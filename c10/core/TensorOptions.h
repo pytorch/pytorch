@@ -701,6 +701,8 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
       return DeviceType::XLA;
     case DispatchKey::Vulkan:
       return DeviceType::Vulkan;
+    case DispatchKey::Meta:
+      return DeviceType::Meta;
 
     // stuff that people are actively developing
     case DispatchKey::XPU:

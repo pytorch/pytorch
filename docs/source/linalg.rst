@@ -22,6 +22,7 @@ Functions
 .. autofunction:: slogdet
 .. autofunction:: eigh
 .. autofunction:: eigvalsh
+.. autofunction:: matrix_power
 .. autofunction:: matrix_rank
 .. autofunction:: norm
 .. autofunction:: vector_norm
