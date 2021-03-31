@@ -932,11 +932,11 @@ RegisterOperators reg2({
         std::log(a) / std::log(b),
         float),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
-    DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
-    DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
-    DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
-    DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
-    DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::log10, std::log10(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sqrt, std::sqrt(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::acos, std::acos(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::asin, std::asin(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::atan, std::atan(a), float, float),
     DEFINE_GENERIC_OP(
         aten::atan2,
         std::atan2(a, b),
@@ -949,15 +949,22 @@ RegisterOperators reg2({
         std::atan2(a, b),
         std::atan2(a, b),
         float),
-    DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
-    DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
-    DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
-    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
-    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
-    DEFINE_UNARY_OP(aten::acosh, std::acosh(a), float, float),
-    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
-    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
-    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::cos, std::cos(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sin, std::sin(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::tan, std::tan(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::asinh, std::asinh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::atanh, std::atanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::acosh, std::acosh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sinh, std::sinh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::cosh, std::cosh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::tanh, std::tanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX_CAST(
+        aten::angle,
+        std::arg(a),
+        float,
+        float,
+        float,
+        float),
     DEFINE_UNARY_OP(aten::degrees, degrees(a), float, float),
     DEFINE_UNARY_OP(aten::radians, radians(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
@@ -973,7 +980,13 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
 
     // TODO: move abs to aten namespace because it's schematized!
-    DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX_CAST(
+        prim::abs,
+        std::abs(a),
+        int,
+        float,
+        float,
+        float),
     Operator(
         "prim::abs(Tensor x) -> Tensor",
         [](Stack* stack) {
@@ -1225,7 +1238,7 @@ RegisterOperators reg2({
 
 #define DEFINE_COMPLEX_OP(type_a, type_b, actual_type_a, actual_type_b) \
   Operator(                                                             \
-      "aten::complex." #type_a "_" #type_b "(" #type_a " x," #type_b    \
+      "aten::Complex." #type_a "_" #type_b "(" #type_a " x," #type_b    \
       " y) -> complex",                                                 \
       [](Stack* stack) {                                                \
         actual_type_a a;                                                \
@@ -1236,6 +1249,31 @@ RegisterOperators reg2({
       },                                                                \
       aliasAnalysisFromSchema())
 
+#define DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(                               \
+    type_a, type_b, actual_type_a, actual_type_b)                        \
+  Operator(                                                              \
+      "aten::Complex." #type_a "_" #type_b "(" #type_a " x," #type_b     \
+      " y) -> complex",                                                  \
+      [](Stack* stack) {                                                 \
+        actual_type_a a;                                                 \
+        actual_type_b b;                                                 \
+        pop(stack, a, b);                                                \
+        auto comp = c10::complex<double>(a.item<double>(), b);           \
+        push(stack, comp);                                               \
+      },                                                                 \
+      aliasAnalysisFromSchema()),                                        \
+      Operator(                                                          \
+          "aten::Complex." #type_b "_" #type_a "(" #type_b " x," #type_a \
+          " y) -> complex",                                              \
+          [](Stack* stack) {                                             \
+            actual_type_b a;                                             \
+            actual_type_a b;                                             \
+            pop(stack, a, b);                                            \
+            auto comp = c10::complex<double>(a, b.item<double>());       \
+            push(stack, comp);                                           \
+          },                                                             \
+          aliasAnalysisFromSchema())
+
     DEFINE_COMPLEX_OP(int, bool, int, bool),
     DEFINE_COMPLEX_OP(bool, int, bool, int),
     DEFINE_COMPLEX_OP(float, bool, double, bool),
@@ -1245,6 +1283,9 @@ RegisterOperators reg2({
     DEFINE_COMPLEX_OP(int, int, int, int),
     DEFINE_COMPLEX_OP(bool, bool, bool, bool),
     DEFINE_COMPLEX_OP(float, float, double, double),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, float, at::Tensor, double),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, int, at::Tensor, int),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, bool, at::Tensor, bool),
 });
 
 bool isSortableTupleType(

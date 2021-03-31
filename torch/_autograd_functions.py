@@ -16,6 +16,8 @@ class _LU(torch.autograd.Function):
         If not stated otherwise, for tensors A and B,
         `A B` means the matrix product of A and B.
 
+        Let A^H = (A^T).conj()
+
         Forward AD:
         Note that PyTorch returns packed LU, it is a mapping
         A -> (B:= L + U - I, P), such that A = P L U, and
@@ -42,19 +44,19 @@ class _LU(torch.autograd.Function):
 
         Backward AD:
         The backward sensitivity is then:
-        Tr(B_grad^T dB) = Tr(B_grad^T dL) + Tr(B_grad^T dU) = [1] + [2].
+        Tr(B_grad^H dB) = Tr(B_grad^H dL) + Tr(B_grad^H dU) = [1] + [2].
 
-        [1] = Tr(B_grad^T dL) = Tr(B_grad^T L 1_L * (L^{-1} P^T dA U^{-1}))
+        [1] = Tr(B_grad^H dL) = Tr(B_grad^H L 1_L * (L^{-1} P^T dA U^{-1}))
             = [using Tr(A (B * C)) = Tr((A * B^T) C)]
-            = Tr((B_grad^T L * 1_L^T) L^{-1} P^T dA U^{-1})
+            = Tr((B_grad^H L * 1_L^T) L^{-1} P^T dA U^{-1})
             = [cyclic property of trace]
-            = Tr(U^{-1} (B_grad^T L * 1_L^T) L^{-1} P^T dA)
-            = Tr((P L^{-T} (L^T B_grad * 1_L) U^{-T})^T dA).
+            = Tr(U^{-1} (B_grad^H L * 1_L^T) L^{-1} P^T dA)
+            = Tr((P L^{-H} (L^H B_grad * 1_L) U^{-H})^H dA).
         Similar, [2] can be rewritten as:
-        [2] = Tr(P L^{-T} (B_grad U^T * 1_U) U^{-T})^T dA, hence
-        Tr(A_grad^T dA) = [1] + [2]
-                        = Tr((P L^{-T} (L^T B_grad * 1_L + B_grad U^T * 1_U) U^{-T})^T dA), so
-        A_grad = P L^{-T} (L^T B_grad * 1_L + B_grad U^T * 1_U) U^{-T}.
+        [2] = Tr(P L^{-H} (B_grad U^H * 1_U) U^{-H})^H dA, hence
+        Tr(A_grad^H dA) = [1] + [2]
+                        = Tr((P L^{-H} (L^H B_grad * 1_L + B_grad U^H * 1_U) U^{-H})^H dA), so
+        A_grad = P L^{-H} (L^H B_grad * 1_L + B_grad U^H * 1_U) U^{-H}.
 
         In the code below we use the name `LU` instead of `B`, so that there is no confusion
         in the derivation above between the matrix product and a two-letter variable name.
@@ -63,17 +65,29 @@ class _LU(torch.autograd.Function):
         P, L, U = torch.lu_unpack(LU, pivots)
 
         # To make sure MyPy infers types right
-        assert (L is not None) and (U is not None)
+        assert (L is not None) and (U is not None) and (P is not None)
 
-        I = LU_grad.new_zeros(LU_grad.shape)
-        I.diagonal(dim1=-2, dim2=-1).fill_(1)
-
-        Lt_inv = torch.triangular_solve(I, L, upper=False).solution.transpose(-1, -2)
-        Ut_inv = torch.triangular_solve(I, U, upper=True).solution.transpose(-1, -2)
-
-        phi_L = (L.transpose(-1, -2) @ LU_grad).tril_()
+        # phi_L = L^H B_grad * 1_L
+        phi_L = (L.transpose(-1, -2).conj() @ LU_grad).tril_()
         phi_L.diagonal(dim1=-2, dim2=-1).fill_(0.0)
-        phi_U = (LU_grad @ U.transpose(-1, -2)).triu_()
+        # phi_U = B_grad U^H * 1_U
+        phi_U = (LU_grad @ U.transpose(-1, -2).conj()).triu_()
+        phi = phi_L + phi_U
 
-        self_grad_perturbed = Lt_inv @ (phi_L + phi_U) @ Ut_inv
-        return P @ self_grad_perturbed, None, None
+        # using the notation from above plus the variable names, note
+        # A_grad = P L^{-H} phi U^{-H}.
+        # Instead of inverting L and U, we solve two systems of equations, i.e.,
+        # the above expression could be rewritten as
+        # L^H P^T A_grad U^H = phi.
+        # Let X = P^T A_grad U_H, then
+        # X = L^{-H} phi, where L^{-H} is upper triangular, or
+        # X = torch.triangular_solve(phi, L^H)
+        # using the definition of X we see:
+        # X = P^T A_grad U_H => P X = A_grad U_H => U A_grad^H = X^H P^T, so
+        # A_grad = (U^{-1} X^H P^T)^H, or
+        # A_grad = torch.triangular_solve(X^H P^T, U)^H
+        X = torch.triangular_solve(phi, L.transpose(-1, -2).conj(), upper=True).solution
+        A_grad = torch.triangular_solve(X.transpose(-1, -2).conj() @ P.transpose(-1, -2), U, upper=True) \
+            .solution.transpose(-1, -2).conj()
+
+        return A_grad, None, None
