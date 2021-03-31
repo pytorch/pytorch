@@ -262,6 +262,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::batch_norm:
     case aten::isnan:
     case aten::log:
     case aten::log10:
@@ -356,7 +357,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       auto const& n = v->node();
       auto shape = sizesForValue(n->input(0));
 
-      int64_t dim = constant(n->input(1)).AsNode<IntImm>()->value();
+      int64_t dim = toIValue(n->input(1))->toInt();
       // From the documentation
       // (https://pytorch.org/docs/master/generated/torch.unsqueeze.html):
       //
@@ -425,9 +426,9 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   if (v->node()->kind() == prim::Constant) {
     const auto val = toIValue(v).value();
     if (val.isDouble()) {
-      return FloatImm::make(static_cast<float>(val.toDouble()));
+      return DoubleImm::make(val.toDouble());
     } else if (val.isInt()) {
-      return IntImm::make(val.toInt());
+      return LongImm::make(val.toInt());
     } else if (val.isBool()) {
       return BoolImm::make(val.toBool());
     } else if (val.isNone()) {
@@ -1062,6 +1063,74 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       });
     } break;
 
+    case aten::batch_norm: {
+      bool hasWeight = true;
+      bool hasBias = true;
+
+      if (v->node()->input(1)->node()->kind() == prim::Constant) {
+        const auto val = toIValue(v->node()->input(1)).value();
+        if (val.isNone()) {
+          hasWeight = false;
+        }
+      }
+
+      if (v->node()->input(2)->node()->kind() == prim::Constant) {
+        const auto val = toIValue(v->node()->input(2)).value();
+        if (val.isNone()) {
+          hasBias = false;
+        }
+      }
+
+      auto const& shape = valueShape(v->node()->inputs()[0]);
+      return Compute(
+          "aten_batch_norm",
+          c10::fmap<DimArg>(shape),
+          [this, v, hasWeight, hasBias](const std::vector<VarHandle>& axes) {
+            TORCH_INTERNAL_ASSERT(axes.size() >= 2);
+            auto const& n = v->node();
+            // axes: N, C, H, W
+            std::vector<ExprHandle> indices(axes.begin(), axes.end());
+            ExprHandle c = indices[1];
+
+            // Parameter list:
+            // input, weight, bias, mean, var, training, momentum, eps,
+            // cudnn_enabled
+            std::vector<ExprHandle> inputs = {
+                tensorOrConstant(n->input(0), indices), // input
+                tensorOrConstant(n->input(3), {c}), // mean
+                tensorOrConstant(n->input(4), {c}), // var
+                constant(n->input(7)) // eps
+            };
+            if (hasWeight) {
+              inputs.push_back(tensorOrConstant(n->input(1), {c}));
+            }
+            if (hasBias) {
+              inputs.push_back(tensorOrConstant(n->input(2), {c}));
+            }
+            promoteInputs(inputs);
+
+            ExprHandle input = inputs[0];
+            ExprHandle mean = inputs[1];
+            ExprHandle var = inputs[2];
+            ExprHandle eps = inputs[3];
+            ExprHandle weight = FloatImm::make(1);
+            ExprHandle bias = FloatImm::make(0);
+
+            if (hasWeight) {
+              weight = inputs[4];
+            }
+            if (hasBias) {
+              bias = inputs[5];
+            }
+
+            auto inv_var = rsqrt(var + eps);
+            auto alpha = inv_var * weight;
+            auto beta = bias - mean * alpha;
+            auto output = input * alpha + beta;
+            return demoteOutput(output, n->output());
+          });
+    } break;
+
     case aten::log: {
       return computeOneOperand("aten_log", v, [](const ExprHandle& a) {
         return log(promoteIntegerToDefaultType(a));
@@ -1482,7 +1551,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           dimsFromSizes(sizesForValue(v)),
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
-            int dim = constant(n->inputs()[1]).AsNode<IntImm>()->value();
+            int64_t dim = toIValue(n->inputs()[1])->toInt();
             ExprHandle start = constant(n->inputs()[2]);
             ExprHandle stride = constant(n->inputs()[4]);
 
@@ -1498,7 +1567,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           dimsFromSizes(sizesForValue(v)),
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
-            int64_t dim = constant(n->inputs()[1]).AsNode<IntImm>()->value();
+            int64_t dim = toIValue(n->inputs()[1])->toInt();
             if (dim < 0) {
               if (axes.size() == 0) {
                 throw malformed_input("axes are zero handling unsqueeze");
@@ -1531,6 +1600,10 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::log_softmax: {
       return computeSoftmax(v, true);
+    }
+
+    case aten::conv2d: {
+      return computeConv2d(v);
     }
 
     default: {
@@ -1830,6 +1903,55 @@ Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
         }
       },
       reduction_info.reductionDims);
+}
+
+Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
+  const Node* n = v->node();
+  auto const& shape = sizesForValue(v);
+  Dtype dtype = kFloat;
+  auto maybe_stype = findDtypeForValue(v);
+  if (maybe_stype) {
+    dtype = Dtype(*maybe_stype);
+  }
+  BufHandle ResultBuf("conv", shape, dtype);
+  BufHandle inp = BufHandle(tensors_.at(n->input(0)->unique())->buf());
+  BufHandle w = BufHandle(tensors_.at(n->input(1)->unique())->buf());
+  BufHandle b = BufHandle(tensors_.at(n->input(2)->unique())->buf());
+
+  int sH, sW;
+  auto strides_iv = *toIValue(n->input(3));
+  if (strides_iv.isIntList()) {
+    sH = strides_iv.toIntList()[0];
+    sW = strides_iv.toIntList()[1];
+  } else {
+    sH = sW = strides_iv.toInt();
+  }
+  int pH, pW;
+  auto padding_iv = *toIValue(n->input(4));
+  if (padding_iv.isIntList()) {
+    pH = padding_iv.toIntList()[0];
+    pW = padding_iv.toIntList()[1];
+  } else {
+    pH = pW = padding_iv.toInt();
+  }
+  int dH, dW;
+  auto dil_iv = *toIValue(n->input(5));
+  if (dil_iv.isIntList()) {
+    dH = dil_iv.toIntList()[0];
+    dW = dil_iv.toIntList()[1];
+  } else {
+    dH = dW = dil_iv.toInt();
+  }
+  int groups = toIValue(n->input(6))->toInt();
+
+  // Once we have a performant TE representation for conv2d, we could use it
+  // here instead of the external call!
+  Stmt* s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_conv2d",
+      {inp, w, b},
+      {sH, sW, pH, pW, dH, dW, groups});
+  return new Tensor(ResultBuf.node(), s);
 }
 
 Tensor* TensorExprKernel::computeSoftmax(
@@ -2139,7 +2261,7 @@ std::vector<int64_t> TensorExprKernel::getReductionAxes(
   // We need to handle both of them.
   if (axesNode->kind() == prim::ListConstruct) {
     for (auto axisNode : axesNode->inputs()) {
-      axes.push_back(constant(axisNode).AsNode<IntImm>()->value());
+      axes.push_back(toIValue(axisNode)->toInt());
     }
     return axes;
   }

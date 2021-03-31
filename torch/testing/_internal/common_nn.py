@@ -652,7 +652,7 @@ def mseloss_no_reduce_scalar_test():
 
 
 def nllloss_no_reduce_test():
-    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
     kwargs = {'reduction': 'none'}
     return dict(
         fullname='NLLLoss_no_reduce',
@@ -668,7 +668,7 @@ def nllloss_no_reduce_test():
 
 
 def nllloss_no_reduce_ignore_index_test():
-    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
     kwargs: Dict[str, Union[int, str]] = {'ignore_index': 2, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss_no_reduce_ignore_index',
@@ -685,7 +685,7 @@ def nllloss_no_reduce_ignore_index_test():
 
 
 def nllloss_no_reduce_weights_test():
-    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
     weight = torch.rand(10)
 
     def kwargs(i):
@@ -706,7 +706,7 @@ def nllloss_no_reduce_weights_test():
 
 
 def nllloss_no_reduce_weights_ignore_index_test():
-    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
     weight = torch.rand(10)
 
     def kwargs(i):
@@ -728,7 +728,7 @@ def nllloss_no_reduce_weights_ignore_index_test():
 
 
 def nllloss_no_reduce_weights_ignore_index_neg_test():
-    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
     weight = torch.rand(10)
 
     def kwargs(i):
@@ -1721,7 +1721,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad1',
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='Conv1d',
@@ -1776,6 +1776,42 @@ new_module_tests = [
         constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 6, 3).groups(2)',
         input_size=(2, 4, 6),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv1d_pad_valid',
+        constructor=lambda: nn.Conv1d(4, 5, 3, padding="valid"),
+        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kValid)',
+        input_size=(2, 4, 10),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv1d_pad_same',
+        constructor=lambda: nn.Conv1d(4, 5, 3, padding="same"),
+        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kSame)',
+        input_size=(2, 4, 10),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv1d_pad_same2',
+        constructor=lambda: nn.Conv1d(4, 5, 4, padding="same"),
+        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 4).padding(torch::kSame)',
+        input_size=(2, 4, 10),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv1d_pad_same_dilated',
+        constructor=lambda: nn.Conv1d(4, 5, 4, padding="same", dilation=2),
+        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kSame).dilation(2)',
+        input_size=(2, 4, 10),
         cudnn=True,
         with_tf32=True,
         tf32_precision=0.005,
@@ -1915,6 +1951,33 @@ new_module_tests = [
         with_tf32=True,
     ),
     dict(
+        fullname='Conv2d_pad_valid',
+        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="valid"),
+        cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kValid)',
+        input_size=(2, 2, 6, 5),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv2d_pad_same',
+        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same"),
+        cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kSame)',
+        input_size=(2, 2, 6, 5),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv2d_pad_same_dilated',
+        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same", dilation=2),
+        cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kSame).dilation(2)',
+        input_size=(2, 2, 6, 5),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
         cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
@@ -1962,6 +2025,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.01,
     ),
     dict(
         fullname='Conv2d_depthwise',
@@ -2312,7 +2376,7 @@ new_module_tests = [
         cudnn=True,
         desc='1x1x1_no_bias',
         check_with_long_tensor=False,
-        with_tf32=False,
+        with_tf32=True,
         tf32_precision=0.05,
     ),
     dict(
@@ -2372,6 +2436,33 @@ new_module_tests = [
         input_size=(2, 3, 5, 5, 5),
         with_tf32=True,
         tf32_precision=0.05
+    ),
+    dict(
+        fullname='Conv3d_pad_valid',
+        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="valid"),
+        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kValid)',
+        input_size=(2, 3, 6, 5, 4),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv3d_pad_same',
+        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same"),
+        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kSame)',
+        input_size=(2, 3, 6, 5, 4),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv3d_pad_same_dilated',
+        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same", dilation=2),
+        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kSame).dilation(2)',
+        input_size=(2, 3, 6, 5, 4),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -3708,7 +3799,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='TransformerDecoderLayer',
@@ -3720,7 +3811,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='relu_activation',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='TransformerDecoderLayer',
@@ -3733,7 +3824,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Transformer',
@@ -3839,6 +3930,15 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
     elif reduction == 'sum':
         return output.sum()
     return output
+
+
+def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, reduction='mean'):
+    return nlllossNd_reference(
+        torch.log_softmax(input, 1),
+        target,
+        weight,
+        ignore_index=ignore_index,
+        reduction=reduction)
 
 
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
@@ -4153,6 +4253,7 @@ loss_reference_fns: Dict['str', Callable] = {
     'TripletMarginLoss': tripletmarginloss_reference,
     'MarginRankingLoss': marginrankingloss_reference,
     'CTCLoss': ctcloss_reference,
+    'CrossEntropyLoss': cross_entropy_loss_reference
 }
 
 
@@ -4168,7 +4269,7 @@ criterion_tests = [
     dict(
         module_name='NLLLoss',
         input_fn=lambda: torch.rand(15, 10).log(),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
@@ -4179,7 +4280,7 @@ criterion_tests = [
         constructor_args=(None, None, 2),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight({}).ignore_index(2)',
         input_fn=lambda: torch.rand(15, 10).log(),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, _: nllloss_reference(i, t, ignore_index=2),
         desc='ignore_index',
         check_bfloat16=True,
@@ -4189,7 +4290,7 @@ criterion_tests = [
         constructor_args_fn=lambda: (torch.rand(10),),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m)),
         desc='weights',
@@ -4200,7 +4301,7 @@ criterion_tests = [
         constructor_args_fn=lambda: (torch.rand(10), None, 2),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10)).ignore_index(2)',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=2),
         desc='weights_ignore_index',
@@ -4211,7 +4312,7 @@ criterion_tests = [
         constructor_args_fn=lambda: (torch.rand(10), None, -1),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10)).ignore_index(-1)',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10 + 1).floor().long() - 1,
+        target_fn=lambda: torch.empty(15).uniform_().mul(10 + 1).floor().long() - 1,
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=-1),
         desc='weights_ignore_index_neg',
@@ -4264,14 +4365,14 @@ criterion_tests = [
     dict(
         module_name='CrossEntropyLoss',
         input_size=(15, 10),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
     ),
     dict(
         module_name='CrossEntropyLoss',
         constructor_args_fn=lambda: (torch.rand(10),),
         cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(10))',
         input_size=(15, 10),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         desc='weights',
     ),
     dict(
@@ -4526,6 +4627,58 @@ criterion_tests = [
         check_sum_reduction=True,
         desc='dim_is_3',
         check_bfloat16=True,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        input_size=(2, 3, 5, 5),
+        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='2d',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        constructor_args_fn=lambda: (torch.rand(3),),
+        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
+        input_size=(2, 3, 5, 5),
+        target=torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, weight=get_weight(m)),
+        desc='2d_weights',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        constructor_args=(None, None, 1),
+        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight({}).ignore_index(1)',
+        input_size=(2, 3, 5, 5),
+        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, ignore_index=1),
+        desc='2d_ignore_index',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        input_size=(2, 3, 5, 5, 2, 2),
+        target_fn=lambda: torch.rand(2, 5, 5, 2, 2).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='higher_dim',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        input_size=(2, 3, 5),
+        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='dim_is_3',
+        check_bfloat16=False,
     ),
     dict(
         module_name='PoissonNLLLoss',  # Default is log_input=True, full=False
