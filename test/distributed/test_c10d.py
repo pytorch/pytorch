@@ -4250,8 +4250,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             for p in model.parameters():
                 self.assertTrue(p.grad is not None)
                 norm += p.grad.norm().item()
-            print(f"{numpy.allclose(norm, 78053)=}")
-            print(f"{norm=}")
             assert numpy.allclose(norm, 78053), norm
 
     # DDP will fail when there are unused_parameters in the model
