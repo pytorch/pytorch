@@ -17,12 +17,8 @@ namespace at { namespace native {
 namespace {
 
 c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor) {
-  if (tensor.is_non_overlapping_and_dense()) { //common case
-      if (tensor.is_contiguous()) {
-          transpose_tensor = true;
-      } else {
-          transpose_tensor = false;
-      }
+  if (tensor.is_non_overlapping_and_dense()) { // common case
+      transpose_tensor = tensor.is_contiguous();
       return c10::MaybeOwned<Tensor>::borrowed(tensor);
   }
   IntArrayRef tensor_strides = tensor.strides();
@@ -39,7 +35,7 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   }
 }
 
-} // namespaec
+} // namespace
 
 Tensor prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
   IntArrayRef tensor_strides = tensor.strides();
