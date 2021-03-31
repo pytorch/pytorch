@@ -27,6 +27,7 @@ class BackgroundThread {
     const std::chrono::milliseconds checkTimeout_
         = std::chrono::milliseconds(10);
     HANDLE ghStopEvent_;
+    char* eventName_;
 #else
     std::vector<int> controlPipeFd_{-1, -1};
 #endif
