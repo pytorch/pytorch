@@ -11,7 +11,7 @@ from torch._six import inf
 from torch.autograd import Variable
 import collections.abc
 
-from typing import List, Tuple, Dict, Any
+from typing import List, Sequence, Tuple, Dict, Any, Union
 
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes, floating_types, floating_types_and,
@@ -24,7 +24,7 @@ from torch.testing._internal.common_device_type import \
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
-    (random_square_matrix_of_rank,
+    (is_iterable_of_tensors, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed, SEED,
@@ -82,17 +82,18 @@ class SampleInput(object):
     __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad']
 
     def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None):
-        # input must be a single tensor, and will be the first argument to the op
-        #   this follows the typical pattern where op(t, ...) = t.op(...)
-        assert isinstance(input, torch.Tensor)
-        self.input = input
+        # input is the first input to the op and must be either a Tensor or TensorList (Sequence[Tensor]).
+        # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
+        # op with TensorList inputs do not support method or inplace variants.
+        assert isinstance(input, torch.Tensor) or is_iterable_of_tensors(input)
+        self.input: Union[torch.Tensor, Sequence] = input
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
 
     def __repr__(self):
         arguments = [
-            f'input[{len(self.input)}]',
+            'input=Tensor' if isinstance(self.input, torch.Tensor) else f'input=TensorList[{len(self.input)}]',
             f'args={self.args}' if len(self.args) > 0 else None,
             f'kwargs={self.kwargs}' if len(self.kwargs) > 0 else None,
             (f'output_process_fn_grad={self.output_process_fn_grad}'
@@ -424,7 +425,7 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
         for size in zip(sizes[:-1], sizes[1:]):
             t = make_tensor(size, device, dtype, requires_grad=requires_grad)
             tensors.append(t)
-        result.append(SampleInput(tensors[0], args=tuple(tensors[1:])))
+        result.append(SampleInput(tensors))
 
     return result
 
@@ -682,21 +683,22 @@ def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None):
     )
 
 def sample_inputs_stack(op_info, device, dtype, requires_grad):
-    return (
-        SampleInput(
-            make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(
-                make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-                make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)),
-            kwargs=dict(idx=0)),
-    )
+    tensors = [
+        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+    ]
+
+    return (SampleInput(tensors, args=(0,)),)
 
 def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad):
-    return (SampleInput(
-        make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(
-            make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad))),)
+    tensors = [
+        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+    ]
+
+    return (SampleInput(tensors),)
 
 def sample_inputs_gather(op_info, device, dtype, requires_grad):
     return (
@@ -2906,7 +2908,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_matrix_power,),
     OpInfo('linalg.multi_dot',
            # Need this lambda because gradcheck does not work with TensorList inputs
-           op=lambda *args, **kwargs: torch.linalg.multi_dot(args, **kwargs),
            aten_name='linalg_multi_dot',
            dtypes=floating_and_complex_types_and(torch.half),
            dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -2916,7 +2917,7 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_multi_dot,
-           # test_variant_consistency_jit does not work well with lambda passed in place of op
+           # test_variant_consistency_jit does not work with TensorList inputs
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
@@ -3542,9 +3543,7 @@ op_db: List[OpInfo] = [
            skips=(
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
-               # see https://github.com/pytorch/pytorch/issues/54381
-               SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda'))),
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     HermitianOpInfo('linalg.pinv',
                     variant_test_name='hermitian',
                     aten_name='linalg_pinv',
@@ -3557,9 +3556,7 @@ op_db: List[OpInfo] = [
                     skips=(
                         # cuda gradchecks are slow
                         # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
-                        # see https://github.com/pytorch/pytorch/issues/54381
-                        SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda'))
+                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
                     ),
     OpInfo('eig',
            op=torch.eig,
@@ -3615,9 +3612,7 @@ op_db: List[OpInfo] = [
            skips=(
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
-               # see https://github.com/pytorch/pytorch/issues/54381
-               SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda'))),
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -3671,26 +3666,33 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('stack',
-           # gradcheck expects the input arguments as a flat list
-           op=lambda *args, idx, **kwargs: torch.stack([*args], idx, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_stack,
            skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # stack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
-           ),
-           sample_inputs_func=sample_inputs_stack),
+               SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('hstack',
-           # gradcheck expects the input arguments as a flat list
-           op=lambda *args, **kwargs: torch.hstack([*args], **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # hstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out')),
-           sample_inputs_func=sample_inputs_hstack_dstack_vstack),
+               SkipInfo('TestCommon', 'test_out'),),),
+    OpInfo('vstack',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_hstack_dstack_vstack,
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+               # vstack does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),),),
+    OpInfo('dstack',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_hstack_dstack_vstack,
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+               # dstack does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('unfold',
            op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -3704,27 +3706,6 @@ op_db: List[OpInfo] = [
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
            sample_inputs_func=sample_inputs_unfold),
-    OpInfo('vstack',
-           # gradcheck expects the input arguments as a flat list
-           op=lambda *args, **kwargs: torch.vstack([*args], **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
-               # vstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
-           ),
-           sample_inputs_func=sample_inputs_hstack_dstack_vstack),
-    OpInfo('dstack',
-           # gradcheck expects the input arguments as a flat list
-           op=lambda *args, **kwargs: torch.dstack([*args], **kwargs),
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
-               # dstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),),
-           sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('movedim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,

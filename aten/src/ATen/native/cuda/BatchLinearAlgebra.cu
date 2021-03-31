@@ -2345,7 +2345,7 @@ AT_ERROR("svd: MAGMA library not found in "
   // the loop saves (batch_size - 1) workspace queries which would provide the same result
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   magma_int_t lwork = -1;
-  scalar_t wkopt;
+  scalar_t wkopt = 1; // MAGMA might not set the value for the optimal workspace therefore use 1 as the default value
   magmaSvd<scalar_t, value_t>(jobz, m, n, self_data, lda, S_data, U_data, lda, VT_data, ldvt, &wkopt, lwork, rwork, iwork, &info);
   lwork = magma_int_cast(real_impl<scalar_t, value_t>(wkopt), "work_size");
   scalar_t* work;
