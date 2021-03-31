@@ -64,7 +64,7 @@ void BackgroundThread::join() {
 
 #ifdef _WIN32
 void BackgroundThread::initStopSignal() {
-  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
+  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, eventName_);
   if (ghStopEvent_ == NULL) {
       throw std::runtime_error(
           "Failed to create the control pipe to start the "

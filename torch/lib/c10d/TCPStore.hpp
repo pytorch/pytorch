@@ -14,10 +14,11 @@
 
 namespace c10d {
 
+// Abstract base class to handle thread state
 class BackgroundThread {
   public:
     explicit BackgroundThread(int storeListenSocket);
-    ~BackgroundThread();
+    virtual ~BackgroundThread() = 0;
   protected:
     std::thread daemonThread_;
     int storeListenSocket_;
@@ -70,6 +71,9 @@ class TCPStoreDaemon : public BackgroundThread {
   std::unordered_map<int, size_t> keysAwaited_;
   // From key -> the list of sockets waiting on it
   std::unordered_map<std::string, std::vector<int>> watchedSockets_;
+#ifdef _WIN32
+  char* eventName_ = "tcpStoreDaemonStopEvent";
+#endif
 };
 
 // Listener thread runs on all processes
@@ -85,6 +89,9 @@ class ListenThread : public BackgroundThread {
     void callbackHandler(int socket);
     // List of callbacks map each watched key
     std::unordered_map<std::string, std::function<void(std::string, std::string)>> keyToCallbacks_;
+#ifdef _WIN32
+    char* eventName_ = "listenThreadStopEvent";
+#endif
 };
 
 class TCPStore : public Store {
