@@ -123,7 +123,7 @@ class ArrayCType:
 
 @dataclass(frozen=True)
 class TupleCType:
-    elems: 'CType'
+    elems: List['CType']
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
@@ -132,10 +132,9 @@ class TupleCType:
     @property
     def name(self) -> ArgName:
         # N.B. this isn't currently used anywhere: std::tuple is only used as a return type, which doesn't use names.
-        assert_never("std::tuple isn't currently used as an argument anywhere, and doesn't require a name.")
-        return self.name
+        raise AssertionError("std::tuple isn't currently used as an argument anywhere, and doesn't require a name.")
 
-CType = Union[BaseCType, OptionalCType, ConstRefCType, MutRefCType, ListCType, ArrayRefCType, VectorCType, TupleCType]
+CType = Union[BaseCType, OptionalCType, ConstRefCType, MutRefCType, ListCType, ArrayRefCType, ArrayCType, VectorCType, TupleCType]
 
 # A binding represents any C++ binding site for a formal parameter.
 # We don't distinguish between binding sites for different APIs;
