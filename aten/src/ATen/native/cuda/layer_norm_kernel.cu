@@ -27,23 +27,37 @@ __global__ void RowwiseMomentsCUDAKernel(
     T* mean,
     T* rstd) {
   using T_ACC = acc_type<T, true>;
+
   __shared__ T_ACC m_shared[C10_WARP_SIZE];
   __shared__ T_ACC v_shared[C10_WARP_SIZE];
+  __shared__ T_ACC mean_;
+
   const int64_t i = blockIdx.x;
+  const T_ACC scale = T_ACC(1) / static_cast<T_ACC>(N);
+
   T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
     const int64_t index = i * N + j;
     sum1 += static_cast<T_ACC>(X[index]);
-    sum2 += static_cast<T_ACC>(X[index]) * static_cast<T_ACC>(X[index]);
   }
   sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, m_shared);
-  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, v_shared);
+
   if (threadIdx.x == 0) {
-    const T_ACC scale = T_ACC(1) / static_cast<T_ACC>(N);
-    sum1 *= scale;
-    sum2 = c10::cuda::compat::max(sum2 * scale - sum1 * sum1, T_ACC(0));
-    mean[i] = sum1;
+      mean_ = sum1 * scale;
+  }
+  __syncthreads();
+
+  T_ACC sum2 = 0;
+  for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
+    const int64_t index = i * N + j;
+    T_ACC diff = static_cast<T_ACC>(X[index]) - mean_;
+    sum2 += diff * diff;
+  }
+  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, v_shared);
+
+  if (threadIdx.x == 0) {
+    sum2 = c10::cuda::compat::max(sum2 * scale, T_ACC(0));
+    mean[i] = mean_;
     rstd[i] = c10::cuda::compat::rsqrt(sum2 + static_cast<T_ACC>(eps));
   }
 }
