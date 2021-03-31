@@ -414,7 +414,7 @@ Tensor& subtract_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return self.sub_(other, alpha);
 }
 
-Tensor& sigmoid_backward_out(Tensor& result, const Tensor& grad_output, const Tensor& output) {
+Tensor& sigmoid_backward_out(const Tensor& grad_output, const Tensor& output, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   sigmoid_backward_stub(iter.device_type(), iter);
   return result;
@@ -427,11 +427,10 @@ Tensor sigmoid_backward(const Tensor& grad_output, const Tensor& output) {
   return iter.output();
 }
 
-Tensor& logit_backward_out(
-    Tensor& result,
-    const Tensor& grad_output,
+Tensor& logit_backward_out(const Tensor& grad_output,
     const Tensor& input,
-    c10::optional<double> eps) {
+    c10::optional<double> eps,
+    Tensor& result) {
   auto iter = TensorIterator::binary_op(result, grad_output, input);
   logit_backward_stub(
       iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
@@ -449,7 +448,7 @@ Tensor logit_backward(
   return iter.output();
 }
 
-Tensor& tanh_backward_out(Tensor& result, const Tensor& grad_output, const Tensor& output) {
+Tensor& tanh_backward_out(const Tensor& grad_output, const Tensor& output, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   tanh_backward_stub(iter.device_type(), iter);
   return result;
@@ -780,10 +779,10 @@ Tensor lt(const Tensor& self, const Scalar& other) { return comparison_op(self, 
 Tensor& lt_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::lt_out)); }
 
 // less, alias for torch.lt
-Tensor& less_out(Tensor& result, const Tensor& self, const Tensor& other) { return at::lt_out(result, self, other); }
+Tensor& less_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::lt_out(result, self, other); }
 Tensor less(const Tensor& self, const Tensor& other) { return self.lt(other); }
 Tensor& less_(Tensor& self, const Tensor& other) { return self.lt_(other); }
-Tensor& less_out(Tensor& result, const Tensor& self, const Scalar& other) { return at::lt_out(result, self, other); }
+Tensor& less_out(const Tensor& self, const Scalar& other, Tensor& result) { return at::lt_out(result, self, other); }
 Tensor less(const Tensor& self, const Scalar& other) { return self.lt(other); }
 Tensor& less_(Tensor& self, const Scalar& other) { return self.lt_(other); }
 
@@ -875,7 +874,7 @@ Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Scalar& other)
 Tensor logical_xor(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 Tensor& logical_xor_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
-Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& maximum_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   maximum_stub(iter.device_type(), iter);
   return result;
@@ -889,7 +888,7 @@ Tensor maximum(const Tensor& self, const Tensor& other) {
 }
 
 // binary max, alias for maximum
-Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& max_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::maximum_out(result, self, other);
 }
 
@@ -914,7 +913,7 @@ Tensor fmax(const Tensor& self, const Tensor& other) {
   return iter.output();
 }
 
-Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& minimum_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   minimum_stub(iter.device_type(), iter);
   return result;
@@ -928,7 +927,7 @@ Tensor minimum(const Tensor& self, const Tensor& other) {
 }
 
 // binary min, alias for minimum
-Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& min_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::minimum_out(result, self, other);
 }
 
@@ -1042,7 +1041,7 @@ Tensor& lcm_(Tensor& self, const Tensor& other) {
   return at::lcm_out(self, self, other);
 }
 
-Tensor& hypot_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& hypot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   hypot_stub(iter.device_type(), iter);
   return result;
@@ -1059,7 +1058,7 @@ Tensor& hypot_(Tensor& self, const Tensor& other) {
   return at::hypot_out(self, self, other);
 }
 
-Tensor& igamma_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& igamma_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   igamma_stub(iter.device_type(), iter);
   return result;
@@ -1076,7 +1075,7 @@ Tensor& igamma_(Tensor& self, const Tensor& other) {
   return at::igamma_out(self, self, other);
 }
 
-Tensor& igammac_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& igammac_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   igammac_stub(iter.device_type(), iter);
   return result;
@@ -1093,7 +1092,7 @@ Tensor& igammac_(Tensor& self, const Tensor& other) {
   return at::igammac_out(self, self, other);
 }
 
-Tensor& nextafter_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& nextafter_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   nextafter_stub(iter.device_type(), iter);
   return result;
