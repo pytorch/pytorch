@@ -151,7 +151,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             init_cuda = ""
             device_guard = "// DeviceGuard omitted"  # default
 
-            if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key) and f.device_guard:
+            if (is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key)) and f.device_guard:
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                 if has_tensor_options:
                     # kernel is creating a tensor
