@@ -145,17 +145,19 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
     return jacobians
 
 
-def prepped_input(input, input_idx, entry, entry_idx):
+def prepped_input(input, maybe_perturbed_input):
     # Prepares the inputs to be passed into the function while including the new modified input.
     if input.layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
         # Convert back to mkldnn
-        if input_idx == entry_idx:
-            return entry.to_mkldnn()
+        if maybe_perturbed_input is not None:
+            return maybe_perturbed_input.to_mkldnn()
         else:
             return input
     elif input.layout == torch.sparse_coo:
-        # modifications to entry are reflected in input so we could've just returned `input` here
-        # but due to an issue with coalesce, we need to do an extra clone here.
+        # Modifications to entry are reflected in input so we could've just returned `input` here
+        # but there is an issue where calling .coalesce on a tensor moves it off the graph when the
+        # tensor is already coalesced, so analytical would always return 0 wrt to that input if it
+        # is previously used to compute forward pass. To get around this, we need to do an extra clone here.
         # TODO: get rid of this extra clone once https://github.com/pytorch/pytorch/pull/52874 is landed
         # Make this new tensor require again in case the function has hooks
         return torch.sparse_coo_tensor(input._indices(), input._values(), input.size()).requires_grad_(True)
@@ -185,7 +187,7 @@ def compute_gradient(fn, inputs, input_idx, x, idx, delta, eps, layout):
     assert(delta == eps or delta == (eps * 1j))
 
     def fn_out():
-        inp = tuple(prepped_input(a, i, x, input_idx) if is_tensor_like(a) else a
+        inp = tuple(prepped_input(a, x if i == input_idx else None) if is_tensor_like(a) else a
                     for i, a in enumerate(_as_tuple(inputs)))
         return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
