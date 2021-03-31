@@ -245,6 +245,11 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     }
   }
 
+  if (field == "Stream" || field == "Event") {
+    auto class_type = getCustomClass("__torch__.torch.classes.cuda." + field);
+    return std::make_shared<ClassValue>(class_type);
+  }
+
   py::object member = getattr(loc, field);
   // note: is_constant = true because we consider that global properties
   // on modules like math.pi or torch.float to be constants
@@ -1056,6 +1061,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
       return toSimple(g.insertConstant(py::cast<double>(obj), loc));
+    } else if (PyComplex_CheckExact(obj.ptr())) {
+      auto c_obj = py::cast<std::complex<double>>(obj.ptr());
+      return toSimple(
+          g.insertConstant(static_cast<c10::complex<double>>(c_obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
       return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {
