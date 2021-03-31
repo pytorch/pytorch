@@ -80,4 +80,3 @@ end
 
 # run xcodebuild
 exec "xcodebuild clean build  -project #{xcodeproj_path}  -target #{target.name} -sdk #{sdk} -configuration Release PROVISIONING_PROFILE_SPECIFIER=#{profile} -arch #{arch}"
-

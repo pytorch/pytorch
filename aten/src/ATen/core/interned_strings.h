@@ -323,6 +323,10 @@ namespace c10 {
   _(aten, special_logit)             \
   _(aten, sigmoid)                   \
   _(aten, special_expit)             \
+  _(aten, expm1)                     \
+  _(aten, special_expm1)             \
+  _(aten, exp2)                      \
+  _(aten, special_exp2)              \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \

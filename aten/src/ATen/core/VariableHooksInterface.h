@@ -48,6 +48,14 @@ struct TORCH_API VariableHooksInterface {
   virtual bool is_view(const Tensor&) const = 0;
   virtual const Tensor& base(const Tensor&) const = 0;
   virtual const std::string& name(const Tensor&) const = 0;
+  virtual bool is_leaf(const Tensor&) const = 0;
+  virtual int64_t output_nr(const Tensor&) const = 0;
+  virtual void set_data(const Tensor&, const Tensor&) const = 0;
+  virtual Tensor data(const Tensor&) const = 0;
+  virtual int64_t _version(const Tensor&) const = 0;
+  virtual void retain_grad(const Tensor&) const = 0;
+  virtual void _backward(const Tensor&, TensorList, const c10::optional<Tensor>&, c10::optional<bool>, bool) const = 0;
+  virtual Tensor& requires_grad_(const Tensor&, bool) const = 0;
 };
 
 TORCH_API void SetVariableHooks(VariableHooksInterface* hooks);

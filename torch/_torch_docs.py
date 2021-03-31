@@ -2982,75 +2982,22 @@ add_docstr(torch.erf,
            r"""
 erf(input, *, out=None) -> Tensor
 
-Computes the error function of each element. The error function is defined as follows:
-
-.. math::
-    \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
-""" + r"""
-
-.. note:: Alias for :func:`torch.special.erf`.
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.erf(torch.tensor([0, -1., 10.]))
-    tensor([ 0.0000, -0.8427,  1.0000])
-""".format(**common_args))
+Alias for :func:`torch.special.erf`.
+""")
 
 add_docstr(torch.erfc,
            r"""
 erfc(input, *, out=None) -> Tensor
 
-Computes the complementary error function of each element of :attr:`input`.
-The complementary error function is defined as follows:
-
-.. math::
-    \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
-""" + r"""
-
-.. note:: Alias for :func:`torch.special.erfc`.
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.erfc(torch.tensor([0, -1., 10.]))
-    tensor([ 1.0000, 1.8427,  0.0000])
-""".format(**common_args))
+Alias for :func:`torch.special.erfc`.
+""")
 
 add_docstr(torch.erfinv,
            r"""
 erfinv(input, *, out=None) -> Tensor
 
-Computes the inverse error function of each element of :attr:`input`.
-The inverse error function is defined in the range :math:`(-1, 1)` as:
-
-.. math::
-    \mathrm{erfinv}(\mathrm{erf}(x)) = x
-""" + r"""
-
-.. note:: Alias for :func:`torch.special.erfinv`.
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.erfinv(torch.tensor([0, 0.5, -1.]))
-    tensor([ 0.0000,  0.4769,    -inf])
-""".format(**common_args))
+Alias for :func:`torch.special.erfinv`.
+""")
 
 add_docstr(torch.exp,
            r"""
@@ -3078,45 +3025,15 @@ add_docstr(torch.exp2,
            r"""
 exp2(input, *, out=None) -> Tensor
 
-Computes the base two exponential function of :attr:`input`.
-
-.. math::
-    y_{i} = 2^{x_{i}}
-""" + r"""
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
-    tensor([ 1.,  2.,  8., 16.])
-""".format(**common_args))
+Alias for :func:`torch.special.exp2`.
+""")
 
 add_docstr(torch.expm1,
            r"""
 expm1(input, *, out=None) -> Tensor
 
-Returns a new tensor with the exponential of the elements minus 1
-of :attr:`input`.
-
-.. math::
-    y_{i} = e^{x_{i}} - 1
-""" + r"""
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.expm1(torch.tensor([0, math.log(2.)]))
-    tensor([ 0.,  1.])
-""".format(**common_args))
+Alias for :func:`torch.special.expm1`.
+""")
 
 add_docstr(torch.eye,
            r"""
@@ -7681,25 +7598,8 @@ Sets the number of threads used for interop parallelism
 add_docstr(torch.sigmoid, r"""
 sigmoid(input, *, out=None) -> Tensor
 
-Returns a new tensor with the sigmoid of the elements of :attr:`input`.
-
-.. math::
-    \text{out}_{i} = \frac{1}{1 + e^{-\text{input}_{i}}}
-""" + r"""
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.9213,  1.0887, -0.8858, -1.7683])
-    >>> torch.sigmoid(a)
-    tensor([ 0.7153,  0.7481,  0.2920,  0.1458])
-""".format(**common_args))
+Alias for :func:`torch.special.expit`.
+""")
 
 add_docstr(torch.logit,
            r"""
@@ -8829,7 +8729,7 @@ takes the same shape as the indices.
 
 Args:
     {input}
-    indices (LongTensor): the indices into tensor
+    index (LongTensor): the indices into tensor
 
 Example::
 
@@ -8837,6 +8737,39 @@ Example::
     ...                     [6, 7, 8]])
     >>> torch.take(src, torch.tensor([0, 2, 5]))
     tensor([ 4,  5,  8])
+""".format(**common_args))
+
+add_docstr(torch.take_along_dim,
+           r"""
+take_along_dim(input, indices, dim, *, out=None) -> Tensor
+
+Selects values from :attr:`input` at the 1-dimensional indices from :attr:`indices` along the given :attr:`dim`.
+
+Functions that return indices along a dimension, like :func:`torch.argmax` and :func:`torch.argsort`,
+are designed to work with this function. See the examples below.
+
+.. note::
+    This function is similar to NumPy's `take_along_axis`.
+    See also :func:`torch.gather`.
+
+Args:
+    {input}
+    indices (tensor): the indices into :attr:`input`. Must have long dtype.
+    dim (int): dimension to select along.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> t = torch.tensor([[10, 30, 20], [60, 40, 50]])
+    >>> max_idx = torch.argmax(t)
+    >>> torch.take_along_dim(t, max_idx)
+    tensor([60])
+    >>> sorted_idx = torch.argsort(t, dim=1)
+    >>> torch.take_along_dim(t, sorted_idx, dim=1)
+    tensor([[10, 20, 30],
+            [40, 50, 60]])
 """.format(**common_args))
 
 add_docstr(torch.tan,
@@ -9564,8 +9497,9 @@ Example::
 """.format(**factory_like_common_args))
 
 add_docstr(torch.empty,
-           r"""
-empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
+           """
+empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False, \
+memory_format=torch.contiguous_format) -> Tensor
 
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`size`.
