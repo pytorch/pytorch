@@ -72,7 +72,8 @@ void PThreadPool::run(
 size_t getDefaultNumThreads();
 
 PThreadPool* pthreadpool() {
-  static auto threadpool = std::make_unique<PThreadPool>(getDefaultNumThreads());
+  static auto threadpool =
+    std::make_unique<PThreadPool>(getDefaultNumThreads());
 #ifndef WIN32
   static std::once_flag flag;
   std::call_once(flag, []() {
@@ -80,8 +81,7 @@ PThreadPool* pthreadpool() {
   });
 #endif
   static auto true_bool = true;
-  static auto false_bool = false;
-  if (leak_corrupted_threadpool.compare_exchange_strong(true_bool, false_bool)) {
+  if (leak_corrupted_threadpool.compare_exchange_strong(true_bool, false)) {
     if (auto leaked = threadpool.release()) {
       auto num_threads = leaked->get_thread_count();
       threadpool.reset(new PThreadPool(num_threads));
