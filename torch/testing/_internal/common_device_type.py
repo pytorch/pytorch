@@ -817,6 +817,9 @@ def onlyCUDA(fn):
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
+def expectedFailureMeta(fn):
+    return expectedFailure('meta')(fn)
+
 class expectedAlertNondeterministic:
     def __init__(self, caller_name, device_type=None, fn_has_device_arg=True):
         self.device_type = device_type
