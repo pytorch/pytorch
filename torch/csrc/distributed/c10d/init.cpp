@@ -1079,11 +1079,16 @@ Arguments:
           .def(
               "monitored_barrier",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::chrono::milliseconds& timeout) {
+                 const std::chrono::milliseconds& timeout,
+                 bool waitAllRanks) {
+                     LOG(INFO) << "kUnsetTimeout is " << ::c10d::kUnsetTimeout.count();
+                     LOG(INFO) << "wait all ranks is: " << waitAllRanks;
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                return self->monitoredBarrier(opts);
+                return self->monitoredBarrier(opts, waitAllRanks);
               },
+              py::arg("timeout") = ::c10d::kUnsetTimeout,
+              py::arg("wait_all_ranks") = false,
               py::call_guard<py::gil_scoped_release>());
 
   // base ProcessGroup::Options binding
