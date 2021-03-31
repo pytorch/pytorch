@@ -161,7 +161,7 @@ Tensor einsum(std::string equation, TensorList operands) {
 
   const auto num_ops = operands.size();
 
-  // Convert labels for input operands into an index in [0, 25] and store
+  // Convert labels for input operands into an index in [0, 52) and store
   // them in op_labels for each operand along with ELLIPSIS if present.
   std::vector<std::vector<int>> op_labels(num_ops);
   bool found_ell = false;
@@ -201,13 +201,13 @@ Tensor einsum(std::string equation, TensorList operands) {
       default:
         // Parse label
         TORCH_CHECK(
-            lhs[i] >= 'a' && lhs[i] <= 'z',
-            "einsum() operand subscript must be in range [a, z] but found ",
+            lhs[i] >= 'a' && lhs[i] <= 'z' || lhs[i] >= 'A' && lhs[i] <= 'Z',
+            "einsum() operand subscript must be in range [a, z] or [A, Z] but found ",
             lhs[i],
             " for operand ",
             curr_op);
-        // Convert label to index in [0, 25] and store
-        op_labels[curr_op].push_back(lhs[i] - 'a');
+        // Convert label to index in [0, 52) and store
+        op_labels[curr_op].push_back(lhs[i] >= 'a' && lhs[i] <= 'z' ? lhs[i] - 'a' : lhs[i] - 'A' + 26);
     }
   }
 
@@ -215,8 +215,8 @@ Tensor einsum(std::string equation, TensorList operands) {
       curr_op == num_ops - 1,
       "einsum() more operands were provided than specified in the equation");
 
-  // Labels must be within [a, z].
-  constexpr int TOTAL_LABELS = 'z' - 'a' + 1;
+  // Labels must be within [a, z] or [A, Z].
+  constexpr int TOTAL_LABELS = ('z' - 'a' + 1) * 2;
   std::vector<int> label_count(TOTAL_LABELS, 0);
 
   // The maximum number of dimensions covered by any ellipsis, needed when

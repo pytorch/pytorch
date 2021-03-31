@@ -3886,6 +3886,7 @@ class TestLinalg(TestCase):
         check("ijk,jk->i", C, A)            # tensor matrix contraction
         check("aij,jk->aik", D, E)          # tensor matrix contraction
         check("abcd,dfg->abcfg", F, G)      # tensor tensor contraction
+        check("azAZ,byB->azAyB", F, G)      # like above but with capital letters
         check("ijk,jk->ik", C, A)           # tensor matrix contraction with double indices
         check("ijk,jk->ij", C, A)           # tensor matrix contraction with double indices
         check("ijk,ik->j", C, B)            # non contiguous
@@ -4004,6 +4005,9 @@ class TestLinalg(TestCase):
         check('...a->', [[2], [4]], expected_output=6)
         check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
 
+        # Capital letters OK
+        check('A', [1], expected_output=1)
+
     def test_einsum_error_cases(self, device):
         def check(equation, operands, regex, exception=RuntimeError):
             with self.assertRaisesRegex(exception, r'einsum\(\) ' + regex):
@@ -4015,7 +4019,6 @@ class TestLinalg(TestCase):
         check('', [], r'must provide at least one operand')
         check('. ..', [x], r'found \'.\' for operand 0 that is not part of any ellipsis')
         check('... ...', [x], r'found \'.\' for operand 0 for which an ellipsis was already found')
-        check('A', [x], r'operand subscript must be in range \[a, z\] but found A for operand 0')
         check(',', [x], r'fewer operands were provided than specified in the equation')
         check('', [x, x], r'more operands were provided than specified in the equation')
         check('', [x], r'the number of subscripts in the equation \(0\) does not match the number '
@@ -4026,7 +4029,6 @@ class TestLinalg(TestCase):
                             r'of dimensions \(1\) for operand 0')
         check('a->... .', [x], r'found \'.\' for output but an ellipsis \(...\) was already found')
         check('a->..', [x], r'found \'.\' for output that is not part of any ellipsis \(...\)')
-        check('a->A', [x], r'subscripts must be in range \[a, z\] but found A for the output')
         check('a->aa', [x], r'output subscript a appears more than once in the output')
         check('a->i', [x], r'output subscript i does not appear in the equation for any input operand')
         check('aa', [y], r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
