@@ -17,7 +17,7 @@ std::shared_ptr<JitFuture> RequestCallback::operator()(Message& request, const s
   // owners and resumne processing in a different thread. Hence, the
   // thread_local context id needs to be set and cleared in the thread that
   // indeed carries out the processing logic.
-  std::cout << "[" << getpid() << "]" << "RequestCallback::operator() calls processMessage with messageId = " << request.id()
+  std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "RequestCallback::operator() calls processMessage with messageId = " << request.id()
                     << ", messageType = " << std::hex << request.type() << std::dec
                     << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
   return processMessage(request, deviceIndices);

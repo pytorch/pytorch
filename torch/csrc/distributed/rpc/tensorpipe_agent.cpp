@@ -608,9 +608,9 @@ void TensorPipeAgent::pipeRead(
     }
 
     auto ctx = createLazyStreamContext();
-    std::cout << "[" << getpid() << "]" << "Before TensorPipeAgent::pipeRead calls tensorpipeAllocate with ctx.devices().size() = " << ctx->devices().size() << std::endl;
+    std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "Before TensorPipeAgent::pipeRead calls tensorpipeAllocate with ctx.devices().size() = " << ctx->devices().size() << std::endl;
     TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage, ctx);
-    std::cout << "[" << getpid() << "]" << "After  TensorPipeAgent::pipeRead calls tensorpipeAllocate with ctx.devices().size() = " << ctx->devices().size() << std::endl;
+    std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "After  TensorPipeAgent::pipeRead calls tensorpipeAllocate with ctx.devices().size() = " << ctx->devices().size() << std::endl;
 
     pipe->read(
         std::move(tpMessage),
@@ -646,10 +646,10 @@ void TensorPipeAgent::pipeWrite(
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers tpBuffers;
 
-  std::cout << "[" << getpid() << "]" << "Before TensorPipeAgent::pipeWrite calls tensorpipeSerialize with ctx.devices().size() = " << ctx->devices().size() << std::endl;
+  std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "Before TensorPipeAgent::pipeWrite calls tensorpipeSerialize with ctx.devices().size() = " << ctx->devices().size() << std::endl;
   std::tie(tpMessage, tpBuffers) =
       tensorpipeSerialize(std::move(rpcMessage), std::move(devices), ctx);
-  std::cout << "[" << getpid() << "]" << "After  TensorPipeAgent::pipeWrite calls tensorpipeSerialize with ctx.devices().size() = " << ctx->devices().size() << std::endl;
+  std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "After  TensorPipeAgent::pipeWrite calls tensorpipeSerialize with ctx.devices().size() = " << ctx->devices().size() << std::endl;
 
   pipe->write(
       std::move(tpMessage),
@@ -804,7 +804,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
-            std::cout << "[" << getpid() << "]" << "futureResponseMessage = cb_->operator()(requestMessage, ctx->devices()); with ctx->devices().size() = " << ctx->devices().size() << std::endl;
+            std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "futureResponseMessage = cb_->operator()(requestMessage, ctx->devices()); with ctx->devices().size() = " << ctx->devices().size() << std::endl;
             futureResponseMessage = cb_->operator()(requestMessage, ctx->devices());
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =

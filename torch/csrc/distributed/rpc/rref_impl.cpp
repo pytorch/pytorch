@@ -8,6 +8,10 @@
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#include <cassert>
+#include <unistd.h>
+#include <thread>
+
 namespace {
 // If the type is subtype of named type, return its qualifiedname, otherwise
 // return its type str.
@@ -260,15 +264,20 @@ void OwnerRRef::setError(std::exception_ptr eptr) {
 
 // #ifdef USE_CUDA_NOT_ROCM
 void OwnerRRef::recordAllDevices(const std::set<c10::DeviceIndex>& deviceIndices) {
+  assert(cudaEvents_.empty());
+  std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "OwnerRRef::recordAllDevices 1 with cudaEvents_.size() = " << cudaEvents_.size() << std::endl;
   cudaEvents_.clear();
   for (auto deviceIndex : deviceIndices) {
     at::cuda::CUDAEvent cudaEvent;
     cudaEvent.record(at::cuda::getCurrentCUDAStream(deviceIndex));
     cudaEvents_.push_back(std::move(cudaEvent));
   }
+  std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "OwnerRRef::recordAllDevices 2 with cudaEvents_.size() = " << cudaEvents_.size() << std::endl;
 }
 
 void OwnerRRef::waitAllDevices() {
+  assert(!cudaEvents_.empty());
+  std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "OwnerRRef::waitAllDevices with cudaEvents_.size() = " << cudaEvents_.size() << std::endl;
   for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
     cudaEvent.block(at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
   }

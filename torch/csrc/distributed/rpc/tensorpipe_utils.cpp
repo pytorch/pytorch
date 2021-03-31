@@ -113,7 +113,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
             std::move(metadata)});
 #ifdef USE_CUDA_NOT_ROCM
       } else if (tensorDataVec[i].device().is_cuda()) {
-        std::cout << "[" << getpid() << "]" << "tensorpipeSerialize calls ctx->getStream(deviceIndex) with deviceIndex = " << (int)(tensorDataVec[i].device().index()) << std::endl;
+        std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "tensorpipeSerialize calls ctx->getStream(deviceIndex) with deviceIndex = " << (int)(tensorDataVec[i].device().index()) << std::endl;
         auto stream = ctx->getStream(tensorDataVec[i].device().index());
         tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
             tensorpipe::CudaBuffer{
@@ -174,7 +174,7 @@ TensorpipeReadBuffers tensorpipeAllocate(
   buffers.pickle.resize(tpMessage.payloads[kTpMessagePickleIdx].length);
   tpMessage.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
 
-  std::cout << "[" << getpid() << "]" << "tensorpipeAllocate with tpMessage.tensors.size() = " << tpMessage.tensors.size() << std::endl;
+  std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "tensorpipeAllocate with tpMessage.tensors.size() = " << tpMessage.tensors.size() << std::endl;
   for (auto& tensor : tpMessage.tensors) {
     if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCpu) {
       buffers.tensors.emplace_back(at::getCPUAllocator()->allocate(
@@ -184,7 +184,7 @@ TensorpipeReadBuffers tensorpipeAllocate(
 #ifdef USE_CUDA_NOT_ROCM
     } else if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCuda) {
       auto deviceIndex = std::stoi(tensor.metadata);
-      std::cout << "[" << getpid() << "]" << "tensorpipeAllocate calls ctx->getStream(deviceIndex) with deviceIndex = " << deviceIndex << std::endl;
+      std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "tensorpipeAllocate calls ctx->getStream(deviceIndex) with deviceIndex = " << deviceIndex << std::endl;
       auto stream = ctx->getStream(deviceIndex);
       // CUDACachingAllocator will call recordStream accordingly on the current
       // stream.

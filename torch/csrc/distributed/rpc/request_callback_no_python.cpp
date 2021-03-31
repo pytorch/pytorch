@@ -89,7 +89,7 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
                     ->config());
           }
 
-          std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processMessage calls processRpcWithErrors with messageId = " << id 
+          std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "RequestCallbackNoPython::processMessage calls processRpcWithErrors with messageId = " << id 
                     << ", messageType = " << std::hex << messageType << std::dec
                     << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
           processRpcWithErrors(*rpc, messageType, id, retFuture, deviceIndices);
@@ -120,7 +120,7 @@ void RequestCallbackNoPython::processRpcWithErrors(
     const std::shared_ptr<JitFuture>& responseFuture,
     const std::set<c10::DeviceIndex>& deviceIndices) const {
   try {
-    std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processRpcWithErrors calls processRpc with messageId = " << messageId << ", messageType = " << std::hex << messageType << std::dec
+    std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "RequestCallbackNoPython::processRpcWithErrors calls processRpc with messageId = " << messageId << ", messageType = " << std::hex << messageType << std::dec
               << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
     processRpc(rpc, messageType, messageId, responseFuture, deviceIndices);
   } catch (std::exception& e) {
@@ -390,7 +390,7 @@ void RequestCallbackNoPython::processForwardAutogradReq(
       std::make_shared<JitFuture>(at::AnyClassType::get());
   // Kick off processing for the nested RPC command.
   // wrappedRpcResponseFuture will be a Future<T> to the result.
-  std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processForwardAutogradReq calls processRpc with messageId = " << messageId
+  std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "RequestCallbackNoPython::processForwardAutogradReq calls processRpc with messageId = " << messageId
             << ", wrappedMessageType = " << std::hex << wrappedMessageType << std::dec
             << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
   processRpc(
@@ -530,7 +530,7 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
         "Expected profiler to be enabled!");
     // Kick off processing for nested work and get Future<T> result in
     // wrappedRpcResponseFuture
-    std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processRunWithProfilingReq calls processRpc with messageId = " << messageId << std::endl;
+    std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "RequestCallbackNoPython::processRunWithProfilingReq calls processRpc with messageId = " << messageId << std::endl;
     processRpc(
         rpcWithProfilingReq.wrappedRpc(),
         wrappedMsgType,
@@ -617,7 +617,7 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
-      std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processRpc calls processPythonRemoteCall with messageId = " << messageId
+      std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "RequestCallbackNoPython::processRpc calls processPythonRemoteCall with messageId = " << messageId
                 << ", messageType = " << std::hex << messageType << std::dec
                 << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
       processPythonRemoteCall(rpc, markComplete, messageId, responseFuture, deviceIndices);
@@ -628,6 +628,9 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
+      std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "RequestCallbackNoPython::processRpc calls processPythonRRefFetchCall with messageId = " << messageId
+                << ", messageType = " << std::hex << messageType << std::dec
+                << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
       processPythonRRefFetchCall(rpc, messageId, responseFuture);
       return;
     }
@@ -644,7 +647,7 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
-      std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processRpc calls processForwardAutogradReq with messageId = " << messageId
+      std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "RequestCallbackNoPython::processRpc calls processForwardAutogradReq with messageId = " << messageId
                 << ", messageType = " << std::hex << messageType << std::dec
                 << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
       processForwardAutogradReq(rpc, messageId, responseFuture, deviceIndices);

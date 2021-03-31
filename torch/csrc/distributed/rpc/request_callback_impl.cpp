@@ -33,6 +33,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 #include <unistd.h>
+#include <thread>
 
 namespace torch {
 namespace distributed {
@@ -370,8 +371,14 @@ void RequestCallbackImpl::processPythonRemoteCall(
           IValue py_ivalue = jit::toIValue(result, PyObjectType::get());
 
           py::gil_scoped_release release;
-          ownerRRef->setValue(std::move(py_ivalue));
+
+          std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "Before RequestCallbackImpl::processPythonRemoteCall calls ownerRRef->recordAllDevices(deviceIndices); with rrefId() = " << ownerRRef->rrefId() << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
+          std::cout.flush();
           ownerRRef->recordAllDevices(deviceIndices);
+          ownerRRef->setValue(std::move(py_ivalue)); 
+          std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "After  RequestCallbackImpl::processPythonRemoteCall calls ownerRRef->recordAllDevices(deviceIndices); with rrefId() = " << ownerRRef->rrefId() << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
+          std::cout.flush();
+
           auto m = RemoteRet(rrefId, forkId).toMessage();
           m.setId(messageId);
           responseFuture->markCompleted(
@@ -409,13 +416,18 @@ void RequestCallbackImpl::processPythonRRefFetchCall(
         // Need this GIL to guard jit::toPyObj and destruct its returned
         // py::object
         py::gil_scoped_acquire acquire;
+        std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "RequestCallbackImpl::processPythonRRefFetchCall rref->hasValue() = " << rref->hasValue() << std::endl;
         result = std::make_shared<SerializedPyObj>(
             pythonRpcHandler.serialize(jit::toPyObject(rref->getValue())));
       }
       Message m =
           PythonRRefFetchRet(std::move(*result).toIValues()).toMessage();
       m.setId(messageId);
+      std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "Before RequestCallbackImpl::processPythonRRefFetchCall calls rref->waitAllDevices(); with rrefId() = " << rref->rrefId() << std::endl;
+      std::cout.flush();
       rref->waitAllDevices();
+      std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "After  RequestCallbackImpl::processPythonRRefFetchCall calls rref->waitAllDevices(); with rrefId() = " << rref->rrefId() << std::endl;
+      std::cout.flush();
       responseFuture->markCompleted(
           IValue(c10::make_intrusive<Message>(std::move(m))));
     } catch (py::error_already_set& e) {
@@ -473,7 +485,7 @@ void RequestCallbackImpl::processRpcWithErrors(
     const std::shared_ptr<JitFuture>& responseFuture,
     const std::set<c10::DeviceIndex>& deviceIndices) const {
   try {
-    std::cout << "[" << getpid() << "]" << "RequestCallbackImpl::processRpcWithErrors calls processRpc with messageId = " << messageId 
+    std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "RequestCallbackImpl::processRpcWithErrors calls processRpc with messageId = " << messageId 
               << ", messageType = " << std::hex << messageType << std::dec
               << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
     processRpc(rpc, messageType, messageId, responseFuture, deviceIndices);

@@ -102,7 +102,7 @@ struct TORCH_CUDA_CPP_API CudaLazyStreamContext : public LazyStreamContext {
     if (iter == streams_.end()) {
       auto cudaStream = at::cuda::getStreamFromPool(
           /* isHighPriority */ false, /* device */ index);
-      std::cout << "[" << getpid() << "]" << "streams_.emplace(index, cudaStream); with index = " << (int)index << std::endl;
+      std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "streams_.emplace(index, cudaStream); with index = " << (int)index << std::endl;
       streams_.emplace(index, cudaStream);
       return cudaStream;
     } else {
