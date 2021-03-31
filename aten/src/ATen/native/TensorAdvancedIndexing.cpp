@@ -479,20 +479,27 @@ Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source);
 }
 
-
-Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
+Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source_, const Scalar &alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   auto numel = index.numel();
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
           "index_add_(): Expected dtype int32/int64 for index");
-  TORCH_CHECK(self.scalar_type() == source.scalar_type(),
-              "index_add_(): self and source must have the same scalar type");
-  TORCH_CHECK(dim == 0 || dim < source.dim(),
+  TORCH_CHECK(dim == 0 || dim < source_.dim(),
               "index_add_(): Indexing dim ", dim, " is out of bounds of tensor");
-  TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
+  TORCH_CHECK(numel == (source_.dim() == 0 ? 1 : source_.size(dim)),
               "index_add_(): Number of indices should be equal to self.size(dim)");
+
+  Tensor source = source_;
+  const auto selfType = self.scalar_type();
+  const auto commonType = promoteTypes(selfType, source.scalar_type());
+  auto promoteToType = [&](Tensor& tensor, ScalarType type) {
+    if (tensor.scalar_type() != type) {
+      tensor = tensor.toType(type);
+    }
+  };
+  promoteToType(source, commonType);
 
   at::assert_no_internal_overlap(self);
   at::assert_no_overlap(self, index);
@@ -511,6 +518,8 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     if (numel == 0) {
       return self;
     }
+
+    promoteToType(self, commonType);
     auto selfSlice = self.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
     auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
@@ -535,6 +544,7 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
   else {
     TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
 
+    promoteToType(self, commonType);
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
@@ -557,6 +567,7 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
       });
     });
   }
+  promoteToType(self, selfType);
   return self;
 }
 
@@ -653,7 +664,7 @@ Tensor & index_select_out_cpu_dim1_(
   return result_contig;
 }
 
-Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index) {
+Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & index, Tensor & result) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   auto numel = index.numel();
@@ -784,7 +795,7 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
 
 Tensor index_select_cpu_(const Tensor & self, int64_t dim, const Tensor & index) {
   Tensor result = at::empty({0}, self.options());
-  return index_select_out_cpu_(result, self, dim, index);
+  return at::native::index_select_out_cpu_(self, dim, index, result);
 }
 
 Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
@@ -878,7 +889,12 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
 
-Tensor & gather_out_cpu_cuda(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+Tensor& gather_out_cpu_cuda(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    bool sparse_grad,
+    Tensor& result) {
   resize_output(result, index.sizes());
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
@@ -889,7 +905,7 @@ Tensor & gather_out_cpu_cuda(Tensor & result, const Tensor & self, int64_t dim, 
 
 Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   Tensor result = at::empty({0}, self.options());
-  return gather_out_cpu_cuda(result, self, dim, index, sparse_grad);
+  return at::native::gather_out_cpu_cuda(self, dim, index, sparse_grad, result);
 }
 
 Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
@@ -1137,14 +1153,14 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   return result;
 }
 
-Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
+Tensor & masked_select_out_cpu(const Tensor & self, const Tensor & mask, Tensor & result) {
   namedinference::compute_broadcast_outnames(self, mask);
   return masked_select_out_impl_cpu(result, self, mask);
 }
 
 Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
   Tensor result = at::empty({0}, self.options());
-  return masked_select_out_cpu(result, self, mask);
+  return at::native::masked_select_out_cpu(self, mask, result);
 }
 
 Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Tensor& mask) {
@@ -1227,7 +1243,7 @@ Tensor take_cpu(const Tensor& self, const Tensor& index) {
     return output;
 }
 
-Tensor& take_out_cpu(Tensor& out, const Tensor& self, const Tensor& index) {
+Tensor& take_out_cpu(const Tensor& self, const Tensor& index, Tensor& out) {
     take_out_cpu_template(out, self, index);
     return out;
 }
