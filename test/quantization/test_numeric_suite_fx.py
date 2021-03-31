@@ -426,6 +426,12 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 # conv3d - relu
                 self.conv3d_1 = nn.Conv3d(1, 1, 1)
                 self.relu_2 = nn.ReLU()
+                # linear
+                self.linear_0 = nn.Linear(1, 1)
+                # linear - relu
+                self.linear_1 = nn.Linear(1, 1)
+                self.relu_3 = nn.ReLU()
+
 
             def forward(self, x):
                 x = self.conv1d_0(x)
@@ -439,10 +445,14 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 x = self.conv3d_0(x)
                 x = self.conv3d_1(x)
                 x = self.relu_2(x)
+                x = x.reshape(1, 1)
+                x = self.linear_0(x)
+                x = self.linear_1(x)
+                x = self.relu_3(x)
                 return x
 
         m = M().eval()
-        self._test_extract_weights(m, results_len=6)
+        self._test_extract_weights(m, results_len=8)
 
     @skipIfNoFBGEMM
     def test_extract_weights_fun(self):
