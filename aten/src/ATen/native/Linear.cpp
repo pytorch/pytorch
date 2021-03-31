@@ -4,6 +4,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
+#include <c10/util/MaybeOwned.h>
 
 #include <array>
 #include <cctype>
@@ -16,23 +17,25 @@ namespace at { namespace native {
 
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  auto bias = bias_opt.has_value()
+    ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
+    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
 
   if (input.is_mkldnn()) {
-    return at::mkldnn_linear(input, weight, bias);
+    return at::mkldnn_linear(input, weight, *bias);
   }
 #if defined(C10_MOBILE)
-  if (xnnpack::use_linear(input, weight, bias)) {
-    return xnnpack::linear(input, weight, bias);
+  if (xnnpack::use_linear(input, weight, *bias)) {
+    return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input.dim() == 2 && bias.defined()) {
+  if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
-    return at::addmm(bias, input, weight.t());
+    return at::addmm(*bias, input, weight.t());
   }
   auto output = at::matmul(input, weight.t());
-  if (bias.defined()) {
-    output.add_(bias);
+  if (bias->defined()) {
+    output.add_(*bias);
   }
   return output;
 }
