@@ -221,8 +221,8 @@ void test(DeprecatedTypeProperties &T) {
       {
         auto lhs = ones(*lhs_it, T);
         auto rhs = zeros(*rhs_it, T).toType(ScalarType::Long);
-        TRY_CATCH_ELSE(auto result = lhs.take(rhs), ASSERT_EQ(lhs.numel(), 0);
-                       ASSERT_NE(rhs.numel(), 0),
+        TRY_CATCH_ELSE(auto result = lhs.take(rhs),
+                       ASSERT_EQ(lhs.numel(), 0); ASSERT_NE(rhs.numel(), 0),
                        require_equal_size_dim(result, rhs));
       }
 

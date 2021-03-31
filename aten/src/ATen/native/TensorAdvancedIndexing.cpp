@@ -332,6 +332,7 @@ Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const b
 
   // index checks
   TORCH_CHECK_INDEX(source.numel() == index.numel(), "put_(): Expected 'source' and 'index' to have the same number of elements, but got 'source' (", source.numel(), "), 'index'(", index.numel(), ")");
+  TORCH_CHECK_INDEX(!(self.numel() == 0 && index.numel() != 0), "put_(): Tried to put elements into an empty tensor");
 
   // These overlaps were not present before so they are not BC
   // That being said, I truly believe that they are necessary
@@ -403,6 +404,7 @@ Tensor& take_out(const Tensor& self, const Tensor& index, Tensor& out) {
   TORCH_CHECK(self.device() == self.device() && self.device() == index.device(),
       "take(): self, index and self expected to be in the same device, but got (self) ",
       self.device(), ", (index) ", index.device(), ", and (self) ", self.device());
+  TORCH_CHECK_INDEX(!(self.numel() == 0 && index.numel() != 0), "take(): tried to take from an empty tensor");
 
   at::assert_no_internal_overlap(out);
   at::assert_no_overlap(out, index);
