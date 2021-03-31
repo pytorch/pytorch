@@ -15,13 +15,15 @@ __all__ = ["assert_tensors_equal", "assert_tensors_allclose"]
 # The UsageError should be raised in case the test function is not used correctly. With this the user is able to
 # differentiate between a test failure (there is a bug in the tested code) and a test error (there is a bug in the
 # test). If pytest is the test runner, we use the built-in UsageError instead our custom one.
-try:
+
+if "pytest" in sys.modules:
     # The module 'pytest' will be imported if the 'pytest' runner is used. This will only give false-positives in case
     # a previously imported module already directly or indirectly imported 'pytest', but the test is run by another
     # runner such as 'unittest'.
-    pytest = sys.modules["pytest"]
-    UsageError = pytest.UsageError  # type: ignore[attr-defined]
-except KeyError:
+    import pytest
+
+    UsageError = pytest.UsageError
+else:
 
     class UsageError(Exception):  # type: ignore[no-redef]
         pass
@@ -45,6 +47,8 @@ def _check_are_tensors(a: Any, b: Any) -> Optional[AssertionError]:
     if not (isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor)):
         return AssertionError(f"Both inputs have to be tensors, but got {type(a)} and {type(b)} instead.")
 
+    return None
+
 
 def _check_supported_tensors(a: torch.Tensor, b: torch.Tensor) -> Optional[UsageError]:
     """Checks if the tensors are supported by the current infrastructure.
@@ -64,6 +68,8 @@ def _check_supported_tensors(a: torch.Tensor, b: torch.Tensor) -> Optional[Usage
         return UsageError("Comparison for quantized tensors is not supported yet.")
     if any(t.is_sparse for t in (a, b)):
         return UsageError("Comparison for sparse tensors is not supported yet.")
+
+    return None
 
 
 def _check_attributes_equal(
@@ -105,6 +111,8 @@ def _check_attributes_equal(
 
     if check_stride and a.stride() != b.stride():
         return AssertionError(msg_fmtstr.format("stride()", a.stride(), b.stride()))
+
+    return None
 
 
 def _equalize_attributes(a: torch.Tensor, b: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -192,7 +200,7 @@ def _check_values_equal(a: torch.Tensor, b: torch.Tensor) -> Optional[AssertionE
     """
     mismatches = torch.ne(a, b)
     if not torch.any(mismatches):
-        return
+        return None
 
     trace = _trace_mismatches(a, b, mismatches)
     return AssertionError(
@@ -221,7 +229,7 @@ def _check_values_allclose(
     """
     mismatches = ~torch.isclose(a, b, rtol=rtol, atol=atol)
     if not torch.any(mismatches):
-        return
+        return None
 
     trace = _trace_mismatches(a, b, mismatches)
     return AssertionError(
@@ -272,7 +280,7 @@ def assert_tensors_equal(
         To assert that the values in two tensors are are close but are not required to be bitwise equal, use
         :func:`assert_tensors_allclose` instead.
     """
-    exc = _check_are_tensors(a, b)
+    exc: Optional[Exception] = _check_are_tensors(a, b)
     if exc:
         raise exc
 
@@ -360,7 +368,7 @@ def assert_tensors_allclose(
 
         To assert that the values in two tensors are bitwise equal, use :func:`assert_tensors_equal` instead.
     """
-    exc = _check_are_tensors(a, b)
+    exc: Optional[Exception] = _check_are_tensors(a, b)
     if exc:
         raise exc
 

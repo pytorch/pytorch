@@ -34,6 +34,7 @@ bool test_cat_dim1_0();
 bool test_cat_dim1_1();
 bool test_cat_dim1_nonarray_0();
 bool test_cat_dim1_nonarray_1();
+bool test_log_softmax();
 bool test_softmax();
 bool test_sigmoid();
 bool test_hardsigmoid();
