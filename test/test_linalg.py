@@ -4006,7 +4006,7 @@ class TestLinalg(TestCase):
         check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
 
         # Capital letters OK
-        check('A', [1], expected_output=1)
+        check('A', [1], expected_output=[1])
 
     def test_einsum_error_cases(self, device):
         def check(equation, operands, regex, exception=RuntimeError):
