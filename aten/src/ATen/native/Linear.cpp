@@ -1,7 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
@@ -645,5 +646,54 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   return result;
 }
 
+} // namespace native
 
-}}  // namespace at::native
+namespace meta {
+TORCH_META_FUNC(log_matmul)(const Tensor& lhs, const Tensor& rhs) {
+  at::native::check_scalar_type_device_layout_equal(lhs, rhs);
+  TORCH_CHECK(lhs.dim() >= 2 && rhs.dim() >= 2, "invalid sizes");
+  TORCH_CHECK(lhs.size(-1) == rhs.size(-2), "invalid sizes");
+
+  std::vector<int64_t> res_shape;
+  int maxdim = std::max(lhs.dim(), rhs.dim());
+  for (int dim = 0; dim < maxdim - 2; dim++) {
+    int dim_lhs = dim + (lhs.dim() - maxdim);
+    int dim_rhs = dim + (rhs.dim() - maxdim);
+    if (dim_lhs < 0 ||
+        ((dim_rhs >= 0) && (lhs.size(dim_lhs) == 1) &&
+         (rhs.size(dim_rhs) > 1))) {
+      res_shape.push_back(rhs.size(dim_rhs));
+    } else {
+      if ((dim_rhs >= 0) && (rhs.size(dim_rhs) > 1)) {
+        TORCH_CHECK(
+            rhs.size(dim_rhs) == lhs.size(dim_lhs),
+            "dimension mismatch: size in dim ",
+            dim_lhs,
+            " of the left hand side cannot be broadcast with ",
+            dim_rhs,
+            " of the right hand side");
+      }
+      res_shape.push_back(lhs.size(dim_lhs));
+    }
+  }
+  res_shape.push_back(lhs.size(-2));
+  res_shape.push_back(rhs.size(-1));
+
+  set_output(res_shape, lhs.options());
+}
+} // namespace meta
+
+namespace native {
+TORCH_IMPL_FUNC(log_matmul_cpu)
+(const Tensor& lhs, const Tensor& rhs, const Tensor& out) {
+  // this isn't CPU-specific but we have a more parallel CUDA implementation
+  // we make a for loop to avoid O(N**3) memory intermediates
+  auto lhs_unsqueezed = lhs.unsqueeze(-1);
+  for (int64_t i = 0; i < lhs_unsqueezed.size(-3); i++) {
+    auto row = out.select(/*dim*/ -2, /*index*/ i);
+    at::logsumexp_out(row, lhs_unsqueezed.select(-3, i) + rhs, /*dim*/ -2);
+  }
+}
+
+} // namespace native
+} // namespace at

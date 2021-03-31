@@ -25,6 +25,7 @@
 #include <cusparse.h>
 #include <bitset>
 
+#include <ATen/native/cuda/LaunchUtils.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -51,21 +52,6 @@
 namespace at {
 namespace native {
 namespace {
-
-// Number of threads in a block given an input size up to MAX_BLOCK_SIZE
-static int getNumThreads(int nElem) {
-#if defined(__HIP_PLATFORM_HCC__)
-  int threadSizes[5] = {16, 32, 64, 128, 256};
-#else
-  int threadSizes[5] = {32, 64, 128, 256, 512};
-#endif
-  for (int i = 0; i != 5; ++i) {
-    if (nElem <= threadSizes[i]) {
-      return threadSizes[i];
-    }
-  }
-  return threadSizes[4];
-}
 
 template <typename scalar_t, bool LogSoftMax>
 __global__ void cuda_sparse_coo_softmax_kernel(

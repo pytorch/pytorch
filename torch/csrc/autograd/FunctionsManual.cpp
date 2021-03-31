@@ -548,6 +548,86 @@ Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntAr
   return grad * (self - result).exp();
 }
 
+std::tuple<Tensor, Tensor> log_matmul_backward(
+    const Tensor& grad_out,
+    const Tensor& lhs,
+    const Tensor& rhs,
+    const Tensor& result,
+    const std::array<bool, 2> grad_input_mask) {
+  // The derivative of res = log(exp(A) @ exp(B)) w.r.t. A is defined by
+  // (dres/dA @ grad_out) = ((1/exp(res) * grad_out) @ exp(B.t())) * exp(A)
+  // and the analogous thing for B
+
+  // Now just as we don't want to compute log matmul by the naive formula and
+  // use logsumexp instead, we also want to be stable here. But this is
+  // difficult because the gradient is not in log space and can be negative. But
+  // as the operator is linear, we can split the gradient in positive and
+  // negative parts, take logs separately and then combine them at the end.
+  // (incidentally, this is similar to logcumsumexp_backward).
+
+  // Batching means
+  // - the transpose is in the final dimensions
+  // - we have to add reductions (sum to size) for broadcasting
+
+  auto almost_neg_inf = AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::kBFloat16,
+      at::kHalf,
+      grad_out.scalar_type(),
+      "log_matmul_backward",
+      [&]() {
+        return at::full(
+            {}, std::numeric_limits<scalar_t>::lowest(), grad_out.options());
+      });
+
+  auto compute_grad_part = [result](
+                               const Tensor& me,
+                               const Tensor& other,
+                               const Tensor& log_grad_out_result_part,
+                               bool me_is_lhs) {
+    auto gr_part =
+        (me_is_lhs
+             ? at::log_matmul(log_grad_out_result_part, other.transpose(-2, -1))
+             : at::log_matmul(
+                   other.transpose(-2, -1), log_grad_out_result_part));
+    // undo broadcasting
+    for (int d = result.dim() - 3; d >= 0; d--) {
+      int d2 = d - (result.dim() - me.dim());
+      if (d2 < 0 || (me.size(d2) == 1 && result.size(d) > 1)) {
+        gr_part = gr_part.logsumexp(std::max(d2, 0), /*keepdim=*/(d2 >= 0));
+      }
+    }
+    return gr_part + me;
+  };
+  auto combine_parts = [](const Tensor& pos_part, const Tensor& neg_part) {
+    auto max_part = at::maximum(pos_part, neg_part);
+    max_part = at::where(
+        max_part.abs() == INFINITY,
+        max_part,
+        at::zeros({}, max_part.options()));
+    return ((pos_part - max_part).exp() - (neg_part - max_part).exp()) *
+        max_part.exp();
+  };
+  Tensor grad_lhs, grad_rhs;
+  if (!grad_out.defined()) {
+    return {grad_lhs, grad_rhs};
+  }
+  auto log_grad_out_pos_res =
+      at::where(grad_out > 0, grad_out.log() - result, almost_neg_inf);
+  auto log_grad_out_neg_res =
+      at::where(grad_out < 0, grad_out.neg().log() - result, almost_neg_inf);
+  if (grad_input_mask[0]) {
+    grad_lhs = combine_parts(
+        compute_grad_part(lhs, rhs, log_grad_out_pos_res, /*me_is_lhs=*/true),
+        compute_grad_part(lhs, rhs, log_grad_out_neg_res, /*me_is_lhs=*/true));
+  }
+  if (grad_input_mask[1]) {
+    grad_rhs = combine_parts(
+        compute_grad_part(rhs, lhs, log_grad_out_pos_res, /*me_is_lhs=*/false),
+        compute_grad_part(rhs, lhs, log_grad_out_neg_res, /*me_is_lhs=*/false));
+  }
+  return {grad_lhs, grad_rhs};
+}
+
 Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim) {
   if (grad.dim() == 0 || grad.numel() == 0) {
     return grad;

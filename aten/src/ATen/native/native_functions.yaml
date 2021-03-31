@@ -2271,6 +2271,16 @@
 
 - func: logsumexp.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: log_matmul(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  structured_delegate: log_matmul.out
+
+- func: log_matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU: log_matmul_cpu
+    CUDA: log_matmul_cuda
+
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
 
 - func: matmul(Tensor self, Tensor other) -> Tensor

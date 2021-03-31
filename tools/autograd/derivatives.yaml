@@ -671,6 +671,9 @@
 - name: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   self: logsumexp_backward(grad, self, result, dim, keepdim)
 
+- name: log_matmul(Tensor self, Tensor other) -> Tensor
+  self, other: log_matmul_backward(grad, self, other, result, grad_input_mask)
+
 - name: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   self: not_implemented("lstsq")
   A: not_implemented("lstsq")
