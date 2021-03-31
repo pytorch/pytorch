@@ -10,7 +10,9 @@ from typing import _tp_cache, _type_check, _type_repr  # type: ignore
 try:
     from typing import GenericMeta  # Python 3.6
 except ImportError:  # Python > 3.6
-    class GenericMeta(type):  # type: ignore
+    from abc import ABCMeta
+
+    class GenericMeta(ABCMeta):  # type: ignore
         pass
 
 
@@ -188,29 +190,13 @@ def issubinstance(data, data_type):
 # conflicts as elaborated in https://www.python.org/dev/peps/pep-0560/
 
 
-def _fixed_type(param) -> bool:
-    param = TYPE2ABC.get(param, param)
-
-    if isinstance(param, TypeVar) or param in (Any, ...):  # type: ignore
-        return False
-    if hasattr(param, '__args__'):
-        # For Python 3.6, `__args__` can be None
-        if param.__args__ is None or len(param.__args__) == 0:
-            return False
-        for arg in param.__args__:
-            if not _fixed_type(arg):
-                return False
-    return True
-
-
 class _DataPipeType:
     r"""
-    Save type in `param` and check if it's fixed or non-fixed type
+    Save type annotation in `param`
     """
 
     def __init__(self, param):
         self.param = param
-        self.fixed = _fixed_type(param)
 
     def __repr__(self):
         return _type_repr(self.param)
@@ -238,31 +224,6 @@ class _DataPipeType:
 _DEFAULT_TYPE = _DataPipeType(Any)
 
 
-def _mro_subclass_init(obj, fixed):
-    r"""
-    Run through MRO to check if any super class has already built in
-    the corresponding `__init_subclass__`. If so, no need to add
-    `__init_subclass__`.
-    """
-
-    mro = obj.__mro__
-    for b in mro:
-        if isinstance(b, _DataPipeMeta):
-            if fixed:
-                if b.__init_subclass__ == fixed_type_init:
-                    return True
-                if hasattr(b.__init_subclass__, '__func__') and \
-                        b.__init_subclass__.__func__ == fixed_type_init:  # type: ignore
-                    return True
-            else:
-                if b.__init_subclass__ == nonfixed_type_init:
-                    return True
-                if hasattr(b.__init_subclass__, '__func__') and \
-                        b.__init_subclass__.__func__ == nonfixed_type_init:  # type: ignore
-                    return True
-    return False
-
-
 class _DataPipeMeta(GenericMeta):
     r"""
     Metaclass for `DataPipe`. Add `type` attribute and `__init_subclass__` based
@@ -273,23 +234,15 @@ class _DataPipeMeta(GenericMeta):
     def __new__(cls, name, bases, namespace, **kargs):
         # For Python > 3.6
         cls.__origin__ = None
-        # Save __init__ function
-        if '__init__' in namespace:
-            namespace.update({'_origin_init': namespace['__init__']})
         if 'type' in namespace:
             return super().__new__(cls, name, bases, namespace)
 
         # For plain derived class without annotation
-        t = None
         for base in bases:
             if isinstance(base, _DataPipeMeta):
-                t = base.type
-                break
-        if t is not None:
-            namespace.update({'type': t})
-        else:
-            namespace.update({'type': _DEFAULT_TYPE, '__init_subclass__': nonfixed_type_init})
+                return super().__new__(cls, name, bases, namespace)
 
+        namespace.update({'type': _DEFAULT_TYPE, '__init_subclass__': _dp_init_subclass})
         return super().__new__(cls, name, bases, namespace)
 
     @_tp_cache
@@ -307,20 +260,15 @@ class _DataPipeMeta(GenericMeta):
 
         # Types are equal, fast path for inheritance
         if self.type.issubtype(t):
-            if _mro_subclass_init(self, t.fixed):
+            if _mro_subclass_init(self):
                 return self
 
         name = self.__name__ + '[' + str(t) + ']'
         bases = (self,) + self.__bases__
 
-        if t.fixed:
-            return self.__class__(name, bases,
-                                  {'__init_subclass__': fixed_type_init,
-                                   'type': t})
-        else:
-            return self.__class__(name, bases,
-                                  {'__init_subclass__': nonfixed_type_init,
-                                   'type': t})
+        return self.__class__(name, bases,
+                              {'__init_subclass__': _dp_init_subclass,
+                               'type': t})
 
     def __eq__(self, other):
         if not isinstance(other, _DataPipeMeta):
@@ -334,12 +282,34 @@ class _DataPipeMeta(GenericMeta):
         return hash((self.__name__, self.type))
 
 
-def _validate_iter(sub_cls):
+def _mro_subclass_init(obj):
+    r"""
+    Run through MRO to check if any super class has already built in
+    the corresponding `__init_subclass__`. If so, no need to add
+    `__init_subclass__`.
+    """
+
+    mro = obj.__mro__
+    for b in mro:
+        if isinstance(b, _DataPipeMeta):
+            if b.__init_subclass__ == _dp_init_subclass:
+                return True
+            if hasattr(b.__init_subclass__, '__func__') and \
+                    b.__init_subclass__.__func__ == _dp_init_subclass:  # type: ignore
+                return True
+    return False
+
+
+def _dp_init_subclass(sub_cls, *args, **kwargs):
     # TODO:
     # - add global switch for type checking at compile-time
     if '__iter__' in sub_cls.__dict__:
         iter_fn = sub_cls.__dict__['__iter__']
-        hints = get_type_hints(iter_fn)
+        try:
+            hints = get_type_hints(iter_fn)
+        # Ignore TypeError causes by invalid string typing annotation in order to keep internal BC
+        except TypeError:
+            return
         if 'return' in hints:
             return_hint = hints['return']
             # Plain Return Hint for Python 3.6
@@ -354,29 +324,3 @@ def _validate_iter(sub_cls):
             if not issubtype(data_type, sub_cls.type.param):
                 raise TypeError("Expected return type of '__iter__' is a subtype of {}, but found {}"
                                 " for {}".format(sub_cls.type, _type_repr(data_type), sub_cls.__name__))
-
-
-def fixed_type_init(sub_cls, *args, **kwargs):
-    _validate_iter(sub_cls)
-    if '_origin_init' in sub_cls.__dict__:
-        sub_cls.__init__ = sub_cls._origin_init
-    else:
-
-        # Fake __init__ function
-        def fake_init(self, *args, **kwargs):
-            pass
-        sub_cls.__init__ = fake_init
-
-
-def nonfixed_type_init(sub_cls, *args, **kwargs):
-    _validate_iter(sub_cls)
-    if '_origin_init' in sub_cls.__dict__:
-        init_fn = sub_cls.__dict__['_origin_init']
-
-        def new_init(self, *args, **kwargs):
-            init_fn(self, *args, **kwargs)
-            self.type = copy.deepcopy(sub_cls.type)
-    else:
-        def new_init(self, *args, **kwargs):
-            self.type = copy.deepcopy(sub_cls.type)
-    sub_cls.__init__ = new_init
