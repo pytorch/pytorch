@@ -163,6 +163,100 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
   return std::tuple<Tensor, Tensor>(vals_, vecs_);
 }
 
+/*
+  Computes eigenvalues and eigenvectors of the input that is stored initially in 'vectors'.
+  The computation is done in-place: 'vectors' stores the input and will be overwritten,
+  'values' should be an allocated empty array.
+  'infos' is used to store information for possible checks for error.
+  'upper' controls the portion of input matrix to consider in computations
+  'compute_eigenvectors' controls whether eigenvectors should be computed.
+  This function doesn't do any error checks and it's assumed that every argument is valid.
+*/
+template <typename scalar_t>
+void apply_lapack_eigh(Tensor& values, Tensor& vectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+#ifndef USE_LAPACK
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.eigh or eigvalsh on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+
+  char uplo = upper ? 'U' : 'L';
+  char jobz = compute_eigenvectors ? 'V' : 'N';
+
+  auto n = vectors.size(-1);
+  auto lda = std::max<int64_t>(1, n);
+  auto batch_size = batchCount(vectors);
+
+  auto vectors_stride = matrixStride(vectors);
+  auto values_stride = values.size(-1);
+
+  auto vectors_data = vectors.data_ptr<scalar_t>();
+  auto values_data = values.data_ptr<value_t>();
+  auto infos_data = infos.data_ptr<int>();
+
+  // Using 'int' instead of int32_t or int64_t is consistent with the current LAPACK interface
+  // It really should be changed in the future to something like lapack_int that depends on the specific LAPACK library that is linked
+  // or switch to supporting only 64-bit indexing by default.
+  int lwork = -1;
+  int lrwork = -1;
+  int liwork = -1;
+  scalar_t lwork_query;
+  value_t rwork_query;
+  int iwork_query;
+
+  // call lapackSyevd once to get the optimal size for work data
+  scalar_t work_query;
+  lapackSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_data, lda, values_data,
+    &lwork_query, lwork, &rwork_query, lrwork, &iwork_query, liwork, infos_data);
+
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(lwork_query));
+  Tensor work = at::empty({lwork}, vectors.options());
+  auto work_data = work.data_ptr<scalar_t>();
+
+  liwork = std::max<int>(1, iwork_query);
+  Tensor iwork = at::empty({liwork}, vectors.options().dtype(at::kInt));
+  auto iwork_data = iwork.data_ptr<int>();
+
+  Tensor rwork;
+  value_t* rwork_data = nullptr;
+  if (vectors.is_complex()) {
+    lrwork = std::max<int>(1, rwork_query);
+    rwork = at::empty({lrwork}, values.options());
+    rwork_data = rwork.data_ptr<value_t>();
+  }
+
+  // Now call lapackSyevd for each matrix in the batched input
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* vectors_working_ptr = &vectors_data[i * vectors_stride];
+    value_t* values_working_ptr = &values_data[i * values_stride];
+    int* info_working_ptr = &infos_data[i];
+    lapackSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_working_ptr, lda, values_working_ptr,
+      work_data, lwork, rwork_data, lrwork, iwork_data, liwork, info_working_ptr);
+    // The current behaviour for Linear Algebra functions to raise an error if something goes wrong
+    // or input doesn't satisfy some requirement
+    // therefore return early since further computations will be wasted anyway
+    if (*info_working_ptr != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_lapack_eigh'
+void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+  // This function calculates the symmetric/hermitian eigendecomposition
+  // in-place tensors should be in batched column major memory format the
+  // content of eigenvalues, eigenvectors and infos is overwritten by
+  // 'apply_lapack_eigh'
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      eigenvectors.scalar_type(), "linalg_eigh_cpu", [&] {
+        apply_lapack_eigh<scalar_t>(
+            eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+      });
+}
+
 // This is a type dispatching helper function for 'apply_orgqr'
 Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "orgqr_cpu", [&]{
@@ -238,6 +332,11 @@ REGISTER_ARCH_DISPATCH(eig_stub, DEFAULT, &eig_kernel_impl);
 REGISTER_AVX_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_AVX2_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_VSX_DISPATCH(eig_stub, &eig_kernel_impl);
+
+REGISTER_ARCH_DISPATCH(linalg_eigh_stub, DEFAULT, &linalg_eigh_kernel);
+REGISTER_AVX_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
+REGISTER_AVX2_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
+REGISTER_VSX_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 
 REGISTER_ARCH_DISPATCH(orgqr_stub, DEFAULT, &orgqr_kernel_impl);
 REGISTER_AVX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);

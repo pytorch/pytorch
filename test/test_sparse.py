@@ -3272,13 +3272,11 @@ class TestSparseUnaryUfuncs(TestCase):
 
         sample = samples[0]
 
-        if len(sample.input) > 1:
-            self.skipTest("Skipped! Testing unary ops, one input is expected")
-        sample = sample.input[0]
+        assert isinstance(sample.input, torch.Tensor)
 
-        expected = op(sample)
+        expected = op(sample.input)
         assert torch.is_tensor(expected)
-        output = op(sample.to_sparse())
+        output = op(sample.input.to_sparse())
         assert torch.is_tensor(output)
         self.assertEqual(output.to_dense(), expected)
 

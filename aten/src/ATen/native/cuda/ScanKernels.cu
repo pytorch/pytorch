@@ -584,7 +584,7 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
   return _logcumsumexp_out_cuda(self, dim, result);
 }
 
-Tensor& _cumsum_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _cumsum_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   TensorArg output_arg{result, "output", 1};
   TensorArg input_arg{self, "input", 2};
   checkAllSameGPU("cumsum", {output_arg, input_arg});
@@ -617,10 +617,10 @@ Tensor& _cumsum_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
 
 Tensor _cumsum_cuda(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _cumsum_out_cuda(result, self, dim);
+  return at::native::_cumsum_out_cuda(self, dim, result);
 }
 
-Tensor& _cumprod_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _cumprod_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   TensorArg output_arg{result, "output", 1};
   TensorArg input_arg{self, "input", 2};
   checkAllSameGPU("cumprod", {output_arg, input_arg});
@@ -653,7 +653,7 @@ Tensor& _cumprod_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
 
 Tensor _cumprod_cuda(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _cumprod_out_cuda(result, self, dim);
+  return at::native::_cumprod_out_cuda(self, dim, result);
 }
 
 }} // namespace at::native
