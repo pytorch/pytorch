@@ -17,8 +17,6 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Ensure consistent CircleCI YAML config
         run: |
           pip install -r requirements.txt
@@ -32,6 +30,9 @@ jobs:
           rm -r "shellcheck-${scversion}"
           shellcheck --version
           .jenkins/run-shellcheck.sh
+      - name: Ensure correct trailing newlines
+        run: |
+          (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
         run: |
           (! git grep -I -no ' $' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above files have trailing spaces; please remove them"; false))
@@ -41,7 +42,7 @@ jobs:
       - name: Ensure canonical include
         run: |
           (! git grep -I -no $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
-      # note that this next step depends on a clean heckout;
+      # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
       - name: Ensure C++ source files are not executable
@@ -66,8 +67,6 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Get HEAD commit SHA
         run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
         id: get-commit-sha
@@ -102,7 +101,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # deep clone, to allow us to use git merge-base
       - name: Get HEAD commit SHA
         run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
@@ -203,8 +201,6 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Run cmakelint
         run: |
           set -eux
@@ -224,8 +220,6 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Install dependencies
         run: |
           set -eux

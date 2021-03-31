@@ -193,4 +193,3 @@ class CommitDataCache:
         data = {commit: features._asdict() for commit, features in self.data.items()}
         with open(self.path, 'w') as f:
             json.dump(data, f)
-
