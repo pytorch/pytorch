@@ -3082,7 +3082,10 @@ Computes the base two exponential function of :attr:`input`.
 
 .. math::
     y_{i} = 2^{x_{i}}
+
+.. note:: Alias for :func:`torch.special.exp2`.
 """ + r"""
+
 Args:
     {input}
 
@@ -3104,6 +3107,10 @@ of :attr:`input`.
 
 .. math::
     y_{i} = e^{x_{i}} - 1
+
+.. note:: This function provides greater precision than exp(x) - 1 for small values of x.
+
+.. note:: Alias for :func:`torch.special.expm1`.
 """ + r"""
 
 Args:
@@ -8829,7 +8836,7 @@ takes the same shape as the indices.
 
 Args:
     {input}
-    indices (LongTensor): the indices into tensor
+    index (LongTensor): the indices into tensor
 
 Example::
 
@@ -8837,6 +8844,39 @@ Example::
     ...                     [6, 7, 8]])
     >>> torch.take(src, torch.tensor([0, 2, 5]))
     tensor([ 4,  5,  8])
+""".format(**common_args))
+
+add_docstr(torch.take_along_dim,
+           r"""
+take_along_dim(input, indices, dim, *, out=None) -> Tensor
+
+Selects values from :attr:`input` at the 1-dimensional indices from :attr:`indices` along the given :attr:`dim`.
+
+Functions that return indices along a dimension, like :func:`torch.argmax` and :func:`torch.argsort`,
+are designed to work with this function. See the examples below.
+
+.. note::
+    This function is similar to NumPy's `take_along_axis`.
+    See also :func:`torch.gather`.
+
+Args:
+    {input}
+    indices (tensor): the indices into :attr:`input`. Must have long dtype.
+    dim (int): dimension to select along.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> t = torch.tensor([[10, 30, 20], [60, 40, 50]])
+    >>> max_idx = torch.argmax(t)
+    >>> torch.take_along_dim(t, max_idx)
+    tensor([60])
+    >>> sorted_idx = torch.argsort(t, dim=1)
+    >>> torch.take_along_dim(t, sorted_idx, dim=1)
+    tensor([[10, 20, 30],
+            [40, 50, 60]])
 """.format(**common_args))
 
 add_docstr(torch.tan,
@@ -9564,8 +9604,9 @@ Example::
 """.format(**factory_like_common_args))
 
 add_docstr(torch.empty,
-           r"""
-empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
+           """
+empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False, \
+memory_format=torch.contiguous_format) -> Tensor
 
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`size`.
