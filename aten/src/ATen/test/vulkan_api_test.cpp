@@ -630,7 +630,7 @@ TEST(VulkanAPITest, conv2d_winograd) {
         height,
       };
     }
-  } input {1, 3, 177, 232};
+  } input {1, 10, 177, 232};
 
   constexpr struct {
     uint32_t output_channels;
