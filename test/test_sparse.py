@@ -77,11 +77,11 @@ class TestSparse(TestCase):
         # TODO: Put this in torch.cuda.randn
         return torch.empty(*args, **kwargs).normal_()
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_print_coalesced(self, device, dtype):
         self._test_print(device, dtype, True)
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_print_uncoalesced(self, device, dtype):
         self._test_print(device, dtype, False)
 
@@ -140,7 +140,7 @@ class TestSparse(TestCase):
         self.assertExpected('\n'.join(printed))
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_basic(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
             if isinstance(with_size, Number):
@@ -179,7 +179,7 @@ class TestSparse(TestCase):
         self.assertEqual(x._values().numel(), 0)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_coalesce(self, device, dtype, coalesced):
 
         def _test_coalesce(t):
@@ -226,7 +226,7 @@ class TestSparse(TestCase):
             t, _, _ = self._gen_sparse(len(sparse_size), nnz, sparse_size + dense_size, dtype, device, coalesced)
             _test_coalesce(t)  # this tests correctness
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_ctor_size_checks(self, device, dtype):
         indices = self.index_tensor([
             [0, 0, 0],
@@ -250,7 +250,7 @@ class TestSparse(TestCase):
             RuntimeError,
             lambda: self.sparse_tensor(indices, values, torch.Size([2, 4, 2, 1])))
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_to_dense(self, device, dtype):
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
@@ -274,7 +274,7 @@ class TestSparse(TestCase):
             x.requires_grad_(True)
             gradcheck(fn, (x,), check_sparse_nnz=True)
 
-        for value_type in [*torch.testing.floating64_type_and()]:
+        for value_type in [torch.double]:
             i = self.index_tensor([
                 [0, 1, 2, 2],
                 [0, 0, 0, 3],
@@ -324,7 +324,7 @@ class TestSparse(TestCase):
     def test_to_sparse(self, device, dtype, coalesced):
         shape = [5, 2, 10, 4]
         max_nnz = 1
-        for value_type in [*torch.testing.floating64_type_and()]:
+        for value_type in [torch.double]:
             for dim, dim_sz in enumerate(shape, 1):
                 max_nnz *= dim_sz
                 rnnz = torch.randint(2, max_nnz, (1,)).item()
@@ -342,13 +342,13 @@ class TestSparse(TestCase):
             sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3], dtype=value_type, device=device, coalesced=coalesced)
             self.assertRaises(RuntimeError, lambda: sp.to_sparse())
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_sparse_bool(self, device, dtype):
         a = torch.tensor([True, False], dtype=dtype, device=device).to(torch.bool)
         b = a.to_sparse().to_dense()
         self.assertEqual(a, b)
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_scalar(self, device, dtype):
         # tensor with value
         a = self.sparse_tensor(self.index_tensor([], device=device).unsqueeze(1), 12.3, [], dtype=dtype, device=device)
@@ -378,7 +378,7 @@ class TestSparse(TestCase):
         self.assertEqual(torch.tensor(0, dtype=dtype, device=device), a.to_dense())
         self.assertEqual(a, a.to_dense().to_sparse())
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_shared(self, device, dtype):
         i = self.index_tensor([[2]], device=device)
         v = torch.tensor([5], dtype=dtype, device=device)
@@ -394,7 +394,7 @@ class TestSparse(TestCase):
         i[0][0] = 0
         self.assertEqual(torch.empty((3, 0), dtype=dtype, device=device), self.safeToDense(x))
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_to_dense_hybrid(self, device, dtype):
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
@@ -439,7 +439,7 @@ class TestSparse(TestCase):
         res = torch.empty((3, 4, 2, 0), dtype=dtype, device=device)
         test_tensor(x, res)
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_contig(self, device, dtype):
         def test_tensor(x, exp_i, exp_v):
             x = x.coalesce()
@@ -520,7 +520,7 @@ class TestSparse(TestCase):
         exp_v = torch.empty([2, 0], dtype=dtype, device=device)
         test_tensor(x, exp_i, exp_v)
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_contig_hybrid(self, device, dtype):
         def test_tensor(x, exp_i, exp_v):
             x = x.coalesce()
@@ -608,7 +608,7 @@ class TestSparse(TestCase):
         test_tensor(x, exp_i, exp_v)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_clone(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
             x = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
@@ -626,7 +626,7 @@ class TestSparse(TestCase):
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_Sparse_to_Sparse_copy_(self, device, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor)
         sparse_dims = 3
@@ -673,7 +673,7 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_Sparse_to_Sparse_copy_multi_gpu(self, device, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor) across GPU devices
         sparse_dims = 3
@@ -726,7 +726,7 @@ class TestSparse(TestCase):
         test_tensor(x)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_transpose(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
             x = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
@@ -770,7 +770,7 @@ class TestSparse(TestCase):
         test_shape(10, 20, 0, 0)
         test_shape(10, 20, 0, 20)
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_t_empty(self, device, dtype):
         def test_in_place(x):
             shape_original = x.shape
@@ -799,7 +799,7 @@ class TestSparse(TestCase):
         test_not_in_place(x)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_add_zeros(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, sizes):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes, dtype, device, coalesced)
@@ -814,7 +814,7 @@ class TestSparse(TestCase):
         test_shape(2, 20, [3, 17, 19, 5])
         test_shape(2, 20, [3, 17, 19, 0])
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_add_sub_nnz(self, device, dtype):
         # nnz should not grow unbounded (gh-34964)
         x = torch.randn(10, dtype=dtype, device=device).to_sparse()
@@ -827,7 +827,7 @@ class TestSparse(TestCase):
         self.assertLessEqual(x._nnz(), 10)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_cat(self, device, dtype, coalesced):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
         def test_shapes(shapes, dim, fail_message=None):
@@ -869,7 +869,7 @@ class TestSparse(TestCase):
             torch.cat((sp, dn))
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_unsqueeze(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, sizes, unsqueeze_dim, fail_message=None):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes, dtype, device, coalesced)
@@ -901,7 +901,7 @@ class TestSparse(TestCase):
         test_shape(3, 10, [5, 7, 11, 13, 17], 6, "Dimension out of range")
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_select(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, sizes, select_dim, select_index, fail_message=None):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes, dtype, device, coalesced)
@@ -933,7 +933,7 @@ class TestSparse(TestCase):
                 test_shape(1, 10, sizes, d, i)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_index_select(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, sizes, select_dim, select_index, fail_message=None):
             if isinstance(select_index, int):
@@ -1349,7 +1349,7 @@ class TestSparse(TestCase):
 
     @onlyCUDA
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_sparse_add_out_bfloat16(self, device, dtype, coalesced):
         # fp32
         x, _, _ = self._gen_sparse(3, 5, 10, dtype, device, coalesced)
@@ -1366,7 +1366,7 @@ class TestSparse(TestCase):
         self.assertEqual(res_fp32, res_bf16, atol=1e-2, rtol=0)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_norm(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)
@@ -1574,7 +1574,7 @@ class TestSparse(TestCase):
         _test_basic_ops()
         _test_basic_ops_hybrid()
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_add_dense_sparse_mismatch(self, device, dtype):
         def test_shape(dense_size, sparse_dims_shape, dense_dims_shape, sparse_size):
             x = torch.zeros(dense_size, dtype=dtype, device=device)
@@ -1589,7 +1589,7 @@ class TestSparse(TestCase):
         test_shape([3, 4], [1, 4], [4, 4, 4], [3, 4, 4])
         test_shape([3, 4, 0], [1, 4], [4, 4, 4, 0], [3, 4, 4, 0])
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_add_noncontiguous(self, device, dtype):
         indices = self.index_tensor([[1, 2], [0, 2]], device=device)
         values = torch.tensor([1.], dtype=dtype, device=device).expand(2, 3, 4, 5)
@@ -1612,7 +1612,7 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y2), expected)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_sparse_mask(self, device, dtype, coalesced):
         def _test_sparse_mask_fixed():
             i = self.index_tensor([
@@ -1657,7 +1657,7 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape(0, 0, [10, 10, 0], [], dtype, device, coalesced)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_sparse_mask_hybrid(self, device, dtype, coalesced):
         def _test_sparse_mask_hybrid_fixed():
             i = self.index_tensor([
@@ -1709,7 +1709,7 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape(0, 0, [10, 10, 0], [2, 0], dtype, device, coalesced)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_zeros(self, device, dtype, coalesced):
         def _test_zeros(nnzs, shape, out_shape_i, out_shape_v=None):
             out_shape = out_shape_i + (out_shape_v or [])
@@ -1734,7 +1734,7 @@ class TestSparse(TestCase):
         test_shape([2, 3, 4], [0, 4, 5, 6], [2, 3, 0], [9, 12])
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_zeros_like(self, device, dtype, coalesced):
         def _test_zeros_like(nnzs, template_shape_i, template_shape_v=None):
             template_shape_v = template_shape_v or []
@@ -1814,7 +1814,7 @@ class TestSparse(TestCase):
             result = torch.empty_like(dense_tensor, layout=torch.sparse_coo)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_empty_like(self, device, dtype, coalesced):
         # tests https://github.com/pytorch/pytorch/issues/43699
 
@@ -1870,7 +1870,7 @@ class TestSparse(TestCase):
                     yield [dim, start, length]
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_narrow(self, device, dtype, coalesced):
         shape = [3, 3, 4, 2]
         input, _, _ = self._gen_sparse(4, 19, shape, dtype, device, coalesced)
@@ -1987,7 +1987,7 @@ class TestSparse(TestCase):
                 self.assertEqual(expected_output, sparse_tensor_out.to_dense())
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_neg_negative(self, device, dtype, coalesced):
 
         if coalesced:
@@ -2143,7 +2143,7 @@ class TestSparse(TestCase):
             y, _, _ = self._gen_sparse(2, 20, [10, 100], dtype, device, coalesced)
             res = x.mv(y)
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_sparse_add_coalesce(self, device, dtype):
         i = self.index_tensor([[1, 2, 1]], device=device)
         v = torch.tensor([3, 4, 5], dtype=dtype, device=device)
@@ -2228,7 +2228,7 @@ class TestSparse(TestCase):
         self._test_new_device((30, 20, 10, 0), 1)
 
     @coalescedonoff
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_new(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
             x, indices, values = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)
@@ -2284,7 +2284,7 @@ class TestSparse(TestCase):
                                 self.assertEqual(device, sparse_tensor._values().device)
                             self.assertEqual(True, sparse_tensor.requires_grad)
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_factory_size_check(self, device, dtype):
         indices = self.index_tensor([[1, 2],
                                     [0, 2]], device=device)
@@ -2349,7 +2349,7 @@ class TestSparse(TestCase):
         expected_indices = torch.empty((4, 0), dtype=torch.long, device=device)
         self.assertEqual(tensor._indices(), expected_indices)
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_factory_nnz(self, device, dtype):
         indices = self.index_tensor([[0]], device=device)  # (sparse_dim, nnz): (1, 1)
         values = torch.tensor([[1, 1], [1, 1]], dtype=dtype, device=device)  # (nnz, ...): (2, 2)
@@ -2363,7 +2363,7 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(RuntimeError, "indices and values must have same nnz"):
             torch.sparse_coo_tensor(indices, values, sizes, dtype=dtype, device=device)
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_factory_nnz_zero(self, device, dtype):
         def test_shape(i_shape, v_shape, size, expected_size):
             if size:
@@ -2384,7 +2384,7 @@ class TestSparse(TestCase):
         test_shape([3, 0], [0, 2, 4, 0], [0, 0, 0, 2, 4, 0], [0, 0, 0, 2, 4, 0])
         test_shape([3, 0], [0, 2, 4, 0], [1, 2, 3, 2, 4, 0], [1, 2, 3, 2, 4, 0])
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_factory_dense_dim(self, device, dtype):
         indices = self.index_tensor([[0]], device=device)
         values = torch.tensor([[[1, 1, 1], [1, 1, 1]]], dtype=dtype, device=device)
@@ -2608,7 +2608,7 @@ class TestSparse(TestCase):
         self.assertEqual(x.to_dense().view(-1)[0:x_v_numel].view(x_v),
                          x_dense.view(-1)[0:x_v_numel].view(x_v))
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_resize(self, device, dtype):
         # 1. Expand the size of some dense dimensions [Supported]
         self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
@@ -2728,7 +2728,7 @@ class TestSparse(TestCase):
         do_test(self.sparse_empty([3, 0], device=device).data)
         do_test(self.sparse_empty([3, 0], device=device).detach())
 
-    @dtypes(*torch.testing.floating64_type_and())
+    @dtypes(torch.double)
     def test_change_tensor_metadata(self, device, dtype):
         i = self.index_tensor([[0], [1]], device=device)
         v = torch.tensor([[3, 4, 5]], dtype=dtype, device=device)

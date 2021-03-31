@@ -44,12 +44,11 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
 static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
   auto device1 = x1.device().type();
-  TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device1);
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
   auto device2 = x2.device().type();
-  TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device2);
   TORCH_CHECK(p >= 0, "cdist only supports non-negative p values");
   TORCH_CHECK(device1 == device2, "X1 and X2 must have the same device type. X1: ", device1, " X2: ", device2);
+  // TODO: This is bad; this test should apply universally
   TORCH_CHECK(!x1.is_cuda() || x1.get_device() == x2.get_device(), "device of X1 (", x1.get_device(), ") must match device of X2 (", x2.get_device(), ")");
   int64_t c1 = x1.size(-1);
   int64_t c2 = x2.size(-1);
@@ -62,6 +61,14 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
 
   int64_t r1 = x1.size(-2);
   int64_t r2 = x2.size(-2);
+
+  // See Note [cdist relies on cdist_impl redispatching]
+  // Keep this condition in sync with the condition at the Note
+  if (!(p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25))))) {
+    TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device1);
+    TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device2);
+  }
+
   auto dim1 = x1.dim();
   auto dim2 = x2.dim();
 
@@ -108,11 +115,13 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
   auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
   auto result = [&]() {
     NoNamesGuard guard;
-    // This is for pytorch to figure the backward pass itself
-    // when p=2
     int64_t r1 = x1.size(-2);
     int64_t r2 = x2.size(-2);
     int64_t mode = compute_mode.value_or(0);
+    // Note [cdist relies on cdist_impl redispatching]
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // This is for pytorch to figure the backward pass itself
+    // when p=2.  Keep this condition in sync with the See Note reference
     if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
         return cdist_impl(x1, x2, p, compute_mode);
     } else {

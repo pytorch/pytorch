@@ -21,6 +21,7 @@ export TEST_DIR="${PWD}/test"
 export TEST_DIR_WIN=$(cygpath -w "${TEST_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR="/c/users/circleci/workspace/build-results"
 export PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
+export PYTORCH_TEST_SKIP_NOARCH=1
 
 mkdir -p $TMP_DIR/build/torch
 
