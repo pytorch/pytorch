@@ -16,14 +16,15 @@ __all__ = ["assert_tensors_equal", "assert_tensors_allclose"]
 # differentiate between a test failure (there is a bug in the tested code) and a test error (there is a bug in the
 # test). If pytest is the test runner, we use the built-in UsageError instead our custom one.
 
-if "pytest" in sys.modules:
+try:
     # The module 'pytest' will be imported if the 'pytest' runner is used. This will only give false-positives in case
     # a previously imported module already directly or indirectly imported 'pytest', but the test is run by another
     # runner such as 'unittest'.
-    import pytest
-
-    UsageError = pytest.UsageError
-else:
+    # 'mypy' is not able to handle this within a type annotation
+    # (see https://mypy.readthedocs.io/en/latest/common_issues.html#variables-vs-type-aliases for details). In such
+    # cases we need to add a 'type: ignore[valid-type]' comment to the annotation.
+    UsageError = getattr(sys.modules["pytest"], "UsageError")
+except (KeyError, AttributeError):
 
     class UsageError(Exception):  # type: ignore[no-redef]
         pass
@@ -50,7 +51,7 @@ def _check_are_tensors(a: Any, b: Any) -> Optional[AssertionError]:
     return None
 
 
-def _check_supported_tensors(a: torch.Tensor, b: torch.Tensor) -> Optional[UsageError]:
+def _check_supported_tensors(a: torch.Tensor, b: torch.Tensor) -> Optional[UsageError]:  # type: ignore[valid-type]
     """Checks if the tensors are supported by the current infrastructure.
 
     All checks are temporary and will be relaxed in the future.
