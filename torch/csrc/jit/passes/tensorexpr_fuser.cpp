@@ -890,11 +890,12 @@ class TensorExprFuser {
       "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
     };
-  static const OperatorSet cuda_only_operator_set{
+    static const OperatorSet cuda_only_operator_set{
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
-  };
-  static const OperatorSet cpu_only_operator_set{
-      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"};
+    };
+    static const OperatorSet cpu_only_operator_set{
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"
+    };
     // clang-format on
 
     for (const Value* v : node->inputs()) {
