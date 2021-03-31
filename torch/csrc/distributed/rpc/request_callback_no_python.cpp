@@ -14,6 +14,8 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#include <unistd.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -87,6 +89,9 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
                     ->config());
           }
 
+          std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processMessage calls processRpcWithErrors with messageId = " << id 
+                    << ", messageType = " << std::hex << messageType << std::dec
+                    << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
           processRpcWithErrors(*rpc, messageType, id, retFuture, deviceIndices);
 
           // Response message has been sent at this moment, this post-response
@@ -115,6 +120,8 @@ void RequestCallbackNoPython::processRpcWithErrors(
     const std::shared_ptr<JitFuture>& responseFuture,
     const std::set<c10::DeviceIndex>& deviceIndices) const {
   try {
+    std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processRpcWithErrors calls processRpc with messageId = " << messageId << ", messageType = " << std::hex << messageType << std::dec
+              << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
     processRpc(rpc, messageType, messageId, responseFuture, deviceIndices);
   } catch (std::exception& e) {
     responseFuture->markCompleted(handleError(e, messageType, messageId));
@@ -383,6 +390,9 @@ void RequestCallbackNoPython::processForwardAutogradReq(
       std::make_shared<JitFuture>(at::AnyClassType::get());
   // Kick off processing for the nested RPC command.
   // wrappedRpcResponseFuture will be a Future<T> to the result.
+  std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processForwardAutogradReq calls processRpc with messageId = " << messageId
+            << ", wrappedMessageType = " << std::hex << wrappedMessageType << std::dec
+            << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
   processRpc(
       rpcWithAutograd.wrappedRpc(),
       wrappedMessageType,
@@ -520,6 +530,7 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
         "Expected profiler to be enabled!");
     // Kick off processing for nested work and get Future<T> result in
     // wrappedRpcResponseFuture
+    std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processRunWithProfilingReq calls processRpc with messageId = " << messageId << std::endl;
     processRpc(
         rpcWithProfilingReq.wrappedRpc(),
         wrappedMsgType,
@@ -606,6 +617,9 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
+      std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processRpc calls processPythonRemoteCall with messageId = " << messageId
+                << ", messageType = " << std::hex << messageType << std::dec
+                << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
       processPythonRemoteCall(rpc, markComplete, messageId, responseFuture, deviceIndices);
       return;
     }
@@ -630,6 +644,9 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
+      std::cout << "[" << getpid() << "]" << "RequestCallbackNoPython::processRpc calls processForwardAutogradReq with messageId = " << messageId
+                << ", messageType = " << std::hex << messageType << std::dec
+                << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
       processForwardAutogradReq(rpc, messageId, responseFuture, deviceIndices);
       return;
     }
@@ -660,7 +677,7 @@ IValue RequestCallbackNoPython::handleError(
     const std::exception& e,
     const MessageType messageType,
     int64_t messageId) const {
-  LOG(ERROR) << "Received error while processing request type " << messageType
+  LOG(ERROR) << "Received error while processing request type " << std::hex << messageType << std::dec
              << ": " << e.what();
   // Adding node information to the error here since all processed RPC
   // requests should be going through this function.

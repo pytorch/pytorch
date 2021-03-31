@@ -32,6 +32,8 @@
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
+#include <unistd.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -471,6 +473,9 @@ void RequestCallbackImpl::processRpcWithErrors(
     const std::shared_ptr<JitFuture>& responseFuture,
     const std::set<c10::DeviceIndex>& deviceIndices) const {
   try {
+    std::cout << "[" << getpid() << "]" << "RequestCallbackImpl::processRpcWithErrors calls processRpc with messageId = " << messageId 
+              << ", messageType = " << std::hex << messageType << std::dec
+              << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
     processRpc(rpc, messageType, messageId, responseFuture, deviceIndices);
   } catch (py::error_already_set& e) {
     responseFuture->markCompleted(handleError(e, messageType, messageId));

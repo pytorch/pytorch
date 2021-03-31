@@ -12,6 +12,8 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
+#include <unistd.h>
+
 namespace tensorpipe {
 class Message;
 } // namespace tensorpipe
@@ -100,6 +102,7 @@ struct TORCH_CUDA_CPP_API CudaLazyStreamContext : public LazyStreamContext {
     if (iter == streams_.end()) {
       auto cudaStream = at::cuda::getStreamFromPool(
           /* isHighPriority */ false, /* device */ index);
+      std::cout << "[" << getpid() << "]" << "streams_.emplace(index, cudaStream); with index = " << (int)index << std::endl;
       streams_.emplace(index, cudaStream);
       return cudaStream;
     } else {
