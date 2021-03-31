@@ -3800,10 +3800,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
+    @unittest.skip("TODO: Test is always failing - https://github.com/pytorch/pytorch/issues/54979")
     def test_resnet18_ddp(self):
-        # TODO: This test is always failings and needs to be updated
-        # Issue: https://github.com/pytorch/pytorch/issues/54979
-        raise unittest.SkipTest()
         from torchvision import models
         from torchvision.models import quantization as quantized_models
         eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False).eval().float()
