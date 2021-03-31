@@ -59,8 +59,8 @@ class BackendDebugHandleManager {
  public:
   BackendDebugHandleManager() = default;
   int64_t getNextDebugHandleForInlinedCallStackPtr(
-      SourceRange range,
-      InlinedCallStackPtr cs_ptr);
+      const SourceRange& range,
+      const InlinedCallStackPtr& cs_ptr);
   std::unordered_map<int64_t, DelegateDebugInfoType> getCallStackPtrMap();
 
  private:

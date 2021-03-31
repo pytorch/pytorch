@@ -14,15 +14,15 @@ namespace jit {
 namespace {
 
 std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
-    DelegateDebugInfoType sr_callstack,
+    const DelegateDebugInfoType& sr_callstack,
     const std::string& root_scope_string,
     const std::string& top_module_type_name) {
-  constexpr size_t kFunction = 0;
+  // constexpr size_t kFunction = 0;
   constexpr size_t kSourceRange = 1;
   constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
 
-  SourceRange range = sr_callstack.first;
+  const SourceRange& range = sr_callstack.first;
   InlinedCallStackPtr callstack_ptr = sr_callstack.second;
   std::string module_info =
       root_scope_string + "(" + top_module_type_name + ")";
@@ -110,7 +110,7 @@ MobileDebugTable::MobileDebugTable(
   const std::string callstack_debug_file("callstack_debug_map.pkl");
   if (reader->hasRecord("callstack_debug_map.pkl")) {
     at::DataPtr callstack_data;
-    size_t callstack_data_size;
+    size_t callstack_data_size{0};
     std::tie(callstack_data, callstack_data_size) =
         reader->getRecord(callstack_debug_file);
     InlinedCallStackUnpickler unpickler;

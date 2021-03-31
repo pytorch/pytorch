@@ -538,11 +538,12 @@ class ScriptModuleSerializer {
           debug_handle_cs_ptr_map, source_range_tags_);
       // Write out the debug-handle-to-InlinedCallStackPtr map
       std::string filename = "callstack_debug_map.pkl";
+      static constexpr size_t kMinToCompress = 200;
       writer_.writeRecord(
           filename,
           cs_data.data(),
           cs_data.size(),
-          cs_data.size() > 200 /*compress*/);
+          cs_data.size() > kMinToCompress /*compress*/);
     }
   }
 

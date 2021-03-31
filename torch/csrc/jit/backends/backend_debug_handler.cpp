@@ -3,11 +3,12 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int64_t> BackendDebugHandleManager::unique_debug_handle_{0};
 
 int64_t BackendDebugHandleManager::getNextDebugHandleForInlinedCallStackPtr(
-    SourceRange range,
-    InlinedCallStackPtr cs_ptr) {
+    const SourceRange& range,
+    const InlinedCallStackPtr& cs_ptr) {
   int64_t debug_handle = unique_debug_handle_;
   handles_to_inlined_callstack_ptrs_[debug_handle] =
       std::make_pair(range, cs_ptr);

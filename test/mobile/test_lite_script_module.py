@@ -83,12 +83,12 @@ class TestLiteScriptModule(TestCase):
             assert(b"callstack_debug_map.pkl" in exported_module)
 
             mobile_module = _load_for_lite_interpreter(buffer)
-            with self.assertRaisesRegex(RuntimeError, 'Module hierarchy:top\(B\).A0\(A\)'):
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A0\(A\)"):
                 x = torch.rand((2, 3))
                 y = torch.rand((8, 10))
                 z = torch.rand((8, 10))
                 mobile_module(x, y, z)
-            with self.assertRaisesRegex(RuntimeError, 'Module hierarchy:top\(B\).A1\(A\)'):
+            with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\).A1\(A\)"):
                 x = torch.rand((2, 3))
                 y = torch.rand((2, 3))
                 z = torch.rand((8, 10))
