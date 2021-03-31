@@ -26,13 +26,63 @@ ArgName = Union[str, SpecialArgName]
 # you need trnsnlations that know about these types, beef up this data
 # structure.
 
-@dataclass(frozen=True)
+
+# Prints an enum without the enum class name
+class PrintEnum(Enum):
+    def __str__(self):
+        return self.name
+
+# The set of all non-templated, valid, fully-qualified names of C++ types that are used in the codegen.
+# Templated types get their own dataclass, mainly to make namespace parsing easier.
+BaseCppType = PrintEnum('BaseCppType', (
+    'int64_t',
+    'double',
+    'bool',
+    'void',
+    'std::string',
+    'at::Generator',
+    'at::ScalarType',
+    'at::Tensor',
+    'at::TensorList',
+    'at::Dimname',
+    'at::DimnameList',
+    'at::Layout',
+    'at::Device',
+    'at::Scalar',
+    'at::MemoryFormat',
+    'at::QScheme',
+    'at::Storage',
+    'at::Stream',
+    'at::IntArrayRef',
+    'at::TensorOptions',
+))
+
+@dataclass(unsafe_hash=True)
 class BaseCType:
-    type: str
+    type: BaseCppType
     name: ArgName
 
+    def __init__(self, ty: str, name: ArgName):
+        # BaseCType checks that the type that you pass in is a valid C++ type.
+        # For convenience, we assume that the "standard" pytorch namespaces are in-scope.
+        in_scope_namespaces = ['', 'at::', 'c10::']
+        # Simple namespace resolution rules: try every in-scope namespace before declaring a type to be invalid.
+        baseCppType = None
+        for ns in in_scope_namespaces:
+            namespaced_ty = f'{ns}{ty}'
+            if namespaced_ty in BaseCppType.__members__:
+                baseCppType = BaseCppType[namespaced_ty]
+        assert baseCppType is not None, f"Received invalid C++ type: {ty}"
+        self.type = baseCppType
+        self.name = name
+
     def cpp_type(self, *, strip_ref: bool = False) -> str:
-        return self.type
+        return str(self.type)
+
+    # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
+    # TODO: Kill this when we eventually remove it!
+    def cpp_type_remove_namespaces(self) -> str:
+        return str(self.type).replace('at::', '')
 
 @dataclass(frozen=True)
 class ConstRefCType:
@@ -42,6 +92,9 @@ class ConstRefCType:
         if strip_ref:
             return self.elem.cpp_type(strip_ref=strip_ref)
         return f'const {self.elem.cpp_type()} &'
+
+    def cpp_type_remove_namespaces(self) -> str:
+        return f'const {self.elem.cpp_type_remove_namespaces()} &'
 
     @property
     def name(self) -> ArgName:
@@ -56,6 +109,9 @@ class MutRefCType:
             return self.elem.cpp_type(strip_ref=strip_ref)
         return f'{self.elem.cpp_type()} &'
 
+    def cpp_type_remove_namespaces(self) -> str:
+        return f'{self.elem.cpp_type_remove_namespaces()} &'
+
     @property
     def name(self) -> ArgName:
         return self.elem.name
@@ -67,6 +123,9 @@ class OptionalCType:
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
         return f'c10::optional<{self.elem.cpp_type()}>'
+
+    def cpp_type_remove_namespaces(self) -> str:
+        return f'c10::optional<{self.elem.cpp_type_remove_namespaces()}>'
 
     @property
     def name(self) -> ArgName:
@@ -80,6 +139,9 @@ class ListCType:
         # Do not pass `strip_ref` recursively.
         return f'c10::List<{self.elem.cpp_type()}>'
 
+    def cpp_type_remove_namespaces(self) -> str:
+        return f'c10::List<{self.elem.cpp_type_remove_namespaces()}>'
+
     @property
     def name(self) -> ArgName:
         return self.elem.name
@@ -90,7 +152,10 @@ class ArrayRefCType:
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
-        return f'ArrayRef<{self.elem.cpp_type()}>'
+        return f'at::ArrayRef<{self.elem.cpp_type()}>'
+
+    def cpp_type_remove_namespaces(self) -> str:
+        return f'at::ArrayRef<{self.elem.cpp_type_remove_namespaces()}>'
 
     @property
     def name(self) -> ArgName:
@@ -103,6 +168,9 @@ class VectorCType:
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
         return f'std::vector<{self.elem.cpp_type()}>'
+
+    def cpp_type_remove_namespaces(self) -> str:
+        return f'std::vector<{self.elem.cpp_type_remove_namespaces()}>'
 
     @property
     def name(self) -> ArgName:
@@ -117,6 +185,9 @@ class ArrayCType:
         # Do not pass `strip_ref` recursively.
         return f'std::array<{self.elem.cpp_type()},{self.size}>'
 
+    def cpp_type_remove_namespaces(self) -> str:
+        return f'std::array<{self.elem.cpp_type_remove_namespaces()}, {self.size}>'
+
     @property
     def name(self) -> ArgName:
         return self.elem.name
@@ -128,6 +199,9 @@ class TupleCType:
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
         return f'std::tuple<{",".join([e.cpp_type() for e in self.elems])}>'
+
+    def cpp_type_remove_namespaces(self) -> str:
+        return f'std::tuple<{",".join([e.cpp_type_remove_namespaces() for e in self.elems])}>'
 
     @property
     def name(self) -> ArgName:
@@ -168,6 +242,15 @@ class Binding:
         if self.default is not None:
             mb_default = f"={self.default}"
         return f"{self.type} {self.name}{mb_default}"
+
+    # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
+    # TODO: Kill this when we eventually remove it!
+    def decl_remove_namespaces(self) -> str:
+        type_s = self.ctype.cpp_type_remove_namespaces()
+        mb_default = ""
+        if self.default is not None:
+            mb_default = f"={self.default}"
+        return f"{type_s} {self.name}{mb_default}"
 
     def defn(self) -> str:
         return f"{self.type} {self.name}"

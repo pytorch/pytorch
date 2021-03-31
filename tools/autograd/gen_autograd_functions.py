@@ -216,8 +216,8 @@ MISC_GETTER_DEFS = {
     'c10::optional<double>': (GETTER_DEFINITION_OPT, GETTER_BODY_DOUBLE),
     'bool': (GETTER_DEFINITION, GETTER_BODY_BOOL),
     'std::string': (GETTER_DEFINITION, GETTER_BODY_STRING),
-    'Scalar': (GETTER_DEFINITION, GETTER_BODY_SCALAR),
-    'c10::optional<Scalar>': (GETTER_DEFINITION_OPT, GETTER_BODY_SCALAR),
+    'at::Scalar': (GETTER_DEFINITION, GETTER_BODY_SCALAR),
+    'c10::optional<at::Scalar>': (GETTER_DEFINITION_OPT, GETTER_BODY_SCALAR),
 }
 
 # These functions have backwards which cannot be traced, and so must have
@@ -283,7 +283,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     py_getsetdef_structs: List[str] = []
 
     for arg in info.args_with_derivatives:
-        if arg.type == 'TensorList' or arg.type == 'const c10::List<c10::optional<Tensor>> &':
+        if arg.type == 'at::TensorList' or arg.type == 'const c10::List<c10::optional<at::Tensor>> &':
             size = f'{arg.name}_size_'
             saved_list_sizes.append(f'size_t {arg.name}_size_;')
         else:
@@ -294,8 +294,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         name = var.name
         should_append_getsetdef = True
 
-        if var.type == 'Tensor' or var.type == 'c10::optional<Tensor>' or var.type == 'c10::optional<Tensor>&' or \
-                (var.type == 'Scalar' and is_output):
+        if var.type == 'at::Tensor' or var.type == 'c10::optional<at::Tensor>' or var.type == 'c10::optional<at::Tensor>&' or \
+                (var.type == 'at::Scalar' and is_output):
             saved_variables.append(f'SavedVariable {name}_;')
             release_variables.append(f'{name}_.reset_data();')
             release_variables.append(f'{name}_.reset_grad_function();')
@@ -303,7 +303,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             unpack.append(f'auto {name} = {name}_.unpack({ptr});')
             getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_SAVEDVAR))
-        elif var.type == 'TensorList':
+        elif var.type == 'at::TensorList':
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -314,7 +314,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
             getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
-        elif var.type == 'c10::List<c10::optional<Tensor>>':
+        elif var.type == 'c10::List<c10::optional<at::Tensor>>':
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -325,15 +325,15 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
             getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
-        elif var.type == 'IntArrayRef':
+        elif var.type == 'at::IntArrayRef':
             saved_variables.append(f'std::vector<int64_t> {name};')
             getter_definitions.append(GETTER_DEFINITION.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
-        elif var.type == 'c10::optional<IntArrayRef>':
+        elif var.type == 'c10::optional<at::IntArrayRef>':
             saved_variables.append(f'c10::OptionalArray<int64_t> {name};')
             getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
-        elif var.type == 'c10::optional<ArrayRef<double>>':
+        elif var.type == 'c10::optional<at::ArrayRef<double>>':
             saved_variables.append(f'c10::OptionalArray<double> {name};')
             getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_DOUBLE))
@@ -349,8 +349,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 getter_definitions.append(getter_def.substitute(op=info.op, name=name, body=body))
             else:
                 # Types we don't expose python bindings to yet:
-                #   TypeAndSize, ScalarType, TensorOptions, TensorGeometry,
-                #   std::vector<std::vector<int64_t>>, std::vector<ScalarType>
+                #   TypeAndSize, at::ScalarType, TensorOptions, TensorGeometry,
+                #   std::vector<std::vector<int64_t>>, std::vector<at::ScalarType>
                 should_append_getsetdef = False
 
         if should_append_getsetdef:

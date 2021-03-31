@@ -86,7 +86,7 @@ def translate(
         # TODO: This could get us in recomputation trouble if b.expr is nontrivial
         t = b.type
         if isinstance(t, ConstRefCType) and isinstance(t.elem, OptionalCType) and \
-                isinstance(t.elem.elem, BaseCType) and t.elem.elem.type == 'Tensor':
+                isinstance(t.elem.elem, BaseCType) and str(t.elem.elem.type) == 'at::Tensor':
             ctx[ConstRefCType(BaseCType("Tensor", t.elem.elem.name))] = \
                 f'({b.expr}.has_value() ? *{b.expr} : at::Tensor())'
 
