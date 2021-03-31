@@ -4539,7 +4539,7 @@ class TestONNXRuntime(unittest.TestCase):
                 a = torch.ones(12,)
                 for i in range(10):
                     a.add_(torch.ones(12,))
-                return a+x
+                return a + x
 
         m = M()
         x = torch.randn(12,)
@@ -4616,7 +4616,7 @@ class TestONNXRuntime(unittest.TestCase):
     @unittest.skip("Skip til ONNX opset 14 for Sequence Identity. Pass locally.")
     def test_inplace_sequence_with_loop(self):
         class M(torch.nn.Module):
-            def process(self, beam_hyps: List[torch.Tensor], done:torch.Tensor, x):
+            def process(self, beam_hyps: List[torch.Tensor], done: torch.Tensor, x):
                 batch_size = x.shape[0]
                 for i in range(batch_size):
                     if done[i]:

@@ -238,8 +238,8 @@ std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
 
   // TODO: fix node output metadata based on block output metadata.
-  for (size_t i=0; i < node->outputs().size(); ++i) {
-    node->output(i)->setType(node->blocks().at(0)->outputs().at(i+1)->type());
+  for (size_t i = 0; i < node->outputs().size(); ++i) {
+    node->output(i)->setType(node->blocks().at(0)->outputs().at(i + 1)->type());
   }
   TORCH_INTERNAL_ASSERT(output_size == new_outputs.size());
   return new_outputs;
@@ -381,7 +381,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   FixupONNXSubblockOutputs(node);
   ONNXFixupUninitializedOutput(if_node);
   // TODO: fix node output metadata based on block output metadata.
-  for (size_t i=0; i < node->outputs().size(); ++i) {
+  for (size_t i = 0; i < node->outputs().size(); ++i) {
     node->output(i)->setType(node->blocks().at(0)->outputs().at(i)->type());
   }
 
