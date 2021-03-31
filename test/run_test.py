@@ -237,6 +237,7 @@ RUN_PARALLEL_BLOCKLIST = [
     'test_namedtuple_return_api',
     'test_op_aliases',
     'test_overrides',
+    'test_package',
     'test_show_pickle',
     'test_tensorexpr',
     'distributions/test_constraints',
