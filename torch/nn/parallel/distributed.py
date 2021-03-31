@@ -306,12 +306,13 @@ class DistributedDataParallel(Module):
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices.
-                   1) For single-device modules, ``device_ids`` should only
+                   1) For single-device modules, ``device_ids`` can
                    contain exactly one device id, which represents the only
                    CUDA device where the input module corresponding to this process resides.
                    Alternatively, ``device_ids`` can also be ``None``.
                    2) For multi-device modules and CPU modules,
                    ``device_ids`` must be ``None``.
+
                    When ``device_ids`` is ``None`` for both cases,
                    input data for the forward pass must be placed on the correct device.
                    (default: ``None``)
@@ -406,6 +407,7 @@ class DistributedDataParallel(Module):
 
         if (
             device_ids is None
+            or len(device_ids) == 0  # For backward compatibility.
             or self.device_type == "cpu"
             or self.is_multi_device_module
         ):
@@ -459,7 +461,6 @@ class DistributedDataParallel(Module):
                 "The `check_reduction` argument in `DistributedDataParallel` "
                 "module is deprecated. Please avoid using it."
             )
-            pass
 
         # Check that a module does not have Uninitialized parameters
         for param in module.parameters():
