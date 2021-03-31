@@ -1488,6 +1488,13 @@ def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False, *
         out.append(SampleInput(a))
     return out
 
+def sample_inputs_symeig(op_info, device, dtype, requires_grad=False):
+    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
+    for o in out:
+        o.kwargs = {"upper": bool(np.random.choice([True, False])),
+                    "eigenvectors": True}
+    return out
+
 
 def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -2693,6 +2700,17 @@ op_db: List[OpInfo] = [
            skips=(
                # cholesky_inverse does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),)),
+    OpInfo('symeig',
+           dtypes=floating_and_complex_types(),
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_symeig,
+           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
+           ),
     UnaryUfuncInfo('clamp',
                    aliases=('clip', ),
                    decorators=(precisionOverride({torch.bfloat16: 7e-2, torch.float16: 1e-2}),),
