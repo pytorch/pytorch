@@ -718,8 +718,13 @@ class DistributedDataParallel(Module):
         # Ensure we covered all parameters
         if len(param_set) != len(param_index_to_param_fqn):
             raise ValueError(
-                f"Expected param to name mapping to cover all parameters, but got conflicting lengths: {len(param_set)} vs {len(param_index_to_param_fqn)}"
+                (
+                    "Expected param to name mapping to cover all parameters, but"
+                    f" got conflicting lengths: {len(param_set)} vs "
+                    f"{len(param_index_to_param_fqn)}"
+                )
             )
+
         return param_index_to_param_fqn
 
     def _get_parameters(self, m, recurse=True):

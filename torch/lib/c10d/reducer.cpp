@@ -476,7 +476,13 @@ void Reducer::mark_variable_ready(VariableIndex index) {
       "Out of range variable index.");
   if (ddp_debug_level_ != DistributedDebugLevel::OFF && replica_index == 0) {
     // We don't expect the same variable to be marked ready twice.
-    TORCH_INTERNAL_ASSERT(perIterationReadyParams_.find(variable_index) == perIterationReadyParams_.end(), c10::str("Variable index ", variable_index, " already has been marked as ready!"));
+    TORCH_INTERNAL_ASSERT(
+        perIterationReadyParams_.find(variable_index) ==
+            perIterationReadyParams_.end(),
+        c10::str(
+            "Variable index ",
+            variable_index,
+            " already has been marked as ready!"));
     perIterationReadyParams_.insert(variable_index);
   }
   backward_stats_[replica_index][variable_index] =
@@ -1047,8 +1053,9 @@ void Reducer::copy_bucket_to_grad(
 std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
   TORCH_INTERNAL_ASSERT(ddp_debug_level_ != DistributedDebugLevel::OFF);
   std::vector<std::string> unMarkedParamNames;
-  for (const auto & it : param_names_) {
-    if (perIterationReadyParams_.find(it.first) == perIterationReadyParams_.end()) {
+  for (const auto& it : param_names_) {
+    if (perIterationReadyParams_.find(it.first) ==
+        perIterationReadyParams_.end()) {
       unMarkedParamNames.push_back(it.second);
     }
   }
@@ -1443,7 +1450,9 @@ void Reducer::ensure_prior_reduction_finished() {
       auto unmarkedParams = getUnmarkedParamsForIteration();
       if (unmarkedParams.size() > 0) {
         for (const auto& s : unmarkedParams) {
-          LOG(INFO) << "[Rank " << process_group_->getRank() << "] " << "Parameter: " << s << " did not get gradient in backwards pass.";
+          LOG(INFO) << "[Rank " << process_group_->getRank() << "] "
+                    << "Parameter: " << s
+                    << " did not get gradient in backwards pass.";
         }
         unmarkedParamInfo = c10::Join(", ", unmarkedParams);
       }
@@ -1485,9 +1494,20 @@ void Reducer::ensure_prior_reduction_finished() {
       kBaseErrorMsg += kDDPBugErrorMsg;
     }
     if (ddp_debug_level_ == DistributedDebugLevel::OFF) {
-      kBaseErrorMsg += "\n In addition, you can set the environment variable TORCH_DISTRIBUTED_DEBUG to either INFO or DETAIL to print information about which particular parameters were unused by this rank as part of this error.";
+      kBaseErrorMsg +=
+        "\n In addition, you can set the environment variable "
+        "TORCH_DISTRIBUTED_DEBUG to either INFO or DETAIL to print out information "
+        "about which particular parameters did not receive gradient on this rank "
+        "as part of this error";
     } else {
-      kBaseErrorMsg += c10::str("\n", "Parameters which did not receive grad for rank ", process_group_->getRank(), ": ", unmarkedParamInfo);
+      kBaseErrorMsg +=
+        c10::str(
+          "\n",
+          "Parameters which did not receive grad for rank ",
+          process_group_->getRank(),
+          ": ",
+          unmarkedParamInfo
+        );
       // TODO: we can validate that no parameter here is part of unused_parameters_,
       // otherwise this is a bug in DDP unused parameter detection.
     }

@@ -5296,7 +5296,7 @@ class DistributedTest:
                 model.cuda(self.rank),
                 device_ids=[self.rank],
             )
-            expected_mapping = {0: 'a.weight', 1: 'b.weight'}
+            expected_mapping = {0: "a.weight", 1: "b.weight"}
             net_params, _ = net._build_params_for_reducer()
             param_to_name_mapping = net._build_param_to_name_mapping(net_params)
             self.assertDictEqual(expected_mapping, param_to_name_mapping)
@@ -5304,16 +5304,15 @@ class DistributedTest:
             # Test when DDP is used with ignored parameters.
             model = TwoLinLayerNet()
             # Parameters to ignore are in the format {module_name}.{param_name}
-            params_to_ignore = ['a.weight']
+            params_to_ignore = ["a.weight"]
             torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
-                model,
-                params_to_ignore
+                model, params_to_ignore
             )
             net = torch.nn.parallel.DistributedDataParallel(
                 model.cuda(self.rank),
                 device_ids=[self.rank],
             )
-            expected_mapping = {0: 'b.weight'}
+            expected_mapping = {0: "b.weight"}
             net_params, _ = net._build_params_for_reducer()
             param_to_name_mapping = net._build_param_to_name_mapping(net_params)
             self.assertDictEqual(expected_mapping, param_to_name_mapping)
@@ -5348,13 +5347,14 @@ class DistributedTest:
             if ignore_sparse:
                 for module_name, module in model.named_modules():
                     if module == model.sub_module.embedding_net.embedding:
-                        for parameter_name, param in module.named_parameters(recurse=False):
+                        for parameter_name, param in module.named_parameters(
+                            recurse=False
+                        ):
                             fqn = f"{module_name}.{parameter_name}"
                             sparse_embedding_fqns.append(fqn)
 
                 torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
-                    model,
-                    sparse_embedding_fqns
+                    model, sparse_embedding_fqns
                 )
                 unused_modules = [
                     model.sub_module.embedding_net.lin,
@@ -5373,11 +5373,15 @@ class DistributedTest:
                     if module in unused_modules:
                         expected_unused_param_fqns.append(fqn)
                     else:
-                        if not ignore_sparse or module != model.sub_module.embedding_net.embedding:
+                        if (
+                            not ignore_sparse
+                            or module != model.sub_module.embedding_net.embedding
+                        ):
                             used_param_fqns.append(fqn)
 
             net = torch.nn.parallel.DistributedDataParallel(
-                model.cuda(self.rank), device_ids=[self.rank],
+                model.cuda(self.rank),
+                device_ids=[self.rank],
             )
             batch, dim = 10, 2
             inp = torch.ones(batch, dim)
@@ -5393,7 +5397,7 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         e = str(e)
-                        unused_param_substr = e[e.find("did not receive grad"):]
+                        unused_param_substr = e[e.find("did not receive grad") :]
                         # Validate that each unused param fully qualified name
                         # shows up in error logs. We do this instead of
                         # constructing a joined string since order of parameters
