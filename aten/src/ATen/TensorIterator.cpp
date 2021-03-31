@@ -570,7 +570,7 @@ bool TensorIteratorBase::is_dim_reduced(int dim) const {
 }
 
 void TensorIteratorBase::permute_dimensions(IntArrayRef perm) {
-  TORCH_INTERNAL_ASSERT(perm.size() == (unsigned)ndim());
+  TORCH_INTERNAL_ASSERT(perm.size() == static_cast<unsigned>(ndim()));
 
   auto reorder = [perm](IntArrayRef data) {
     auto res = DimVector(data.size(), 0);

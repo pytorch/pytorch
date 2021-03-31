@@ -1289,7 +1289,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
     int64_t new_dense_dim = new_values.dim() - 1; // exclude nnz dim
     std::vector<int64_t> new_sizes;
     new_sizes.reserve(dims_to_keep_v.size());
-for (auto d : dims_to_keep_v) new_sizes.emplace_back(sizes[d]);
+    for (auto d : dims_to_keep_v) new_sizes.emplace_back(sizes[d]);
     if (sum_all_sparse_dim) new_sizes.emplace(new_sizes.begin(), 1);
 
     // use coalesce() to do sum reduction
