@@ -117,7 +117,7 @@ Tensor isposinf(const Tensor &self) {
   return result;
 }
 
-Tensor& isposinf_out(Tensor& result, const Tensor& self) {
+Tensor& isposinf_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
   TORCH_CHECK(result.scalar_type() == at::kBool, "isposinf does not support non-boolean outputs.");
   result.resize_(self.sizes());
@@ -141,7 +141,7 @@ Tensor isneginf(const Tensor &self) {
   return result;
 }
 
-Tensor& isneginf_out(Tensor& result, const Tensor& self) {
+Tensor& isneginf_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
   TORCH_CHECK(result.scalar_type() == at::kBool, "isneginf does not support non-boolean outputs.");
   result.resize_(self.sizes());
@@ -320,7 +320,7 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
   if (self.is_quantized()) {
     Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
-    at::native::max_out(self.int_repr(), dim, keepdim, max, max_indices);
+    at::native::max_out(self.int_repr() , dim, keepdim, max, max_indices);
     // TODO: qscheme
     return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point()), max_indices);
   } else {

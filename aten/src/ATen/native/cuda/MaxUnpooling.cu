@@ -98,11 +98,10 @@ __global__ void max_unpooling3d_backward_kernel(
   }
 }
 
-Tensor& max_unpooling2d_forward_out_cuda(
-    Tensor& output,
-    const Tensor& self_,
+Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
     const Tensor& indices_,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    Tensor& output) {
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
   TORCH_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
@@ -182,7 +181,7 @@ Tensor max_unpooling2d_forward_cuda(
     const Tensor& indices,
     IntArrayRef output_size) {
   auto output = at::empty({0}, self.options());
-  max_unpooling2d_forward_out_cuda(output, self, indices, output_size);
+  at::native::max_unpooling2d_forward_out_cuda(self, indices, output_size, output);
   return output;
 }
 
@@ -261,13 +260,12 @@ static void max_unpooling3d_shape_check(
   }
 }
 
-Tensor& max_unpooling3d_forward_out_cuda(
-    Tensor& output,
-    const Tensor& self_,
+Tensor& max_unpooling3d_forward_out_cuda(const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
     IntArrayRef stride,
-    IntArrayRef padding) {
+    IntArrayRef padding,
+    Tensor& output) {
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
   max_unpooling3d_shape_check(
       self_, Tensor(), indices_, output_size, stride, padding);
@@ -358,17 +356,16 @@ Tensor max_unpooling3d_forward_cuda(
     IntArrayRef stride,
     IntArrayRef padding) {
   auto output = at::empty({0}, self.options());
-  max_unpooling3d_forward_out_cuda(
-      output, self, indices, output_size, stride, padding);
+  at::native::max_unpooling3d_forward_out_cuda(
+      self, indices, output_size, stride, padding, output);
   return output;
 }
 
-at::Tensor& max_unpooling2d_backward_out_cuda(
-    Tensor& grad_input,
-    const Tensor& grad_output_,
+at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
     const Tensor& self_,
     const Tensor& indices_,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    Tensor& grad_input) {
   int64_t oheight = output_size[0];
   int64_t owidth = output_size[1];
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
@@ -456,19 +453,18 @@ at::Tensor max_unpooling2d_backward_cuda(
     const Tensor& indices,
     IntArrayRef output_size) {
   auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  max_unpooling2d_backward_out_cuda(
-      grad_input, grad_output, self, indices, output_size);
+  at::native::max_unpooling2d_backward_out_cuda(
+      grad_output, self, indices, output_size, grad_input);
   return grad_input;
 }
 
-at::Tensor& max_unpooling3d_backward_out_cuda(
-    Tensor& grad_input,
-    const Tensor& grad_output_,
+at::Tensor& max_unpooling3d_backward_out_cuda(const Tensor& grad_output_,
     const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
     IntArrayRef stride,
-    IntArrayRef padding) {
+    IntArrayRef padding,
+    Tensor& grad_input) {
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
@@ -566,8 +562,8 @@ at::Tensor max_unpooling3d_backward_cuda(
     IntArrayRef stride,
     IntArrayRef padding) {
   auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  max_unpooling3d_backward_out_cuda(
-      grad_input, grad_output, self, indices, output_size, stride, padding);
+  at::native::max_unpooling3d_backward_out_cuda(
+      grad_output, self, indices, output_size, stride, padding, grad_input);
   return grad_input;
 }
 
