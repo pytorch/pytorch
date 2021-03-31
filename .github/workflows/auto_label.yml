@@ -22,23 +22,23 @@ jobs:
           TITLE="${{ github.event.issue.title }}"
           ISSUE_NUMBER=${{ github.event.issue.number }}
         fi
-        echo ::set-output name=TITLE::${TITLE}
-        echo ::set-output name=ISSUE_NUMBER::${ISSUE_NUMBER}
+        echo ::set-output name=TITLE::"${TITLE}"
+        echo ::set-output name=ISSUE_NUMBER::"${ISSUE_NUMBER}"
         echo ::set-output name=OWNER::"${{ github.repository_owner }}"
         echo ::set-output name=REPO::"${{ github.event.repository.name }}"
     - name: Auto-label ROCm
       run: |
         set -eux
-        if [[ ${TITLE,,} == *rocm* ]]; then
+        if [[ "${TITLE,,}" == *rocm* ]]; then
           curl \
             -X POST \
             -H "Authorization: token ${GITHUB_TOKEN}" \
-            https://api.github.com/repos/${OWNER}/${REPO}/issues/${ISSUE_NUMBER}/labels \
+            "https://api.github.com/repos/${OWNER}/${REPO}/issues/${ISSUE_NUMBER}/labels" \
             -d '{"labels":["ROCm"]}'
         fi
       env:
         GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        TITLE: ${{ steps.vars.outputs.TITLE }}
-        ISSUE_NUMBER: ${{ steps.vars.outputs.ISSUE_NUMBER }}
-        OWNER: ${{ steps.vars.outputs.OWNER }}
-        REPO: ${{ steps.vars.outputs.REPO }}
+        TITLE: "${{ steps.vars.outputs.TITLE }}"
+        ISSUE_NUMBER: "${{ steps.vars.outputs.ISSUE_NUMBER }}"
+        OWNER: "${{ steps.vars.outputs.OWNER }}"
+        REPO: "${{ steps.vars.outputs.REPO }}"
