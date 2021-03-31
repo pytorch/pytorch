@@ -184,8 +184,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
       at::cuda::cub::sort_pairs<int64_t, scalar_t>(
         keys.data_ptr<int64_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
-        n, false, 0, bits);
-      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
+        n);
     });
   }
 
