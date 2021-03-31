@@ -19,21 +19,76 @@ namespace {
 const std::set<c10::Symbol> inplace_ops =
     {aten::append, aten::index_put_, aten::pop, aten::insert, aten::Delete};
 
-struct InplaceRemover {
-  InplaceRemover(
+struct InplaceConverter {
+  InplaceConverter(
       std::shared_ptr<Graph> graph,
       MutationRemover* mr,
       Module* model = nullptr)
       : graph_(graph), mr_(mr), module_(model) {}
 
-  void removeInplaceOps();
-  void RegisterInplaceOpAsBlockOutputs();
-  void RegisterInplaceNodeInBlocks(Value* orig_data, Value* new_data);
+  // new api
+  void convertMutationForONNX();
 
+  // old api
+  void RegisterInplaceOpAsBlockOutputs();
+
+  // old code
+  void RegisterInplaceNodeInBlocks(Value* orig_data, Value* new_data);
   bool isInplaceNode(const Node* n) const;
 
  private:
 
+  struct ValueTracker {
+    ValueTracker() : graph_(nullptr), root_block_(nullptr) {}
+
+    void init(const std::shared_ptr<Graph>& graph);
+    void registerSetValue(Value* old_v, Value* new_v);
+    Value* findAliasForValueAtNode(Value* v, const Node* n) const;
+    void passUpdateValueUse(Block* block);
+    std::string toString() const;
+
+   private:
+    std::vector<std::tuple<Value*, Node*, Block*>> sortAliasOfValue(const Value* v) const;
+
+    std::shared_ptr<Graph> graph_;
+    Block* root_block_;
+
+    // Map from aliases to ground truth value.
+    // A single value can have multiple aliases throughout the graph,
+    // created by inplace operators, and preserved through loop carried input/output.
+    std::unordered_map<Value*, Value*> alias_to_value_;
+
+    struct aliasComp {
+      bool operator() (const Value* a, const Value* b) {
+        auto* n_a = a->node();
+        auto* n_b = b->node();
+        if (n_a == n_b) {
+          return false;
+        }
+        auto a_b = n_a->isBefore(n_b);
+        auto b_a = n_b->isBefore(n_a);
+        if (a_b == b_a) {
+          return a->unique() < b->unique();
+        }
+        return a_b;
+      }
+    };
+    // Map from ground truth value to aliases sorted by their order in graph.
+    std::unordered_map<Value*, std::set<Value*, aliasComp>> value_to_sorted_aliases_;
+  };
+
+  // new code
+  void gatherAttrNameInitialValueMap(Block* block,
+      std::unordered_map<std::string, Value*>& attr_name_value_map,
+      std::unordered_map<Node*, std::string>& attr_node_fullname_map);
+  void replaceAttrWithInplaceOps(Block* block,
+      const std::unordered_map<std::string, Value*>& attr_name_value_map,
+      const std::unordered_map<Node*, std::string>& attr_node_fullname_map);
+
+  void convertInplaceOps();
+  void convertInplaceOps(Block* block);
+
+  // old code
   Value* MatchIfBlocksOutputForValue(
       Value* orig_data,
       Block* outer_block,
@@ -84,6 +139,7 @@ struct InplaceRemover {
   std::shared_ptr<Graph> graph_;
   MutationRemover* mr_;
   Module* module_;
+  ValueTracker vt_;
   // A map of names and values of referenced attributes, to avoid duplicates.
   std::unordered_map<std::string, Value*> allAttrValues_ = {};
   // A map of names and values of set attributes, to track mutations.
@@ -92,11 +148,7 @@ struct InplaceRemover {
   std::unordered_map<std::string, Value*> allAttrModules_ = {};
 };
 
-void InplaceRemover::removeInplaceOps() {
-
-}
-
-bool InplaceRemover::isInplaceNode(const Node* n) const {
+bool InplaceConverter::isInplaceNode(const Node* n) const {
   if (inplace_ops.find(n->kind()) != inplace_ops.end()) {
     return true;
   }
@@ -146,7 +198,7 @@ Node* addDummyClone(
 // Check If then/else blocks to match the number of outputs.
 // If the number of block outputs do not match, insert a dummy
 // constant of corresponding shape and type.
-Value* InplaceRemover::MatchIfBlocksOutputForValue(
+Value* InplaceConverter::MatchIfBlocksOutputForValue(
     Value* orig_data,
     Block* outer_block,
     Value* origOutput) {
@@ -243,7 +295,7 @@ Value* InplaceRemover::MatchIfBlocksOutputForValue(
 //    %64 : Tensor = aten::index_put(%state.1, %63, %36, %9)
 //    -> (%64)
 // clang-format on
-void InplaceRemover::RegisterInplaceNodeInIfBlocks(
+void InplaceConverter::RegisterInplaceNodeInIfBlocks(
     Value* orig_data,
     Value* new_data,
     const std::string& output_name) {
@@ -303,7 +355,7 @@ void InplaceRemover::RegisterInplaceNodeInIfBlocks(
 //          -> (%27, %60)
 //      -> (%27, %61)
 // clang-format on
-void InplaceRemover::RegisterInplaceNodeInLoopBlocks(Value* orig_data, Value* new_data) {
+void InplaceConverter::RegisterInplaceNodeInLoopBlocks(Value* orig_data, Value* new_data) {
   Node* inplace_node = new_data->node();
   Block* outer_block = inplace_node->owningBlock();
   Node* outer_block_node = outer_block->owningNode();
@@ -388,7 +440,7 @@ void InplaceRemover::RegisterInplaceNodeInLoopBlocks(Value* orig_data, Value* ne
 // }
 
 // Register inplace op node inputs/outputs through the blocks.
-void InplaceRemover::RegisterInplaceNodeInBlocks(Value* orig_data, Value* new_data) {
+void InplaceConverter::RegisterInplaceNodeInBlocks(Value* orig_data, Value* new_data) {
   Node* inplace_node = new_data->node();
   Block* outer_block = inplace_node->owningBlock();
   Node* outer_block_node = outer_block->owningNode();
@@ -399,6 +451,19 @@ void InplaceRemover::RegisterInplaceNodeInBlocks(Value* orig_data, Value* new_da
   // Check if the value is already registered in the block
   bool registered = false;
   while (isInplaceNode(orig_data->node())) {
+    // TODO: another edge case. will overtrace orig_data
+    //    eg.
+    //        a = tensor
+    //        b = a.inplace_op()
+    //        loop
+    //          c = a.inplace_op()
+    //          loop
+    //            d = a.inplace_op()
+    //        return a
+    //
+    //  In code handling "b = a.inplace_op()", all later usage of a are
+    //  converted to b. So the below code will use `a` as `orig_data`, while
+    //  in the graph, all the rest of inplace ops actually uses `b`.
     orig_data = orig_data->node()->inputs().at(0);
   }
   for (auto use : orig_data->uses()) {
@@ -432,7 +497,7 @@ void InplaceRemover::RegisterInplaceNodeInBlocks(Value* orig_data, Value* new_da
   }
 }
 
-void PrepareIndexPutForONNX(Node* node, InplaceRemover* ir) {
+void PrepareIndexPutForONNX(Node* node, InplaceConverter* ic) {
   TORCH_INTERNAL_ASSERT(
       node->kind() == aten::index_put || node->kind() == aten::index_put_);
   auto placeholder_node = EncapsulatePatternIntoSubblock(node).value();
@@ -440,15 +505,18 @@ void PrepareIndexPutForONNX(Node* node, InplaceRemover* ir) {
     auto orig_data = placeholder_node->input();
     auto new_data = placeholder_node->output();
 
+    // avoid confusing "registered" logic
+    node->removeAllInputs();
+
     if (nullptr == placeholder_node->owningBlock()->owningNode()) {
       orig_data->replaceAllUsesAfterNodeWith(placeholder_node, new_data);
       return;
     }
-    ir->RegisterInplaceNodeInBlocks(orig_data, new_data);
+    ic->RegisterInplaceNodeInBlocks(orig_data, new_data);
   }
 }
 
-void PrepareCopyForONNX(Node* node, InplaceRemover* ir) {
+void PrepareCopyForONNX(Node* node, InplaceConverter* ic) {
   if (node->kind() == aten::copy_) {
     // aten::copy_ can be viewed as a special case of index_put, where the
     // tensor indices input is empty.
@@ -476,11 +544,56 @@ void PrepareCopyForONNX(Node* node, InplaceRemover* ir) {
     index_put->copyMetadata(node->output());
     node->output()->replaceAllUsesWith(index_put);
 
-    PrepareIndexPutForONNX(index_put->node(), ir);
+    // avoid confusing "registered" logic
+    node->removeAllInputs();
+
+    PrepareIndexPutForONNX(index_put->node(), ic);
   }
 }
 
-void PrepareInplaceOpsInBlocksForONNX(Node* node, InplaceRemover* ir) {
+std::pair<Value*, Value*> PrepareIndexPutForONNX(Node* node) {
+  TORCH_INTERNAL_ASSERT(
+      node->kind() == aten::index_put || node->kind() == aten::index_put_);
+  auto placeholder_node = EncapsulatePatternIntoSubblock(node).value();
+  node->destroy();
+  return std::make_pair(placeholder_node->input(0), placeholder_node->output());
+}
+
+std::pair<Value*, Value*> PrepareCopyForONNX(Node* node) {
+  TORCH_INTERNAL_ASSERT(node->kind() == aten::copy_);
+  // aten::copy_ can be viewed as a special case of index_put, where the
+  // tensor indices input is empty.
+  // Remove aten::copy_, and replace it with index_put.
+  // 1. create an empty listConstruct node as indices input for index_put.
+  // 2. create index_put node.
+
+  // Tracing aten::copy_ broadcasts the rhs values.
+  // 3. Apply broadcasting for scripting.
+  WithInsertPoint guard(node);
+  auto graph = node->owningGraph();
+  auto dummy_list =
+      graph->insertNode(graph->createList(OptionalType::ofTensor(), {}))
+          ->output();
+
+  auto expanded_value =
+      graph->insert(aten::expand_as, {node->input(1), node->input(0)});
+  expanded_value->node()->setSourceRange(node->sourceRange());
+  expanded_value->copyMetadata(node->input(1));
+
+  auto index_put = graph->insert(
+      aten::index_put_,
+      {node->input(0), dummy_list, expanded_value, node->input(2)});
+  index_put->node()->setSourceRange(node->sourceRange());
+  index_put->copyMetadata(node->output());
+  node->output()->replaceAllUsesWith(index_put);
+
+  auto orig_data = node->input(0);
+  node->destroy();
+
+  return PrepareIndexPutForONNX(index_put->node());
+}
+
+void PrepareInplaceOpsInBlocksForONNX(Node* node, InplaceConverter* ic) {
   if (!node->kind().is_aten())
     return;
 
@@ -492,8 +605,8 @@ void PrepareInplaceOpsInBlocksForONNX(Node* node, InplaceRemover* ir) {
   auto new_schema = name.substr(0, name.size() - 1);
 
   Node* input_node = node->inputs().at(0)->node();
-  if (input_node->kind() != aten::select && input_node->kind() != aten::slice)
-    return;
+  // if (input_node->kind() != aten::select && input_node->kind() != aten::slice)
+  //   return;
 
   auto graph = node->owningGraph();
   auto new_node = graph->create(Symbol::fromQualString(new_schema), 1);
@@ -507,13 +620,56 @@ void PrepareInplaceOpsInBlocksForONNX(Node* node, InplaceRemover* ir) {
   auto false_val_ = graph->insertConstant(false);
 
   auto new_copy = graph->create(aten::copy_, 1);
-  new_copy->addInput(input_node->output());
+  new_copy->addInput(node->inputs().at(0));
   new_copy->addInput(new_node->output());
   new_copy->addInput(false_val_);
   new_copy->insertBefore(node);
   new_copy->setSourceRange(node->sourceRange());
 
-  PrepareCopyForONNX(new_copy, ir);
+  PrepareCopyForONNX(new_copy, ic);
+}
+
+std::pair<Value*, Value*> PrepareInplaceOpsInBlocksForONNX(Node* node) {
+  if (!node->kind().is_aten())
+    return {};
+
+  auto name = node->schema().name();
+  bool inplace_op = name.at(name.size() - 1) == '_';
+  if (!inplace_op)
+    return {};
+
+  auto new_schema = name.substr(0, name.size() - 1);
+
+  Node* input_node = node->inputs().at(0)->node();
+
+  auto graph = node->owningGraph();
+  auto new_node = graph->create(Symbol::fromQualString(new_schema), 1);
+  for (Value* input : node->inputs()) {
+    new_node->addInput(input);
+  }
+  new_node->output()->setType(node->output()->type());
+  new_node->insertBefore(node);
+  new_node->setSourceRange(node->sourceRange());
+  node->replaceAllUsesWith(new_node);
+  node->destroy();
+
+  if (input_node->kind() == aten::select || input_node->kind() == aten::slice) {
+    // Cases from a[i] = x. Convert to copy_ and eventually index_put_.
+    WithInsertPoint guard(new_node);
+    auto false_val_ = graph->insertConstant(false);
+
+    auto new_copy = graph->create(aten::copy_, 1);
+    new_copy->addInput(new_node->inputs().at(0));
+    new_copy->addInput(new_node->output());
+    new_copy->addInput(false_val_);
+    new_copy->insertAfter(new_node);
+    new_copy->setSourceRange(new_node->sourceRange());
+
+    return PrepareCopyForONNX(new_copy);
+  } else {
+    // Direct aliasing.
+    return std::make_pair(new_node->input(0), new_node->output());
+  }
 }
 
 // aten::pop is inplace. The tensor list input is updated.
@@ -521,64 +677,43 @@ void PrepareInplaceOpsInBlocksForONNX(Node* node, InplaceRemover* ir) {
 // aten::pop. Then it makes the original aten::pop operator return the updated
 // tensor list, and replaces all later uses of that tensor list with this new
 // output.
-static void PrepareListPopForONNX(Node* n, InplaceRemover* ir) {
-  if (n->kind() == aten::pop) {
-    //   %ten : Tensor = aten::pop(%seq, %pos)
-    // Convert to
-    //   %ten : Tensor = aten::__getitem__(%seq, %pos)
-    //   %new_seq : Tensor[] = aten::pop(%seq, %pos)
-    // And replace all uses of %seq afterwards with %new_seq
-    Node* getitem_node =
-        n->owningGraph()->create(aten::__getitem__, {n->inputs()});
-    getitem_node->output()->setType(n->output()->type());
-    getitem_node->insertBefore(n);
-    n->output()->replaceAllUsesWith(getitem_node->output());
-    n->output()->setType(n->inputs().at(0)->type());
+static std::pair<Value*, Value*> PrepareListPopForONNX(Node* n) {
+  TORCH_INTERNAL_ASSERT(n->kind() == aten::pop);
+  //   %ten : Tensor = aten::pop(%seq, %pos)
+  // Convert to
+  //   %ten : Tensor = aten::__getitem__(%seq, %pos)
+  //   %new_seq : Tensor[] = aten::pop(%seq, %pos)
+  // And replace all uses of %seq afterwards with %new_seq
+  Node* getitem_node =
+      n->owningGraph()->create(aten::__getitem__, {n->inputs()});
+  getitem_node->output()->setType(n->output()->type());
+  getitem_node->insertBefore(n);
+  n->output()->replaceAllUsesWith(getitem_node->output());
+  n->output()->setType(n->inputs().at(0)->type());
 
-    if (nullptr == n->owningBlock()->owningNode()) {
-      n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
-      return;
-    }
-    ir->RegisterInplaceNodeInBlocks(n->inputs().at(0), n->output());
-  }
+  return std::make_pair(n->input(0), n->output());
 }
 
-static void PrepareListDeleteForONNX(Node* n, InplaceRemover* ir) {
-  if (n->kind() == aten::Delete) {
+static std::pair<Value*, Value*> PrepareListDeleteForONNX(Node* n) {
+  TORCH_INTERNAL_ASSERT(n->kind() == aten::Delete);
+  n->addOutput();
+  n->output()->setType(n->inputs().at(0)->type());
+
+  return std::make_pair(n->input(0), n->output());
+}
+
+static std::pair<Value*, Value*> PrepareListAppendAndInsertForONNX(Node* n) {
+  TORCH_INTERNAL_ASSERT(n->kind() == aten::insert || n->kind() == aten::append);
+  if (n->outputs().size() == 0) {
     n->addOutput();
     n->output()->setType(n->inputs().at(0)->type());
-
-    if (nullptr == n->owningBlock()->owningNode()) {
-      n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
-      return;
-    }
-    ir->RegisterInplaceNodeInBlocks(n->inputs().at(0), n->output());
   }
+  return std::make_pair(n->input(0), n->output());
 }
 
-static void PrepareListAppendAndInsertForONNX(Node* n, InplaceRemover* ir) {
-  if (n->kind() == aten::insert || n->kind() == aten::append) {
-    if (n->outputs().size() == 0) {
-      n->addOutput();
-      n->output()->setType(n->inputs().at(0)->type());
-    }
-
-    if (nullptr == n->owningBlock()->owningNode()) {
-      n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
-      return;
-    }
-    ir->RegisterInplaceNodeInBlocks(n->inputs().at(0), n->output());
-  }
-}
-
-static void PrepareListSetItemForONNX(Node* n, InplaceRemover* ir) {
-  if (n->kind() == aten::_set_item) {
-    if (nullptr == n->owningBlock()->owningNode()) {
-      n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
-      return;
-    }
-    ir->RegisterInplaceNodeInBlocks(n->inputs().at(0), n->output());
-  }
+static std::pair<Value*, Value*> PrepareListSetItemForONNX(Node* n) {
+  TORCH_INTERNAL_ASSERT(n->kind() == aten::_set_item);
+  return std::make_pair(n->input(0), n->output());
 }
 
 // Remove Mutation pass does not handle mutation on block inputs.
@@ -679,7 +814,7 @@ Value* findArgumentAsInputParam(
       name);
 }
 
-Value* InplaceRemover::registerSetAttrInBlocks(
+Value* InplaceConverter::registerSetAttrInBlocks(
     Block* block,
     Node* cloneNode,
     Value* origValue,
@@ -770,7 +905,7 @@ Value* InplaceRemover::registerSetAttrInBlocks(
 //      %_output_conv.bias.4 : Tensor = aten::clone(%23, %31)
 //     -> (%_output_conv.bias.4)
 // clang-format on
-void InplaceRemover::trackAndRegisterAttributesInBlocks(
+void InplaceConverter::trackAndRegisterAttributesInBlocks(
     Node* n,
     const Module& module_,
     std::unordered_map<std::string, Value*>& nextSetAttrValues) {
@@ -893,7 +1028,7 @@ void InplaceRemover::trackAndRegisterAttributesInBlocks(
 //      %_output_state.3 : Tensor = onnx::Placeholder[name="index_put_"](%state.1)...
 //       ...
 //      -> (%_output_state_copy.2, %_output_state.3)
-std::unordered_map<std::string, Value*> InplaceRemover::registerInplaceOpAsBlockOutputs(Block* block) {
+std::unordered_map<std::string, Value*> InplaceConverter::registerInplaceOpAsBlockOutputs(Block* block) {
   Node* m = *block->nodes().begin();
   WithInsertPoint guard(m);
   std::unordered_map<std::string, Value*> nextSetAttrValues = {};
@@ -901,9 +1036,9 @@ std::unordered_map<std::string, Value*> InplaceRemover::registerInplaceOpAsBlock
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++; // node n can be destroyed
-    printf("before node: ");
-    n->dump();
-    printf("pre graph: %s\n", n->owningGraph()->toString().c_str());
+    // printf("before node: ");
+    // n->dump();
+    // printf("pre graph: %s\n", n->owningGraph()->toString().c_str());
     if (nullptr != module_ &&
         (n->kind() == prim::GetAttr || n->kind() == prim::SetAttr)) {
       Module moduleClone = (*module_);
@@ -913,10 +1048,14 @@ std::unordered_map<std::string, Value*> InplaceRemover::registerInplaceOpAsBlock
           nextSetAttrValues);
     } else if (n->kind() == aten::copy_) {
       PrepareCopyForONNX(n, this);
+      GRAPH_UPDATE("After copy:", graph_->toString());
     } else if (n->kind() == aten::index_put || n->kind() == aten::index_put_) {
       PrepareIndexPutForONNX(n, this);
     } else if (mr_->inplaceOpVariant(n)) {
+      // TODO: not sure the effectiveness of this.
+      //       Since aliasDb is not out of sync with current graph.
       PrepareInplaceOpsInBlocksForONNX(n, this);
+      GRAPH_UPDATE("After inplace op:", graph_->toString());
     } else if (n->kind() == aten::pop) {
       PrepareListPopForONNX(n, this);
     } else if (n->kind() == aten::insert || n->kind() == aten::append) {
@@ -953,15 +1092,208 @@ std::unordered_map<std::string, Value*> InplaceRemover::registerInplaceOpAsBlock
         }
       }
     }
-    printf("after graph: %s\n", n->owningGraph()->toString().c_str());
+    // printf("after graph: %s\n", n->owningGraph()->toString().c_str());
   }
   return nextSetAttrValues;
 }
 
-void InplaceRemover::convertGetSetAttrToInplaceOps(Block* block) {
+void InplaceConverter::ValueTracker::init(const std::shared_ptr<Graph>& graph) {
+  alias_to_value_ = {};
+  value_to_sorted_aliases_ = {};
+  graph_ = graph;
+  root_block_ = graph->block();
+}
+
+std::string InplaceConverter::ValueTracker::toString() const {
+  std::stringstream ss;
+
+  // ss << "Current graph: " << graph_->toString() << std::endl;
+  ss << "Tracking " << value_to_sorted_aliases_.size() << " individual values." << std::endl;
+  ss << "value_to_sorted_aliases_: " << std::endl;
+  size_t idx = 0;
+  for (auto it : value_to_sorted_aliases_) {
+    ss << "Value[" << idx << "]: " << it.first->debugName() << std::endl;
+    ss << "  Mapping to ";
+    for (auto v : it.second) {
+      ss << v->debugName() << " ";
+    }
+    ss << std::endl;
+    idx++;
+  }
+
+  ss << "alias_to_value_: " << std::endl;
+  for (auto it : alias_to_value_) {
+    ss << "  Alias " << it.first->debugName();
+    ss << " map to " << it.second->debugName() << std::endl;
+  }
+
+  return ss.str();
+}
+
+std::vector<std::tuple<Value*, Node*, Block*>> InplaceConverter::ValueTracker::sortAliasOfValue(const Value* v) const {
+  std::vector<std::tuple<Value*, Node*, Block*>> res = {};
+
+  // TORCH_INTERNAL_ASSERT(value_to_sorted_aliases_.find(v) != value_to_sorted_aliases.end());
+  // for (auto v : value_to_aliases_[v]) {
+
+  // }
+
+  return res;
+}
+
+// TODO: maybe don't need n, is it true that for all cases n should be just new_v->node()?
+void InplaceConverter::ValueTracker::registerSetValue(Value* old_v, Value* new_v) {
+  GRAPH_UPDATE("Calling registerSetValue with old_v: ", old_v->debugName(), " new_v: ", new_v->debugName());
+  GRAPH_UPDATE(this->toString());
+  auto* n = new_v->node();
+  auto* owning_block = n->owningBlock();
+
+  if (alias_to_value_.find(old_v) == alias_to_value_.end()) {
+    alias_to_value_[old_v] = old_v;
+    value_to_sorted_aliases_[old_v] = {old_v};
+  }
+
+  auto root_v = alias_to_value_[old_v];
+  alias_to_value_[new_v] = root_v;
+  // auto alias_order = sortAliasOfValue(root_v);
+  auto &sorted_alias = value_to_sorted_aliases_[root_v];
+  sorted_alias.insert(new_v);
+
+  // check if new_v is registered as block output for if & loop subblock.
+  // NOTE: minor thought, if v is actually not used, dce probably not able to pick up this block output.
+  if (owning_block == root_block_) {
+    return;
+  }
+  auto* owning_blocknode = owning_block->owningNode();
+  TORCH_INTERNAL_ASSERT(nullptr != owning_blocknode);
+  auto owning_block_nkind = owning_blocknode->kind();
+  if (owning_block_nkind != prim::Loop && owning_block_nkind != prim::If) {
+    return;
+  }
+
+  bool registered = std::any_of(owning_block->outputs().begin(), owning_block->outputs().end(), [&sorted_alias](Value* out) {
+    return std::any_of(sorted_alias.begin(), sorted_alias.end(), [&out](Value* alias) {
+      return alias == out;
+    });
+  });
+
+  if (!registered) {
+    if (owning_block_nkind == prim::Loop) {
+      owning_block->registerOutput(new_v);
+      auto new_block_in = owning_block->addInput();
+      sorted_alias.insert(new_block_in);
+      alias_to_value_[new_block_in] = root_v;
+      owning_blocknode->addInput(root_v);
+      auto* new_blocknode_out = owning_blocknode->addOutput();
+      registerSetValue(root_v, new_blocknode_out);
+    } else if (owning_block_nkind == prim::If) {
+      // Only register as output, if there this value comes from outer block.
+      auto isAncestor = [](const Block* a, const Block* b) {
+        while (b && b->owningNode()) {
+          if (a == b) {
+            return true;
+          }
+          b = b->owningNode()->owningBlock();
+        }
+        return a == b;
+      };
+      bool from_outer = std::any_of(sorted_alias.begin(), sorted_alias.end(), [&owning_blocknode, isAncestor](Value* alias) {
+        return isAncestor(alias->node()->owningBlock(), owning_blocknode->owningBlock());
+      });
+      if (from_outer) {
+        for (auto* if_sub_block : owning_blocknode->blocks()) {
+          if (owning_block == if_sub_block) {
+            if_sub_block->registerOutput(new_v);
+          } else {
+            if_sub_block->registerOutput(root_v);
+          }
+        }
+        auto* new_blocknode_out = owning_blocknode->addOutput();
+        registerSetValue(root_v, new_blocknode_out);
+      }
+    }
+  }
+
+  GRAPH_UPDATE("After registerSetValue for in: ", old_v->debugName(), ", out: ", new_v->debugName(), ". tracker status:");
+  GRAPH_UPDATE(this->toString());
+}
+
+void InplaceConverter::ValueTracker::passUpdateValueUse(Block* block) {
+  auto updateValueUse = [this](Node* n) {
+    for (size_t i = 0; i < n->inputs().size(); ++i) {
+      auto* in = n->input(i);
+      auto* alias = this->findAliasForValueAtNode(in, n);
+      if (alias != in) {
+        n->replaceInput(i, alias);
+        GRAPH_UPDATE("Replacing ", in->debugName(), " with ", alias->debugName(), " for ", *n);
+      }
+    }
+  };
+
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++; // node n can be destroyed
+
+    updateValueUse(n);
+
+    auto nkind = n->kind();
+    if (nkind == prim::If || nkind == prim::Loop) {
+      for (auto* sub_block : n->blocks()) {
+        passUpdateValueUse(sub_block);
+      }
+    }
+  }
+  updateValueUse(block->return_node());
+}
+
+Value* InplaceConverter::ValueTracker::findAliasForValueAtNode(Value* v, const Node* n) const {
+  GRAPH_UPDATE("Finding alias for value:", v->debugName(), " at node ", *n);
+  if (alias_to_value_.find(v) == alias_to_value_.end()) {
+    // This value was not affected by any inplace operator.
+    return v;
+  }
+
+  auto* root_v = alias_to_value_.find(v)->second;
+  TORCH_INTERNAL_ASSERT(value_to_sorted_aliases_.find(root_v) != value_to_sorted_aliases_.end());
+  const auto& aliases = value_to_sorted_aliases_.find(root_v)->second;
+
+  // alias is accessible only if
+  // 1. alias owning block is ancestor of n.
+  // 2. alias owning node is before n.
+  // return the last alias that satisfies this condition.
+  auto isAncestor = [](const Block* a, const Block* b) {
+    while (b && b->owningNode()) {
+      if (a == b) {
+        return true;
+      }
+      b = b->owningNode()->owningBlock();
+    }
+    return a == b;
+  };
+  Value* found_alias = nullptr;
+  for (auto* alias : aliases) {
+    auto* alias_n = alias->node();
+    if (alias_n->isBefore(n) && isAncestor(alias_n->owningBlock(), n->owningBlock())) {
+      found_alias = alias;
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(nullptr != found_alias);
+
+  return found_alias;
+}
+
+void InplaceConverter::gatherAttrNameInitialValueMap(
+    Block* block,
+    std::unordered_map<std::string, Value*>& attr_name_value_map,
+    std::unordered_map<Node*, std::string>& attr_node_fullname_map) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+    Node* n = *it;
+    it++; // node n can be destroyed
+
+    for (auto* sub_block : n->blocks()) {
+      gatherAttrNameInitialValueMap(sub_block, attr_name_value_map, attr_node_fullname_map);
+    }
 
     if (n->kind() != prim::GetAttr && n->kind() != prim::SetAttr)
       continue;
@@ -979,7 +1311,9 @@ void InplaceRemover::convertGetSetAttrToInplaceOps(Block* block) {
     }
     fullName += name;
 
-    if (allAttrValues_.find(fullName) == allAttrValues_.end() &&
+    attr_node_fullname_map.insert({n, fullName});
+
+    if (attr_name_value_map.find(fullName) == attr_name_value_map.end() &&
         attrModule.hasattr(name)) {
       auto attr = attrModule.attr(name);
       auto type = attrModule.type();
@@ -987,70 +1321,104 @@ void InplaceRemover::convertGetSetAttrToInplaceOps(Block* block) {
 
       // Add model_parameters and model_buffers as model inputs. Order is
       // preserved based on the appearance in the graph.
+      WithInsertPoint guard(graph_->nodes().front());
       if (type->is_parameter(slot) || type->is_buffer(slot) ||
           (attr.isObject() && !attr.toObjectRef().type()->is_module())) {
-        if (allAttrValues_.find(fullName) == allAttrValues_.end()) {
-          paramConst = findArgumentAsInputParam(graph_, fullName, attr);
-          allAttrValues_.insert({fullName, paramConst});
-        }
+        paramConst = findArgumentAsInputParam(graph_, fullName, attr);
+        attr_name_value_map.insert({fullName, paramConst});
       } else if (auto attrVal = tryInsertConstant(*graph_, attr)) {
         for (size_t i = 0; i < type->getAttributes().size(); i++) {
           if (type->getAttributeName(i) == name) {
             paramConst = *attrVal;
-            allAttrValues_.insert({fullName, paramConst});
+            attr_name_value_map.insert({fullName, paramConst});
           }
         }
       } else {
+        // TODO: error out or continue?
         GRAPH_DEBUG(
             attr.type()->cast<ClassType>() ? "" : "attribute: ",
             name,
             " is not materializable.");
-        return;
       }
     }
 
-    if (n->kind() == prim::SetAttr) { // Handle SetAttr node
-      if (attrModule.hasattr(name)) {
-        // If inside a block, keep the output value to register in block
-        // output.
-        auto block_ = n->owningBlock();
-        Node* cloneNode =
-            addDummyClone(graph_.get(), n->inputs().at(1), true, n);
-        if (block_->owningNode() &&
-            (block_->owningNode()->kind() == prim::If ||
-            block_->owningNode()->kind() == prim::Loop)) {
-          auto attrValue = (setAttrValues_.find(fullName) != setAttrValues_.end())
-              ? setAttrValues_[fullName]
-              : allAttrValues_[fullName];
-
-          auto blockOutput = registerSetAttrInBlocks(
-              block_, cloneNode, attrValue, fullName);
-
-          if (nullptr != blockOutput) {
-            nextSetAttrValues[fullName] = blockOutput;
-          }
-        }
-        // SetAttr writes a value to an attr. Keep this
-        // in the setAttrValues map.
-        setAttrValues_[fullName] = cloneNode->output();
-      }
-    } else if (n->kind() == prim::GetAttr) { // Handle GetAttr node
-      allAttrModules_[fullName] = n->input(0);
-      if (setAttrValues_.find(fullName) != setAttrValues_.end()) {
-        // Attr has been set earlier in the graph.
-        // Read its value from setAttrValues map.
-        auto set_attr_node_input = setAttrValues_[fullName];
-        // Clone SetAttr input
-        n->output()->replaceAllUsesAfterNodeWith(n, set_attr_node_input);
-      } else if (allAttrValues_.find(fullName) != allAttrValues_.end()) {
-        // Attr has not been set earlier in the graph. Replace it with the
-        // graph parameter if exists.
-        n->output()->replaceAllUsesWith(allAttrValues_[fullName]);
-        n->removeAllInputs();
-      }
+    // Create dummy initial value.
+    if (attr_name_value_map.find(fullName) == attr_name_value_map.end()) {
+      auto* noneNode = graph_->create(prim::Constant);
+      noneNode->output()->setType(NoneType::get());
+      noneNode->insertBefore(graph_->nodes().front());
+      attr_name_value_map.insert({fullName, noneNode->output()});
     }
   }
+
 }
+
+void InplaceConverter::replaceAttrWithInplaceOps(Block* block,
+    const std::unordered_map<std::string, Value*>& attr_name_value_map,
+    const std::unordered_map<Node*, std::string>& attr_node_fullname_map) {
+
+  for (auto pair : attr_node_fullname_map) {
+    auto* n = pair.first;
+    auto fullName = pair.second;
+    auto find_init_val = attr_name_value_map.find(fullName);
+    TORCH_INTERNAL_ASSERT(find_init_val != attr_name_value_map.end());
+
+    TORCH_INTERNAL_ASSERT(n->kind() == prim::GetAttr || n->kind() == prim::SetAttr);
+    if (n->kind() == prim::SetAttr) {
+      // auto* copyNode = graph_->create(aten::copy_, 1);
+      // WithInsertPoint guard(graph_->nodes().front());
+      // auto false_val_ = graph_->insertConstant(false);
+
+      // NOTE: directly create index_put_ to avoid expanding for copy_.
+      WithInsertPoint guard(n);
+      auto false_val_ = graph_->insertConstant(false);
+      auto dummy_list =
+          graph_->insertNode(graph_->createList(OptionalType::ofTensor(), {}))
+              ->output();
+
+      auto* index_put_node = graph_->create(aten::index_put_, 1);
+      index_put_node->addInput(find_init_val->second);
+      index_put_node->addInput(dummy_list);
+      index_put_node->addInput(n->input(1));
+      index_put_node->addInput(false_val_);
+      index_put_node->setSourceRange(n->sourceRange());
+
+      index_put_node->insertBefore(n);
+
+
+      // copyNode->addInput(find_init_val->second);
+      // copyNode->addInput(n->input(1));
+      // copyNode->addInput(false_val_);
+      // copyNode->insertBefore(n);
+      // copyNode->setSourceRange(n->sourceRange());
+    } else {
+      // prim::GetAttr
+      n->output()->replaceAllUsesWith(find_init_val->second);
+    }
+
+    n->destroy();
+  }
+}
+
+void InplaceConverter::convertGetSetAttrToInplaceOps(Block* block) {
+  // First pass over graph, to gather all attribute names,
+  // and their intial values.
+  // Create dummy initial values for attributes.
+  // In the end of this pass,
+  // these dummy initial values should have zero uses, and safely removed.
+  // Otherwise it will imply error in model for using uninitialized values.
+  std::unordered_map<std::string, Value*> attr_name_value_map = {};
+  std::unordered_map<Node*, std::string> attr_node_fullname_map = {};
+  gatherAttrNameInitialValueMap(block, attr_name_value_map, attr_node_fullname_map);
+  GRAPH_UPDATE("Graph after gatherAttrNameInitialValueMap", graph_->toString());
+
+  // Second pass over graph,
+  // replace GetAttr with initial value,
+  // and replace SetAttr with aten::copy_(initial_value, new_value)
+  replaceAttrWithInplaceOps(block, attr_name_value_map, attr_node_fullname_map);
+}
+
+
 
 // Register Inplace Ops As Block Outputs
 // Inplace operations like aten::copy_ or aten::append that are inside
@@ -1059,9 +1427,72 @@ void InplaceRemover::convertGetSetAttrToInplaceOps(Block* block) {
 // to the outer block.
 // We also consider setAttr node an inplace op, and handle those
 // similarly by tracking the output as sub-block outputs.
-void InplaceRemover::RegisterInplaceOpAsBlockOutputs() {
+void InplaceConverter::RegisterInplaceOpAsBlockOutputs() {
   convertGetSetAttrToInplaceOps(graph_->block());
+  GRAPH_UPDATE("Graph after convertGetSetAttrToInplaceOps", graph_->toString());
   registerInplaceOpAsBlockOutputs(graph_->block());
+}
+
+void InplaceConverter::convertInplaceOps(Block* block) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+    Node* n = *it;
+    it++; // node n can be destroyed
+
+    auto nkind = n->kind();
+    if (n->kind() == aten::copy_) {
+      Value *orig_data, *new_out;
+      std::tie(orig_data, new_out) = PrepareCopyForONNX(n);
+      vt_.registerSetValue(orig_data, new_out);
+    } else if (n->kind() == aten::index_put || n->kind() == aten::index_put_) {
+      Value *orig_data, *new_out;
+      std::tie(orig_data, new_out) = PrepareIndexPutForONNX(n);
+      if (nkind == aten::index_put_) {
+        vt_.registerSetValue(orig_data, new_out);
+      }
+    } else if (n->kind() == aten::insert || n->kind() == aten::append) {
+      Value *orig_data, *new_out;
+      std::tie(orig_data, new_out) = PrepareListAppendAndInsertForONNX(n);
+      vt_.registerSetValue(orig_data, new_out);
+    } else if (mr_->inplaceOpVariant(n)) {
+      Value *orig_data, *new_out;
+      std::tie(orig_data, new_out) = PrepareInplaceOpsInBlocksForONNX(n);
+      if (nullptr != new_out) {
+        vt_.registerSetValue(orig_data, new_out);
+      }
+    } else if (n->kind() == aten::pop) {
+      Value *orig_data, *new_out;
+      std::tie(orig_data, new_out) = PrepareListPopForONNX(n);
+      vt_.registerSetValue(orig_data, new_out);
+    } else if (n->kind() == aten::Delete) {
+      Value *orig_data, *new_out;
+      std::tie(orig_data, new_out) = PrepareListDeleteForONNX(n);
+      vt_.registerSetValue(orig_data, new_out);
+    } else if (n->kind() == aten::_set_item) {
+      Value *orig_data, *new_out;
+      std::tie(orig_data, new_out) = PrepareListSetItemForONNX(n);
+      vt_.registerSetValue(orig_data, new_out);
+    } else { // for prim::If and prim::Loop nodes with blocks.
+      // All outputs are replacing some outer values.
+      // For those already captured, it implies that new values are assigned to the alias.
+      for (Block* sub_block : n->blocks()) {
+        convertInplaceOps(sub_block);
+      }
+    }
+  }
+}
+
+void InplaceConverter::convertInplaceOps() {
+  convertInplaceOps(graph_->block());
+  GRAPH_UPDATE("Graph after convertInplaceOps: ", graph_->toString());
+  GRAPH_UPDATE(vt_.toString());
+}
+
+void InplaceConverter::convertMutationForONNX() {
+  convertGetSetAttrToInplaceOps(graph_->block());
+  GRAPH_UPDATE("Graph after convertGetSetAttrToInplaceOps", graph_->toString());
+  vt_.init(graph_);
+  convertInplaceOps();
+  vt_.passUpdateValueUse(graph_->block());
 }
 
 } // namespace
@@ -1074,8 +1505,8 @@ void RemoveInplaceOpsForONNX(
   PrepareForRemoveMutations(mr, graph->block());
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
-  InplaceRemover ir(graph, &mr, model);
-  ir.RegisterInplaceOpAsBlockOutputs();
+  InplaceConverter ic(graph, &mr, model);
+  ic.convertMutationForONNX();
 }
 
 } // namespace jit
