@@ -375,6 +375,10 @@ struct TEWrapper {
     cg->call(args);
   }
 
+  void call(const std::vector<void*>& args) {
+    cg->call_raw(args);
+  }
+
   inline bool supports(const at::Tensor& t) {
     return t.is_contiguous() && t.dtype().Match<float>();
   }
@@ -419,6 +423,9 @@ struct TEWrapper {
   TEWrapper() = default;
   template <typename... Ts>
   void operator()(const Ts&... ts) {
+    DCHECK(0 && "Invalid call");
+  }
+  void call(const std::vector<void*>& args) {
     DCHECK(0 && "Invalid call");
   }
 
@@ -513,7 +520,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
       at::native::threshold_out(in0_t, 0, 0, out_t);
     } else {
       at::native::resize_as_(out_t, in0_t, c10::nullopt);
-      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+      int64_t nn = in0_t.numel();
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
   };
 });
@@ -531,7 +539,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
       at::native::tanh_out(in0_t, out_t);
     } else {
       at::native::resize_as_(out_t, in0_t, c10::nullopt);
-      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+      int64_t nn = in0_t.numel();
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
   };
 });
@@ -552,8 +561,8 @@ REGISTER_OPERATOR_FUNCTOR(
           at::native::sigmoid_out(in0_t, out_t);
         } else {
           at::native::resize_as_(out_t, in0_t, c10::nullopt);
-          (*te)(
-              out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+          int64_t nn = in0_t.numel();
+          te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
         }
       };
     });
@@ -579,7 +588,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       at::native::logit_out(in0_t, in1_d, out_t);
     } else {
       at::native::resize_as_(out_t, in0_t, c10::nullopt);
-      (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
+      int64_t nn = in0_t.numel();
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
     }
   };
 });

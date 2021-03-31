@@ -365,6 +365,9 @@ void BlockCodeGen::Initialize() {
 void BlockCodeGen::call(const std::vector<CallArg>& args) {
   throw std::runtime_error("BlockCodeGen: Cannot call Block code ");
 }
+void BlockCodeGen::call_raw(const std::vector<void*>& args) {
+  throw std::runtime_error("BlockCodeGen: Cannot call Block code ");
+}
 
 BlockCodeGen::~BlockCodeGen() = default;
 RegisterCodeGen<BlockCodeGen> block_codegen_reg("block_codegen");

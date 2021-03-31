@@ -63,6 +63,7 @@ class TORCH_API CodeGen {
   }
 
   virtual void call(const std::vector<CallArg>& args) = 0;
+  virtual void call_raw(const std::vector<void*>& args) = 0;
 
   virtual at::Tensor empty_strided(
       c10::IntArrayRef size,
@@ -120,41 +121,31 @@ class CodeGen::CallArg {
   CallArg(const PaddedBuffer<T>& buffer);
 
   template <typename T>
-  CallArg(const std::vector<T>& buffer) : ptr_(const_cast<T*>(buffer.data())) {}
+  CallArg(const std::vector<T>& buffer)
+      : data_(const_cast<T*>(buffer.data())) {}
 
-  CallArg(void* ptr) : ptr_(ptr) {}
+  CallArg(void* ptr) : data_(ptr) {}
 
-#define ARG_TYPE_CTOR(Type, Name) \
-  CallArg(Type v) : Name##val_(v) {}
+#define ARG_TYPE_CTOR(Type, Name)     \
+  CallArg(Type v) {                   \
+    memcpy(&data_, &v, sizeof(Type)); \
+  }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_TYPE_CTOR);
 #undef ARG_TYPE_CTOR
 
   void* data() const {
-    return ptr_;
+    return data_;
   }
 
-#define ARG_DATA_DEFINE(Type, Name) \
-  Type Name##Data() const {         \
-    return Name##val_;              \
-  }
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_DATA_DEFINE);
-#undef ARG_DATA_DEFINE
-
-#define ARG_PTR_DEFINE(Type, Name)         \
-  Type* Name##Ptr() const {                \
-    return const_cast<Type*>(&Name##val_); \
+#define ARG_PTR_DEFINE(Type, Name) \
+  Type* Name##Ptr() const {        \
+    return (Type*)&data_;          \
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_PTR_DEFINE);
 #undef ARG_PTR_DEFINE
 
  private:
-  union {
-    void* ptr_;
-
-#define ARG_BACKING(Type, Name) Type Name##val_;
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_BACKING);
-#undef ARG_BACKING
-  };
+  void* data_;
 };
 
 class RegisterCodeGenList {
