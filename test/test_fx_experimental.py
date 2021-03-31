@@ -24,7 +24,7 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionerConfig,
     PartitionMode
 )
-from torch.fx.experimental.fuser import fuse
+import torch.fx.experimental.optimization as optimization
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.normalize import NormalizeOperators
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
@@ -33,10 +33,12 @@ from torch.fx.operator_schemas import _torchscript_type_to_python_type
 
 try:
     from torchvision.models import resnet18
+    import torchvision.models
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+skipIfNoMkldnn = unittest.skipIf(not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()), "no MKLDNN")
 
 
 def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
@@ -77,16 +79,16 @@ class TestFXExperimental(JitTestCase):
         # Fix for now to add type/shape to output
         for node in traced.graph.nodes:
             if node.op == "output":
-                node.shape = a.shape
-                node.dtype = a.dtype
+                node.meta['shape'] = a.shape
+                node.meta['dtype'] = a.dtype
         for mod in module_with_submodules.modules():
             if isinstance(mod, GraphModule):
                 for node in mod.graph.nodes:
-                    node.shape = a.shape
-                    node.dtype = a.dtype
+                    node.meta['shape'] = a.shape
+                    node.meta['dtype'] = a.dtype
         for node in module_with_submodules.graph.nodes:
-            node.shape = a.shape
-            node.dtype = a.dtype
+            node.meta['shape'] = a.shape
+            node.meta['dtype'] = a.dtype
 
         weights1 = {}
         weights2 = {}
@@ -581,7 +583,7 @@ class TestFXExperimental(JitTestCase):
     def test_conv_bn_fusion(self):
         rn18 = resnet18().eval()
         traced = symbolic_trace(rn18)
-        fused = fuse(traced)
+        fused = optimization.fuse(traced)
 
         self.assertTrue(all(not isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules()))
 
@@ -1176,10 +1178,73 @@ class {test_classname}(torch.nn.Module):
         self.assertEqual(_count_matmuls(module), 2)
         self.assertEqual(_count_matmuls(opt_module), 2)
 
+    @skipIfNoMkldnn
+    def test_prepare_for_inference_cpu(self):
+        import torch.nn as nn
+
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                layers = []
+                layers2 = []
+                for _ in range(10):
+                    layers.append(nn.Conv2d(3, 3, 1))
+                    layers.append(nn.BatchNorm2d(3))
+                    layers.append(nn.ReLU())
+
+                    layers2.append(nn.Conv2d(3, 3, 1))
+                    layers2.append(nn.BatchNorm2d(3))
+                    layers2.append(nn.ReLU())
+                self.model = nn.Sequential(*layers)
+                self.model2 = nn.Sequential(*layers2)
+
+            def forward(self, x):
+                return self.model(x) + self.model2(x)
+
+
+        N, C, H, W, = 1, 3, 224, 224
+        inp = torch.randn(N, C, H, W)
+        with torch.no_grad():
+            model = Foo().eval()
+            optimized_model = optimization.prepare_for_inference(model)
+            torch.testing.assert_allclose(model(inp), optimized_model(inp))
+
+    @skipIfNoTorchVision
+    @skipIfNoMkldnn
+    def test_prepare_for_inference_cpu_torchvision(self):
+        models = [
+            torchvision.models.resnet18,
+            torchvision.models.resnet50,
+            torchvision.models.densenet121,
+            torchvision.models.shufflenet_v2_x1_0,
+            torchvision.models.vgg16,
+            torchvision.models.mobilenet_v2,
+            torchvision.models.mnasnet1_0,
+            torchvision.models.resnext50_32x4d
+        ]
+        with torch.no_grad():
+            for model_type in models:
+                model = model_type()
+                C, H, W, = 3, 224, 224
+                inp = torch.randn(3, C, H, W)
+                model(inp)
+                model.eval()
+                inp = torch.randn(1, C, H, W)
+                heuristic = optimization.gen_mkl_autotuner(inp, iters=0, warmup=0)
+                optimized_model = optimization.prepare_for_inference(model)
+
+                orig_out = model(inp)
+                new_out = optimized_model(inp)
+                torch.testing.assert_allclose(orig_out, new_out)
+
+
 class TestNormalizeOperators(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
+        # Unsupported input types
+        if op.name in {'index_put', '__getitem__', 'unfold'}:
+            return
         known_no_good = {'stack', 'hstack', 'vstack', 'dstack', 'repeat',
                          'lu'}
 
@@ -1235,6 +1300,8 @@ class TestModule(torch.nn.Module):
     def forward(self, {', '.join(param_names)}):
         return torch.{op.name}({', '.join(args)})
                 """
+
+                # print(code)
 
                 g = {'torch': torch, 'inf' : math.inf}
                 exec(code, g)
