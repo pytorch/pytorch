@@ -390,13 +390,12 @@ std::tuple<Tensor, Tensor> fractional_max_pool3d_cpu(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& fractional_max_pool3d_backward_out_cpu(
-  at::Tensor& gradInput,
-  const at::Tensor& gradOutput_,
+Tensor& fractional_max_pool3d_backward_out_cpu(const at::Tensor& gradOutput_,
   const at::Tensor& input,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const at::Tensor& indices) {
+  const at::Tensor& indices,
+  at::Tensor& gradInput) {
   fractional_max_pool3d_backward_out_cpu_template(
     input,
     gradOutput_,
