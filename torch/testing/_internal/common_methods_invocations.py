@@ -3864,7 +3864,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     UnaryUfuncInfo('special.logit',
                    aten_name='special_logit',
-                   ref=scipy_reference_wrapper(lambda x: scipy.special.logit(x)),
+                   ref=scipy.special.logit if TEST_SCIPT else _NOTHING,
                    domain=(0, 1),
                    decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                   torch.float16: 5e-1}),),
