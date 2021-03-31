@@ -377,10 +377,6 @@ namespace impl {
       assert_is_valid_output_type<T, AllowDeprecatedTypes>();
       return c10::ivalue::from(std::move(v));
     }
-    static IValue copy(const T& v) {
-      assert_is_valid_output_type<T, AllowDeprecatedTypes>();
-      return IValue(v);
-    }
   };
 
   // Special case to allow kernels to return `Tensor&`.
@@ -389,9 +385,6 @@ namespace impl {
   struct return_to_ivalue<at::Tensor&, AllowDeprecatedTypes, void> final {
     static IValue call(at::Tensor& v) {
       return c10::ivalue::from(v);
-    }
-    static IValue copy(at::Tensor& v) {
-      return IValue(v);
     }
   };
 
@@ -484,17 +477,11 @@ namespace impl {
     static void call(OutputType&& output, Stack* stack) {
       torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::call(std::forward<OutputType>(output)));
     }
-    static void copy(const OutputType& output, Stack* stack) {
-      torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::copy(output));
-    }
   };
   template<class... OutputTypes, bool AllowDeprecatedTypes>
   struct push_outputs<std::tuple<OutputTypes...>, AllowDeprecatedTypes> final {
     static void call(std::tuple<OutputTypes...>&& output, Stack* stack) {
       call_(std::move(output), stack, std::make_index_sequence<sizeof...(OutputTypes)>());
-    }
-    static void copy(const std::tuple<OutputTypes...>& output, Stack* stack) {
-      copy_(output, stack, std::make_index_sequence<sizeof...(OutputTypes)>());
     }
 
   private:
@@ -502,16 +489,10 @@ namespace impl {
     static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, std::index_sequence<indices...>) {
       torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::call(std::forward<OutputTypes>(std::get<indices>(output)))...);
     }
-    template<size_t... indices>
-    static void copy_(const std::tuple<OutputTypes...>& output, Stack* stack, std::index_sequence<indices...>) {
-      torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::copy(std::get<indices>(output))...);
-    }
   };
   template<bool AllowDeprecatedTypes>
   struct push_outputs<void, AllowDeprecatedTypes> final {
     static void call(int /*dummy*/, Stack* /*stack*/) {
-    }
-    static void copy(int /*dummy*/, Stack* /*stack*/) {
     }
   };
 
