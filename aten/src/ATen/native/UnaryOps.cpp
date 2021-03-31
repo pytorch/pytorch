@@ -26,11 +26,15 @@ namespace at {
 
 namespace meta {
 
-TORCH_META_FUNC(sin) (
-  const Tensor& self
-) {
-  build_unary_float_op(maybe_get_output(), self);
-}
+#define CREATE_UNARY_META_FUNC(func)                  \
+  TORCH_META_FUNC(func) (const Tensor& self) {        \
+    build_unary_float_op(maybe_get_output(), self);   \
+  }
+
+// Use this macro iff you need to dispatch and don't need
+// extra error checking/have a different signature, etc.
+CREATE_UNARY_META_FUNC(sin)
+CREATE_UNARY_META_FUNC(sinc)
 
 } // namespace meta
 
@@ -40,6 +44,11 @@ namespace native {
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
 // macro that implements everything, because the former allows some simple preprocessing that are unique to some
 // operators (more is foreseeable) and is more flexible and elegant than the latter.
+#define CREATE_UNARY_TORCH_IMPL_FUNC(func)                                \
+TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& result) {  \
+  func##_stub(device_type(), *this);                                      \
+}
+
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
   auto iter = TensorIterator::unary_op(result, self);
@@ -290,6 +299,14 @@ Tensor& expm1_out(const Tensor& self, Tensor& result) { return unary_op_impl_flo
 Tensor expm1(const Tensor& self) { return unary_op_impl_float(self, expm1_stub); }
 Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
 
+// special_exp2, alias for exp2
+Tensor& special_exp2_out(const Tensor& self, Tensor& result) { return at::exp2_out(result, self); }
+Tensor special_exp2(const Tensor& self) { return self.exp2(); }
+
+// special_expm1, alias for expm1
+Tensor& special_expm1_out(const Tensor& self, Tensor& result) { return at::expm1_out(result, self); }
+Tensor special_expm1(const Tensor& self) { return self.expm1(); }
+
 Tensor& erf_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, erf_stub); }
 Tensor erf(const Tensor& self) { return unary_op_impl_float(self, erf_stub); }
 Tensor& erf_(Tensor& self) { return unary_op_impl_(self, at::erf_out); }
@@ -298,16 +315,19 @@ Tensor& erfc_out(const Tensor& self, Tensor& result) { return unary_op_impl_floa
 Tensor erfc(const Tensor& self) { return unary_op_impl_float(self, erfc_stub); }
 Tensor& erfc_(Tensor& self) { return unary_op_impl_(self, at::erfc_out); }
 
-Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, erfinv_stub); }
+Tensor& erfinv_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, erfinv_stub); }
 Tensor erfinv(const Tensor& self) { return unary_op_impl_float(self, erfinv_stub); }
 Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
 
+// special_erf, alias for erf
 Tensor& special_erf_out(const Tensor& self, Tensor& result) { return at::erf_out(result, self); }
 Tensor special_erf(const Tensor& self) { return self.erf(); }
 
+// special_erfc, alias for erfc
 Tensor& special_erfc_out(const Tensor& self, Tensor& result) { return at::erfc_out(result, self); }
 Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 
+// special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
@@ -325,7 +345,7 @@ Tensor& floor_out(const Tensor& self, Tensor& result) {
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
 
-Tensor& i0_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, i0_stub); }
+Tensor& i0_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, i0_stub); }
 Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
 Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
@@ -384,17 +404,13 @@ Tensor& sgn_out(const Tensor& self, Tensor& result) {
 Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
-TORCH_IMPL_FUNC(sin_out) (const Tensor& self, const Tensor& result) {
-  sin_stub(device_type(), *this);
-}
+CREATE_UNARY_TORCH_IMPL_FUNC(sin)
 
 Tensor& cos_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cos_stub); }
 Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
 Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
 
-Tensor& sinc_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, sinc_stub); }
-Tensor sinc(const Tensor& self) { return unary_op_impl_float(self, sinc_stub); }
-Tensor& sinc_(Tensor& self) { return unary_op_impl_(self, at::sinc_out); }
+CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 
 Tensor& sinh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, sinh_stub); }
 Tensor sinh(const Tensor& self) { return unary_op_impl_float(self, sinh_stub); }
@@ -655,7 +671,7 @@ Tensor polygamma(int64_t n, const Tensor& self) {
 Tensor& polygamma_(Tensor& self, int64_t n) {
   return at::polygamma_out(self, n, self);
 }
-Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
+Tensor& polygamma_out(int64_t n, const Tensor& self, Tensor& result) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
   auto iter = TensorIterator::unary_op(result, self);
   polygamma_stub(iter.device_type(), iter, n);
@@ -672,19 +688,34 @@ static inline void mvlgamma_check(const Tensor& self, int64_t p) {
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
-  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
+  Tensor args = native::arange(
+      -p / 2. + 0.5,
+      0.5,
+      0.5,
+      optTypeMetaToScalarType(self.options().dtype_opt()),
+      self.options().layout_opt(),
+      self.options().device_opt(),
+      self.options().pinned_memory_opt());
   args = args.add(self.unsqueeze(-1));
   return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(c10::pi<double>) / 4.);
 }
 
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
-  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
+  auto dtype_opt = self.options().dtype_opt();
+  Tensor args = native::arange(
+      -p / 2. + 0.5,
+      0.5,
+      0.5,
+      optTypeMetaToScalarType(self.options().dtype_opt()),
+      self.options().layout_opt(),
+      self.options().device_opt(),
+      self.options().pinned_memory_opt());
   args = args.add(self.unsqueeze(-1));
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(c10::pi<double>) / 4.));
 }
 
-Tensor& lgamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, lgamma_stub); }
+Tensor& lgamma_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, lgamma_stub); }
 Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub); }
 Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
 
