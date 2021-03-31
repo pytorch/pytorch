@@ -129,13 +129,8 @@ logit(input, *, out=None) -> Tensor
 Computes the logit (defined below) of the elements of :attr:`input`.
 
 .. math::
-    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
-    z_{i} = \begin{cases}
-        x_{i} & \text{if eps is None} \\
-        \text{eps} & \text{if } x_{i} < \text{eps} \\
-        x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
-        1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
-    \end{cases}
+    y_{i} = \ln(\frac{x_{i}}{1 - x_{i}})
+
 """ + r"""
 Args:
     {input}
