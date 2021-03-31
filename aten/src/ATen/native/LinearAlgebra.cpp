@@ -182,7 +182,7 @@ Tensor linalg_pinv(const Tensor& input, double rcond, bool hermitian) {
 }
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, const Tensor& rcond, bool hermitian) {
+Tensor& linalg_pinv_out(const Tensor& input, const Tensor& rcond, bool hermitian, Tensor& result) {
   checkSameDevice("linalg_pinv", result, input);
   checkLinalgCompatibleDtype("linalg_pinv", result, input);
 
@@ -192,7 +192,7 @@ Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, const Tensor& rcond
   return result;
 }
 
-Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, double rcond, bool hermitian) {
+Tensor& linalg_pinv_out(const Tensor& input, double rcond, bool hermitian, Tensor& result) {
   Tensor rcond_tensor = at::full({}, rcond, input.options().dtype(ScalarType::Double));
   return at::linalg_pinv_out(result, input, rcond_tensor, hermitian);
 }
@@ -301,7 +301,7 @@ Tensor matrix_power(const Tensor& self, int64_t n) {
   return at::native::linalg_matrix_power(self, n);
 }
 
-Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
+Tensor& linalg_matrix_rank_out(const Tensor& self, optional<double> tol, bool hermitian, Tensor& result) {
   checkSameDevice("linalg_matrix_rank", result, self);
   ScalarType output_type = ScalarType::Long;
   checkLinalgCompatibleDtype("linalg_matrix_rank", result.scalar_type(), output_type);
@@ -489,7 +489,7 @@ Tensor& math_addr_out(const Tensor& self,
 }
 
 // torch.ger, alias for torch.outer
-Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
+Tensor& ger_out(const Tensor& self, const Tensor& vec2, Tensor &result) {
   TORCH_WARN("torch.ger is deprecated and will be removed in a future PyTorch release. "
              "Use torch.outer instead.");
   return at::outer_out(result, self, vec2);
@@ -499,7 +499,7 @@ Tensor ger(const Tensor& self, const Tensor& vec2) {
   return self.outer(vec2);
 }
 
-Tensor& inner_out(Tensor& out, const Tensor& self, const Tensor& other) {
+Tensor& inner_out(const Tensor& self, const Tensor& other, Tensor& out) {
   checkDeviceType("inner()", {out, self, other}, self.device().type());
 
   // If either self or other is a scalar just multiply them
@@ -539,7 +539,7 @@ Tensor inner(const Tensor& self, const Tensor& other) {
   return at::tensordot(self, other, -1, -1);
 }
 
-Tensor& outer_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
+Tensor& outer_out(const Tensor& self, const Tensor& vec2, Tensor &result) {
   check_1d(self, "self", "outer");
   check_1d(vec2, "vec2", "outer");
 
@@ -1962,23 +1962,25 @@ Tensor& linalg_vector_norm_out(const Tensor& self, const optional<Scalar>& opt_o
 Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
-  return at::native::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
+  return at::native::linalg_norm_out(
+      self, opt_ord, opt_dim, keepdim, opt_dtype, result);
 }
 
 // Frobenius and nuclear norms
 Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
-  return at::native::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+  return at::native::linalg_norm_out(
+      self, ord, opt_dim, keepdim, opt_dtype, result);
 }
 
 // Numerical or None norms
-Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor& linalg_norm_out(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return linalg_norm_out_impl(result, self, opt_ord, c10::nullopt, opt_dim, keepdim, opt_dtype);
 }
 
 // Frobenius and nuclear norms
-Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor& linalg_norm_out(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -2090,7 +2092,7 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   return _linalg_cond_helper(self, ord_variant);
 }
 
-Tensor& linalg_cond_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord) {
+Tensor& linalg_cond_out(const Tensor& self, const optional<Scalar>& opt_ord, Tensor& result) {
   checkSameDevice("linalg_cond", result, self);
   ScalarType real_dtype = toValueType(self.scalar_type());
   checkLinalgCompatibleDtype("linalg_cond", result.scalar_type(), real_dtype);
@@ -2122,7 +2124,7 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
 }
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_cond_out(Tensor& result, const Tensor& self, std::string ord) {
+Tensor& linalg_cond_out(const Tensor& self, std::string ord, Tensor& result) {
   checkSameDevice("linalg_cond", result, self);
   ScalarType real_dtype = toValueType(self.scalar_type());
   checkLinalgCompatibleDtype("linalg_cond", result.scalar_type(), real_dtype);
@@ -2175,7 +2177,7 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
 }
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
+Tensor& linalg_tensorinv_out(const Tensor& self, int64_t ind, Tensor& result) {
   checkSameDevice("tensorinv", result, self);
   checkLinalgCompatibleDtype("tensorinv", result, self);
 
@@ -2224,7 +2226,7 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
   return result.reshape(result_shape);
 }
 
-Tensor& linalg_tensorsolve_out(Tensor& result, const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
+Tensor& linalg_tensorsolve_out(const Tensor& self, const Tensor& other, optional<IntArrayRef> dims, Tensor& result) {
   checkSameDevice("tensorsolve", result, self);
   checkLinalgCompatibleDtype("tensorsolve", result, self);
 
