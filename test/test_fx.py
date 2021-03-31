@@ -2165,6 +2165,7 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
+    @skipIfNoTorchVision
     def test_cpatcher(self):
 
         cnt = 0
