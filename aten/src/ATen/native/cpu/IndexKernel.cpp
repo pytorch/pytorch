@@ -155,7 +155,8 @@ void cpu_take_put_kernel(
       auto& iterated = *reinterpret_cast<scalar_t*>(iterated_data_bytes);
 
       TORCH_CHECK_INDEX(idx >= -numel && idx < numel,
-                        "out of range: ", idx, " out of ", numel);
+                        "out of range: tried to access index ",
+                        idx, " on a tensor of ", numel, " elements.");
       if (idx < 0) {
         idx += numel;
       }
