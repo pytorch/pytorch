@@ -226,6 +226,16 @@ void test(DeprecatedTypeProperties &T) {
                        require_equal_size_dim(result, rhs));
       }
 
+      // put
+      {
+        auto lhs = ones(*lhs_it, T);
+        auto rhs1 = zeros(*rhs_it, T).toType(ScalarType::Long);
+        auto rhs2 = zeros(*rhs_it, T);
+        TRY_CATCH_ELSE(auto result = lhs.put(rhs1, rhs2),
+                       ASSERT_EQ(lhs.numel(), 0); ASSERT_NE(rhs1.numel(), 0),
+                       require_equal_size_dim(result, lhs));
+      }
+
       // ger
       {
         auto lhs = ones(*lhs_it, T);
