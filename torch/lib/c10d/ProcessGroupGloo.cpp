@@ -2815,8 +2815,8 @@ void ProcessGroupGloo::monitoredBarrier(
       }
     }
 
-    if (failedRanks.size() > 0) {
-      auto ranksStr = c10::Join(", ", failedRanks);
+    if (!failedRanks.empty()) {
+      const std::string ranksStr = c10::Join(", ", failedRanks);
       const std::string error = c10::str(
           "Ranks ",
           ranksStr,

@@ -38,6 +38,7 @@ from torch.testing._internal.common_distributed import (
     require_n_gpus_for_nccl_backend,
     requires_nccl_version,
     captured_output,
+    with_nccl_blocking_wait,
 )
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -5178,9 +5179,6 @@ class DistributedTest:
 
         def _test_monitored_barrier_allreduce_hang(self, wait_all_ranks):
             # tests expected behavior when nonzero rank hangs.
-            if "NCCL_ASYNC_ERROR_HANDLING" in os.environ:
-                del os.environ["NCCL_ASYNC_ERROR_HANDLING"]
-            os.environ["NCCL_BLOCKING_WAIT"] = "1"
             nccl_pg = dist.new_group(
                 ranks=list(i for i in range(int(self.world_size))),
                 timeout=timedelta(seconds=2),
@@ -5222,6 +5220,7 @@ class DistributedTest:
             ):
                 gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks)
 
+        @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_rocm
@@ -5231,13 +5230,14 @@ class DistributedTest:
             # report first timed out rank.
             self._test_monitored_barrier_allreduce_hang(wait_all_ranks=False)
 
+        @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_rocm
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_monitored_barrier_allreduce_hang_wait_all_ranks(self):
             # tests expected behavior when nonzero rank hangs and we want to
-            # report first timed out rank.
+            # report all timed out ranks.
             self._test_monitored_barrier_allreduce_hang(wait_all_ranks=True)
 
         @require_backend({"gloo"})
@@ -5260,8 +5260,7 @@ class DistributedTest:
         def test_monitored_barrier_failure_order(self):
             # Ensure that the first (in sorted order) rank is reported when
             # multiple ranks fail to pass the monitored_barrier.
-            # TODO: Provide ability to wait and report all failed ranks:
-            # https://github.com/pytorch/pytorch/issues/54879
+            # TODO(#54879): Provide ability to wait and report all failed ranks
             expected_first_failed_rank = 2
             timeout = timedelta(seconds=2)
             if self.rank == 0:

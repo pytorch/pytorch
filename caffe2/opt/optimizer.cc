@@ -45,4 +45,3 @@ NetDef optimize(NetDef net, int level) {
 
 } // namespace opt
 } // namespace caffe2
-
