@@ -433,7 +433,7 @@ void initTensorExprBindings(PyObject* module) {
 
   using TSGraph = std::shared_ptr<Graph>;
   py::class_<TensorExprKernel>(te, "TensorExprKernel")
-      .def(py::init<const TSGraph>())
+      .def(py::init<const TSGraph&>())
       .def(
           "run",
           [](TensorExprKernel& self, const py::tuple& inputs) {
@@ -469,7 +469,7 @@ void initTensorExprBindings(PyObject* module) {
             return createPyObjectForStack(std::move(stack));
           })
       .def(
-          "get_code_gen_stmt",
+          "get_codegen_stmt",
           [](TensorExprKernel& self) { return self.getCodeGenStmt(); },
           py::return_value_policy::reference)
       .def(

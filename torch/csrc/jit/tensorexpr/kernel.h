@@ -35,7 +35,7 @@ class TORCH_API TensorExprKernel {
     return codegen_->getCodeText(attr);
   }
 
-  std::shared_ptr<Graph> graph() {
+  const std::shared_ptr<Graph> graph() {
     return graph_;
   }
 
