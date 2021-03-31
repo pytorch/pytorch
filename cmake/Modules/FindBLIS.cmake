@@ -8,10 +8,6 @@
 # CPU only Dockerfile to build with AMD BLIS is available at the location
 # pytorch/docker/pytorch/cpu-blis/Dockerfile
 #
-# Example commandline to build PyTorch with AMD BLIS:
-# sudo DOCKER_BUILDKIT=1 docker build . -t docker-image-repo-name
-# Example commandline to run the built docker container:
-# sudo docker run --name container-name -it docker-image-repo-name
 
 
 SET(BLIS_INCLUDE_SEARCH_PATHS
@@ -30,8 +26,6 @@ SET(BLIS_LIB_SEARCH_PATHS
   /usr/lib64/blis
   /usr/local/blis/lib
   /opt/blis/lib
-  $ENV{BLIS}
-  $ENV{BLIS}/lib
   $ENV{BLIS_HOME}
   $ENV{BLIS_HOME}/lib
 )
