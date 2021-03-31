@@ -50,7 +50,10 @@ fi
 # determine number of GPU devices available for running tests in parallel
 # this also only turns on the --run-parallel feature for GPU jobs; CPU jobs run normally
 if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export PYTORCH_DEVICE_COUNT=$(python -c "import torch; print(torch.cuda.device_count() if torch.cuda.is_available() else 1)")
+  export PYTORCH_DEVICE_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+  export PYTORCH_GPU_RUN_PARALLEL="-- --run-parallel ${PYTORCH_DEVICE_COUNT}"
+elif [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export PYTORCH_DEVICE_COUNT=$(rocminfo | grep -E 'Name:.*\sgfx' | wc -l)
   export PYTORCH_GPU_RUN_PARALLEL="-- --run-parallel ${PYTORCH_DEVICE_COUNT}"
 fi
 
