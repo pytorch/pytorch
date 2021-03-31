@@ -699,14 +699,24 @@ bool test_cat_dim1_nonarray_1() {
 }
 
 bool test_softmax() {
-  __block std::vector<int64_t> size{2, 3, 1, 1};
-  return TEST(size, __PRETTY_FUNCTION__, ^bool {
-    auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::log_softmax(X1, 1);
-    auto X2 = X1.metal();
-    auto Y2 = at::log_softmax(X2, 1).cpu();
-    return almostEqual(Y1, Y2);
-  });
+    __block std::vector<int64_t> size{2,2};
+    return TEST(size, __PRETTY_FUNCTION__, ^bool {
+      auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto Y1 = at::softmax(X1, 0);
+      auto X2 = X1.metal();
+      auto Y2 = at::softmax(X2, 0).cpu();
+      return almostEqual(Y1, Y2);
+    });
+}
+bool test_log_softmax() {
+    __block std::vector<int64_t> size{2,2};
+    return TEST(size, __PRETTY_FUNCTION__, ^bool {
+      auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto Y1 = at::log_softmax(X1, 1);
+      auto X2 = X1.metal();
+      auto Y2 = at::log_softmax(X2, 1).cpu();
+      return almostEqual(Y1, Y2);
+    });
 }
 
 bool test_upsampling_nearest2d_vec() {
