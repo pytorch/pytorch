@@ -1550,7 +1550,7 @@ Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
 
 .. math::
-    \text{out}_{i} = \left\lceil \text{input}_{i} \right\rceil = \left\lfloor \text{input}_{i} \right\rfloor + 1
+    \text{out}_{i} = \left\lceil \text{input}_{i} \right\rceil
 """ + r"""
 Args:
     {input}
