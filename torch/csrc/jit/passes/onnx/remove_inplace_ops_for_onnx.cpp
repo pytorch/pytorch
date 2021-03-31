@@ -434,45 +434,43 @@ void InplaceConverter::ValueTracker::registerSetValue(
             });
       });
 
-  if (!registered) {
+  auto isAncestor = [](const Block* a, const Block* b) {
+    while (b && b->owningNode()) {
+      if (a == b) {
+        return true;
+      }
+      b = b->owningNode()->owningBlock();
+    }
+    return a == b;
+  };
+  bool from_outer_alias = std::any_of(
+      sorted_alias.begin(),
+      sorted_alias.end(),
+      [&owning_blocknode, isAncestor](Value* alias) {
+        return isAncestor(
+            alias->node()->owningBlock(), owning_blocknode->owningBlock());
+      });
+
+  // Only register as output, if this value has not been registered yet, and has
+  // alias from outer block.
+  if (!registered && from_outer_alias) {
     if (owning_block_nkind == prim::Loop) {
       owning_block->registerOutput(new_v);
       auto new_block_in = owning_block->addInput();
       sorted_alias.insert(new_block_in);
       alias_to_value_[new_block_in] = root_v;
       owning_blocknode->addInput(root_v);
-      auto* new_blocknode_out = owning_blocknode->addOutput();
-      registerSetValue(root_v, new_blocknode_out);
     } else if (owning_block_nkind == prim::If) {
-      // Only register as output, if there this value comes from outer block.
-      auto isAncestor = [](const Block* a, const Block* b) {
-        while (b && b->owningNode()) {
-          if (a == b) {
-            return true;
-          }
-          b = b->owningNode()->owningBlock();
+      for (auto* if_sub_block : owning_blocknode->blocks()) {
+        if (owning_block == if_sub_block) {
+          if_sub_block->registerOutput(new_v);
+        } else {
+          if_sub_block->registerOutput(root_v);
         }
-        return a == b;
-      };
-      bool from_outer = std::any_of(
-          sorted_alias.begin(),
-          sorted_alias.end(),
-          [&owning_blocknode, isAncestor](Value* alias) {
-            return isAncestor(
-                alias->node()->owningBlock(), owning_blocknode->owningBlock());
-          });
-      if (from_outer) {
-        for (auto* if_sub_block : owning_blocknode->blocks()) {
-          if (owning_block == if_sub_block) {
-            if_sub_block->registerOutput(new_v);
-          } else {
-            if_sub_block->registerOutput(root_v);
-          }
-        }
-        auto* new_blocknode_out = owning_blocknode->addOutput();
-        registerSetValue(root_v, new_blocknode_out);
       }
     }
+    auto* new_blocknode_out = owning_blocknode->addOutput();
+    registerSetValue(root_v, new_blocknode_out);
   }
 
   GRAPH_UPDATE(
