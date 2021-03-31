@@ -25,7 +25,6 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
     (random_symmetric_matrix, random_symmetric_psd_matrix,
-     # random_square_matrix_of_rank,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed, SEED,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
@@ -2823,9 +2822,9 @@ op_db: List[OpInfo] = [
                # unstable if the matrix has repeated singular values, see
                # https://github.com/pytorch/pytorch/issues/53364
                SkipInfo('TestGradients', 'test_fn_grad', device_type='cuda',
-                        dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
+                        dtypes=(torch.float64,), active_if=TEST_WITH_ROCM),
                SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda',
-                        dtypes=[torch.float64, torch.float32], active_if=TEST_WITH_ROCM),
+                        dtypes=(torch.float64, torch.float32), active_if=TEST_WITH_ROCM),
            )),
 
     HermitianOpInfo('linalg.eigh',
