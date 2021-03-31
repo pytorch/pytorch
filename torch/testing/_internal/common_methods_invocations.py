@@ -808,7 +808,7 @@ def sample_inputs_index_select(op_info, device, dtype, requires_grad, **kwargs):
             args=(0, torch.tensor(0, dtype=torch.int64, device=device))),
     )
 
-def sample_inputs_getitem(op_info, device, dtype, requires_grad):
+def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
     test_args = [
         (dont_convert([1, 2]),),
         (slice(0, 3),),
@@ -832,7 +832,7 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad):
         args=args)
         for args in test_args)
 
-def sample_inputs_index_put(op_info, device, dtype, requires_grad):
+def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
     inputs = []
     for accumulate in [False, True]:
         # Test with indices arg
@@ -992,7 +992,7 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           requires_grad=requires_grad),))
     return inputs
 
-def sample_inputs_outer(op_info, device, dtype, requires_grad):
+def sample_inputs_outer(op_info, device, dtype, requires_grad, **kwargs):
     inputs = []
     arg_a = make_tensor((S,), device, dtype, requires_grad=requires_grad)
     arg_b = make_tensor((M,), device, dtype, requires_grad=requires_grad)
@@ -1808,32 +1808,33 @@ def sample_inputs_floor_divide(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
     for_inplace_variant = kwargs.get('for_inplace_variant', False)
-    samples = (
-        SampleInput(make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-                    args=(torch.randn(S, S, device=device) > 0,
-                          make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+    samples = [
+        SampleInput(_make_tensor_helper((M, M)),
+                    args=(torch.randn(M, M, device=device) > 0, _make_tensor_helper((M, M)))),
 
-        SampleInput(make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-                    args=(torch.randn((S,), device=device) > 0,
-                          make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+        SampleInput(_make_tensor_helper((M, M)),
+                    args=(torch.randn((M,), device=device) > 0, _make_tensor_helper((M, M)))),
 
-        SampleInput(make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-                    args=(bernoulli_scalar().to(device),
-                          make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad))),
-    )
+        SampleInput(_make_tensor_helper((M, M)),
+                    args=(bernoulli_scalar().to(device), _make_tensor_helper((M, M)))),
+    ]
 
     if not for_inplace_variant:
-        samples += (SampleInput(_make_tensor_helper((S,)),  # type: ignore
-                                args=(torch.randn(S, S, device=device) > 0, _make_tensor_helper((S, S)))),)
+        samples.append(SampleInput(_make_tensor_helper((S,)),
+                                   args=(torch.randn(S, S, device=device) > 0, _make_tensor_helper((S, S)))),)
 
     return samples
 
+
 def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
-    for_inplace_variant = kwargs.get('for_inplace_variant', False)
     def _make_tensor_helper(shape):
         return make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
 
+    for_inplace_variant = kwargs.get('for_inplace_variant', False)
     samples = (
         SampleInput(_make_tensor_helper((S, S)), args=(torch.randn(S, S, device=device) > 0, 10)),
         SampleInput(_make_tensor_helper((S, S)), args=(torch.randn(S, S, device=device) > 0, _make_tensor_helper(()))),
@@ -1845,7 +1846,9 @@ def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
 
     if not for_inplace_variant:
         samples += (SampleInput(_make_tensor_helper((S,)),  # type: ignore
-                                args=(torch.randn(S, S, device=device) > 0, _make_tensor_helper((S, S)))),)
+                                args=(torch.randn(S, S, device=device) > 0, _make_tensor_helper(()))),)
+        samples += (SampleInput(_make_tensor_helper((S,)),  # type: ignore
+                                args=(torch.randn(S, S, device=device) > 0, 10)),)
 
     return samples
 

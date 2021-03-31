@@ -228,12 +228,13 @@ class TestCommon(JitCommonTestCase):
             inplace_ops.append(a_op.inplace_variant)
         aliases = tuple(aliases)
 
-        inplace_ops = tuple(v for v in inplace_ops if v is not None)
+        inplace_variants = tuple(v for v in inplace_ops if v is not None)
         variants = tuple(v for v in (method, inplace) + aliases if v is not None)
-        outplace_variants = tuple(set(variants) - set(inplace_ops))
+        outplace_variants = tuple(set(variants) - set(inplace_variants))
 
         _requires_grad = (op.supports_autograd and
                           (dtype.is_floating_point or op.supports_complex_autograd))
+        print("_Requires_GRAD", _requires_grad)
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad,
                                    for_inplace_variant=False)
 
@@ -278,14 +279,14 @@ class TestCommon(JitCommonTestCase):
                     #   tensor inputs
                     # TODO: update to handle checking grads of all tensor inputs as
                     #   derived from each tensor output
-                    if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)):
+                    if (_requires_grad and isinstance(expected_forward, torch.Tensor)):
                         expected_forward.sum().backward()
                         expected_grad = sample.input.grad
 
         _test_consistency_helper(samples, outplace_variants)
 
         if len(inplace_ops) > 0:
-            inplace_samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd,
+            inplace_samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad,
                                                for_inplace_variant=True)
             _test_consistency_helper(inplace_samples, inplace_variants)
 
