@@ -102,8 +102,18 @@ const std::map<std::string, at::Tensor> Module::named_parameters() const {
   return params;
 }
 
+// We will continue to suppor this API for now as this is being relied upon
+// for profiling.
+// We really need to change this part, so in the next step for profiling support
+// for delegates, the first thing will be to retwrite how profiling is done
+// for lite interpreter.
 std::string Module::get_forward_method_debug_info(size_t pc) const {
-  return find_method("forward")->get_module_debug_info(pc);
+  auto debug_handle = find_method("forward")->get_debug_handle(pc);
+  std::string top_module_type_name;
+  if (_ivalue()->type()->name()) {
+    top_module_type_name = _ivalue()->type()->name().value().name();
+  }
+  return getDebugTable()->getModuleHierInfo(debug_handle, top_module_type_name);
 }
 
 void Module::train(bool on) {
@@ -157,8 +167,12 @@ void Method::run(Stack& stack) const {
     }
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+    std::string top_module_type_name;
+    if (owner_->_ivalue()->type()->name()) {
+      top_module_type_name = owner_->_ivalue()->type()->name().value().name();
+    }
     auto debug_string = owner_->getDebugTable()->getSourceDebugString(
-        function_->getExceptionDebugHandle());
+        function_->getExceptionDebugHandle(), top_module_type_name);
     error.add_context(debug_string);
 #endif
     if (observer) {
@@ -179,8 +193,12 @@ void Method::run(Stack& stack) const {
       }
     } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+      std::string top_module_type_name;
+      if (owner_->_ivalue()->type()->name()) {
+        top_module_type_name = owner_->_ivalue()->type()->name().value().name();
+      }
       auto debug_string = owner_->getDebugTable()->getSourceDebugString(
-          function_->getExceptionDebugHandle());
+          function_->getExceptionDebugHandle(), top_module_type_name);
       error.add_context(debug_string);
 #endif
       if (observer) {

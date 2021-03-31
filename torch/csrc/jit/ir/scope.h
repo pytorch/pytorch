@@ -76,6 +76,11 @@ struct ModuleInstanceInfo {
   std::string instance_name() const {
     return instance_name_;
   }
+
+  bool operator==(const ModuleInstanceInfo& rhs) {
+    return (class_type() == rhs.class_type()) &&
+        (instance_name() == rhs.instance_name());
+  }
 };
 
 /**
@@ -143,9 +148,32 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   // Return next element in the callstack list.
   c10::optional<InlinedCallStackPtr> callee() const;
 
+  // Return next element in the callstack list.
+  c10::optional<ModuleInstanceInfo> module_instance() const;
+
+  // Return next element in the callstack list.
+  SourceRange source_range() const;
+
   // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
+
+  void setCallee(c10::optional<InlinedCallStackPtr>);
+
+  bool operator==(const InlinedCallStack& rhs) const {
+    // No need to compare fn_, since source_range equivalence check
+    // should suffice.
+    return (module_instance().has_value() ==
+            rhs.module_instance().has_value()) &&
+        (module_instance().has_value() &&
+         module_instance().value() == rhs.module_instance().value()) &&
+        callee() == rhs.callee() && source_range() == rhs.source_range();
+  }
+
+  bool operator!=(const InlinedCallStack& rhs) const {
+    return !(*this == rhs);
+  }
 };
 
+using DelegateDebugInfoType = std::pair<SourceRange, InlinedCallStackPtr>;
 } // namespace jit
 } // namespace torch

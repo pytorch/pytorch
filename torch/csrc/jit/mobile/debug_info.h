@@ -1,7 +1,8 @@
 #pragma once
 #include <c10/util/flat_hash_map.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/ir/scope.h>
 
 namespace torch {
 namespace jit {
@@ -19,11 +20,17 @@ namespace jit {
 class MobileDebugTable {
  public:
   MobileDebugTable(
-      std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader);
-  std::string getSourceDebugString(const int64_t debug_handle);
+      std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader,
+      const std::shared_ptr<CompilationUnit>& cu);
+  std::string getSourceDebugString(
+      const int64_t debug_handle,
+      const std::string& top_module_type_name = "");
+  std::string getModuleHierInfo(
+      const int64_t debug_handle,
+      const std::string& top_module_type_name = "");
 
  private:
-  ska::flat_hash_map<int64_t, SourceRange> source_range_map_;
+  ska::flat_hash_map<int64_t, DelegateDebugInfoType> callstack_ptr_map_;
 };
 
 } // namespace jit

@@ -24,14 +24,12 @@ class Function {
       const std::string& name,
       const std::string& overload_name,
       int64_t model_version);
-  void set_module_debug_info_list_size(size_t size);
-  void set_module_info(const std::string& module_info, size_t pc);
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
 
   void set_register_size(size_t size);
 
-  std::string get_module_debug_info(size_t pc) const;
+  int64_t get_debug_handle(size_t pc) const;
   const std::shared_ptr<Code> get_code() const;
 
   void setSchema(c10::FunctionSchema schema);
@@ -46,7 +44,6 @@ class Function {
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;
   at::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
-  std::vector<std::string> pc_to_module_debug_info_;
 };
 
 } // namespace mobile

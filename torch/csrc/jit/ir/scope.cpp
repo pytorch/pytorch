@@ -120,6 +120,18 @@ c10::optional<InlinedCallStackPtr> InlinedCallStack::callee() const {
   return callee_;
 }
 
+void InlinedCallStack::setCallee(c10::optional<InlinedCallStackPtr> callee) {
+  callee_ = std::move(callee);
+}
+
+c10::optional<ModuleInstanceInfo> InlinedCallStack::module_instance() const {
+  return module_instance_info_;
+}
+
+SourceRange InlinedCallStack::source_range() const {
+  return source_range_;
+}
+
 std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   std::vector<InlinedCallStackEntry> r;
   c10::optional<InlinedCallStackPtr> current = intrusive_from_this();
