@@ -35,8 +35,8 @@ void main() {
   const int shzy = shz + shy;
 
   i[tid.z][tid.y][tid.x] = texelFetch(uInput, ivec3(ipos.x, ipos.y, pos.z), 0) *
-                           int(ipos.x >= 0 && ipos.x < uBlock.limits.x) *
-                           int(ipos.y >= 0 && ipos.y < uBlock.limits.y);
+                           int(all(greaterThanEqual(ipos, ivec2(0,0)))) *
+                           int(all(lessThan(ipos, uBlock.limits)));
 
   memoryBarrierShared();
   barrier();
