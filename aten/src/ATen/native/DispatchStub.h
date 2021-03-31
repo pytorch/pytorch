@@ -196,9 +196,9 @@ struct RegisterHIPDispatch {
     name(const name&) = delete;            \
     name& operator=(const name&) = delete; \
   };                                       \
-  extern TORCH_API struct name name
+  extern TORCH_API const struct name name
 
-#define DEFINE_DISPATCH(name) struct name name
+#define DEFINE_DISPATCH(name) const struct name name
 
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
   template <> decltype(fn) DispatchStub<decltype(fn), struct name>::arch = fn;
