@@ -2823,6 +2823,8 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/53364
                SkipInfo('TestGradients', 'test_fn_grad', device_type='cuda',
                         dtypes=(torch.float64,), active_if=TEST_WITH_ROCM),
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda',
+                        dtypes=(torch.float64,), active_if=TEST_WITH_ROCM),
                SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda',
                         dtypes=(torch.float64, torch.float32), active_if=TEST_WITH_ROCM),
            )),
