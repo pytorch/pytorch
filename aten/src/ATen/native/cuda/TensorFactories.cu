@@ -140,6 +140,11 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
       std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max(), generator);
     auto keys_tmp = at::empty_like(keys);
     auto keys_out = keys_tmp.data_ptr<int64_t>();
+    std::cout << "before shuffle" << std::endl;
+    std::cout << "result: " << result << std::endl;
+    std::cout << "keys: " << keys << std::endl;
+    std::cout << "keys_tmp: " << keys_tmp << std::endl;
+    std::cout << "range: " << range << std::endl;
     cudaDeviceSynchronize();
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
@@ -148,7 +153,15 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         range.data_ptr<scalar_t>(), shuffled_data_,
         n);
     });
+    std::cout << "after launch" << std::endl;
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     cudaDeviceSynchronize();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    std::cout << "after shuffle" << std::endl;
+    std::cout << "result: " << result << std::endl;
+    std::cout << "keys: " << keys << std::endl;
+    std::cout << "keys_tmp: " << keys_tmp << std::endl;
+    std::cout << "range: " << range << std::endl;
   }
 
   if (!result.is_contiguous()) {
