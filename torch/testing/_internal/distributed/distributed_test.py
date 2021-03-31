@@ -5284,4 +5284,4 @@ class DistributedTest:
             rank_str = ", ".join([str(i) for i in range(1, int(self.world_size))])
             err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
             with self.assertRaisesRegex(RuntimeError, err_regex):
-                dist.monitored_barrier(timeout=timeout)
+                dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)

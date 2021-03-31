@@ -1081,8 +1081,6 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::chrono::milliseconds& timeout,
                  bool waitAllRanks) {
-                     LOG(INFO) << "kUnsetTimeout is " << ::c10d::kUnsetTimeout.count();
-                     LOG(INFO) << "wait all ranks is: " << waitAllRanks;
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
                 return self->monitoredBarrier(opts, waitAllRanks);
