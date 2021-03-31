@@ -2097,7 +2097,7 @@ def _gradcheck(fn, inputs, **kwargs):
     # that calls into _gradcheck but enables "fast_and_slow" by default.
     if kwargs.pop("fast_and_slow", None) is not None:
         # When fast_and_slow=True, we make sure the fast and slow implementations behave the same
-        if not has_complex_inputs_or_inputs(fn, inputs) or kwargs.pop("fast_mode", True) is False:
+        if not has_complex_inputs_or_inputs(fn, inputs) and not kwargs.pop("fast_mode", True) is False:
             fast = _gradcheck(fn, inputs, **kwargs, fast_mode=True)
             try:
                 slow = _gradcheck(fn, inputs, **kwargs, fast_mode=False)
@@ -2126,7 +2126,7 @@ def _gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
     if kwargs.pop("fast_and_slow", None) is not None:
         # When fast_and_slow=True, we make sure the fast and slow implementations behave the same
-        if not has_complex_inputs_or_inputs(fn, inputs) or kwargs.pop("fast_mode", True) is False:
+        if not has_complex_inputs_or_inputs(fn, inputs) and not kwargs.pop("fast_mode", True) is False:
             fast = _gradgradcheck(fn, inputs, **kwargs, fast_mode=True)
             try:
                 slow = _gradgradcheck(fn, inputs, **kwargs, fast_mode=False)

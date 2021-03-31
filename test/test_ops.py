@@ -6,11 +6,8 @@ import torch
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-<<<<<<< HEAD
-    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor)
-=======
-    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor, gradcheck, gradgradcheck)
->>>>>>> ac2041f76b... Implement faster gradcheck
+    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
+     gradcheck, gradgradcheck)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, method_tests)
 from torch.testing._internal.common_device_type import \
