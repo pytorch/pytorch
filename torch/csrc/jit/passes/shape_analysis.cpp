@@ -18,6 +18,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "ATen/core/jit_type.h"
 
 namespace torch {
 namespace jit {
@@ -287,7 +288,15 @@ class ShapePropagator {
       auto new_type =
           unifyTypes(lhs[i]->type(), rhs[i]->type(), /*default_to_any=*/true);
       AT_ASSERT(new_type);
+      if (!(*new_type)->isSubtypeOf(old_output_type)) {
+        return changed;
+      }
+      // if ((*new_type)->cast<c10::OptionalType>() && !old_output_type->cast<c10::OptionalType>()) {
+      //   return changed;
+      // }
       outputs[i]->setType(*new_type);
+
+
       if (*old_output_type != *outputs[i]->type())
         changed = true;
     }

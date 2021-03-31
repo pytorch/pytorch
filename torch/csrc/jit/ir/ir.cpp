@@ -743,6 +743,7 @@ void Value::inferTypeFrom(
 bool Value::mustBeNone() const {
   return type()->cast<NoneType>() || node_->mustBeNone();
 }
+
 bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
       !type()->cast<OptionalType>();
@@ -927,6 +928,12 @@ bool Node::matches(const FunctionSchema& schema) const {
     const MatchTypeReturn matched_type =
         matchTypeVariables(formal, actuals[i]->type(), type_env);
     if (!matched_type.success()) {
+
+      if (kind() == aten::mul) {
+        std::cerr << "value %" << actuals[i]->debugName() << " of type " << *actuals[i]->type() << std::endl;
+        std::cerr << " node = " << *this << std::endl;
+        std::cerr << "@@@ mul didnt match because " << matched_type.reason() << std::endl;
+      }
       return false;
     }
 
@@ -964,6 +971,25 @@ bool Node::matches(
     }
   }
   return true;
+}
+
+c10::optional<size_t> Node::indexOfOutput(Value* v, bool allow_duplicates) {
+  c10::optional<size_t> res;
+  for (size_t i = 0; i < v->node()->outputs().size(); i++) {
+    if (v == v->node()->output(i)) {
+      
+      if (allow_duplicates) {
+        return {i};
+      } else {
+        if (res.has_value()) {
+          return {};
+        } else {
+          res = i;
+        }
+      }
+    } 
+  }
+  return res;
 }
 
 bool Node::mustBeNone() const {

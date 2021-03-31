@@ -413,7 +413,7 @@ const std::vector<std::string> functions = {
                 if bias is not None:
                    grad_bias = grad_output._grad_sum_to_size(bias.size())
                 else:
-                   grad_bias = None
+                   grad_bias = None #torch.ones([0])
 
                 weight_size = weight.size()
                 grad_input = torch.matmul(grad_output, weight)

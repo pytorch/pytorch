@@ -415,6 +415,7 @@ class DeadCodeEliminator {
 void EliminateDeadCode(
     const std::shared_ptr<Graph>& graph,
     DCESideEffectPolicy sideEffectPolicy) {
+  GRAPH_DUMP("Before EliminateDeadCode: ", graph);
   DeadCodeEliminator(graph, sideEffectPolicy)
       .run(graph->block(), /*recurse=*/true);
   GRAPH_DUMP("After EliminateDeadCode: ", graph);

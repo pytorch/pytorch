@@ -346,6 +346,56 @@ struct ReverseDetails {
   Block* reverse_block;
 };
 
+static void unwrapOptionalGradient(Value* dx) {
+  std::vector<Value*> stack;
+  stack.push_back(dx);
+  
+  const static auto optional_tensor_type =
+      OptionalType::create(TensorType::get());
+
+  while (!stack.empty()) {
+    auto v = stack.back();
+    stack.pop_back();
+    if (auto opt_type = v->type()->cast<OptionalType>()) {
+      if (auto tensor_type = opt_type->getElementType()->cast<TensorType>()) {
+        GRAPH_DEBUG("Unwrapping the optional part of %", v->debugName());
+        v->setType(tensor_type);
+        auto index = v->node()->indexOfOutput(v);
+        if (index) {
+          for (auto b: v->node()->blocks()) {
+            GRAPH_DEBUG("Adding %", b->outputs()[*index], " to a work stack for unwrapping");
+            stack.push_back(b->outputs()[*index]);
+          }
+        }
+      }
+    }
+  }
+}
+
+// static void unwrapOptionalGradient(Value* dx) {
+//   const static auto optional_tensor_type =
+//       OptionalType::create(TensorType::get());
+
+//   if (auto opt_type = dx->type()->cast<OptionalType>()) {
+//     if (auto tensor_type = opt_type->getElementType()->cast<TensorType>()) {
+//       GRAPH_DEBUG("Unwrapping the optional part of ", dx->debugName());
+//       dx->setType(tensor_type);
+//     }
+//   }
+// }
+
+// static Value* unwrapOptionalGradient(Value* dx) {
+//   const static auto optional_tensor_type =
+//       OptionalType::create(TensorType::get());
+//   if (*dx->type() != *optional_tensor_type) {
+//     return dx;
+//   }
+//   WithInsertPoint wip{dx->node()->next()};
+//   GRAPH_DEBUG("Unwrapping optional tensor value ", dx->debugName());
+//   return dx->node()->owningGraph()->insert(
+//       prim::unchecked_unwrap_optional, {dx});
+// }
+
 // AutogradAdd is a special addition function that handles Undef
 // AutogradAdd(a, b) == a + b if defined(a) and defined(b)
 // AutogradAdd(Undef, b) == b
@@ -431,6 +481,14 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
       // aten::type_as case.
       if (!grad_inputs[i])
         continue;
+
+      // if a backward function returns `None` or `Tensor` (i.e.
+      // Optional[Tensor]) as a gradient for one of the forward's inputs, we
+      // need to strip off the optional part, otherwise any following
+      // computations that use the gradient may fail schema matching
+      
+      //grad_inputs[i] = unwrapOptionalGradient(grad_inputs[i]);
+      unwrapOptionalGradient(grad_inputs[i]);
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
@@ -662,7 +720,47 @@ static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
   // multiple times. Make sure we deduplicate them before lifting.
   EliminateCommonSubexpression(grad_desc.f);
   deduplicateSizeCaptures(grad_desc, rev_info);
+  GRAPH_DEBUG("Reverse Graph: ", *rev_info.reverse_block->owningNode());
   eliminateDeadCode(rev_info);
+}
+
+static value_list removeRecomputedValues(const value_list& reverse_captures, Block* reverse_block) {
+  value_list result;
+
+
+      // for (auto input : src->inputs()) {
+      //   local_map[input] = this->addInput()->copyMetadata(input);
+      // }
+
+  std::unordered_map<Value*, Value*> mat2recomp_values;
+  auto env = [&mat2recomp_values](Value* v) { 
+    auto it = mat2recomp_values.find(v);
+    if (it != mat2recomp_values.end()) {
+      return it->second;
+    }
+    return v; 
+  };
+
+  for (auto v : reverse_captures) {
+    if (v->node()->kind() == aten::relu) {
+      WithInsertPoint wip(v->node());
+
+      TORCH_INTERNAL_ASSERT(v->node()->outputs().size() == 1);
+      auto graph = v->node()->owningGraph();
+      
+      auto copy = graph->createClone(v->node(), env);
+      graph->insertNode(copy);
+      for (size_t i = 0; i < v->node()->outputs().size(); i++) {
+        mat2recomp_values[v] = copy->output();
+      }
+  } else {
+    result.push_back(v);
+  }
+
+  return result;
+}
+
+  return result;
 }
 
 // Takes a grad_desc.f returned from `addReverseInline` and splits off the
@@ -686,6 +784,8 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   // they are not already an input or an output of f
   // Invariant: topo sorted
   value_list reverse_captures = getReverseCaptures(grad_desc);
+
+  //reverse_captures = removeRecomputed(value_list);
 
   // --------------------------------------------------------------------------
   // 2. Prepare input/outputs lists for f and df

@@ -478,6 +478,8 @@ struct TORCH_API Node {
     return c10::nullopt;
   }
 
+  c10::optional<size_t> indexOfOutput(Value* v, bool allow_duplicates = false);
+
   // Returns true if the value of input name is statically known
   bool is_constant(Symbol name) const {
     return static_cast<bool>(get(name));
