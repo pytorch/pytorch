@@ -383,25 +383,6 @@ vTensor pack_weights_2d_winograd_2_3(
       const float m31 = s21;
       const float m32 = s22;
 
-      /*
-      dst_k[(4*dst_oh + 0)*dst_kw_sz + 16*dst_ow + 4*0 + dst_iw] = m00;
-      dst_k[(4*dst_oh + 0)*dst_kw_sz + 16*dst_ow + 4*1 + dst_iw] = (m00 + m01 + m02)/2.f;
-      dst_k[(4*dst_oh + 0)*dst_kw_sz + 16*dst_ow + 4*2 + dst_iw] = (m00 - m01 + m02)/2.f;
-      dst_k[(4*dst_oh + 0)*dst_kw_sz + 16*dst_ow + 4*3 + dst_iw] = m02;
-      dst_k[(4*dst_oh + 1)*dst_kw_sz + 16*dst_ow + 4*0 + dst_iw] = m10;
-      dst_k[(4*dst_oh + 1)*dst_kw_sz + 16*dst_ow + 4*1 + dst_iw] = (m10 + m11 + m12)/2.f;
-      dst_k[(4*dst_oh + 1)*dst_kw_sz + 16*dst_ow + 4*2 + dst_iw] = (m10 - m11 + m12)/2.f;
-      dst_k[(4*dst_oh + 1)*dst_kw_sz + 16*dst_ow + 4*3 + dst_iw] = m12;
-      dst_k[(4*dst_oh + 2)*dst_kw_sz + 16*dst_ow + 4*0 + dst_iw] = m20;
-      dst_k[(4*dst_oh + 2)*dst_kw_sz + 16*dst_ow + 4*1 + dst_iw] = (m20 + m21 + m22)/2.f;
-      dst_k[(4*dst_oh + 2)*dst_kw_sz + 16*dst_ow + 4*2 + dst_iw] = (m20 - m21 + m22)/2.f;
-      dst_k[(4*dst_oh + 2)*dst_kw_sz + 16*dst_ow + 4*3 + dst_iw] = m22;
-      dst_k[(4*dst_oh + 3)*dst_kw_sz + 16*dst_ow + 4*0 + dst_iw] = m30;
-      dst_k[(4*dst_oh + 3)*dst_kw_sz + 16*dst_ow + 4*1 + dst_iw] = (m30 + m31 + m32)/2.f;
-      dst_k[(4*dst_oh + 3)*dst_kw_sz + 16*dst_ow + 4*2 + dst_iw] = (m30 - m31 + m32)/2.f;
-      dst_k[(4*dst_oh + 3)*dst_kw_sz + 16*dst_ow + 4*3 + dst_iw] = m32;
-      */
-
       dst_k[(4*dst_oh + 0)*dst_kw_sz +  0*dst_ow_sz + 4*dst_ow + dst_iw] = m00;
       dst_k[(4*dst_oh + 0)*dst_kw_sz +  4*dst_ow_sz + 4*dst_ow + dst_iw] = (m00 + m01 + m02)/2.f;
       dst_k[(4*dst_oh + 0)*dst_kw_sz +  8*dst_ow_sz + 4*dst_ow + dst_iw] = (m00 - m01 + m02)/2.f;
