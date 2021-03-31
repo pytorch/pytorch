@@ -569,6 +569,10 @@ std::tuple<Tensor, Tensor> log_matmul_backward(
   // - the transpose is in the final dimensions
   // - we have to add reductions (sum to size) for broadcasting
 
+  Tensor grad_lhs, grad_rhs;
+  if (!grad_out.defined()) {
+    return std::tuple<Tensor, Tensor>{grad_lhs, grad_rhs};
+  }
   auto almost_neg_inf = AT_DISPATCH_FLOATING_TYPES_AND2(
       at::kBFloat16,
       at::kHalf,
@@ -602,15 +606,11 @@ std::tuple<Tensor, Tensor> log_matmul_backward(
     auto max_part = at::maximum(pos_part, neg_part);
     max_part = at::where(
         max_part.abs() == INFINITY,
-        max_part,
-        at::zeros({}, max_part.options()));
+        at::zeros({}, max_part.options()),
+        max_part);
     return ((pos_part - max_part).exp() - (neg_part - max_part).exp()) *
         max_part.exp();
   };
-  Tensor grad_lhs, grad_rhs;
-  if (!grad_out.defined()) {
-    return {grad_lhs, grad_rhs};
-  }
   auto log_grad_out_pos_res =
       at::where(grad_out > 0, grad_out.log() - result, almost_neg_inf);
   auto log_grad_out_neg_res =
@@ -625,7 +625,7 @@ std::tuple<Tensor, Tensor> log_matmul_backward(
         compute_grad_part(rhs, lhs, log_grad_out_pos_res, /*me_is_lhs=*/false),
         compute_grad_part(rhs, lhs, log_grad_out_neg_res, /*me_is_lhs=*/false));
   }
-  return {grad_lhs, grad_rhs};
+  return std::tuple<Tensor, Tensor>{grad_lhs, grad_rhs};
 }
 
 Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim) {
