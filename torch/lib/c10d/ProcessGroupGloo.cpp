@@ -2738,7 +2738,7 @@ void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
   auto startTime = std::chrono::steady_clock::now();
   auto worldSize = this->getSize();
   // Holds mapping of rank to pair of recv/send work.
-  std::unordered_map<
+  std::map<
       int,
       std::tuple<
           c10::intrusive_ptr<ProcessGroup::Work>,

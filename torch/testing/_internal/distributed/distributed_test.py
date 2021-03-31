@@ -5137,7 +5137,10 @@ class DistributedTest:
             if self.rank == failed_rank:
                 return
             if self.rank == 0:
-                with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"Rank {failed_rank} failed to pass monitoredBarrier"
+                ):
                     dist.monitored_barrier(timeout=timeout)
             else:
                 # It is permissible for other ranks that did not fail to
@@ -5162,7 +5165,10 @@ class DistributedTest:
                 return
 
             if self.rank == 0:
-                with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"Rank {failed_rank} failed to pass monitoredBarrier"
+                ):
                     dist.monitored_barrier(subgroup, timeout)
             else:
                 # Other ranks call into monitored_barrier, but this should be a
@@ -5205,19 +5211,15 @@ class DistributedTest:
                     nccl_pg.allreduce(tensors).wait(timedelta(seconds=0.1))
                 return
 
-            # Rank 0 should report timed out rank.
+            # Rank 0 should report first (in order) timed out rank.
+            expected_first_fail_rank = 1
             monitored_barrier_timeout_seconds = timedelta(seconds=0.1)
-            world_size = int(self.world_size)
-            if world_size == 2:
-                err_regex = "Rank 1"
-            else:
-                # monitored_barrier() does not enforce an order it waits on for
-                # the ranks, so accept any rank that should be caught.
-                # TODO: provide an option in monitored_barrier() to collect all
-                # hanging ranks.
-                err_regex = f"Rank [1-{world_size - 1}]"
-
-            with self.assertRaisesRegex(RuntimeError, err_regex):
+            # TODO: provide an option in monitored_barrier() to collect all
+            # hanging ranks.
+            with self.assertRaisesRegex(
+                RuntimeError,
+                f"Rank {expected_first_fail_rank} failed to pass monitoredBarrier"
+            ):
                 gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds)
 
         @require_backend({"gloo"})
@@ -5233,3 +5235,20 @@ class DistributedTest:
                     RuntimeError, f"Rank {self.rank} timed out in monitoredBarrier"
                 ):
                     process_group.monitored_barrier(timeout)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_small_worldsize
+        def test_monitored_barrier_failure_order(self):
+            # Ensure that the first (in sorted order) rank is reported when
+            # multiple ranks fail to pass the monitored_barrier.
+            # TODO: Provide ability to wait and report all failed ranks:
+            # https://github.com/pytorch/pytorch/issues/54879
+            expected_first_failed_rank = 2
+            timeout = timedelta(seconds=2)
+            if self.rank == 0:
+                with self.assertRaisesRegex(RuntimeError, f"Rank {expected_first_failed_rank}"):
+                    dist.monitored_barrier(timeout=timeout)
+            elif self.rank == 1:
+                # Successfully pass barrier
+                dist.monitored_barrier(timeout=timeout)
