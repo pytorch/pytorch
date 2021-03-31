@@ -34,7 +34,7 @@ std::vector<int> nms_cpu_upright(
   CAFFE_ENFORCE_EQ(proposals.rows(), scores.rows());
   CAFFE_ENFORCE_EQ(proposals.cols(), 4);
   CAFFE_ENFORCE_EQ(scores.cols(), 1);
-  CAFFE_ENFORCE_LE(sorted_indices.size(), proposals.rows());
+  CAFFE_ENFORCE_LE(sorted_indices.size(), static_cast<size_t>(proposals.rows()));
 
   using EArrX = EArrXt<typename Derived1::Scalar>;
 
@@ -544,7 +544,7 @@ std::vector<int> nms_cpu_rotated(
   CAFFE_ENFORCE_EQ(proposals.rows(), scores.rows());
   CAFFE_ENFORCE_EQ(proposals.cols(), 5);
   CAFFE_ENFORCE_EQ(scores.cols(), 1);
-  CAFFE_ENFORCE_LE(sorted_indices.size(), proposals.rows());
+  CAFFE_ENFORCE_LE(sorted_indices.size(), static_cast<size_t>(proposals.rows()));
 
   using EArrX = EArrXt<typename Derived1::Scalar>;
 

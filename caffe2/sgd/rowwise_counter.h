@@ -43,7 +43,7 @@ class RowWiseCounterOp final : public Operator<CPUContext> {
     for (auto i = 0; i < n; ++i) {
       const std::size_t idx = indices[i];
       CAFFE_ENFORCE_GE(
-          Input(COUNTER).numel(),
+          static_cast<std::size_t>(Input(COUNTER).numel()),
           idx,
           this->debug_def().input(COUNTER),
           ", out of bound,  idx:",

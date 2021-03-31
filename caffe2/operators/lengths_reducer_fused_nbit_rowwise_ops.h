@@ -55,7 +55,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
     }
 
     CAFFE_ENFORCE_GT(
-        data.size(1),
+        static_cast<size_t>(data.size(1)),
         sizeof(at::Half) + sizeof(at::Half),
         "DATA must have more than 4 columns");
     static_assert(8 % BIT_RATE == 0, "BIT_RATE must divide 8");
@@ -362,7 +362,7 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
     }
 
     CAFFE_ENFORCE_GT(
-        data.size(1),
+        static_cast<size_t>(data.size(1)),
         sizeof(at::Half) + sizeof(at::Half),
         "DATA must have more than 4 columns");
     static_assert(8 % BIT_RATE == 0, "BIT_RATE must divide 8");

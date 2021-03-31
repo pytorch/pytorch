@@ -1142,13 +1142,13 @@ CAFFE2_RAND_UNIFORM_INT(uint64_t);
       const T sum,                                                        \
       T* r,                                                               \
       CPUContext* context) {                                              \
-    CAFFE_ENFORCE_GE(a, 0);                                               \
+    CAFFE_ENFORCE_GE(a, static_cast<T>(0));                               \
     CAFFE_ENFORCE_GE(sum / (double)n, a);                                 \
     CAFFE_ENFORCE_LE(sum / (double)n, b);                                 \
     T current_sum = 0;                                                    \
     T remaining_sum = sum;                                                \
     for (size_t i = 0; i < n; ++i) {                                      \
-      auto remaining_numbers = n - 1 - i;                                 \
+      auto remaining_numbers = static_cast<T>(n - 1 - i);                 \
       double mean = (sum - current_sum) / (remaining_numbers + 1);        \
       double stdev = std::min(mean - a, b - mean);                        \
       at::normal_distribution<double> distribution{mean, stdev / 4.0};    \

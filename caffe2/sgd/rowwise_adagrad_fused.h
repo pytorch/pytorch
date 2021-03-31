@@ -276,7 +276,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
         // access within range
         // gradient access within range
         CAFFE_ENFORCE_GE(
-            numParams,
+            static_cast<std::size_t>(numParams),
             block_size + offsetIdx,
             "Accessing params out of bound,  idx:",
             idx,
@@ -536,7 +536,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         // access within range
         // gradient access within range
         CAFFE_ENFORCE_GE(
-            numParams,
+            static_cast<std::size_t>(numParams),
             block_size + offsetIdx,
             "Accessing params out of bound,  idx:",
             idx,
@@ -809,7 +809,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
         // access within range
         // gradient access within range
         CAFFE_ENFORCE_GE(
-            Input(PARAM).numel(),
+            static_cast<std::size_t>(Input(PARAM).numel()),
             block_size + offsetIdx,
             this->debug_def().input(PARAM),
             ", out of bound,  idx:",
