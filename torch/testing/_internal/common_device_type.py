@@ -720,7 +720,7 @@ def onlyOnCPUAndCUDA(fn):
     @wraps(fn)
     def only_fn(self, device, *args, **kwargs):
         if self.device_type != 'cpu' and self.device_type != 'cuda':
-            reason = "Doesn't run on {0}".format(self.device_type)
+            reason = "onlyOnCPUAndCUDA: doesn't run on {0}".format(self.device_type)
             raise unittest.SkipTest(reason)
 
         return fn(self, device, *args, **kwargs)
@@ -816,6 +816,9 @@ def onlyCUDA(fn):
 
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
+
+def expectedFailureMeta(fn):
+    return expectedFailure('meta')(fn)
 
 class expectedAlertNondeterministic:
     def __init__(self, caller_name, device_type=None, fn_has_device_arg=True):
