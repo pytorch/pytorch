@@ -6,16 +6,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.fx.quantize import is_activation_post_process
 
-from typing import Optional, Any, Tuple, Callable
-
-# TODO(future PR): delete this after FX has a util for it
-def print_node(node: Optional[Node]) -> None:
-    if node is None:
-        print(None)
-    else:
-        print(
-            node, ', target:', node.target, ', op:', node.op,
-            ', args:', node.args, ', kwargs:', node.kwargs)
+from typing import Any, Tuple, Callable
 
 def getattr_from_fqn(gm: GraphModule, fqn: str) -> Any:
     """
