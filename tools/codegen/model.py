@@ -102,9 +102,9 @@ class DispatchKey(Enum):
     TESTING_ONLY_GenericMode = auto()
     NumDispatchKeys = auto()
     Autograd = auto()
-    Math = auto()
-    DefaultBackend = auto()
-    EndOfAliasKeys = DefaultBackend
+    CompositeImplicitAutograd = auto()
+    CompositeExplicitAutograd = auto()
+    EndOfAliasKeys = CompositeExplicitAutograd
 
     CPUTensorId = CPU
     CUDATensorId = CUDA
@@ -125,16 +125,12 @@ class DispatchKey(Enum):
                 return v
         raise AssertionError(f'unknown dispatch key {value}')
 
-class UseC10Dispatcher(Enum):
-    full = 0
-    hacky_wrapper_for_legacy_signatures = 1
-
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
 def is_generic_dispatch_key(dk: DispatchKey) -> bool:
-    return dk in {DispatchKey.DefaultBackend, DispatchKey.Math}
+    return dk in {DispatchKey.CompositeExplicitAutograd, DispatchKey.CompositeImplicitAutograd}
 
 # CUDA specific dispatch keys
 def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
@@ -172,10 +168,6 @@ class NativeFunction:
     # classes for expository clarity.)
     func: 'FunctionSchema'
 
-    # Corresponds to the 'use_c10_dispatcher' field.  The default
-    # is 'full'
-    use_c10_dispatcher: UseC10Dispatcher
-
     # Whether or not to omit automatic generation of a DeviceGuard
     device_guard: bool
 
@@ -205,7 +197,7 @@ class NativeFunction:
     # case, that is equivalent to having written:
     #
     #   dispatch:
-    #       Math: $operator_name
+    #       CompositeImplicitAutograd: $operator_name
     dispatch: Dict[DispatchKey, str]
 
     # The location in the YAML file were this native function entry was
@@ -249,7 +241,7 @@ class NativeFunction:
             # Structured functions MUST have a dispatch table
             return True
         else:
-            return self.dispatch.keys() != {DispatchKey.Math}
+            return self.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -270,17 +262,6 @@ class NativeFunction:
         cpp_no_default_args_list = e.pop('cpp_no_default_args', [])
         assert isinstance(cpp_no_default_args_list, list)
         cpp_no_default_args = set(cpp_no_default_args_list)
-
-        use_c10_dispatcher_s = e.pop('use_c10_dispatcher', None)
-        assert use_c10_dispatcher_s != 'full', \
-            "There is no need to specify 'use_c10_dispatcher: full' anymore. This is the default now. Just remove the line."
-        if use_c10_dispatcher_s is None:
-            use_c10_dispatcher = UseC10Dispatcher.full
-        elif use_c10_dispatcher_s == 'hacky_wrapper_for_legacy_signatures':
-            use_c10_dispatcher = UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
-        else:
-            raise AssertionError(
-                f'use_c10_dispatcher must be full or hacky_wrapper_for_legacy_signatures, got {use_c10_dispatcher}')
 
         variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
@@ -337,27 +318,26 @@ class NativeFunction:
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
                     dispatch[dispatch_key] = v
-            assert dispatch != {DispatchKey.Math: cpp.name(func)}, \
+            assert dispatch != {DispatchKey.CompositeImplicitAutograd: cpp.name(func)}, \
                 "unnecessary dispatch table for this function; just delete the dispatch " \
                 "key entirely"
-            assert dispatch.keys() != {DispatchKey.Math}, \
-                f"unexpected name for singleton Math dispatch entry: expected {cpp.name(func)} " \
-                f"but got {dispatch[DispatchKey.Math]}.  Rename your implementation to the expected " \
+            assert dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}, \
+                f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} " \
+                f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected " \
                 "name, then delete the dispatch table"
         elif not structured and structured_delegate is None:
-            dispatch[DispatchKey.Math] = cpp.name(func)
+            dispatch[DispatchKey.CompositeImplicitAutograd] = cpp.name(func)
 
-        assert not (DispatchKey.DefaultBackend in dispatch and DispatchKey.Math in dispatch), \
-            "cannot specify both DefaultBackend and Math on a single kernel; each " \
+        assert not (DispatchKey.CompositeExplicitAutograd in dispatch and DispatchKey.CompositeImplicitAutograd in dispatch), \
+            "cannot specify both CompositeExplicitAutograd and CompositeImplicitAutograd on a single kernel; each " \
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
-            "implementation, specify DefaultBackend; otherwise specify Math only"
+            "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
 
         e.pop('__line__')
         assert not e, f"leftover entries: {e}"
 
         return NativeFunction(
             func=func,
-            use_c10_dispatcher=use_c10_dispatcher,
             variants=variants,
             structured=structured,
             structured_delegate=structured_delegate,
@@ -409,9 +389,6 @@ class NativeFunction:
                                if a.default is not None}
         invalid_args = set.difference(self.cpp_no_default_args, defaulted_arguments)
         assert len(invalid_args) == 0, f'Invalid cpp_no_default_args: {invalid_args}'
-        if self.structured or self.structured_delegate:
-            assert self.use_c10_dispatcher is UseC10Dispatcher.full, \
-                "Structured kernels MUST be use_c10_dispatcher: full; port your argument order"
         if self.structured_inherits is not None:
             assert self.structured, "structured_inherits must also imply structured: True"
         if self.structured_delegate is not None:
@@ -454,7 +431,7 @@ class NativeFunctionsGroup:
         if self.structured:
             # For now, structured composite kernels are not supported (need some
             # design work to figure out how to make the composite case work)
-            assert self.out.dispatch.keys() != {DispatchKey.Math}
+            assert self.out.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
 
             assert self.functional.structured_delegate == self.out.func.name, \
                 f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
@@ -1116,6 +1093,22 @@ class Arguments:
             ret.append(self.tensor_options)
         ret.extend(self.post_tensor_options_kwarg_only)
         return ret
+
+    # NB: contains out args.
+    @property
+    def tensor_args(self) -> Sequence[Union[Argument, SelfArgument]]:
+        ret: List[Union[Argument, SelfArgument]] = []
+        candidates: List[Union[Argument, SelfArgument]] = []
+        candidates.extend(self.positional)
+        candidates.extend(self.pre_tensor_options_kwarg_only)
+        candidates.extend(self.post_tensor_options_kwarg_only)
+        candidates.extend(self.out)
+        for arg in candidates:
+            a = arg.argument if isinstance(arg, SelfArgument) else arg
+            if a.type.is_tensor_like():
+                ret.append(arg)
+        return ret
+
 
     def signature(self, *, strip_default: bool = False) -> 'Arguments':
         # dataclasses.replace could be used here, but it is less
