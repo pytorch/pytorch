@@ -364,17 +364,28 @@ class MultiProcessTestCase(TestCase):
         GET_TRACEBACK = 1
 
     @staticmethod
-    def _event_listener(pipe):
+    def _event_listener(pipe, rank):
+        logger.info(f'Starting event listener thread for {rank}')
         while True:
-            event = pipe.recv()
-            if event == MultiProcessTestCase.Event.GET_TRACEBACK:
-                # Return traceback to the parent process.
-                with tempfile.NamedTemporaryFile(mode='r+') as tmp_file:
-                    faulthandler.dump_traceback(tmp_file)
-                    # Flush buffers and seek to read from the beginning
-                    tmp_file.flush()
-                    tmp_file.seek(0)
-                    pipe.send(tmp_file.read())
+            if pipe.poll(None):
+
+                if pipe.closed:
+                    logger.info(f'Pipe closed for process {rank}, stopping event listener thread')
+                    return
+
+                event = pipe.recv()
+                logger.info(f'Received event {event} on process {rank}')
+
+                if event == MultiProcessTestCase.Event.GET_TRACEBACK:
+                    # Return traceback to the parent process.
+                    with tempfile.NamedTemporaryFile(mode='r+') as tmp_file:
+                        faulthandler.dump_traceback(tmp_file)
+                        # Flush buffers and seek to read from the beginning
+                        tmp_file.flush()
+                        tmp_file.seek(0)
+                        pipe.send(tmp_file.read())
+
+                        logger.info(f'Process {rank} sent traceback')
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe, faulthandler_file_name):
@@ -383,7 +394,7 @@ class MultiProcessTestCase(TestCase):
         # Start event listener thread.
         threading.Thread(
             target=MultiProcessTestCase._event_listener,
-            args=(pipe,),
+            args=(pipe, rank),
             daemon=True).start()
 
         self._register_fault_handler(faulthandler_file_name)
@@ -425,18 +436,22 @@ class MultiProcessTestCase(TestCase):
                 pipe = self.pid_to_pipe[process.pid]
                 try:
                     pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
-                    pipes.append(pipe)
+                    pipes.append((i, pipe))
                 except BrokenPipeError as e:
                     logger.error(f'Encountered error while trying to get traceback for process {i}: {e}')
 
         # Wait for results.
-        for pipe in pipes:
+        for rank, pipe in pipes:
             # Wait for traceback
             if pipe.poll(5):
+                if pipe.closed:
+                    logger.info(f'Pipe closed for process {rank}, cannot retrieve traceback')
+                    continue
+
                 traceback = pipe.recv()
-                logger.error(f'Process {i} timed out with traceback: \n\n{traceback}')
+                logger.error(f'Process {rank} timed out with traceback: \n\n{traceback}')
             else:
-                logger.error(f'Could not retrieve traceback for timed out process: {i}')
+                logger.error(f'Could not retrieve traceback for timed out process: {rank}')
 
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())
