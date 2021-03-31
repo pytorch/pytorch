@@ -18,4 +18,3 @@ struct Log1pFunctor {
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_LOG1P_OP_H_
-
