@@ -6,8 +6,13 @@ inline bool batch_norm_use_channels_last_kernels(const at::Tensor& self) {
 
 namespace at { namespace native {
 
-std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(Tensor& output, Tensor& save_mean, Tensor& save_invstd, const Tensor& self, const Tensor& weight, const Tensor& bias,
-                                                   const Tensor& running_mean, const Tensor& running_var, bool train, double momentum, double epsilon) {
+std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon, Tensor& output, Tensor& save_mean, Tensor& save_invstd) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
+  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "batch_norm_cuda", [&] {
     auto mean_st = running_mean.dtype();
     auto var_st = running_var.dtype();
@@ -54,7 +59,18 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
     save_invstd = at::empty({0}, input_options);
   }
 
-  batch_norm_cuda_out(output, save_mean, save_invstd, self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+  at::native::batch_norm_cuda_out(
+      self,
+      weight,
+      bias,
+      running_mean,
+      running_var,
+      train,
+      momentum,
+      epsilon,
+      output,
+      save_mean,
+      save_invstd);
   return std::make_tuple(output, save_mean, save_invstd);
 }
 
@@ -111,12 +127,16 @@ Tensor batch_norm_elemt_cuda(const Tensor& self, const c10::optional<Tensor>& we
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   auto output = at::empty_like(self, self.suggest_memory_format());
-  batch_norm_elemt_cuda_out(output, self, weight, bias, mean, invstd, epsilon);
+  at::native::batch_norm_elemt_cuda_out(self, weight, bias, mean, invstd, epsilon, output);
   return output;
 }
 
-Tensor& batch_norm_elemt_cuda_out(Tensor& output, const Tensor& self, const Tensor& weight, const Tensor& bias,
-                             const Tensor& mean, const Tensor& invstd, double epsilon) {
+Tensor& batch_norm_elemt_cuda_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+                             const Tensor& mean, const Tensor& invstd, double epsilon, Tensor& output) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
     batch_norm_elemt_channels_last_cuda_template(output, self, weight, bias, mean, invstd, epsilon);
     return output;
