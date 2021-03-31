@@ -350,9 +350,8 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
     dst.copy_(src);
     return;
   }
-  Tensor b_src;
-  std::tie(b_src) = expand_inplace(dst, src.view(slicePrefix1sSize(src.sizes())), "setitem");
-  dst.copy_(b_src);
+  c10::MaybeOwned<Tensor> b_src = expand_inplace_v2(dst, src.view(slicePrefix1sSize(src.sizes())), "setitem");
+  dst.copy_(*b_src);
 }
 
 // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
