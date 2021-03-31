@@ -4,6 +4,7 @@
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/DimVector.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Resize.h>
@@ -670,8 +671,8 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
 
   // construct new size and stride: we drop dim1 and dim2 (maximum first for not changing the index of the minimum)
   // the new ("joint") dimension is appended to the end of the shape / stride to match numpy semantics
-  auto sizes = self.sizes().vec();
-  auto strides = self.strides().vec();
+  DimVector sizes(self.sizes().begin(), self.sizes().end());
+  DimVector strides(self.strides().begin(), self.strides().end());
   sizes.erase(sizes.begin() + std::max(dim1, dim2));
   strides.erase(strides.begin() + std::max(dim1, dim2));
   sizes.erase(sizes.begin() + std::min(dim1, dim2));
@@ -929,8 +930,8 @@ Tensor permute(const Tensor& self, IntArrayRef dims) {
            "number of dims don't match in permute");
   auto oldSizes = self.sizes();
   auto oldStrides = self.strides();
-  std::vector<int64_t> newSizes(nDims);
-  std::vector<int64_t> newStrides(nDims);
+  DimVector newSizes(nDims);
+  DimVector newStrides(nDims);
   std::vector<bool> seen(nDims);
   for (const auto i : c10::irange(nDims)) {
     auto dim = maybe_wrap_dim(dims[i], nDims);
@@ -1125,8 +1126,8 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   if (self.is_sparse()) {
     return select_sparse(self, dim, index);
   }
-  auto sizes = self.sizes().vec();
-  auto strides = self.strides().vec();
+  DimVector sizes(self.sizes().begin(), self.sizes().end());
+  DimVector strides(self.strides().begin(), self.strides().end());
   auto storage_offset = self.storage_offset() + index * strides[dim];
   sizes.erase(sizes.begin() + dim);
   strides.erase(strides.begin() + dim);
@@ -1241,8 +1242,8 @@ Tensor slice(
     TORCH_CHECK_INDEX(false, "slice() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
-  auto sizes = self.sizes().vec();
-  auto strides = self.strides().vec();
+  DimVector sizes(self.sizes().begin(), self.sizes().end());
+  DimVector strides(self.strides().begin(), self.strides().end());
 
   // handle optional parameters
   int64_t start_val = start.has_value() ? start.value() : 0;
@@ -1640,8 +1641,8 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
     return at::_mkldnn_transpose_(self, dim0, dim1);
   }
 
-  auto strides = self.strides().vec();
-  auto sizes = self.sizes().vec();
+  DimVector sizes(self.sizes().begin(), self.sizes().end());
+  DimVector strides(self.strides().begin(), self.strides().end());
   std::swap(strides[dim0], strides[dim1]);
   std::swap(sizes[dim0], sizes[dim1]);
   return self.as_strided_(sizes, strides);
@@ -1664,8 +1665,8 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     return at::_mkldnn_transpose(self, dim0, dim1);
   }
 
-  auto strides = self.strides().vec();
-  auto sizes = self.sizes().vec();
+  DimVector sizes(self.sizes().begin(), self.sizes().end());
+  DimVector strides(self.strides().begin(), self.strides().end());
   std::swap(strides[dim0], strides[dim1]);
   std::swap(sizes[dim0], sizes[dim1]);
   auto result = self.as_strided(sizes, strides);
@@ -1696,10 +1697,10 @@ Tensor & t_(Tensor & self) {
   return self.transpose_(0, self.dim() < 2 ? 0 : 1);
 }
 
-std::tuple<std::vector<int64_t>, std::vector<int64_t> >
+std::tuple<DimVector, DimVector>
 inferSqueezeGeometry(const Tensor &tensor) {
-  std::vector<int64_t> sizes;
-  std::vector<int64_t> strides;
+  DimVector sizes;
+  DimVector strides;
 
   for(const auto d : c10::irange(tensor.dim())) {
     if(tensor.sizes()[d] != 1) {
@@ -1708,13 +1709,13 @@ inferSqueezeGeometry(const Tensor &tensor) {
     }
   }
 
-  return std::make_tuple(sizes, strides);
+  return std::make_tuple(std::move(sizes), std::move(strides));
 }
 
-std::tuple<std::vector<int64_t>, std::vector<int64_t> >
+std::tuple<DimVector, DimVector>
 inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
-  std::vector<int64_t> sizes;
-  std::vector<int64_t> strides;
+  DimVector sizes;
+  DimVector strides;
 
   for(const auto d : c10::irange(tensor.dim())) {
     if(d != dim || tensor.sizes()[dim] != 1) {
@@ -1722,15 +1723,15 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
       strides.push_back(tensor.strides()[d]);
     }
   }
-  return std::make_tuple(sizes, strides);
+  return std::make_tuple(std::move(sizes), std::move(strides));
 }
 
 namespace {
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.
 struct InferUnsqueezeGeometryResult {
-  c10::SmallVector<int64_t, 5> sizes;
-  c10::SmallVector<int64_t, 5> strides;
+  DimVector sizes;
+  DimVector strides;
   InferUnsqueezeGeometryResult(IntArrayRef tensor_sizes, IntArrayRef tensor_strides)
       : sizes(tensor_sizes.begin(), tensor_sizes.end())
       , strides(tensor_strides.begin(), tensor_strides.end()) {}
@@ -1748,8 +1749,8 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
 Tensor squeeze_qtensor(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  std::vector<int64_t> sizes;
-  std::vector<int64_t> strides;
+  DimVector sizes;
+  DimVector strides;
   std::tie(sizes, strides) = inferSqueezeGeometry(self);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
@@ -1774,8 +1775,8 @@ Tensor squeeze_qtensor(const Tensor& self) {
 
 Tensor squeeze_qtensor(const Tensor& self, int64_t dim) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  std::vector<int64_t> sizes;
-  std::vector<int64_t> strides;
+  DimVector sizes;
+  DimVector strides;
   std::tie(sizes, strides) = inferSqueezeGeometry(self, dim);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
