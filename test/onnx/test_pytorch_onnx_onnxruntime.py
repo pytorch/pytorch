@@ -82,7 +82,6 @@ def run_ort(ort_sess, input):
 
 
 def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
-    # print("pytorch output:", output, "\nort_outs:", ort_outs)
     output, _ = torch.jit._flatten(output)
     outputs = [to_numpy(outp) for outp in output]
 
