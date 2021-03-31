@@ -11,6 +11,7 @@ import tools.codegen.api.structured as structured
 @with_native_function
 def gen_unstructured(f: NativeFunction) -> List[str]:
     ns = list(f.dispatch.values())
+    native_sig = NativeSignature(f.func)
 
     rs = []
     # Sometimes a function name shows up multiple times; only generate
@@ -22,11 +23,21 @@ def gen_unstructured(f: NativeFunction) -> List[str]:
         if "legacy::" in n:
             continue
         seen.add(n)
-        returns_type = native.returns_type(f.func.returns).cpp_type()
-        args = native.arguments(f.func)
-        rs.append(f"TORCH_API {returns_type} {n}({', '.join(a.decl() for a in args)});")
+        rs.append(f"TORCH_API {native_sig.decl(name=n)};")
 
     return rs
+
+@with_native_function
+def gen_unstructured_external(f: ExternalBackendFunction) -> List[str]:
+    # XLA appears to have used the dispatcher convention to write their kernel signatures,
+    # probably because they based their signatures off of our RegistrationDeclarations.h
+    dispatcher_sig = DispatcherSignature.from_schema(f.native_function.func)
+    if f.metadata is not None:
+        # Only generate declarations for operators that xla has defined in the yaml
+        name = f.metadata.kernel
+        return [f"static {dispatcher_sig.decl(name=name)};"]
+    else:
+        return []
 
 @with_native_function
 def gen_structured(g: NativeFunctionsGroup) -> List[str]:
@@ -65,8 +76,15 @@ void impl({', '.join(a.decl() for a in out_args)});
 # Generates NativeFunctions.h, a list of forward declarations of all
 # actual kernel definitions we keep in aten/src/ATen/native/
 @with_native_function
-def compute_native_function_declaration(g: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
-    if isinstance(g, NativeFunctionsGroup):
+def compute_native_function_declaration(g: Union[NativeFunctionsGroup, NativeFunction, ExternalBackendFunctionsGroup, ExternalBackendFunction]) -> List[str]:
+    if isinstance(g, ExternalBackendFunctionsGroup):
+        if g.structured:
+            assert_never("Structured external backend functions are not implemented yet.")
+        else:
+            return list(concatMap(gen_unstructured_external, g.functions()))
+    elif isinstance(g, ExternalBackendFunction):
+        return gen_unstructured_external(g)
+    elif isinstance(g, NativeFunctionsGroup):
         if g.structured:
             return gen_structured(g)
         else:

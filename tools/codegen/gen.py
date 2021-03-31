@@ -526,8 +526,8 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
     return returns, name_to_field_name
 
 # arguments in yaml roughly corresponds to the public C++ API
-def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_set: Set[str],
-                              out_arg_set: Set[str], name_to_field_name: Dict[str, str]) -> object:
+def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_set: Set[str], out_arg_set: Set[str],
+                              name_to_field_name: Dict[str, str]) -> object:
     if isinstance(cpp_a.argument, TensorOptionsArguments):
         arg: Dict[str, object] = {
             'annotation': None,
@@ -544,11 +544,11 @@ def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_
         raise AssertionError()
     elif isinstance(cpp_a.argument, Argument):
         return compute_argument_yaml(
-            cpp_a.argument, schema_order=schema_order,
-            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
+            cpp_a.argument, schema_order=schema_order, kwarg_only_set=kwarg_only_set,
+            out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
 
-def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Set[str],
-                          out_arg_set: Set[str], name_to_field_name: Dict[str, str]) -> object:
+def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Set[str], out_arg_set: Set[str],
+                          name_to_field_name: Dict[str, str]) -> object:
     arg: Dict[str, object] = {
         'annotation': str(a.annotation) if a.annotation else None,
         'dynamic_type': dynamic_type(a.type),
@@ -586,8 +586,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     cpp_args = sig_group.signature.arguments()
     arguments = [
         compute_cpp_argument_yaml(
-            cpp_a, schema_order=False,
-            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
+            cpp_a, schema_order=False, kwarg_only_set=kwarg_only_set,
+            out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
         for cpp_a in cpp_args
     ]
 
@@ -595,8 +595,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     schema_order_arguments = [
         compute_argument_yaml(
-            a, schema_order=True,
-            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
+            a, schema_order=True, kwarg_only_set=kwarg_only_set,
+            out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
         for a in schema_order_jit_arguments
     ]
 
@@ -746,6 +746,26 @@ def get_custom_build_selector(
 
     return selector
 
+def get_grouped_native_functions(native_yaml_path: str) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
+    native_functions = parse_native_yaml(native_yaml_path)
+
+    pre_grouped_native_functions: Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]]
+    pre_grouped_native_functions = defaultdict(dict)
+    for f in native_functions:
+        d = pre_grouped_native_functions[f.func.signature()]
+        assert f.func.kind() not in d
+        d[f.func.kind()] = f
+
+    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
+        r = NativeFunctionsGroup.from_dict(d)
+        if r is None:
+            return list(d.values())
+        else:
+            return [r]
+
+    # TODO: how come ValuesView isn't a Sequence lol
+    return list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate ATen source files')
     parser.add_argument(
@@ -800,24 +820,9 @@ def main() -> None:
         options.op_selection_yaml_path,
     )
 
-    native_functions = parse_native_yaml(os.path.join(options.source_path, 'native/native_functions.yaml'))
-
-    pre_grouped_native_functions: Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]]
-    pre_grouped_native_functions = defaultdict(dict)
-    for f in native_functions:
-        d = pre_grouped_native_functions[f.func.signature()]
-        assert f.func.kind() not in d
-        d[f.func.kind()] = f
-
-    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
-        r = NativeFunctionsGroup.from_dict(d)
-        if r is None:
-            return list(d.values())
-        else:
-            return [r]
-
-    # TODO: how come ValuesView isn't a Sequence lol
-    grouped_native_functions = list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
+    native_yaml_path = os.path.join(options.source_path, 'native/native_functions.yaml')
+    native_functions = parse_native_yaml(native_yaml_path)
+    grouped_native_functions = get_grouped_native_functions(native_yaml_path)
     structured_native_functions = [g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)]
 
     template_dir = os.path.join(options.source_path, "templates")

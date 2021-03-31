@@ -228,6 +228,25 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
         else:
             assert_never(self.target)
 
+    @method_with_native_function
+    def gen_external_backend_unstructured(self, f: ExternalBackendFunction) -> str:
+        sig = NativeSignature(f.native_function.func, prefix='wrapper_')
+
+        name = sig.name()
+        returns_type = sig.returns_type().cpp_type()
+        args = sig.arguments()
+        args_str = ', '.join(a.defn() for a in args)
+        return f"""\
+{returns_type} {name}({args_str}) {{
+  XLA_FN_TRACK(3);
+  XLA_COUNTER("aten::_assert_async", 1);
+  TF_VLOG(3) << "XLA _assert_async :" << " self=" << self.toString();
+{return_kw}{impl_name}({args_exprs_str});
+}}
+"""
+
+
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -557,3 +576,45 @@ generate_super=self.g.out.structured_inherits is not None
             assert_never(self.target)
             # Silence mypy's "Missing return statement" error
             return None
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#
+#                       External Backends
+#
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+@dataclass(frozen=True)
+class RegisterExternalBackend:
+    dispatch_key: DispatchKey
+
+    @method_with_native_function
+    def __call__(self, g: Union[ExternalBackendFunctionsGroup, ExternalBackendFunction]) -> List[str]:
+        if isinstance(g, ExternalBackendFunctionsGroup) and g.metadata.structured:
+            return self.gen_external_backend_structured(g)
+        elif isinstance(g, ExternalBackendFunctionsGroup) and not g.metadata.structured:
+            functions = [ExternalBackendFunction(f, g.metadata) for f in g.functions()]
+            return [self.gen_external_backend_unstructured(f) for f in functions]
+        elif isinstance(g, ExternalBackendFunction):
+            r = self.gen_external_backend_unstructured(g)
+            return [r]
+        else:
+            assert_never(f)
+
+    @method_with_native_function
+    def gen_external_backend_unstructured(self, f: ExternalBackendFunction) -> str:
+        sig = NativeSignature(f.native_function.func, prefix='wrapper_')
+
+        name = sig.name()
+        returns_type = sig.returns_type().cpp_type()
+        args = sig.arguments()
+        args_str = ', '.join(a.defn() for a in args)
+        return f"""\
+{returns_type} {name}({args_str}) {{
+  XLA_FN_TRACK(3);
+  XLA_COUNTER("aten::_assert_async", 1);
+  TF_VLOG(3) << "XLA _assert_async :" << " self=" << self.toString();
+{return_kw}{impl_name}({args_exprs_str});
+}}
+"""
+

@@ -959,6 +959,9 @@ class Argument:
         assert str(r) == arg, f'{str(r)} != {arg}'
         return r
 
+    def with_name(self, *, name: str) -> 'Argument':
+        return Argument(name=name, type=self.type, default=self.default, annotation=self.annotation)
+
     @property
     def is_write(self) -> bool:
         return self.annotation is not None and self.annotation.is_write
@@ -1030,6 +1033,9 @@ class Return:
 class SelfArgument:
     argument: Argument
 
+    def with_name(self, *, name: str) -> 'SelfArgument':
+        return SelfArgument(self.argument.with_name(name=name))
+
 # Bundle of arguments that represent a TensorOptions.  This is mostly
 # relevant for the public C++ API but we bake it into the core data
 # model because other APIs often have to interact with it
@@ -1042,6 +1048,13 @@ class TensorOptionsArguments:
 
     def all(self) -> Sequence[Argument]:
         return [self.dtype, self.layout, self.device, self.pin_memory]
+
+    def with_name(self, *, name: str) -> 'TensorOptionsArguments':
+        # "Renaming" a TensorOptions argument isn't a piece of functionality currently exercised anywhere,
+        # and probably doesn't represent behavior we'd really want
+        # (this functionality is currently only applied to tensor-like args).
+        # TODO: Maybe make this pattern less accessible?
+        raise TypeError(f'Trying to rename a TensorOptionsArgument to {name}.')
 
 @dataclass(frozen=True)
 class Arguments:
@@ -1355,6 +1368,114 @@ class OperatorName:
             return f"{self.name}.{self.overload_name}"
         else:
             return f"{self.name}"
+
+@dataclass(frozen=True)
+class ExternalBackendMetadata:
+
+    operator: OperatorName
+    backend: str
+    kernel: str
+
+    # The location in the YAML file were this native function entry was
+    # defined.  This is for conveniently reporting error messages!
+    loc: 'Location'
+
+    structured: bool = False  # TODO: this will eventually become per-op metadata in the yaml file
+
+    @staticmethod
+    def from_yaml(ei: Dict[str, object], loc: 'Location', backend: str) -> 'ExternalBackendMetadata':
+        """
+        Parse an ExternalBackendMetadata from a dictionary as directly parsed
+        from an external backend's yaml file.
+        The metadata in this file is mapped to an in-tree NativeFunction.
+        """
+        e = ei.copy()
+
+        native_operator_str = e.pop('func')
+        native_operator = OperatorName.parse(native_operator_str)
+
+        kernel = e.pop('kernel')
+        assert isinstance(kernel, str), f'not a str: {kernel}'
+
+        return ExternalBackendMetadata(operator=native_operator, backend=backend, kernel=kernel, loc=loc)
+
+@dataclass(frozen=True)
+class ExternalBackendFunction:
+
+    native_function: NativeFunction
+    metadata: Optional[ExternalBackendMetadata]
+
+    @property
+    def structured(self) -> bool:
+        # An external backend op is only considered structured if it's been marked structured both in-tree and out-of-tree
+        return self.native_function.structured and self.metadata is not None and self.metadata.structured
+
+    def __post_init__(self) -> None:
+        kind = self.native_function.func.kind()
+        if kind == SchemaKind.out or kind == SchemaKind.inplace:
+            assert self.metadata is None or not self.metadata.structured, \
+                "Found an out/inplace operator marked with the structured keyword." \
+                f" Only functional operators can be marked as structured. operator={str(self.native_function.func.name)}"
+
+@dataclass(frozen=True)
+class ExternalBackendFunctionsGroup:
+    functional: ExternalBackendFunction
+    inplace: Optional[ExternalBackendFunction]
+    out: ExternalBackendFunction
+
+    @property
+    def structured(self) -> bool:
+        return self.primary.structured
+
+    @property
+    def primary(self) -> bool:
+        # TODO: hardcoding that XLA will only implement functional variants of structured kernel.
+        # This will eventually by toggleable per backend.
+        return self.functional
+
+    def __post_init__(self) -> None:
+        # TODO: the purpose of `from_function_group` is to make it so that you don't have to call the ctr directly.
+        # `from_function_group` takes in a NativeFunctionsGroup object,
+        # which has already passed any NativeFunctionsGroup validations.
+        # Because of that, I'm not bothering to duplicate the validations here.
+        # But BAD things can happen if you create your own ExternalBackendFunctionsGroup object
+        # with arbitrary ExternalBackendFunction objects!
+        if self.structured:
+            for f in self.functions():
+                if f == self.primary:
+                    continue
+                # For ops marked as structured externally, we expect external backends to
+                # only include either the functional or out variant in their yaml
+                assert f.metadata is None, \
+                    f"{str(self.primary.native_function.func.name)} is marked as structured. " \
+                    f"variant, {str(f.native_function.func.name)} will be generated for you " \
+                    "and doesn't need to live in the yaml."
+
+    # TODO: do we need this?
+    def signature(self) -> 'FunctionSchema':
+        return self.primary.func.signature()
+
+    def functions(self) -> Iterator[ExternalBackendFunction]:
+        yield self.out
+        yield self.functional
+        if self.inplace is not None:
+            yield self.inplace
+
+    @staticmethod
+    def from_function_group(g: NativeFunctionsGroup, metadata: Dict[OperatorName, ExternalBackendMetadata]) -> 'ExternalBackendFunctionsGroup':
+        out_meta = metadata.get(g.out.func.name, None)
+        out = ExternalBackendFunction(g.out, out_meta)
+
+        functional_meta = metadata.get(g.functional.func.name, None)
+        functional = ExternalBackendFunction(g.functional, functional_meta)
+
+        inplace = None
+        if g.inplace:
+            inplace_meta = metadata.get(g.inplace.func.name, None)
+            inplace = ExternalBackendFunction(g.inplace, inplace_meta)
+
+        return ExternalBackendFunctionsGroup(functional, inplace, out)
+
 
 # Helper functions for parsing argument lists (both inputs and returns)
 
