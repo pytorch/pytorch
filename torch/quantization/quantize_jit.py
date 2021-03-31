@@ -88,6 +88,7 @@ def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC,
     else:
         model = wrap_cpp_module(model_c)
     torch._C._jit_pass_constant_propagation(model.graph)
+    torch._C._jit_pass_dce(model.graph)
     return model
 
 def convert_jit(model, inplace=False, debug=False, preserved_attrs=None):
@@ -112,6 +113,7 @@ def _quantize_jit(model, qconfig_dict, run_fn=None, run_args=None, inplace=False
         model = convert_jit(model, True, debug)
 
     torch._C._jit_pass_constant_propagation(model.graph)
+    torch._C._jit_pass_dce(model.graph)
     return model
 
 def quantize_jit(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
