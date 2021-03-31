@@ -144,11 +144,11 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
         target = inputs
     inp_indices = [i for i, a in enumerate(target) if is_tensor_like(a) and a.requires_grad]
     for i, (inp, inp_idx) in enumerate(zip(iter_tensors(target, True), inp_indices)):
-        jacobians += [get_numerical_jacobian_for_input(fn, inp, inp_idx, inputs, outputs, eps, eps, grad_out)]
+        jacobians += [get_numerical_jacobian_wrt_specific_input(fn, inp, inp_idx, inputs, outputs, eps, eps, grad_out)]
     return jacobians
 
 
-def compute_gradient(fn, entry, v, norm_v, do_checks):
+def compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
     # Performs finite differencing by perturbing `entry` in-place by `v` and
     # returns the gradient of each of the outputs wrt to x at idx.
     # we currently assume that the norm of delta equals eps
@@ -163,7 +163,7 @@ def compute_gradient(fn, entry, v, norm_v, do_checks):
     entry.copy_(orig)
 
     def compute(a, b):
-        do_checks(a, b)
+        nbhd_checks_fn(a, b)
         ret = (b - a) / (2 * norm_v)
         return ret.detach().reshape(-1)
 
@@ -211,22 +211,24 @@ def combine_jacobian_cols(jacobians_cols, outputs, input, dim):
     return jacobians
 
 
-def prepped_input(input, input_idx, entry, entry_idx, fast_mode=False):
+def prepped_input(input, maybe_perturbed_input, fast_mode=False):
     # Prepares the inputs to be passed into the function while including the new modified input.
     if input.layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
         # Convert back to mkldnn
-        if input_idx == entry_idx:
-            return entry.to_mkldnn()
+        if maybe_perturbed_input is not None:
+            return maybe_perturbed_input.to_mkldnn()
         else:
             return input
     elif input.layout == torch.sparse_coo:
-        if fast_mode and input_idx == entry_idx:
+        if fast_mode and maybe_perturbed_input is not None:
             # entry is already a "cloned" version of the original tensor
             # thus changes to entry are not reflected in the input
-            return entry
+            return maybe_perturbed_input
         else:
-            # modifications to entry are reflected in input so we could've just returned `input` here
-            # but due to an issue with coalesce, we need to do an extra clone here.
+            # Modifications to entry are reflected in input so we could've just returned `input` here
+            # but there is an issue where calling .coalesce on a tensor moves it off the graph when the
+            # tensor is already coalesced, so analytical would always return 0 wrt to that input if it
+            # is previously used to compute forward pass. To get around this, we need to do an extra clone here.
             # TODO: get rid of this extra clone once https://github.com/pytorch/pytorch/pull/52874 is landed
             # Make this new tensor require again in case the function has hooks
             return torch.sparse_coo_tensor(input._indices(), input._values(), input.size()).requires_grad_(True)
@@ -250,7 +252,7 @@ def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, delta, 
          f" dtypes {output1.dtype} and {output2.dtype}.")
 
 
-def get_numerical_jacobian_for_input(fn, input, input_idx, inputs, outputs, delta, eps, grad_out):
+def get_numerical_jacobian_wrt_specific_input(fn, input, input_idx, inputs, outputs, delta, eps, grad_out):
     # Computes the numerical jacobians wrt to a single input. Returns N jacobian
     # tensors, where N is the number of outputs. Input must require grad.
     assert input.requires_grad
@@ -259,22 +261,22 @@ def get_numerical_jacobian_for_input(fn, input, input_idx, inputs, outputs, delt
 
     for x, idx, d_idx in iter_tensor(input):
         def wrapped_fn():
-            inp = tuple(prepped_input(a, i, x, input_idx) if is_tensor_like(a) else a
+            inp = tuple(prepped_input(a, x if i == input_idx else None) if is_tensor_like(a) else a
                         for i, a in enumerate(_as_tuple(inputs)))
             return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
-        entry = x[idx]
-        do_checks = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, delta=delta, idx=idx)
+        input_to_perturb = x[idx]
+        nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, idx=idx, delta=delta)
 
         def jvp_fn(delta):
-            return compute_gradient(wrapped_fn, entry, delta, eps, do_checks)
+            return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, eps, nbhd_checks_fn)
         jacobian_cols[d_idx] = []
         compute_numerical_jacobian_cols(jacobian_cols[d_idx], delta, jvp_fn, x.is_complex(), grad_out)
 
     return combine_jacobian_cols(jacobian_cols, outputs, input, input.numel())
 
 
-def get_fast_numerical_jacobian_for_input(fn, input_idx, input, inputs, outputs, delta, eps, grad_out):
+def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, input, inputs, outputs, delta, eps, grad_out):
     jacobian_cols: List[Optional[torch.Tensor]] = []
 
     # If fast_mode=False, iter_tensor handles the below cases:
@@ -282,22 +284,22 @@ def get_fast_numerical_jacobian_for_input(fn, input_idx, input, inputs, outputs,
     # operations that require the tensor to have strides
     if input.layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
         # Convert to dense so we can perform operations that require strided tensors
-        entry = input.to_dense()
+        input_to_perturb = input.to_dense()
     elif input.layout == torch.sparse_coo:
         # TODO: get rid of this extra clone once https://github.com/pytorch/pytorch/pull/52874 is landed
-        entry = input.clone()
+        input_to_perturb = input.clone()
     else:
-        entry = input.data
+        input_to_perturb = input.data
 
     def wrapped_fn():
-        inp = tuple(prepped_input(a, i, entry, input_idx, True) if is_tensor_like(a) else a
+        inp = tuple(prepped_input(a, input_to_perturb if i == input_idx else None, True) if is_tensor_like(a) else a
                     for i, a in enumerate(_as_tuple(inputs)))
         return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
-    do_checks = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, delta=delta)
+    nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, delta=delta)
 
     def jvp_fn(delta):
-        return compute_gradient(wrapped_fn, entry, delta, eps, do_checks)
+        return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, eps, nbhd_checks_fn)
 
     compute_numerical_jacobian_cols(jacobian_cols, delta, jvp_fn, input.is_complex(), grad_out)
     jacobians = allocate_jacobians_with_outputs(outputs, dtype=input.dtype, device=input.device)
@@ -465,8 +467,8 @@ def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> b
 
 def check_no_differentiable_outputs_fast(fail_test, func, func_out, all_inputs, input_tensors, inputs_indices, all_u, eps):
     for inp_idx, inp, u in zip(inputs_indices, input_tensors, all_u):
-        numerical_jacobians = get_fast_numerical_jacobian_for_input(func, inp_idx, inp, all_inputs,
-                                                                    _as_tuple(func_out), eps * u, eps, 1.0)
+        numerical_jacobians = get_fast_numerical_jacobian_wrt_specific_input(func, inp_idx, inp, all_inputs,
+                                                                             _as_tuple(func_out), eps * u, eps, 1.0)
         for jacobian in numerical_jacobians:
             if torch.ne(jacobian, 0).sum() > 0:
                 return fail_test('Numerical gradient for function expected to be zero')
@@ -773,14 +775,14 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
 
     # Numerically approximate v^T (J u)
     for i, (inp, input_idx, u) in enumerate(zip(inp_tensors, inp_tensor_indices, all_u)):
-        numerical = get_fast_numerical_jacobian_for_input(func, input_idx, inp, tupled_inputs, outputs, eps * u, eps, 1.0)
-
+        numerical = get_fast_numerical_jacobian_wrt_specific_input(func, input_idx, inp, tupled_inputs,
+                                                                   outputs, eps * u, eps, 1.0)
         for j, (a, v) in enumerate(zip(numerical, all_v)):
             out = dot(a, v.to(device=a.device))
             all_numerical[i].append(dot(a, v.to(device=a.device)))
 
         if any_complex:
-            numerical_from_imag_grad_out = get_fast_numerical_jacobian_for_input(
+            numerical_from_imag_grad_out = get_fast_numerical_jacobian_wrt_specific_input(
                 func, input_idx, inp, tupled_inputs, outputs, eps * u, eps, 1j)
             for j in complex_output_indices:
                 a, v = numerical_from_imag_grad_out[j], all_v[j]
