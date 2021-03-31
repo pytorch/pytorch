@@ -118,7 +118,7 @@ void cpu_max_pool_channels_last(
   // for the convience of vectorization, use integer of the same size of scalar_t,
   //   e.g. int32_t for float, int64_t for double
   // need to make sure doesn't overflow
-  TORCH_CHECK(input_height * input_width < std::numeric_limits<integer_t>::max());
+  TORCH_CHECK(input_height <= std::ceil(std::numeric_limits<integer_t>::max() / (double)input_width));
 
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
