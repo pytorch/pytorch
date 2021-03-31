@@ -3281,7 +3281,8 @@ class DistributedTest:
             self._test_DistributedDataParallel(
                 gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
 
-        def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset, output_device=None, affine=True):
+        def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset,
+                                                        output_device=None, affine=True):
             # Run a simple end to end DDP model, use result of single node model
             # as baseline
 
@@ -3327,7 +3328,7 @@ class DistributedTest:
                 True,
                 offset,
                 dist.get_world_size(),
-                5 if affine is True else 2,
+                5 if affine else 2,
             )
             self._barrier()
 
