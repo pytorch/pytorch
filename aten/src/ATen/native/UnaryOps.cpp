@@ -307,7 +307,7 @@ Tensor& erfc_out(const Tensor& self, Tensor& result) { return unary_op_impl_floa
 Tensor erfc(const Tensor& self) { return unary_op_impl_float(self, erfc_stub); }
 Tensor& erfc_(Tensor& self) { return unary_op_impl_(self, at::erfc_out); }
 
-Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, erfinv_stub); }
+Tensor& erfinv_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, erfinv_stub); }
 Tensor erfinv(const Tensor& self) { return unary_op_impl_float(self, erfinv_stub); }
 Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
 
@@ -334,7 +334,7 @@ Tensor& floor_out(const Tensor& self, Tensor& result) {
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
 
-Tensor& i0_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, i0_stub); }
+Tensor& i0_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, i0_stub); }
 Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
 Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
@@ -660,7 +660,7 @@ Tensor polygamma(int64_t n, const Tensor& self) {
 Tensor& polygamma_(Tensor& self, int64_t n) {
   return at::polygamma_out(self, n, self);
 }
-Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
+Tensor& polygamma_out(int64_t n, const Tensor& self, Tensor& result) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
   auto iter = TensorIterator::unary_op(result, self);
   polygamma_stub(iter.device_type(), iter, n);
@@ -704,7 +704,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(c10::pi<double>) / 4.));
 }
 
-Tensor& lgamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, lgamma_stub); }
+Tensor& lgamma_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, lgamma_stub); }
 Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub); }
 Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
 
