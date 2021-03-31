@@ -47,7 +47,6 @@ from torch.jit._async import fork, wait
 from torch.jit._serialization import save, load
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
 
-from torch.jit.cuda import stream
 from torch.jit._freeze import freeze, optimize_frozen_module
 
 # For backwards compatibility
@@ -74,7 +73,48 @@ Error.__qualname__ = "Error"
 
 # for use in python if using annotate
 def annotate(the_type, the_value):
-    # noop in python
+    """
+    This method is a pass-through function that returns `the_value`, used to hint TorchScript
+    compiler the type of `the_value`. It is a no-op when running outside of TorchScript.
+
+    Though TorchScript can infer correct type for most Python expressions, there are some cases where
+    type infernece can be wrong, including:
+    - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`s
+    - Optional types like `Optional[T]` but assigned a valid value of type `T`, TorchScript would assume
+    it is type `T` rather than `Optional[T]`
+
+    Note that `annotate()` does not help in `__init__` method of `torch.nn.Module` subclasses because it
+    is executed in eager mode. To annotate types of `torch.nn.Module` attributes,
+    use :meth:`~torch.jit.Annotate` instead.
+
+    Example:
+
+    .. testcode::
+
+        import torch
+        from typing import Dict
+
+        @torch.jit.script
+        def fn():
+            # Telling TorchScript that this empty dictionary is a (str -> int) dictionary
+            # instead of default dictionary type of (str -> Tensor).
+            d = torch.jit.annotate(Dict[str, int], {})
+
+            # Without `torch.jit.annotate` above, following statement would fail because of
+            # type mismatch.
+            d["name"] = 20
+
+    .. testcleanup::
+
+        del fn
+
+    Args:
+        the_type: Python type that should be passed to TorchScript compiler as type hint for `the_value`
+        the_value: Value or expression to hint type for.
+
+    Returns:
+        `the_value` is passed back as return value.
+    """
     return the_value
 
 
