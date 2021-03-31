@@ -5318,11 +5318,7 @@ class DistributedTest:
             param_to_name_mapping = net._build_param_to_name_mapping(net_params)
             self.assertDictEqual(expected_mapping, param_to_name_mapping)
 
-        @with_dist_debug_levels(levels=["INFO", "DETAIL"])
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
-        @skip_if_lt_x_gpu(2)
-        def test_ddp_multiple_nested_unused_params_error(self):
+        def _test_ddp_multiple_nested_unused_params_error(self, ignore_sparse):
             class SubModule(nn.Module):
                 def __init__(self):
                     super().__init__()
@@ -5348,16 +5344,37 @@ class DistributedTest:
                     return self.sub_module(x)
 
             model = MyModel()
-            unused_modules = list(model.sub_module.embedding_net.modules()) + [
-                model.sub_module.lin.b,
-            ]
+            sparse_embedding_fqns = []
+            if ignore_sparse:
+                for module_name, module in model.named_modules():
+                    if module == model.sub_module.embedding_net.embedding:
+                        for parameter_name, param in module.named_parameters(recurse=False):
+                            fqn = f"{module_name}.{parameter_name}"
+                            sparse_embedding_fqns.append(fqn)
+
+                torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                    model,
+                    sparse_embedding_fqns
+                )
+                unused_modules = [
+                    model.sub_module.embedding_net.lin,
+                    model.sub_module.lin.b,
+                ]
+            else:
+                unused_modules = list(model.sub_module.embedding_net.modules()) + [
+                    model.sub_module.lin.b,
+                ]
 
             expected_unused_param_fqns = []
+            used_param_fqns = []  # Validate that these don't mistakenly show up.
             for module_name, module in model.named_modules():
                 for parameter_name, param in module.named_parameters(recurse=False):
+                    fqn = f"{module_name}.{parameter_name}"
                     if module in unused_modules:
-                        fqn = f"{module_name}.{parameter_name}"
                         expected_unused_param_fqns.append(fqn)
+                    else:
+                        if not ignore_sparse or module != model.sub_module.embedding_net.embedding:
+                            used_param_fqns.append(fqn)
 
             net = torch.nn.parallel.DistributedDataParallel(
                 model.cuda(self.rank), device_ids=[self.rank],
@@ -5383,3 +5400,27 @@ class DistributedTest:
                         # can be different in Reducer.
                         for unused_param_fqn in expected_unused_param_fqns:
                             self.assertTrue(unused_param_fqn in unused_param_substr)
+                        # Validate that used param fqns don't show up in error
+                        # logs.
+                        for used_param_fqn in used_param_fqns:
+                            self.assertFalse(used_param_fqn in unused_param_substr)
+                        # Validate that ignored param fqns don't show up as unused
+                        # (since DDP does not track them)
+                        for sparse_param_fqn in sparse_embedding_fqns:
+                            self.assertFalse(sparse_param_fqn in unused_param_substr)
+
+        @with_dist_debug_levels(levels=["INFO", "DETAIL"])
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_multiple_nested_unused_params_error(self):
+            self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=False)
+
+        @with_dist_debug_levels(levels=["INFO", "DETAIL"])
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_multiple_nested_unused_params_error_ignore_params(self):
+            # Tests unused parameter reporting when DDP is configured to ignore
+            # certain parameters.
+            self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=True)
