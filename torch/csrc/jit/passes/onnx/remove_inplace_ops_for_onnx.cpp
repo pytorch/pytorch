@@ -24,7 +24,7 @@ struct InplaceConverter {
       std::shared_ptr<Graph> graph,
       MutationRemover* mr,
       Module* model = nullptr)
-      : graph_(graph), mr_(mr), module_(model) {}
+      : graph_(std::move(graph)), mr_(mr), module_(model) {}
 
   void convertMutationForONNX();
 
@@ -763,7 +763,7 @@ void RemoveInplaceOpsForONNX(
   PrepareForRemoveMutations(mr, graph->block());
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
-  InplaceConverter ic(std::move(graph), &mr, model);
+  InplaceConverter ic(graph, &mr, model);
   ic.convertMutationForONNX();
 }
 
