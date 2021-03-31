@@ -120,11 +120,14 @@ void IterVisitor::traverseFrom(
 
     // If we just poped a stmt_stack level, we can finally visit it!
     if (all_inputs_visited) {
-      // Mark visited
-      visited.insert(stmt);
+      // stmt may have be already visited.
+      if (traverseAllPaths || visited.find(stmt) == visited.end()) {
+        // Mark visited
+        visited.insert(stmt);
 
-      // Actually visit stmt
-      handle(stmt);
+        // Actually visit stmt
+        handle(stmt);
+      }
 
       // Remove last value just visited
       current_inputs.pop_back();
