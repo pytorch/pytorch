@@ -234,7 +234,9 @@ class TORCH_API Rshift : public BitwiseOpNode<Rshift> {
       : BitwiseOpNode(lhs, rhs, IRNodeType::kRshift) {}
 };
 
-class TORCH_API Max : public BinaryOpNode<Max> {
+// TODO: add TORCH_API
+// Currently adding it results in a compilation error on Windows
+class Max : public BinaryOpNode<Max> {
  private:
   bool propagate_nans_;
 
