@@ -411,22 +411,20 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 
 } // namespace
 
-Tensor& quantile_out(
-    Tensor& out,
-    const Tensor& self,
+Tensor& quantile_out(const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& out) {
   quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/false);
   return out;
 }
 
-Tensor& quantile_out(
-    Tensor& out,
-    const Tensor& self,
+Tensor& quantile_out(const Tensor& self,
     double q,
     optional<int64_t> _dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::quantile_out(
@@ -458,22 +456,20 @@ Tensor quantile(
       self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
 }
 
-Tensor& nanquantile_out(
-    Tensor& out,
-    const Tensor& self,
+Tensor& nanquantile_out(const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& out) {
   quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/true);
   return out;
 }
 
-Tensor& nanquantile_out(
-    Tensor& out,
-    const Tensor& self,
+Tensor& nanquantile_out(const Tensor& self,
     double q,
     optional<int64_t> _dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::nanquantile_out(
@@ -551,14 +547,13 @@ std::tuple<Tensor, Tensor> kthvalue(
   return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
 }
 
-std::tuple<Tensor&, Tensor&> topk_out_cpu(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+std::tuple<Tensor&, Tensor&> topk_out_cpu(const Tensor& self,
     int64_t k,
     int64_t dim_,
     bool largest,
-    bool sorted) {
+    bool sorted,
+    Tensor& values,
+    Tensor& indices) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
   TORCH_CHECK(
       k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
@@ -682,13 +677,12 @@ Tensor nanmedian_cpu(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/true);
 }
 
-std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(const Tensor& self,
     c10::optional<bool> stable,
     int64_t dim,
-    bool descending) {
+    bool descending,
+    Tensor& values,
+    Tensor& indices) {
   values.resize_(self.sizes()).copy_(self);
   indices.resize_(self.sizes());
 
@@ -704,13 +698,13 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(
   return std::forward_as_tuple(values, indices);
 }
 
-std::tuple<Tensor&, Tensor&> sort_out_cpu(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+std::tuple<Tensor&, Tensor&> sort_out_cpu(const Tensor& self,
     int64_t dim,
-    bool descending) {
-  return sort_out_cpu_stable(values, indices, self, /*stable=*/false, dim, descending);
+    bool descending,
+    Tensor& values,
+    Tensor& indices) {
+  return at::native::sort_out_cpu_stable(
+      self, /*stable=*/false, dim, descending, values, indices);
 }
 
 std::tuple<Tensor, Tensor> sort_cpu_stable(
@@ -721,7 +715,7 @@ std::tuple<Tensor, Tensor> sort_cpu_stable(
   TORCH_CHECK(!self.is_complex(), "sort(): input tensor must be of non-complex type");
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return sort_out_cpu_stable(values, indices, self, stable, dim, descending);
+  return at::native::sort_out_cpu_stable(self, stable, dim, descending, values, indices);
 }
 
 std::tuple<Tensor, Tensor> sort_cpu(
@@ -731,7 +725,7 @@ std::tuple<Tensor, Tensor> sort_cpu(
   return sort_cpu_stable(self, /*stable=*/false, dim, descending);
 }
 
-Tensor& msort_out(Tensor& values, const Tensor& self) {
+Tensor& msort_out(const Tensor& self, Tensor& values) {
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::sort_out(values, indices, self, 0, false);
   return values;
