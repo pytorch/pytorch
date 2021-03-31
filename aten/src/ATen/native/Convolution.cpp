@@ -246,9 +246,6 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
       || (weight.size(-1) > 3 && weight.size(-2) > 3)
       || input.size(0) > 1
       || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480) // for some case, native is faster
-      // OneDNN < 1.8.1 produce incorrect results in this case (see #50042)
-      // TODO(VitalyFedyunin): Remove this patch after OneDNN 1.8.1 merged in
-      && !(groups > 0 && groups % 24 == 0 && weight.size(0) == groups && weight.size(1) == 1)
       );
 
 #endif
@@ -649,9 +646,12 @@ static Tensor convolution_same(
 }
 
 Tensor _convolution_mode(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, std::string padding, IntArrayRef dilation,
     int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   if (padding == "same") {
     return at::native::convolution_same(
         input, weight, bias, stride, dilation, groups);
@@ -739,7 +739,7 @@ at::Tensor convolution_overrideable(
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
-  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_overrideable not implemented. You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
 }
 
 at::Tensor _convolution(
