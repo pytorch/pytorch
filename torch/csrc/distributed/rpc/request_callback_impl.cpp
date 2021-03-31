@@ -371,7 +371,6 @@ void RequestCallbackImpl::processPythonRemoteCall(
           IValue py_ivalue = jit::toIValue(result, PyObjectType::get());
 
           py::gil_scoped_release release;
-
           std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "Before RequestCallbackImpl::processPythonRemoteCall calls ownerRRef->recordAllDevices(deviceIndices); with rrefId() = " << ownerRRef->rrefId() << ", deviceIndices.size() = " << deviceIndices.size() << std::endl;
           std::cout.flush();
           ownerRRef->recordAllDevices(deviceIndices);
