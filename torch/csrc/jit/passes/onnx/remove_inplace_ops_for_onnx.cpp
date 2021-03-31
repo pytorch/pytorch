@@ -21,7 +21,7 @@ const std::set<c10::Symbol> inplace_ops =
 
 struct InplaceConverter {
   InplaceConverter(
-      const std::shared_ptr<Graph>& graph,
+      std::shared_ptr<Graph> graph,
       MutationRemover* mr,
       Module* model = nullptr)
       : graph_(graph), mr_(mr), module_(model) {}
@@ -68,7 +68,6 @@ struct InplaceConverter {
     // root value.
     std::unordered_map<Value*, Value*> alias_to_value_;
 
-    // TODO: order might be useless, could potentially remove this.
     struct aliasComp {
       bool operator()(const Value* a, const Value* b) {
         auto* n_a = a->node();
@@ -370,7 +369,7 @@ std::string InplaceConverter::ValueTracker::toString() const {
      << std::endl;
   ss << "value_to_sorted_aliases_: " << std::endl;
   size_t idx = 0;
-  for (auto it : value_to_sorted_aliases_) {
+  for (const auto& it : value_to_sorted_aliases_) {
     ss << "Value[" << idx << "]: " << it.first->debugName() << std::endl;
     ss << "  Mapping to ";
     for (auto v : it.second) {
@@ -640,7 +639,7 @@ void InplaceConverter::replaceAttrWithInplaceOps(
     Block* block,
     const std::unordered_map<std::string, Value*>& attr_name_value_map,
     const std::unordered_map<Node*, std::string>& attr_node_fullname_map) {
-  for (auto pair : attr_node_fullname_map) {
+  for (const auto& pair : attr_node_fullname_map) {
     auto* n = pair.first;
     auto fullName = pair.second;
     auto find_init_val = attr_name_value_map.find(fullName);
@@ -764,7 +763,7 @@ void RemoveInplaceOpsForONNX(
   PrepareForRemoveMutations(mr, graph->block());
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
-  InplaceConverter ic(graph, &mr, model);
+  InplaceConverter ic(std::move(graph), &mr, model);
   ic.convertMutationForONNX();
 }
 
