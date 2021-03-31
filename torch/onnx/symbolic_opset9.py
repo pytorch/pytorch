@@ -1111,6 +1111,10 @@ def wrap_logical_op_with_negation(func):
     return wrap_with_not
 
 
+def __not_(g, self):
+    return g.op("Not", self)
+
+
 def eq(g, self, other):
     return g.op("Equal", self, other)
 
@@ -1594,6 +1598,11 @@ def min(g, self, dim_or_y=None, keepdim=None):
         min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
         indices = g.op('ArgMin', self, axis_i=dim, keepdims_i=keepdim)
         return min, indices
+
+
+def prim_min(g, self):
+    ten = stack(g, self, g.op("Constant", value_t=torch.tensor([0])))
+    return min(g, ten)
 
 
 def exp(g, self):
