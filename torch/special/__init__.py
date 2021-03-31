@@ -123,7 +123,7 @@ Example::
 """.format(**common_args))
 
 logit = _add_docstr(_special.special_logit,
-                     r"""
+                    r"""
 logit(input, *, out=None) -> Tensor
 
 Computes the logit (defined below) of the elements of :attr:`input`.
@@ -153,7 +153,7 @@ Example::
 """.format(**common_args))
 
 expit = _add_docstr(_special.special_expit,
-                     r"""
+                    r"""
 expit(input, *, out=None) -> Tensor
 
 Computes the expit (also known as the logistic sigmoid function) of the elements of :attr:`input`.
@@ -179,14 +179,19 @@ Example::
 exp2 = _add_docstr(_special.special_exp2,
                    r"""
 exp2(input, *, out=None) -> Tensor
+
 Computes the base two exponential function of :attr:`input`.
+
 .. math::
     y_{i} = 2^{x_{i}}
+
 """ + r"""
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> torch.special.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
     tensor([ 1.,  2.,  8., 16.])
@@ -195,18 +200,23 @@ Example::
 expm1 = _add_docstr(_special.special_expm1,
                     r"""
 expm1(input, *, out=None) -> Tensor
+
 Computes the exponential of the elements minus 1
 of :attr:`input`.
-..
+
 .. math::
     y_{i} = e^{x_{i}} - 1
+
 .. note:: This function provides greater precision than exp(x) - 1 for small values of x.
+
 """ + r"""
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
-    >>> torch.expm1(torch.tensor([0, math.log(2.)]))
+    >>> torch.special.expm1(torch.tensor([0, math.log(2.)]))
     tensor([ 0.,  1.])
 """.format(**common_args))
