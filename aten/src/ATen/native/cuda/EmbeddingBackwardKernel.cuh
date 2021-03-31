@@ -33,4 +33,3 @@ Tensor embedding_backward_cuda_kernel(
     const Tensor &per_sample_weights = Tensor());
 
 }}
-

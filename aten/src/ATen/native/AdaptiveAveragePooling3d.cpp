@@ -279,10 +279,9 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
 
 } // namespace
 
-Tensor& adaptive_avg_pool3d_out_cpu(
-    Tensor& output,
-    const Tensor& input,
-    IntArrayRef output_size) {
+Tensor& adaptive_avg_pool3d_out_cpu(const Tensor& input,
+    IntArrayRef output_size,
+    Tensor& output) {
   adaptive_avg_pool3d_out_cpu_template(output, input, output_size);
   return output;
 }
@@ -293,10 +292,9 @@ Tensor adaptive_avg_pool3d_cpu(Tensor const& input, IntArrayRef output_size) {
   return output;
 }
 
-Tensor& adaptive_avg_pool3d_backward_out_cpu(
-    Tensor& gradInput,
-    const Tensor& gradOutput_,
-    const Tensor& input) {
+Tensor& adaptive_avg_pool3d_backward_out_cpu(const Tensor& gradOutput_,
+    const Tensor& input,
+    Tensor& gradInput) {
   gradInput.resize_as_(input).zero_();
   adaptive_avg_pool3d_backward_out_cpu_template(gradInput, gradOutput_, input);
   return gradInput;
