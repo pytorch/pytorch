@@ -2,7 +2,6 @@ from tools.codegen.model import *
 
 from tools.codegen.api.types import *
 from tools.codegen.api import cpp
-from tools.codegen import local
 
 from typing import Union, Sequence, List, Optional
 

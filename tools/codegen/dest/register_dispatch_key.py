@@ -10,7 +10,6 @@ from tools.codegen.api.types import *
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
-import tools.codegen.local as local
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
 # Generates Register{dispatch}.cpp (e.g., RegisterCPU.cpp).
@@ -205,9 +204,7 @@ namespace {{
                 return None
             else:
                 dispatcher_sig = DispatcherSignature.from_schema(f.func)
-
                 payload = f"TORCH_FN({name})"
-
                 return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
             assert_never(self.target)
