@@ -68,7 +68,7 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
     if (a.size() != b.size()) {
       return false;
     }
-    for (std::size_t i = 0; i < a.size(); ++i) {
+    for (auto i = decltype(a.size()){0}; i < a.size(); ++i) {
       if (!a[i].equal(b[i])) {
         return false;
       }

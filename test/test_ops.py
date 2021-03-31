@@ -112,15 +112,21 @@ class TestGradients(TestCase):
             else:
                 variant_out_fn = variant
 
+            # Note on TensorList inputs
+            #
+            # gradcheck does not support TensorList inputs so here we pass TensorList
+            # inputs of size n as n single Tensor inputs to gradcheck and wrap the op
+            # in a function that puts the n Tensor inputs back into a TensorList
+
             def fn(*inputs):
-                # Pack input back into TensorList since we splat it when passing to gradcheck
-                if not isinstance(sample.input, torch.Tensor):
+                # Put tensors back into TensorList since we splat them when passing to gradcheck
+                if is_iterable_of_tensors(sample.input):
                     n = len(sample.input)
                     inputs = (inputs[:n], *inputs[n:])
                 output = variant_out_fn(*inputs, **sample.kwargs)
                 return op.output_func(output)
 
-            # Gradcheck does not support TensorList so we splat it with the remaining args
+            # Splat TensorList inputs into single Tensor inputs
             gradcheck_args = (sample.input,) if isinstance(sample.input, torch.Tensor) else tuple(sample.input)
             gradcheck_args += sample.args
 

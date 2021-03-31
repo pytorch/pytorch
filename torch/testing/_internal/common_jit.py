@@ -48,32 +48,37 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
                    for i, v in enumerate(vs)
                    if v is not None and v.dtype in floating_and_complex_types_and(torch.half, torch.bfloat16))
 
-    def clone_inputs(requires_grad):
+    def clone_tensor(t, preserve_requires_grad):
+        require_grad = preserve_requires_grad and t.requires_grad
+        return t.detach().clone().requires_grad_(require_grad)
+
+    def clone_inputs(preserve_requires_grad: bool):
         inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []
-        recording_tensors: List[torch.Tensor] = []
+
         for arg in args:
             if isinstance(arg, torch.Tensor):
-                require_grad = requires_grad and arg.requires_grad
-                inputs.append(arg.detach().clone().requires_grad_(require_grad))
-                if require_grad:
-                    recording_tensors.append(arg)
+                inputs.append(clone_tensor(arg, preserve_requires_grad))
             elif is_iterable_of_tensors(arg):
-                tensors = []
-                for t in arg:
-                    require_grad = requires_grad and t.requires_grad
-                    tensors.append(t.detach().clone().requires_grad_(require_grad))
-                    if require_grad:
-                        recording_tensors.append(t)
-                inputs.append(tensors)
+                inputs.append(tuple(clone_tensor(t, preserve_requires_grad) for t in arg))
             else:
                 inputs.append(arg)
 
-        return inputs, recording_tensors
+        return inputs
 
-    nograd_inputs, _ = clone_inputs(False)
-    recording_inputs, recording_tensors = clone_inputs(True)
+    # Returns tensors in args that requires_grad, including tensors in TensorList args
+    def get_recording_tensors(args):
+        recording_tensors: List[torch.Tensor] = []
+
+        for arg in args:
+            if isinstance(arg, torch.Tensor) and arg.requires_grad:
+                recording_tensors.append(arg)
+            elif is_iterable_of_tensors(arg):
+                recording_tensors.extend(filter(lambda t: t.requires_grad, arg))
+
+        return recording_tensors
 
     # test no gradients case
+    nograd_inputs = clone_inputs(preserve_requires_grad=False)
     outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
     with enable_profiling_mode_for_profiling_tests():
         outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
@@ -88,6 +93,8 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
 
     with enable_profiling_mode_for_profiling_tests():
         # test single grad case
+        recording_inputs = clone_inputs(preserve_requires_grad=True)
+        recording_tensors = get_recording_tensors(recording_inputs)
         outputs = output_func(self.runAndSaveRNG(reference_func, recording_inputs, kwargs))
         grads = torch.autograd.grad(allSum(outputs), recording_tensors,
                                     allow_unused=allow_unused)
@@ -107,7 +114,8 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
 
         l2 = (allSum(grads) * l1)
         grads2 = torch.autograd.grad(l2, recording_tensors, allow_unused=allow_unused)
-        recording_inputs, recording_tensors = clone_inputs(True)
+        recording_inputs = clone_inputs(preserve_requires_grad=True)
+        recording_tensors = get_recording_tensors(recording_inputs)
         outputs_test = output_func(self.runAndSaveRNG(func, recording_inputs, kwargs))
         l1_test = allSum(outputs_test)
         grads_test = torch.autograd.grad(
