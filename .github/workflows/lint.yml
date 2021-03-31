@@ -17,8 +17,6 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Ensure consistent CircleCI YAML config
         run: |
           pip install -r requirements.txt
@@ -32,6 +30,9 @@ jobs:
           rm -r "shellcheck-${scversion}"
           shellcheck --version
           .jenkins/run-shellcheck.sh
+      - name: Ensure correct trailing newlines
+        run: |
+          (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
         run: |
           (! git grep -I -no ' $' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above files have trailing spaces; please remove them"; false))
@@ -66,8 +67,6 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Prepare output dir with HEAD commit SHA
         run: |
           mkdir flake8-output
@@ -100,7 +99,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # deep clone, to allow us to use git merge-base
       - name: Prepare output dir with HEAD commit SHA
         run: |
@@ -199,8 +197,6 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Run cmakelint
         run: |
           set -eux
@@ -220,8 +216,6 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Install dependencies
         run: |
           set -eux
