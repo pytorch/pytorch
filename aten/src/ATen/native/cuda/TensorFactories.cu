@@ -87,7 +87,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
   result.resize_({n});
 
   // Generate random values for the keys array
-  AT_DISPATCH_ALL_TYPES(
+  AT_DISPATCH_ALL_TYPES_AND(kHalf,
     result.scalar_type(), "randperm_out_cuda", [&] {
       TORCH_CHECK(n <= std::numeric_limits<int>::max(),
         "randperm of tensors larger than INT_MAX is not supported yet in pytorch");
