@@ -97,7 +97,7 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), enable_cpatching: bool = True) -> None:
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), enable_cpatching: bool = False) -> None:
         """
         Construct a Tracer object.
 
@@ -107,7 +107,7 @@ class Tracer(TracerBase):
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap().
 
-            enable_cpatching (bool): defaults to `True`,
+            enable_cpatching (bool): defaults to `False`,
                 Allows you to enable/disable monkeypatching of torch functions at the
                 C-level (which captures functins like randn).
 
