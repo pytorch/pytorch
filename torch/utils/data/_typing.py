@@ -2,7 +2,6 @@
 # https://github.com/python/cpython/blob/master/Lib/typing.py
 
 import collections
-import copy
 import numbers
 from typing import (Any, Dict, Iterator, List, Set, Sequence, Tuple,
                     TypeVar, Union, get_type_hints)
