@@ -343,7 +343,7 @@ class PackagingTsSerTest(PackageTestCase):
         self.assertEqual(loaded_mod_list[1]("input"), scripted_mod_b("input"))
 
     @skipIfNoTorchVision
-    def test_ts_scriptping_packaged_mod(self):
+    def test_ts_scripting_packaged_mod(self):
         # Test scripting a module loaded from a package
         # and saving it in a new package as a script object
         from package_a.test_module import SimpleTest
