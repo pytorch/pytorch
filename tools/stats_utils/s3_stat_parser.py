@@ -82,9 +82,10 @@ class Version2Report(VersionedReport):
 
 Report = Union[Version1Report, VersionedReport]
 
+if HAVE_BOTO3:
+    S3_RESOURCE_READ_ONLY = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
+    S3_RESOURCE = boto3.resource('s3')
 
-S3_RESOURCE_READ_ONLY = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
-S3_RESOURCE = boto3.resource('s3')
 
 def get_S3_bucket_readonly(bucket_name: str) -> Any:
     return S3_RESOURCE_READ_ONLY.Bucket(bucket_name)
