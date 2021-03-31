@@ -7232,10 +7232,22 @@ def generate_test_function(cls,
         # Special case for binary float ops (binary ops that promote int to float)
         if op_str in binary_float_ops_inplace and \
                 'inplace' in subtest_str and dtype in _integer_types:
-            with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
-                cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
-            with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
-                device_result = getattr(device_tensor, op_str)(*device_args)
+            # see https://github.com/pytorch/pytorch/issues/54897
+            try:
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
+                    cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
+                    device_result = getattr(device_tensor, op_str)(*device_args)
+            except Exception:
+                if self.device_type == 'meta':
+                    return
+                else:
+                    raise
+            else:
+                if self.device_type == 'meta':
+                    self.fail('expected test to fail on meta tensors, but it passed')
+                else:
+                    pass
             return  # Nothing more to check
 
         # Runs the tensor op on CPU and device
