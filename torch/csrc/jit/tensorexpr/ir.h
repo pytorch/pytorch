@@ -256,7 +256,9 @@ class TORCH_API Max : public BinaryOpNode<Max> {
   }
 };
 
-class TORCH_API Min : public BinaryOpNode<Min> {
+// TODO: add TORCH_API
+// Currently adding it results in a compilation error on Windows
+class Min : public BinaryOpNode<Min> {
  private:
   bool propagate_nans_;
 
