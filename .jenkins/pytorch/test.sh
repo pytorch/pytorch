@@ -53,7 +53,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_DEVICE_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
   export PYTORCH_GPU_RUN_PARALLEL="-- --run-parallel ${PYTORCH_DEVICE_COUNT}"
 elif [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export PYTORCH_DEVICE_COUNT=$(rocminfo | grep -E 'Name:.*\sgfx' | wc -l)
+  export PYTORCH_DEVICE_COUNT=$(rocminfo | grep -c 'Name:.*\sgfx')
   export PYTORCH_GPU_RUN_PARALLEL="-- --run-parallel ${PYTORCH_DEVICE_COUNT}"
 fi
 
