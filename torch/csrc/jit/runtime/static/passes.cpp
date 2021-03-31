@@ -459,8 +459,8 @@ void FuseSigridTransformsListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* sigrid_node = *it;
     auto kind = sigrid_node->kind();
-    // TODO: make it work the TorchBind version
-    if (strcmp(kind.toQualString(), "fb::sigrid_transforms") == 0) {
+    if (strcmp(kind.toQualString(), "fb::sigrid_transforms") == 0 ||
+        strcmp(kind.toQualString(), "fb::sigrid_transforms_torch_bind") == 0) {
       const Value* sigrid_out = sigrid_node->outputs()[0];
       if (sigrid_out->uses().size() > 1) {
         continue;
