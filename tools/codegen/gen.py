@@ -512,7 +512,7 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
         ret = {
             'dynamic_type': dynamic_type(r.type),
             'name': name,
-            'type': cpp.return_type(r),
+            'type': cpp.return_type(r).cpp_type(),
         }
 
         if r.name:
@@ -607,7 +607,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
             a, method=False, cpp_no_default_args=set(), faithful=False, has_tensor_options=False)
     ]
 
-    cpp_returns = cpp.returns_type(f.func.returns)
+    cpp_returns = cpp.returns_type(f.func.returns).cpp_type()
     schema_order_cpp_signature = f"{cpp_returns} ({', '.join(cpp_schema_order_types)})"
 
     is_factory_method = any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) \
@@ -640,7 +640,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 @with_native_function
 def compute_registration_declarations(f: NativeFunction) -> str:
     name = dispatcher.name(f.func)
-    returns_type = dispatcher.returns_type(f.func.returns)
+    returns_type = dispatcher.returns_type(f.func.returns).cpp_type()
     args = dispatcher.arguments(f.func)
     args_str = ', '.join(a.no_default().decl() for a in args)
     comment_data : Dict[str, str] = {

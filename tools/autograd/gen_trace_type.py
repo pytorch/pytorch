@@ -293,7 +293,7 @@ def declare_returned_variables(f: NativeFunction) -> str:
         return ''
     types = map(cpp.return_type, f.func.returns)
     names = cpp.return_names(f)
-    return '\n'.join(f'{type} {name};' for type, name in zip(types, names))
+    return '\n'.join(f'{type.cpp_type()} {name};' for type, name in zip(types, names))
 
 def tie_return_values(f: NativeFunction) -> str:
     if len(f.func.returns) == 1:
@@ -376,7 +376,7 @@ def method_definition(f: NativeFunction) -> Optional[str]:
     )
 
     return METHOD_DEFINITION.substitute(
-        return_type=cpp.returns_type(f.func.returns),
+        return_type=cpp.returns_type(f.func.returns).cpp_type(),
         type_wrapper_name=type_wrapper_name(f),
         formals=formals,
         type_definition_body=emit_trace_body(f),

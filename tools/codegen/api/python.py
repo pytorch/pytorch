@@ -945,7 +945,7 @@ def dispatch_lambda_return_str(f: NativeFunction) -> str:
     # mutable reference to temporary.  Maybe we could assign it to a
     # variable itself.)
     returns_without_annotation = tuple(map(lambda r: Return(r.name, r.type, None), f.func.returns))
-    return_str = cpp.returns_type(returns_without_annotation)
+    return_str = cpp.returns_type(returns_without_annotation).cpp_type()
     if return_str not in SUPPORTED_RETURN_TYPES:
         raise RuntimeError(f'{f.func.name} returns unsupported type {return_str}')
     return return_str

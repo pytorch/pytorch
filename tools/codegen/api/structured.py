@@ -52,7 +52,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
         elif str(t.elem) == 'Dimname':
             return BaseCType("DimnameList", binds)
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
-        return BaseCType(f"ArrayRef<{elem.cpp_type()}>", binds)
+        return ArrayRefCType(BaseCType(elem.cpp_type(), binds))
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 

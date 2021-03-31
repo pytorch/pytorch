@@ -238,7 +238,7 @@ def gen_differentiable_outputs(fn: NativeFunctionWithDifferentiabilityInfo) -> L
     f = fn.func
     info = fn.info
     outputs: List[DifferentiableOutput] = [
-        DifferentiableOutput(name=name, type=ret.type, cpp_type=cpp.return_type(ret))
+        DifferentiableOutput(name=name, type=ret.type, cpp_type=cpp.return_type(ret).cpp_type())
         for name, ret in zip(cpp.return_names(f), f.func.returns)]
     output_differentiability = info.output_differentiability if info else None
     if output_differentiability is not None:

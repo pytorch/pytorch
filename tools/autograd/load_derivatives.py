@@ -71,7 +71,7 @@ def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...
     argument_types = tuple(a.type for a in arguments)
 
     return_names = tuple(n if n != 'self' else 'result' for n in cpp.return_names(f))
-    return_types = tuple(cpp.return_type(r) for r in f.func.returns)
+    return_types = tuple(cpp.return_type(r).cpp_type() for r in f.func.returns)
 
     formula, saved_inputs = saved_variables(formula, argument_names, argument_types, var_names)
     formula, saved_outputs = saved_variables(formula, return_names, return_types, var_names)
