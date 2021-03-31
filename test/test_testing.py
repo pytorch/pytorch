@@ -686,8 +686,7 @@ class TestFrameworkUtils(TestCase):
 
 
 class TestAsserts(TestCase):
-    @staticmethod
-    def _assert_fns(device=None):
+    def assert_fns(self):
         return [torch.testing.assert_tensors_equal, torch.testing.assert_tensors_close]
 
     @onlyCPU
@@ -695,7 +694,7 @@ class TestAsserts(TestCase):
         a = torch.empty((), device=device)
         b = np.empty(())
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             with self.assertRaises(AssertionError):
                 fn(a, b)
 
@@ -704,7 +703,7 @@ class TestAsserts(TestCase):
         a = torch.ones(1, dtype=torch.float32, device=device)
         b = torch.ones(1, dtype=torch.complex64, device=device)
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             with self.assertRaises(UsageError):
                 fn(a, b, check_dtype=False)
 
@@ -713,7 +712,7 @@ class TestAsserts(TestCase):
         a = torch.empty((), device=device)
         b = torch.sparse_coo_tensor(size=(), device=device)
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             with self.assertRaises(UsageError):
                 fn(a, b)
 
@@ -724,7 +723,7 @@ class TestAsserts(TestCase):
         b = torch._empty_affine_quantized(a.shape, scale=1, zero_point=0, dtype=torch.qint32, device=device)
         b.fill_(val)
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             with self.assertRaises(UsageError):
                 fn(a, b)
 
@@ -733,7 +732,7 @@ class TestAsserts(TestCase):
         a = torch.empty((), device=device)
         b = a.clone().reshape((1,))
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             with self.assertRaisesRegex(AssertionError, "shape"):
                 fn(a, b)
 
@@ -742,7 +741,7 @@ class TestAsserts(TestCase):
         a = torch.empty((), device=device)
         b = a.clone().cpu()
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             with self.assertRaisesRegex(AssertionError, "device"):
                 fn(a, b)
 
@@ -751,7 +750,7 @@ class TestAsserts(TestCase):
         a = torch.empty((), device=device)
         b = a.clone().cpu()
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             fn(a, b, check_device=False)
 
     @onlyCPU
@@ -759,7 +758,7 @@ class TestAsserts(TestCase):
         a = torch.empty((), dtype=torch.float, device=device)
         b = a.clone().to(torch.int)
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             with self.assertRaisesRegex(AssertionError, "dtype"):
                 fn(a, b)
 
@@ -768,7 +767,7 @@ class TestAsserts(TestCase):
         a = torch.ones((), dtype=torch.float, device=device)
         b = a.clone().to(torch.int)
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             fn(a, b, check_dtype=False)
 
     @onlyCPU
@@ -776,7 +775,7 @@ class TestAsserts(TestCase):
         a = torch.empty((2, 2), device=device)
         b = torch.as_strided(a.clone().t().contiguous(), a.shape, a.stride()[::-1])
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             with self.assertRaisesRegex(AssertionError, "stride"):
                 fn(a, b)
 
@@ -785,7 +784,7 @@ class TestAsserts(TestCase):
         a = torch.empty((2, 2), device=device)
         b = torch.as_strided(a.clone().t().contiguous(), a.shape, a.stride()[::-1])
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             fn(a, b, check_stride=False)
 
     @onlyCPU
@@ -793,8 +792,48 @@ class TestAsserts(TestCase):
         a = torch.tensor(1, device=device)
         b = torch.tensor(2, device=device)
 
-        for fn in self._assert_fns():
+        for fn in self.assert_fns():
             with self.assertRaises(AssertionError):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_values_msg_abs_mismatches(self, device):
+        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
+        b = a.clone()
+        b[2, 3] = 9
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"\s+1\s+"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_values_msg_rel_mismatches(self, device):
+        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
+        b = a.clone()
+        b[2, 3] = 9
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"8([.]3+)?\s*[%]"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_values_msg_index(self, device):
+        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
+        b = a.clone()
+        b[2, 3] = 9
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"2,\s*3"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_values_msg_max_diff(self, device):
+        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
+        b = a.clone()
+        b[2, 3] = 9
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"\s4.0\s"):
                 fn(a, b)
 
     @onlyCPU
