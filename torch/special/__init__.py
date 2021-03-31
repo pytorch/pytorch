@@ -193,6 +193,7 @@ Keyword args:
     {out}
 
 Example::
+
     >>> torch.special.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
     tensor([ 1.,  2.,  8., 16.])
 """.format(**common_args))
@@ -217,6 +218,7 @@ Keyword args:
     {out}
 
 Example::
+
     >>> torch.special.expm1(torch.tensor([0, math.log(2.)]))
     tensor([ 0.,  1.])
 """.format(**common_args))
