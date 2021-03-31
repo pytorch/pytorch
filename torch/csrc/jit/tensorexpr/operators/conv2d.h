@@ -1,9 +1,10 @@
 #pragma once
 
-#include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 Tensor* conv2d_depthwise(
     BufHandle input,
@@ -13,4 +14,6 @@ Tensor* conv2d_depthwise(
     int pad,
     int groups);
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
