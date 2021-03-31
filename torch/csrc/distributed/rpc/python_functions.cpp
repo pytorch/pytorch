@@ -1,6 +1,5 @@
 #include <ATen/ThreadLocalState.h>
 #include <c10/util/C++17.h>
-#include <exception>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
@@ -18,6 +17,7 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/python_compat.h>
+#include <exception>
 
 namespace torch {
 namespace distributed {
@@ -48,9 +48,7 @@ IValue toPyIValue(const Message& message) {
       py::gil_scoped_acquire acquire;
       py::object value = pythonRpcHandler.deserialize(resp.serializedPyObj());
       pythonRpcHandler.handleException(value);
-      return jit::toIValue(
-          value,
-          PyObjectType::get());
+      return jit::toIValue(value, PyObjectType::get());
     }
     default: {
       TORCH_CHECK(false, "Unrecognized response message type ", msgType);
@@ -156,7 +154,8 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
               dataPtrs.emplace_back(tensor.storage().data_ptr());
             }
 
-            // toPyIValue might throw and we need to record the appropriate exception.
+            // toPyIValue might throw and we need to record the appropriate
+            // exception.
             IValue ivalue;
             try {
               ivalue = toPyIValue(message);
@@ -165,8 +164,7 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
               return;
             }
 
-            child->markCompletedWithDataPtrs(
-                ivalue, std::move(dataPtrs));
+            child->markCompletedWithDataPtrs(ivalue, std::move(dataPtrs));
           }
         }));
     return child;
