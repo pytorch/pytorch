@@ -54,8 +54,10 @@ class TestOpInfo(TestCase):
     def test_supported_dtypes(self, device, dtype, op):
         for sample in op.sample_inputs(device, dtype):
             op(sample.input, *sample.args, **sample.kwargs)
-            self.assertTrue(sample.input.dtype == dtype)
-            self.assertTrue(sample.input.device.type == self.device_type)
+            # NOTE: only check the first tensor in the iterable of tensors
+            sample_input = sample.input[0] if is_iterable_of_tensors(sample.input) else sample.input
+            self.assertTrue(sample_input.dtype == dtype)
+            self.assertTrue(sample_input.device.type == self.device_type)
 
     # Verifies that backward for each supported floating or complex dtype
     #   does NOT throw a runtime error.
