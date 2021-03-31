@@ -71,7 +71,7 @@ jobs:
       - name: Regenerate ToCs
         run: |
           set -eux
-          export PATH=~/.npm-global:"$PATH"
+          export PATH=~/.npm-global/bin:"$PATH"
           for FILE in {CONTRIBUTING,README}.md; do
             markdown-toc --bullets='-' -i "$FILE"
           done
