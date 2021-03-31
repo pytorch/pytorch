@@ -3,7 +3,7 @@
 
 namespace torch::jit::tensorexpr {
 
-TensorSchedule conv2d_depthwise(
+Tensor* conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     BufHandle bias,
@@ -57,27 +57,27 @@ TensorSchedule conv2d_depthwise(
       },
       {{C / groups, "c"}, {R, "r"}, {S, "s"}});
 
-  auto sch = [R, stride, pad](LoopNest& nest, Tensor* conv) {
-    constexpr int kLoopH = 2, kLoopW = 3;
-    if (R == 3 && stride == 2 && pad == 1) {
-      For *head, *tail;
-      auto loops = nest.getLoopStmtsFor(conv);
-      nest.sliceHead(loops[kLoopW], 2, &head, &tail);
-      loops = nest.getLoopStmtsFor(conv);
-      nest.sliceHead(loops[kLoopH], 2, &head, &tail);
-    } else if (R == 3 && stride == 1 && pad == 1) {
-      For *main, *peeled;
-      auto loops = nest.getAllLoopNestsWritingToBuf(conv->buf());
-      main = loops[1][kLoopW];
-      nest.sliceHead(main, 1, &peeled, &main);
-      nest.sliceTail(main, 1, &main, &peeled);
-      main = LoopNest::getParentLoop(main);
-      nest.sliceHead(main, 1, &peeled, &main);
-      nest.sliceTail(main, 1, &main, &peeled);
-    }
-  };
+  LoopNest nest({conv});
 
-  return {conv, sch};
+  constexpr int kLoopH = 2, kLoopW = 3;
+  if (R == 3 && stride == 2 && pad == 1) {
+    For *head, *tail;
+    auto loops = nest.getLoopStmtsFor(conv);
+    nest.sliceHead(loops[kLoopW], 2, &head, &tail);
+    loops = nest.getLoopStmtsFor(conv);
+    nest.sliceHead(loops[kLoopH], 2, &head, &tail);
+  } else if (R == 3 && stride == 1 && pad == 1) {
+    For *main, *peeled;
+    auto loops = nest.getAllLoopNestsWritingToBuf(conv->buf());
+    main = loops[1][kLoopW];
+    nest.sliceHead(main, 1, &peeled, &main);
+    nest.sliceTail(main, 1, &main, &peeled);
+    main = LoopNest::getParentLoop(main);
+    nest.sliceHead(main, 1, &peeled, &main);
+    nest.sliceTail(main, 1, &main, &peeled);
+  }
+
+  return new Tensor(conv->buf(), nest.root_stmt());
 }
 
 } // namespace torch::jit::tensorexpr

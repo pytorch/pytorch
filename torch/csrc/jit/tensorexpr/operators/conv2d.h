@@ -5,14 +5,7 @@
 
 namespace torch::jit::tensorexpr {
 
-using ScheduleFn = std::function<void(LoopNest&, Tensor*)>;
-
-struct TensorSchedule {
-  Tensor* tensor;
-  ScheduleFn schedule;
-};
-
-TensorSchedule conv2d_depthwise(
+Tensor* conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     BufHandle bias,

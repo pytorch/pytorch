@@ -28,11 +28,10 @@ TEST(Conv, DepthwiseConv2D) {
   te::Placeholder input("input", te::kFloat, {N, C, H, W});
   te::Placeholder weight("weight", te::kFloat, {K, CperG, R, S});
   te::Placeholder bias("bias", te::kFloat, {K});
-  auto [output, schedule] = te::conv2d_depthwise(
+  te::Tensor* output = te::conv2d_depthwise(
       input.handle(), weight.handle(), bias.handle(), kStride, kPad, kGroups);
 
   te::LoopNest loop({output});
-  schedule(loop, output);
   loop.simplify();
   loop.prepareForCodegen();
   te::LLVMCodeGen cg(loop.root_stmt(), {input, weight, bias, output});
