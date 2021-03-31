@@ -15,9 +15,6 @@ class kernel_arena_scope(object):
         self.scope = None
 
 class TestTensorExprPyBind(JitTestCase):
-    def setUp(self):
-        torch._C._jit_override_can_fuse_on_cpu(True)
-
     def test_simple_sum(self):
         with kernel_arena_scope():
             dtype = torch._C._te.Dtype.Float
@@ -76,21 +73,21 @@ class TestTensorExprPyBind(JitTestCase):
         y = torch.rand(size, device=device)
         z = torch.rand(size, device=device)
 
-        scripted_f = torch.jit.script(f, (x, y, z))
+        graph_str = """
+graph(%a.1 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu),
+      %b.1 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu),
+      %c.1 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu)):
+  %6 : int = prim::Constant[value=1]()
+  %7 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu) = aten::add(%a.1, %b.1, %6) # test/test_tensorexpr_pybind.py:73:19
+  %3 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu) = aten::add(%7, %c.1, %6) # test/test_tensorexpr_pybind.py:73:19
+  return (%3)
+        """
+        graph = torch._C.parse_ir(graph_str)
 
-        scripted_f(x, y, z)
-        scripted_f(x, y, z)
-
-        node = None
-        graph = torch.jit.last_executed_optimized_graph()
-        node = graph.findNode("prim::TensorExprGroup", True)
-
-        if not node:
-            return
         with kernel_arena_scope():
-            graph = node.g('Subgraph')
-            res1 = torch._C._te.TensorExprKernel.run(graph, (x, y, z))
-            res2 = torch._C._te.TensorExprKernel.fallback(graph, (x, y, z))
+            kernel = torch._C._te.TensorExprKernel(graph)
+            res1 = kernel.run((x, y, z))
+            res2 = kernel.fallback((x, y, z))
             correct = f(x, y, z)
             np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
             np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)

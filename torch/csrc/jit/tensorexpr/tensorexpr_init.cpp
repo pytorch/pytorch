@@ -434,38 +434,38 @@ void initTensorExprBindings(PyObject* module) {
   using TSGraph = std::shared_ptr<Graph>;
   py::class_<TensorExprKernel>(te, "TensorExprKernel")
       .def(py::init<const TSGraph>())
-      .def_static(
+      .def(
           "run",
-          [](const TSGraph graph, const py::tuple& inputs) {
+          [](TensorExprKernel& self, const py::tuple& inputs) {
             Stack stack;
             stack.reserve(inputs.size()); // captures?
             for (auto& obj : inputs) {
               stack.push_back(toTypeInferredIValue(obj));
             }
-            auto g_inputs = graph->inputs();
+            auto g_inputs = self.graph()->inputs();
             for (size_t i = 0; i < inputs.size(); ++i) {
               if (stack[i].isTensor()) {
                 g_inputs[i]->setType(stack[i].type());
               }
             }
-            TensorExprKernel(graph).run(stack);
+            self.run(stack);
             return createPyObjectForStack(std::move(stack));
           })
-      .def_static(
+      .def(
           "fallback",
-          [](const TSGraph graph, const py::tuple& inputs) {
+          [](TensorExprKernel& self, const py::tuple& inputs) {
             Stack stack;
             stack.reserve(inputs.size()); // captures?
             for (auto& obj : inputs) {
               stack.push_back(toTypeInferredIValue(obj));
             }
-            auto g_inputs = graph->inputs();
+            auto g_inputs = self.graph()->inputs();
             for (size_t i = 0; i < inputs.size(); ++i) {
               if (stack[i].isTensor()) {
                 g_inputs[i]->setType(stack[i].type());
               }
             }
-            TensorExprKernel(graph).fallback(stack);
+            self.fallback(stack);
             return createPyObjectForStack(std::move(stack));
           })
       .def(
