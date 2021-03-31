@@ -926,12 +926,8 @@ void conv2d_winograd_2_3(
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
-        VK_KERNEL(transform_winograd_2_3),
-        {
-          out_w_units,
-          out_h_units,
-          v_input_winograd.extents().data[2u],
-        },
+        VK_KERNEL(transform_winograd_2_3_sh),
+        v_input_winograd.extents(),
         context->gpu().adapter->local_work_group_size(),
         v_input_winograd.image(
             command_buffer,
@@ -966,7 +962,7 @@ void conv2d_winograd_2_3(
           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
-        VK_KERNEL(conv2d_winograd_2_3_test),
+        VK_KERNEL(conv2d_winograd_2_3),
         {
           out_w_units,
           out_h_units,
