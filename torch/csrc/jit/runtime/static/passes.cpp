@@ -7,6 +7,22 @@
 
 namespace torch {
 namespace jit {
+namespace {
+bool HasInplaceOp(Block* block, const AliasDb& alias_db) {
+  for (auto* node : block->nodes()) {
+    for (Block* sub_block : node->blocks()) {
+      return HasInplaceOp(sub_block, alias_db);
+    }
+    auto inputs = node->inputs();
+    // check if node modifies inputs (both inplace ops and certain out variants
+    // would qualify). For example: c = torch.sigmoid(b, out=b) is essentially
+    // the same as c = b.sigmoid_()
+    if (inputs.size() > 0 && alias_db.writesToAlias(node, {inputs[0]})) {
+      return true;
+    }
+  }
+  return false;
+}
 
 void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
@@ -306,6 +322,16 @@ void ClipRangesGatherRangesX2SigridHashPrecompute(
   fuse.runOnGraph(graph);
 }
 
+void SplitOutPrecomputeOpsForSparseNN(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+#ifdef FBCODE_CAFFE2
+  PrecomputeMultiplierShiftForSigridHash(graph);
+  ConstantPropagation(graph);
+  ConstantPooling(graph);
+#endif
+}
+} // namespace
+
 void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
   SplitOutPrecomputeOpsForSparseNN(graph);
@@ -327,15 +353,6 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 #endif
 }
 
-void SplitOutPrecomputeOpsForSparseNN(
-    std::shared_ptr<torch::jit::Graph>& graph) {
-#ifdef FBCODE_CAFFE2
-  PrecomputeMultiplierShiftForSigridHash(graph);
-  ConstantPropagation(graph);
-  ConstantPooling(graph);
-#endif
-}
-
 TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def("static_runtime::pure_inputs() -> Tensor", []() -> at::Tensor {
     return at::randn({1});
@@ -347,6 +364,10 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
       "static_runtime::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)");
   m.def(
       "static_runtime::flatten_copy.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)");
+}
+
+bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
+  return HasInplaceOp(graph->block(), alias_db);
 }
 
 void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -381,6 +402,8 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
        c10::Symbol::fromQualString("static_runtime::flatten_copy")},
       {c10::Symbol::fromQualString("aten::to"),
        c10::Symbol::fromQualString("static_runtime::to_copy")}};
+
+  bool has_inplace_ops = HasInplaceOp(graph, db);
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto* n : graph->nodes()) {
     if (!supported.count(n->kind())) {
@@ -406,7 +429,7 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
     // result. To keep static runtime consistent with the jit interpreter, here
     // we choose not to replace reshape with the copy version
     auto* in = n->input(0);
-    if (in->uses().size() > 1) {
+    if (has_inplace_ops && in->uses().size() > 1) {
       continue;
     }
 
@@ -436,8 +459,8 @@ void FuseSigridTransformsListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
     Node* sigrid_node = *it;
     auto kind = sigrid_node->kind();
-    // TODO: make it work the TorchBind version
-    if (strcmp(kind.toQualString(), "fb::sigrid_transforms") == 0) {
+    if (strcmp(kind.toQualString(), "fb::sigrid_transforms") == 0 ||
+        strcmp(kind.toQualString(), "fb::sigrid_transforms_torch_bind") == 0) {
       const Value* sigrid_out = sigrid_node->outputs()[0];
       if (sigrid_out->uses().size() > 1) {
         continue;
