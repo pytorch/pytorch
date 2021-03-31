@@ -39,11 +39,12 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
 // The source-code of kernels for float, double and complex types is similar,
 // barring a small distinction - even if the output dtype is float, a double
 // exponent can be used. But Complex types' computation doesn't allow standard
-// & double-precision to be mixed. In order to provide a common path for float,
-// double & complex types, template parameter cast_scalar_t is being used to
-// resolve the aforementioned distinction. This approach also allows BFloat16 to
-// use this common-path. Half can't currently use it, as AVX2 support for sqrt &
-// rsqrt doesn't exist for it yet.
+// & double-precision to be mixed, since std::pow takes either complex64 inputs,
+// or complex128 inputs, but not both. So, in order to provide a common path for
+// float, double & complex types, template parameter cast_scalar_t is being used
+// to resolve the aforementioned distinction. This approach also allows BFloat16
+// to use this common-path. Half can't currently use it, as AVX2 support for
+// sqrt & rsqrt doesn't currently exist for it.
 template <typename scalar_t, typename cast_scalar_t, typename exp_scalar_t>
 void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scalar_t exp) {
   using Vec = Vec256<scalar_t>;
