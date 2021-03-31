@@ -820,10 +820,10 @@ if(USE_BREAKPAD)
   set(BREAKPAD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/breakpad)
   set(BREAKPAD_BIN ${CMAKE_CURRENT_BINARY_DIR}/third_party/breakpad)
   set(BREAKPAD_STATIC_LIB ${BREAKPAD_BIN}/lib/libbreakpad_client.a)
-  set(BREAKPAD_INCLUDES ${BREAKPAD_DIR}/src)
+  set(BREAKPAD_INCLUDES ${BREAKPAD_DIR}/src ${BREAKPAD_BIN}/include/breakpad)
 
   set(LSS_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/linux-syscall-support)
-  set(LSS_DEST ${CMAKE_CURRENT_BINARY_DIR}/third_party/breakpad/src/libbreakpad-build/src/third_party/lss)
+  set(LSS_DEST ${CMAKE_CURRENT_SOURCE_DIR}/third_party/breakpad/src/third_party/lss)
 
   file(MAKE_DIRECTORY ${BREAKPAD_INCLUDES})
 
@@ -831,10 +831,9 @@ if(USE_BREAKPAD)
       libbreakpad
       PREFIX ${BREAKPAD_BIN}
       SOURCE_DIR ${BREAKPAD_DIR}
-      # TODO: Add this as a submodule or something instead of cloning it here
       CONFIGURE_COMMAND mkdir -p ${LSS_DEST} && cp ${LSS_SOURCE}/linux_syscall_support.h ${LSS_DEST} && ${BREAKPAD_DIR}/configure --silent --srcdir=${BREAKPAD_DIR} --prefix=${BREAKPAD_BIN}
       BUILD_COMMAND make --silent
-      INSTALL_COMMAND make install >/dev/null || make install
+      INSTALL_COMMAND make install --silent > /dev/null
       BUILD_BYPRODUCTS ${BREAKPAD_STATIC_LIB}
   )
 
@@ -843,7 +842,7 @@ if(USE_BREAKPAD)
   add_dependencies(breakpad libbreakpad)
 
   set_target_properties(breakpad PROPERTIES IMPORTED_LOCATION ${BREAKPAD_STATIC_LIB})
-  set_target_properties(breakpad PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${BREAKPAD_INCLUDES})
+  set_target_properties(breakpad PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${BREAKPAD_INCLUDES}")
 endif()
 
 

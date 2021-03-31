@@ -432,8 +432,8 @@ def main():
         ctime = os.path.getctime(latest)
         creation_time = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M:%S')
         print(f"\n *** Detected a minidump at {latest} created on {creation_time}, "
-               "if this is related to your bug please include it when you file a report ***",
-               file=sys.stderr)
+              "if this is related to your bug please include it when you file a report ***",
+              file=sys.stderr)
 
 
 

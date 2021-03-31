@@ -1865,3 +1865,10 @@ if(BUILD_PYTHON)
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
 endif()
+
+if(USE_BREAKPAD)
+  # TODO: Something less hacky (create/map an include dir somewhere?)
+  add_custom_command(TARGET torch_cpu
+                     POST_BUILD
+                     COMMAND rm -rf ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/breakpad/src/third_party/lss)
+endif()

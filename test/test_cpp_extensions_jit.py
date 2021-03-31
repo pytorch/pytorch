@@ -28,6 +28,7 @@ if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
         TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
     )
 IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform == "linux"
 
 
 def remove_build_path():
@@ -867,6 +868,7 @@ class TestCppExtensionJIT(common.TestCase):
 
         gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
 
+    @unittest.skipIf(not IS_LINUX, "Crash handling only implemented on Linux")
     def test_crash_handler(self):
         def run_test(stderr_file, destination):
             # Code to enable dumps and trigger a segfault
