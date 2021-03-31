@@ -135,44 +135,6 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
 
   if (n == 0) {
     return result;
-  } else if (bits <= 8) {
-    auto keys = at::empty(result.sizes(), opt.dtype(kByte)).random_(generator);
-    auto keys_tmp = at::empty_like(keys);
-    auto keys_out = keys_tmp.data_ptr<uint8_t>();
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<uint8_t, scalar_t>(
-        keys.data_ptr<uint8_t>(), keys_out,
-        range.data_ptr<scalar_t>(), shuffled_data_,
-        n, false, 0, bits);
-      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-    });
-  } else if (bits <= 16) {
-    auto keys = at::empty(result.sizes(), opt.dtype(kShort)).random_(
-      std::numeric_limits<int16_t>::min(), std::numeric_limits<int16_t>::max(), generator);
-    auto keys_tmp = at::empty_like(keys);
-    auto keys_out = keys_tmp.data_ptr<int16_t>();
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<int16_t, scalar_t>(
-        keys.data_ptr<int16_t>(), keys_out,
-        range.data_ptr<scalar_t>(), shuffled_data_,
-        n, false, 0, bits);
-      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-    });
-  } else if (bits <= 32) {
-    auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(
-      std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), generator);
-    auto keys_tmp = at::empty_like(keys);
-    auto keys_out = keys_tmp.data_ptr<int>();
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<int, scalar_t>(
-        keys.data_ptr<int>(), keys_out,
-        range.data_ptr<scalar_t>(), shuffled_data_,
-        n, false, 0, bits);
-      randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
-    });
   } else {
     auto keys = at::empty(result.sizes(), opt.dtype(kLong)).random_(
       std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max(), generator);
@@ -186,6 +148,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         range.data_ptr<scalar_t>(), shuffled_data_,
         n);
     });
+    cudaDeviceSynchronize();
   }
 
   if (!result.is_contiguous()) {
