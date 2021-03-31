@@ -17,8 +17,6 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Ensure consistent CircleCI YAML config
         run: |
           pip install -r requirements.txt
@@ -32,6 +30,9 @@ jobs:
           rm -r "shellcheck-${scversion}"
           shellcheck --version
           .jenkins/run-shellcheck.sh
+      - name: Ensure correct trailing newlines
+        run: |
+          (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
         run: |
           (! git grep -I -no ' $' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above files have trailing spaces; please remove them"; false))
@@ -56,6 +57,33 @@ jobs:
           set -eux
           python torch/testing/check_kernel_launches.py |& tee ${GITHUB_WORKSPACE}/cuda_kernel_launch_checks.txt
 
+  toc:
+    runs-on: ubuntu-18.04
+    # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
+    env:
+      NPM_CONFIG_PREFIX: ~/.npm-global
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v2
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+      - name: Install markdown-toc
+        run: npm install -g markdown-toc
+      - name: Regenerate ToCs
+        run: |
+          set -eux
+          export PATH=~/.npm-global/bin:"$PATH"
+          for FILE in {CONTRIBUTING,README}.md; do
+            markdown-toc --bullets='-' -i "$FILE"
+          done
+      - name: Assert that regenerating the ToCs didn't change them
+        run: |
+          set -eux
+          CHANGES=$(git status --porcelain)
+          echo "$CHANGES"
+          git diff
+          [ -z "$CHANGES" ]
+
   flake8-py3:
     runs-on: ubuntu-18.04
     steps:
@@ -66,29 +94,25 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - name: Get HEAD commit SHA
-        run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
-        id: get-commit-sha
+      - name: Prepare output dir with HEAD commit SHA
+        run: |
+          mkdir flake8-output
+          cd flake8-output
+          echo ${{ github.event.pull_request.head.sha }} > commit-sha.txt
       - name: Run flake8
         run: |
           set -eux
           pip install -r requirements-flake8.txt
           flake8 --version
-          flake8 | tee ${GITHUB_WORKSPACE}/flake8-output.txt
-      - name: Add annotations
-        uses: pytorch/add-annotations-github-action@master
+          flake8 | tee ${GITHUB_WORKSPACE}/flake8-output/warnings.txt
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
         with:
-          check_name: 'flake8-py3'
-          linter_output_path: 'flake8-output.txt'
-          commit_sha: ${{ steps.get-commit-sha.outputs.commit-sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w+\d+) (?<errorDesc>.*)'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Catch any other warnings
+          name: flake8-py3
+          path: flake8-output/
+      - name: Fail if there were any warnings
         run: |
-          [ ! -s flake8-output.txt ]
+          [ ! -s flake8-output/warnings.txt ]
 
   clang-tidy:
     if: github.event_name == 'pull_request'
@@ -102,11 +126,12 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # deep clone, to allow us to use git merge-base
-      - name: Get HEAD commit SHA
-        run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
-        id: get-commit-sha
+      - name: Prepare output dir with HEAD commit SHA
+        run: |
+          mkdir clang-tidy-output
+          cd clang-tidy-output
+          echo ${{ github.event.pull_request.head.sha }} > commit-sha.txt
       - name: Install dependencies
         run: |
           set -eux
@@ -180,18 +205,14 @@ jobs:
             -g"-torch/csrc/deploy/interpreter/interpreter.h"  \
             -g"-torch/csrc/deploy/interpreter/interpreter_impl.h"  \
             -g"-torch/csrc/deploy/interpreter/test_main.cpp"  \
-            "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
+            "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output/warnings.txt
 
-          cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
-      - name: Add annotations
-        uses: pytorch/add-annotations-github-action@master
+          cat ${GITHUB_WORKSPACE}/clang-tidy-output/warnings.txt
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
         with:
-          check_name: 'clang-tidy'
-          linter_output_path: 'clang-tidy-output.txt'
-          commit_sha: ${{ steps.get-commit-sha.outputs.commit-sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: clang-tidy
+          path: clang-tidy-output/
 
   cmakelint:
     runs-on: ubuntu-18.04
@@ -203,8 +224,6 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Run cmakelint
         run: |
           set -eux
@@ -224,8 +243,6 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Install dependencies
         run: |
           set -eux
