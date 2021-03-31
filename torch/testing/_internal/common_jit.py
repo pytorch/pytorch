@@ -59,7 +59,7 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
             if isinstance(arg, torch.Tensor):
                 inputs.append(clone_tensor(arg, preserve_requires_grad))
             elif is_iterable_of_tensors(arg):
-                inputs.append(tuple(clone_tensor(t, preserve_requires_grad) for t in arg))
+                inputs.append([clone_tensor(t, preserve_requires_grad) for t in arg])
             else:
                 inputs.append(arg)
 
