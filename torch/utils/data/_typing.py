@@ -9,9 +9,10 @@ from typing import _tp_cache, _type_check, _type_repr  # type: ignore
 try:
     from typing import GenericMeta  # Python 3.6
 except ImportError:  # Python > 3.6
-    from abc import ABCMeta
+    # In case of metaclass conflict for ABCMeta and _ProtocolMeta
+    from typing import _ProtocolMeta  # type: ignore
 
-    class GenericMeta(ABCMeta):  # type: ignore
+    class GenericMeta(_ProtocolMeta):  # type: ignore
         pass
 
 
