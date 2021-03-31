@@ -5,38 +5,22 @@
 #include <atomic>
 
 namespace {
-// Number of threads in the thread-pool before fork
-std::atomic<int> num_threads_before_fork{-1};
+// After fork, the child process inherits the data-structures of the parent
+// process' thread-pool, but since those threads don't exist, the thread-pool
+// is corrupt. It's done in order to prevent segfaults in worker processes,
+// which otherwise segfault, as they try to handle inherited data-structures of
+// parent's Caffe2 thread-pool, although those threads don't exist in child
+// processes.
+// Ref: https://github.com/pytorch/pytorch/issues/54752#issuecomment-810315302
+std::atomic<bool> leak_corrupted_threadpool(false);
+
+void child_atfork() {
+  leak_corrupted_threadpool = true;
+}
 
 } // namespace
 
 namespace caffe2 {
-
-// Handler used by pthread_atfork that's executed before fork starts processing.
-// Saves the value of the number of threads prior to fork, so that the Caffe2
-// threadpool can be leaked, and restored via after_fork handler, after fork.
-// It's done in order to prevent segfaults in worker processes, which otherwise
-// segfault, as they try to handle inherited data-structures of parent's Caffe2
-// thread-pool, although those threads don't exist in child processes.
-// Ref: https://github.com/pytorch/pytorch/issues/54752#issuecomment-810315302
-static void before_fork() {
-#ifdef USE_PTHREADPOOL
-  PThreadPool* const pool = caffe2::pthreadpool();
-  TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
-  num_threads_before_fork.store(pool->get_thread_count());
-  pool->set_thread_count(1);
-#endif
- }
-
-// Handler used by pthread_atfork that's executed after fork starts processing
-// Restores the Caffe2 thread-pool after fork.
-static void after_fork() {
-#ifdef USE_PTHREADPOOL
-  PThreadPool* const pool = caffe2::pthreadpool();
-  TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
-  pool->set_thread_count(num_threads_before_fork.load());
-#endif
-}
 
 PThreadPool::PThreadPool(const size_t thread_count)
     : threadpool_(pthreadpool_create(thread_count), pthreadpool_destroy) {}
@@ -91,13 +75,22 @@ void PThreadPool::run(
 size_t getDefaultNumThreads();
 
 PThreadPool* pthreadpool() {
-  static std::unique_ptr<PThreadPool> threadpool =
-      std::make_unique<PThreadPool>(getDefaultNumThreads());
+  static auto threadpool = std::make_unique<PThreadPool>(getDefaultNumThreads());
 #ifndef WIN32
-  // Register pthread_atfork handlers to prevent segfaults in worker processes
-  // after fork.
-  pthread_atfork(before_fork, after_fork, nullptr);
+  static std::once_flag flag;
+  std::call_once(flag, []() {
+    pthread_atfork(nullptr, nullptr, child_atfork);
+  });
 #endif
+  static auto true_bool = true;
+  static auto false_bool = false;
+  if (leak_corrupted_threadpool.compare_exchange_strong(true_bool, false_bool)) {
+    if (auto leaked = threadpool.release()) {
+      auto num_threads = leaked->get_thread_count();
+      threadpool.reset(new PThreadPool(num_threads));
+      TORCH_WARN("Leaking thread pool before fork.");
+    }
+  }
   return threadpool.get();
 }
 
