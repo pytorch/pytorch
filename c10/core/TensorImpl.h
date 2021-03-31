@@ -484,28 +484,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * compute_contiguous() for the exact definition of whether or not
    * a tensor is contiguous or not.
    */
-  TENSORIMPL_MAYBE_VIRTUAL bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
-    // Slow path subclass customizations. Keep inline code as small as
-    // possible.
-    if (C10_UNLIKELY(is_contiguous_policy_ != IsContiguousPolicy::DefaultBehavior)) {
-      return is_contiguous_customized(memory_format);
-    }
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
-    if (memory_format == at::MemoryFormat::ChannelsLast) {
-      return is_channels_last_contiguous_;
-    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-      return is_channels_last_3d_contiguous_;
-    }
-    return is_contiguous_;
-  }
+  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const;
 
-  bool is_contiguous_customized(at::MemoryFormat memoryFormat) const;
-
- private:
-  [[noreturn]] void throw_is_contiguous_not_allowed_error() const;
-  [[noreturn]] void throw_is_contiguous_in_other_formats_not_allowed_error() const;
-
- public:
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::SparseCPU) ||
@@ -1735,27 +1715,6 @@ public:
     storage_access_should_throw_ = true;
   }
 
-  // Policy for adjusting the behavior of is_contiguous(). Allows
-  // subclass customization while still being able to inline is_contiguous().
-  enum class IsContiguousPolicy : int8_t {
-    // Allow is_contiguous to work normally,.
-    DefaultBehavior,
-    // is_contiguous() is not allowed; throw an exception.
-    AlwaysThrow,
-    // is_contiguous() is only allowed with MemoryFormat::Contiguous;
-    // throw otherwise.
-    ThrowUnlessContiguousMemoryFormat,
-    // is_contiguous() will return true if and only if passed
-    // MemoryFormat::Contiguous.
-    ForceContiguousInContiguousMemoryFormatFalseOtherwise,
-    // is_contiguous() will always return true.
-    ForceContiguousInAllMemoryFormats,
-  };
-
-  void set_is_contiguous_policy(IsContiguousPolicy p) {
-    is_contiguous_policy_ = p;
-  }
-
 protected:
   Storage storage_;
 
@@ -1832,20 +1791,14 @@ protected:
   // (which do not have a device.)
   c10::optional<c10::Device> device_opt_;
 
-  // Tensor is contiguous.
-  bool is_contiguous_ : 1;
-
-  // Subclass customization policy for is_contiguous().
-  IsContiguousPolicy is_contiguous_policy_ : 3;
+  // Tensor is contiguous
+  bool is_contiguous_ = true;
 
   // Tensor is a subclass that does not permit storage access.
   bool storage_access_should_throw_ = false;
 
   // default member initializers for bit-fields only available with -std=c++2a or -std=gnu++2a
   inline void init_bitfields() {
-    is_contiguous_ = true;
-    is_contiguous_policy_ = IsContiguousPolicy::DefaultBehavior;
-
     is_channels_last_ = false;
     is_channels_last_contiguous_ = false;
     is_channels_last_3d_ = false;
@@ -1960,7 +1913,7 @@ protected:
 //    SizesAndStrides strides (pre-allocated 4)
 //    storage offset
 //    numel
-//    data type (2), device(3), is_contiguous bitfields(1), storage_access_should_throw_(1), other bitfields(1)
+//    data type, device, is_contiguous, storage_access_should_throw_, bitfields
 //    DispatchKeySet
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
