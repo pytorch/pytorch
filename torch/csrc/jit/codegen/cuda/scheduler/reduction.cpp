@@ -622,7 +622,6 @@ void scheduleReduction(
     const std::vector<TensorView*>& outs_of_red) {
   FUSER_PERF_SCOPE("scheduleReduction");
   FusionGuard fg(fusion);
-  constexpr int kLoopUnrollSplit = 4;
 
   // If either of these are nullptr at the end of this function don't do
   // anything. Otherwise Transform and parallize entire fusion based on
