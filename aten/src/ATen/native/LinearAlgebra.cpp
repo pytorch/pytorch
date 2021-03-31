@@ -60,7 +60,7 @@ Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
   checkLinalgCompatibleDtype("torch.linalg.det", out, self, "out");
   squareCheckInputs(self);
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
-              "Expected a floating point tensor as input");
+              "Expected a floating point or complex tensor as input");
 
   IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
   at::native::resize_output(out, out_sizes);
