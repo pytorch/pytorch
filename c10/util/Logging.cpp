@@ -1,6 +1,9 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#ifdef FBCODE_CAFFE2
+#include <folly/synchronization/SanitizeThread.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -213,6 +216,10 @@ bool InitCaffeLogging(int* argc, char** argv) {
 }
 
 void UpdateLoggingLevelsFromFlags() {
+#ifdef FBCODE_CAFFE2
+  // TODO(T82645998): Fix data race exposed by TSAN.
+  folly::annotate_ignore_thread_sanitizer_guard g(__FILE__, __LINE__);
+#endif
   // If caffe2_log_level is set and is lower than the min log level by glog,
   // we will transfer the caffe2_log_level setting to glog to override that.
   FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);

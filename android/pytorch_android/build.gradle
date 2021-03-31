@@ -34,6 +34,9 @@ android {
             minifyEnabled false
         }
     }
+    buildFeatures {
+        prefab true
+    }
     sourceSets {
         main {
             java {
@@ -73,7 +76,7 @@ android {
 }
 
 dependencies {
-    implementation 'com.facebook.fbjni:fbjni-java-only:' + rootProject.fbjniJavaOnlyVersion
+    implementation 'com.facebook.fbjni:fbjni:' + rootProject.fbjniVersion
     implementation 'com.android.support:appcompat-v7:' + rootProject.androidSupportAppCompatV7Version
     implementation 'com.facebook.soloader:nativeloader:' + rootProject.soLoaderNativeLoaderVersion
 

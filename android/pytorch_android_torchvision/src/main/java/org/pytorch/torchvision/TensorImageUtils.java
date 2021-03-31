@@ -30,7 +30,10 @@ public final class TensorImageUtils {
    *     order
    */
   public static Tensor bitmapToFloat32Tensor(
-      final Bitmap bitmap, final float[] normMeanRGB, final float normStdRGB[], final MemoryFormat memoryFormat) {
+      final Bitmap bitmap,
+      final float[] normMeanRGB,
+      final float normStdRGB[],
+      final MemoryFormat memoryFormat) {
     checkNormMeanArg(normMeanRGB);
     checkNormStdArg(normStdRGB);
 
@@ -41,7 +44,14 @@ public final class TensorImageUtils {
   public static Tensor bitmapToFloat32Tensor(
       final Bitmap bitmap, final float[] normMeanRGB, final float normStdRGB[]) {
     return bitmapToFloat32Tensor(
-        bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), normMeanRGB, normStdRGB, MemoryFormat.CONTIGUOUS);
+        bitmap,
+        0,
+        0,
+        bitmap.getWidth(),
+        bitmap.getHeight(),
+        normMeanRGB,
+        normStdRGB,
+        MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -113,7 +123,17 @@ public final class TensorImageUtils {
       final float[] normStdRGB,
       final FloatBuffer outBuffer,
       final int outBufferOffset) {
-    bitmapToFloatBuffer(bitmap, x, y, width, height, normMeanRGB, normStdRGB, outBuffer, outBufferOffset, MemoryFormat.CONTIGUOUS);
+    bitmapToFloatBuffer(
+        bitmap,
+        x,
+        y,
+        width,
+        height,
+        normMeanRGB,
+        normStdRGB,
+        outBuffer,
+        outBufferOffset,
+        MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -142,7 +162,8 @@ public final class TensorImageUtils {
     checkNormStdArg(normStdRGB);
 
     final FloatBuffer floatBuffer = Tensor.allocateFloatBuffer(3 * width * height);
-    bitmapToFloatBuffer(bitmap, x, y, width, height, normMeanRGB, normStdRGB, floatBuffer, 0, memoryFormat);
+    bitmapToFloatBuffer(
+        bitmap, x, y, width, height, normMeanRGB, normStdRGB, floatBuffer, 0, memoryFormat);
     return Tensor.fromBlob(floatBuffer, new long[] {1, 3, height, width}, memoryFormat);
   }
 
@@ -154,7 +175,8 @@ public final class TensorImageUtils {
       int height,
       float[] normMeanRGB,
       float[] normStdRGB) {
-    return bitmapToFloat32Tensor(bitmap, x, y, width, height, normMeanRGB, normStdRGB, MemoryFormat.CONTIGUOUS);
+    return bitmapToFloat32Tensor(
+        bitmap, x, y, width, height, normMeanRGB, normStdRGB, MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -191,7 +213,15 @@ public final class TensorImageUtils {
 
     final FloatBuffer floatBuffer = Tensor.allocateFloatBuffer(3 * tensorWidth * tensorHeight);
     imageYUV420CenterCropToFloatBuffer(
-        image, rotateCWDegrees, tensorWidth, tensorHeight, normMeanRGB, normStdRGB, floatBuffer, 0, memoryFormat);
+        image,
+        rotateCWDegrees,
+        tensorWidth,
+        tensorHeight,
+        normMeanRGB,
+        normStdRGB,
+        floatBuffer,
+        0,
+        memoryFormat);
     return Tensor.fromBlob(floatBuffer, new long[] {1, 3, tensorHeight, tensorWidth}, memoryFormat);
   }
 
@@ -202,7 +232,14 @@ public final class TensorImageUtils {
       final int tensorHeight,
       float[] normMeanRGB,
       float[] normStdRGB) {
-    return imageYUV420CenterCropToFloat32Tensor(image, rotateCWDegrees, tensorWidth, tensorHeight, normMeanRGB, normStdRGB, MemoryFormat.CONTIGUOUS);
+    return imageYUV420CenterCropToFloat32Tensor(
+        image,
+        rotateCWDegrees,
+        tensorWidth,
+        tensorHeight,
+        normMeanRGB,
+        normStdRGB,
+        MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -285,7 +322,16 @@ public final class TensorImageUtils {
       float[] normStdRGB,
       final FloatBuffer outBuffer,
       final int outBufferOffset) {
-    imageYUV420CenterCropToFloatBuffer(image, rotateCWDegrees, tensorWidth, tensorHeight, normMeanRGB, normStdRGB, outBuffer, outBufferOffset, MemoryFormat.CONTIGUOUS);
+    imageYUV420CenterCropToFloatBuffer(
+        image,
+        rotateCWDegrees,
+        tensorWidth,
+        tensorHeight,
+        normMeanRGB,
+        normStdRGB,
+        outBuffer,
+        outBufferOffset,
+        MemoryFormat.CONTIGUOUS);
   }
 
   private static class NativePeer {
