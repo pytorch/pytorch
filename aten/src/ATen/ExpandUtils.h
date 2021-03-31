@@ -53,6 +53,11 @@ inline c10::MaybeOwned<Tensor> expand_inplace_v2(const Tensor& tensor, const Ten
   return c10::MaybeOwned<Tensor>::owned(to_expand.expand(tensor.sizes(), /*implicit=*/true)); // see [expand implicit]
 }
 
+// expand_inplace_v2 may borrow from to_expand; prevent calling with an
+// obvious temporary.
+inline c10::MaybeOwned<Tensor> expand_inplace_v2(const Tensor& tensor, Tensor&& to_expand) = delete;
+
+
 C10_DEPRECATED_MESSAGE("expand_inplace is deprecated. Use expand_inplace_v2 instead.")
 inline std::tuple<Tensor> expand_inplace(const Tensor &tensor, const Tensor &to_expand) {
   return std::make_tuple(*expand_inplace_v2(tensor, to_expand));
@@ -62,6 +67,11 @@ inline c10::MaybeOwned<Tensor> expand_inplace_v2(const Tensor &tensor, const Ten
   check_defined({tensor, to_expand}, api_name);
   return expand_inplace_v2(tensor, to_expand);
 }
+
+// expand_inplace_v2 may borrow from to_expand; prevent calling with an
+// obvious temporary.
+inline c10::MaybeOwned<Tensor> expand_inplace_v2(const Tensor& tensor, Tensor&& to_expand, const char *api_name) = delete;
+
 
 C10_DEPRECATED_MESSAGE("expand_inplace is deprecated. Use expand_inplace_v2 instead.")
 inline std::tuple<Tensor> expand_inplace(const Tensor &tensor, const Tensor &to_expand, const char *api_name) {
@@ -80,6 +90,13 @@ inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> expand_inpla
       c10::MaybeOwned<Tensor>::owned(to_expand2.expand(tensor.sizes(), /*implicit=*/true)));
 }
 
+// expand_inplace_v2 may borrow from to_expand1 and to_expand2; prevent
+// calling with an obvious temporary.
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> expand_inplace_v2(const Tensor &tensor, Tensor &&to_expand1, const Tensor &to_expand2) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> expand_inplace_v2(const Tensor &tensor, const Tensor &to_expand1, Tensor &&to_expand2) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> expand_inplace_v2(const Tensor &tensor, Tensor &&to_expand1, Tensor &&to_expand2) = delete;
+
+
 C10_DEPRECATED_MESSAGE("expand_inplace is deprecated. Use expand_inplace_v2 instead.")
 inline std::tuple<Tensor, Tensor> expand_inplace(const Tensor &tensor, const Tensor &to_expand1, const Tensor &to_expand2) {
   auto newResult = expand_inplace_v2(tensor, to_expand1, to_expand2);
@@ -89,8 +106,15 @@ inline std::tuple<Tensor, Tensor> expand_inplace(const Tensor &tensor, const Ten
 inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> expand_inplace_v2(const Tensor &tensor, const Tensor &to_expand1, const Tensor &to_expand2,
                                                  const char *api_name) {
   check_defined({tensor, to_expand1, to_expand2}, api_name);
-  return expand_inplace(tensor, to_expand1, to_expand2);
+  return expand_inplace_v2(tensor, to_expand1, to_expand2);
 }
+
+// expand_inplace_v2 may borrow from to_expand1 and to_expand2; prevent
+// calling with an obvious temporary.
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> expand_inplace_v2(const Tensor &tensor, Tensor &&to_expand1, const Tensor &to_expand2, const char *api_name) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> expand_inplace_v2(const Tensor &tensor, const Tensor &to_expand1, Tensor &&to_expand2, const char *api_name) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> expand_inplace_v2(const Tensor &tensor, Tensor &&to_expand1, Tensor &&to_expand2, const char *api_name) = delete;
+
 
 C10_DEPRECATED_MESSAGE("expand_inplace is deprecated. Use expand_inplace_v2 instead.")
 inline std::tuple<Tensor, Tensor> expand_inplace(const Tensor &tensor, const Tensor &to_expand1, const Tensor &to_expand2,
