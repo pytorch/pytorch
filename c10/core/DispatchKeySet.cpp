@@ -3,7 +3,7 @@
 namespace c10 {
 
 // backend_dispatch_keyset should include all runtime backend keys.
-// Alias key DispatchKey::DefaultBackend maps to backend_dispatch_keyset
+// Alias key DispatchKey::CompositeExplicitAutograd maps to backend_dispatch_keyset
 // NestedTensor has been explicitly removed due to incompatibility with some
 // kernels, such as structured kernels, that use the DefaultBackend key.
 constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
@@ -16,6 +16,7 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
         DispatchKey::PrivateUse2,
         DispatchKey::PrivateUse3,
         DispatchKey::MLC,
+        DispatchKey::Meta,
     });
 
 bool isBackendDispatchKey(DispatchKey t) {
@@ -33,7 +34,7 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return autograd_dispatch_keyset;
     case DispatchKey::CompositeImplicitAutograd:
       return math_dispatch_keyset;
-    case DispatchKey::DefaultBackend:
+    case DispatchKey::CompositeExplicitAutograd:
       return backend_dispatch_keyset;
     default:
       return DispatchKeySet(t);
