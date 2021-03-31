@@ -132,6 +132,20 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       opnames.emplace_back(node->schema().operator_name());
       if (save_mobile_debug_info) {
         std::string root_scope_string = getModuleTypeName(module, "top");
+        // A little explanation as to why node->sourceRange() is not enough
+        // and we need to do node->sourceRange().findSourceRangeThatGenerated()
+        // When you do m = torch.jit.script/trace(model)
+        // the scripted model has graphs for methods with nodes.
+        // The nodes of this graph are annotated with sourceRange that is original
+        // python code.
+        // However when such a model is serialized via torch.jit.save, what is
+        // saved is compiled python code of the model. The compiled code for methods is
+        // effectively compiled graph which contains prim/aten etc. ops.
+        // This is not the same as original python code.
+        // When such a serialized model is loaded via torch.jit.load, node->sourceRange()
+        // does not point to original python code but points to transformed/compiled
+        // python code. So in order to get original python code which is serialized in
+        // debug_pkl, it is necessary to do node->sourceRange().findSourceRangeThatGenerated()
         auto source_range = node->sourceRange().findSourceRangeThatGenerated()
             ? node->sourceRange().findSourceRangeThatGenerated().value()
             : node->sourceRange();

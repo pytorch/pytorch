@@ -544,7 +544,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
     set(MOBILE_SRCS
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/debug_info.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import_data.cpp
@@ -555,6 +554,14 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/sequential.cpp
        )
+    if(USE_SOURCE_DEBUG_ON_MOBILE)
+      set(MOBILE_EAGER_SYMOBLICATION_SRCS
+         ${TORCH_SRC_DIR}/csrc/jit/mobile/debug_info.cpp
+         ${TORCH_SRC_DIR}/csrc/jit/serialization/source_range_serialization.cpp
+         ${TORCH_SRC_DIR}/csrc/jit/frontend/source_range.cpp
+         )
+      list(APPEND MOBILE_SRCS ${MOBILE_EAGER_SYMOBLICATION_SRCS})
+    endif()
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
 
@@ -913,6 +920,23 @@ if(NOT INTERN_BUILD_MOBILE)
   add_dependencies(torch_cpu Caffe2_PROTO)
 endif()
 
+# Codegen selected_mobile_ops.h for template selective build
+if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
+  add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+    COMMAND
+    "${PYTHON_EXECUTABLE}"
+    ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
+    --yaml_file_path "${SELECTED_OP_LIST}"
+    --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+    WORKING_DIRECTORY "${TORCH_ROOT}")
+
+  add_custom_target(
+    __selected_mobile_ops_header_gen
+    DEPENDS ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h)
+  add_dependencies(torch_cpu __selected_mobile_ops_header_gen)
+endif()
+
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT NO_API)
     target_include_directories(torch_cpu PRIVATE
@@ -1120,6 +1144,10 @@ endif()
 
 if(BUILD_LITE_INTERPRETER)
   target_compile_definitions(torch_cpu PRIVATE BUILD_LITE_INTERPRETER)
+  # Enable template selective build only when SELECTED_OP_LIST is provided.
+  if(SELECTED_OP_LIST)
+    target_compile_definitions(torch_cpu PRIVATE TEMPLATE_SELECTIVE_BUILD)
+  endif()
 endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
@@ -1476,7 +1504,8 @@ if(USE_ROCM)
     # correct dependency from generated files.)
     target_link_libraries(torch_hip PRIVATE ATEN_CUDA_FILES_GEN_LIB)
   endif()
-  target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_HIP_DEPENDENCY_LIBS})
+  target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
+  target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})

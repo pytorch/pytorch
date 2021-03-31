@@ -301,7 +301,11 @@ void BytecodeDeserializer::parseMethods(
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
+      // TODO: Save debug handles for all instructions, not just for OP
       if (op_code == OP) {
+        // In later PRs we will refactor this to always save debug handles.
+        // Debug info, source range and inlined callstack ptr saving will become
+        // optional.
         if (has_debug_info) {
           auto module_debug_tuple =
               module_debug_info_list[X].toTuple()->elements();
