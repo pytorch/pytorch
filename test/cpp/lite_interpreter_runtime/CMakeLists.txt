@@ -10,7 +10,7 @@ add_library(backend_with_compiler_runtime SHARED
         ${TORCH_ROOT}/test/cpp/jit/test_backend_compiler_lib.cpp
         ${TORCH_ROOT}/torch/csrc/jit/backends/backend_interface.cpp
         )
-target_compile_definitions(backend_with_compiler_runtime PRIVATE DELEGATE_RUNTIME=1)
+target_compile_definitions(backend_with_compiler_runtime)
 target_link_libraries(backend_with_compiler_runtime torch)
 
 add_executable(

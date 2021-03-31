@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/backends/backend_detail.h>
 
-#include <ATen/core/builtin_function.h>
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 
@@ -53,7 +53,7 @@ Module codegen_backend_module(
       {"__torch__",
        "torch",
        "classes",
-       detail::kBackendsNamespace,
+       kBackendsNamespace,
        backend_name});
   // TODO: Validate method_compile_spec.
 

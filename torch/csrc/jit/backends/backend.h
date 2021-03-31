@@ -2,7 +2,6 @@
 
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/stack.h>
-#include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/backends/backend_interface.h>
 #include <torch/custom_class.h>
 
@@ -19,6 +18,8 @@ c10::FunctionSchema getIsAvailableSchema() {
       /*returns=*/{available});
   return preprocessor_schema;
 }
+
+constexpr static auto kBackendsNamespace = "__backends__";
 
 c10::FunctionSchema getCompileSchema() {
   c10::Argument self("self", c10::AnyType::get());
@@ -95,7 +96,7 @@ class backend {
   // function.
   backend(const std::string& name) : backend_name_(name) {
     static auto cls =
-        torch::class_<TBackendInterface>(detail::kBackendsNamespace, name)
+        torch::class_<TBackendInterface>(kBackendsNamespace, name)
             .def(torch::init<>())
             ._def_unboxed(
                 "is_available",

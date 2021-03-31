@@ -3,15 +3,12 @@
 #include <torch/csrc/jit/api/module.h>
 
 #include <ATen/core/jit_type.h>
-#include <ATen/core/stack.h>
 
 #include <functional>
 
 namespace torch {
 namespace jit {
 namespace detail {
-
-constexpr static auto kBackendsNamespace = "__backends__";
 
 using BackendPreprocessFunction =
     std::function<c10::IValue(const Module&, const c10::Dict<IValue, IValue>&)>;
