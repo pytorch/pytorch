@@ -833,7 +833,7 @@ class TestAsserts(TestCase):
         b[2, 3] = 9
 
         for fn in self.assert_fns():
-            with self.assertRaisesRegex(AssertionError, r"\s4.0\s"):
+            with self.assertRaisesRegex(AssertionError, r"\s+4[.]0\s+"):
                 fn(a, b)
 
     @onlyCPU
