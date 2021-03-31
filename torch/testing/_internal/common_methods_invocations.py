@@ -1808,48 +1808,42 @@ def sample_inputs_floor_divide(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs):
-    def _make_tensor_helper(shape, low=None, high=None):
-        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     for_inplace_variant = kwargs.get('for_inplace_variant', False)
-    samples = [
-        SampleInput(_make_tensor_helper((M, M)),
-                    args=(torch.randn(M, M, device=device) > 0, _make_tensor_helper((M, M)))),
 
-        SampleInput(_make_tensor_helper((M, M)),
-                    args=(torch.randn((M,), device=device) > 0, _make_tensor_helper((M, M)))),
+    def samples_generator():
+        yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, make_arg((S, S))))
+        yield SampleInput(make_arg((S, S)), args=(torch.randn((S,), device=device) > 0, make_arg((S, S))))
+        yield SampleInput(make_arg((S, S)), args=(bernoulli_scalar().to(device), make_arg((S, S))))
 
-        SampleInput(_make_tensor_helper((M, M)),
-                    args=(bernoulli_scalar().to(device), _make_tensor_helper((M, M)))),
-    ]
+        if not for_inplace_variant:
+            yield SampleInput(make_arg((S,)), args=(torch.randn(S, S, device=device) > 0, make_arg((S, S))))
 
-    if not for_inplace_variant:
-        samples.append(SampleInput(_make_tensor_helper((S,)),
-                                   args=(torch.randn(S, S, device=device) > 0, _make_tensor_helper((S, S)))),)
-
+    samples = tuple(samples_generator())
     return samples
 
 
 def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
-    def _make_tensor_helper(shape):
-        return make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     for_inplace_variant = kwargs.get('for_inplace_variant', False)
-    samples = (
-        SampleInput(_make_tensor_helper((S, S)), args=(torch.randn(S, S, device=device) > 0, 10)),
-        SampleInput(_make_tensor_helper((S, S)), args=(torch.randn(S, S, device=device) > 0, _make_tensor_helper(()))),
-        SampleInput(_make_tensor_helper((S, S)), args=(torch.randn(S, device=device) > 0, 10)),
-        SampleInput(_make_tensor_helper(()), args=(torch.randn((), device=device) > 0, 10)),
-        SampleInput(_make_tensor_helper(()), args=(torch.randn((), device=device) > 0, _make_tensor_helper(()))),
-        SampleInput(_make_tensor_helper((S, S)), args=(torch.randn((), device=device) > 0, 10)),
-    )
 
-    if not for_inplace_variant:
-        samples += (SampleInput(_make_tensor_helper((S,)),  # type: ignore
-                                args=(torch.randn(S, S, device=device) > 0, _make_tensor_helper(()))),)
-        samples += (SampleInput(_make_tensor_helper((S,)),  # type: ignore
-                                args=(torch.randn(S, S, device=device) > 0, 10)),)
+    def sample_generator():
+        yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, 10))
+        yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, make_arg(())))
+        yield SampleInput(make_arg((S, S)), args=(torch.randn(S, device=device) > 0, 10))
+        yield SampleInput(make_arg(()), args=(torch.randn((), device=device) > 0, 10))
+        yield SampleInput(make_arg(()), args=(torch.randn((), device=device) > 0, make_arg(())))
+        yield SampleInput(make_arg((S, S)), args=(torch.randn((), device=device) > 0, 10))
 
+        if not for_inplace_variant:
+            yield SampleInput(make_arg((S,)),
+                              args=(torch.randn(S, S, device=device) > 0, make_arg(())))
+            yield SampleInput(make_arg((S,)),
+                              args=(torch.randn(S, S, device=device) > 0, 10))
+
+    samples = tuple(sample_generator())
     return samples
 
 def sample_inputs_masked_select(op_info, device, dtype, requires_grad, **kwargs):
