@@ -368,8 +368,8 @@ void RequestCallbackImpl::processPythonRemoteCall(
           IValue py_ivalue = jit::toIValue(result, PyObjectType::get());
 
           py::gil_scoped_release release;
-          ownerRRef->setValue(std::move(py_ivalue));
           ownerRRef->recordAllDevices(deviceIndices);
+          ownerRRef->setValue(std::move(py_ivalue));
           auto m = RemoteRet(rrefId, forkId).toMessage();
           m.setId(messageId);
           responseFuture->markCompleted(
