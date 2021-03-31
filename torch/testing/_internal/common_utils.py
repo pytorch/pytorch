@@ -2090,14 +2090,14 @@ def _gradcheck(fn, inputs, **kwargs):
     # to the wrapper code and its purpose is to facilitate the testing of gradcheck itself.
     # When fast_and_slow=True, IF 1) the passed 'func' is real to real AND 2) we do not explicitly pass
     # in fast_mode=False, THEN we run both the fast and slow implementations of gradcheck and compare
-    # to see if the results are the same. Devs who encounter the error should file and issue.
+    # to see if the results are the same.
     #
     # Temporary changes:
     # _gradcheck is no longer directly used by any tests, instead we add another additional wrapper
     # that calls into _gradcheck but enables "fast_and_slow" by default.
-    if kwargs.pop("fast_and_slow", None) is not None:
+    if kwargs.pop("fast_and_slow", True):
         # When fast_and_slow=True, we make sure the fast and slow implementations behave the same
-        if not has_complex_inputs_or_inputs(fn, inputs) and not kwargs.pop("fast_mode", True) is False:
+        if kwargs.pop("fast_mode", True) and not has_complex_inputs_or_inputs(fn, inputs):
             fast = _gradcheck(fn, inputs, **kwargs, fast_mode=True)
             try:
                 slow = _gradcheck(fn, inputs, **kwargs, fast_mode=False)
@@ -2107,7 +2107,6 @@ def _gradcheck(fn, inputs, **kwargs):
             if fast is not slow:
                 raise RuntimeError("Gradcheck Error:" + gradcheck_error_msg)
             return fast and slow
-
         return _gradcheck(fn, inputs, **kwargs, fast_mode=False)
 
     keys_enabled_by_default = (
@@ -2124,9 +2123,9 @@ def _gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     # on the fast_and_slow parameter, which is specific to the wrapper code.
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
-    if kwargs.pop("fast_and_slow", None) is not None:
+    if kwargs.pop("fast_and_slow", True):
         # When fast_and_slow=True, we make sure the fast and slow implementations behave the same
-        if not has_complex_inputs_or_inputs(fn, inputs) and not kwargs.pop("fast_mode", True) is False:
+        if kwargs.pop("fast_mode", True) and not has_complex_inputs_or_inputs(fn, inputs):
             fast = _gradgradcheck(fn, inputs, **kwargs, fast_mode=True)
             try:
                 slow = _gradgradcheck(fn, inputs, **kwargs, fast_mode=False)
