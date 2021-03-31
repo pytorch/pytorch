@@ -1,5 +1,7 @@
 # Table of Contents
 
+<!-- toc -->
+
 - [Table of Contents](#table-of-contents)
   - [Contributing to PyTorch](#contributing-to-pytorch)
   - [Developing PyTorch](#developing-pytorch)
@@ -39,6 +41,8 @@
     - [Why no leak detection?](#why-no-leak-detection)
   - [Caffe2 notes](#caffe2-notes)
   - [CI failure tips](#ci-failure-tips)
+
+<!-- tocstop -->
 
 ## Contributing to PyTorch
 

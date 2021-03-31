@@ -8,6 +8,8 @@ PyTorch is a Python package that provides two high-level features:
 
 You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
 
+<!-- toc -->
+
 - [More about PyTorch](#more-about-pytorch)
 - [Installation](#installation)
   - [Binaries](#binaries)
@@ -19,6 +21,8 @@ You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to 
 - [Communication](#communication)
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
+
+<!-- tocstop -->
 
 | System | 3.6 | 3.7 | 3.8 |
 | :---: | :---: | :---: | :--: |
