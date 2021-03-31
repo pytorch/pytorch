@@ -338,15 +338,11 @@ class StreamContext(object):
 
     def __init__(self, stream: Optional['torch.cuda.Stream']):  # type: ignore
         self.stream = stream
-
-        # If CUDA device is not available, then return
         self.idx = _get_device_index(None, True)
-        if self.idx == -1:
-            return
+        if not torch.jit.is_scripting():
+            if self.idx is None:
+                self.idx = -1
 
-        # Initialize the below streams to default stream/None on the current device
-        # if we are in scripting or eager mode appropriately. This is to avoid lazy_init()
-        # check in eager mode.
         self.src_prev_stream = None if not torch.jit.is_scripting() else torch.cuda.default_stream(None)
         self.dst_prev_stream = None if not torch.jit.is_scripting() else torch.cuda.default_stream(None)
 
@@ -354,7 +350,7 @@ class StreamContext(object):
         # Local cur_stream variable for type refinement
         cur_stream = self.stream
         # Return if stream is None
-        if cur_stream is None:
+        if cur_stream is None or self.idx == -1:
             return
         self.src_prev_stream = torch.cuda.current_stream(None)
 
@@ -369,7 +365,7 @@ class StreamContext(object):
         # Local cur_stream variable for type refinement
         cur_stream = self.stream
         # If stream is None or no CUDA device available, return
-        if cur_stream is None:
+        if cur_stream is None or self.idx == -1:
             return
 
         # Reset the stream on the original device
