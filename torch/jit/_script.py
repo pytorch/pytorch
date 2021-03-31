@@ -122,8 +122,9 @@ def _is_new_style_class(cls):
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
     defaults = torch.jit.frontend.get_default_args_for_class(obj)
-    torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
-    torch.jit._state._add_script_class(obj, qualified_name)
+    script_class = torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
+    torch.jit._state._add_script_class(obj, script_class)
+    return script_class
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -1148,10 +1149,10 @@ def interface(obj):
     # instead of a class interface type, an module interface type only compile
     # the user provided methods as part of the interface
     ast = get_jit_class_def(obj, obj.__name__)
-    torch._C._jit_script_interface_compile(
+    mangled_classname = torch._C._jit_script_interface_compile(
         qualified_name, ast, rcb, is_module_interface
     )
-    obj.__torch_script_interface__ = True
+    obj.__torch_script_interface__ = mangled_classname
     return obj
 
 
@@ -1161,7 +1162,7 @@ def _recursive_compile_class(obj, loc):
     # case it fails
     error_stack = torch._C.CallStack(_qual_name, loc)
     rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
-    _compile_and_register_class(obj, rcb, _qual_name)
+    return _compile_and_register_class(obj, rcb, _qual_name)
 
 CompilationUnit = torch._C.CompilationUnit
 set_module(CompilationUnit, "torch.jit")
