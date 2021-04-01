@@ -1589,7 +1589,7 @@ static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
   return result;
 }
 
-Tensor& column_stack_out(Tensor& result, TensorList tensors) {
+Tensor& column_stack_out(TensorList tensors, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
               "column_stack expects a non-empty TensorList");
 
