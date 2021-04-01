@@ -750,29 +750,33 @@
   dispatch:
     CPU, CUDA: bitwise_not_out
 
+- func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: copysign_out
+
 - func: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: copysign
+  structured_delegate: copysign.out
 
 - func: copysign_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU, CUDA: copysign_
-
-- func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: copysign_out
+  structured_delegate: copysign.out
 
 - func: copysign.Scalar(Tensor self, Scalar other) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: copysign
+    CompositeExplicitAutograd: copysign
 
 - func: copysign_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU, CUDA: copysign_
+    CompositeExplicitAutograd: copysign_
+
+- func: copysign.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: copysign_out
 
 - func: logical_not(Tensor self) -> Tensor
   variants: function, method
