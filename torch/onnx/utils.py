@@ -78,7 +78,8 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            enable_onnx_checker=True, use_external_data_format=False):
     import builtins
     len_backup = builtins.len
-    builtins.len = lambda x:x.__len__()
+    # Get rid of patch
+    # builtins.len = lambda x : x.__len__()
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
