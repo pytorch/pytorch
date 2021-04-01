@@ -516,9 +516,20 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
   list(APPEND LIBTORCH_CMAKE_SRCS "")
 
+  list(APPEND MOBILE_DEBUG_SRCS "")
+  if(USE_SOURCE_DEBUG_ON_MOBILE)
+    set(MOBILE_EAGER_SYMOBLICATION_SRCS
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/debug_info.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/serialization/source_range_serialization.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/frontend/source_range.cpp
+       )
+    list(APPEND MOBILE_DEBUG_SRCS ${MOBILE_EAGER_SYMOBLICATION_SRCS})
+  endif()
+
   # Switch between the full jit interpreter and lite interpreter
   if(BUILD_LITE_INTERPRETER)
     append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
+    list(APPEND LIBTORCH_CMAKE_SRCS ${MOBILE_DEBUG_SRCS})
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
   endif()
@@ -554,15 +565,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/sequential.cpp
        )
-    if(USE_SOURCE_DEBUG_ON_MOBILE)
-      set(MOBILE_EAGER_SYMOBLICATION_SRCS
-         ${TORCH_SRC_DIR}/csrc/jit/mobile/debug_info.cpp
-         ${TORCH_SRC_DIR}/csrc/jit/serialization/source_range_serialization.cpp
-         ${TORCH_SRC_DIR}/csrc/jit/frontend/source_range.cpp
-         )
-      list(APPEND MOBILE_SRCS ${MOBILE_EAGER_SYMOBLICATION_SRCS})
-    endif()
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
+    list(APPEND TORCH_SRCS ${MOBILE_DEBUG_SRCS})
   endif()
 
   # This one needs to be unconditionally added as Functions.cpp is also unconditionally added
