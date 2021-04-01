@@ -3129,7 +3129,7 @@ class TestRandomTensorCreation(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @slowTest
+    @onlyCUDA
     def test_randperm(self, device):
         if device == 'cpu':
             rng_device = None
@@ -3141,7 +3141,7 @@ class TestRandomTensorCreation(TestCase):
         for n in (100, 50000, 100000):
             # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
             # different from others on CUDA.
-            for dtype in (torch.long, torch.half, torch.float):
+            for dtype in (torch.long, torch.float):
                 if n > 2049 and dtype == torch.half:  # Large n for torch.half will raise an exception, do not test here.
                     continue
                 with torch.random.fork_rng(devices=rng_device):
@@ -3149,6 +3149,7 @@ class TestRandomTensorCreation(TestCase):
                 res2 = torch.empty(0, dtype=dtype, device=device)
                 torch.randperm(n, out=res2, dtype=dtype, device=device)
                 self.assertEqual(res1, res2, atol=0, rtol=0)
+                self.assertEqual(res1.sort().values.long(), torch.arange(n, device=device))
 
         # Default type is long
         for n in (100, 10000):
@@ -3178,6 +3179,7 @@ class TestRandomTensorCreation(TestCase):
                 res = torch.randperm(n, dtype=torch.long, device=device)
             torch.randperm(n, out=non_contiguous_tensor)
             self.assertEqual(non_contiguous_tensor, res)
+            self.assertEqual(res.sort().values.long(), torch.arange(n, device=device))
 
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA
