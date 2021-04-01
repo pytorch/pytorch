@@ -1,6 +1,6 @@
 from functools import reduce, wraps, partial
 from itertools import product
-from operator import mul, itemgetter
+from operator import mul
 import collections
 import operator
 import random
@@ -78,7 +78,6 @@ class SkipInfo(DecorateInfo):
 class SampleInput(object):
     """Represents sample inputs to a function."""
 
-    # output_process_fn_grad is a function that modifies the output of op compatible with input
     __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad']
 
     def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None):
@@ -86,7 +85,7 @@ class SampleInput(object):
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         # op with TensorList inputs do not support method or inplace variants.
         assert isinstance(input, torch.Tensor) or is_iterable_of_tensors(input)
-        self.input: Union[torch.Tensor, Sequence] = input
+        self.input: Union[torch.Tensor, Sequence[torch.Tensor]] = input
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
@@ -155,7 +154,6 @@ class OpInfo(object):
                                                # inside of DifferentiableGraphs when this operation is autodiffed.
                                                # Ex: ['aten::add', 'aten::mm'], defaults to an empty list
                                                # Note: currently no ops use fusible nodes
-                 output_func=lambda x: x,  # fn mapping output to part that should be gradcheck'ed
                  supports_out=True,  # whether the op supports the out kwarg
                  skips=tuple(),  # information about which tests to skip
                  decorators=None,  # decorators to apply to generated tests
@@ -170,6 +168,7 @@ class OpInfo(object):
                  supports_complex_autograd=None,  # whether the operation supports complex autograd
                                                   # defaults to supports_autograd's value
                  supports_sparse=False,  # whether the op supports sparse inputs
+                 gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs),  # wrapper function for gradcheck
                  check_batched_grad=True,  # check batched grad when doing gradcheck
                  check_batched_gradgrad=True,  # check batched grad grad when doing gradgradcheck
                  ):
@@ -200,7 +199,6 @@ class OpInfo(object):
 
         self.skips = skips
         self.decorators = decorators
-        self.output_func = output_func
         self.sample_inputs_func = sample_inputs_func
 
         self.assert_autodiffed = assert_autodiffed
@@ -219,6 +217,7 @@ class OpInfo(object):
         if self.supports_complex_autograd is None:
             self.supports_complex_autograd = supports_autograd
 
+        self.gradcheck_wrapper = gradcheck_wrapper
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
 
@@ -1218,116 +1217,23 @@ class ForeachUnaryFuncInfo(OpInfo):
         self.inplace_variant = foreach_method_inplace
         self.ref = torch_ref_method
 
-class HermitianOpInfo(OpInfo):
-    """Operator information for Hermitian functions
-    These are functions that take Hermitian matrices as input.
-    They require a modified function to be tested for gradcheck, because the finite-difference algorithm
-    for calculating derivatives does not preserve the Hermitian property of the input and returning incorrect results.
-    """
 
-    def __init__(self,
-                 name,
-                 *,
-                 skips=tuple(),
-                 **kwargs):
-        new_skips = (
-            *skips,
-            # These tests do not take into account custom op.get_op()
-            # TODO: implement op.input_func instead of modifying op.get_op()
-            # See https://github.com/pytorch/pytorch/issues/50837
-            SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-        )
-
-        super().__init__(name=name,
-                         skips=new_skips,
-                         **kwargs)
-
-    def get_op(self):
-        """
-        Returns the function variant of the operator, torch.<op_name>,
-        compatible with gradcheck for Hermitian functions.
-        It works only for single input argument.
-        """
-        def hermitian_func(non_hermitian_input, **kwargs):
-            hermitian_input = non_hermitian_input + non_hermitian_input.conj().transpose(-2, -1)
-            return self.op(hermitian_input, **kwargs)
-
-        return hermitian_func
-
-
-class TriangularOpInfo(OpInfo):
-    """Operator information for function that take lower or upper triangular matrices as input.
-    They require a modified function to be tested for gradcheck, because the finite-difference algorithm
-    for calculating derivatives does not preserve the triangular property of the input and returning incorrect results.
-    """
-
-    def __init__(self,
-                 name,
-                 *,
-                 skips=tuple(),
-                 **kwargs):
-        new_skips = (
-            *skips,
-            # These tests do not take into account custom op.get_op()
-            # TODO: implement op.input_func instead of modifying op.get_op()
-            # See https://github.com/pytorch/pytorch/issues/50837
-            SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-            SkipInfo('TestCommon', 'test_variant_consistency_eager')
-        )
-
-        super().__init__(name=name,
-                         skips=new_skips,
-                         **kwargs)
-
-    def get_op(self):
-        """
-        Returns the function variant of the operator, torch.<op_name>,
-        compatible with gradcheck for triangular input functions.
-        It works only for single input argument and upper kwarg
-        """
-        def triangular_func(non_triangular_input, upper=False):
-            if upper:
-                triangular_input = non_triangular_input.triu()
-            else:
-                triangular_input = non_triangular_input.tril()
-            return self.op(triangular_input, upper=upper)
-
-        return triangular_func
-
-    def get_method(self):
-        """
-        Returns the method variant of the operator
-        compatible with gradcheck for triangular input functions.
-        It works only for single input argument and upper kwarg
-        """
-        def triangular_func(non_triangular_input, upper=False):
-            if upper:
-                triangular_input = non_triangular_input.triu()
-            else:
-                triangular_input = non_triangular_input.tril()
-            return self.method_variant(triangular_input, upper=upper)
-
-        return triangular_func
-
-    def sample_inputs(self, device, dtype, requires_grad=False):
-        """
-        This function generates Cholesky factors of positive-definite (non-singular) Hermitian (symmetric) matrices
-        for cholesky_inverse.
-        """
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-        inputs = (
-            torch.zeros(0, 0, dtype=dtype, device=device),  # 0x0 matrix
-            torch.zeros(0, 2, 2, dtype=dtype, device=device),  # zero batch of matrices
-            random_hermitian_pd_matrix(S, dtype=dtype, device=device),  # single matrix
-            random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),  # batch of matrices
-        )
-        test_cases = (torch.linalg.cholesky(a) for a in inputs)
-        out = []
-        for a in test_cases:
-            a.requires_grad = requires_grad
-            out.append(SampleInput(a))
-            out.append(SampleInput(a, kwargs=dict(upper=True)))
-        return out
+def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=False):
+    # Generate Cholesky factors of positive-definite (non-singular) Hermitian (symmetric) matrices
+    from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+    inputs = (
+        torch.zeros(0, 0, dtype=dtype, device=device),  # 0x0 matrix
+        torch.zeros(0, 2, 2, dtype=dtype, device=device),  # zero batch of matrices
+        random_hermitian_pd_matrix(S, dtype=dtype, device=device),  # single matrix
+        random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),  # batch of matrices
+    )
+    test_cases = (torch.linalg.cholesky(a) for a in inputs)
+    out = []
+    for a in test_cases:
+        a.requires_grad = requires_grad
+        out.append(SampleInput(a))
+        out.append(SampleInput(a, kwargs=dict(upper=True)))
+    return out
 
 def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False):
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
@@ -1402,10 +1308,26 @@ def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.linalg.eigh with UPLO="U" or "L" keyword argument.
     """
-    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
-    for o in out:
-        o.kwargs = {"UPLO": np.random.choice(["L", "U"])}
-    return out
+    def out_fn(output):
+        return output[0], abs(output[1])
+
+    samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
+    for sample in samples:
+        sample.kwargs = {"UPLO": np.random.choice(["L", "U"])}
+        sample.output_process_fn_grad = out_fn
+
+    return samples
+
+
+def sample_inputs_linalg_slogdet(op_info, device, dtype, requires_grad=False):
+    def out_fn(output):
+        return output[1]
+
+    samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
+    for sample in samples:
+        sample.output_process_fn_grad = out_fn
+
+    return samples
 
 
 def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=False):
@@ -2220,6 +2142,24 @@ def reference_lgamma(x):
     return out
 
 
+def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
+    """Gradcheck wrapper for functions that take Hermitian matrices as input.
+
+    They require a modified function because the finite-difference algorithm
+    for calculating derivatives does not preserve the Hermitian property of the input.
+    """
+    return op(input + input.conj().transpose(-2, -1), *args, **kwargs)
+
+
+def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
+    """Gradcheck wrpper for functions that take lower or upper triangular matrices as input.
+
+    They require a modified function because the finite-difference algorithm
+    for calculating derivatives does not preserve the triangular property of the input.
+    """
+    return op(input.triu() if upper else input.tril(), upper)
+
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -2475,28 +2415,28 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=floating_types_and(torch.bfloat16),
                    dtypesIfCUDA=floating_types_and(torch.half),
                    assert_autodiffed=True),
-    HermitianOpInfo('cholesky',
-                    op=torch.cholesky,
-                    dtypes=floating_and_complex_types(),
-                    check_batched_gradgrad=False,
-                    sample_inputs_func=sample_inputs_linalg_cholesky,
-                    decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
-                    skips=(
-                        # cuda gradchecks are slow
-                        # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
-                    ),
-    TriangularOpInfo('cholesky_inverse',
-                     op=torch.cholesky_inverse,
-                     dtypes=floating_and_complex_types(),
-                     # TODO: RuntimeError: cholesky_inverse does not support automatic differentiation for outputs
-                     # with complex dtype.
-                     supports_complex_autograd=False,
-                     check_batched_gradgrad=False,
-                     decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-                     skips=(
-                         # cholesky_inverse does not correctly warn when resizing out= inputs
-                         SkipInfo('TestCommon', 'test_out'),)),
+    OpInfo('cholesky',
+           dtypes=floating_and_complex_types(),
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_linalg_cholesky,
+           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+    OpInfo('cholesky_inverse',
+           dtypes=floating_and_complex_types(),
+           # TODO: RuntimeError: cholesky_inverse does not support automatic differentiation for outputs
+           # with complex dtype.
+           supports_complex_autograd=False,
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_linalg_cholesky_inverse,
+           gradcheck_wrapper=gradcheck_wrapper_triangular_input,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           skips=(
+               # cholesky_inverse does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),)),
     UnaryUfuncInfo('clamp',
                    aliases=('clip', ),
                    decorators=(precisionOverride({torch.bfloat16: 7e-2, torch.float16: 1e-2}),),
@@ -2834,34 +2774,33 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
-    HermitianOpInfo('linalg.cholesky',
-                    aten_name='linalg_cholesky',
-                    op=torch.linalg.cholesky,
-                    dtypes=floating_and_complex_types(),
-                    # TODO: RuntimeError: While computing batched gradients,
-                    # got: vmap: Calling Tensor.as_strided is not supported
-                    # unless the batch dims being vmapped over are at the front of the tensor (in memory layout).
-                    check_batched_gradgrad=False,
-                    sample_inputs_func=sample_inputs_linalg_cholesky,
-                    decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
-                    skips=(
-                        # cuda gradchecks are slow
-                        # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
-                    ),
-    HermitianOpInfo('linalg.eigh',
-                    aten_name='linalg_eigh',
-                    op=torch.linalg.eigh,
-                    dtypes=floating_and_complex_types(),
-                    check_batched_gradgrad=False,
-                    sample_inputs_func=sample_inputs_linalg_eigh,
-                    output_func=lambda out: (out[0], abs(out[1])),  # gauge invariant loss function
-                    decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
-                    skips=(
-                        # cuda gradchecks are slow
-                        # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
-                    ),
+    OpInfo('linalg.cholesky',
+           aten_name='linalg_cholesky',
+           dtypes=floating_and_complex_types(),
+           # TODO: RuntimeError: While computing batched gradients,
+           # got: vmap: Calling Tensor.as_strided is not supported
+           # unless the batch dims being vmapped over are at the front of the tensor (in memory layout).
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_linalg_cholesky,
+           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
+           ),
+    OpInfo('linalg.eigh',
+           aten_name='linalg_eigh',
+           dtypes=floating_and_complex_types(),
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_linalg_eigh,
+           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
+           ),
     OpInfo('linalg.lstsq',
            aten_name='linalg_lstsq',
            op=torch.linalg.lstsq,
@@ -2911,8 +2850,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_slogdet',
            op=torch.linalg.slogdet,
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_invertible,
-           output_func=itemgetter(1),
+           sample_inputs_func=sample_inputs_linalg_slogdet,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.vector_norm',
            op=torch.linalg.vector_norm,
@@ -3508,20 +3446,19 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
-    HermitianOpInfo('linalg.pinv',
-                    variant_test_name='hermitian',
-                    aten_name='linalg_pinv',
-                    op=torch.linalg.pinv,
-                    dtypes=floating_and_complex_types(),
-                    check_batched_grad=False,
-                    check_batched_gradgrad=False,
-                    sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
-                    decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
-                    skips=(
-                        # cuda gradchecks are slow
-                        # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
-                    ),
+    OpInfo('linalg.pinv',
+           aten_name='linalg_pinv',
+           variant_test_name='hermitian',
+           dtypes=floating_and_complex_types(),
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
+           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('eig',
            op=torch.eig,
            dtypes=floating_and_complex_types(),
