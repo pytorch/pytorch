@@ -262,6 +262,8 @@ class EmbeddingBag(Module):
     Inputs: :attr:`input` (IntTensor or LongTensor), :attr:`offsets` (IntTensor or LongTensor, optional), and
         :attr:`per_index_weights` (Tensor, optional)
 
+        - :attr:`input` and :attr:`offsets` have to be of the same type, either int or long
+
         - If :attr:`input` is 2D of shape `(B, N)`,
 
           it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
