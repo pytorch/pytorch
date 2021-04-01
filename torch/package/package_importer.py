@@ -402,6 +402,9 @@ class PackageImporter(Importer):
                         self._handle_fromlist(module, module.__all__, recursive=True)
                 elif not hasattr(module, x):
                     from_name = "{}.{}".format(module_name, x)
+                    # handle case where from_name is ''
+                    if from_name[-1] == ".":
+                        from_name = from_name[:-1]
                     try:
                         self._gcd_import(from_name)
                     except ModuleNotFoundError as exc:

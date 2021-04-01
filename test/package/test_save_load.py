@@ -68,6 +68,19 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
+    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    def test_dunder_imports(self):
+        filename = self.temp()
+        with PackageExporter(filename, verbose=True) as he:
+            import package_b
+            obj = package_b.PackageBObject
+            he.save_pickle("res", "obj.pkl", obj)
+            print(he.debug_deps)
+        hi = PackageImporter(filename)
+        loaded_obj = hi.load_pickle("res", "obj.pkl")
+        # hi will throw errors if cannot resolve __import__'s
+        # dependencies on loading side
+
     def test_save_module_binary(self):
         f = BytesIO()
         with PackageExporter(f, verbose=False) as he:
