@@ -1,6 +1,6 @@
 import sys
 from collections import namedtuple
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, Type
 
 import torch
 from ._core import _unravel_index
@@ -21,9 +21,9 @@ try:
     # a previously imported module already directly or indirectly imported 'pytest', but the test is run by another
     # runner such as 'unittest'.
     # 'mypy' is not able to handle this within a type annotation
-    # (see https://mypy.readthedocs.io/en/latest/common_issues.html#variables-vs-type-aliases for details). In such
-    # cases we need to add a 'type: ignore[valid-type]' comment to the annotation.
-    UsageError = getattr(sys.modules["pytest"], "UsageError")
+    # (see https://mypy.readthedocs.io/en/latest/common_issues.html#variables-vs-type-aliases for details). In case
+    # 'UsageError' is used in an annotation, add a 'type: ignore[valid-type]' comment.
+    UsageError: Type[Exception] = sys.modules["pytest"].UsageError  # type: ignore[attr-defined]
 except (KeyError, AttributeError):
 
     class UsageError(Exception):  # type: ignore[no-redef]
