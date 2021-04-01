@@ -10,19 +10,26 @@ namespace torch {
 namespace jit {
 
 struct MutationRemover {
-  MutationRemover(std::shared_ptr<Graph> graph)
+  MutationRemover(
+      std::shared_ptr<Graph> graph,
+      c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt)
       : aliasDb_(nullptr), graph_(std::move(graph)) {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
+    mutation_filter_ = mutation_filter;
   }
 
-  void removeListMutation();
+  // return true if graph is modified
+  bool removeListMutation();
 
-  void removeTensorMutation();
+  // return true if graph is modified
+  bool removeTensorMutation();
 
   bool isSpecialMappedOp(Node* n) {
     return n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)") ||
         n->matches(
-            "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)");
+            "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)") ||
+        n->matches(
+            "aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)");
   }
 
   bool inplaceOpVariant(Node* n) {
@@ -69,27 +76,35 @@ struct MutationRemover {
  private:
   bool newMemoryLocation(Value* v);
   Node* createSpecialMappedOp(Node* n);
-  bool listAppendFollowingListConstruct(Node* n);
+  bool listMutationFollowingListConstruct(Node* n);
   bool tryMakeCreationAndMutationAtomic(
       Value* mutated_value,
       Node* mutating_op);
   bool tryMakeUnaliasedIfOutputAndMutationAtomic(
       Value* mutated_value,
       Node* mutating_op);
-  void RemoveListMutation(Block* block);
-  void RemoveTensorMutation(Block* block);
+  // return true if graph is modified
+  bool RemoveListMutation(Block* block);
+  // return true if graph is modified
+  bool RemoveTensorMutation(Block* block);
 
- private:
+  c10::optional<std::function<bool(Node*)>> mutation_filter_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
 };
 
+// Removes list mutation with functional equivalents
+// return true if graph is modified
+TORCH_API bool RemoveListMutation(const std::shared_ptr<Graph>& graph);
+
 // Replaces in-place aten ops with their functional equivalents
 // when it can be proven that this does not change graph semantics
-TORCH_API void RemoveListMutation(const std::shared_ptr<Graph>& graph);
-
-// Removes list mutation with functional equivalents
-TORCH_API void RemoveTensorMutation(const std::shared_ptr<Graph>& graph);
+// if `mutation_filter` is present, the pass will only attempt to
+// remove mutation on nodes which return true for the filter
+// return true if graph is modified
+TORCH_API bool RemoveTensorMutation(
+    const std::shared_ptr<Graph>& graph,
+    c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt);
 
 } // namespace jit
 } // namespace torch

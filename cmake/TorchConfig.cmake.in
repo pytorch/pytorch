@@ -75,7 +75,7 @@ else()
   if(@USE_CUDA@)
     append_wholearchive_lib_if_found(torch_cuda c10_cuda)
   endif()
-  
+
   # We need manually add dependent libraries when they are not linked into the
   # shared library.
   # TODO: this list might be incomplete.
@@ -83,7 +83,7 @@ else()
   if(@BUILD_CAFFE2@)
     append_torchlib_if_found(Caffe2_perfkernels_avx512 Caffe2_perfkernels_avx2 Caffe2_perfkernels_avx)
   endif()
-  
+
   if(@USE_NNPACK@)
     append_torchlib_if_found(nnpack)
   endif()
