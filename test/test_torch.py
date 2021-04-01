@@ -2648,6 +2648,22 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
 
+            # Complain if out dtype mismatch
+            x = torch.empty(4, 3, 8, 8, device='meta', dtype=torch.float)
+            out = torch.empty(4, 3, 16, 16, device='meta', dtype=torch.double)
+            self.assertExpectedRaisesInline(
+                RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
+                """Expected out tensor to have dtype float, but got double instead"""
+            )
+
+            # Complain if out device mismatch
+            x = torch.empty(0, 3, 8, 8, device='meta')
+            out = torch.empty(0, 3, 16, 16, device='cpu')
+            self.assertExpectedRaisesInline(
+                RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
+                """Expected out tensor to have device meta, but got cpu instead"""
+            )
+
         @noarchTest
         def test_detach_meta(self):
             x = torch.empty(2, device='meta')
