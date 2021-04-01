@@ -89,4 +89,28 @@ inline Tensor expm1(const Tensor& self) {
   return torch::special_expm1(self);
 }
 
+inline Tensor xlog1py(const Tensor& self, const Tensor& other) {
+  return torch::special_xlog1py(self, other);
+}
+
+inline Tensor xlog1py(const Scalar& self, const Tensor& other) {
+  return torch::special_xlog1py(self, other);
+}
+
+inline Tensor xlog1py(const Tensor& self, const Scalar& other) {
+  return torch::special_xlog1py(self, other);
+}
+
+inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return torch::special_xlog1py_out(result, self, other);
+}
+
+inline Tensor& xlog1py_out(Tensor& result, const Scalar& self, const Tensor& other) {
+  return torch::special_xlog1py_out(result, self, other);
+}
+
+inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Scalar& other) {
+  return torch::special_xlog1py_out(result, self, other);
+}
+
 }} // torch::special
