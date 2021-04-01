@@ -76,7 +76,7 @@ OPERATOR_SCHEMA(AddFakeFp16).NumInputs(2).NumOutputs(1);
 REGISTER_CPU_OPERATOR(
     DivFakeFp16,
     BinaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, double>,
         CPUContext,
         FP16PairWiseCPUFunctor<DivFunctor<CPUContext>>>);
 OPERATOR_SCHEMA(DivFakeFp16).NumInputs(2).NumOutputs(1);

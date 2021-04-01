@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # in ScriptModule or pass it to a ScriptFunction
 # _ScriptLocalOptimizerInterface serves as a common
 # interface type for Optimizer ScriptModules.
-# 
+#
 # TODO (wanchaol): remove this once we added TorchScript
 # class reference semantics
 @jit.interface

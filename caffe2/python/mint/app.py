@@ -7,7 +7,6 @@ import numpy as np
 import nvd3
 import os
 import sys
-# pyre-fixme[21]: Could not find a module corresponding to import `tornado.httpserver`
 import tornado.httpserver
 # pyre-fixme[21]: Could not find a module corresponding to import `tornado.wsgi`
 import tornado.wsgi

@@ -55,27 +55,35 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nni.LinearReLU: nniq.LinearReLU,
     nniqat.ConvBn1d: nnq.Conv1d,
     nniqat.ConvBn2d: nnq.Conv2d,
+    nniqat.ConvBn3d: nnq.Conv3d,
     nniqat.ConvBnReLU1d: nniq.ConvReLU1d,
     nniqat.ConvBnReLU2d: nniq.ConvReLU2d,
+    nniqat.ConvBnReLU3d: nniq.ConvReLU3d,
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
+    nniqat.ConvReLU3d: nniq.ConvReLU3d,
     nniqat.LinearReLU: nniq.LinearReLU,
     # QAT modules:
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
+    nnqat.Conv3d: nnq.Conv3d,
 }
 
 # Default map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv2d: nnqat.Conv2d,
+    nn.Conv3d: nnqat.Conv3d,
     nn.Linear: nnqat.Linear,
     nn.modules.linear._LinearWithBias: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn1d: nniqat.ConvBn1d,
     nni.ConvBn2d: nniqat.ConvBn2d,
+    nni.ConvBn3d: nniqat.ConvBn3d,
     nni.ConvBnReLU1d: nniqat.ConvBnReLU1d,
     nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,
+    nni.ConvBnReLU3d: nniqat.ConvBnReLU3d,
     nni.ConvReLU2d: nniqat.ConvReLU2d,
-    nni.LinearReLU: nniqat.LinearReLU
+    nni.ConvReLU3d: nniqat.ConvReLU3d,
+    nni.LinearReLU: nniqat.LinearReLU,
 }
 
 # Default map for swapping dynamic modules

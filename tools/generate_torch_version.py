@@ -24,7 +24,7 @@ def get_torch_version(sha: Optional[str] = None) -> str:
     elif sha != 'Unknown':
         if sha is None:
             sha = get_sha(pytorch_root)
-        version += '+' + sha[:7]
+        version += '+git' + sha[:7]
     return version
 
 if __name__ == "__main__":

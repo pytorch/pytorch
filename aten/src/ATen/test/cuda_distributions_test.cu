@@ -40,6 +40,7 @@ void assert_with_expected_uniforms(uint64_t counter_offset) {
 
   // launch kernel to get expected randoms
   expected_uniforms<<<1, 1>>>(x, counter_offset);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Wait for GPU to finish before accessing on host
   cudaDeviceSynchronize();
