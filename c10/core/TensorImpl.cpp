@@ -89,6 +89,7 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   if (is_view || c10::InferenceMode::is_enabled()) {
     // See Note [Expected TLS state in InferenceMode] for why we don't add Autograd & InplaceOrView keys.
     key_set_ = key_set;
+    version_counter_ = VariableVersion(/*enabled=*/false);
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]
@@ -309,6 +310,8 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
 void TensorImpl::set_requires_grad(bool requires_grad) {
+  TORCH_CHECK(!requires_grad || !is_inference_tensor() || c10::InferenceMode::is_enabled(),
+    "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.");
   if (!requires_grad && !autograd_meta_) return;
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
   // NB: In principle, setting requires_grad to false could result in

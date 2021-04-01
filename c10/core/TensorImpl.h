@@ -10,6 +10,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
@@ -228,21 +229,71 @@ struct C10_API VariableVersion {
   c10::intrusive_ptr<VersionCounter> version_counter_;
 
  public:
+  // Returns true for inference tensor.
+  // `as_view` on inference tensor in normal mode checks unique() so
+  // we cannot throw here. If Inplace and View were separate dispatch
+  // keys we can just put Inplace in the default_included_set, so that
+  // view ops on inference tensor doesn't have to go through as_view
+  // even outside InferenceMode.
   bool unique() const {
-    return 1 == version_counter_.use_count();
+    return this->enabled() ? 1 == version_counter_.use_count() : true;
   }
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
   // leaves it in a persistently undefined state. See
   // https://cplusplus.github.io/LWG/issue2334.
   VariableVersion(uint32_t version = 0)
       : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
-
-  void bump() noexcept {
-    ++version_counter_->version_;
+  explicit VariableVersion(bool enabled, uint32_t version = 0) {
+    if (enabled) {
+      version_counter_ = c10::make_intrusive<VersionCounter>(version);
+    }
   }
 
-  uint32_t current_version() const noexcept {
-    return version_counter_->version_;
+  bool enabled() const {
+    return version_counter_;
+  }
+
+  // Note [Inplace update inference tensor]
+  // 1. Inplace update to inference tensor is forbidden in normal mode.
+  //   For example:
+  //     inference_tensor.copy_(normal_tensor_requires_grad)
+  //   This inplace makes inference_tensor have requires_grad=True and
+  //   have a grad_fn.  This is bad because views of `inference_tensor`
+  //   created in InferenceMode won't be able to know the grad_fn since
+  //   their ViewMeta were not recorded. To match NoGradMode behavior
+  //   that "inplace update to a view created in NoGradMode raise an error",
+  //   we just ban inplace update to inference tensor since we can't tell
+  //   if an inference tensor is a view created in InferenceMode.
+  //
+  //   Note that views of `inference_tensor` created in InferenceMode has proper
+  //   ViewMeta so that they're aware of the grad_fn correctly.
+  //
+  // 2. Inplace update to inference tensor in inference tensor is doesn't bump
+  //    version counter.
+  //    * It either doesn't call bump() by skipping InplaceOrView kernel,
+  //      - e.g. inference_tensor.add_(1)
+  //    * or bump() is a no-op for inference tensor.
+  //      - e.g. inference_tensor.add_(normal_tensor)
+  void bump() {
+    bool enabled = this->enabled();
+    TORCH_CHECK(enabled || InferenceMode::is_enabled(),
+      "Inplace update to inference tensor in normal mode is not allowed. You can make "
+      "a clone to get a normal tensor before doing inplace update.");
+
+    if (enabled) {
+      ++version_counter_->version_;
+    }
+  }
+
+  // Returns 0 for inference tensor in InferenceMode.  We'd like user
+  // code that runs in normal mode still runs in InferenceMode with
+  // minimal change, thus it returns 0 instead of throwing.
+  uint32_t current_version() const {
+    bool enabled = this->enabled();
+    TORCH_CHECK(enabled || InferenceMode::is_enabled(),
+      "Accessing version counter of inference tensor is not allowed.");
+
+    return enabled ? (uint32_t) version_counter_->version_ : 0;
   }
 };
 
@@ -1092,21 +1143,27 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_contiguous();
   }
 
+  // Inference tensor doesn't have version counter,
+  // set_version_counter is no-op for them.
   void set_version_counter(
     const c10::VariableVersion& version_counter) noexcept {
-    version_counter_ = version_counter;
+    if (!this->is_inference_tensor()) {
+      version_counter_ = version_counter;
+    }
   }
 
   void set_version_counter(
     c10::VariableVersion&& version_counter) noexcept {
-    version_counter_ = std::move(version_counter);
+    if (!this->is_inference_tensor()) {
+      version_counter_ = std::move(version_counter);
+    }
   }
 
   const c10::VariableVersion& version_counter() const noexcept {
     return version_counter_;
   }
 
-  void bump_version() noexcept {
+  void bump_version() {
     version_counter_.bump();
   }
 

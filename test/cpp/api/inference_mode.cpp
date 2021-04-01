@@ -448,3 +448,42 @@ TEST(InferenceModeTest, TestInplaceCopyOnInferenceTensor) {
       "Inplace update to inference tensor in normal mode is not allowed");
   }
 }
+
+TEST(InferenceModeTest, TestSetRequiresGradInNormalMode) {
+  torch::Tensor t;
+  {
+    InferenceMode guard;
+    t = torch::ones({1, 2, 3});
+  }
+  t.set_requires_grad(false);
+  ASSERT_THROWS_WITH(t.set_requires_grad(true),
+    "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.");
+}
+
+TEST(InferenceModeTest, TestAccessVersionCounter) {
+  torch::Tensor t;
+  {
+    InferenceMode guard;
+    t = torch::ones({1, 2, 3});
+    t.unsafeGetTensorImpl()->version_counter().current_version();
+    t.unsafeGetTensorImpl()->bump_version();
+  }
+  ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->version_counter().current_version(),
+    "Accessing version counter of inference tensor is not allowed.");
+  ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->bump_version(),
+    "Inplace update to inference tensor in normal mode is not allowed.");
+}
+
+TEST(InferenceModeTest, TestInplaceUpdateInferenceTensorWithNormalTensor) {
+  torch::Tensor s = torch::ones({1, 2, 3});
+  torch::Tensor t;
+  {
+    InferenceMode guard;
+    t = torch::ones({1, 2, 3});
+    s.add_(t);
+    t.add_(s);
+  }
+  s.copy_(t);
+  ASSERT_THROWS_WITH(t.copy_(s),
+    "Inplace update to inference tensor in normal mode is not allowed");
+}
