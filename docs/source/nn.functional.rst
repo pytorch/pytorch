@@ -137,6 +137,15 @@ Pooling functions
 
 .. autofunction:: adaptive_avg_pool3d
 
+:hidden:`fractional_max_pool2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: fractional_max_pool2d
+
+:hidden:`fractional_max_pool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: fractional_max_pool3d
 
 Non-linear activation functions
 -------------------------------
@@ -291,6 +300,11 @@ Normalization functions
 ~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: batch_norm
+
+:hidden:`group_norm`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: group_norm
 
 :hidden:`instance_norm`
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -467,6 +481,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: nll_loss
+
+:hidden:`huber_loss`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: huber_loss
 
 :hidden:`smooth_l1_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~

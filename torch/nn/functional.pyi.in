@@ -255,6 +255,9 @@ def smooth_l1_loss(input: Tensor, target: Tensor, size_average: Optional[bool] =
                    reduction: str = ..., beta: float = ...) -> Tensor: ...
 
 
+def huber_loss(input: Tensor, target: Tensor, reduction: str = ..., delta: float = ...) -> Tensor: ...
+
+
 def l1_loss(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
             reduction: str = ...) -> Tensor: ...
 

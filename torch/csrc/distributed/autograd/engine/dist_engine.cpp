@@ -1,6 +1,7 @@
 #include <queue>
 
 #include <ATen/Parallel.h>
+#include <c10/core/Event.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -279,7 +280,7 @@ void DistEngine::computeDependencies(
 
     // Create a dummy GraphRoot and run init_to_execute with it.
     GraphRoot dummyRoot(edges, {});
-    graphTask->init_to_execute(dummyRoot, outputEdges, /*accumulate_grad=*/false);
+    graphTask->init_to_execute(dummyRoot, outputEdges, /*accumulate_grad=*/false, /*min_topo_nr=*/0);
     for (auto& mapEntry : graphTask->exec_info_) {
       auto& execInfo = mapEntry.second;
       if (!execInfo.captures_) {
@@ -423,8 +424,27 @@ std::shared_ptr<c10::ivalue::Future> DistEngine::
 
 std::shared_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
     const ContextPtr& autogradContext,
-    const std::shared_ptr<Node>& sendFunction,
+    const std::shared_ptr<SendRpcBackward>& sendFunction,
     bool retainGraph) {
+
+  // Typically the local autograd engine ensures stream synchronizations between
+  // nodes in the graph. However, for distributed autograd the sendFunction
+  // inputs might have been retrieved over the wire on a separate stream and the
+  // sendFunction itself runs on a different stream. As a result, we need to
+  // manually synchronize those two streams here.
+  const auto& send_backward_stream = sendFunction->stream(c10::DeviceType::CUDA);
+  if (send_backward_stream) {
+    for (const auto& grad : sendFunction->getGrads()) {
+        const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+        const auto default_stream = guard.getStream(grad.device());
+        if (send_backward_stream != default_stream) {
+          auto event = c10::Event{c10::DeviceType::CUDA};
+          event.record(default_stream);
+          send_backward_stream->wait(event);
+        }
+    }
+  }
+
   std::unique_lock<std::mutex> lock(initializedContextIdsLock_);
   if (initializedContextIds_.find(autogradContext->contextId()) ==
       initializedContextIds_.end()) {

@@ -244,22 +244,7 @@ class EventList(list):
                             '"cat": "cpu_to_cuda", '
                             '"args": {}}, ' % (evt.trace_name, evt.time_range.start,
                                                evt.thread, next_id))
-                    f.write('{"name": "%s", '
-                            '"ph": "f", '
-                            '"ts": %s, '
-                            '"tid": %s, '
-                            '"pid": "CUDA functions", '
-                            '"id": %s, '
-                            '"cat": "cpu_to_cuda", '
-                            '"args": {}}, ' % (k.name, k.interval.start, k.device, next_id))
-                    f.write('{"name": "%s", '
-                            '"ph": "X", '
-                            '"ts": %s, '
-                            '"dur": %s, '
-                            '"tid": %s, '
-                            '"pid": "CUDA functions", '
-                            '"args": {}}, ' % (k.name, k.interval.start,
-                                               k.interval.elapsed_us(), k.device))
+                    # Note: use torch.profiler to get device kernel trace
                     next_id += 1
 
             # remove trailing whitespace and comma
@@ -291,10 +276,10 @@ class EventList(list):
 
         Args:
             group_by_input_shapes: group entries by
-            (event name, input shapes) rather than just event name.
-            This is useful to see which input shapes contribute to the runtime
-            the most and may help with size-specific optimizations or
-            choosing the best candidates for quantization (aka fitting a roof line)
+                (event name, input shapes) rather than just event name.
+                This is useful to see which input shapes contribute to the runtime
+                the most and may help with size-specific optimizations or
+                choosing the best candidates for quantization (aka fitting a roof line)
 
             group_by_stack_n: group by top n stack trace entries
 
@@ -838,7 +823,7 @@ class Interval(object):
         return self.end - self.start
 
 
-Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
+Kernel = namedtuple('Kernel', ['name', 'device', 'duration'])
 
 
 class FunctionEvent(FormattedTimesMixin):
@@ -872,9 +857,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.is_legacy: bool = is_legacy
         self.flops: Optional[float] = flops
 
-    def append_kernel(self, name, device, start, end):
+    def append_kernel(self, name, device, duration):
         assert self.device_type == DeviceType.CPU
-        self.kernels.append(Kernel(name, device, Interval(start, end)))
+        self.kernels.append(Kernel(name, device, duration))
 
     def append_cpu_child(self, child):
         """Append a CPU child of type FunctionEvent.
@@ -932,11 +917,11 @@ class FunctionEvent(FormattedTimesMixin):
         if self.device_type == DeviceType.CPU:
             if not self.is_legacy:
                 # account for the kernels in the children ops
-                return (sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) +
+                return (sum(kinfo.duration for kinfo in self.kernels) +
                         sum(ch.cuda_time_total for ch in self.cpu_children))
             else:
                 # each legacy cpu events has a single (fake) kernel
-                return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels)
+                return sum(kinfo.duration for kinfo in self.kernels)
         else:
             assert self.device_type == DeviceType.CUDA
             return self.time_range.elapsed_us()
@@ -1189,8 +1174,7 @@ def parse_kineto_results(result):
                     fe.append_kernel(
                         f_evt.name,
                         f_evt.device_index,
-                        f_evt.time_range.start,
-                        f_evt.time_range.end)
+                        f_evt.time_range.end - f_evt.time_range.start)
                 elif f_evt.device_type == DeviceType.CPU:
                     # make sure that 'thread' of a CPU Kineto (e.g. CUDA Runtime) event is associated
                     # with the 'thread' of the corresponding linked PyTorch event to properly track
@@ -1235,32 +1219,14 @@ def parse_legacy_records(thread_records):
 
     next_id = 0
     start_record = None
-    cuda_records = {}
     functions = []
     record_stack = []
-
-    # cuda start events and the overall profiler start event don't happen
-    # at exactly the same time because we need to record an event on each device
-    # and each record takes ~4us. So we adjust here by the difference
-    # adding the difference in CPU time between the profiler start event
-    # and the CPU time of the cuda start event for the device
-    def adjusted_time(cuda_record, cuda_records_map):
-        assert cuda_record.device() != -1
-        assert start_record is not None
-        cuda_time_0 = cuda_records_map[(cuda_record.node_id(), cuda_record.device())]
-        return cuda_time_0.cuda_elapsed_us(cuda_record) + start_record.cpu_elapsed_us(cuda_time_0)
 
     # '__start_profile' is not guaranteed to be first, so we must find it here
     for record in itertools.chain(*thread_records):
         name = record.name()
         if start_record is None and name == '__start_profile':
             start_record = record
-        elif '__cuda_start_event' in name:
-            # N.B.: Each CUDA device has its own __cuda_start_event.
-            assert record.device() != -1
-            # key for cuda_records is (node_id, device) in case of multiple nodes
-            # having the same device
-            cuda_records[(record.node_id(), record.device())] = record
 
     assert start_record is not None and not start_record.is_remote()
 
@@ -1335,14 +1301,12 @@ def parse_legacy_records(thread_records):
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():
-                    cuda_start = adjusted_time(start, cuda_records)
-                    cuda_end = adjusted_time(record, cuda_records)
-                    if (cuda_end - cuda_start) > 0:
+                    duration = start.cuda_elapsed_us(record)
+                    if duration > 0:
                         fe.append_kernel(
                             start.name(),
                             start.device(),
-                            cuda_start,
-                            cuda_end)
+                            duration)
                 functions.append(fe)
                 del range_starts[record_key]
                 del cpu_memory_allocs[record_key]
@@ -1454,8 +1418,7 @@ def parse_nvprof_trace(path):
         evt = functions_map[row['marker_id']]
         evt.append_kernel(row['kernel_name'],
                           0,
-                          row['kernel_start'],
-                          row['kernel_end'])
+                          row['kernel_end'] - row['kernel_start'])
 
     functions.sort(key=lambda evt: evt.time_range.start)
     return functions

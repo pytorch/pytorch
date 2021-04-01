@@ -146,20 +146,19 @@ void col2im_backward_out_cuda_template(
     IntArrayRef padding,
     IntArrayRef stride) {
   // im2col_out_cuda checks size of kernel_size, dilation, padding and stride
-  im2col_out_cuda(
-      grad_input, grad_output, kernel_size, dilation, padding, stride);
+  at::native::im2col_out_cuda(
+      grad_output, kernel_size, dilation, padding, stride, grad_input);
 }
 
 } // namespace
 
-Tensor& col2im_out_cuda(
-    Tensor& output,
-    const Tensor& input,
+Tensor& col2im_out_cuda(const Tensor& input,
     IntArrayRef output_size,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
     IntArrayRef padding,
-    IntArrayRef stride) {
+    IntArrayRef stride,
+    Tensor& output) {
   col2im_out_cuda_template(
       output, input, output_size, kernel_size, dilation, padding, stride);
   return output;
@@ -179,13 +178,12 @@ Tensor col2im_cuda(
   return output;
 }
 
-Tensor& col2im_backward_out_cuda(
-    Tensor& grad_input,
-    const Tensor& grad_output,
+Tensor& col2im_backward_out_cuda(const Tensor& grad_output,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
     IntArrayRef padding,
-    IntArrayRef stride) {
+    IntArrayRef stride,
+    Tensor& grad_input) {
   col2im_backward_out_cuda_template(
       grad_input, grad_output, kernel_size, dilation, padding, stride);
   return grad_input;
