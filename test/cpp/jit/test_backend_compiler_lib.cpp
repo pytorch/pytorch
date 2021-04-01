@@ -49,6 +49,10 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   explicit BackendWithCompiler() {}
   virtual ~BackendWithCompiler() = default;
 
+  bool is_available() override {
+    return true;
+  }
+
   // Since the actual compilation is done AOT,
   c10::impl::GenericDict compile(
       c10::IValue processed,

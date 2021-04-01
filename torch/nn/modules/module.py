@@ -401,8 +401,8 @@ class Module:
                 )
             )
 
-        (The diagram shows an ``nn.Module`` ``A``. ``A`` has a nested 
-        submodule ``net_b``, which itself has two submodules ``net_c`` 
+        (The diagram shows an ``nn.Module`` ``A``. ``A`` has a nested
+        submodule ``net_b``, which itself has two submodules ``net_c``
         and ``linear``. ``net_c`` then has a submodule ``conv``.)
 
         To check whether or not we have the ``linear`` submodule, we
@@ -411,8 +411,8 @@ class Module:
         ``get_submodule("net_b.net_c.conv")``.
 
         The runtime of ``get_submodule`` is bounded by the degree
-        of module nesting in ``target``. A query against 
-        ``named_modules`` achieves the same result, but it is O(N) in 
+        of module nesting in ``target``. A query against
+        ``named_modules`` achieves the same result, but it is O(N) in
         the number of transitive modules. So, for a simple check to see
         if some submodule exists, ``get_submodule`` should always be
         used.

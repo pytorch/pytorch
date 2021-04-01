@@ -42,9 +42,13 @@ if [[ "$COMMIT_SOURCE" == master ]]; then
 fi
 
 # Include tests
+# shellcheck source=./perf_test/test_cpu_speed_mini_sequence_labeler.sh
 . ./test_cpu_speed_mini_sequence_labeler.sh
+# shellcheck source=./perf_test/test_cpu_speed_mnist.sh
 . ./test_cpu_speed_mnist.sh
+# shellcheck source=./perf_test/test_cpu_speed_torch.sh
 . ./test_cpu_speed_torch.sh
+# shellcheck source=./perf_test/test_cpu_speed_torch_tensor.sh
 . ./test_cpu_speed_torch_tensor.sh
 
 # Run tests
