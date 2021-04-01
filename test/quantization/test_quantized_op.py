@@ -2005,7 +2005,7 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_instance_norm(self):
         max_sides = (4, 5)
-        shape_list = ([2, 2, 2, 2], [8, 8, 8, 8], [11, 11, 11, 11], [1, 32, 224, 224, 160])
+        shape_list = ([2, 2, 2, 2], [8, 8, 8, 8], [11, 11, 11, 11], [1, 4, 224, 224, 160])
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
@@ -2066,7 +2066,7 @@ class TestQuantizedOps(TestCase):
                         ch_vals = dqX[batch_idx][ch_idx]
                         assume(
                             float(torch.unique(ch_vals).shape[0]) / ch_vals.numel() > 0.01
-                            or ch_vals.numel() < 5 or ch_vals.numel() > 25600)
+                            or ch_vals.numel() < 5)
 
                 qY = torch.ops.quantized.instance_norm(qX, weight, bias, eps, Y_scale, Y_zero_point)
 
