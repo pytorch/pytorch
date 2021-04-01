@@ -35,6 +35,10 @@ class TORCH_API TensorExprKernel {
     return codegen_->getCodeText(attr);
   }
 
+  const std::shared_ptr<Graph> graph() {
+    return graph_;
+  }
+
  private:
   enum ElementType {
     kAllTypes = 0,
