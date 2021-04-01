@@ -54,7 +54,6 @@ from torch._six import string_classes
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
-from torch.overrides import is_tensor_like
 
 torch.backends.disable_global_flags()
 
@@ -2070,6 +2069,8 @@ def gradcheck(fn, inputs, **kwargs):
 def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     # Wrapper around gradgradcheck that enables certain keys by default
     # See gradcheck above for an explanation of why we need something like this
+    #
+    # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
     keys_enabled_by_default = (
         "check_batched_grad",)
 
