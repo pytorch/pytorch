@@ -3021,21 +3021,6 @@ class TestAutograd(TestCase):
         gradcheck(torch.igamma, (s, x))
         gradgradcheck(torch.igamma, (s, x))
 
-    def test_chain_matmul(self):
-        def gen_matrices(p, dtype):
-            matrices = []
-            for (pi, pi_1) in zip(p[:-1], p[1:]):
-                matrices.append(torch.randn(pi, pi_1, dtype=dtype).requires_grad_())
-            return matrices
-
-        for dtype in [torch.double, torch.cdouble]:
-            gradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5], dtype))
-            gradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6], dtype))
-            gradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10], dtype))
-            gradgradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5], dtype))
-            gradgradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6], dtype))
-            gradgradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10], dtype))
-
     def test_profiler_tracing(self):
         t1, t2 = torch.ones(1), torch.ones(1)
         with torch.autograd.profiler.profile(use_kineto=kineto_available()) as prof:

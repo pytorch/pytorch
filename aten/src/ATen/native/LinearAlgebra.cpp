@@ -617,6 +617,20 @@ Tensor chain_matmul(TensorList matrices) {
   return at::native::linalg_multi_dot(matrices);
 }
 
+Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
+  checkAllSameDim(matrices, 2);
+
+  TORCH_CHECK(
+      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
+
+  if (matrices.size() == 1) {
+    at::native::resize_output(result, matrices[0].sizes());
+    return result.copy_(matrices[0]);
+  }
+
+  return at::native::linalg_multi_dot_out(matrices, result);
+}
+
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
  TORCH_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
 }
