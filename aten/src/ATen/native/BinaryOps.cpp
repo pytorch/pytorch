@@ -194,10 +194,6 @@ Tensor& copysign_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result;
 }
 
-Tensor& copysign_out(const Tensor& self, const Scalar& other, Tensor& result) {
-  return at::copysign_out(result, self, wrapped_scalar_tensor(other));
-}
-
 Tensor copysign(const Tensor& self, const Tensor& other) {
   Tensor result;
   auto iter = TensorIterator::binary_float_op(result, self, other);
