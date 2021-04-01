@@ -3640,9 +3640,10 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.half),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
-           # TODO: var does support out in some signatures
+           # TODO: revisit, some var signatures do support out (see std, too)
            supports_out=False,
            supports_complex_autograd=False,
+           assert_autodiffed=True,
            ),
     OpInfo('xlogy',
            dtypes=all_types_and(torch.bool),
