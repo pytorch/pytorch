@@ -20,6 +20,8 @@ import math
 
 from typing import List
 
+CUDA_MAJOR, CUDA_MINOR = (int(x) for x in torch.version.cuda.split('.'))
+
 os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK'] = '1'
 os.environ['PYTORCH_NVFUSER_DISABLE_FMA'] = '1'
 os.environ['PYTORCH_NVFUSER_DISABLE_FASTMATH'] = '1'
@@ -2025,6 +2027,7 @@ class TestCudaFuser(JitTestCase):
         self.assertGraphContainsExactly(t_jit.graph_for(x), FUSION_GUARD, 1)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(CUDA_MAJOR < 11, "requires CUDA11 or above")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_graph_rng(self):
