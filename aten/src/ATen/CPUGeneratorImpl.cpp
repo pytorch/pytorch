@@ -38,7 +38,7 @@ struct CPUGeneratorImplStateLegacy {
  * new data introduced in at::CPUGeneratorImpl and the legacy state. It is used
  * as a helper for torch.get_rng_state() and torch.set_rng_state()
  * functions.
- */ 
+ */
 struct CPUGeneratorImplState {
   CPUGeneratorImplStateLegacy legacy_pod;
   float next_float_normal_sample;
@@ -119,7 +119,7 @@ uint64_t CPUGeneratorImpl::seed() {
  * must be a strided CPU byte tensor and of the same size as either
  * CPUGeneratorImplStateLegacy (for legacy CPU generator state) or
  * CPUGeneratorImplState (for new state).
- * 
+ *
  * FIXME: Remove support of the legacy state in the future?
  */
 void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {

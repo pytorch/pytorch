@@ -53,10 +53,10 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
 
     Args:
         mat1 (SparseTensor): the first sparse matrix to be multiplied
-        mat2 (Tensor): the second matrix to be multiplied, which could be sparse or dense 
+        mat2 (Tensor): the second matrix to be multiplied, which could be sparse or dense
 
     Shape:
-        The format of the output tensor of this function follows: 
+        The format of the output tensor of this function follows:
         - sparse x sparse -> sparse
         - sparse x dense -> dense
 
