@@ -8,7 +8,7 @@ _tensor_or_tensors = Union[torch.Tensor, Iterable[torch.Tensor]]
 
 def clip_grad_norm_(
         parameters: _tensor_or_tensors, max_norm: float, norm_type: float = 2.0,
-        error_if_nonfinite: bool = True) -> torch.Tensor:
+        error_if_nonfinite: bool = False) -> torch.Tensor:
     r"""Clips gradient norm of an iterable of parameters.
 
     The norm is computed over all gradients together, as if they were
@@ -55,7 +55,7 @@ def clip_grad_norm_(
 
 def clip_grad_norm(
         parameters: _tensor_or_tensors, max_norm: float, norm_type: float = 2.,
-        error_if_nonfinite: bool = True) -> torch.Tensor:
+        error_if_nonfinite: bool = False) -> torch.Tensor:
     r"""Clips gradient norm of an iterable of parameters.
 
     .. warning::

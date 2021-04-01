@@ -14,7 +14,7 @@ inline double clip_grad_norm_(
     std::vector<Tensor> parameters,
     double max_norm,
     double norm_type = 2.0,
-    bool error_if_nonfinite = true) {
+    bool error_if_nonfinite = false) {
   std::vector<Tensor> params_with_grad;
 
   for (const auto& param : parameters) {
@@ -63,7 +63,7 @@ inline double clip_grad_norm_(
     std::initializer_list<Tensor> parameters,
     double max_norm,
     double norm_type = 2.0,
-    bool error_if_nonfinite = true) {
+    bool error_if_nonfinite = false) {
   return clip_grad_norm_(std::vector<Tensor>(parameters), max_norm, norm_type, error_if_nonfinite);
 }
 
@@ -73,7 +73,7 @@ inline double clip_grad_norm_(
     Tensor parameter,
     double max_norm,
     double norm_type = 2.0,
-    bool error_if_nonfinite = true) {
+    bool error_if_nonfinite = false) {
   std::vector<Tensor> params = {parameter};
   return clip_grad_norm_(params, max_norm, norm_type, error_if_nonfinite);
 }
