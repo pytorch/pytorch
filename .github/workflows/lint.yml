@@ -23,7 +23,6 @@ jobs:
         run: cd .circleci && ./ensure-consistency.py
       - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
         run: |
-          import os
           import yaml
           import subprocess
           workflows = subprocess.check_output(['python', '.github/scripts/generate_workflow_names.py'],
