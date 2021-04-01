@@ -1252,6 +1252,23 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    @disableScriptTest()  # Functional module not scriptable
+    def test_maxunpool_2d(self):
+        class MaxUnpoolModel(torch.nn.Module):
+            def __init__(self):
+                super(MaxUnpoolModel, self).__init__()
+                self.pool = torch.nn.MaxPool2d(2, stride=2, return_indices=True)
+                self.unpool = torch.nn.MaxUnpool2d(2, stride=2)
+
+            def forward(self, input):
+                output, indices = self.pool(input)
+                return self.unpool(output, indices)
+        
+        model = MaxUnpoolModel()
+        x = torch.rand(1, 1, 4, 4)
+        print(model(x))
+        self.run_test(model, x)
+
     def test_avgpool_default_stride(self):
         class AvgPoolModel(torch.nn.Module):
             def forward(self, x):

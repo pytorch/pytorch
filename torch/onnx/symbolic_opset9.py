@@ -908,6 +908,35 @@ max_pool2d_with_indices = _max_pool("max_pool2d_with_indices", _pair, 2, return_
 max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, return_indices=True)
 
 
+def _max_unpool(name, tuple_fn, ndims):
+    def symbolic_fn(g, input, indices, output_size, *args):
+        maxpool_node = input.node().inputs()
+        print(maxpool_node)
+        '''if not stride:
+            stride = kernel_size
+        padding = tuple(tuple_fn(padding))
+        if ceil_mode:
+            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+            padding = padding + tuple(numpy.add(padding_ceil, padding))
+        else:
+            padding = padding * 2
+        kwargs = {
+            'kernel_shape_i': tuple_fn(kernel_size),
+            'pads_i': padding,
+            'strides_i': tuple_fn(stride),
+        }'''
+        kwargs = {}
+        r = g.op("MaxUnpool", input, indices, output_size, **kwargs)
+        return r
+
+    return symbolic_fn
+
+
+max_unpool1d = _max_unpool("max_unpool1d", _single, 1)
+max_unpool2d = _max_unpool("max_unpool2d", _pair, 2)
+max_unpool3d = _max_unpool("max_unpool3d", _triple, 3)
+
+
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
