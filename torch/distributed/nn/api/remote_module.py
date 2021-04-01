@@ -2,7 +2,6 @@
 import types
 from typing import (
     Any,
-    Bool,
     Callable,
     Dict,
     Iterator,
@@ -311,7 +310,7 @@ class _RemoteModule(nn.Module):
     def modules(self) -> Iterator[Module]:  # type: ignore[return]
         _raise_not_supported(self.modules.__name__)
 
-    def named_modules(self, memo: Optional[Set[Module]] = None, prefix: str = "", remove_duplicate: Bool = True):
+    def named_modules(self, memo: Optional[Set[Module]] = None, prefix: str = "", remove_duplicate: bool = True):
         _raise_not_supported(self.named_modules.__name__)
 
     def train(self: T, mode: bool = True) -> T:  # type: ignore[return]
