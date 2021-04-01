@@ -601,7 +601,7 @@ class TestCommon(JitCommonTestCase):
                 return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
 
             out = _apply_out_transform(_case_four_transform, expected)
-            with self.assertRaises(RuntimeError, msg=f"Expected RuntimeError when calling with input.device={device} and out.device={out.device}"):
+            with self.assertRaises(RuntimeError, msg=f"Expected RuntimeError when calling with input.device={device} and out.device={wrong_device}"):
                 op_out(out=out)
 
         # Case 5: out= with correct shape and device, but a dtype
@@ -614,7 +614,7 @@ class TestCommon(JitCommonTestCase):
         #   tensor is a floating point or complex dtype.
         _dtypes = floating_and_complex_types_and(torch.float16, torch.bfloat16)
         if (isinstance(expected, torch.Tensor) and expected.dtype in _dtypes or
-            (not isinstance(expected, torch.Tensor) and any(t.dtype in _dtypes for t in expected))):
+                (not isinstance(expected, torch.Tensor) and any(t.dtype in _dtypes for t in expected))):
             def _case_five_transform(t):
                 return make_tensor(t.shape, dtype=torch.long, device=t.device)
 
