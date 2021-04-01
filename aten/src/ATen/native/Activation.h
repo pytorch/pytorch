@@ -12,20 +12,20 @@ namespace native {
 
 using activation_fn = void (*)(TensorIterator&);
 using activation_backward_fn = void (*)(TensorIterator&);
-using softplus_fn = void (*)(TensorIterator&, Scalar, Scalar);
-using softplus_backward_fn = void (*)(TensorIterator&, Scalar, Scalar);
-using threshold_fn = void (*)(TensorIterator&, Scalar, Scalar);
-using hardtanh_backward_fn = void (*)(TensorIterator&, Scalar, Scalar);
+using softplus_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&);
+using softplus_backward_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&);
+using threshold_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&);
+using hardtanh_backward_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&);
 using hardsigmoid_fn = void(*)(TensorIterator&);
 using hardsigmoid_backward_fn = void(*)(TensorIterator&);
 using hardswish_fn = void(*)(TensorIterator&);
 using hardswish_backward_fn = void(*)(TensorIterator&);
-using shrink_fn = void (*)(TensorIterator&, Scalar);
-using shrink_backward_fn = void (*)(TensorIterator&, Scalar);
-using elu_fn = void (*)(TensorIterator&, Scalar, Scalar, Scalar);
-using elu_backward_fn = void (*)(TensorIterator&, Scalar, Scalar, Scalar, bool);
-using leaky_relu_fn = void (*)(TensorIterator&, Scalar);
-using leaky_relu_backward_fn = void (*)(TensorIterator&, Scalar);
+using shrink_fn = void (*)(TensorIterator&, const Scalar&);
+using shrink_backward_fn = void (*)(TensorIterator&, const Scalar&);
+using elu_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&, const Scalar&);
+using elu_backward_fn = void (*)(TensorIterator&, const Scalar&, const Scalar&, const Scalar&, bool);
+using leaky_relu_fn = void (*)(TensorIterator&, const Scalar&);
+using leaky_relu_backward_fn = void (*)(TensorIterator&, const Scalar&);
 using log_sigmoid_cpu_fn = void (*)(Tensor& , Tensor&, const Tensor& );
 
 DECLARE_DISPATCH(elu_fn, elu_stub);

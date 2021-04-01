@@ -106,6 +106,7 @@ Indexing, Slicing, Joining, Mutating Ops
     swapdims
     t
     take
+    take_along_dim
     tensor_split
     tile
     transpose
@@ -306,6 +307,7 @@ Pointwise Ops
     floor_divide
     fmod
     frac
+    frexp
     imag
     ldexp
     lerp

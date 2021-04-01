@@ -5,7 +5,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/container/modulelist.h>
 #include <torch/nn/modules/container/sequential.h>
-#include <torch/nn/functional/activation.h> 
+#include <torch/nn/functional/activation.h>
 #include <torch/nn/options/adaptive.h>
 
 namespace torch {
@@ -42,7 +42,7 @@ class TORCH_API AdaptiveLogSoftmaxWithLossImpl : public Cloneable<AdaptiveLogSof
  public:
    AdaptiveLogSoftmaxWithLossImpl(int64_t in_features, int64_t n_classes, std::vector<int64_t> cutoffs)
       : AdaptiveLogSoftmaxWithLossImpl(AdaptiveLogSoftmaxWithLossOptions(in_features, n_classes, cutoffs)) {}
-     
+
   explicit AdaptiveLogSoftmaxWithLossImpl(AdaptiveLogSoftmaxWithLossOptions options_);
 
   ASMoutput forward(const Tensor& input, const Tensor& target);
@@ -66,12 +66,12 @@ class TORCH_API AdaptiveLogSoftmaxWithLossImpl : public Cloneable<AdaptiveLogSof
   /// The options with which this `Module` was constructed
   AdaptiveLogSoftmaxWithLossOptions options;
 
-  /// Cutoffs used to assign targets to their buckets. It should be an ordered Sequence 
+  /// Cutoffs used to assign targets to their buckets. It should be an ordered Sequence
   /// of integers sorted in the increasing order
   std::vector<int64_t> cutoffs;
 
   int64_t shortlist_size;
-  
+
   /// Number of clusters
   int64_t n_clusters;
 

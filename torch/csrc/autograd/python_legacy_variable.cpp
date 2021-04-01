@@ -47,11 +47,11 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   if (!data || data == Py_None) {
     // For legacy serialization code, create an empty tensor. This is also used
     // by nn.Parameter() with no arguments.
-    auto type_id = torch::tensors::get_default_dispatch_key();
+    auto dispatch_key = torch::tensors::get_default_dispatch_key();
     auto scalar_type = torch::tensors::get_default_scalar_type();
     auto options = TensorOptions(scalar_type)
-        .device(computeDeviceType(type_id))
-        .layout(layout_from_backend(dispatchKeyToBackend(type_id)));
+        .device(dispatchKeyToDeviceType(dispatch_key))
+        .layout(dispatchKeyToLayout(dispatch_key));
     var = at::empty({0}, options);
   } else if (THPVariable_Check(data)) {
     var = ((THPVariable*)data)->cdata.detach();

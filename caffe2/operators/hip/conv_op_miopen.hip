@@ -278,7 +278,7 @@ bool MIOPENConvOp::DoRunWithType() {
             weight_dims.data(),
             nullptr));
     }
-    
+
     mio_output_dims_ = Y->sizes().vec();
     std::vector<int> output_dims(std::begin(mio_output_dims_), std::end(mio_output_dims_));
     int output_dim_size = output_dims.size();
@@ -288,7 +288,7 @@ bool MIOPENConvOp::DoRunWithType() {
           weight_desc_,
           &output_dim_size,
           output_dims.data()));
-          
+
     MIOPEN_ENFORCE(miopenSetTensorDescriptor(
           top_desc_, miopenTypeWrapper<T_X>::type, output_dims.size(), output_dims.data(), nullptr));
 

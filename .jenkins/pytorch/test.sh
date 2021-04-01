@@ -7,6 +7,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
@@ -24,6 +25,12 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *noarch* ]]; then
+  export PYTORCH_TEST_SKIP_NOARCH=0
+else
+  export PYTORCH_TEST_SKIP_NOARCH=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -118,6 +125,12 @@ test_python_shard2() {
   time python test/run_test.py --exclude-jit-executor --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
+
+test_python() {
+  time python test/run_test.py --exclude-jit-executor --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
+}
+
 
 test_aten() {
   # Test ATen
@@ -321,6 +334,7 @@ test_backward_compatibility() {
   set -x
   pushd test/backward_compatibility
   python -m venv venv
+  # shellcheck disable=SC1091
   . venv/bin/activate
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch
@@ -421,14 +435,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
-elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
-  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure
-  # cpp extension can be built correctly under this old env
-  test_cpp_extensions
 else
   install_torchvision
-  test_python_shard1
-  test_python_shard2
+  test_python
   test_aten
   test_vec256
   test_libtorch

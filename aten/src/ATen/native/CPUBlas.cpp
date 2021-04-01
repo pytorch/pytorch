@@ -11,11 +11,11 @@ extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void 
 #endif  // AT_BUILD_WITH_BLAS()
 
 #if AT_BUILD_WITH_BLAS()
-extern "C" void cswap_(int *n, const void *x, int *incx, void *y, int *incy); 
+extern "C" void cswap_(int *n, const void *x, int *incx, void *y, int *incy);
 extern "C" void dcopy_(int *n, const double *x, int *incx, double *y, int *incy);
 extern "C" void scopy_(int *n, const float *x, int *incx, float *y, int *incy);
-extern "C" void zcopy_(int *n, const void *x, int *incx, void *y, int *incy); 
-extern "C" void ccopy_(int *n, const void *x, int *incx, void *y, int *incy); 
+extern "C" void zcopy_(int *n, const void *x, int *incx, void *y, int *incy);
+extern "C" void ccopy_(int *n, const void *x, int *incx, void *y, int *incy);
 extern "C" void daxpy_(int *n, double *a, const double *x, int *incx, double *y, int *incy);
 extern "C" void saxpy_(int *n, float *a, const float *x, int *incx, float *y, int *incy);
 extern "C" void caxpy_(int *n, void *a, const void *x, int *incx, void *y, int *incy);
@@ -279,7 +279,7 @@ void axpy(int64_t n, double a, const double *x, int64_t incx, double *y, int64_t
     daxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
     return;
   }
-  #endif 
+  #endif
   axpy_stub(
       kCPU, at::kDouble,
       n, a, x, incx, y, incy);
@@ -300,7 +300,7 @@ void axpy(int64_t n, float a, const float *x, int64_t incx, float *y, int64_t in
     saxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
     return;
   }
-  #endif 
+  #endif
   axpy_stub(
       kCPU, at::kFloat,
       n, a, x, incx, y, incy);
@@ -321,7 +321,7 @@ void axpy(int64_t n, c10::complex<double> a, const c10::complex<double> *x, int6
     zaxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
     return;
   }
-  #endif 
+  #endif
   axpy_stub(
       kCPU, at::kComplexDouble,
       n, a, x, incx, y, incy);
@@ -342,7 +342,7 @@ void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_
     caxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
     return;
   }
-  #endif 
+  #endif
   axpy_stub(
       kCPU, at::kComplexFloat,
       n, a, x, incx, y, incy);
@@ -364,7 +364,7 @@ void copy(int64_t n, const double *x, int64_t incx, double *y, int64_t incy) {
     dcopy_(&i_n, x, &i_incx, y, &i_incy);
     return;
   }
-  #endif 
+  #endif
   copy_stub(
       kCPU, at::kDouble,
       n, x, incx, y, incy);
@@ -384,7 +384,7 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy) {
     scopy_(&i_n, x, &i_incx, y, &i_incy);
     return;
   }
-  #endif 
+  #endif
   copy_stub(
       kCPU, at::kFloat,
       n, x, incx, y, incy);
@@ -404,7 +404,7 @@ void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<d
     zcopy_(&i_n, x, &i_incx, y, &i_incy);
     return;
   }
-  #endif 
+  #endif
   copy_stub(
       kCPU, at::kComplexDouble,
       n, x, incx, y, incy);
@@ -424,10 +424,10 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
     ccopy_(&i_n, x, &i_incx, y, &i_incy);
     return;
   }
-  #endif 
+  #endif
   copy_stub(
       kCPU, at::kComplexFloat,
       n, x, incx, y, incy);
 }
- 
+
 }}}  // namespace at::native::cpublas

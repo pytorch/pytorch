@@ -280,6 +280,30 @@ class TestFunctionalIterDataPipe(TestCase):
                 with self.assertRaises(AttributeError):
                     p = pickle.dumps(datapipe)  # type: ignore
 
+    def test_concat_datapipe(self):
+        input_dp1 = IDP(range(10))
+        input_dp2 = IDP(range(5))
+
+        with self.assertRaisesRegex(ValueError, r"Expected at least one DataPipe"):
+            dp.iter.Concat()
+
+        with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `IterDataPipe`"):
+            dp.iter.Concat(input_dp1, ())
+
+        concat_dp = input_dp1.concat(input_dp2)
+        self.assertEqual(len(concat_dp), 15)
+        self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
+
+        # Test Reset
+        self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
+
+        input_dp_nl = IDP_NoLen(range(5))
+        concat_dp = input_dp1.concat(input_dp_nl)
+        with self.assertRaises(NotImplementedError):
+            len(concat_dp)
+
+        self.assertEqual(list(d for d in concat_dp), list(range(10)) + list(range(5)))
+
     def test_map_datapipe(self):
         input_dp = IDP(range(10))
 
@@ -515,6 +539,22 @@ class TestFunctionalIterDataPipe(TestCase):
             len(tsfm_dp)
         for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
             self.assertEqual(tsfm_data, input_data)
+
+    def test_zip_datapipe(self):
+        with self.assertRaises(TypeError):
+            dp.iter.Zip(IDP(range(10)), list(range(10)))
+
+        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))
+        with self.assertRaises(NotImplementedError):
+            len(zipped_dp)
+        exp = list((i, i) for i in range(5))
+        self.assertEqual(list(d for d in zipped_dp), exp)
+
+        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP(range(5)))
+        self.assertEqual(len(zipped_dp), 5)
+        self.assertEqual(list(zipped_dp), exp)
+        # Reset
+        self.assertEqual(list(zipped_dp), exp)
 
 
 if __name__ == '__main__':
