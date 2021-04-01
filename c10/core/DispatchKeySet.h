@@ -82,6 +82,10 @@ public:
   DispatchKeySet operator-(DispatchKeySet other) const {
     return DispatchKeySet(repr_ & ~other.repr_);
   }
+  // Compute self ^ other
+  DispatchKeySet operator^(DispatchKeySet other) const {
+    return DispatchKeySet(repr_ ^ other.repr_);
+  }
   // Perform set equality
   bool operator==(DispatchKeySet other) const {
     return repr_ == other.repr_;
@@ -201,6 +205,11 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradPrivateUse2,
     DispatchKey::AutogradPrivateUse3,
     DispatchKey::AutogradOther,
+});
+
+// See Note [TLS Initialization]
+constexpr DispatchKeySet default_included_set = DispatchKeySet({
+    DispatchKey::InplaceOrView,
 });
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_InplaceOrView =
