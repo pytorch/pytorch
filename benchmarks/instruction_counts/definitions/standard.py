@@ -68,6 +68,8 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
             x += y_vector                            | x += y_vector;
             x += y_int                               | x += y_int;
             x + y_float                              | x + y_float;
+            torch.add(x, y_float)                    | torch::add(x, y_float);
+            torch.add(x, y_float, out=x)             | torch::add_out(/*out=*/x, x, y_float);
                                                      |
             # @multiply                              | // @multiply
             x *= 1.0                                 | x *= 1;
@@ -75,6 +77,8 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
             x *= y_vector                            | x *= y_vector;
             x *= y_int                               | x *= y_int;
             x * y_float                              | x * y_float;
+            torch.mul(x, y_float)                    | torch::mul(x, y_float);
+            torch.mul(x, y_float, out=x)             | torch::mul_out(/*out=*/x, x, y_float);
                                                      |
             # @equality                              | // @equality
             x == y_float                             | x == y_float;
@@ -87,12 +91,13 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
             # @setup                                 | // @setup
             x = torch.ones((4, 4))                   | auto x = torch::ones({4, 4});
             y = torch.ones((4, 4))                   | auto y = torch::ones({4, 4});
+            x_t = x.t()                              | auto x_t = x.t();
                                                      |
             # @contiguous (trivial)                  | // @contiguous (trivial)
             x.contiguous()                           | x.contiguous();
                                                      |
             # @contiguous (non-trivial)              | // @contiguous (non-trivial)
-            x.t().contiguous()                       | x.t().contiguous();
+            x_t.contiguous()                         | x_t.contiguous();
                                                      |
             # @clone                                 | // @clone
             x.clone()                                | x.clone();
@@ -182,6 +187,12 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
                                                  |
         # @view                                  | // @view
         x.view(-1, 1)                            | x.view({-1, 1});
+                                                 |
+        # @transpose                             | // @transpose
+        x.t()                                    | x.t();
+                                                 |
+        # @reshape                               | // @reshape
+        x.reshape((16, 1))                       | x.reshape({16, 1});
     """)),
 
     "nn Modules": {
