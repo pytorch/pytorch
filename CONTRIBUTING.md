@@ -1,44 +1,48 @@
 # Table of Contents
 
-- [Table of Contents](#table-of-contents)
-  - [Contributing to PyTorch](#contributing-to-pytorch)
-  - [Developing PyTorch](#developing-pytorch)
-    - [Tips and Debugging](#tips-and-debugging)
-  - [Nightly Checkout & Pull](#nightly-checkout--pull)
-  - [Codebase structure](#codebase-structure)
-  - [Unit testing](#unit-testing)
-    - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
-    - [Running `mypy`](#running-mypy)
-  - [Writing documentation](#writing-documentation)
-    - [Building documentation](#building-documentation)
-      - [Tips](#tips)
-      - [Building C++ Documentation](#building-c-documentation)
-    - [Previewing changes](#previewing-changes)
-      - [Submitting changes for review](#submitting-changes-for-review)
-    - [Adding documentation tests](#adding-documentation-tests)
-  - [Profiling with `py-spy`](#profiling-with-py-spy)
-  - [Managing multiple build trees](#managing-multiple-build-trees)
-  - [C++ development tips](#c-development-tips)
-    - [Build only what you need](#build-only-what-you-need)
-    - [Code completion and IDE support](#code-completion-and-ide-support)
-    - [Make no-op build fast](#make-no-op-build-fast)
-      - [Use Ninja](#use-ninja)
-      - [Use CCache](#use-ccache)
-      - [Use a faster linker](#use-a-faster-linker)
-    - [C++ frontend development tips](#c-frontend-development-tips)
-    - [GDB integration](#gdb-integration)
-  - [CUDA development tips](#cuda-development-tips)
-  - [Windows development tips](#windows-development-tips)
-    - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
-  - [Running clang-tidy](#running-clang-tidy)
-  - [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
-  - [Building PyTorch with ASAN](#building-pytorch-with-asan)
-    - [Getting `ccache` to work](#getting-ccache-to-work)
-    - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
-    - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
-    - [Why no leak detection?](#why-no-leak-detection)
-  - [Caffe2 notes](#caffe2-notes)
-  - [CI failure tips](#ci-failure-tips)
+<!-- toc -->
+
+- [Contributing to PyTorch](#contributing-to-pytorch)
+- [Developing PyTorch](#developing-pytorch)
+  - [Tips and Debugging](#tips-and-debugging)
+- [Nightly Checkout & Pull](#nightly-checkout--pull)
+- [Codebase structure](#codebase-structure)
+- [Unit testing](#unit-testing)
+  - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
+  - [Running `mypy`](#running-mypy)
+- [Writing documentation](#writing-documentation)
+  - [Building documentation](#building-documentation)
+    - [Tips](#tips)
+    - [Building C++ Documentation](#building-c-documentation)
+  - [Previewing changes](#previewing-changes)
+    - [Submitting changes for review](#submitting-changes-for-review)
+  - [Adding documentation tests](#adding-documentation-tests)
+- [Profiling with `py-spy`](#profiling-with-py-spy)
+- [Managing multiple build trees](#managing-multiple-build-trees)
+- [C++ development tips](#c-development-tips)
+  - [Build only what you need](#build-only-what-you-need)
+  - [Code completion and IDE support](#code-completion-and-ide-support)
+  - [Make no-op build fast](#make-no-op-build-fast)
+    - [Use Ninja](#use-ninja)
+    - [Use CCache](#use-ccache)
+    - [Use a faster linker](#use-a-faster-linker)
+  - [C++ frontend development tips](#c-frontend-development-tips)
+  - [GDB integration](#gdb-integration)
+- [CUDA development tips](#cuda-development-tips)
+- [Windows development tips](#windows-development-tips)
+  - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
+- [Running clang-tidy](#running-clang-tidy)
+- [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
+- [Building PyTorch with ASAN](#building-pytorch-with-asan)
+  - [Getting `ccache` to work](#getting-ccache-to-work)
+  - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
+  - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
+  - [Why no leak detection?](#why-no-leak-detection)
+- [Caffe2 notes](#caffe2-notes)
+- [CI failure tips](#ci-failure-tips)
+  - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+
+<!-- tocstop -->
 
 ## Contributing to PyTorch
 
@@ -1137,8 +1141,9 @@ Once you submit a PR or push a new commit to a branch that is in
 an active PR, CI jobs will be run automatically. Some of these may
 fail and you will need to find out why, by looking at the logs.
 
-Fairly often, a CI failure might be unrelated to your changes. In this
-case, you can usually ignore the failure.
+Fairly often, a CI failure might be unrelated to your changes. In this case, you
+can usually ignore the failure. See [the following
+subsection](#which-commit-is-used-in-ci) for more details.
 
 Some failures might be related to specific hardware or environment
 configurations. In this case, if the job is run by CircleCI, you can
@@ -1169,3 +1174,56 @@ following steps:
 For certain Windows failures, it may be useful to have a full [Remote
 Desktop](https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/remote-desktop-clients) connection. See detailed instructions [here](https://github.com/pytorch/pytorch/wiki/Debugging-Windows-with-Remote-Desktop-or-CDB-(CLI-windbg)-on-CircleCI)
 for how to set that up after rerunning the job.
+
+### Which commit is used in CI?
+
+For CI run on `master`, this repository is checked out for a given `master`
+commit, and CI is run on that commit (there isn't really any other choice). For
+PRs, however, it's a bit more complicated. Consider this commit graph, where
+`master` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
+commit `B`:
+
+```
+       o---o---B (refs/pull/42/head)
+      /         \
+     /           C (refs/pull/42/merge)
+    /           /
+---o---o---o---A (refs/heads/master)
+```
+
+There are two possible choices for which commit to use:
+
+1. Checkout commit `B`, the head of the PR (manually committed by the PR
+   author).
+2. Checkout commit `C`, the hypothetical result of what would happen if the PR
+   were merged into `master` (automatically generated by GitHub).
+
+This choice depends on several factors; here is the decision tree as of
+2021-03-30:
+
+- For CI jobs on CircleCI:
+  - If the name of the job (or one of its ancestors in the workflow DAG)
+    contains "xla" or "gcc5", choice **2** is used. This includes the following
+    jobs:
+    - pytorch_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_cpp_doc_build
+      - pytorch_doc_test
+      - pytorch_linux_backward_compatibility_check_test
+      - pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
+      - pytorch_linux_xenial_py3_6_gcc5_4_test
+      - pytorch_python_doc_build
+    - pytorch_xla_linux_bionic_py3_6_clang9_build
+      - pytorch_xla_linux_bionic_py3_6_clang9_test
+  - Otherwise, choice **1** is used.
+- For CI jobs on GitHub Actions:
+  - If the PR was created using [`ghstack`](https://github.com/ezyang/ghstack),
+    choice **1** is used.
+  - Otherwise, choice **2** is used.
+
+This is important to be aware of, because if you see a CI failure on your PR and
+choice **2** is being used for that CI job, it is possible that the failure is
+nondeterministically caused by a commit that does not exist in the ancestry of
+your PR branch. If you happen to have write access to this repo, you can choose
+to use `ghstack` to eliminate this nondeterminism for GitHub Actions jobs on
+your PRs, but it will still be present for the select CircleCI jobs listed
+above.
