@@ -69,3 +69,5 @@ which version of PyTorch you are using, refer to this example below::
     elif torch.cuda.is_available() and torch.version.cuda:
         # do something specific for CUDA
 
+.. |trade|  unicode:: U+02122 .. TRADEMARK SIGN
+   :ltrim:
