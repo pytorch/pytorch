@@ -1,7 +1,3 @@
 # Double quote to prevent globbing and word splitting.
 # https://github.com/koalaman/shellcheck/wiki/SC2086
 disable=SC2086
-
-# Declare and assign separately to avoid masking return values.
-# https://github.com/koalaman/shellcheck/wiki/SC2155
-disable=SC2155

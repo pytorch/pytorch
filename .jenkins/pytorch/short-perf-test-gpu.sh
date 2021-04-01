@@ -20,7 +20,8 @@ aws configure set default.s3.multipart_threshold 5GB
 
 if [[ "$COMMIT_SOURCE" == master ]]; then
     # Get current master commit hash
-    export MASTER_COMMIT_ID=$(git log --format="%H" -n 1)
+    MASTER_COMMIT_ID=$(git log --format="%H" -n 1)
+    export MASTER_COMMIT_ID
 fi
 
 # Find the master commit to test against
