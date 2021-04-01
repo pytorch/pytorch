@@ -1,6 +1,7 @@
 import collections
 import io
 import linecache
+import sys
 import pickletools
 import types
 from pathlib import Path
@@ -128,6 +129,7 @@ class PackageExporter:
         self.matched_patterns: Set[int] = set()
         self.debug_deps: List[Tuple[str, str]] = []
         self._unique_id = 0
+        self.files_used: Set[str] = set()
 
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
@@ -345,6 +347,10 @@ node [shape=box];
             self.save_extern_module(root_name)
             return
 
+        if self._can_implicitly_mock(module_name):
+            self.save_mock_module(module_name)
+            return
+
         for i, (pattern, action, _) in enumerate(self.patterns):
             if pattern.matches(module_name):
                 action(module_name)
@@ -438,6 +444,17 @@ node [shape=box];
         """
         filename = self._filename(package, resource)
         self._write(filename, binary)
+
+    def mock_trace(self, callable, inp):
+        files_used = set()
+
+        def prof_fn(frame, event, arg):
+            files_used.add(frame.f_code.co_filename)
+
+        sys.setprofile(prof_fn)
+        callable(*inp)
+        sys.setprofile(None)
+        self.files_used.update(files_used)
 
     def mock(
         self,
@@ -619,6 +636,18 @@ node [shape=box];
         package_path = package.replace(".", "/")
         resource = _normalize_path(resource)
         return f"{package_path}/{resource}"
+
+    def _can_implicitly_mock(self, module_name: str):
+        if not self.files_used:
+            return False
+
+        module = self._import_module(module_name)
+        filename = getattr(module, "__file__", None)
+
+        if filename and filename not in self.files_used:
+            return True
+
+        return False
 
     def _can_implicitly_extern(self, module_name: str):
         return module_name == "torch" or (
