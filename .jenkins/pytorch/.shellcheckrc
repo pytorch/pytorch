@@ -1,4 +1,15 @@
+# Double quote to prevent globbing and word splitting.
+# https://github.com/koalaman/shellcheck/wiki/SC2086
 disable=SC2086
+
+# Declare and assign separately to avoid masking return values.
+# https://github.com/koalaman/shellcheck/wiki/SC2155
 disable=SC2155
+
+# Use cd ... || exit in case cd fails.
+# https://github.com/koalaman/shellcheck/wiki/SC2164
 disable=SC2164
+
+# Want to escape a single quote? echo 'This is how it'\''s done'.
+# https://github.com/koalaman/shellcheck/wiki/SC1003
 disable=SC1003
