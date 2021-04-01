@@ -352,6 +352,7 @@ void check_arguments(
   checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
 
   AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_embedding_bag_cpu_impl", [&]() {
+    TORCH_CHECK(offsets.sizes()[0] >= 1, "offsets should have at least 1 element");
     index_t offset_0 = offsets.data_ptr<index_t>()[0];
     index_t offset_n = offsets.data_ptr<index_t>()[offsets.sizes()[0]-1];
     TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
@@ -592,22 +593,12 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
     const Tensor& weight,
-    const Tensor& indices_,
-    const Tensor& offsets_,
+    const Tensor& indices,
+    const Tensor& offsets,
     const int64_t mode,
     const Tensor& per_sample_weights,
     bool include_last_offset,
     bool requires_grad) {
-  Tensor indices = indices_;
-  Tensor offsets = offsets_;
-  const auto commonType =
-      promoteTypes(offsets.scalar_type(), indices.scalar_type());
-  if (indices.scalar_type() != commonType) {
-    indices = indices.toType(commonType);
-  }
-  if (offsets.scalar_type() != commonType) {
-    offsets = offsets.toType(commonType);
-  }
 
   check_arguments(weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
@@ -695,8 +686,8 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
 
 // Assumes all input tensors are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
-                              const Tensor &offsets_,
+Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
+                              const Tensor &offsets,
                               const Tensor &offset2bag,
                               const Tensor &bag_size_,
                               const Tensor &max_indices_,
@@ -705,17 +696,6 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
                               bool sparse, const c10::optional<Tensor>& per_sample_weights_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
-
-  Tensor indices = indices_;
-  Tensor offsets = offsets_;
-  const auto commonType =
-      promoteTypes(offsets.scalar_type(), indices.scalar_type());
-  if (indices.scalar_type() != commonType) {
-    indices = indices.toType(commonType);
-  }
-  if (offsets.scalar_type() != commonType) {
-    offsets = offsets.toType(commonType);
-  }
 
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag", indices_arg, {kLong, kInt});
@@ -936,8 +916,8 @@ template<typename scalar_t>
 Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     const Tensor& grad,
     const Tensor& weight,  // NB: embedding table, not per_sample_weights
-    const Tensor& indices_,
-    const Tensor& offsets_,
+    const Tensor& indices,
+    const Tensor& offsets,
     const Tensor& offset2bag,
     int64_t mode) {
   TORCH_CHECK(
@@ -946,17 +926,6 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
 
   AT_ASSERT(grad.dim() == 2);
   auto embedding_features = grad.sizes()[1];
-
-  Tensor indices = indices_;
-  Tensor offsets = offsets_;
-  const auto commonType =
-      promoteTypes(offsets.scalar_type(), indices.scalar_type());
-  if (indices.scalar_type() != commonType) {
-    indices = indices.toType(commonType);
-  }
-  if (offsets.scalar_type() != commonType) {
-    offsets = offsets.toType(commonType);
-  }
 
   AT_ASSERT(indices.dim() == 1);
   auto num_samples = indices.sizes()[0];

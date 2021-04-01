@@ -646,7 +646,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
-        return at::native::embedding_bag_byte_rowwise_offsets_out(
+        return at::native::embedding_bag_4bit_rowwise_offsets_out(
             out_t,
             weight,
             indices,
