@@ -16,13 +16,13 @@ class NnapiModule(torch.nn.Module):
     out_templates: List[torch.Tensor]
 
     def __init__(
-            self,
-            shape_compute_module: torch.nn.Module,
-            ser_model: torch.Tensor,
-            weights: List[torch.Tensor],
-            inp_mem_fmts: List[int],
-            out_mem_fmts: List[int],
-            ):
+        self,
+        shape_compute_module: torch.nn.Module,
+        ser_model: torch.Tensor,
+        weights: List[torch.Tensor],
+        inp_mem_fmts: List[int],
+        out_mem_fmts: List[int],
+    ):
         super().__init__()
         self.shape_compute_module = shape_compute_module
         self.ser_model = ser_model
@@ -95,10 +95,10 @@ def convert_model_to_nnapi(model, inputs):
         pass
     shape_compute_module = torch.jit.script(ShapeComputeModule())
     real_shape_compute_lines = [
-            "def prepare(self, ser_model: torch.Tensor, args: List[torch.Tensor]) -> List[torch.Tensor]:\n",
-        ] + [
-            f"    {line}\n" for line in shape_compute_lines
-        ]
+        "def prepare(self, ser_model: torch.Tensor, args: List[torch.Tensor]) -> List[torch.Tensor]:\n",
+    ] + [
+        f"    {line}\n" for line in shape_compute_lines
+    ]
     shape_compute_module.define("".join(real_shape_compute_lines))
 
     nnapi_model = NnapiModule(
@@ -129,8 +129,8 @@ def convert_model_to_nnapi(model, inputs):
     else:
         ret_expr = "".join(f"retvals[{idx}], " for idx in range(retval_count))
     wrapper_model.define(
-            f"def forward(self, {arg_list}):\n"
-            f"    retvals = self.mod([{arg_list}])\n"
-            f"    return {ret_expr}\n"
-            )
+        f"def forward(self, {arg_list}):\n"
+        f"    retvals = self.mod([{arg_list}])\n"
+        f"    return {ret_expr}\n"
+    )
     return wrapper_model

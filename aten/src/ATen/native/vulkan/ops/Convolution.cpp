@@ -395,8 +395,8 @@ bool available(
     const bool transposed,
     const IntArrayRef /* output_padding */,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   return api::available() &&
          // Weight
          (4 == weight.ndimension()) &&
@@ -853,8 +853,8 @@ Conv2dOpContext::Conv2dOpContext(
     const bool /* transposed */,
     const IntArrayRef /* output_padding */,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max)
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max)
   : packed_{
       pack_weights(pool, weight, groups),
       pack_biases(pool, bias, weight),
@@ -889,8 +889,8 @@ Conv2dOpContext Conv2dOpContext::create(
     const bool transposed,
     const IntArrayRef output_padding_arg,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   const auto stride = expand_param_if_needed(stride_arg, "stride", 2);
   const auto padding = expand_param_if_needed(padding_arg, "padding", 2);
   const auto dilation = expand_param_if_needed(dilation_arg, "dilation", 2);
@@ -1044,8 +1044,8 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   return c10::make_intrusive<Conv2dOpContext>(
       Conv2dOpContext::create(
           persistent()->pool,

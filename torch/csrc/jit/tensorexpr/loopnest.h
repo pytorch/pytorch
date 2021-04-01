@@ -43,9 +43,47 @@ class TORCH_API LoopNest {
   }
 
   std::vector<For*> getLoopStmtsFor(Tensor*) const;
+  std::vector<For*> getLoopStmtsFor(const Buf*) const;
   std::vector<For*> getLoopStmtsFor(Stmt*) const;
   Stmt* getLoopBodyFor(Tensor*) const;
+  Stmt* getLoopBodyFor(const Buf*) const;
   bool hasLoopBodyFor(Tensor*) const;
+
+  // Returns the For stmt that is immediately enclosing the given stmt.
+  static For* getParentLoop(const Stmt* st);
+
+  // Returns the list of For stmts corresponding to the loopnest that is
+  // enclosing the given stmt.
+  static std::vector<For*> getEnclosingLoopNest(const Stmt* st);
+
+  // Returns a list of all Stmts that write to the given buf.
+  std::vector<const Stmt*> getAllWritesToBuf(const Buf*) const;
+
+  // The following methods return the For loops that contain writes to
+  // the given buf.
+  //
+  // For example, consider the following code:
+  //   for i1
+  //     for j1
+  //       a[i1,j1] =
+  //   for i2
+  //     for j2
+  //       for k2
+  //         a[i2,j2] =
+  //     for j3
+  //       a[i2,j3] =
+
+  // Returns a list of For loops which directly contain a Stmt that writes
+  // to buf.
+  // For the above example:
+  //   getAllInnermostLoopsWritingToBuf(a) => {j1, k2, j3}
+  std::vector<For*> getAllInnermostLoopsWritingToBuf(const Buf*) const;
+
+  // Returns a list of For loopnests which contain a Stmt that writes to
+  // the given buf. Each loopnest here is a vector For loops.
+  // For the above example:
+  //   getAllLoopNestsWritingToBuf(a) => {{i1,j1}, {i2,j2,k2}, {i2,j3}}
+  std::vector<std::vector<For*>> getAllLoopNestsWritingToBuf(const Buf*) const;
 
   static void vectorize(For*);
   Stmt* simplify();
@@ -64,6 +102,101 @@ class TORCH_API LoopNest {
 
   static void splitWithMask(For* f, int factor);
   static void splitWithMask(For* f, int factor, For** outer, For** inner);
+
+  // The following methods support loop distribution.
+  // For example, consider the following code. This will be used to
+  // demonstrate the methods below.
+  //
+  // S1:  for i
+  // S2:    A[i] = 0
+  // S3:    for j
+  // S4:      A[i] = A[i] +
+  // S5:    B[i] = A[i]
+  // S6:    for k
+  // S7:      B[i] = B[i] +
+
+  // This method distributes the given loop over its body by splitting
+  // after every given pivot stmt.
+  //
+  // NOTE: Pivot stmts that are not in the given loop's body will be ignored.
+  //
+  // For the above example:
+  //   distributeLoop(S1, {S3, S5})
+  // will result in:
+  // S1:  for i
+  // S2:    A[i] = 0
+  // S3:    for j
+  // S4:      A[i] = A[i] +
+  //   :  for i
+  // S5:    B[i] = A[i]
+  //   :  for i
+  // S6:    for k
+  // S7:      B[i] = B[i] +
+  static std::vector<For*> distributeLoop(
+      For* loop,
+      const std::unordered_set<Stmt*>& pivots);
+
+  // This method distributes the given loop over every stmt in its body.
+  //
+  // For the above example:
+  //   distributeLoop(S1)
+  // will result in:
+  // S1:  for i
+  // S2:    A[i] = 0
+  //   :  for i
+  // S3:    for j
+  // S4:      A[i] = A[i] +
+  //   :  for i
+  // S5:    B[i] = A[i]
+  //   :  for i
+  // S6:    for k
+  // S7:      B[i] = B[i] +
+  static std::vector<For*> distributeLoop(For* loop);
+
+  // This method distributes the given loop over its body by splitting
+  // after every For stmt in its body.
+  //
+  // For the above example:
+  //   distributeLoopOverInnerLoops(S1)
+  // will result in:
+  // S1:  for i
+  // S2:    A[i] = 0
+  // S3:    for j
+  // S4:      A[i] = A[i] +
+  //   :  for i
+  // S5:    B[i] = A[i]
+  // S6:    for k
+  // S7:      B[i] = B[i] +
+  static std::vector<For*> distributeLoopOverInnerLoops(For* loop);
+
+  // This method performs loop fusion.
+  // For example, consider the following code.
+  //
+  // S1:  for m
+  // S2:    A[m] = 0
+  // S3:    for j
+  // S4:      A[m] = A[m] +
+  // S5:  for n
+  // S5:    B[n] = A[n]
+  // S6:    for k
+  // S7:      B[n] = B[n] +
+  //
+  // fuseLoops({S1, S5}), will return the following loop:
+  // S1:  for m
+  // S2:    A[m] = 0
+  // S3:    for j
+  // S4:      A[m] = A[m] +
+  // S5:    B[m] = A[m]
+  // S6:    for k
+  // S7:      B[m] = B[m] +
+  //
+  // Loop fusion is done only when all the conditions below are satisfied.
+  //  * All the loops have the same parent.
+  //  * There are no statements between these loops in their parent body.
+  //  * The start bounds are the same for all loops.
+  //  * The stop bounds are the same for all loops.
+  //  * Fusing the loops does not violate or add any dependencies.
+  static For* fuseLoops(const std::vector<For*>& loops);
 
   void reorderAxis(For* a, For* b);
 

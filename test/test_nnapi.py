@@ -2,7 +2,7 @@
 import os
 import ctypes
 import torch
-from typing import Tuple, List
+from typing import Tuple
 from torch.backends._nnapi.prepare import convert_model_to_nnapi
 from torch.testing._internal.common_utils import TestCase, run_tests
 
@@ -33,15 +33,15 @@ class TestNNAPI(TestCase):
             self.can_run_nnapi = False
 
     def check(
-            self,
-            module,
-            arg_or_args,
-            *,
-            trace_args=None,
-            convert_args=None,
-            atol_rtol=None,
-            limit=None,
-            ):
+        self,
+        module,
+        arg_or_args,
+        *,
+        trace_args=None,
+        convert_args=None,
+        atol_rtol=None,
+        limit=None,
+    ):
         with torch.no_grad():
             if isinstance(arg_or_args, torch.Tensor):
                 args = [arg_or_args]
@@ -73,11 +73,11 @@ class TestNNAPI(TestCase):
         torch.manual_seed(29)
         inp_quant = qpt(inp_float, 0.03, 128)
         return [
-                ("float", inp_float),
-                ("float-nhwc", nhwc(inp_float)),
-                ("quant", inp_quant),
-                ("quant-nhwc", nhwc(inp_quant)),
-                ]
+            ("float", inp_float),
+            ("float-nhwc", nhwc(inp_float)),
+            ("quant", inp_quant),
+            ("quant-nhwc", nhwc(inp_quant)),
+        ]
 
     def test_prelu(self):
         arg = torch.tensor([[1.0, -1.0, 2.0, -2.0]]).unsqueeze(-1).unsqueeze(-1)
@@ -90,11 +90,11 @@ class TestNNAPI(TestCase):
 
         # Test flexible size
         self.check(
-                multi_a,
-                arg,
-                trace_args=[torch.zeros(1, 4, 3, 3)],
-                convert_args=[nhwc(torch.zeros(1, 4, 0, 0))],
-                )
+            multi_a,
+            arg,
+            trace_args=[torch.zeros(1, 4, 3, 3)],
+            convert_args=[nhwc(torch.zeros(1, 4, 0, 0))],
+        )
 
     def test_quantize(self):
         self.check(

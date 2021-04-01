@@ -514,15 +514,18 @@ class _NnapiSerializer(object):
         if oper.op_type == NNAPI_OperandCode.TENSOR_FLOAT32:
             return f"torch.zeros({shape_code}, dtype=torch.float32)"
         elif oper.op_type == NNAPI_OperandCode.TENSOR_QUANT8_ASYMM:
-            return f"torch.quantize_per_tensor(torch.zeros(1), scale={oper.scale}, zero_point={oper.zero_point}, dtype=torch.quint8).expand({shape_code}).contiguous()"
+            return (
+                f"torch.quantize_per_tensor("
+                f"torch.zeros(1), scale={oper.scale}, zero_point={oper.zero_point}, dtype=torch.quint8)"
+                f".expand({shape_code}).contiguous()"
+            )
         raise Exception(f"Unsupported output operand type: {oper.op_type}")
 
     def forward_operand_shape(self, out_op_id, out_dim, in_op_id, in_dim):
         self.compute_operand_shape(out_op_id, out_dim, flex_name(in_op_id, in_dim))
 
     def compute_operand_shape(self, op_id, dim, expr):
-        self.flexible_shape_computation_lines.append(
-                f"{flex_name(op_id, dim)} = {expr}")
+        self.flexible_shape_computation_lines.append(f"{flex_name(op_id, dim)} = {expr}")
 
     def transpose_to_nhwc(self, in_id, oper):
         if oper.shape[2:] != (1, 1):
@@ -678,7 +681,7 @@ class _NnapiSerializer(object):
                 if s == 0:
                     pt_d = reverse_map_dim(dim_order, d)
                     self.flexible_shape_computation_lines.append(
-                            f"ser_model[{model_offset}] = {flex_name(op_id, pt_d)}")
+                        f"ser_model[{model_offset}] = {flex_name(op_id, pt_d)}")
                 model_offset += 1
             model.append(self.serialize_ints(shape))
 
@@ -690,13 +693,13 @@ class _NnapiSerializer(object):
         self.flexible_shape_computation_lines.extend(template_return_lines)
 
         return (
-                array.array("i", b"".join(model)),
-                self.used_weights,
-                inp_dim_orders,
-                out_dim_orders,
-                self.flexible_shape_computation_lines,
-                retval_count,
-                )
+            array.array("i", b"".join(model)),
+            self.used_weights,
+            inp_dim_orders,
+            out_dim_orders,
+            self.flexible_shape_computation_lines,
+            retval_count,
+        )
 
     def serialize_values(self):
         serialized_values = []
@@ -956,7 +959,7 @@ class _NnapiSerializer(object):
 
         if in_oper.dim_order == DimOrder.CHANNELS_LAST:
             assert len(in_oper.shape) == 4
-            nnapi_dim = [ [0, 3, 1, 2][d] for d in dim ]
+            nnapi_dim = [[0, 3, 1, 2][d] for d in dim]
         else:
             nnapi_dim = dim
 
@@ -1069,7 +1072,7 @@ class _NnapiSerializer(object):
 
         assert in0_oper.op_type == in1_oper.op_type
         in0_id, in0_oper, in1_id, in1_oper = self.transpose_for_broadcast(
-                in0_id, in0_oper, in1_id, in1_oper)
+            in0_id, in0_oper, in1_id, in1_oper)
         # NOTE: PyTorch and NNAPI have the same broadcast semantics.
         out_shape = broadcast_shapes(in0_oper.shape, in1_oper.shape)
         out_oper = in0_oper._replace(shape=out_shape)
@@ -1118,7 +1121,7 @@ class _NnapiSerializer(object):
 
         op_map = {
             (-1, 1): NNAPI_OperationCode.RELU1,
-            ( 0, 6): NNAPI_OperationCode.RELU6,
+            ( 0, 6): NNAPI_OperationCode.RELU6,  # noqa: E201
         }
 
         opcode = op_map.get((min_val, max_val))

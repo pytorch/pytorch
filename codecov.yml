@@ -4,7 +4,7 @@ coverage:
       default:
         threshold: 1%
     patch: off
-        
+
 codecov:
   notify:
     # Code coverage is collected by 6 configs: codecov_test[12], onnx[12] and windows_test[2]

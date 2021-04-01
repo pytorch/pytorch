@@ -157,8 +157,8 @@ Tensor run(
 c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
     Tensor weight,
     c10::optional<Tensor> bias,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   return xnnpack::XNNPackLinearOpContext::create_context(
       std::move(weight), std::move(bias), output_min, output_max);
 }

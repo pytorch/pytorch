@@ -476,7 +476,7 @@ def is_warn_always_enabled():
 # Define Storage and Tensor classes
 ################################################################################
 
-from .tensor import Tensor
+from ._tensor import Tensor
 from .storage import _StorageBase
 
 
@@ -683,8 +683,8 @@ def compiled_with_cxx11_abi():
 
 
 # Import the ops "namespace"
-from torch._ops import ops as ops
-from torch._classes import classes as classes
+from torch._ops import ops
+from torch._classes import classes
 
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom
