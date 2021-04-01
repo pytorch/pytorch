@@ -6953,6 +6953,9 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-bionic-rocm4.0.1-py3.6"
           image_name: "pytorch-linux-bionic-rocm4.0.1-py3.6"
+      - docker_build_job:
+          name: "docker-pytorch-linux-bionic-rocm4.1-py3.6"
+          image_name: "pytorch-linux-bionic-rocm4.1-py3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           requires:
@@ -9327,8 +9330,8 @@ workflows:
           name: pytorch_windows_vs2019_py36_cuda11.2_build
           python_version: "3.6"
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -9340,8 +9343,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda11.2_build
           test_name: pytorch-windows-test1
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -9353,8 +9356,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda11.2_build
           test_name: pytorch-windows-test2
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
 
   # The following allows these jobs to run on ci-all and release branches
@@ -9427,8 +9430,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda11.2_build
           test_name: pytorch-windows-test1
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
           filters:
             branches:
@@ -9445,8 +9448,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda11.2_build
           test_name: pytorch-windows-test2
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
           filters:
             branches:
