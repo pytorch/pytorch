@@ -798,42 +798,80 @@ class TestAsserts(TestCase):
 
     @onlyCPU
     def test_mismatching_values_msg_abs_mismatches(self, device):
-        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
+        a = torch.empty((3, 3), dtype=torch.float32, device=device).fill_(5)
         b = a.clone()
-        b[2, 3] = 9
+
+        a[0, 1] = 1
+        b[0, 1] = 2
+        b[1, 2] = 9
 
         for fn in self.assert_fns():
-            with self.assertRaisesRegex(AssertionError, r"\s+1\s+"):
+            with self.assertRaisesRegex(AssertionError, r"\s+2\s+"):
                 fn(a, b)
 
     @onlyCPU
     def test_mismatching_values_msg_rel_mismatches(self, device):
-        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
+        a = torch.empty((3, 3), dtype=torch.float32, device=device).fill_(5)
         b = a.clone()
-        b[2, 3] = 9
+
+        a[0, 1] = 1
+        b[0, 1] = 2
+        b[1, 2] = 9
 
         for fn in self.assert_fns():
-            with self.assertRaisesRegex(AssertionError, r"8([.]3+)?\s*[%]"):
+            with self.assertRaisesRegex(AssertionError, r"22([.]2+)?\s*[%]"):
                 fn(a, b)
 
     @onlyCPU
-    def test_mismatching_values_msg_index(self, device):
-        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
+    def test_mismatching_values_msg_max_abs_diff(self, device):
+        a = torch.empty((3, 3), dtype=torch.float32, device=device).fill_(5)
         b = a.clone()
-        b[2, 3] = 9
 
-        for fn in self.assert_fns():
-            with self.assertRaisesRegex(AssertionError, r"2,\s*3"):
-                fn(a, b)
-
-    @onlyCPU
-    def test_mismatching_values_msg_max_diff(self, device):
-        a = torch.empty((3, 4), dtype=torch.float32, device=device).fill_(5)
-        b = a.clone()
-        b[2, 3] = 9
+        a[0, 1] = 1
+        b[0, 1] = 2
+        b[1, 2] = 9
 
         for fn in self.assert_fns():
             with self.assertRaisesRegex(AssertionError, r"\s+4[.]0\s+"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_values_max_abs_diff_idx(self, device):
+        a = torch.empty((3, 3), dtype=torch.float32, device=device).fill_(5)
+        b = a.clone()
+
+        a[0, 1] = 1
+        b[0, 1] = 2
+        b[1, 2] = 9
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"1,\s*2"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_values_msg_max_rel_diff(self, device):
+        a = torch.empty((3, 3), dtype=torch.float32, device=device).fill_(5)
+        b = a.clone()
+
+        a[0, 1] = 1
+        b[0, 1] = 2
+        b[1, 2] = 9
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"\s+0[.]5\s+"):
+                fn(a, b)
+
+    @onlyCPU
+    def test_mismatching_values_max_rel_diff_idx(self, device):
+        a = torch.empty((3, 3), dtype=torch.float32, device=device).fill_(5)
+        b = a.clone()
+
+        a[0, 1] = 1
+        b[0, 1] = 2
+        b[1, 2] = 9
+
+        for fn in self.assert_fns():
+            with self.assertRaisesRegex(AssertionError, r"0,\s*1"):
                 fn(a, b)
 
     @onlyCPU
