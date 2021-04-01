@@ -157,6 +157,7 @@ def _process_group_init_backend_handler(
 
     # TODO: add try-except and destroy _agent in all processes if any fails.
     return ProcessGroupAgent(
+        store,
         name,
         group,
         rpc_backend_options.num_send_recv_threads,

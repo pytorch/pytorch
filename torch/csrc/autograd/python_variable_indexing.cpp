@@ -83,8 +83,8 @@ static inline void invalid_index(PyObject* obj) {
     "Variables are valid indices (got %s)", Py_TYPE(obj)->tp_name);
 }
 
-static inline Variable sequenceToVariable(c10::DispatchKey dispatch_key, PyObject* seq) {
-  return torch::utils::indexing_tensor_from_data(dispatch_key, kLong, c10::nullopt, seq);
+static inline Variable sequenceToVariable(c10::TensorOptions options, PyObject* seq) {
+  return torch::utils::indexing_tensor_from_data(options, kLong, c10::nullopt, seq);
 }
 
 static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
@@ -181,9 +181,7 @@ static inline Variable applySlicing(
           }
           return at::indexing::TensorIndex(std::move(tensor));
         } else if (PySequence_Check(obj)) {
-          // TODO: Naughty naughty get out of jail free
-          // (Fixing this means I have to fix the call chain though :/)
-          return at::indexing::TensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj));
+          return at::indexing::TensorIndex(sequenceToVariable(self.options(), obj));
         } else {
           auto idx = THPObjectPtr(PyNumber_Index(obj));
           if (!idx) {

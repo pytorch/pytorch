@@ -53,7 +53,7 @@ class Unflatten(Module):
       be either `int` or `str` when `Tensor` or `NamedTensor` is used, respectively.
 
     * :attr:`unflattened_size` is the new shape of the unflattened dimension of the tensor and it can be
-      a `tuple` of ints or a `list` of ints or `torch.Size` for `Tensor` input;  a `NamedShape` 
+      a `tuple` of ints or a `list` of ints or `torch.Size` for `Tensor` input;  a `NamedShape`
       (tuple of `(name, size)` tuples) for `NamedTensor` input.
 
     Shape:
@@ -112,7 +112,7 @@ class Unflatten(Module):
         if (isinstance(input, tuple)):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, tuple):
-                    raise TypeError("unflattened_size must be tuple of tuples, " + 
+                    raise TypeError("unflattened_size must be tuple of tuples, " +
                                     "but found element of type {} at pos {}".format(type(elem).__name__, idx))
             return
         raise TypeError("unflattened_size must be a tuple of tuples, " +
@@ -122,7 +122,7 @@ class Unflatten(Module):
         if (isinstance(input, (tuple, list))):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, int):
-                    raise TypeError("unflattened_size must be tuple of ints, " + 
+                    raise TypeError("unflattened_size must be tuple of ints, " +
                                     "but found element of type {} at pos {}".format(type(elem).__name__, idx))
             return
         raise TypeError("unflattened_size must be a tuple of ints, but found type {}".format(type(input).__name__))

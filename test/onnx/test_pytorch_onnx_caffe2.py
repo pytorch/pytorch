@@ -118,7 +118,6 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
     embed_params = False
-    use_new_jit_passes = False
 
     def setUp(self):
         torch.manual_seed(0)
@@ -136,8 +135,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
     def run_debug_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, example_outputs=None,
-                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
-                       use_new_jit_passes=use_new_jit_passes):
+                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
         """
         # TODO: remove this from the final release version
         This test is for our debugging only for the case where
@@ -160,8 +158,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                       opset_version=self.opset_version,
                                       keep_initializers_as_inputs=True,
                                       add_node_names=False,
-                                      operator_export_type=operator_export_type,
-                                      use_new_jit_passes=use_new_jit_passes)
+                                      operator_export_type=operator_export_type)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -172,8 +169,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
                         example_outputs=None, do_constant_folding=True,
-                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
-                        use_new_jit_passes=use_new_jit_passes):
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
         """
         This is what the user facing version will look like
         """
@@ -197,8 +193,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                       do_constant_folding=do_constant_folding,
                       opset_version=self.opset_version,
                       keep_initializers_as_inputs=True,
-                      operator_export_type=operator_export_type,
-                      use_new_jit_passes=use_new_jit_passes)
+                      operator_export_type=operator_export_type)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
@@ -214,13 +209,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                  use_gpu=use_gpu_, rtol=rtol, atol=atol,
                                  example_outputs=example_outputs,
                                  do_constant_folding=do_constant_folding,
-                                 operator_export_type=operator_export_type,
-                                 use_new_jit_passes=self.use_new_jit_passes)
+                                 operator_export_type=operator_export_type)
         else:
             self.run_debug_test(model, train, batch_size, state_dict, input,
                                 use_gpu=use_gpu_, example_outputs=example_outputs,
-                                operator_export_type=operator_export_type,
-                                use_new_jit_passes=self.use_new_jit_passes)
+                                operator_export_type=operator_export_type)
 
     def test_linear(self):
         class MyModel(torch.nn.Module):
@@ -1436,6 +1429,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    # ConstantFill is a deprecated experimental op (used in opsets < 9).
+    # Shape inference does not cover this op.
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_arithmetic(self):
         class Arithmetic(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -2526,8 +2522,7 @@ TestCaffe2BackendEmbed_opset10 = type(str("TestCaffe2BackendEmbed_opset10"),
 # to embed_params=True
 TestCaffe2BackendEmbed_opset9_new_jit_API = type(str("TestCaffe2BackendEmbed_opset9_new_jit_API"),
                                                  (unittest.TestCase,),
-                                                 dict(TestCaffe2Backend_opset9.__dict__, embed_params=True,
-                                                 use_new_jit_passes=True))
+                                                 dict(TestCaffe2Backend_opset9.__dict__, embed_params=True))
 
 if __name__ == '__main__':
     unittest.main()

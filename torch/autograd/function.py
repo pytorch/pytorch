@@ -173,8 +173,8 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         It must accept a context ctx as the first argument, followed by any
         number of arguments (tensors or other types).
 
-        The context can be used to store tensors that can be then retrieved
-        during the backward pass.
+        The context can be used to store arbitrary data that can be then
+        retrieved during the backward pass.
         """
         raise NotImplementedError("You must implement the forward function for custom"
                                   " autograd.Function.")
@@ -186,10 +186,13 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         This function is to be overridden by all subclasses.
 
         It must accept a context :attr:`ctx` as the first argument, followed by
-        as many outputs did :func:`forward` return, and it should return as many
-        tensors, as there were inputs to :func:`forward`. Each argument is the
-        gradient w.r.t the given output, and each returned value should be the
-        gradient w.r.t. the corresponding input.
+        as many outputs as the :func:`forward` returned (None will be passed in
+        for non tensor outputs of the forward function),
+        and it should return as many tensors, as there were inputs to
+        :func:`forward`. Each argument is the gradient w.r.t the given output,
+        and each returned value should be the gradient w.r.t. the
+        corresponding input. If an input is not a Tensor or is a Tensor not
+        requiring grads, you can just pass None as a gradient for that input.
 
         The context can be used to retrieve tensors saved during the forward
         pass. It also has an attribute :attr:`ctx.needs_input_grad` as a tuple

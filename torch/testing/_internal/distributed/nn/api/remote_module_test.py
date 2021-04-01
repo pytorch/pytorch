@@ -34,6 +34,7 @@ class MyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
     ) -> Tuple[str, int, Tensor]:
+        # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
 
@@ -42,6 +43,7 @@ class RemoteMyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
     ) -> Tuple[str, int, Tensor]:
+        # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
     def forward_async(
@@ -257,8 +259,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, msnpu, xla, vulkan"
-            " device type at start of device string",
+            r"Expected one of .+ device type at start of device string",
         ):
             list(
                 self._create_remote_module_iter(

@@ -1,0 +1,94 @@
+name: Build Linux libtorch
+
+on:
+  # TODO: These are only runnable from workflow_dispatch, we need to eventually add
+  #       a cron
+  # TODO: Add an on_release trigger to build on tags
+  workflow_dispatch:
+
+jobs:
+  generate-build-matrix:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-18.04
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    container:
+      image: python:3.9
+    steps:
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - name: Generating build matrix
+        id: set-matrix
+        run: |
+          # outputting for debugging purposes
+          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py libtorch)
+          echo "${MATRIX}"
+          echo "::set-output name=matrix::${MATRIX}"
+  build-libtorch:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: generate-build-matrix
+    runs-on: linux.2xlarge
+    strategy:
+      matrix:
+        ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
+      fail-fast: false
+    container:
+      image: ${{ matrix.container_image }}
+    env:
+      # TODO: remove this var from the libtorch builder script(s)
+      DESIRED_PYTHON: '3.7'
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_VERSION: ${{ matrix.GPU_ARCH_VERSION }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      BUILD_PYTHONLESS: 1
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      # TODO: remove this and bake env var into the Docker image
+      DESIRED_DEVTOOLSET: ${{ matrix.devtoolset }}
+      PYTORCH_BUILD_NUMBER: 1
+      SKIP_ALL_TESTS: 1
+    steps:
+      - name: Clean runner workspace
+        run: rm -rf "${{ github.workspace }}"
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+        with:
+          path: pytorch
+          submodules: recursive
+      - name: Clone pytorch/builder
+        uses: actions/checkout@v2
+        with:
+          repository: pytorch/builder
+          path: builder
+      - name: Generate version string
+        working-directory: pytorch/
+        run: |
+          version=$(.github/scripts/generate_pytorch_version.py)
+          echo "Generated version: ${version}"
+          echo "PYTORCH_BUILD_VERSION=${version}" >> $GITHUB_ENV
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ matrix.gpu_arch_type == 'cuda' && matrix.gpu_arch_version == '11.1' }}
+        run: |
+          echo "BUILD_SPLIT_CUDA=1" >> $GITHUB_ENV
+      # TODO: Remove this once we remove the need for the directories to be
+      #       in specific locations
+      - name: Symlink repositories to root directory (for legacy scripts purposes)
+        run: |
+          ln -s $(pwd)/pytorch /pytorch
+          ln -s $(pwd)/builder /builder
+      # TODO: Bundle the correct build script in the base container image so
+      #       that we don't have to do this type of specification
+      - name: Build PyTorch binary (CUDA specific)
+        if: ${{ matrix.gpu_arch_type == 'cuda' }}
+        run: |
+          /builder/manywheel/build.sh
+      - name: Build PyTorch binary (CPU specific)
+        if: ${{ matrix.gpu_arch_type == 'cpu' }}
+        run: |
+          /builder/manywheel/build_cpu.sh
+      - uses: actions/upload-artifact@v2
+        with:
+          name: pytorch-libtorch-${{ matrix.libtorch_variant }}-${{ matrix.devtoolset }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
+          path: /remote/**/*.zip
+      # TODO: Add a step here for uploading binaries
