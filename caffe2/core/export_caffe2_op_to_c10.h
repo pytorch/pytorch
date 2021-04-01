@@ -29,7 +29,7 @@ inline c10::List<at::Tensor> _call_caffe2_op(
     std::vector<c10::IValue>&& inputs,
     c10::List<at::Tensor>&& outputs) {
   Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
-  op.Run();
+  op.Run(-1);
   return std::move(op).move_newstyle_outputs();
 }
 
