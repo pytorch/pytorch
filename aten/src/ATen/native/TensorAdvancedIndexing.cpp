@@ -325,19 +325,15 @@ Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const b
 
   // Type and device checks
   TORCH_CHECK(index.scalar_type() == ScalarType::Long, "put_(): Expected a long tensor for index, but got ", index.scalar_type())
-  TORCH_CHECK(self.scalar_type() == source.scalar_type(), "put_(): self and source expected to have the same dtype, but got (self) ", self.scalar_type(), " and (source) ", source.scalar_type());
+  TORCH_CHECK(self.scalar_type() == source.scalar_type(), "put_(): self and source expected to have the same dtype, but got self.dtype = ", self.scalar_type(), " and source.dtype = ", source.scalar_type());
   TORCH_CHECK(self.device() == source.device() && self.device() == index.device(),
-      "put_(): self, index and source expected to be in the same device, but got (self) ",
-      self.device(), ", (index) ", index.device(), ", and (source) ", source.device());
+      "put_(): self, index and source expected to be in the same device, but got self.device = ",
+      self.device(), ", index.device = ", index.device(), ", and source.device = ", source.device());
 
   // index checks
-  TORCH_CHECK_INDEX(source.numel() == index.numel(), "put_(): Expected 'source' and 'index' to have the same number of elements, but got 'source' (", source.numel(), "), 'index'(", index.numel(), ")");
+  TORCH_CHECK_INDEX(source.numel() == index.numel(), "put_(): Expected source and index to have the same number of elements, but got source.numel() = ", source.numel(), ", index.numel() = ", index.numel());
   TORCH_CHECK_INDEX(!(self.numel() == 0 && index.numel() != 0), "put_(): Tried to put elements into an empty tensor");
 
-  // These overlaps were not present before so they are not BC
-  // That being said, I truly believe that they are necessary
-  // This function does basically the same than `index_copy_`, as such, they should have
-  // the same preconditions for them not to bite users
   at::assert_no_internal_overlap(self);
   at::assert_no_overlap(self, index);
   at::assert_no_overlap(self, source);
@@ -400,10 +396,12 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
 Tensor& take_out(const Tensor& self, const Tensor& index, Tensor& out) {
   // Type and device checks
   TORCH_CHECK(index.scalar_type() == ScalarType::Long, "take(): Expected a long tensor for index, but got ", index.scalar_type())
-  TORCH_CHECK(self.scalar_type() == self.scalar_type(), "take(): self and self expected to have the same dtype, but got (self) ", self.scalar_type(), " and (self) ", self.scalar_type());
-  TORCH_CHECK(self.device() == self.device() && self.device() == index.device(),
-      "take(): self, index and self expected to be in the same device, but got (self) ",
-      self.device(), ", (index) ", index.device(), ", and (self) ", self.device());
+  TORCH_CHECK(self.scalar_type() == out.scalar_type(), "take(): self and out expected to have the same dtype, but got self.dtype = ", self.scalar_type(), " and out.dtype = ", out.scalar_type());
+  TORCH_CHECK(self.device() == out.device() && self.device() == index.device(),
+      "take(): self, index and out expected to be in the same device, but got self.device = ",
+      self.device(), ", index.device = ", index.device(), ", and out.device = ", out.device());
+
+  // index checks
   TORCH_CHECK_INDEX(!(self.numel() == 0 && index.numel() != 0), "take(): tried to take from an empty tensor");
 
   at::assert_no_internal_overlap(out);
