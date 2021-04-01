@@ -313,7 +313,12 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
     # - add global switch for type checking at compile-time
     if '__iter__' in sub_cls.__dict__:
         iter_fn = sub_cls.__dict__['__iter__']
-        hints = get_type_hints(iter_fn)
+        # TODO: Remove try except block after invalid type anotations are removed from internal codebase
+        try:
+            hints = get_type_hints(iter_fn)
+        except TypeError:
+            warnings.warn('Invalid return type annotation of `__iter__` for {}'.format(sub_cls.__name__))
+            return
         if 'return' in hints:
             return_hint = hints['return']
             # Plain Return Hint for Python 3.6
