@@ -553,7 +553,7 @@ void GraphTask::exec_post_processing() {
     }
   }
 
-  // final_callbacks may now access any grad on the current or default stream.
+  // final_callbacks may now use any grad on its device's current or default stream.
   for (size_t i = 0; i < final_callbacks_.size(); ++i) {
     cb_lock.unlock();
     final_callbacks_[i]();
@@ -925,7 +925,7 @@ auto Engine::execute(const edge_list& roots,
       /* cpu_ready_queue */ local_ready_queue);
 
   // Collects current and default streams for devices where this process has a context,
-  // so graph_task can sync them with leaf_streams.
+  // so GraphTask::exec_post_processing can sync them with leaf_streams.
   // Should this be inside init_to_execute?
   graph_task->stash_current_streams();
 
@@ -964,7 +964,6 @@ auto Engine::execute(const edge_list& roots,
   // in dist_engine.cpp).
   auto& fut = graph_task->future_result_;
   fut->wait();
-
   return fut->value().toTensorVector();
 }
 
