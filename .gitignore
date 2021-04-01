@@ -15,6 +15,7 @@ coverage.xml
 .hypothesis
 .mypy_cache
 **/.pytorch-test-times
+**/.pytorch-slow-tests
 */*.pyc
 */*.so*
 */**/__pycache__

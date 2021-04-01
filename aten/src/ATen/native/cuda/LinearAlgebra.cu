@@ -10,27 +10,32 @@
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOps.h>
+#include <c10/util/MaybeOwned.h>
 
 namespace at { namespace native {
 
-Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
-  Tensor tensor_;
+namespace {
+
+c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor) {
+  if (tensor.is_non_overlapping_and_dense()) { // common case
+      transpose_tensor = tensor.is_contiguous();
+      return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  }
   IntArrayRef tensor_strides = tensor.strides();
   IntArrayRef tensor_sizes = tensor.sizes();
-
   if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
-    tensor_ = tensor;
     transpose_tensor = false;
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
   } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
-    tensor_ = tensor;
     transpose_tensor = true;
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
   } else {
     transpose_tensor = true;
-    tensor_ = tensor.clone(at::MemoryFormat::Contiguous);
+    return c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
   }
-
-  return tensor_;
 }
+
+} // namespace
 
 Tensor prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
   IntArrayRef tensor_strides = tensor.strides();
@@ -71,16 +76,19 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU("addmm", args);
 
-  Tensor self_;
-  if (&result != &self) {
-    std::tie(self_) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
-  } else {
-    self_ = self;
-  }
-
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
-  IntArrayRef self__sizes = self_.sizes();
+  Tensor self_;
+  if (&result != &self) {
+    std::tie(self_) = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
+  } else {
+    self_ = self;
+    IntArrayRef self__sizes = self_.sizes();
+    TORCH_CHECK(result.dim() == 2, "tensors must be 2-D");
+    TORCH_CHECK(self__sizes[0] == mat1_sizes[0], "self_ dim 0 must match mat1 dim 0");
+    TORCH_CHECK(self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
+  }
+
   TORCH_CHECK(
       mat1_sizes[1] == mat2_sizes[0],
       "mat1 dim 1 must match mat2 dim 0",
@@ -88,8 +96,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       mat1_sizes[1],
       " mat2 dim0: ",
       mat2_sizes[0]);
-  TORCH_CHECK(self__sizes[0] == mat1_sizes[0], "self_ dim 0 must match mat1 dim 0");
-  TORCH_CHECK(self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
 
   if (&result != &self) {
     at::native::resize_as_(result, self_);
@@ -98,7 +104,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     }
   }
 
-  TORCH_CHECK(result.dim() == 2 && self_.dim() == 2, "tensors must be 2-D");
 
   IntArrayRef result_sizes = result.sizes();
   if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
@@ -106,27 +111,25 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   }
 
   bool transpose_result;
-  Tensor result_ = prepare_matrix_for_cublas(result, transpose_result);
+  c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
   bool transpose_mat1;
   bool transpose_mat2;
-  Tensor mat1_ = transpose_result ? mat2 : mat1;
-  Tensor mat2_ = transpose_result ? mat1 : mat2;
-  mat1_ = prepare_matrix_for_cublas(mat1_, transpose_mat1);
-  mat2_ = prepare_matrix_for_cublas(mat2_, transpose_mat2);
+  c10::MaybeOwned<Tensor> mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1);
+  c10::MaybeOwned<Tensor> mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2);
 
   if (transpose_result) {
     transpose_mat1 = !transpose_mat1;
     transpose_mat2 = !transpose_mat2;
-    mat1_sizes = mat1_.sizes();
-    mat2_sizes = mat2_.sizes();
+    mat1_sizes = mat1_->sizes();
+    mat2_sizes = mat2_->sizes();
   }
 
   int64_t m = mat1_sizes[transpose_result ? 1 : 0];
   int64_t k = mat1_sizes[transpose_result ? 0 : 1];
   int64_t n = mat2_sizes[transpose_result ? 0 : 1];
-  int64_t mat1_ld = mat1_.stride((transpose_mat1 == transpose_result) ? 1 : 0);
-  int64_t mat2_ld = mat2_.stride((transpose_mat2 == transpose_result) ? 1 : 0);
-  int64_t result_ld = result_.stride(transpose_result ? 0 : 1);
+  int64_t mat1_ld = mat1_->stride((transpose_mat1 == transpose_result) ? 1 : 0);
+  int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
+  int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
   at::ScalarType scalar_type = self_.scalar_type();
 
   if (mat1.numel() == 0) {
@@ -151,9 +154,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
     scalar_t beta_val = beta.to<scalar_t>();
-    scalar_t* mat1_ptr = mat1_.data_ptr<scalar_t>();
-    scalar_t* mat2_ptr = mat2_.data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_.data_ptr<scalar_t>();
+    scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
+    scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
+    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
     at::cuda::blas::gemm<scalar_t>(
       transpose_mat1 ? 't' : 'n',
       transpose_mat2 ? 't' : 'n',
@@ -165,8 +168,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       result_ptr, result_ld
     );
   });
-  if (result.data_ptr() != result_.data_ptr()) {
-    result.copy_(result_);
+  if (result.data_ptr() != result_->data_ptr()) {
+    result.copy_(*result_);
   }
   return result;
 }

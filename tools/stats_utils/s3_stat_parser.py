@@ -82,15 +82,17 @@ class Version2Report(VersionedReport):
 
 Report = Union[Version1Report, VersionedReport]
 
+if HAVE_BOTO3:
+    S3_RESOURCE_READ_ONLY = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
+    S3_RESOURCE = boto3.resource('s3')
+
 
 def get_S3_bucket_readonly(bucket_name: str) -> Any:
-    s3 = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
-    return s3.Bucket(bucket_name)
+    return S3_RESOURCE_READ_ONLY.Bucket(bucket_name)
 
 
 def get_S3_object_from_bucket(bucket_name: str, object: str) -> Any:
-    s3 = boto3.resource('s3')
-    return s3.Object(bucket_name, object)
+    return S3_RESOURCE.Object(bucket_name, object)
 
 
 def case_status(case: Version1Case) -> Status:
@@ -189,6 +191,6 @@ def get_previous_reports_for_branch(branch: str, ci_job_prefix: str = "") -> Lis
         for job_name, summary in summaries.items():
             reports.append(summary[0])
             if len(summary) > 1:
-                logger.info(f'Warning: multiple summary objects found for {commit}/{job_name}')
+                logger.warning(f'WARNING: Multiple summary objects found for {commit}/{job_name}')
         commit_index += 1
     return reports
