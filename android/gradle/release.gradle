@@ -1,5 +1,3 @@
 apply from: rootProject.file('gradle/android_tasks.gradle')
 
-apply from: rootProject.file('gradle/release_bintray.gradle')
-
-apply from: rootProject.file('gradle/gradle_maven_push.gradle')
+apply plugin: 'com.vanniktech.maven.publish'
