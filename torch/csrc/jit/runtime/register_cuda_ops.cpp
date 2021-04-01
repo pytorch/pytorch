@@ -67,6 +67,15 @@ RegisterOperators const reg({
         [](Stack* stack) {
           auto v = pop(stack);
           auto s = v.toCustomClass<torch::jit::CUDAStream>();
+          auto stream_device_idx = static_cast<int64_t>(s->device_index());
+          auto cur_device_idx =
+              static_cast<int64_t>(c10::cuda::current_device());
+          // If the stream is not on the current device, change the
+          // device to the device of the stream.
+          if (cur_device_idx != stream_device_idx) {
+            c10::cuda::set_device(
+                static_cast<c10::DeviceIndex>(stream_device_idx));
+          }
           // To set the current CUDA stream using
           // c10::cuda::setCurrentCUDAStream, the jit::CUDAStream object needs
           // to be converted to c10::cuda::CUDAStream. Since the latter cannot

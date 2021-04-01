@@ -148,8 +148,8 @@ def convert_model_to_nnapi(model, inputs):
     else:
         ret_expr = "".join(f"retvals[{idx}], " for idx in range(retval_count))
     wrapper_model.define(
-            f"def forward(self, {arg_list}):\n"
-            f"    retvals = self.mod([{arg_list}])\n"
-            f"    return {ret_expr}\n"
-            )
+        f"def forward(self, {arg_list}):\n"
+        f"    retvals = self.mod([{arg_list}])\n"
+        f"    return {ret_expr}\n"
+    )
     return wrapper_model

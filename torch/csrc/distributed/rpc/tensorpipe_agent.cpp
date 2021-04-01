@@ -9,6 +9,7 @@
 #include <fmt/format.h>
 #include <tensorpipe/tensorpipe.h>
 
+#include <torch/csrc/distributed/rpc/agent_utils.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -134,16 +135,16 @@ constexpr int64_t kMultiplexedUvChannelPriority = 100;
 constexpr int64_t kBasicChannelPriority = 0;
 
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaIpcChannelPriority = 300;
+constexpr int64_t kCudaIpcChannelPriority = 301;
 #endif
 
 #if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaGdrChannelPriority = 200;
+constexpr int64_t kCudaGdrChannelPriority = 201;
 #endif
 
 #ifdef USE_CUDA_NOT_ROCM
-constexpr int64_t kCudaXthChannelPriority = 400;
-constexpr int64_t kCudaBasicChannelPriority = 100;
+constexpr int64_t kCudaXthChannelPriority = 401;
+constexpr int64_t kCudaBasicChannelPriority = 101;
 #endif
 
 std::unique_ptr<TransportRegistration> makeUvTransport() {
@@ -412,32 +413,13 @@ void TensorPipeAgent::removeFromTimeoutMap(uint64_t messageId) {
   }
 }
 
-void TensorPipeAgent::collectNames() {
-  const worker_id_t selfId = workerInfo_.id_;
-  const std::string& selfName = workerInfo_.name_;
+void TensorPipeAgent::prepareNames() {
+  auto nameToId = collectNames(
+      rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
 
-  std::vector<uint8_t> selfNameVector(
-      (uint8_t*)selfName.c_str(),
-      (uint8_t*)selfName.c_str() + selfName.length());
-  rankToNameStore_.set(c10::to_string(selfId), selfNameVector);
-
-  workerIdToInfo_.emplace(selfId, WorkerInfo(selfName, selfId));
-  workerNameToInfo_.emplace(selfName, WorkerInfo(selfName, selfId));
-  for (worker_id_t workerId = 0; workerId < worldSize_; ++workerId) {
-    if (workerId == selfId) {
-      continue;
-    }
-    std::vector<uint8_t> workerNameVector =
-        rankToNameStore_.get(c10::to_string(workerId));
-    std::string workerName(
-        (char*)workerNameVector.data(), workerNameVector.size());
-
-    TORCH_CHECK(
-        workerNameToInfo_.find(workerName) == workerNameToInfo_.end(),
-        "RPC worker name ",
-        workerName,
-        " is not unique.");
-
+  for (const auto& entry : nameToId) {
+    const auto& workerName = entry.first;
+    const auto& workerId = entry.second;
     workerIdToInfo_.emplace(workerId, WorkerInfo(workerName, workerId));
     workerNameToInfo_.emplace(workerName, WorkerInfo(workerName, workerId));
   }
@@ -464,7 +446,7 @@ TensorPipeAgent::TensorPipeAgent(
       nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       processGroup_(std::move(processGroup)) {
-  collectNames();
+  prepareNames();
 
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
@@ -694,11 +676,40 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     Message&& responseMessage =
         std::move(*futureResponseMessage->value().toCustomClass<Message>());
     responseMessage.setId(messageId);
+
     std::vector<c10::DeviceIndex> devices;
     try {
       devices = getDevicesForRemote(pipe->getRemoteName(), responseMessage);
     } catch (const std::exception& e) {
       responseMessage = createExceptionResponse(e.what(), messageId);
+    }
+
+    auto ctxDevices = ctx->devices();
+    if (!ctxDevices.empty()) {
+      // FIXME: skipping this check when ctxDevices is empty to allow
+      // RRef.to_here().
+      for (const auto& tensor : responseMessage.tensors()) {
+        const auto device = tensor.device().index();
+        if (device != -1 && ctxDevices.find(device) == ctxDevices.end()) {
+          std::ostringstream oss;
+          std::copy(
+              ctxDevices.begin(),
+              ctxDevices.end(),
+              // interpreting c10::DeviceIndex as int32_t to avoid printing
+              // it as a char.
+              std::ostream_iterator<int32_t>(oss, ", "));
+          responseMessage = createExceptionResponse(
+              c10::str(
+                  "RPC detected that a user-function output tensor on device ",
+                  int32_t(device),
+                  ". This device is not one of the input tensor devices: ",
+                  oss.str(),
+                  "which is not yet supported. Please file a feature request "
+                  "issue in PyTorch GitHub repo."),
+              messageId);
+          break;
+        }
+      }
     }
 
     pipeWrite(

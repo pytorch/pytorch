@@ -410,7 +410,7 @@ class TestAdam(hu.HypothesisTestCase):
             dc, op,
             [param, mom1, mom2, indices, grad, LR, ITER],
             [0, 1, 2, 3],
-            input_device_options=input_device_options)   
+            input_device_options=input_device_options)
 
         self.assertReferenceChecks(
             gc, op,
