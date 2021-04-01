@@ -7,6 +7,7 @@
 #endif
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
@@ -430,6 +431,54 @@ void initTensorExprBindings(PyObject* module) {
       [](Stmt* stmt) { return IRSimplifier::simplify(stmt); },
       py::return_value_policy::reference);
 
+  using TSGraph = std::shared_ptr<Graph>;
+  py::class_<TensorExprKernel>(te, "TensorExprKernel")
+      .def(py::init<const TSGraph&>())
+      .def(
+          "run",
+          [](TensorExprKernel& self, const py::tuple& inputs) {
+            Stack stack;
+            stack.reserve(inputs.size()); // captures?
+            for (auto& obj : inputs) {
+              stack.push_back(toTypeInferredIValue(obj));
+            }
+            auto g_inputs = self.graph()->inputs();
+            for (size_t i = 0; i < inputs.size(); ++i) {
+              if (stack[i].isTensor()) {
+                g_inputs[i]->setType(stack[i].type());
+              }
+            }
+            self.run(stack);
+            return createPyObjectForStack(std::move(stack));
+          })
+      .def(
+          "fallback",
+          [](TensorExprKernel& self, const py::tuple& inputs) {
+            Stack stack;
+            stack.reserve(inputs.size()); // captures?
+            for (auto& obj : inputs) {
+              stack.push_back(toTypeInferredIValue(obj));
+            }
+            auto g_inputs = self.graph()->inputs();
+            for (size_t i = 0; i < inputs.size(); ++i) {
+              if (stack[i].isTensor()) {
+                g_inputs[i]->setType(stack[i].type());
+              }
+            }
+            self.fallback(stack);
+            return createPyObjectForStack(std::move(stack));
+          })
+      .def(
+          "get_codegen_stmt",
+          [](TensorExprKernel& self) { return self.getCodeGenStmt(); },
+          py::return_value_policy::reference)
+      .def(
+          "get_code_text",
+          [](TensorExprKernel& self, const std::string& attr = "") {
+            return self.getCodeText(attr);
+          },
+          py::arg("attr") = "");
+
   py::class_<CodeGen>(te, "CodeGen")
       .def(
           "call",
@@ -442,7 +491,7 @@ void initTensorExprBindings(PyObject* module) {
             self.call(value_ptrs);
           })
       .def(
-          "getCodeText",
+          "get_code_text",
           [](CodeGen& self, const std::string& attr = "") {
             return self.getCodeText(attr);
           },
