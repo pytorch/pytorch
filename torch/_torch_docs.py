@@ -3082,7 +3082,10 @@ Computes the base two exponential function of :attr:`input`.
 
 .. math::
     y_{i} = 2^{x_{i}}
+
+.. note:: Alias for :func:`torch.special.exp2`.
 """ + r"""
+
 Args:
     {input}
 
@@ -3104,6 +3107,10 @@ of :attr:`input`.
 
 .. math::
     y_{i} = e^{x_{i}} - 1
+
+.. note:: This function provides greater precision than exp(x) - 1 for small values of x.
+
+.. note:: Alias for :func:`torch.special.expm1`.
 """ + r"""
 
 Args:
@@ -6513,6 +6520,9 @@ total number of elements in each tensor need to be the same.
 
 .. note:: When the shapes do not match, the shape of :attr:`mean`
           is used as the shape for the returned output tensor
+
+.. note:: When :attr:`std` is a CUDA tensor, this function synchronizes
+          its device with the CPU.
 
 Args:
     mean (Tensor): the tensor of per-element means

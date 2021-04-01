@@ -29,7 +29,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       : TensorImpl(key_set, data_type, device),
         opaque_handle_(std::move(opaque_handle)) {
     set_storage_access_should_throw();
-    set_is_contiguous_policy(IsContiguousPolicy::AlwaysThrow);
+    set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
     sizes_and_strides_.set_sizes(sizes);
     refresh_numel();
     is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;

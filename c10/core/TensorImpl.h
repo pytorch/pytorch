@@ -483,27 +483,35 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Tensors with non-trivial strides are not contiguous.  See
    * compute_contiguous() for the exact definition of whether or not
    * a tensor is contiguous or not.
+   *
+   * NOTE: is_contiguous is only `TENSORIMPL_MAYBE_VIRTUAL` for
+   * backward compatibility. See `set_has_contiguity_policy` and
+   * `is_contiguous_custom` for the encouraged customization point.
    */
   TENSORIMPL_MAYBE_VIRTUAL bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
-    // Slow path subclass customizations. Keep inline code as small as
-    // possible.
-    if (C10_UNLIKELY(is_contiguous_policy_ != IsContiguousPolicy::DefaultBehavior)) {
-      return is_contiguous_customized(memory_format);
+    if (C10_UNLIKELY(has_contiguity_ != HasContiguityPolicy::Default)) {
+      return is_contiguous_nondefault_policy_impl(memory_format);
     }
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
     if (memory_format == at::MemoryFormat::ChannelsLast) {
       return is_channels_last_contiguous_;
-    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+    }
+    else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
       return is_channels_last_3d_contiguous_;
     }
     return is_contiguous_;
   }
 
-  bool is_contiguous_customized(at::MemoryFormat memoryFormat) const;
-
  private:
-  [[noreturn]] void throw_is_contiguous_not_allowed_error() const;
-  [[noreturn]] void throw_is_contiguous_in_other_formats_not_allowed_error() const;
+  bool is_contiguous_nondefault_policy_impl(at::MemoryFormat) const;
+
+ protected:
+  /**
+   * Customization point for is_contiguous; must also
+   * set_has_contiguity_policy(HasContiguityPolicy::Custom) for this
+   * to be called.
+   */
+  virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
 
  public:
   bool is_sparse() const {
@@ -581,6 +589,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // file aten/src/ATen/core/boxing/impl/test_helpers.h
   void remove_autograd_key() {
     key_set_ = key_set_ - autograd_dispatch_keyset;
+  }
+
+  // Inference tensor doesn't have autograd or InplaceOrView key.
+  bool is_inference_tensor() {
+    bool no_InplaceOrView = !key_set_.has(c10::DispatchKey::InplaceOrView);
+    bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(no_InplaceOrView == no_Autograd,
+      "InplaceOrView and Autograd keys must be on/off at the same time.");
+    return no_InplaceOrView && no_Autograd;
   }
 
   int64_t get_device() const {
@@ -1737,25 +1754,23 @@ public:
 
 protected:
   // Policy for adjusting the behavior of is_contiguous(). Allows
-  // subclass customization while still being able to inline is_contiguous().
-  enum class IsContiguousPolicy : uint8_t {
-    // Allow is_contiguous to work normally,.
-    DefaultBehavior,
-    // is_contiguous() is not allowed; throw an exception.
-    AlwaysThrow,
-    // is_contiguous() is only allowed with MemoryFormat::Contiguous;
-    // throw otherwise.
-    ThrowUnlessContiguousMemoryFormat,
-    // is_contiguous() will return true if and only if passed
-    // MemoryFormat::Contiguous.
-    ForceContiguous,
+  // subclass customization while still being able to inline
+  // is_contiguous() in the common case.
+  enum class HasContiguityPolicy : uint8_t {
+    // Default behavior: check is_contiguous_ and similar bitflags.
+    Default,
+    // Throw a generic error message that this tensor type does not
+    // support is_contiguous.
+    ContiguityNotSupported,
+    // Call virtual is_contiguous_custom method to implement custom
+    // is_contiguous behavior.
+    CustomBehavior,
   };
 
-  void set_is_contiguous_policy(IsContiguousPolicy p) {
-    is_contiguous_policy_ = p;
+  void set_has_contiguity_policy(HasContiguityPolicy p) {
+    has_contiguity_ = p;
   }
 
-protected:
   Storage storage_;
 
 private:
@@ -1831,11 +1846,9 @@ protected:
   // (which do not have a device.)
   c10::optional<c10::Device> device_opt_;
 
-  // Tensor is contiguous.
+  // Tensor is contiguous
   bool is_contiguous_ : 1;
-
-  // Subclass customization policy for is_contiguous().
-  IsContiguousPolicy is_contiguous_policy_ : 2;
+  HasContiguityPolicy has_contiguity_ : 2;
 
   // Tensor is a subclass that does not permit storage access.
   bool storage_access_should_throw_ = false;
@@ -1843,7 +1856,7 @@ protected:
   // default member initializers for bit-fields only available with -std=c++2a or -std=gnu++2a
   inline void init_bitfields() {
     is_contiguous_ = true;
-    is_contiguous_policy_ = IsContiguousPolicy::DefaultBehavior;
+    has_contiguity_ = HasContiguityPolicy::Default;
 
     is_channels_last_ = false;
     is_channels_last_contiguous_ = false;
@@ -1959,7 +1972,7 @@ protected:
 //    SizesAndStrides strides (pre-allocated 4)
 //    storage offset
 //    numel
-//    data type (2), device(3), is_contiguous bitfields(1), storage_access_should_throw_(1), other bitfields(1)
+//    data type, device, is_contiguous, storage_access_should_throw_, bitfields
 //    DispatchKeySet
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...

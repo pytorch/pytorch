@@ -51,7 +51,7 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
 
   is_non_overlapping_and_dense_ = false;
   set_storage_access_should_throw();
-  set_is_contiguous_policy(IsContiguousPolicy::AlwaysThrow);
+  set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
 }
 
 IntArrayRef SparseTensorImpl::strides() const {

@@ -4,6 +4,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
+#include <c10/core/InferenceMode.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -84,10 +85,15 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   // a backend DispatchKey and an AutogradBackend key.
   // We automatically add the corresponding autograd key to key_set_ so that backends can stay
   // in the old way of only registering with backend key like DispatchKey::CPU.
-  // TODO: Ideally this logic fits best in Variable/Autograd layer so that we only
-  // add AutogradBackend key when the tensor requires grad.
-  DispatchKey k = key_set.highestPriorityBackendTypeId();
-  key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
+  if (c10::InferenceMode::is_enabled()) {
+    // See Note [Expected TLS state in InferenceMode] for why we don't add Autograd & InplaceOrView keys.
+    key_set_ = key_set;
+  } else {
+    // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
+    //       See Note [Dream: skip VariableType kernel when requires_grad=false]
+    DispatchKey k = key_set.highestPriorityBackendTypeId();
+    key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
+  }
 
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
   // Storages with default devices.
@@ -270,39 +276,22 @@ void TensorImpl::throw_storage_access_error() const {
   TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
-bool TensorImpl::is_contiguous_customized(at::MemoryFormat memoryFormat) const {
-  switch (is_contiguous_policy_) {
-    case IsContiguousPolicy::AlwaysThrow:
-      throw_is_contiguous_not_allowed_error();
-    case IsContiguousPolicy::ThrowUnlessContiguousMemoryFormat:
-      if (memoryFormat == MemoryFormat::Contiguous) {
-        return is_contiguous_;
-      }
-      throw_is_contiguous_in_other_formats_not_allowed_error();
-    case IsContiguousPolicy::ForceContiguous:
-      return memoryFormat == MemoryFormat::Contiguous;
-    case IsContiguousPolicy::DefaultBehavior:
-      TORCH_INTERNAL_ASSERT(
-          false, "is_contiguous_customized somehow called with default behavior policy!");
-  }
-}
-
-void TensorImpl::throw_is_contiguous_not_allowed_error() const {
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false, "Tensors of type ", tensorimpl_type_name(),
-      " do not have is_contiguous");
-}
-
-void TensorImpl::throw_is_contiguous_in_other_formats_not_allowed_error() const {
-  // HACK: Preserve vmap error text for BatchedTensorImpl.
-  if (!strcmp(tensorimpl_type_name(), "BatchedTensorImpl")) {
+bool TensorImpl::is_contiguous_nondefault_policy_impl(at::MemoryFormat memory_format) const {
+  if (has_contiguity_ == HasContiguityPolicy::ContiguityNotSupported) {
     TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "NYI: querying is_contiguous inside of vmap for memory_format other "
-        "than torch.contiguous_format");
+        false, "Tensors of type ", tensorimpl_type_name(),
+        " do not have is_contiguous");
+  } else {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(has_contiguity_ == HasContiguityPolicy::CustomBehavior);
+    return is_contiguous_custom(memory_format);
   }
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false, "Tensors of type ", tensorimpl_type_name(),
-      " only allow is_contiguous() with torch.contiguous_format");
+}
+
+bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "TensorImpl::is_contiguous_custom should never be called; did you "
+      "set_has_contiguity_policy and forget to override is_contiguous_custom?");
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
