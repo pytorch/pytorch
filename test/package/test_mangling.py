@@ -7,6 +7,8 @@ from torch.package._mangling import (
 )
 from torch.testing._internal.common_utils import run_tests
 
+from io import BytesIO
+
 try:
     from .common import PackageTestCase
 except ImportError:
@@ -78,12 +80,13 @@ class TestMangling(PackageTestCase):
 
         obj = package_a.subpackage.PackageASubpackageObject()
         obj2 = package_a.PackageAObject(obj)
-        f1 = self.temp()
+        f1 = BytesIO()
         with PackageExporter(f1, verbose=False) as pe:
             pe.save_pickle("obj", "obj.pkl", obj2)
-
+        f1.seek(0)
         importer1 = PackageImporter(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
+        f1.seek(0)
         importer2 = PackageImporter(f1)
         loaded2 = importer2.load_pickle("obj", "obj.pkl")
 

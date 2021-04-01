@@ -45,8 +45,16 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or
       a one-element tuple `(sW,)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a one-element tuple `(padW,)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
     dilation: the spacing between kernel elements. Can be a single number or
       a one-element tuple `(dW,)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
@@ -78,14 +86,24 @@ Note:
         **reproducibility_notes, **tf32_notes
     )
     + r"""
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
     weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padH, padW)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
+
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
@@ -125,8 +143,17 @@ Args:
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padT, padH, padW)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
+
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dT, dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
@@ -1850,6 +1877,13 @@ def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tens
         - output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
           and all but the last dimension are the same shape as the input.
     """
+    if has_torch_function_variadic(input1, input2, weight):
+        return handle_torch_function(
+            bilinear,
+            (input1, input2, weight),
+            input1, input2, weight,
+            bias=bias
+        )
     return torch.bilinear(input1, input2, weight, bias)
 
 
@@ -1974,6 +2008,12 @@ def embedding(
                  [ 0.6262,  0.2438,  0.7471]]])
     """
 
+    if has_torch_function_variadic(input, weight):
+        return handle_torch_function(
+            embedding, (input, weight),
+            input, weight, padding_idx, max_norm, norm_type,
+            scale_grad_by_freq, sparse
+        )
     if padding_idx is not None:
         if padding_idx > 0:
             assert padding_idx < weight.size(0), "Padding_idx must be within num_embeddings"
@@ -2385,6 +2425,13 @@ def ctc_loss(
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
+    if has_torch_function_variadic(log_probs, targets, input_lengths, target_lengths):
+        return handle_torch_function(
+            ctc_loss,
+            (log_probs, targets, input_lengths, target_lengths),
+            log_probs, targets, input_lengths, target_lengths,
+            blank=blank, reduction=reduction, zero_infinity=zero_infinity
+        )
     return torch.ctc_loss(
         log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction), zero_infinity
     )
@@ -2457,43 +2504,7 @@ def nll_loss(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    dim = input.dim()
-    if dim < 2:
-        raise ValueError("Expected 2 or more dimensions (got {})".format(dim))
-
-    if input.size(0) != target.size(0):
-        raise ValueError(
-            "Expected input batch_size ({}) to match target batch_size ({}).".format(input.size(0), target.size(0))
-        )
-    if dim == 2:
-        ret = torch._C._nn.nll_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-    elif dim == 4:
-        ret = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-    else:
-        # dim == 3 or dim > 4
-        n = input.size(0)
-        c = input.size(1)
-        out_size = (n,) + input.size()[2:]
-        if target.size()[1:] != input.size()[2:]:
-            raise ValueError("Expected target size {}, got {}".format(out_size, target.size()))
-        input = input.contiguous()
-        target = target.contiguous()
-        # support empty batches, see #15870
-        if input.numel() > 0:
-            input = input.view(n, c, 1, -1)
-        else:
-            input = input.view(n, c, 0, 0)
-        if target.numel() > 0:
-            target = target.view(n, 1, -1)
-        else:
-            target = target.view(n, 0, 0)
-        reduction_enum = _Reduction.get_enum(reduction)
-        if reduction != "none":
-            ret = torch._C._nn.nll_loss2d(input, target, weight, reduction_enum, ignore_index)
-        else:
-            out = torch._C._nn.nll_loss2d(input, target, weight, reduction_enum, ignore_index)
-            ret = out.view(out_size)
-    return ret
+    return torch._C._nn.nll_loss_nd(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
 
 
 def poisson_nll_loss(
@@ -2771,7 +2782,7 @@ def cross_entropy(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)
+    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
 
 
 def binary_cross_entropy(
@@ -4151,6 +4162,8 @@ def pairwise_distance(x1: Tensor, x2: Tensor, p: float = 2.0, eps: float = 1e-6,
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
+    if has_torch_function_variadic(x1, x2):
+        return handle_torch_function(pairwise_distance, (x1, x2), x1, x2, p=p, eps=eps, keepdim=keepdim)
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
