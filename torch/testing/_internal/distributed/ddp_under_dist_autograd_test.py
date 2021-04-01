@@ -97,7 +97,7 @@ class RemoteEM(nn.Module):
         self.em = nn.EmbeddingBag(
             num_embeddings,
             embedding_dim,
-            _weight=torch.Tensor([init_em] * num_embeddings),
+            _weight=torch.tensor([init_em] * num_embeddings),
         )
 
     def forward(self, input: torch.Tensor):
@@ -278,10 +278,10 @@ def get_training_examples():
     # Every example has another one that has exactly the same features but an
     # opposite value. Therefore, their grads cancel each other in all-reduce.
     for value in (-1, 1):
-        for x in (-1 * value, 1 * value):
-            for y in (1 * value, -1 * value):
+        for x in (-1.0 * value, 1.0 * value):
+            for y in (1.0 * value, -1.0 * value):
                 for z in (0, 1):
-                    training_examples.dense_features[idx, :] = torch.Tensor((x, y))
+                    training_examples.dense_features[idx, :] = torch.tensor((x, y))
                     training_examples.sparse_features[idx] = z
                     training_examples.values[idx] = value
                     idx += 1
