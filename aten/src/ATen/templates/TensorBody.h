@@ -881,8 +881,9 @@ template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Tensor return type
-  std::function<void(Tensor)> fn(hook);
-  return _register_hook([fn](const Tensor& grad) {
+  static_assert(std::is_same<decltype(hook(Tensor())), void>::value,
+                "Expected hook to return void");
+  return _register_hook([fn=std::forward<T>(hook)](const Tensor& grad) {
     fn(grad);
     return Tensor();
   });
@@ -890,7 +891,7 @@ auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
 
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
-  return _register_hook(hook);
+  return _register_hook(std::forward<T>(hook));
 }
 
 namespace detail {
