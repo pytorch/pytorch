@@ -451,6 +451,7 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 
 } // namespace
 
+
 Tensor& quantile_out(
     const Tensor& self,
     const Tensor& q,
@@ -462,7 +463,7 @@ Tensor& quantile_out(
       out,
       self,
       q,
-      dim,
+      std::move(dim),
       keepdim,
       get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/false);
@@ -481,7 +482,7 @@ Tensor& quantile_out(
   return at::native::quantile_out(
       self,
       at::scalar_tensor(q, self.options()),
-      dim,
+      std::move(dim),
       keepdim,
       interpolation,
       out);
@@ -498,7 +499,7 @@ Tensor quantile(
       out,
       self,
       q,
-      dim,
+      std::move(dim),
       keepdim,
       get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/false);
@@ -514,7 +515,7 @@ Tensor quantile(
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::quantile(
-      self, at::scalar_tensor(q, self.options()), dim, keepdim, interpolation);
+      self, at::scalar_tensor(q, self.options()), std::move(dim), keepdim, interpolation);
 }
 
 Tensor& nanquantile_out(
@@ -528,7 +529,7 @@ Tensor& nanquantile_out(
       out,
       self,
       q,
-      dim,
+      std::move(dim),
       keepdim,
       get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/true);
@@ -547,7 +548,7 @@ Tensor& nanquantile_out(
   return at::native::nanquantile_out(
       self,
       at::scalar_tensor(q, self.options()),
-      dim,
+      std::move(dim),
       keepdim,
       interpolation,
       out);
@@ -564,7 +565,7 @@ Tensor nanquantile(
       out,
       self,
       q,
-      dim,
+      std::move(dim),
       keepdim,
       get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/true);
@@ -580,7 +581,7 @@ Tensor nanquantile(
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::nanquantile(
-      self, at::scalar_tensor(q, self.options()), dim, keepdim, interpolation);
+      self, at::scalar_tensor(q, self.options()), std::move(dim), keepdim, interpolation);
 }
 
 Tensor& quantile_out(
@@ -589,7 +590,7 @@ Tensor& quantile_out(
     optional<int64_t> dim,
     bool keepdim,
     Tensor& out) {
-  return at::native::quantile_out(self, q, dim, keepdim, "linear", out);
+  return at::native::quantile_out(self, q, std::move(dim), keepdim, "linear", out);
 }
 
 Tensor& quantile_out(
@@ -598,7 +599,7 @@ Tensor& quantile_out(
     optional<int64_t> dim,
     bool keepdim,
     Tensor& out) {
-  return at::native::quantile_out(self, q, dim, keepdim, "linear", out);
+  return at::native::quantile_out(self, q, std::move(dim), keepdim, "linear", out);
 }
 
 Tensor quantile(
@@ -606,7 +607,7 @@ Tensor quantile(
     const Tensor& q,
     optional<int64_t> dim,
     bool keepdim) {
-  return at::native::quantile(self, q, dim, keepdim, "linear");
+  return at::native::quantile(self, q, std::move(dim), keepdim, "linear");
 }
 
 Tensor quantile(
@@ -614,7 +615,7 @@ Tensor quantile(
     double q,
     optional<int64_t> dim,
     bool keepdim) {
-  return at::native::quantile(self, q, dim, keepdim, "linear");
+  return at::native::quantile(self, q, std::move(dim), keepdim, "linear");
 }
 
 Tensor& nanquantile_out(
@@ -623,7 +624,7 @@ Tensor& nanquantile_out(
     optional<int64_t> dim,
     bool keepdim,
     Tensor& out) {
-  return at::native::nanquantile_out(self, q, dim, keepdim, "linear", out);
+  return at::native::nanquantile_out(self, q, std::move(dim), keepdim, "linear", out);
 }
 
 Tensor& nanquantile_out(
@@ -632,7 +633,7 @@ Tensor& nanquantile_out(
     optional<int64_t> dim,
     bool keepdim,
     Tensor& out) {
-  return at::native::nanquantile_out(self, q, dim, keepdim, "linear", out);
+  return at::native::nanquantile_out(self, q, std::move(dim), keepdim, "linear", out);
 }
 
 Tensor nanquantile(
@@ -640,7 +641,7 @@ Tensor nanquantile(
     const Tensor& q,
     optional<int64_t> dim,
     bool keepdim) {
-  return at::native::nanquantile(self, q, dim, keepdim, "linear");
+  return at::native::nanquantile(self, q, std::move(dim), keepdim, "linear");
 }
 
 Tensor nanquantile(
@@ -648,7 +649,7 @@ Tensor nanquantile(
     double q,
     optional<int64_t> dim,
     bool keepdim) {
-  return at::native::nanquantile(self, q, dim, keepdim, "linear");
+  return at::native::nanquantile(self, q, std::move(dim), keepdim, "linear");
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
@@ -697,14 +698,13 @@ std::tuple<Tensor, Tensor> kthvalue(
   return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
 }
 
-std::tuple<Tensor&, Tensor&> topk_out_cpu(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+std::tuple<Tensor&, Tensor&> topk_out_cpu(const Tensor& self,
     int64_t k,
     int64_t dim_,
     bool largest,
-    bool sorted) {
+    bool sorted,
+    Tensor& values,
+    Tensor& indices) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
   TORCH_CHECK(
       k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
@@ -828,13 +828,12 @@ Tensor nanmedian_cpu(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/true);
 }
 
-std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(const Tensor& self,
     c10::optional<bool> stable,
     int64_t dim,
-    bool descending) {
+    bool descending,
+    Tensor& values,
+    Tensor& indices) {
   values.resize_(self.sizes()).copy_(self);
   indices.resize_(self.sizes());
 
@@ -850,13 +849,13 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(
   return std::forward_as_tuple(values, indices);
 }
 
-std::tuple<Tensor&, Tensor&> sort_out_cpu(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
+std::tuple<Tensor&, Tensor&> sort_out_cpu(const Tensor& self,
     int64_t dim,
-    bool descending) {
-  return sort_out_cpu_stable(values, indices, self, /*stable=*/false, dim, descending);
+    bool descending,
+    Tensor& values,
+    Tensor& indices) {
+  return at::native::sort_out_cpu_stable(
+      self, /*stable=*/false, dim, descending, values, indices);
 }
 
 std::tuple<Tensor, Tensor> sort_cpu_stable(
@@ -867,7 +866,7 @@ std::tuple<Tensor, Tensor> sort_cpu_stable(
   TORCH_CHECK(!self.is_complex(), "sort(): input tensor must be of non-complex type");
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return sort_out_cpu_stable(values, indices, self, stable, dim, descending);
+  return at::native::sort_out_cpu_stable(self, stable, dim, descending, values, indices);
 }
 
 std::tuple<Tensor, Tensor> sort_cpu(
@@ -877,7 +876,7 @@ std::tuple<Tensor, Tensor> sort_cpu(
   return sort_cpu_stable(self, /*stable=*/false, dim, descending);
 }
 
-Tensor& msort_out(Tensor& values, const Tensor& self) {
+Tensor& msort_out(const Tensor& self, Tensor& values) {
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::sort_out(values, indices, self, 0, false);
   return values;
