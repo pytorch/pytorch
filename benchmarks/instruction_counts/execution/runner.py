@@ -1,3 +1,4 @@
+"""Run benchmarks while handling parallelism, isolation, and fault tolerance."""
 import math
 import multiprocessing
 import subprocess
@@ -15,12 +16,25 @@ CPU_COUNT: int = multiprocessing.cpu_count()
 
 class WorkerFailed(Exception):
     """Raised in the main process when a worker failure is detected."""
-    def __init__(self, wrapped_trace: Optional[str] = None) -> None:
+    def __init__(self, cmd: str, wrapped_trace: Optional[str] = None) -> None:
+        self.cmd: str = cmd
         self.wrapped_trace: Optional[str] = wrapped_trace
         super().__init__()
 
 
 class CorePool:
+    """Allocator style helper class to assign individual tasks to a core range.
+
+    Pinning tasks to separate cores (or core ranges if `num_threads` > 1)
+    serves two purposes. First, it prevents the machine from being overloaded,
+    which can result in OOMs or Callgrind crashes. Second, it helps reduce
+    noise in the wall times, which are collected as a secondary metric. For
+    multi-threaded workloads, adjacency is important. Often pairs of cores
+    share silicon (e.g. cache), while far away cores may lie on separate NUMA
+    nodes. For this reason, CorePool will only allocate contiguous core ranges.
+    This falls short of full architecture awareness, and instead tries to find
+    a balance between rigor and engineering complexity.
+    """
     def __init__(self, min_core_id: int, max_core_id: int) -> None:
         assert min_core_id >= 0
         assert max_core_id >= min_core_id
@@ -101,6 +115,7 @@ class Runner:
         except WorkerFailed as e:
             print('Shutting down all outstanding jobs before re-raising.')
             self._force_shutdown(verbose=True)
+            print(f"Cmd: {e.cmd}")
             if e.wrapped_trace:
                 print(e.wrapped_trace)
             else:
@@ -128,7 +143,7 @@ class Runner:
         active_jobs: List[InProgress] = []
         for job in self._active_jobs:
             self._currently_processed = job.work_order
-            if not job.ready:
+            if not job.check_finished():
                 active_jobs.append(job)
                 continue
 
@@ -141,7 +156,7 @@ class Runner:
 
             else:
                 assert isinstance(result, WorkerFailure)
-                raise WorkerFailed(wrapped_trace=result.failure_trace)
+                raise WorkerFailed(cmd=job.proc.cmd, wrapped_trace=result.failure_trace)
         self._currently_processed = None
         self._active_jobs.clear()
         self._active_jobs.extend(active_jobs)

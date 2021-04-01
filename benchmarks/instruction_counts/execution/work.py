@@ -83,7 +83,12 @@ class _BenchmarkProcess:
         cmd.append(_ENV)
 
         if self._cpu_list is not None:
-            cmd.extend(["taskset", "--cpu-list", self._cpu_list])
+            cmd.extend([
+                f"GOMP_CPU_AFFINITY={self._cpu_list}",
+                "taskset",
+                "--cpu-list",
+                self._cpu_list
+            ])
 
         cmd.extend([
             _PYTHON, WORKER_PATH,
@@ -175,8 +180,7 @@ class InProgress:
     def duration(self) -> float:
         return self._proc.duration
 
-    @property
-    def ready(self) -> bool:
+    def check_finished(self) -> bool:
         if self._proc.poll() is not None:
             return True
 

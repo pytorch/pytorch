@@ -55,11 +55,11 @@ def get_size_of_all_nodes(fx_module: GraphModule, args: List[torch.Tensor]) -> N
 
 
 def get_shape_and_dtype(node: Node) -> Any:
-    shape = getattr(node, "shape", None)
+    shape = node.meta.get('shape')
     if not shape:
         raise RuntimeError("Node has no shape attr")
 
-    dtype = getattr(node, "dtype", None)
+    dtype = node.meta.get('dtype')
     if not dtype:
         raise RuntimeError("Node has no dtype attr")
 
