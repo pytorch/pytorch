@@ -52,7 +52,9 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     } break;
     case prim::DictConstruct: {
       dictConstruct(
-          stack, n->output()->type()->expect<DictType>(), n->inputs().size());
+          stack,
+          n->output()->type()->expectRef<DictType>(),
+          n->inputs().size());
     } break;
     case prim::CreateObject: {
       createObject(stack, n->output()->type()->expect<ClassType>());
@@ -132,8 +134,9 @@ struct ConstantPropagator {
     return ConstantPropagator(std::move(graph), false, false);
   }
 
-  void run() {
+  bool run() {
     ConstantPropagation(graph_->block());
+    return made_change_;
   }
 
  private:
@@ -142,11 +145,7 @@ struct ConstantPropagator {
       bool aliasing_types,
       bool ignore_custom_classes)
       : graph_(std::move(graph)) {
-    if (aliasing_types) {
-      aliasDb_ = torch::make_unique<AliasDb>(graph_);
-    } else {
-      aliasDb_ = nullptr;
-    }
+    aliasing_types_ = aliasing_types;
     ignore_custom_classes_ = ignore_custom_classes;
   }
 
@@ -164,6 +163,7 @@ struct ConstantPropagator {
     for (size_t i = 0; i < outputs.size(); ++i) {
       auto new_output = tryInsertConstant(*graph, outputs[i]);
       if (new_output) {
+        made_change_ = true;
         GRAPH_UPDATE(
             "Folding %",
             n->outputs()[i]->debugName(),
@@ -185,6 +185,7 @@ struct ConstantPropagator {
       n->outputs().at(i)->replaceAllUsesWith(
           n->inputs().at(i + loop_input_offset));
     }
+    made_change_ = true;
     n->destroy();
   }
 
@@ -236,6 +237,7 @@ struct ConstantPropagator {
     size_t block_index = *input_bool ? 0 : 1;
     ConstantPropagation(n->blocks().at(block_index));
     inlineIfBody(n->blocks().at(block_index));
+    made_change_ = true;
   }
 
   void replaceAndRemoveIfOutput(Node* n, size_t i, Value* replacement) {
@@ -246,7 +248,7 @@ struct ConstantPropagator {
   }
 
   // remove extra outputs from the node
-  bool removeExtraIfOutputs(Node* n) {
+  void removeExtraIfOutputs(Node* n) {
     TORCH_CHECK(n->kind() == prim::If, "Only supported for If nodes");
     auto true_block = n->blocks()[0];
     auto false_block = n->blocks()[1];
@@ -274,12 +276,12 @@ struct ConstantPropagator {
 
       i++; // increment bc we didn't remove current index
     }
-    // an output was removed
-    return initial_outputs != true_block->outputs().size();
+    made_change_ |= initial_outputs != true_block->outputs().size();
   }
 
   // remove extra outputs from the node
   void removeExtraLoopOutputs(Node* node) {
+    auto initial_outputs = node->outputs().size();
     auto loop_body = node->blocks().at(0);
     auto loop_input_offset = 2; // offset of loop carried deps in input list
     auto loop_body_offset =
@@ -300,6 +302,7 @@ struct ConstantPropagator {
         loop_body->eraseOutput(loop_body_offset + i);
       }
     }
+    made_change_ |= initial_outputs != node->outputs().size();
   }
 
   // An Op has runnable inputs if:
@@ -323,10 +326,17 @@ struct ConstantPropagator {
     });
   }
 
+  AliasDb* getOrCreateAliasDb() {
+    if (!aliasDb_) {
+      aliasDb_ = std::make_unique<AliasDb>(graph_);
+    }
+    return aliasDb_.get();
+  }
+
   bool supportedNode(Node* n) {
     bool no_mutation;
-    if (aliasDb_) {
-      no_mutation = !aliasDb_->hasWriters(n);
+    if (aliasing_types_) {
+      no_mutation = !getOrCreateAliasDb()->hasWriters(n);
     } else {
       no_mutation =
           noMutableValues(n->inputs()) && noMutableValues(n->outputs());
@@ -375,26 +385,35 @@ struct ConstantPropagator {
   }
 
   std::shared_ptr<Graph> graph_;
-  std::unique_ptr<AliasDb> aliasDb_;
+  // lazily initialized if using aliasing_types, otherwise not initialized
+  std::unique_ptr<AliasDb> aliasDb_ = nullptr;
+  bool aliasing_types_;
+  bool made_change_ = false;
   bool ignore_custom_classes_;
 };
 } // anonymous namespace
 
-void ConstantPropagation(
+bool ConstantPropagation(
     std::shared_ptr<Graph>& graph,
     bool ignore_custom_classes) {
   ConstantPropagator cp =
       ConstantPropagator::WithAliasDb(graph, ignore_custom_classes);
-  cp.run();
-  EliminateDeadCode(graph);
+  bool made_change = cp.run();
+  if (made_change) {
+    EliminateDeadCode(graph);
+  }
   GRAPH_DUMP("After ConstantPropagation: ", graph);
+  return made_change;
 }
 
-void ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
+bool ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
   ConstantPropagator cp = ConstantPropagator::NoAliasDb(graph);
-  cp.run();
-  EliminateDeadCode(graph);
+  bool made_change = cp.run();
+  if (made_change) {
+    EliminateDeadCode(graph);
+  }
   GRAPH_DUMP("After ConstantPropagation: ", graph);
+  return made_change;
 }
 
 } // namespace jit
