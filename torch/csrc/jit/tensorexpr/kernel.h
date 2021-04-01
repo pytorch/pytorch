@@ -35,6 +35,10 @@ class TORCH_API TensorExprKernel {
     return codegen_->getCodeText(attr);
   }
 
+  const std::shared_ptr<Graph> graph() {
+    return graph_;
+  }
+
  private:
   enum ElementType {
     kAllTypes = 0,
@@ -141,6 +145,8 @@ class TORCH_API TensorExprKernel {
   Tensor* computeSoftmax(const torch::jit::Value* v, bool log_softmax);
 
   Tensor* computeCatWoConditionals(const torch::jit::Value* v);
+
+  Tensor* computeConv2d(const torch::jit::Value* v);
 
   Tensor* computeValue(const torch::jit::Value* v);
 

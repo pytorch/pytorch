@@ -519,6 +519,49 @@ Example::
     tensor(5.7220e-06)
 """)
 
+matrix_power = _add_docstr(_linalg.linalg_matrix_power, r"""
+matrix_power(input, n, *, out=None) -> Tensor
+
+Raises the square matrix :attr:`input`, or each square matrix in a batched
+:attr:`input`, to the integer power :attr:`n`.
+
+If :attr:`n` is 0, the identity matrix (or batch of identity matrices) of the same shape
+as :attr:`input` is returned. If :attr:`n` is negative, the inverse of each matrix
+(if invertible) is computed and then raised to the integer power ``abs(n)``.
+
+Args:
+    input (Tensor): the input matrix of size `(n, n)` or the batch of matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+    n (int): the exponent to raise the :attr:`input` matrix to
+
+Keyword args:
+    out (Tensor, optional): tensor to write the output to.
+
+Example:
+
+    >>> a = torch.randn(3, 3)
+    >>> a
+    tensor([[-0.2270,  0.6663, -1.3515],
+            [-0.9838, -0.4002, -1.9313],
+            [-0.7886, -0.0450,  0.0528]])
+    >>> torch.linalg.matrix_power(a, 0)
+    tensor([[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]])
+    >>> torch.linalg.matrix_power(a, 3)
+    tensor([[ 1.0756,  0.4980,  0.0100],
+            [-1.6617,  1.4994, -1.9980],
+            [-0.4509,  0.2731,  0.8001]])
+    >>> torch.linalg.matrix_power(a.expand(2, -1, -1), -2)
+    tensor([[[ 0.2640,  0.4571, -0.5511],
+            [-1.0163,  0.3491, -1.5292],
+            [-0.4899,  0.0822,  0.2773]],
+
+            [[ 0.2640,  0.4571, -0.5511],
+            [-1.0163,  0.3491, -1.5292],
+            [-0.4899,  0.0822,  0.2773]]])
+""")
+
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
 matrix_rank(input, tol=None, hermitian=False, *, out=None) -> Tensor
 
@@ -651,6 +694,72 @@ Examples::
     tensor(5.4345)
     >>> LA.vector_norm(b, ord=3.5)
     tensor(5.4345)
+""")
+
+multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
+linalg.multi_dot(tensors, *, out=None)
+
+Efficiently multiplies two or more matrices given by :attr:`tensors` by ordering the
+multiplications so that the fewest arithmetic operations are performed.
+
+Every tensor in :attr:`tensors` must be 2D, except for the first and last which
+may be 1D. If the first tensor is a 1D vector of size `n` it is treated as a row vector
+of size `(1, n)`, similarly if the last tensor is a 1D vector of size `n` it is treated
+as a column vector of size `(n, 1)`.
+
+If the first tensor has size `(a, b)` and the last tensor has size `(c, d)` the
+output will have size `(a, d)`. However, if either tensor is 1D then the implied
+dimension of size `1` as described above is squeezed from the output. e.g. for tensors
+of size `(b)` and `(c, d)` the output will have size `(d)`.
+
+.. warning:: This function does not broadcast.
+
+.. note:: This function is implemented by chaining :func:`torch.mm` calls after
+          computing the optimal matrix multiplication order.
+
+.. note:: This function is similar to NumPy's `multi_dot` except that the first and last
+          tensors must be either 1D or 2D whereas NumPy allows them to be nD.
+
+.. note:: The cost of multiplying two matrices with shapes `(a, b)` and `(b, c)` is
+          `a * b * c`. Given matrices `A`, `B` and `C` each with shapes `(10, 100)`,
+          `(100, 5)` and `(5, 50)` respectively, we can calculate the cost of different
+          multiplication orders as follows:
+
+          .. math::
+
+            cost((AB)C) = 10*100*5 + 10*5*50 = 5000 + 2500 = 7500
+            cost(A(BC)) = 10*100*50 + 100*5*50 = 50000 + 25000 = 75000
+
+          In this case, multiplying A and B first followed by C is 10 times faster.
+
+Args:
+    tensors (sequence of Tensors): two or more tensors to multiply. The first and last
+        tensors may be 1D or 2D. Every other tensor must be 2D.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> from torch.linalg import multi_dot
+
+    >>> multi_dot([torch.tensor([1, 2]), torch.tensor([2, 3])])
+    tensor(8)
+    >>> multi_dot([torch.tensor([[1, 2]]), torch.tensor([2, 3])])
+    tensor([8])
+    >>> multi_dot([torch.tensor([[1, 2]]), torch.tensor([[2], [3]])])
+    tensor([[8]])
+
+    >>> a = torch.arange(2 * 3).view(2, 3)
+    >>> b = torch.arange(3 * 2).view(3, 2)
+    >>> c = torch.arange(2 * 2).view(2, 2)
+    >>> multi_dot((a, b, c))
+    tensor([[ 26,  49],
+            [ 80, 148]])
+
+    >>> multi_dot((a.to(torch.float), torch.empty(3, 0), torch.empty(0, 2)))
+    tensor([[0., 0.],
+            [0., 0.]])
 """)
 
 norm = _add_docstr(_linalg.linalg_norm, r"""
@@ -840,7 +949,7 @@ Args:
     compute_uv (bool, optional): whether to compute `U` and `V` or not. Defaults to True.
     out (tuple, optional): a tuple of three tensors to use for the outputs. If compute_uv=False,
                            the 1st and 3rd arguments must be tensors, but they are ignored. E.g. you can
-                           pass `(torch.Tensor(), out_S, torch.Tensor())`
+                           pass `(torch.tensor([]), out_S, torch.tensor([]))`
 
 Example::
 
@@ -1281,8 +1390,8 @@ Example::
     True
     >>> a = torch.randn(3, 4, 5)
     >>> q, r = torch.linalg.qr(a, mode='complete')
-    >>> torch.allclose(torch.matmul(q, r), a)
+    >>> torch.allclose(torch.matmul(q, r), a, atol=1e-5)
     True
-    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(5))
+    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(4), atol=1e-5)
     True
 """)
