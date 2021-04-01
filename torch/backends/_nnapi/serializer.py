@@ -836,7 +836,7 @@ class _NnapiSerializer(object):
 
         op_map = {
             (-1, 1): NNAPI_OperationCode.RELU1,
-            ( 0, 6): NNAPI_OperationCode.RELU6,
+            ( 0, 6): NNAPI_OperationCode.RELU6,  # noqa: E201
         }
 
         opcode = op_map.get((min_val, max_val))

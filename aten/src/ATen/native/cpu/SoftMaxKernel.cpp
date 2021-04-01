@@ -76,7 +76,7 @@ inline void _vec_log_softmax_lastdim(
             scalar_t* output_data = output_data_base + i * dim_size;
             scalar_t tmp_sum = tmp_sum_scalar[j];
             scalar_t max_input = max_input_arr[j];
-            
+
             // It's necessary to keep the order of the operations below.
             // In some cases that input is large digits and the difference
             // is small, if we compute `max_input` plus `tmp_sum` before,

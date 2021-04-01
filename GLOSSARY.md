@@ -1,4 +1,4 @@
-# PyTorch Glossary 
+# PyTorch Glossary
 
 - [PyTorch Glossary](#pytorch-glossary)
 - [Operation and Kernel](#operation-and-kernel)
@@ -39,7 +39,7 @@ For example, this
 to create Custom Operations.
 
 ## Kernel
-Implementation of a PyTorch operation, specifying what should be done when an 
+Implementation of a PyTorch operation, specifying what should be done when an
 operation executes.
 
 ## Compound Operation
@@ -57,7 +57,7 @@ Same as Compound Operation.
 ## Leaf Operation
 An operation that's considered a basic operation, as opposed to a Compound
 Operation. Leaf Operation always has dispatch functions defined, usually has a
-derivative function defined as well. 
+derivative function defined as well.
 
 ## Device Kernel
 Device-specific kernel of a leaf operation.
