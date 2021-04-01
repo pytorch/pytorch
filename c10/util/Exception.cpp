@@ -133,6 +133,10 @@ void warn(SourceLocation source_location, const std::string& msg, const bool ver
   ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
 }
 
+void warn(SourceLocation source_location, detail::CompileTimeEmptyString msg, const bool verbatim) {
+  warn(source_location, "", verbatim);
+}
+
 void warn(SourceLocation source_location, const char* msg, const bool verbatim) {
   ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
 }

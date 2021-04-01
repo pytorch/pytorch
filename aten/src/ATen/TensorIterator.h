@@ -204,7 +204,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   const Tensor& tensor(int arg) const { return operands_[arg].tensor; }
   Tensor& tensor(int arg) { return operands_[arg].tensor; }
 
-  Tensor output(int arg=0) const {
+  const Tensor& output(int arg=0) const {
     AT_ASSERT(arg < num_outputs_);
     return operands_[arg].tensor;
   }
@@ -331,6 +331,7 @@ public:
 
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 
+  void build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_unary_float_op(const Tensor& out, const Tensor& a);
   void build_unary_op(const Tensor& out, const Tensor& a);
