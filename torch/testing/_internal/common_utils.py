@@ -2052,32 +2052,6 @@ class BytesIOContext(io.BytesIO):
         pass
 
 
-def _as_tuple(x):
-    if isinstance(x, tuple):
-        return x
-    elif isinstance(x, list):
-        return tuple(x)
-    else:
-        return x,
-
-
-def has_complex_inputs_or_inputs(fn, inputs):
-    tupled_inputs = _as_tuple(inputs)
-
-    func_out = fn(*tupled_inputs)
-
-    return any(is_tensor_like(o) and o.is_complex() for o in _as_tuple(func_out)) or \
-        any(is_tensor_like(i) and i.is_complex() for i in tupled_inputs)
-
-
-gradcheck_error_msg = \
-    (" fast implementation of gradcheck succeded but"
-     " the slow implementation failed. This is very unexpected, so"
-     " please help file an issue!"
-     " As a temporary workaround you can set 'fast_mode=False' when"
-     " calling into gradcheck wrapper")
-
-
 def gradcheck(fn, inputs, **kwargs):
     # Wrapper around gradcheck that enables certain keys by default.
     # Use this testing-internal gradcheck instead of autograd.gradcheck so that new features like vmap and
@@ -2085,25 +2059,6 @@ def gradcheck(fn, inputs, **kwargs):
     # to be disabled to default for the public-facing api to avoid breaking user code.
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradcheck.
-    #
-    # When fast_and_slow=True, IF 1) the passed 'func' is real to real AND 2) we do not explicitly pass
-    # in fast_mode=False, THEN we run both the fast and slow implementations of gradcheck and compare
-    # to see if the results are the same.
-    if kwargs.pop("fast_and_slow", True):
-        kwargs["fast_and_slow"] = False
-        # When fast_and_slow=True, we make sure the fast and slow implementations behave the same
-        if kwargs.pop("fast_mode", True) and not has_complex_inputs_or_inputs(fn, inputs):
-            fast = gradcheck(fn, inputs, **kwargs, fast_mode=True)
-            try:
-                slow = gradcheck(fn, inputs, **kwargs, fast_mode=False)
-            except Exception:
-                raise RuntimeError("Gradcheck Error:" + gradcheck_error_msg)
-            # For when raise_exception=False
-            if fast is not slow:
-                raise RuntimeError("Gradcheck Error:" + gradcheck_error_msg)
-            return fast and slow
-        return gradcheck(fn, inputs, **kwargs, fast_mode=False)
-
     keys_enabled_by_default = (
         "check_batched_grad",)
 
@@ -2114,25 +2069,7 @@ def gradcheck(fn, inputs, **kwargs):
 
 def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     # Wrapper around gradgradcheck that enables certain keys by default
-    # See gradcheck above for an explanation of why we need something like this and details
-    # on the fast_and_slow parameter, which is specific to the wrapper code.
-    #
-    # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
-    if kwargs.pop("fast_and_slow", True):
-        kwargs["fast_and_slow"] = False
-        # When fast_and_slow=True, we make sure the fast and slow implementations behave the same
-        if kwargs.pop("fast_mode", True) and not has_complex_inputs_or_inputs(fn, inputs):
-            fast = gradgradcheck(fn, inputs, **kwargs, fast_mode=True)
-            try:
-                slow = gradgradcheck(fn, inputs, **kwargs, fast_mode=False)
-            except Exception:
-                raise RuntimeError("Gradgradcheck Error:" + gradcheck_error_msg)
-            # For when raise_exception=False
-            if fast is not slow:
-                raise RuntimeError("Gradgradcheck Error:" + gradcheck_error_msg)
-            return fast and slow
-        return gradgradcheck(fn, inputs, **kwargs, fast_mode=False)
-
+    # See gradcheck above for an explanation of why we need something like this
     keys_enabled_by_default = (
         "check_batched_grad",)
 

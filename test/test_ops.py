@@ -6,13 +6,13 @@ import torch
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
-     gradcheck, gradgradcheck)
+    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, method_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
+from torch.autograd.gradcheck import gradcheck, gradgradcheck
 
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
@@ -121,19 +121,16 @@ class TestGradients(TestCase):
             if check == 'gradcheck':
                 self.assertTrue(gradcheck(fn, gradcheck_args,
                                           check_batched_grad=op.check_batched_grad,
-                                          check_grad_dtypes=True,
-                                          fast_mode=op.fast_gradcheck))
+                                          check_grad_dtypes=True))
             elif check == 'gradgradcheck':
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=False,
                                               check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True,
-                                              fast_mode=op.fast_gradcheck))
+                                              check_grad_dtypes=True))
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=True,
                                               check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True,
-                                              fast_mode=op.fast_gradcheck))
+                                              check_grad_dtypes=True))
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 
