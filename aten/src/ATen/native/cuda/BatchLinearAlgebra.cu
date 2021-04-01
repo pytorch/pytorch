@@ -115,7 +115,7 @@ void magmaOrgqr(
     magma_int_t ldda, scalar_t* tau, scalar_t* dT, magma_int_t nb, magma_int_t* info);
 
 template<class scalar_t, class value_t=scalar_t>
-void magmaSymeig(
+void magmaSyevd(
     magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, scalar_t* dA, magma_int_t ldda,
     value_t* w, scalar_t* wA, magma_int_t ldwa, scalar_t* work, magma_int_t lwork, value_t* rwork,
     magma_int_t lrwork, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info);
@@ -890,7 +890,7 @@ void magmaOrgqr<c10::complex<float>>(
 }
 
 template<>
-void magmaSymeig<double>(
+void magmaSyevd<double>(
     magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, double* dA, magma_int_t ldda,
     double* w, double* wA, magma_int_t ldwa, double* work, magma_int_t lwork, double* rwork,
     magma_int_t lrwork, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
@@ -902,7 +902,7 @@ void magmaSymeig<double>(
 }
 
 template<>
-void magmaSymeig<float>(
+void magmaSyevd<float>(
     magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, float* dA, magma_int_t ldda,
     float* w, float* wA, magma_int_t ldwa, float* work, magma_int_t lwork, float* rwork,
     magma_int_t lrwork, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
@@ -914,7 +914,7 @@ void magmaSymeig<float>(
 }
 
 template<>
-void magmaSymeig<c10::complex<double>, double>(
+void magmaSyevd<c10::complex<double>, double>(
     magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, c10::complex<double>* dA, magma_int_t ldda,
     double* w, c10::complex<double>* wA, magma_int_t ldwa, c10::complex<double>* work, magma_int_t lwork, double* rwork,
     magma_int_t lrwork, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
@@ -926,7 +926,7 @@ void magmaSymeig<c10::complex<double>, double>(
 }
 
 template<>
-void magmaSymeig<c10::complex<float>, float>(
+void magmaSyevd<c10::complex<float>, float>(
     magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, c10::complex<float>* dA, magma_int_t ldda,
     float* w, c10::complex<float>* wA, magma_int_t ldwa, c10::complex<float>* work, magma_int_t lwork, float* rwork,
     magma_int_t lrwork, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
@@ -2051,29 +2051,39 @@ std::tuple<Tensor,Tensor> _linalg_qr_helper_cuda(const Tensor& self, std::string
   r_working_copy = r_working_copy.narrow(-2, 0, n_columns_q).triu();
   return std::make_tuple(q_working_copy, r_working_copy);
 }
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
+static void apply_magma_eigh(Tensor& values, Tensor& vectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
 #ifndef USE_MAGMA
-AT_ERROR("symeig: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+  TORCH_CHECK(
+    false,
+    "Calling torch.linalg.eigh/eigvalsh on a CUDA tensor requires compiling ",
+    "PyTorch with MAGMA. Please use PyTorch built with MAGMA support.");
 #else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == kCPU);
+
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
-  auto self_data = self.data_ptr<scalar_t>();
-  auto eigvals_data = eigvals.data_ptr<value_t>();
-  auto self_matrix_stride = matrixStride(self);
-  auto eigvals_stride = eigvals.size(-1);
-  int64_t batch_size = batchCount(self);
-  magma_int_t n = magma_int_cast(self.size(-1), "n");
 
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
-  magma_vec_t jobz = eigenvectors ? MagmaVec : MagmaNoVec;
+  magma_vec_t jobz = compute_eigenvectors ? MagmaVec : MagmaNoVec;
+
+  magma_int_t n = magma_int_cast(vectors.size(-1), "n");
+  auto lda = std::max<magma_int_t>(1, n);
+  auto batch_size = batchCount(vectors);
+
+  auto vectors_stride = matrixStride(vectors);
+  auto values_stride = values.size(-1);
+
+  auto vectors_data = vectors.data_ptr<scalar_t>();
+  auto values_data = values.data_ptr<value_t>();
+  auto infos_data = infos.data_ptr<magma_int_t>();
 
   scalar_t* wA;
-  ALLOCATE_ARRAY(wA, scalar_t, n * n);
+  ALLOCATE_ARRAY(wA, scalar_t, lda * lda);
 
-  magma_int_t info;
   // Run once, first to get the optimum work sizes.
   // Since we deal with batches of matrices with the same dimensions, doing this outside
   // the loop saves (batch_size - 1) workspace queries which would provide the same result
@@ -2084,30 +2094,34 @@ AT_ERROR("symeig: MAGMA library not found in "
   magma_int_t iwkopt;
   magma_int_t lrwork = -1;
   value_t rwkopt;
-  magmaSymeig<scalar_t, value_t>(jobz, uplo, n, self_data, n, eigvals_data, wA, n, &wkopt, lwork, &rwkopt, lrwork, &iwkopt, liwork, &info);
+  magmaSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_data, lda, values_data,
+    wA, lda, &wkopt, lwork, &rwkopt, lrwork, &iwkopt, liwork, infos_data);
 
   scalar_t* work;
   magma_int_t* iwork;
-  lwork = magma_int_cast(real_impl<scalar_t, value_t>(wkopt), "work_size");
-  liwork = magma_int_cast(iwkopt, "iwork_size");
+  lwork = magma_int_cast(std::max<int64_t>(1, real_impl<scalar_t, value_t>(wkopt)), "work_size");
+  liwork = magma_int_cast(std::max<int64_t>(1, iwkopt), "iwork_size");
   ALLOCATE_ARRAY(work, scalar_t, lwork);
   ALLOCATE_ARRAY(iwork, magma_int_t, liwork);
 
   value_t* rwork = nullptr;
   c10::Storage storage_rwork;
-  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-    lrwork = magma_int_cast(rwkopt, "rwork_size");
+  if (vectors.is_complex()) {
+    lrwork = magma_int_cast(std::max<int64_t>(1, rwkopt), "rwork_size");
     storage_rwork = pin_memory<value_t>(lrwork);
     rwork = static_cast<value_t*>(storage_rwork.data());
   }
 
-  for (int64_t i = 0; i < batch_size; i++) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    value_t* eigvals_working_ptr = &eigvals_data[i * eigvals_stride];
-    magmaSymeig<scalar_t, value_t>(jobz, uplo, n, self_working_ptr, n, eigvals_working_ptr,
-                          wA, n, work, lwork, rwork, lrwork, iwork, liwork, &info);
-    infos[i] = info;
-    if (info != 0) {
+  for (decltype(batch_size) i = 0; i < batch_size; i++) {
+    scalar_t* vectors_working_ptr = &vectors_data[i * vectors_stride];
+    value_t* values_working_ptr = &values_data[i * values_stride];
+    magma_int_t* info_working_ptr = &infos_data[i];
+    magmaSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_working_ptr, lda, values_working_ptr,
+      wA, lda, work, lwork, rwork, lrwork, iwork, liwork, info_working_ptr);
+    // The current behaviour for Linear Algebra functions to raise an error if something goes wrong
+    // or input doesn't satisfy some requirement
+    // therefore return early since further computations will be wasted anyway
+    if (*info_working_ptr != 0) {
       return;
     }
   }
@@ -2115,20 +2129,19 @@ AT_ERROR("symeig: MAGMA library not found in "
 }
 
 std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {
-  std::vector<int64_t> infos(batchCount(self), 0);
+  Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt).device(at::kCPU));
 
-  auto self_sizes = self.sizes().vec();
-  self_sizes.pop_back();
-  ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  auto eigvals_shape = IntArrayRef(self.sizes().data(), self.dim()-1);  // self.shape[:-1]
+  ScalarType real_dtype = toValueType(self.scalar_type());
 
-  // magmaSymeig uses a hybrid CPU-GPU algorithm to compute the eigenvalues and eigenvectors.
+  // magmaSyevd uses a hybrid CPU-GPU algorithm to compute the eigenvalues and eigenvectors.
   // The driver routine magma_(d/s)syev_gpu accepts a tensor on the CPU for eigvalenvalues.
   // The data is later moved to the appropriate device.
   // In the case where self.numel() == 0, we just return an empty tensor of
   // dimensions on the CUDA (to avoid the unnecessary "to(at::kCUDA)")
   auto eigvals_working_copy = self.numel() == 0
-                              ? at::empty(self_sizes, self.options().dtype(dtype))
-                              : at::empty(self_sizes, self.options().dtype(dtype).device(at::kCPU));
+                              ? at::empty(eigvals_shape, self.options().dtype(real_dtype))
+                              : at::empty(eigvals_shape, self.options().dtype(real_dtype).device(at::kCPU));
 
   if (self.numel() == 0) {
     return std::tuple<Tensor, Tensor>(eigvals_working_copy, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
@@ -2136,13 +2149,13 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 
   auto self_working_copy = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "symeig_cuda", [&]{
-    apply_symeig<scalar_t>(self_working_copy, eigvals_working_copy, eigenvectors, upper, infos);
+    apply_magma_eigh<scalar_t>(eigvals_working_copy, self_working_copy, infos, upper, eigenvectors);
   });
 
   if (self.dim() > 2) {
     batchCheckErrors(infos, "symeig_cuda");
   } else {
-    singleCheckErrors(infos[0], "symeig_cuda");
+    singleCheckErrors(infos.item().toInt(), "symeig_cuda");
   }
   if (eigenvectors) {
     return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
@@ -2150,6 +2163,52 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
     return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), at::empty({0}, self.options()));
   }
 }
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// This is a type dispatch function for 'apply_magma_eigh'
+// For small inputs result is computed on CPU
+void linalg_eigh_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+  // MAGMA just calls LAPACK for eigenvectors.size(-1) <= 128
+  // See https://bitbucket.org/icl/magma/src/e6fdca447bd402693e8b0b950a898b6879bbcc41/src/zheevd_gpu.cpp?at=master#lines-258
+  // in addition lda is ignored breaking 0x0 inputs
+  if (eigenvectors.size(-1) > 128) {
+    // MAGMA requires eigenvalues and infos tensors to reside on CPU
+    Tensor eigenvalues_cpu = eigenvalues.to(kCPU);
+    infos = infos.to(kCPU);
+
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      eigenvectors.scalar_type(), "linalg_eigh_cpu", [&] {
+        apply_magma_eigh<scalar_t>(
+            eigenvalues_cpu, eigenvectors, infos, upper, compute_eigenvectors);
+      });
+
+    // Transfer computed by MAGMA results from CPU to GPU
+    eigenvalues.copy_(eigenvalues_cpu);
+  } else { // eigenvectors.size(-1) <= 128
+    // transfer to CPU, compute the result and copy back to GPU
+    // this is faster than going through MAGMA that does the same
+    Tensor eigenvalues_cpu = at::empty_like(eigenvalues, eigenvalues.options().device(kCPU));
+    if (compute_eigenvectors) {
+      Tensor eigenvectors_cpu = at::empty_like(eigenvectors, eigenvectors.options().device(kCPU));
+      at::linalg_eigh_out(eigenvalues_cpu, eigenvectors_cpu, eigenvectors.to(kCPU), upper ? "U" : "L");
+      eigenvectors.copy_(eigenvectors_cpu);
+    } else {
+      at::linalg_eigvalsh_out(eigenvalues_cpu, eigenvectors.to(kCPU), upper ? "U" : "L");
+    }
+    eigenvalues.copy_(eigenvalues_cpu);
+  }
+}
+
+void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+#if defined(USE_CUSOLVER)
+  linalg_eigh_cusolver(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+#else
+  linalg_eigh_magma(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+#endif
+}
+
+REGISTER_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2241,21 +2300,6 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
 
 REGISTER_DISPATCH(eig_stub, &eig_kernel_impl);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-// This function computes eigenvalues 'w' and eigenvectors 'v' of the tensor 'self'
-// compute_eigenvectors controls whether eigenvectors should be computed
-// uplo controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
-// '_symeig_helper_cuda' prepares correct input for 'apply_symeig' and checks for possible errors using 'infos'
-// See also CPU implementation in aten/src/ATen/native/BatchLinearAlgebra.cpp
-std::tuple<Tensor, Tensor> _syevd_helper_cuda(const Tensor& self, bool compute_eigenvectors, std::string uplo_str) {
-  // NumPy allows lowercase input for UPLO argument
-  // It is assumed that uplo_str is either "U" or "L"
-  char uplo = std::toupper(uplo_str[0]);
-  bool upper = uplo == 'U' ? true : false;
-  return _symeig_helper_cuda(self, compute_eigenvectors, upper);
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
@@ -2301,7 +2345,7 @@ AT_ERROR("svd: MAGMA library not found in "
   // the loop saves (batch_size - 1) workspace queries which would provide the same result
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   magma_int_t lwork = -1;
-  scalar_t wkopt;
+  scalar_t wkopt = 1; // MAGMA might not set the value for the optimal workspace therefore use 1 as the default value
   magmaSvd<scalar_t, value_t>(jobz, m, n, self_data, lda, S_data, U_data, lda, VT_data, ldvt, &wkopt, lwork, rwork, iwork, &info);
   lwork = magma_int_cast(real_impl<scalar_t, value_t>(wkopt), "work_size");
   scalar_t* work;

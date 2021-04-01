@@ -982,7 +982,7 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
       shape_ = shape;
     } else if (!shape.equals(shape_)) {
       all_ops_same_shape_ = false;
-      shape_ = DimVector(infer_size(shape_, shape));
+      shape_ = infer_size_dimvector(shape_, shape);
     }
   }
 }
