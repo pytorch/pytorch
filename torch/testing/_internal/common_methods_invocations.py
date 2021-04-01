@@ -1725,36 +1725,28 @@ def sample_inputs_cumprod(op_info, device, dtype, requires_grad):
     return list(sample_generator())
 
 def sample_inputs_copysign(op_info, device, dtype, requires_grad):
-    def _make_case(case):
-        if isinstance(case, tuple):
-            return make_tensor(case, device, dtype,
-                               low=None, high=None,
-                               requires_grad=requires_grad)
-        else:
-            return case
+    def _make_tensor(*shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
     cases = (
         # no broadcast
-        ((S, S, S), (S, S, S)),
+        (_make_tensor(S, S, S), _make_tensor(S, S, S)),
         # broadcast rhs
-        ((S, S, S), (S, S)),
-
-        # Broadcasts `self` : Issue with inplace-variants
-        # Reference: https://github.com/pytorch/pytorch/issues/50747
-        # We should enable the below lines once the issue is resolved.
-        # ((S, S), (S, S, S)),
-        # ((S, 1, S), (M, S)),
+        (_make_tensor(S, S, S), _make_tensor(S, S)),
+        # broadcast lhs
+        (_make_tensor(S, S), _make_tensor(S, S, S)),
+        # broadcast all
+        (_make_tensor(S, 1, S), _make_tensor(M, S)),
 
         # scalar
-        ((S, S), 3.14),
+        (_make_tensor(S, S), 3.14),
         # scalar positive zero
-        ((S, S), 0.0),
+        (_make_tensor(S, S), 0.0),
         # scalar negative zero
-        ((S, S), -0.0),
+        (_make_tensor(S, S), -0.0),
     )
 
-    return [SampleInput(_make_case(lhs), args=(_make_case(rhs),))
-            for lhs, rhs in cases]
+    return [SampleInput(input, args=(args,)) for input, args in cases]
 
 def sample_inputs_prod(op_info, device, dtype, requires_grad):
     def make_arg(shape):
