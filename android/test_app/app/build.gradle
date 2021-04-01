@@ -112,7 +112,6 @@ android {
         }
     }
     packagingOptions {
-        pickFirst '**/*.so'
         doNotStrip '**.so'
     }
 
