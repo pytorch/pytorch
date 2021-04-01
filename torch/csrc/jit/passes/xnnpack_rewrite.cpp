@@ -397,6 +397,10 @@ script::Module optimizeForMobile(
     cloned_module = FoldConvBatchNorm(cloned_module);
   }
 
+  // Many optimizations require a frozen module, but ConvBatchNorm requires
+  // an unfrozen module
+  cloned_module = freeze_module(cloned_module, preserved_list);
+
   if (!optimization_blocklist.count(
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS) &&
       optimize_forward) {
@@ -421,14 +425,19 @@ script::Module optimizeForMobile(
   // will have to explicitly call Inlining pass.
   runCanonicalOptimizations(cloned_module, methods_to_optimize);
 
-  if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT) &&
-      optimize_forward) {
-    removeDropout(cloned_module);
+  if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
+    for (const std::string& method : methods_to_optimize) {
+      auto graph = cloned_module.get_method(method).graph();
+      // Module must be not be in training mode but optimize calls eval()
+      removeDropout(graph);
+    }
   }
 
-  if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU) &&
-      optimize_forward) {
-    FuseAddRelu(cloned_module);
+  if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
+    for (const std::string& method : methods_to_optimize) {
+      auto graph = cloned_module.get_method(method).graph();
+      FuseAddRelu(graph);
+    }
   }
   cloned_module.register_attribute("mobile_optimized", BoolType::get(), true);
   return cloned_module;

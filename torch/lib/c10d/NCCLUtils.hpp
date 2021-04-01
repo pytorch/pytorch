@@ -11,7 +11,7 @@
 namespace {
   // Provides additional detail into NCCL error codes based on when these are
   // thrown in the NCCL codebase.
-const char* errorMessage(ncclResult_t error) {
+const inline char* getNcclErrorDetailStr(ncclResult_t error) {
   switch (error) {
     case ncclUnhandledCudaError:
       return "ncclUnhandledCudaError: Call to CUDA function failed.";
@@ -54,7 +54,7 @@ const char* errorMessage(ncclResult_t error) {
     if (result != ncclSuccess) {                                              \
       std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
           std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
-          "\n" + errorMessage(result);                                        \
+          "\n" + getNcclErrorDetailStr(result);                               \
       throw std::runtime_error(err);                                          \
     }                                                                         \
   } while (0)
