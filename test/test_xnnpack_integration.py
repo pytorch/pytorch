@@ -36,6 +36,22 @@ class TestXNNPACKOps(TestCase):
         output_linearprepacked = torch.ops.prepacked.linear_clamp_run(input_data, packed_weight_bias)
         torch.testing.assert_allclose(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
 
+    @given(input_size=st.integers(2, 32),
+           weight_output_dim=st.integers(2, 64),
+           use_bias=st.booleans())
+    def test_linear_1d_input(self, input_size, weight_output_dim, use_bias):
+        input_data = torch.rand(input_size)
+        weight = torch.rand((weight_output_dim, input_data.shape[-1]))
+        if use_bias:
+            bias = torch.rand((weight_output_dim))
+        else:
+            bias = None
+        ref_result = F.linear(input_data, weight, bias)
+        packed_weight_bias = torch.ops.prepacked.linear_clamp_prepack(weight, bias)
+        output_linearprepacked = torch.ops.prepacked.linear_clamp_run(input_data, packed_weight_bias)
+        torch.testing.assert_allclose(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
+
+
     @given(batch_size=st.integers(0, 3),
            input_channels_per_group=st.integers(1, 32),
            height=st.integers(5, 64),

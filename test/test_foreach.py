@@ -2,7 +2,7 @@ import torch
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, skipCUDAIfRocm, ops)
+    (instantiate_device_type_tests, dtypes, skipCUDAIfRocm, ops, skipMeta)
 from torch._six import inf, nan
 from torch.testing._internal.common_methods_invocations import \
     (foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_min_max_op_db)
@@ -53,10 +53,11 @@ class TestForeach(TestCase):
                 inplace(tensors)
                 self.assertEqual(tensors, actual)
 
-    # Test foreach binary ops with a single scalar
+    # Test foreach binary ops with a single scalar (binary_op(TensorList, Scalar))
     # Compare results agains reference torch functions
-    # In case of an exeption, check if torch reference function throws as well.
+    # In case of an exception, check if torch reference function throws as well.
     @skipCUDAIfRocm
+    @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_ops_scalar(self, device, dtype, op):
         scalars = [2, 2.2, True, 3 + 5j]
@@ -67,38 +68,38 @@ class TestForeach(TestCase):
         for N in N_values:
             for scalar in scalars:
                 # test out of place
-                foreach_exeption = False
-                torch_exeption = False
+                foreach_exception = None
+                torch_exception = None
                 tensors = op.sample_inputs(device, dtype, N)
                 method = op.get_method()
                 inplace = op.get_inplace()
 
                 try:
                     ref_res = [op.ref(t, scalar) for t in tensors]
-                except Exception:
-                    torch_exeption = True
+                except Exception as e:
+                    torch_exception = e
 
                 try:
                     fe_res = method(tensors, scalar)
-                except Exception:
-                    foreach_exeption = True
+                except Exception as e:
+                    foreach_exception = e
 
-                self.assertEqual(foreach_exeption, torch_exeption)
+                self.assertEqual(type(foreach_exception), type(torch_exception))
 
-                if not torch_exeption:
+                if not torch_exception:
                     if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
                         self.assertEqual(ref_res, fe_res, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
                     else:
                         self.assertEqual(ref_res, fe_res)
 
                 # test inplace
-                foreach_inplace_exeption = False
-                torch_inplace_exeption = False
+                foreach_inplace_exception = None
+                torch_inplace_exception = None
                 try:
                     inplace(tensors, scalar)
                     self.assertEqual(tensors, fe_res)
-                except Exception:
-                    foreach_inplace_exeption = True
+                except Exception as e:
+                    foreach_inplace_exception = e
 
                 try:
                     # get torch inplace reference function
@@ -107,15 +108,16 @@ class TestForeach(TestCase):
 
                     for t in tensors:
                         torch_inplace(t, scalar)
-                except Exception:
-                    torch_inplace_exeption = True
+                except Exception as e:
+                    torch_inplace_exception = e
 
-                self.assertEqual(foreach_inplace_exeption, torch_inplace_exeption)
+                self.assertEqual(type(foreach_inplace_exception), type(torch_inplace_exception))
 
-    # Test foreach binary ops with a scalar list
+    # Test foreach binary ops with a scalar list (binary_op(TensorList, List[Scalar]))
     # Compare results agains reference torch functions
-    # In case of an exeption, check if torch reference function throws as well.
+    # In case of an exception, check if torch reference function throws as well.
     @skipCUDAIfRocm
+    @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_ops_scalar_list(self, device, dtype, op):
         # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
@@ -131,38 +133,38 @@ class TestForeach(TestCase):
 
             for scalar_list in scalar_lists:
                 # test out of place
-                foreach_exeption = False
-                torch_exeption = False
+                foreach_exception = None
+                torch_exception = None
                 tensors = op.sample_inputs(device, dtype, N)
                 method = op.get_method()
                 inplace = op.get_inplace()
 
                 try:
                     ref_res = [op.ref(t, s) for t, s in zip(tensors, scalar_list)]
-                except Exception:
-                    torch_exeption = True
+                except Exception as e:
+                    torch_exception = e
 
                 try:
                     fe_res = method(tensors, scalar_list)
-                except Exception:
-                    foreach_exeption = True
+                except Exception as e:
+                    foreach_exception = e
 
-                self.assertEqual(foreach_exeption, torch_exeption)
+                self.assertEqual(type(foreach_exception), type(torch_exception))
 
-                if not torch_exeption:
+                if not torch_exception:
                     if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
                         self.assertEqual(ref_res, fe_res, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
                     else:
                         self.assertEqual(ref_res, fe_res)
 
                 # test inplace
-                foreach_inplace_exeption = False
-                torch_inplace_exeption = False
+                foreach_inplace_exception = None
+                torch_inplace_exception = None
                 try:
                     inplace(tensors, scalar_list)
                     self.assertEqual(tensors, fe_res)
-                except Exception:
-                    foreach_inplace_exeption = True
+                except Exception as e:
+                    foreach_inplace_exception = e
 
                 try:
                     # get torch inplace reference function
@@ -171,16 +173,17 @@ class TestForeach(TestCase):
 
                     for t, s in zip(tensors, scalar_list):
                         torch_inplace(t, s)
-                except Exception:
-                    torch_inplace_exeption = True
+                except Exception as e:
+                    torch_inplace_exception = e
 
-                self.assertEqual(foreach_inplace_exeption, torch_inplace_exeption)
+                self.assertEqual(type(foreach_inplace_exception), type(torch_inplace_exception))
 
-    # Test foreach binary ops with a two tensor lists
+    # Test foreach binary ops with a two tensor lists (binary_op(TensorList, TensorList))
     # Compare results agains reference torch functions
-    # In case of an exeption, check if torch reference function throws as well.
+    # In case of an exception, check if torch reference function throws as well.
     # In case of add/sub, also test alphas
     @skipCUDAIfRocm
+    @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_ops_tensor_list(self, device, dtype, op):
         # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
@@ -188,8 +191,8 @@ class TestForeach(TestCase):
                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
 
         for N in N_values:
-            foreach_exeption = False
-            torch_exeption = False
+            foreach_exception = None
+            torch_exception = None
             tensors1 = op.sample_inputs(device, dtype, N)
             tensors2 = op.sample_inputs(device, dtype, N)
             method = op.get_method()
@@ -199,19 +202,19 @@ class TestForeach(TestCase):
                 ref_res = [op.ref(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
                 if op.supports_alpha_param:
                     ref_res_alpha = [op.ref(t1, t2, alpha=alpha) for t1, t2 in zip(tensors1, tensors2)]
-            except Exception:
-                torch_exeption = True
+            except Exception as e:
+                torch_exception = e
 
             try:
                 fe_res = method(tensors1, tensors2)
                 if op.supports_alpha_param:
                     fe_res_alpha = method(tensors1, tensors2, alpha=alpha)
-            except Exception:
-                foreach_exeption = True
+            except Exception as e:
+                foreach_exception = e
 
-            self.assertEqual(foreach_exeption, torch_exeption)
+            self.assertEqual(type(foreach_exception), type(torch_exception))
 
-            if not torch_exeption:
+            if not torch_exception:
                 if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
                     self.assertEqual(ref_res, fe_res, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
 
@@ -224,6 +227,7 @@ class TestForeach(TestCase):
                         self.assertEqual(ref_res_alpha, fe_res_alpha)
 
     @skipCUDAIfRocm
+    @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_ops_tensor_list_inplace(self, device, dtype, op):
         # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
@@ -238,15 +242,15 @@ class TestForeach(TestCase):
             inplace = op.get_inplace()
             alpha = 2
 
-            foreach_inplace_exeption = False
-            torch_inplace_exeption = False
+            foreach_inplace_exception = None
+            torch_inplace_exception = None
             try:
                 inplace(tensors1, tensors2)
 
                 if op.supports_alpha_param:
                     inplace(tensors1, tensors2, alpha=alpha)
-            except Exception:
-                foreach_inplace_exeption = True
+            except Exception as e:
+                foreach_inplace_exception = e
 
             try:
                 # get torch inplace reference function
@@ -256,11 +260,11 @@ class TestForeach(TestCase):
                     torch_inplace(t1, t2)
                     if op.supports_alpha_param:
                         torch_inplace(t1, t2, alpha=alpha)
-            except Exception:
-                torch_inplace_exeption = True
+            except Exception as e:
+                torch_inplace_exception = e
 
-            self.assertEqual(foreach_inplace_exeption, torch_inplace_exeption)
-            if not foreach_inplace_exeption:
+            self.assertEqual(type(foreach_inplace_exception), type(torch_inplace_exception))
+            if foreach_inplace_exception is None:
                 self.assertEqual(tensors1, tensors1_copy)
                 self.assertEqual(tensors2, tensors2_copy)
 
@@ -314,11 +318,13 @@ class TestForeach(TestCase):
                     method(tensors, tensors1, tensors2, [2 for _ in range(N - 1)])
 
                 tensors = op.sample_inputs(device, dtype, N + 1)
-                with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got {0}".format(N + 1)):
+                with self.assertRaisesRegex(RuntimeError,
+                                            "Tensor lists must have the same number of tensors, got {0}".format(N + 1)):
                     method(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
                 tensors1 = op.sample_inputs(device, dtype, N + 1)
-                with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got {0}".format(N + 1)):
+                with self.assertRaisesRegex(RuntimeError,
+                                            "Tensor lists must have the same number of tensors, got {0}".format(N + 1)):
                     method(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
     @ops(foreach_min_max_op_db)

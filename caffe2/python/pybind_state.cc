@@ -1031,6 +1031,13 @@ void addObjectMethods(py::module& m) {
 
 void addGlobalMethods(py::module& m) {
   m.attr("is_asan") = py::bool_(C10_ASAN_ENABLED);
+  m.attr("has_fbgemm") = py::bool_(
+#ifdef USE_FBGEMM
+      true
+#else
+      false
+#endif
+  );
   m.def("get_build_options", []() { return GetBuildOptions(); });
 
   // The old mkl backend has been removed permanently, but we
