@@ -86,6 +86,10 @@ target_compile_options(${PYTORCH_JNI_TARGET} PRIVATE
 target_include_directories(${PYTORCH_JNI_TARGET} BEFORE
 PUBLIC $<BUILD_INTERFACE:${libtorch_include_DIR}>)
 
+set(fbjni_DIR ${CMAKE_CURRENT_LIST_DIR}/../libs/fbjni/)
+set(fbjni_BUILD_DIR ${CMAKE_BINARY_DIR}/fbjni/${BUILD_SUBDIR})
+
+add_subdirectory(${fbjni_DIR} ${fbjni_BUILD_DIR})
 
 # ---[ Vulkan deps
 if(USE_VULKAN)
@@ -95,9 +99,6 @@ if(USE_VULKAN)
 endif()
 
 if(ANDROID_ABI)
-  set(build_DIR ${CMAKE_SOURCE_DIR}/build)
-  find_package(fbjni REQUIRED CONFIG)
-
   function(import_static_lib name)
     add_library(${name} STATIC IMPORTED)
     set_property(
@@ -119,7 +120,7 @@ if(ANDROID_ABI)
 
   # Link most things statically on Android.
   set(pytorch_jni_LIBS
-      fbjni::fbjni
+      fbjni
       -Wl,--gc-sections
       -Wl,--whole-archive
       libtorch
@@ -133,14 +134,8 @@ if(ANDROID_ABI)
       libeigen_blas
       libcpuinfo
       libclog
-      android
-      log
   )
 else()
-  set(fbjni_DIR ${CMAKE_CURRENT_LIST_DIR}/../libs/fbjni/)
-  set(fbjni_BUILD_DIR ${CMAKE_BINARY_DIR}/fbjni/${BUILD_SUBDIR})
-  add_subdirectory(${fbjni_DIR} ${fbjni_BUILD_DIR})
-
   # Prefer dynamic linking on the host
   set(pytorch_jni_LIBS
       fbjni
