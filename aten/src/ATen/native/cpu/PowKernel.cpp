@@ -130,8 +130,6 @@ void pow_tensor_scalar_kernel(
       );
     }();
   } else if (dtype == ScalarType::BFloat16) {
-      using scalar_t =
-          decltype(c10::impl::ScalarTypeToCPPType<ScalarType::BFloat16>::t);
       AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, dtype, "pow", [&]() {
         pow_tensor_scalar_optimized_kernel<scalar_t, scalar_t>(
             iter, exp_scalar.to<scalar_t>());
