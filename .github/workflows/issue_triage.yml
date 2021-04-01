@@ -1,11 +1,18 @@
-name: jit-triage
+name: Triage issues to Projects
 
 on:
   issues:
     types: [labeled]
 
 jobs:
-  welcome:
+  triage-issues:
+    strategy:
+      matrix:
+        include:
+          - oncall_label: "oncall: jit"
+            project_name: "Jit Triage"
+          - oncall_label: "oncall: quantization"
+            project_name: "Quantization Triage"
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/github-script@v2
@@ -19,7 +26,7 @@ jobs:
             // - io: A reference to the @actions/io package
 
             // Check if issue has a JIT label.
-            const kJitLabel = "oncall: jit";
+            const oncallLabel = "${{ matrix.oncall_label }}";
 
             issue = await github.issues.get({
               owner: context.issue.owner,
@@ -27,15 +34,15 @@ jobs:
               issue_number: context.issue.number,
             })
 
-            const hasJitLabel = issue.data.labels.filter(label => label.name == kJitLabel).length > 0;
+            const hasOncallLabel = issue.data.labels.filter(label => label.name == oncallLabel).length > 0;
 
-            if (!hasJitLabel) {
+            if (!hasOncallLabel) {
               core.debug("Issue " + issue.data.title + " does not have JIT label");
               return;
             }
 
             // Get project column ID.
-            const kProjectName = "JIT Triage";
+            const kProjectName = "${{ matrix.project_name }}";
             const kColumnName = "Need triage";
 
             // Query all projects in the repository.
