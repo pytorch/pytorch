@@ -284,10 +284,10 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   // vectorized
   __m256i sum_v_epu32 = _mm256_setzero_si256();
   alignas(64) int32_t temp[8];
-  int overflow_threshold = 262144; // 2147483647(max of int32)/(256*256)*8 = 262144 
+  int overflow_threshold = 262144; // 2147483647(max of int32)/(256*256)*8 = 262144
   int loop = len / overflow_threshold + 1;
   for(int j=0; j<=loop; j++){
-    for (; ( (i < overflow_threshold * j) && (i < len / 16 * 16) ); i += 16) {
+    for (; ((i < overflow_threshold * j) && (i < len / 16 * 16)); i += 16) {
       // (i15, ..., i0)
       __m128i src_epu8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
       __m256i src_epu16 = _mm256_cvtepu8_epi16(src_epu8);
@@ -334,7 +334,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   int loop = len / overflow_threshold + 1;
 
   for(int j=0; j<=loop; j++){
-    for (; ( (i < overflow_threshold * j) && (i < len / 16 * 16) ); i += 16) {
+    for (; ((i < overflow_threshold * j) && (i < len / 16 * 16)); i += 16) {
       // (i15, ..., i0)
       __m128i src_epi8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
       __m256i src_epi16 = _mm256_cvtepi8_epi16(src_epi8);
