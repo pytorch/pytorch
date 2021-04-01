@@ -8,6 +8,8 @@
 #include <ATen/native/Resize.h>
 #include <ATen/TensorOperators.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 
 using DimMask = TensorIteratorBase::DimMask;
@@ -235,7 +237,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     TORCH_INTERNAL_ASSERT(op.target_dtype == op.current_dtype)
 
     // Acquires the first non-CPU device (if any) as the common device
-    if (common_device == kCPU && !op.tensor.device().is_cpu()) {
+    if (common_device == kCPU && !op.tensor.is_cpu()) {
       common_device = op.tensor.device();
     }
 
@@ -298,7 +300,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
 
   // Promotes common dtype to the default float scalar type, if needed
   if (config.promote_integer_inputs_to_float_ &&
-      c10::isIntegralType(common_dtype_, /*include_bool=*/true)) {
+      c10::isIntegralType(common_dtype_, /*includeBool=*/true)) {
     common_dtype_ = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 
@@ -326,7 +328,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
       // Handles CPU scalars on CUDA kernels that support them
       if (!common_device.is_cpu() &&
           config.allow_cpu_scalars_ && !op.is_output && op.tensor.dim() == 0 &&
-          op.tensor.device().is_cpu()) {
+          op.tensor.is_cpu()) {
         TORCH_CHECK(current_cpu_scalars_on_non_cpu < max_cpu_scalars_on_non_cpu,
                     "Trying to pass too many CPU scalars to non-CPU kernel!");
         ++current_cpu_scalars_on_non_cpu;
@@ -568,7 +570,7 @@ bool TensorIteratorBase::is_dim_reduced(int dim) const {
 }
 
 void TensorIteratorBase::permute_dimensions(IntArrayRef perm) {
-  TORCH_INTERNAL_ASSERT(perm.size() == ndim());
+  TORCH_INTERNAL_ASSERT(perm.size() == static_cast<unsigned>(ndim()));
 
   auto reorder = [perm](IntArrayRef data) {
     auto res = DimVector(data.size(), 0);
@@ -635,7 +637,7 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
     return;
   }
   auto strides = get_strides();
-  while (strides.size() < 2 * ntensors()) {
+  while (strides.size() < 2U * ntensors()) {
     strides.push_back(0);
   }
 
@@ -861,7 +863,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
 TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
   TORCH_INTERNAL_ASSERT(out1.defined());
   TORCH_INTERNAL_ASSERT(out2.defined());
-  TORCH_CHECK((a.is_cpu() && out1.is_cpu() && out2.is_cpu()) || (a.device() == out1.device() && out1.device() == out2.device()),
+  TORCH_CHECK(a.device() == out1.device() && out1.device() == out2.device(),
       "reduce_op(): expected input and both outputs to be on same device, but input is on ", a.device(),
       ", output1 is on ", out1.device(), " and output2 is on", out2.device());
   TORCH_CHECK(out1.dim() == out2.dim(), "reduce_op(): expected both outputs to have same number of dims, but output1 has ", out1.dim(),
@@ -938,10 +940,6 @@ void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config
   if (!config.check_mem_overlap_) {
     return;
   }
-  if (is_meta_) {
-    // We don't have pointer addresses, cannot check for overlap!
-    return;
-  }
   for (int i = 0; i < num_outputs_; i++) {
     const auto& output = operands_[i].tensor;
     if (!output.defined()) continue;
@@ -984,7 +982,7 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
       shape_ = shape;
     } else if (!shape.equals(shape_)) {
       all_ops_same_shape_ = false;
-      shape_ = DimVector(infer_size(shape_, shape));
+      shape_ = infer_size_dimvector(shape_, shape);
     }
   }
 }
@@ -1102,7 +1100,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
     case FastSetupType::NON_OVERLAPPING_DENSE:
       {
         // find the index of a defined tensor in operands_ start from input tensor
-        int i_defined;
+        int i_defined; // NOLINT(cppcoreguidelines-init-variables)
         for (i_defined = ntensors() - 1; i_defined >= 0; --i_defined) {
           if (operands_[i_defined].tensor.defined()) break;
         }
@@ -1189,7 +1187,7 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
   return FastSetupType::NONE;
 }
 
-TensorIteratorBase::TensorIteratorBase() {}
+TensorIteratorBase::TensorIteratorBase() = default;
 
 void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // populate some persistent configuration fields
@@ -1293,7 +1291,7 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
       TORCH_INTERNAL_ASSERT(op.original_tensor.is_same(t));
       TORCH_INTERNAL_ASSERT(!op.tensor.is_same(t));
       // fastpath CPU to skip a dispatcher trip
-      if (op.tensor.device().is_cpu()) {
+      if (op.tensor.is_cpu()) {
         at::native::resize_output_cpu(op.tensor, sizes);
       } else {
         at::native::resize_output(op.tensor, sizes);
@@ -1324,7 +1322,7 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
       op.current_dtype = op.target_dtype;
   } else if (op.will_resize) {
       // fastpath CPU to skip a dispatcher trip
-      if (op.tensor.device().is_cpu()) {
+      if (op.tensor.is_cpu()) {
         at::native::resize_output_cpu(op.tensor, sizes);
       } else {
         at::native::resize_output(op.tensor, sizes);
@@ -1392,7 +1390,7 @@ DimCounter::DimCounter(IntArrayRef shape, Range range)
   , offset(range.begin) {
   int64_t linear_offset = range.begin;
   int64_t ndim = values.size();
-  for (int dim = 0; dim < ndim; dim++) {
+  for (const auto dim : c10::irange(ndim)) {
     int64_t size = shape[dim];
     if (size > 0) {
       values[dim] = linear_offset % size;

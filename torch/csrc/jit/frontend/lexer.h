@@ -119,7 +119,8 @@ namespace jit {
   _(TK_WITH_ITEM, "withitem", "")                \
   _(TK_AS, "as", "as")                           \
   _(TK_PROP, "property", "")                     \
-  _(TK_ELLIPSIS, "Ellipsis", "Ellipsis")
+  _(TK_ELLIPSIS, "Ellipsis", "Ellipsis")         \
+  _(TK_NONE_TYPE, "NoneType", "NoneType")
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -196,6 +197,11 @@ struct TORCH_API SharedParserData {
     char* endptr;
     torch::jit::strtod_c(startptr, &endptr);
     *len = endptr - startptr;
+    // check if the number is complex valued
+    // access is safe because string is assumed to be null terminated
+    if (endptr != nullptr && *endptr == 'j') {
+      *len += 1;
+    }
     return *len > 0;
   }
 
