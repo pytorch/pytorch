@@ -1,5 +1,3 @@
-from typing import List
-
 # Torch
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 from torch.testing._internal.common_methods_invocations import non_differentiable, create_input, \
@@ -11,7 +9,10 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.testing._internal.common_utils import is_iterable_of_tensors
+
 from copy import deepcopy
+from typing import List, Union
 import math  # noqa: F401
 
 # Testing utils
@@ -269,7 +270,7 @@ def get_constant(x):
 
 def get_script_args(args):
     formals: List[str] = []
-    tensors: List[torch.Tensor] = []
+    tensors: List[Union[torch.Tensor, List[torch.Tensor]]] = []
     actuals: List[str] = []
     for arg in args:
         if isinstance(arg, torch.Tensor):
@@ -277,6 +278,11 @@ def get_script_args(args):
             formals.append(name)
             actuals.append(name)
             tensors.append(arg)
+        elif is_iterable_of_tensors(arg):
+            name = 'i{}'.format(len(formals))
+            formals.append(name + ': List[torch.Tensor]')
+            actuals.append(name)
+            tensors.append(list(arg))
         elif isinstance(arg, str):
             actuals.append("'{}'".format(arg))
         else:
@@ -310,13 +316,13 @@ def create_script_fn(self, method_name, func_type):
 # applied, and all tensor arguments remain.
 # used to trace functions when some arguments are not tensors
 def partial_apply_nontensors(fn, args, **kwargs):
-    source = ['t' if isinstance(arg, torch.Tensor) else 's' for arg in args]
+    source = ['t' if (isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)) else 's' for arg in args]
 
     def new_fn(*tensors_):
         tensors = iter(tensors_)
         return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)), **kwargs)
 
-    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
+    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)]
 
 # create a trace function from input fn
 def create_traced_fn(self, fn):
