@@ -283,6 +283,17 @@ static void UpdateScalarTypeForOutput(
       CreateProfiledTensorTypeWithScalarType(output_tensor_type, scalar_type));
 }
 
+static void RecoverScalarTypeForOutput(
+    Node* n,
+    const c10::ScalarType& scalar_type) {
+      const int64_t onnx_type = ScalarTypeToONNXType(scalar_type);
+      Node* cast_node = n->owningGraph()->create(onnx::Cast, 1);
+      cast_node->addInput(n->output());
+      cast_node->i_(attr::to, onnx_type);
+      cast_node->insertAfter(n);
+      n->output()->replaceAllUsesAfterNodeWith(cast_node, cast_node->output());
+}
+
 static void ImplicitCastNodeForONNX(Node* n) {
   if (IsImplicitCastSupported(n->kind())) {
     auto expected_scalar_type = InferExpectedScalarType(n);
@@ -290,6 +301,10 @@ static void ImplicitCastNodeForONNX(Node* n) {
       auto expected_scalar_type_cast =
           LowPrecisionCastForStandardOps(n, *expected_scalar_type);
       UpdateScalarTypeForInputs(n, *expected_scalar_type_cast);
+      if (*expected_scalar_type != *expected_scalar_type_cast){
+        // If input type is changed, convert it to the original type
+        RecoverScalarTypeForOutput(n, *expected_scalar_type);
+      }
       if (!IsComparisonOp(n->kind())) {
         UpdateScalarTypeForOutput(n, *expected_scalar_type);
       }
@@ -316,6 +331,39 @@ void ScalarTypeAnalysisForONNX(const std::shared_ptr<Graph>& graph) {
 
 void ScalarTypeAnalysisNodeForONNX(Node* n) {
   ImplicitCastNodeForONNX(n);
+}
+
+static void ImplicitCastNodeForONNXWithoutLowPrecision(Node* n) {
+  if (IsImplicitCastSupported(n->kind())) {
+    auto expected_scalar_type = InferExpectedScalarType(n);
+    if (expected_scalar_type) {
+      UpdateScalarTypeForInputs(n, *expected_scalar_type);
+
+      if (!IsComparisonOp(n->kind())) {
+        UpdateScalarTypeForOutput(n, *expected_scalar_type);
+      }
+    }
+  }
+}
+
+static void ImplicitCastForONNXWithoutLowPrecision(Block* block) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
+    for (auto sub : it->blocks()) {
+      ImplicitCastForONNXWithoutLowPrecision(sub);
+    }
+
+    ImplicitCastNodeForONNXWithoutLowPrecision(*it);
+  }
+  EliminateDeadCode(
+      block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
+}
+
+void ScalarTypeAnalysisForONNXWithoutLowPrecision(const std::shared_ptr<Graph>& graph) {
+  ImplicitCastForONNXWithoutLowPrecision(graph->block());
+}
+
+void ScalarTypeAnalysisNodeForONNXWithoutLowPrecision(Node* n) {
+  ImplicitCastNodeForONNXWithoutLowPrecision(n);
 }
 
 } // namespace jit

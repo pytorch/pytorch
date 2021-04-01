@@ -2519,27 +2519,29 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(PowModule3(), (x, y))
 
     # the arithmeticOps(Add\Sub\Mul\Div\Gemm\Pow\Mod) with low precision include unit8 will be failed in ORT
-    # add to(dtype=torch.long) to avoid ORT output type does not match expected type
+    # add to(dtype=torch.long) to avoid ORT output type does not match expected type.
+    # will be fixed in ONNX version 14.
+    @skipIfUnsupportedMaxOpsetVersion(13)
     def test_arithmeticOps_with_low_precision(self):
         class AddModule(torch.nn.Module):
             def forward(self, x, y):
-                return (x + y).to(dtype=torch.long)
+                return x + y
 
         class SubModule(torch.nn.Module):
             def forward(self, x, y):
-                return (x - y).to(dtype=torch.long)
+                return x - y
 
         class MulModule(torch.nn.Module):
             def forward(self, x, y):
-                return (x * y).to(dtype=torch.long)
+                return x * y
 
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
-                return (x / y).to(dtype=torch.long)
+                return x / y
 
         class PowModule(torch.nn.Module):
             def forward(self, x, y):
-                return x.pow(y).to(dtype=torch.long)
+                return x.pow(y)
 
         x = torch.tensor([2, 3, 5], dtype=torch.uint8)
         y = torch.tensor([2, 3, 5], dtype=torch.uint8)
@@ -6896,7 +6898,6 @@ class TestONNXRuntime(unittest.TestCase):
                                    training=torch.onnx.TrainingMode.TRAINING)
         ort_outs = run_ort(ort_sess, input=(x,))
         [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
-
         model_export = torch.jit.script(MyModule())
         ort_sess = convert_to_onnx(model_export, input=(x,), opset_version=self.opset_version,
                                    example_outputs=out,

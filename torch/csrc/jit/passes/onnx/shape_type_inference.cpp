@@ -1255,7 +1255,8 @@ void ONNXShapeTypeInference(
     n_graph->registerOutput(output);
   }
 
-  ScalarTypeAnalysisForONNX(n_graph);
+  // Use scalar_type_analysis without low precision cast
+  ScalarTypeAnalysisForONNXWithoutLowPrecision(n_graph);
 
   GRAPH_DEBUG("Original torch graph: ", n->owningGraph()->toString());
   GRAPH_DEBUG(
