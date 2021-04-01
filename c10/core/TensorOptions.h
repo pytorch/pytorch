@@ -339,7 +339,7 @@ struct C10_API TensorOptions {
 
   // For compatibility with legacy tensor.type() comparisons
   bool type_equal(const TensorOptions& other) const {
-    return backend() == other.backend() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
+    return computeDispatchKey() == other.computeDispatchKey() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
   }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
@@ -399,11 +399,10 @@ struct C10_API TensorOptions {
     return merged;
   }
 
-  // Resolves the tensor type set specified by the current construction axes.
-  DispatchKeySet key_set() const noexcept {
-    return DispatchKeySet(computeDispatchKey());
-  }
-
+  // INVARIANT: computeDispatchKey returns only the subset of dispatch keys for
+  // which dispatchKeyToBackend is injective, if it is defined at all  (for
+  // the most part, this just means that this function never returns an
+  // Autograd key)
   DispatchKey computeDispatchKey() const {
     return c10::computeDispatchKey(optTypeMetaToScalarType(dtype_opt()), layout_opt(), device_opt());
   }
@@ -629,12 +628,16 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             return DispatchKey::MSNPU;
           case DeviceType::XLA:
             return DispatchKey::XLA;
+          case DeviceType::MLC:
+            return DispatchKey::MLC;
           case DeviceType::Vulkan:
             return DispatchKey::Vulkan;
           case DeviceType::Metal:
             return DispatchKey::Metal;
+          case DeviceType::Meta:
+            return DispatchKey::Meta;
           default:
-            AT_ERROR("Unsupported device type for dense layout: ", device_.type());
+            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for dense layout: ", device_.type());
         }
       }
       case Layout::Sparse:
@@ -648,68 +651,89 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
           case DeviceType::XPU:
             return DispatchKey::SparseXPU;
           default:
-            AT_ERROR("Unsupported device type for sparse layout: ", device_.type());
+            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for sparse layout: ", device_.type());
         }
       case Layout::Mkldnn:
         switch (device_.type()) {
           case DeviceType::CPU:
             return DispatchKey::MkldnnCPU;
           default:
-            AT_ERROR("Unsupported device type for mkldnn layout: ", device_.type());
+            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for mkldnn layout: ", device_.type());
         }
       default:
-        AT_ERROR("Unsupported layout: ", layout_);
+        TORCH_CHECK(false, "Unsupported layout: ", layout_);
     }
 }
 
-// We deliberately ignore handling AutogradCPU/CUDA/XLA... keys to
-// avoid adding asymmetry in device <--> Autograd dispatch key mapping.
-inline DeviceType computeDeviceType(DispatchKey tid) {
-  if (tid == DispatchKey::CPU) {
-    return DeviceType::CPU;
-  } else if (tid == DispatchKey::CUDA) {
-    return DeviceType::CUDA;
-  } else if (tid == DispatchKey::HIP) {
-    return DeviceType::HIP;
-  } else if (tid == DispatchKey::FPGA) {
-    return DeviceType::FPGA;
-  } else if (tid == DispatchKey::MKLDNN) {
-    return DeviceType::MKLDNN;
-  } else if (tid == DispatchKey::OpenGL) {
-    return DeviceType::IDEEP;
-  } else if (tid == DispatchKey::OpenCL) {
-    return DeviceType::OPENCL;
-  } else if (tid == DispatchKey::IDEEP) {
-    return DeviceType::IDEEP;
-  } else if (tid == DispatchKey::HIP) {
-    return DeviceType::HIP;
-  } else if (tid == DispatchKey::MSNPU) {
-    return DeviceType::MSNPU;
-  } else if (tid == DispatchKey::XLA) {
-    return DeviceType::XLA;
-  } else if (tid == DispatchKey::SparseCPU) {
-    return DeviceType::CPU;
-  } else if (tid == DispatchKey::SparseCUDA) {
-    return DeviceType::CUDA;
-  } else if (tid == DispatchKey::SparseHIP) {
-    return DeviceType::HIP;
-  } else if (tid == DispatchKey::MkldnnCPU) {
-    return DeviceType::CPU;
-  } else if (tid == DispatchKey::Vulkan) {
-    return DeviceType::Vulkan;
-  } else if (tid == DispatchKey::Metal) {
-    return DeviceType::Metal;
-  } else if (tid == DispatchKey::QuantizedCPU) {
-    return DeviceType::CPU;
-  } else if (tid == DispatchKey::XPU) {
-    return DeviceType::XPU;
-  } else if (tid == DispatchKey::SparseXPU) {
-    return DeviceType::XPU;
-  } else if (tid == DispatchKey::QuantizedXPU) {
-    return DeviceType::XPU;
-  } else {
-    TORCH_INTERNAL_ASSERT(false, "Unknown DispatchKey: ", tid);
+inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
+  switch (dispatch_key) {
+    case DispatchKey::SparseCPU:
+    case DispatchKey::SparseCUDA:
+    case DispatchKey::SparseHIP:
+    case DispatchKey::SparseXPU:
+      return Layout::Sparse;
+    case DispatchKey::MkldnnCPU:
+      return Layout::Mkldnn;
+    default:
+      return Layout::Strided;
   }
+}
+
+inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
+  switch(dispatch_key) {
+    // stuff that's real
+    case DispatchKey::CPU:
+    case DispatchKey::SparseCPU:
+    case DispatchKey::MkldnnCPU:
+    case DispatchKey::QuantizedCPU:
+    case DispatchKey::AutogradCPU:
+      return DeviceType::CPU;
+    case DispatchKey::CUDA:
+    case DispatchKey::SparseCUDA:
+    case DispatchKey::QuantizedCUDA:
+    case DispatchKey::AutogradCUDA:
+      return DeviceType::CUDA;
+    case DispatchKey::HIP:
+    case DispatchKey::SparseHIP:
+      return DeviceType::HIP;
+    case DispatchKey::XLA:
+    case DispatchKey::AutogradXLA:
+      return DeviceType::XLA;
+    case DispatchKey::Vulkan:
+      return DeviceType::Vulkan;
+    case DispatchKey::Meta:
+      return DeviceType::Meta;
+
+    // stuff that people are actively developing
+    case DispatchKey::XPU:
+    case DispatchKey::SparseXPU:
+    case DispatchKey::QuantizedXPU:
+    case DispatchKey::AutogradXPU:
+      return DeviceType::XPU;
+    case DispatchKey::MLC:
+    case DispatchKey::AutogradMLC:
+      return DeviceType::MLC;
+
+    // stuff that isn't real
+    case DispatchKey::MKLDNN:
+      return DeviceType::MKLDNN;
+    case DispatchKey::OpenGL:
+      return DeviceType::IDEEP;
+    case DispatchKey::OpenCL:
+      return DeviceType::OPENCL;
+    case DispatchKey::IDEEP:
+      return DeviceType::IDEEP;
+    case DispatchKey::MSNPU:
+      return DeviceType::MSNPU;
+    default:
+      TORCH_CHECK(false, "DispatchKey ", dispatch_key, " doesn't correspond to a device");
+  }
+}
+
+inline TensorOptions dispatchKeyToTensorOptions(DispatchKey dispatch_key) {
+  return TensorOptions()
+          .layout(dispatchKeyToLayout(dispatch_key))
+          .device(dispatchKeyToDeviceType(dispatch_key));
 }
 
 } // namespace c10

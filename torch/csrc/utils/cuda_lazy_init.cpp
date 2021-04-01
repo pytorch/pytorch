@@ -7,7 +7,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 namespace torch {
 namespace utils {
-  
+
 static bool run_yet = false;
 
 void cuda_lazy_init() {

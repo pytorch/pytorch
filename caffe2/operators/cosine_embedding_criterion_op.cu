@@ -26,7 +26,7 @@ template <>
 bool CosineEmbeddingCriterionOp<CUDAContext>::RunOnDevice() {
   auto& S = Input(0);
   auto& Y = Input(1);
-  
+
   CAFFE_ENFORCE(S.numel() == Y.numel(),
                 "The embedding and label should have the same size.");
   auto* output = Output(0, S.sizes(), at::dtype<float>());
@@ -48,7 +48,7 @@ bool CosineEmbeddingCriterionGradientOp<CUDAContext>::RunOnDevice() {
   auto& S = Input(0);
   auto& Y = Input(1);
   auto& dOutput = Input(2);
-  
+
 
   auto* dS = Output(0, S.sizes(), at::dtype<float>());
 

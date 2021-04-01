@@ -47,7 +47,7 @@ template <>
 bool AccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
-  
+
   CAFFE_ENFORCE_EQ(X.dim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);

@@ -708,11 +708,16 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
     for (const Expr* a : v->args()) {
       a->accept(this);
-      if (value().dtype() != kLong) {
+      int64_t val;
+      if (value().dtype() == kLong) {
+        val = value().as<int64_t>();
+      } else if (value().dtype() == kInt) {
+        val = value().as<int>();
+      } else {
         throw malformed_input(
             "extra_args in ExternalCalls must have int64 dtype", v);
       }
-      extra_args.push_back(value().as<int64_t>());
+      extra_args.push_back(val);
     }
 
     auto fn_ptr = func_registry.at(v->func_name());
@@ -795,8 +800,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     const Var* buffer_var = v->buffer_var();
     std::vector<const Expr*> dims = v->dims();
     int total_byte_size = v->dtype().byte_size();
-    for (size_t i = 0; i < dims.size(); i++) {
-      dims[i]->accept(this);
+    for (auto& dim : dims) {
+      dim->accept(this);
       total_byte_size *= value_.as<int>();
     }
     int int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
