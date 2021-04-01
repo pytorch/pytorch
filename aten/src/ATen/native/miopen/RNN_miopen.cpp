@@ -15,19 +15,18 @@ namespace at { namespace native {
 
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
             const Tensor& input_r, TensorList weight, int64_t weight_stride0,
-            const Tensor& hx, const Tensor& cx,
+            const Tensor& hx, const c10::optional<Tensor>& cx_opt,
             int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_num_layers,
             bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
-            IntArrayRef fn_batch_sizes, const Tensor& fn_dropout_state
+            IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
             ) {
         AT_ERROR("miopen_rnn : ATen not compiled with MIOpen support.");
     }
 
     std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
-            const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
-            const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
-            const Tensor& grad_cy_r, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
-            double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor& dropout_state,
+            const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
+            const Tensor& output, const c10::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
+            double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt,
             const Tensor& reserve, std::array<bool, 4> output_mask
             ) {
         AT_ERROR("miopen_rnn_backward: ATen not compiled with MIOpen support.");
@@ -433,11 +432,14 @@ std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDe
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         const Tensor& input_r, TensorList weight, int64_t weight_stride0,
-        const Tensor& hx, const Tensor& cx,
+        const Tensor& hx, const c10::optional<Tensor>& cx_opt,
         int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_num_layers,
         bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
-        IntArrayRef fn_batch_sizes, const Tensor& fn_dropout_state
+        IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
         ) {
+    // See [Note: hacky wrapper removal for optional tensor]
+    const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
+    const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
 
     check_attributes(input_r, weight, {hx, cx});
     auto input = input_r;
@@ -747,12 +749,18 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
-        const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
-        const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
-        const Tensor& grad_cy_r, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
-        double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor& dropout_state,
+        const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
+        const Tensor& output, const c10::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
+        double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt,
         const Tensor& reserve, std::array<bool, 4> output_mask
         ) {
+    // See [Note: hacky wrapper removal for optional tensor]
+    const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
+    const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
+    const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
+    const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
+    const Tensor& dropout_state = c10::value_or_else(dropout_state_opt, [] {return Tensor();});
+
     if (!grad_output_r.defined() && !grad_hy_r.defined() && !grad_cy_r.defined()) {
         return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>(Tensor(), Tensor(), Tensor(), std::vector<Tensor>(weight.size()));
     }

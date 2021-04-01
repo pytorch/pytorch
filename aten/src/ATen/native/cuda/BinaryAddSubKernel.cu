@@ -30,7 +30,7 @@ void add_kernel_cuda(TensorIteratorBase& iter, Scalar alpha_scalar) {
   });
 }
 
-static void sub_kernel_cuda(TensorIterator& iter, const Scalar& alpha_scalar) {
+static void sub_kernel_cuda(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
   add_kernel_cuda(iter, -alpha_scalar);
 }
 

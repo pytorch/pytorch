@@ -1,6 +1,8 @@
 #pragma once
 #include <ATen/ATen.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 namespace {
