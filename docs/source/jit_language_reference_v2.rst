@@ -1522,3 +1522,247 @@ The ``enumerate`` statement:
 
 * Arguments must be iterables.
 * Iterable types in TorchScript include ``Tensors``, ``lists``, ``tuples``, ``dictionaries``, ``strings``, ``torch.nn.ModuleList`` and ``torch.nn.ModuleDict``.
+
+.. _python-builtin-functions-values-resolution:
+
+Python Functions/Values Resolution Rules
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When given a Python value, TorchScript attempts to resolve it in following five different ways:
+
+* Compilable Python Implementation:
+    * When a Python value is backed by a Python implementation that can be compiled by TorchScript, TorchScript compiles and uses the underlying Python implementation.
+    * Example: ``torch.jit.Attribute``
+* Op Python Wrapper:
+    * When a Python value is a wrapper of a native PyTorch op, TorchScript emits corresponding operator.
+    * Example: ``torch.jit._logging.add_stat_value``
+* Python Object Identity Match:
+    * For a limited set of ``torch.*`` API calls (in the form of Python values) that TorchScript supports, TorchScript attempts to match a Python value against each item in the set.
+    * When matched, TorchScript generates a corresponding ``SugaredValue`` instance that contains lowering logic for these values.
+    * Example: ``torch.jit.isinstance``
+* Name Match:
+    * For Python built-in functions and constants, TorchScript identifies them by name, and creates a corresponding SugaredValue instance that implements their functionality.
+    * Example: ``all()``
+* Value Snapshot:
+    * For Python values from unrecognized modules, TorchScript attempts to take a snapshot of the value and converts to a constant in the graph of the function(s) or method(s) being compiled
+    * Example: ``math.pi``
+
+
+
+.. _python-builtin-functions-support:
+
+Python Builtin Functions Support
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. list-table:: TorchScript Support for Python Builtin Functions
+   :widths: 25 25 50
+   :header-rows: 1
+
+   * - Builtin Function
+     - Support Level
+     - Notes
+   * - ``abs()``
+     - Partial
+     - Only supports ``Tensor``/``Int``/``Float`` type inputs | Doesn't honor ``__abs__`` override
+   * - ``all()``
+     - Full
+     -
+   * - ``any()``
+     - Full
+     -
+   * - ``ascii()``
+     - None
+     -
+   * - ``bin()``
+     - Partial
+     - Only supports ``Int``-type input
+   * - ``bool()``
+     - Partial
+     - Only supports ``Tensor``/``Int``/``Float`` type inputs
+   * - ``breakpoint()``
+     - None
+     -
+   * - ``breakpoint()``
+     - None
+     -
+   * - ``bytearray()``
+     - None
+     -
+   * - ``bytes()``
+     - None
+     -
+   * - ``callable()``
+     - None
+     -
+   * - ``chr()``
+     - Partial
+     - Only ASCII character set is supported
+   * - ``classmethod()``
+     - Full
+     -
+   * - ``compile()``
+     - None
+     -
+   * - ``complex()``
+     - None
+     -
+   * - ``delattr()``
+     - None
+     -
+   * - ``dict()``
+     - Full
+     -
+   * - ``dir()``
+     - None
+     -
+   * - ``divmod()``
+     - Full
+     -
+   * - ``enumerate()``
+     - Full
+     -
+   * - ``eval()``
+     - None
+     -
+   * - ``exec()``
+     - None
+     -
+   * - ``filter()``
+     - None
+     -
+   * - ``filter()``
+     - None
+     -
+   * - ``float()``
+     - Partial
+     - Doesn't honor ``__index__`` override
+   * - ``format()``
+     - Partial
+     - Manual index specification not supported | Format type modifier not supported
+   * - ``frozenset()``
+     - None
+     -
+   * - ``getattr()``
+     - Partial
+     - Attribute name must be string literal
+   * - ``globals()``
+     - None
+     -
+   * - ``hasattr()``
+     - Full
+     -
+   * - ``hash()``
+     - Full
+     - `Tensor`'s hash is based on identity not numeric value
+   * - ``hex()``
+     - Partial
+     - Only supports ``Int``-type input
+   * - ``id()``
+     - Full
+     - Only supports ``Int``-type input
+   * - ``input()``
+     - None
+     -
+   * - ``int()``
+     - Partial
+     - ``base`` argument not supported | Doesn't honor ``__index__`` override
+   * - ``isinstance()``
+     - Full
+     - ``torch.jit.isintance`` provides better support when checking against container types like ``Dict[str, int]``
+   * - ``issubclass()``
+     - None
+     -
+   * - ``iter()``
+     - None
+     -
+   * - ``len()``
+     - Full
+     -
+   * - ``list()``
+     - Full
+     -
+   * - ``ord()``
+     - Partial
+     - Only ASCII character set is supported
+   * - ``pow()``
+     - Full
+     -
+   * - ``print()``
+     - Partial
+     - ``separate``, ``end`` and ``file`` arguments are not supported
+   * - ``property()``
+     - None
+     -
+   * - ``range()``
+     - Full
+     -
+   * - ``repr()``
+     - None
+     -
+   * - ``reversed()``
+     - None
+     -
+   * - ``round()``
+     - Partial
+     - ``ndigits`` argument is not supported
+   * - ``set()``
+     - None
+     -
+   * - ``setattr()``
+     - None
+     - Partial
+   * - ``slice()``
+     - Full
+     -
+   * - ``sorted()``
+     - Partial
+     - ``key`` argument is not supported
+   * - ``staticmethod()``
+     - Full
+     -
+   * - ``str()``
+     - Partial
+     - ``encoding`` and ``errors`` arguments are not supported
+   * - ``sum()``
+     - Full
+     -
+   * - ``super()``
+     - Partial
+     - It can only be used in ``nn.Module``'s ``__init__`` method.
+   * - ``type()``
+     - None
+     -
+   * - ``vars()``
+     - None
+     -
+   * - ``zip()``
+     - Full
+     -
+   * - ``__import__()``
+     - None
+     -
+
+.. _python-builtin-values-support:
+
+Python Builtin Values Support
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. list-table:: TorchScript Support for Python Builtin Values
+   :widths: 25 25 50
+   :header-rows: 1
+
+   * - Builtin Value
+     - Support Level
+     - Notes
+   * - ``False``
+     - Full
+     -
+   * - ``True``
+     - Full
+     -
+   * - ``None``
+     - Full
+     -
+   * - ``NotImplemented``
+     - None
+     -
+   * - ``Ellipsis``
+     - Full
+     -
