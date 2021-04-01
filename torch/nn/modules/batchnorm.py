@@ -38,8 +38,8 @@ class _NormBase(Module):
         self.affine = affine
         self.track_running_stats = track_running_stats
         if self.affine:
-            self.weight = Parameter(torch.Tensor(num_features))
-            self.bias = Parameter(torch.Tensor(num_features))
+            self.weight = Parameter(torch.empty(num_features))
+            self.bias = Parameter(torch.empty(num_features))
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
@@ -142,6 +142,9 @@ class _BatchNorm(_NormBase):
 
 
 class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
+
+    weight: UninitializedParameter  # type: ignore[assignment]
+    bias: UninitializedParameter  # type: ignore[assignment]
 
     def __init__(self, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
         super(_LazyBatchNorm, self).__init__(
@@ -256,6 +259,9 @@ class LazyBatchNorm1d(_LazyBatchNorm):
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
@@ -359,6 +365,9 @@ class LazyBatchNorm2d(_LazyBatchNorm):
     from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
 
     Args:
         eps: a value added to the denominator for numerical stability.
@@ -465,6 +474,9 @@ class LazyBatchNorm3d(_LazyBatchNorm):
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
@@ -565,7 +577,7 @@ class SyncBatchNorm(_BatchNorm):
         >>> # creating process group (optional)
         >>> # ranks is a list of int identifying rank ids.
         >>> ranks = list(range(8))
-        >>> r1, r2 = ranks[:4], ranks[4:] 
+        >>> r1, r2 = ranks[:4], ranks[4:]
         >>> # Note: every rank calls into new_group for every
         >>> # process group created, even if that rank is not
         >>> # part of the group.
@@ -706,7 +718,7 @@ class SyncBatchNorm(_BatchNorm):
             >>> # creating process group (optional)
             >>> # ranks is a list of int identifying rank ids.
             >>> ranks = list(range(8))
-            >>> r1, r2 = ranks[:4], ranks[4:] 
+            >>> r1, r2 = ranks[:4], ranks[4:]
             >>> # Note: every rank calls into new_group for every
             >>> # process group created, even if that rank is not
             >>> # part of the group.

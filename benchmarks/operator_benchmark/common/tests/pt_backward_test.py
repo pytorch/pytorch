@@ -10,9 +10,9 @@ add_configs = op_bench.cross_product_configs(
 )
 
 # This benchmark uses the auto_set to automatically set requires_grad
-# for both inputs. The test name can also be used for filtering. 
+# for both inputs. The test name can also be used for filtering.
 class AddBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K): 
+    def init(self, M, N, K):
         self.input_one = torch.rand(M, N, K, requires_grad=self.auto_set())
         self.input_two = torch.rand(M, N, K, requires_grad=self.auto_set())
         self.set_module_name("add")

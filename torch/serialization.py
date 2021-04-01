@@ -334,7 +334,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
          pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
     """Saves an object to a disk file.
 
-    See also: `saving-loading-tensors`
+    See also: :ref:`saving-loading-tensors`
 
     Args:
         obj: saved object
@@ -348,7 +348,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
 
     .. note::
         PyTorch preserves storage sharing across serialization. See
-        `preserve-storage-sharing` for more details.
+        :ref:`preserve-storage-sharing` for more details.
 
     .. note::
         The 1.6 release of PyTorch switched ``torch.save`` to use a new
@@ -843,7 +843,10 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         storage = loaded_storages[key]
         return storage
 
-    load_module_mapping: Dict[str, str] = {}
+    load_module_mapping: Dict[str, str] = {
+        # See https://github.com/pytorch/pytorch/pull/51633
+        'torch.tensor': 'torch._tensor'
+    }
 
     # Need to subclass Unpickler instead of directly monkey-patching the find_class method
     # because it's marked readonly in pickle.

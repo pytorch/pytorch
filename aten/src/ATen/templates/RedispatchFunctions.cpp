@@ -1,5 +1,6 @@
 // ${generated_comment}
 
+#include <ATen/RedispatchFunctions.h>
 #include <ATen/Functions.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>

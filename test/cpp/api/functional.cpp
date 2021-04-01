@@ -731,7 +731,7 @@ TEST_F(FunctionalTest, TripletMarginWithDistanceLossDefaultParity) {
   for (auto& reduction : reductions) {
     for (auto& margin : margins) {
       for (const auto& swap : swaps) {
-        auto anchor = 
+        auto anchor =
             torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
         auto positive =
             torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));

@@ -32,6 +32,10 @@ def register_ops_helper(domain, version, iter_version):
             op = ('len', op[1])
         if op[0] == '_list':
             op = ('list', op[1])
+        if op[0] == '_any':
+            op = ('any', op[1])
+        if op[0] == '_all':
+            op = ('all', op[1])
         if isfunction(op[1]) and not is_registered_op(op[0], domain, version):
             register_op(op[0], op[1], domain, version)
 
