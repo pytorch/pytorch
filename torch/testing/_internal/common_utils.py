@@ -2078,7 +2078,7 @@ gradcheck_error_msg = \
      " calling into gradcheck wrapper")
 
 
-def _gradcheck(fn, inputs, **kwargs):
+def gradcheck(fn, inputs, **kwargs):
     # Wrapper around gradcheck that enables certain keys by default.
     # Use this testing-internal gradcheck instead of autograd.gradcheck so that new features like vmap and
     # forward-mode AD are tested by default. We create this wrapper because we'd like to keep new checks
@@ -2086,28 +2086,23 @@ def _gradcheck(fn, inputs, **kwargs):
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradcheck.
     #
-    # The actual gradcheck implementation does not know about the fast_and_slow parameter. It is specific
-    # to the wrapper code and its purpose is to facilitate the testing of gradcheck itself.
     # When fast_and_slow=True, IF 1) the passed 'func' is real to real AND 2) we do not explicitly pass
     # in fast_mode=False, THEN we run both the fast and slow implementations of gradcheck and compare
     # to see if the results are the same.
-    #
-    # Temporary changes:
-    # _gradcheck is no longer directly used by any tests, instead we add another additional wrapper
-    # that calls into _gradcheck but enables "fast_and_slow" by default.
     if kwargs.pop("fast_and_slow", True):
+        kwargs["fast_and_slow"] = False
         # When fast_and_slow=True, we make sure the fast and slow implementations behave the same
         if kwargs.pop("fast_mode", True) and not has_complex_inputs_or_inputs(fn, inputs):
-            fast = _gradcheck(fn, inputs, **kwargs, fast_mode=True)
+            fast = gradcheck(fn, inputs, **kwargs, fast_mode=True)
             try:
-                slow = _gradcheck(fn, inputs, **kwargs, fast_mode=False)
+                slow = gradcheck(fn, inputs, **kwargs, fast_mode=False)
             except Exception:
                 raise RuntimeError("Gradcheck Error:" + gradcheck_error_msg)
             # For when raise_exception=False
             if fast is not slow:
                 raise RuntimeError("Gradcheck Error:" + gradcheck_error_msg)
             return fast and slow
-        return _gradcheck(fn, inputs, **kwargs, fast_mode=False)
+        return gradcheck(fn, inputs, **kwargs, fast_mode=False)
 
     keys_enabled_by_default = (
         "check_batched_grad",)
@@ -2117,25 +2112,26 @@ def _gradcheck(fn, inputs, **kwargs):
 
     return torch.autograd.gradcheck(fn, inputs, **kwargs)
 
-def _gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
+def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     # Wrapper around gradgradcheck that enables certain keys by default
     # See gradcheck above for an explanation of why we need something like this and details
     # on the fast_and_slow parameter, which is specific to the wrapper code.
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
     if kwargs.pop("fast_and_slow", True):
+        kwargs["fast_and_slow"] = False
         # When fast_and_slow=True, we make sure the fast and slow implementations behave the same
         if kwargs.pop("fast_mode", True) and not has_complex_inputs_or_inputs(fn, inputs):
-            fast = _gradgradcheck(fn, inputs, **kwargs, fast_mode=True)
+            fast = gradgradcheck(fn, inputs, **kwargs, fast_mode=True)
             try:
-                slow = _gradgradcheck(fn, inputs, **kwargs, fast_mode=False)
+                slow = gradgradcheck(fn, inputs, **kwargs, fast_mode=False)
             except Exception:
                 raise RuntimeError("Gradgradcheck Error:" + gradcheck_error_msg)
             # For when raise_exception=False
             if fast is not slow:
                 raise RuntimeError("Gradgradcheck Error:" + gradcheck_error_msg)
             return fast and slow
-        return _gradgradcheck(fn, inputs, **kwargs, fast_mode=False)
+        return gradgradcheck(fn, inputs, **kwargs, fast_mode=False)
 
     keys_enabled_by_default = (
         "check_batched_grad",)
@@ -2144,11 +2140,6 @@ def _gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         kwargs[key] = kwargs.get(key, True)
 
     return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
-
-
-# Temporarily for testing, always compute both fast and slow modes
-gradcheck = partial(_gradcheck, fast_and_slow=True)
-gradgradcheck = partial(_gradgradcheck, fast_and_slow=True)
 
 
 def _assertGradAndGradgradChecks(test_case, apply_fn, inputs, **kwargs):
