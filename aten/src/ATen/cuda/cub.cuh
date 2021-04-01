@@ -28,29 +28,16 @@ static inline void sort_pairs(
   value_t_ *values_out_ = reinterpret_cast<value_t_*>(values_out);
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  // Use the sorted order of keys to rearrange the result array
   size_t temp_storage_bytes = 0;
-  if (descending) {
-    ::cub::DeviceRadixSort::SortPairsDescending(
+  ::cub::DeviceRadixSort::SortPairs(
       nullptr, temp_storage_bytes,
       keys_in_, keys_out_, values_in_, values_out_, n,
       start_bit, end_bit, at::cuda::getCurrentCUDAStream(), true);
-    auto tmpDataPtr = allocator.allocate(temp_storage_bytes);
-    ::cub::DeviceRadixSort::SortPairsDescending(
+  auto tmpDataPtr = allocator.allocate(temp_storage_bytes);
+  ::cub::DeviceRadixSort::SortPairs(
       tmpDataPtr.get(), temp_storage_bytes,
       keys_in_, keys_out_, values_in_, values_out_, n,
       start_bit, end_bit, at::cuda::getCurrentCUDAStream(), true);
-  } else {
-    ::cub::DeviceRadixSort::SortPairs(
-        nullptr, temp_storage_bytes,
-        keys_in_, keys_out_, values_in_, values_out_, n,
-        start_bit, end_bit, at::cuda::getCurrentCUDAStream(), true);
-    auto tmpDataPtr = allocator.allocate(temp_storage_bytes);
-    ::cub::DeviceRadixSort::SortPairs(
-        tmpDataPtr.get(), temp_storage_bytes,
-        keys_in_, keys_out_, values_in_, values_out_, n,
-        start_bit, end_bit, at::cuda::getCurrentCUDAStream(), true);
-  }
 }
 
 }}}
