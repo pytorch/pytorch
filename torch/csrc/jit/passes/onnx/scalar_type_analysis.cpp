@@ -286,12 +286,12 @@ static void UpdateScalarTypeForOutput(
 static void RecoverScalarTypeForOutput(
     Node* n,
     const c10::ScalarType& scalar_type) {
-      const int64_t onnx_type = ScalarTypeToONNXType(scalar_type);
-      Node* cast_node = n->owningGraph()->create(onnx::Cast, 1);
-      cast_node->addInput(n->output());
-      cast_node->i_(attr::to, onnx_type);
-      cast_node->insertAfter(n);
-      n->output()->replaceAllUsesAfterNodeWith(cast_node, cast_node->output());
+  const int64_t onnx_type = ScalarTypeToONNXType(scalar_type);
+  Node* cast_node = n->owningGraph()->create(onnx::Cast, 1);
+  cast_node->addInput(n->output());
+  cast_node->i_(attr::to, onnx_type);
+  cast_node->insertAfter(n);
+  n->output()->replaceAllUsesAfterNodeWith(cast_node, cast_node->output());
 }
 
 static void ImplicitCastNodeForONNX(Node* n) {
@@ -301,7 +301,7 @@ static void ImplicitCastNodeForONNX(Node* n) {
       auto expected_scalar_type_cast =
           LowPrecisionCastForStandardOps(n, *expected_scalar_type);
       UpdateScalarTypeForInputs(n, *expected_scalar_type_cast);
-      if (*expected_scalar_type != *expected_scalar_type_cast){
+      if (*expected_scalar_type != *expected_scalar_type_cast) {
         // If input type is changed, convert it to the original type
         RecoverScalarTypeForOutput(n, *expected_scalar_type);
       }
@@ -358,7 +358,8 @@ static void ImplicitCastForONNXWithoutLowPrecision(Block* block) {
       block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
-void ScalarTypeAnalysisForONNXWithoutLowPrecision(const std::shared_ptr<Graph>& graph) {
+void ScalarTypeAnalysisForONNXWithoutLowPrecision(
+    const std::shared_ptr<Graph>& graph) {
   ImplicitCastForONNXWithoutLowPrecision(graph->block());
 }
 
