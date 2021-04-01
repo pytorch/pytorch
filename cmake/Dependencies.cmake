@@ -118,7 +118,7 @@ else()
   set(AT_MKLDNN_ENABLED 0)
   set(AT_MKL_ENABLED 0)
 endif()
-set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib;FLAME;Generic")
+set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
@@ -133,6 +133,10 @@ elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
   include_directories(SYSTEM ${OpenBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${OpenBLAS_LIB})
+elseif(BLAS STREQUAL "BLIS")
+  find_package(BLIS REQUIRED)
+  include_directories(SYSTEM ${BLIS_INCLUDE_DIR})
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${BLIS_LIB})
 elseif(BLAS STREQUAL "MKL")
   if(BLAS_SET_BY_USER)
     find_package(MKL REQUIRED)
@@ -171,7 +175,7 @@ if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
   set(AT_MKL_MT 0)
   set(USE_BLAS 1)
-  if(NOT (ATLAS_FOUND OR OpenBLAS_FOUND OR MKL_FOUND OR VECLIB_FOUND OR GENERIC_BLAS_FOUND))
+  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND))
     message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
     find_package(BLAS)
     if(NOT BLAS_FOUND)
@@ -1211,6 +1215,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
+    list(APPEND HIP_CXX_FLAGS -DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     list(APPEND HIP_CXX_FLAGS -std=c++14)
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
@@ -1232,7 +1237,7 @@ if(USE_ROCM)
     # This is needed for library added by hip_add_library (same for hip_add_executable)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
-    set(Caffe2_HIP_DEPENDENCY_LIBS
+    set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${PYTORCH_RCCL_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
 
     # Note [rocblas & rocfft cmake bug]
@@ -1240,10 +1245,10 @@ if(USE_ROCM)
     # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
     if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
-      list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::rocblas hip::hipfft hip::hiprand roc::hipsparse)
     else()
-      list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
     endif()
   else()
