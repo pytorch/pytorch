@@ -886,7 +886,12 @@ class Quantizer:
                 graph_inputs.append(node.name)
 
         def load_before_quant(n: Node) -> Node:
-            return before_quant_env[n.name]
+            """ Load value before quantization if available
+            """
+            if n.name in before_quant_env:
+                return before_quant_env[n.name]
+            else:
+                return env[n.name]
 
         def load_non_quantized(n: Node) -> Node:
             """
