@@ -18,7 +18,7 @@ from torch._C._jit_tree_views import (
 )
 from torch._utils_internal import get_source_lines_and_file
 
-from torch._jit_internal import SourceContext, should_drop, is_static_fn
+from torch._jit_internal import SourceContext, should_drop, is_static_fn, FunctionModifiers
 import torch.jit.annotations
 
 # Borrowed from cPython implementation
@@ -523,6 +523,32 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_With(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
+        # # HACK to recognize ignore context
+        if isinstance(stmt.items[0].context_expr, ast.Call):
+            exp = stmt.items[0].context_expr
+            py_args = []
+            dummy_function_str = "\ndef func_ignore("
+            for i in exp.keywords:
+                dummy_function_str += i.arg + " :"
+                dummy_function_str += i.value.value + ", "
+            dummy_function_str = dummy_function_str[:-2] + ") -> int: pass"
+            dummy_function = ast.parse(dummy_function_str).body[0]
+            dummy_function.body = stmt.body
+            f = astunparse.unparse(dummy_function)
+            f = f + "\ncontainer[\"key\"]=func_ignore"
+            container = {}
+            exec(f)
+            exec("func_ignore._torchscript_modifier = FunctionModifiers.IGNORE")
+            def make_global(*args):
+                for arg in args:
+                    setattr(sys.modules[__name__], arg.__name__, arg)
+            make_global(container["key"])
+            assign_str = "{} = torch.jit.frontend.func_ignore(a, b, c)".format(exp.keywords[-1].arg)
+            assign_ast = ast.parse(assign_str)
+            assign_ast = assign_ast.body[0]
+            rhs = build_expr(ctx, assign_ast.value)
+            lhs = [build_expr(ctx, x) for x in assign_ast.targets]
+            return Assign(lhs, rhs)
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
 
 class ExprBuilder(Builder):
