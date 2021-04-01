@@ -470,15 +470,14 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cpu(
-  Tensor& output,
-  Tensor& indices,
-  const Tensor& input,
+std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cpu(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
-  bool ceil_mode)
+  bool ceil_mode,
+  Tensor& output,
+  Tensor& indices)
 {
   max_pool3d_with_indices_out_cpu_template(
     output,
@@ -521,16 +520,15 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cpu(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& max_pool3d_with_indices_backward_out_cpu(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& max_pool3d_with_indices_backward_out_cpu(const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
   bool ceil_mode,
-  const Tensor& indices)
+  const Tensor& indices,
+  Tensor& gradInput)
 {
   max_pool3d_with_indices_backward_out_cpu_template(
     gradInput,
