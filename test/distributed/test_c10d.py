@@ -2466,6 +2466,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_not_multigpu
     def test_nccl_backend_single_device_module_empty_device_ids(self):
+        # This tests the backward compatibility of accepting an empty list as `device_ids`,
+        # although we no longer document this in favor of the default value of `None`,
+        # which is consistent with multi-device modules and CPU modules.
         self._test_nccl_backend(None, [])
 
     @requires_nccl()
