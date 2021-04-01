@@ -80,7 +80,7 @@ PThreadPool* pthreadpool() {
     pthread_atfork(nullptr, nullptr, child_atfork);
   });
 #endif
-  static auto true_bool = true;
+  auto true_bool = true;
   if (leak_corrupted_threadpool.compare_exchange_strong(true_bool, false)) {
     if (auto leaked = threadpool.release()) {
       auto num_threads = leaked->get_thread_count();
