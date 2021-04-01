@@ -465,7 +465,7 @@ class TestAutograd(TestCase):
         s.abs_().clamp_(0.0001)
         for sign in (-1, 1):
             s[-1] = sign
-            mat = torch.chain_matmul(u, s.diag(), v.t()).requires_grad_()
+            mat = torch.linalg.multi_dot([u, s.diag(), v.t()]).requires_grad_()
             gradcheck(sign_mul_logdet, mat)
             gradgradcheck(sign_mul_logdet, mat)
 
