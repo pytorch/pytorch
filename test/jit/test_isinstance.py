@@ -104,8 +104,8 @@ class TestIsinstance(JitTestCase):
             assert torch.jit.isinstance(x, Optional[torch.Tensor])
             # assert torch.jit.isinstance(x, Optional[str])
             # TODO: above line in eager will evaluate to True while in
-            #       the TS interpreter will evaluate to False as the 
-            #       first torch.jit.isinstance refines the 'None' type 
+            #       the TS interpreter will evaluate to False as the
+            #       first torch.jit.isinstance refines the 'None' type
 
         x = None
         self.checkScript(optional_test_none, (x,))

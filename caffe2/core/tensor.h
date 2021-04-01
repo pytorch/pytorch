@@ -227,6 +227,11 @@ class TORCH_API Tensor final {
     impl_.get()->Resize(dim_source...);
   }
 
+  template <typename T>
+  void Resize(const std::vector<T>& dim_source) const {
+    impl_.get()->Resize(ArrayRef<T>(dim_source));
+  }
+
   /**
    * Resize the tensor like the source tensor. Note that this is just a
    * sugar wrapper that essentially calls Resize(src_tensor.dims()).
@@ -494,7 +499,9 @@ class TORCH_API Tensor final {
         i, static_cast<int>(impl_->dim()), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
 #endif
-    auto s = impl_->size(i);
+    // Avoid TensorImpl::size() because it is a virtual call that
+    // supports out-of-range indexing like Python.
+    auto s = impl_->sizes()[i];
     CAFFE_ENFORCE_LT_WITH_CALLER(s, std::numeric_limits<int>::max());
     return static_cast<int>(s);
   }

@@ -259,11 +259,11 @@ class TORCH_API SoftminImpl : public torch::nn::Cloneable<SoftminImpl> {
  public:
   explicit SoftminImpl(int64_t dim) : SoftminImpl(SoftminOptions(dim)) {}
   explicit SoftminImpl(const SoftminOptions& options_);
-  
+
   Tensor forward(const Tensor& input);
 
   void reset() override;
-  
+
   /// Pretty prints the `Softmin` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 

@@ -25,7 +25,7 @@ Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::op
   return Tensor(std::move(tensor_impl));
 }
 
-Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
+Tensor add_override(const Tensor & a, const Tensor & b , const Scalar& c) {
   test_int = 2;
   return a;
 }
