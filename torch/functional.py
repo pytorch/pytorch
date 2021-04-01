@@ -1470,17 +1470,19 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             else:
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore
 
-def chain_matmul(*matrices):
+def chain_matmul(*matrices, out=None):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
     using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
     of arithmetic operations (`[CLRS]`_). Note that since this is a function to compute the product, :math:`N`
     needs to be greater than or equal to 2; if equal to 2 then a trivial matrix-matrix product is returned.
     If :math:`N` is 1, then this is a no-op - the original matrix is returned as is.
 
+    .. warning::
+        :func:`torch.chain_matmul` is deprecated, use :func:`torch.linalg.multi_dot` instead.
 
     Args:
         matrices (Tensors...): a sequence of 2 or more 2-D tensors whose product is to be determined.
-
+        out (Tensor, optional): the output tensor. Ignored if :attr:`out` = ``None``.
 
     Returns:
         Tensor: if the :math:`i^{th}` tensor was of dimensions :math:`p_{i} \times p_{i + 1}`, then the product
