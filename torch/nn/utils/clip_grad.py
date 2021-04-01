@@ -27,10 +27,11 @@ def clip_grad_norm_(
     Returns:
         Total norm of the parameters (viewed as a single vector).
     """
-    warnings.warn("The behavior of torch.nn.utils.clip_grad_norm_ will change in a future release "
-                  "to error out by default if a non-finite total norm is encountered. At that point, "
-                  "setting error_if_nonfinite=false will be required to retain the old behavior.",
-                  FutureWarning, stacklevel=2)
+    if not error_if_nonfinite:
+        warnings.warn("The behavior of torch.nn.utils.clip_grad_norm_ will change in a future release "
+                      "to error out by default if a non-finite total norm is encountered. At that point, "
+                      "setting error_if_nonfinite=false will be required to retain the old behavior.",
+                      FutureWarning, stacklevel=2)
 
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]

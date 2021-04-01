@@ -15,9 +15,11 @@ inline double clip_grad_norm_(
     double max_norm,
     double norm_type = 2.0,
     bool error_if_nonfinite = false) {
-  TORCH_WARN_ONCE("The behavior of torch.nn.utils.clip_grad_norm_ will change in a future release "
-                  "to error out by default if a non-finite total norm is encountered. At that point, "
-                  "setting error_if_nonfinite=false will be required to retain the old behavior.");
+  if (!error_if_nonfinite) {
+    TORCH_WARN_ONCE("The behavior of torch.nn.utils.clip_grad_norm_ will change in a future release "
+                    "to error out by default if a non-finite total norm is encountered. At that point, "
+                    "setting error_if_nonfinite=false will be required to retain the old behavior.");
+  }
   std::vector<Tensor> params_with_grad;
 
   for (const auto& param : parameters) {
