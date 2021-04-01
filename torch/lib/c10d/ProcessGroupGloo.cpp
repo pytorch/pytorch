@@ -2827,7 +2827,8 @@ void ProcessGroupGloo::monitoredBarrier(
     }
   }
 
-  auto elapsedTime = std::chrono::steady_clock::now() - startTime;
+  auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - startTime);
   LOG(INFO) << "All ranks passed monitoredBarrier in "
             << elapsedTime.count()
             << " ms.";
