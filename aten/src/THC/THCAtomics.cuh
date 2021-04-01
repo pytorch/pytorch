@@ -294,9 +294,9 @@ inline __device__ at::BFloat16 gpuAtomicMul(at::BFloat16 * address, at::BFloat16
   return AtomicFPOp<at::BFloat16>()(address, val,
                                     [](at::BFloat16 bsum, at::BFloat16 val) {
                                       return THCNumerics<at::BFloat16>::mul(bsum, val);
-                                    });    
+                                    });
 }
-    
+
 inline __device__ double gpuAtomicMul(double * address, double val) {
   return AtomicFPOp<double>()(address, val,
                               [](double val, unsigned long long int assumed) {

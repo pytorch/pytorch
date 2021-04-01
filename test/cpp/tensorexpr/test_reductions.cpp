@@ -1978,5 +1978,34 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   ASSERT_EQ(out_before[0], out_after[0]);
 }
 
+TEST(Reductions, InitFunction) {
+  KernelScope ks;
+  constexpr int M = 32;
+  constexpr int N = 16;
+  Placeholder A("A", kFloat, {M, N});
+  Placeholder B("B", kFloat, {N});
+  Tensor* C = Reduce(
+      "C",
+      {{N, "n"}},
+      Sum(),
+      [&](const std::vector<VarHandle>& v) { return B.load(v[0]); },
+      [&](const std::vector<VarHandle>& v) { return A.load(v[1], v[0]); },
+      {{M, "m"}});
+  LoopNest nest({C});
+  nest.prepareForCodegen();
+  Stmt* s = IRSimplifier::simplify(nest.root_stmt());
+  std::ostringstream oss;
+  oss << *s << "\n";
+  const std::string& expected_ir =
+      R"IR(
+#CHECK:  for (int n = 0; n < 16; n++) {
+#CHECK:    C[n] = B[n];
+#CHECK:    for (int m = 0; m < 32; m++) {
+#CHECK:      C[n] = (C[n]) + (A[n + 16 * m]);
+#CHECK:    }
+#CHECK:  }
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
 } // namespace jit
 } // namespace torch

@@ -345,8 +345,8 @@ struct Vec256<c10::quint8> {
     vint32 veci4 = vec_signed(vecf4);
     vint32 veci5 = vec_signed(vecf5);
     vint32 veci6 = vec_signed(vecf6);
-    vint32 veci7 = vec_signed(vecf7); 
-    
+    vint32 veci7 = vec_signed(vecf7);
+
     veci0 = vec_add(veci0, vec_zero_point);
     veci1 = vec_add(veci1, vec_zero_point);
     veci2 = vec_add(veci2, vec_zero_point);
@@ -356,11 +356,11 @@ struct Vec256<c10::quint8> {
     veci5 = vec_add(veci5, vec_zero_point);
     veci6 = vec_add(veci6, vec_zero_point);
     veci7 = vec_add(veci7, vec_zero_point);
- 
+
     vint16 vecshi0 = vec_packs(veci0, veci1);
     vint16 vecshi1 = vec_packs(veci2, veci3);
     vint16 vecshi2 = vec_packs(veci4, veci5);
-    vint16 vecshi3 = vec_packs(veci6, veci7);  
+    vint16 vecshi3 = vec_packs(veci6, veci7);
 
     vuint8 vec0 = vec_packsu(vecshi0, vecshi1);
     vuint8 vec1 = vec_packsu(vecshi2, vecshi3);

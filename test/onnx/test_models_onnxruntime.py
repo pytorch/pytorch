@@ -15,7 +15,6 @@ def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
                        input=inputs, rtol=rtol, atol=atol)
 
         if self.is_script_test_enabled and opset_version > 11:
-            TestModels.use_new_jit_passes = True
             TestModels.onnx_shape_inference = True
 
             outputs = model(inputs)
@@ -37,7 +36,6 @@ TestModels_new_jit_API = type(str("TestModels_new_jit_API"),
                               dict(TestModels.__dict__,
                                    exportTest=exportTest,
                                    is_script_test_enabled=True,
-                                   use_new_jit_passes=True,
                                    onnx_shape_inference=True))
 
 

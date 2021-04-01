@@ -37,11 +37,11 @@ namespace nn {
 ///
 /// \endrst
 ///
-/// Why should you use `ModuleDict` instead of a simple `map` or `OrderedDict`? 
-/// The value a `ModuleDict` provides over manually calling an ordered map of 
+/// Why should you use `ModuleDict` instead of a simple `map` or `OrderedDict`?
+/// The value a `ModuleDict` provides over manually calling an ordered map of
 /// modules is that it allows treating the whole container *as a single module*,
 /// such that performing a transformation on the `ModuleDict` applies to each of the
-/// modules it stores (which are each a registered submodule of the `ModuleDict`). 
+/// modules it stores (which are each a registered submodule of the `ModuleDict`).
 /// For example, calling `.to(torch::kCUDA)` on a `ModuleDict` will move each module
 /// in the map to CUDA memory. For example:
 ///
@@ -62,7 +62,7 @@ namespace nn {
 ///
 /// Finally, `ModuleDict` provides a lightweight container API, such as allowing
 /// iteration over submodules, positional access, adding new modules from a vector
-/// of key-module pairs or an `OrderedDict` or another `ModuleDict` after 
+/// of key-module pairs or an `OrderedDict` or another `ModuleDict` after
 /// construction via `update`.
 class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
  public:
@@ -160,7 +160,7 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
   }
 
   /// Attempts to returns the `Module` associated with the given `key`. Throws
-  /// an exception if no such `key` is stored in the `ModuleDict`. Check 
+  /// an exception if no such `key` is stored in the `ModuleDict`. Check
   /// contains(key) before for a non-throwing way of access.
   std::shared_ptr<Module> operator[](const std::string& key) const {
     return modules_[key];
