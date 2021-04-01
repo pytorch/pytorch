@@ -1117,7 +1117,7 @@ def all_reduce_multigpu(tensor_list,
     tensors should only be GPU tensors
 
     Args:
-        tensor list (List[Tensor]): List of input and output tensors of
+        tensor_list (List[Tensor]): List of input and output tensors of
             the collective. The function operates in-place and requires that
             each tensor to be a GPU tensor on different GPUs.
             You also need to make sure that ``len(tensor_list)`` is the same for
@@ -2475,6 +2475,58 @@ def barrier(group=GroupMember.WORLD,
         return work
     else:
         work.wait()
+
+def monitored_barrier(group=GroupMember.WORLD, timeout=None):
+    """
+    Synchronizes all processes similar to torch.distributed.barrier, but takes
+    a configurable timeout and is able to report ranks that did not pass this
+    barrier within that timeout. Specifically, for non-zero ranks, will block
+    until a send/recv is processed from rank 0. Rank 0 will block until all send
+    /recv from other ranks are processed, and will report failures for ranks
+    that failed to respond in time.
+
+    This collective will block the process corresponding to rank 0 until the
+    whole group exits the function successfully, making it useful for debugging
+    and synchronizing. However, it can have a performance impact and should only
+    be used for debugging or scenarios that require full synhcronization points
+    on the host-side. For debugging purposees, this barrier can be inserted
+    before the application's collective calls to check if any ranks are
+    desynchronized.
+
+    .. note:: Note that this collective is only supported with the GLOO backend.
+
+    Args:
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        timeout (datetime.timedelta, optional): Timeout for monitored_barrier.
+            If None, the default process group timeout will be used.
+
+    Returns:
+        ``None``.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> if dist.get_rank() != 1:
+        >>>     dist.monitored_barrier() # Raises exception indicating that
+        >>> # rank 1 did not call into barrier.
+    """
+
+    # Need to call rank not in group before using the group, otherwise
+    # "Invalid process group" error is raised.
+    if _rank_not_in_group(group):
+        return
+
+    if get_backend(group) != Backend.GLOO:
+        raise RuntimeError(
+            "monitored_barrier is only implemented for GLOO backend."
+        )
+
+    if timeout is None:
+        timeout = default_pg_timeout
+
+    group_to_use = _get_default_group() if group is None else group
+    return group_to_use.monitored_barrier(timeout)
 
 
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
