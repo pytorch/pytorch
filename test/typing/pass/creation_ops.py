@@ -11,8 +11,8 @@ if TEST_NUMPY:
 torch.tensor([[0.1, 1.2], [2.2, 3.1], [4.9, 5.2]])
 torch.tensor([0, 1])
 torch.tensor([[0.11111, 0.222222, 0.3333333]],
-                         dtype=torch.float64,
-                         device=torch.device('cuda:0'))
+             dtype=torch.float64,
+             device=torch.device('cuda:0'))
 torch.tensor(3.14159)
 
 # torch.sparse_coo_tensor
@@ -22,11 +22,11 @@ v = torch.tensor([3, 4, 5], dtype=torch.float32)
 torch.sparse_coo_tensor(i, v, [2, 4])
 torch.sparse_coo_tensor(i, v)
 torch.sparse_coo_tensor(i, v, [2, 4],
-                                    dtype=torch.float64,
-                                    device=torch.device('cuda:0'))
+                        dtype=torch.float64,
+                        device=torch.device('cuda:0'))
 torch.sparse_coo_tensor(torch.empty([1, 0]), [], [1])
 torch.sparse_coo_tensor(torch.empty([1, 0]),
-                                    torch.empty([0, 2]), [1, 2])
+                        torch.empty([0, 2]), [1, 2])
 
 # torch.as_tensor
 a = [1, 2, 3]
@@ -44,11 +44,15 @@ if TEST_NUMPY:
 
 # torch.zeros/zeros_like
 torch.zeros(2, 3)
+torch.zeros((2, 3))
+torch.zeros([2, 3])
 torch.zeros(5)
 torch.zeros_like(torch.empty(2, 3))
 
 # torch.ones/ones_like
 torch.ones(2, 3)
+torch.ones((2, 3))
+torch.ones([2, 3])
 torch.ones(5)
 torch.ones_like(torch.empty(2, 3))
 
@@ -78,6 +82,8 @@ torch.eye(3)
 
 # torch.empty/empty_like/empty_strided
 torch.empty(2, 3)
+torch.empty((2, 3))
+torch.empty([2, 3])
 torch.empty_like(torch.empty(2, 3), dtype=torch.int64)
 torch.empty_strided((2, 3), (1, 2))
 

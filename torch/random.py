@@ -5,7 +5,7 @@ from torch._C import default_generator
 import torch
 
 
-def set_rng_state(new_state) -> None:
+def set_rng_state(new_state: torch.Tensor) -> None:
     r"""Sets the random number generator state.
 
     Args:

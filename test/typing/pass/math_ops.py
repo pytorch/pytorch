@@ -7,8 +7,8 @@ b = torch.randn(4)
 t = torch.tensor([-1, -2, 3], dtype=torch.int8)
 
 # abs/absolute
-torch.abs(torch.Tensor([-1, -2, 3]))
-torch.absolute(torch.Tensor([-1, -2, 3]))
+torch.abs(torch.tensor([-1, -2, 3]))
+torch.absolute(torch.tensor([-1, -2, 3]))
 
 # acos/arccos
 torch.acos(a)
@@ -182,6 +182,9 @@ torch.logaddexp(torch.tensor([-100.0, -200, -300]), torch.tensor([-1.0, -2, -3])
 torch.logaddexp(torch.tensor([1.0, 2000, 30000]), torch.tensor([-1.0, -2, -3]))
 
 # logaddexp2
+torch.logaddexp2(torch.tensor([-1.0]), torch.tensor([-1.0, -2, -3]))
+torch.logaddexp2(torch.tensor([-100.0, -200, -300]), torch.tensor([-1.0, -2, -3]))
+torch.logaddexp2(torch.tensor([1.0, 2000, 30000]), torch.tensor([-1.0, -2, -3]))
 
 # logical_and
 torch.logical_and(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
@@ -245,7 +248,7 @@ torch.neg(torch.randn(5))
 
 # nextafter
 eps = torch.finfo(torch.float32).eps
-torch.nextafter(torch.Tensor([1, 2]), torch.Tensor([2, 1])) == torch.Tensor([eps + 1, 2 - eps])
+torch.nextafter(torch.tensor([1, 2]), torch.tensor([2, 1])) == torch.tensor([eps + 1, 2 - eps])
 
 # polygamma
 torch.polygamma(1, torch.tensor([1, 0.5]))

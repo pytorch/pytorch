@@ -104,7 +104,7 @@ class SobolEngine(object):
         return result
 
     def draw_base2(self, m: int, out: Optional[torch.Tensor] = None,
-                   dtype: torch.dtype = torch.float32):
+                   dtype: torch.dtype = torch.float32) -> torch.Tensor:
         r"""
         Function to draw a sequence of :attr:`2**m` points from a Sobol sequence.
         Note that the samples are dependent on the previous samples. The size
