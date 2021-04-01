@@ -149,6 +149,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
           newNnz,
           stride
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   }
 
@@ -157,7 +158,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // int64_t blockX = min(stride, (int64_t) 512);
   // dim3 block(blockX, 512 / blockX);
   // int64_t grid = min((int64_t) 1024, THCCeilDiv((int64_t) newNnz * stride, (int64_t) block.x * block.y));
-  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream>>>(
+  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream> >>(
   //   THCIndexTensor_(data)(state, uniqueOffsets),
   //   THCIndexTensor_(data)(state, origIndices),
   //   THCTensor_(data)(state, values),
@@ -166,6 +167,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   //   newNnz,
   //   stride
   // );
+  // C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   ////////////////////////////////////////////////////////////
   // unflatten indices if necessary
@@ -284,6 +286,7 @@ Tensor sparse_mask_helper_cuda(
               t_indices_pos_ti,
               t_values_ti,
               r_values_ti);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
   }
   return r_values;

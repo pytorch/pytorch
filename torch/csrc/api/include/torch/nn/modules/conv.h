@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/util/overloaded.h>
+
 #include <torch/expanding_array.h>
 #include <torch/nn/cloneable.h>
 #include <torch/nn/init.h>
@@ -33,7 +35,33 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
       options.out_channels() % options.groups() == 0,
       "out_channels must be divisible by groups");
 
-    _reversed_padding_repeated_twice = torch::nn::modules::utils::_reverse_repeat_vector(options.padding(), 2);
+    c10::visit(c10::overloaded(
+        [&](enumtype::kValid) {
+          _reversed_padding_repeated_twice.resize(2 * D);
+          std::fill_n(_reversed_padding_repeated_twice.begin(), 2 * D, 0);
+        },
+        [&](enumtype::kSame) {
+          for (int64_t i = 0; i < D; ++i) {
+            const auto stride = (*options.stride())[i];
+            TORCH_CHECK(stride == 1, "padding='same' is not supported for strided convolutions");
+          }
+
+          _reversed_padding_repeated_twice.resize(2 * D);
+          for (int64_t i = 0; i < D; ++i) {
+            const auto dilation = (*options.dilation())[i];
+            const auto kernel_size = (*options.kernel_size())[i];
+            const auto total_padding = dilation * (kernel_size - 1);
+            auto left_pad = total_padding / 2;
+            auto right_pad = total_padding - left_pad;
+            _reversed_padding_repeated_twice[2 * i] = left_pad;
+            _reversed_padding_repeated_twice[2 * i + 1] = right_pad;
+          }
+        },
+        [&](const ExpandingArray<D> & pad) {
+          _reversed_padding_repeated_twice =
+              torch::nn::modules::utils::_reverse_repeat_vector(pad, 2);
+        }),
+        options.padding());
 
     if (options.transposed()) {
       std::vector<int64_t> weight_sizes = {
@@ -80,9 +108,19 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
            << ", " << options.out_channels()
            << ", kernel_size=" << options.kernel_size()
            << ", stride=" << options.stride();
-    if (*options.padding() != *ExpandingArray<D>(0)) {
-      stream << ", padding=" << options.padding();
-    }
+    c10::visit(c10::overloaded(
+        [&](enumtype::kValid) {
+          stream << ", padding='valid'";
+        },
+        [&](enumtype::kSame) {
+          stream << ", padding='same'";
+        },
+        [&](const ExpandingArray<D> & pad) {
+          if (*pad != *ExpandingArray<D>(0)) {
+            stream << ", padding=" << pad;
+          }
+        }),
+        options.padding());
     if (*options.dilation() != *ExpandingArray<D>(1)) {
       stream << ", dilation=" << options.dilation();
     }
@@ -220,6 +258,11 @@ template <size_t D, typename Derived>
 class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
  public:
   using torch::nn::ConvNdImpl<D, Derived>::ConvNdImpl;
+  explicit ConvTransposeNdImpl(detail::ConvNdOptions<D> options_)
+    : ConvNdImpl<D, Derived>(options_) {
+    TORCH_INTERNAL_ASSERT(c10::holds_alternative<ExpandingArray<D>>(this->options.padding()),
+                          "ConvTranspose padding cannot be a string");
+  }
 
   /// Pretty prints the `ConvTranspose{1,2,3}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override {
@@ -228,8 +271,9 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
            << ", " << this->options.out_channels()
            << ", kernel_size=" << this->options.kernel_size()
            << ", stride=" << this->options.stride();
-    if (*this->options.padding() != *ExpandingArray<D>(0)) {
-      stream << ", padding=" << this->options.padding();
+    const auto & pad = padding();
+    if (*pad != *ExpandingArray<D>(0)) {
+      stream << ", padding=" << pad;
     }
     if (*this->options.dilation() != *ExpandingArray<D>(1)) {
       stream << ", dilation=" << this->options.dilation();
@@ -250,6 +294,10 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
   }
 
  protected:
+  const ExpandingArray<D>& padding() const {
+    return c10::get<ExpandingArray<D>>(this->options.padding());
+  }
+
   std::vector<int64_t> _output_padding(
       const Tensor& input, const c10::optional<at::IntArrayRef>& output_size,
       const ExpandingArray<D>& stride, const ExpandingArray<D>& padding,

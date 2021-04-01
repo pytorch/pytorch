@@ -209,6 +209,7 @@ int main(int argc, char** argv) {
 
   std::vector<c10::IValue> inputs = create_inputs();
 
+  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);
