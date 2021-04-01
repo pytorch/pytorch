@@ -9,7 +9,7 @@
 #include <c10/util/Exception.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub_wrapper.cuh>
 #include <ATen/native/cuda/TensorFactories.cuh>
 
 #include <algorithm>
@@ -148,7 +148,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
     cudaDeviceSynchronize();
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       auto shuffled_data_ = reinterpret_cast<scalar_t*>(shuffled_data);
-      at::cuda::cub::sort_pairs<int64_t, scalar_t>(
+      at::cuda::cub_wrapper::sort_pairs<int64_t, scalar_t>(
         keys.data_ptr<int64_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n);
