@@ -4,6 +4,8 @@
 #include "caffe2/core/net.h"
 #include "caffe2/proto/caffe2_pb.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 using transform::Graph;
@@ -101,7 +103,7 @@ bool CommonSubexpressionEliminationTransform::ReplaceRule(
     g.node(parent_idx).children[new_idx] = new_op_parents.at(parent_idx);
 
     // Make the parents disown all our outdated siblings.
-    for (int i = 0; i < subgraph.size(); i++) {
+    for (const auto i : c10::irange(subgraph.size())) {
       g.node(parent_idx).children.erase(subgraph[i]);
     }
   }
