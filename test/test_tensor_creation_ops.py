@@ -3163,8 +3163,7 @@ class TestRandomTensorCreation(TestCase):
         self.assertEqual(res2.numel(), 0)
 
         # Test exceptions when n is too large for a floating point type
-        for dtype, small_n, large_n in ((torch.half, 2**11 + 1, 2**11 + 2),
-                                        (torch.float, 2**24 + 1, 2**24 + 2),
+        for dtype, small_n, large_n in ((torch.float, 2**24 + 1, 2**24 + 2),
                                         (torch.double, 2**25,  # 2**53 + 1 is too large to run
                                          2**53 + 2)):
             res = torch.empty(0, dtype=dtype, device=device)
