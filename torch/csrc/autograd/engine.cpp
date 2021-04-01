@@ -153,7 +153,7 @@ static thread_local std::shared_ptr<ReadyQueue> local_ready_queue = nullptr;
 //
 // Internally, backward() runs ops (including leaf nodes) on side threads.
 // And streams are thread local. So GraphTask achieves the above semantics by
-//  1. remembering the current and default streams on all active devices
+//  1. remembering the current and default streams on all active CUDA devices
 //     in the user-facing thread (aka, the thread that called execute() to
 //     launch the GraphTask)
 //  2. remembering the "leaf streams" (streams each backward leaf node ran on)
@@ -532,7 +532,12 @@ void GraphTask::exec_post_processing() {
   if (leaf_streams.size() > 0) {
     const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
     for (const auto& leaf_stream : leaf_streams) {
-      // operator* should error if the entry is a c10::nullopt.
+      // stash_current_streams stashed streams for all device IDs that already had a
+      // CUDA context before the GraphTask executed. For inactive devices, it stashed
+      // a c10::nullopt. I don't expect GraphTask's backward pass ran leaf nodes on
+      // any new devices, so the stashed streams should be enough.
+      // If leaf_stream.device_index() happens to be for a new device,
+      // operator* on the c10::nullopt will throw an error.
       const auto current_stream = *caller_current_streams_[leaf_stream.device_index()];
       const auto default_stream = *caller_default_streams_[leaf_stream.device_index()];
       if (leaf_stream != current_stream || leaf_stream != default_stream) {
