@@ -2455,7 +2455,7 @@ def scatter_add(g, self, dim, index, src):
 
 def log2(g, self):
     _ln2 = 0.693147180559945309
-    return g.op('Div', log(g, self), g.op('Constant', value_t=torch.Tensor([_ln2])))
+    return g.op('Div', log(g, self), g.op('Constant', value_t=torch.tensor([_ln2])))
 
 
 def prim_shape(g, self):
@@ -2999,3 +2999,18 @@ def __range_length(g, lo, hi, step):
     sub = g.op("Sub", hi, lo)
     div = g.op("Ceil", true_divide(g, sub, step))
     return g.op("Cast", div, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+
+
+def linear(g, input, weight, bias):
+    rank = sym_help._get_tensor_rank(input)
+    weight = t(g, weight)
+    if rank == 2 and not bias.node().mustBeNone():
+        alpha = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        beta = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        output = addmm(g, bias, input, weight, alpha, beta)
+    else:
+        output = matmul(g, input, weight)
+        if not bias.node().mustBeNone():
+            output = add(g, bias, output)
+
+    return output
