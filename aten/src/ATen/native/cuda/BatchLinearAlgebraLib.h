@@ -34,6 +34,8 @@ Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, boo
 
 Tensor& orgqr_helper_cuda_lib(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns);
 
+void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors);
+
 #endif  // USE_CUSOLVER
 
 }}  // namespace at::native

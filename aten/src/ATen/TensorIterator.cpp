@@ -940,10 +940,6 @@ void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config
   if (!config.check_mem_overlap_) {
     return;
   }
-  if (is_meta_) {
-    // We don't have pointer addresses, cannot check for overlap!
-    return;
-  }
   for (int i = 0; i < num_outputs_; i++) {
     const auto& output = operands_[i].tensor;
     if (!output.defined()) continue;
@@ -986,7 +982,7 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
       shape_ = shape;
     } else if (!shape.equals(shape_)) {
       all_ops_same_shape_ = false;
-      shape_ = DimVector(infer_size(shape_, shape));
+      shape_ = infer_size_dimvector(shape_, shape);
     }
   }
 }
