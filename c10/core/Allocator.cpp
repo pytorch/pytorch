@@ -30,7 +30,7 @@ void SetAllocator(at::DeviceType t, at::Allocator* alloc, uint8_t priority) {
 
 at::Allocator* GetAllocator(const at::DeviceType& t) {
   auto* alloc = allocator_array[static_cast<int>(t)];
-  AT_ASSERTM(alloc, "Allocator for ", t, " is not set.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(alloc, "Allocator for ", t, " is not set.");
   return alloc;
 }
 

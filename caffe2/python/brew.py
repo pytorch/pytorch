@@ -135,4 +135,5 @@ class HelperWrapper(object):
         return helper_name in self._registry
 
 
+# pyre-fixme[6]: incompatible parameter type: expected ModuleType, got HelperWrapper
 sys.modules[__name__] = HelperWrapper(sys.modules[__name__])

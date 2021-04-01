@@ -1,0 +1,259 @@
+The Pytorch repository and source distributions bundle several libraries that are 
+compatibly licensed.  We list these here.
+
+Name: FP16
+License: MIT
+Files: third_party/FP16
+  For details, see third_party/FP16/LICENSE
+
+Name: FXdiv
+License: MIT
+Files: third_party/FXdiv
+  For details, see third_party/FXdiv/LICENSE
+
+Name: NNPACK
+License: BSD-2-Clause
+Files: third_party/NNPACK
+  For details, see third_party/NNPACK/LICENSE
+
+Name: QNNPACK
+License: BSD-3-Clause
+Files: third_party/QNNPACK
+  For details, see third_party/QNNPACK/LICENSE
+
+Name: XNNPACK
+License: BSD-3-Clause
+Files: third_party/XNNPACK
+  For details, see third_party/XNNPACK/LICENSE
+
+Name: benchmark
+License: Apache-2.0
+Files: third_party/benchmark,
+     third_party/protobuf/third_party/benchmark,
+     third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark,
+     third_party/onnx/third_party/benchmark
+  For details, see third_party/benchmark/LICENSE,
+     third_party/protobuf/third_party/benchmark/LICENSE,
+     third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark/LICENSE,
+     third_party/onnx/third_party/benchmark/LICENSE
+
+Name: clog
+License: BSD-2-Clause
+Files: third_party/cpuinfo/deps/clog,
+     third_party/fbgemm/third_party/cpuinfo/deps/clog,
+     third_party/QNNPACK/deps/clog
+  For details, see third_party/cpuinfo/deps/clog/LICENSE,
+     third_party/fbgemm/third_party/cpuinfo/deps/clog/LICENSE,
+     third_party/QNNPACK/deps/clog/LICENSE
+
+Name: cpuinfo
+License: BSD-2-Clause
+Files: third_party/cpuinfo,
+     third_party/fbgemm/third_party/cpuinfo
+  For details, see third_party/cpuinfo/LICENSE,
+     third_party/fbgemm/third_party/cpuinfo/LICENSE
+
+Name: eigen
+License: BSD-3-Clause
+Files: third_party/eigen
+  For details, see third_party/eigen/COPYING.BSD
+
+Name: enum
+License: BSD-3-Clause
+Files: third_party/python-enum/enum
+  For details, see third_party/python-enum/enum/LICENSE
+
+Name: fbgemm
+License: BSD-3-Clause
+Files: third_party/fbgemm
+  For details, see third_party/fbgemm/LICENSE
+
+Name: fmt
+License: MIT with exception
+Files: third_party/kineto/libkineto/third_party/fmt,
+     third_party/fmt
+  For details, see third_party/kineto/libkineto/third_party/fmt/LICENSE.rst,
+     third_party/fmt/LICENSE.rst
+
+Name: foxi
+License: MIT
+Files: third_party/foxi
+  For details, see third_party/foxi/LICENSE
+
+Name: gemmlowp
+License: Apache-2.0
+Files: third_party/gemmlowp/gemmlowp
+  For details, see third_party/gemmlowp/gemmlowp/LICENSE
+
+Name: generator
+License: Apache-2.0
+Files: third_party/kineto/libkineto/third_party/googletest/googlemock/scripts/generator,
+     third_party/googletest/googlemock/scripts/generator,
+     third_party/fbgemm/third_party/googletest/googlemock/scripts/generator,
+     third_party/protobuf/third_party/googletest/googlemock/scripts/generator,
+     third_party/tensorpipe/third_party/googletest/googlemock/scripts/generator
+  For details, see third_party/kineto/libkineto/third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/fbgemm/third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/protobuf/third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/tensorpipe/third_party/googletest/googlemock/scripts/generator/LICENSE
+
+Name: gloo
+License: BSD-3-Clause
+Files: third_party/gloo
+  For details, see third_party/gloo/LICENSE
+
+Name: googlemock
+License: BSD-3-Clause
+Files: third_party/kineto/libkineto/third_party/googletest/googlemock,
+     third_party/googletest/googlemock,
+     third_party/fbgemm/third_party/googletest/googlemock,
+     third_party/protobuf/third_party/googletest/googlemock,
+     third_party/tensorpipe/third_party/googletest/googlemock
+  For details, see third_party/kineto/libkineto/third_party/googletest/googlemock/LICENSE,
+     third_party/googletest/googlemock/LICENSE,
+     third_party/fbgemm/third_party/googletest/googlemock/LICENSE,
+     third_party/protobuf/third_party/googletest/googlemock/LICENSE,
+     third_party/tensorpipe/third_party/googletest/googlemock/LICENSE
+
+Name: googletest
+License: BSD-3-Clause
+Files: third_party/kineto/libkineto/third_party/googletest,
+     third_party/kineto/libkineto/third_party/googletest/googletest,
+     third_party/googletest,
+     third_party/googletest/googletest,
+     third_party/fbgemm/third_party/googletest,
+     third_party/fbgemm/third_party/googletest/googletest,
+     third_party/protobuf/third_party/googletest,
+     third_party/protobuf/third_party/googletest/googletest,
+     third_party/tensorpipe/third_party/googletest,
+     third_party/tensorpipe/third_party/googletest/googletest
+  For details, see third_party/kineto/libkineto/third_party/googletest/LICENSE,
+     third_party/kineto/libkineto/third_party/googletest/googletest/LICENSE,
+     third_party/googletest/LICENSE,
+     third_party/googletest/googletest/LICENSE,
+     third_party/fbgemm/third_party/googletest/LICENSE,
+     third_party/fbgemm/third_party/googletest/googletest/LICENSE,
+     third_party/protobuf/third_party/googletest/LICENSE,
+     third_party/protobuf/third_party/googletest/googletest/LICENSE,
+     third_party/tensorpipe/third_party/googletest/LICENSE,
+     third_party/tensorpipe/third_party/googletest/googletest/LICENSE
+
+Name: gtest
+License: BSD-3-Clause
+Files: third_party/ideep/mkl-dnn/tests/gtests/gtest
+  For details, see third_party/ideep/mkl-dnn/tests/gtests/gtest/LICENSE
+
+Name: ideep
+License: MIT
+Files: third_party/ideep
+  For details, see third_party/ideep/LICENSE
+
+Name: ios-cmake
+License: BSD-3-Clause
+Files: third_party/ios-cmake
+  For details, see third_party/ios-cmake/LICENSE
+
+Name: kineto
+License: BSD-3-Clause
+Files: third_party/kineto
+  For details, see third_party/kineto/LICENSE
+
+Name: libnop
+License: Apache-2.0
+Files: third_party/tensorpipe/third_party/libnop
+  For details, see third_party/tensorpipe/third_party/libnop/LICENSE
+
+Name: libuv
+License: MIT
+Files: third_party/tensorpipe/third_party/libuv
+  For details, see third_party/tensorpipe/third_party/libuv/LICENSE
+
+Name: miniz-2.0.8
+License: MIT
+Files: third_party/miniz-2.0.8
+  For details, see third_party/miniz-2.0.8/LICENSE
+
+Name: mkl-dnn
+License: Apache-2.0
+Files: third_party/ideep/mkl-dnn
+  For details, see third_party/ideep/mkl-dnn/LICENSE
+
+Name: nccl
+License: BSD-3-Clause
+Files: third_party/nccl/nccl
+  For details, see third_party/nccl/nccl/LICENSE.txt
+
+Name: neon2sse
+License: BSD-Source-Code
+Files: third_party/neon2sse
+  For details, see third_party/neon2sse/LICENSE
+
+Name: onnx
+License: MIT
+Files: third_party/onnx-tensorrt/third_party/onnx,
+     third_party/onnx
+  For details, see third_party/onnx-tensorrt/third_party/onnx/LICENSE,
+     third_party/onnx/LICENSE
+
+Name: onnx-tensorrt
+License: MIT
+Files: third_party/onnx-tensorrt
+  For details, see third_party/onnx-tensorrt/LICENSE
+
+Name: protobuf
+License: BSD-3-Clause
+Files: third_party/protobuf
+  For details, see third_party/protobuf/LICENSE
+
+Name: psimd
+License: MIT
+Files: third_party/psimd
+  For details, see third_party/psimd/LICENSE
+
+Name: pthreadpool
+License: BSD-2-Clause
+Files: third_party/pthreadpool
+  For details, see third_party/pthreadpool/LICENSE
+
+Name: pybind11
+License: BSD-3-Clause
+Files: third_party/pybind11,
+     third_party/onnx-tensorrt/third_party/onnx/third_party/pybind11,
+     third_party/onnx/third_party/pybind11,
+     third_party/tensorpipe/third_party/pybind11
+  For details, see third_party/pybind11/LICENSE,
+     third_party/onnx-tensorrt/third_party/onnx/third_party/pybind11/LICENSE,
+     third_party/onnx/third_party/pybind11/LICENSE,
+     third_party/tensorpipe/third_party/pybind11/LICENSE
+
+Name: python-peachpy
+License: BSD-2-Clause
+Files: third_party/python-peachpy
+  For details, see third_party/python-peachpy/LICENSE.rst
+
+Name: python-six
+License: MIT
+Files: third_party/python-six
+  For details, see third_party/python-six/LICENSE
+
+Name: sleef
+License: BSL-1.0
+Files: third_party/sleef
+  For details, see third_party/sleef/LICENSE.txt
+
+Name: tbb
+License: Apache-2.0
+Files: third_party/tbb
+  For details, see third_party/tbb/LICENSE
+
+Name: tensorpipe
+License: BSD-3-Clause
+Files: third_party/tensorpipe
+  For details, see third_party/tensorpipe/LICENSE.txt
+
+Name: zstd
+License: BSD-3-Clause
+Files: third_party/zstd
+  For details, see third_party/zstd/LICENSE
+

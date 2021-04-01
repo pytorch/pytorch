@@ -128,22 +128,13 @@ class TORCH_API Reducer {
 class ReduceOp : public ExprNode<ReduceOp> {
  public:
   ReduceOp(
-      const Buf* accum,
       const Expr* body,
-      const std::vector<const Expr*>& output_args,
       const std::vector<const Var*>& reduce_args,
       const Reducer& reducer)
       : ExprNodeBase(body->dtype()),
-        accumulator_(accum),
         body_(body),
-        output_args_(output_args),
         reduce_args_(reduce_args),
         reducer_(reducer) {}
-
-  // return the accumulation load expression.
-  const Buf* accumulator() const {
-    return accumulator_;
-  }
 
   // return the body expression which obtains the value to be reduced.
   const Expr* body() const {
@@ -155,20 +146,13 @@ class ReduceOp : public ExprNode<ReduceOp> {
     return reducer_;
   }
 
-  // returns variables associated with the output Tensor.
-  const std::vector<const Expr*>& output_args() const {
-    return output_args_;
-  }
-
   // returns variables associated with the axes of reduction.
   const std::vector<const Var*>& reduce_args() const {
     return reduce_args_;
   }
 
  private:
-  const Buf* accumulator_;
   const Expr* body_;
-  std::vector<const Expr*> output_args_;
   std::vector<const Var*> reduce_args_;
   const Reducer reducer_;
 };

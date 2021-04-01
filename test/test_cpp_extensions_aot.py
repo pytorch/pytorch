@@ -9,9 +9,22 @@ import torch.backends.cudnn
 import torch.utils.cpp_extension
 
 try:
-    import torch_test_cpp_extension.cpp as cpp_extension
-    import torch_test_cpp_extension.msnpu as msnpu_extension
-    import torch_test_cpp_extension.rng as rng_extension
+    import pytest
+    HAS_PYTEST = True
+except ImportError as e:
+    HAS_PYTEST = False
+
+# TODO: Rewrite these tests so that they can be collected via pytest without
+# using run_test.py
+try:
+    if HAS_PYTEST:
+        cpp_extension = pytest.importorskip("torch_test_cpp_extension.cpp")
+        msnpu_extension = pytest.importorskip("torch_test_cpp_extension.msnpu")
+        rng_extension = pytest.importorskip("torch_test_cpp_extension.rng")
+    else:
+        import torch_test_cpp_extension.cpp as cpp_extension
+        import torch_test_cpp_extension.msnpu as msnpu_extension
+        import torch_test_cpp_extension.rng as rng_extension
 except ImportError as e:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "

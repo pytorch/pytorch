@@ -57,6 +57,7 @@ VmaAllocationCreateInfo create_allocation_create_info(
     0u,
     VK_NULL_HANDLE,
     nullptr,
+    0.5f,
   };
 }
 
@@ -413,13 +414,14 @@ Resource::Pool::~Pool() {
     }
   }
   catch (const std::exception& e) {
-    LOG(WARNING)
-        << "Vulkan: Resource pool destructor raised an exception!  Error: "
-        << e.what();
+    TORCH_WARN(
+        "Vulkan: Resource pool destructor raised an exception! Error: ",
+        e.what());
   }
   catch (...) {
-    LOG(WARNING)
-        << "Vulkan: Resource pool destructor raised an unknown exception!";
+    TORCH_WARN(
+        "Vulkan: Resource pool destructor raised an exception! "
+        "Error: Unknown");
   }
 }
 

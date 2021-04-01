@@ -66,7 +66,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
         1, dim,
         reduction == at::Reduction::Mean
         );
-    THCudaCheck(cudaGetLastError());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   else if(input->dim() == 2)
   {
@@ -89,10 +89,11 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
           nframe, dim,
           reduction == at::Reduction::Mean
           );
-      THCudaCheck(cudaGetLastError());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+
       auto t = THTensor_wrap(output_tmp);
       auto r = THTensor_wrap(output);
-      at::native::sum_out(r, t, at::IntArrayRef(std::vector<int64_t>{}), false, r.scalar_type());
+      at::native::sum_out(t, at::IntArrayRef(std::vector<int64_t>{}), false, r.scalar_type(), r);
       THCTensor_(free)(state, output_tmp);
     }
     else
@@ -108,11 +109,11 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
           nframe, dim,
           false
           );
-      THCudaCheck(cudaGetLastError());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
   else {
-    TORCH_CHECK(false, "Expected 2D input with optional zero batch dim, or 1D input with non-zero dims, but got sizes: ", 
+    TORCH_CHECK(false, "Expected 2D input with optional zero batch dim, or 1D input with non-zero dims, but got sizes: ",
       input->sizes());
   }
 
@@ -162,7 +163,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         1, dim,
         reduction == at::Reduction::Mean,
         reduction != at::Reduction::None);
-
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   else if(gradInput->dim() == 2)
   {
@@ -186,6 +187,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         gradInput->size(0), gradInput->size(1),
         reduction == at::Reduction::Mean,
         reduction != at::Reduction::None);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   else {
     TORCH_CHECK(false, "Expected 2D input with optional zero batch dim, or 1D input with non-zero dims, but got sizes: ",

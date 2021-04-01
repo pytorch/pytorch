@@ -55,7 +55,7 @@ ChannelShuffleNHWCKernel(const int G, const int K, const T* X, T* Y) {
 template <>
 bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
-  
+
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
   const int N = X.dim32(0);
   const int C = X.dim32(1);
@@ -74,11 +74,13 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
     ChannelShuffleNCHWKernel<float, false>
         <<<dim_grid, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G, K, HxW, X_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const dim3 dim_grid(N, S, C);
     ChannelShuffleNCHWKernel<float, true>
         <<<dim_grid, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G, K, HxW, X_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -86,7 +88,7 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(0);
-  
+
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
   const int ndim = X.dim();
   const int N = X.dim32(0);
@@ -105,14 +107,17 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
     ChannelShuffleNHWCKernel<float, 32>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G, K, X_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else if (C <= 128) {
     ChannelShuffleNHWCKernel<float, 128>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G, K, X_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else if (C <= 512) {
     ChannelShuffleNHWCKernel<float, 512>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G, K, X_data, Y_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const std::array<std::int64_t, 3> dims = {N * HxW, G, K};
     const std::array<std::int32_t, 3> axes = {0, 2, 1};
@@ -125,7 +130,7 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
 template <>
 bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& dY = Input(0);
-  
+
   auto* dX = Output(0, dY.sizes(), at::dtype<float>());
   const int N = dY.dim32(0);
   const int C = dY.dim32(1);
@@ -144,11 +149,13 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
     ChannelShuffleNCHWKernel<float, false>
         <<<dim_grid, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             K, G, HxW, dY_data, dX_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const dim3 dim_grid(N, S, C);
     ChannelShuffleNCHWKernel<float, true>
         <<<dim_grid, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             K, G, HxW, dY_data, dX_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -156,7 +163,7 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& dY = Input(0);
-  
+
   auto* dX = Output(0, dY.sizes(), at::dtype<float>());
   const int ndim = dY.dim();
   const int N = dY.dim32(0);
@@ -175,14 +182,17 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
     ChannelShuffleNHWCKernel<float, 32>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             K, G, dY_data, dX_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else if (C <= 128) {
     ChannelShuffleNHWCKernel<float, 128>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             K, G, dY_data, dX_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else if (C <= 512) {
     ChannelShuffleNHWCKernel<float, 512>
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             K, G, dY_data, dX_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const std::array<std::int64_t, 3> dims = {N * HxW, K, G};
     const std::array<std::int32_t, 3> axes = {0, 2, 1};

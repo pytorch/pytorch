@@ -4,7 +4,6 @@ import unittest
 
 import torch
 from jit.test_hooks_modules import *
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -21,61 +20,48 @@ if __name__ == "__main__":
 
 # Tests for JIT forward hooks and pre-hooks
 class TestHooks(JitTestCase):
-    saving_msg = "saving modules with hooks not supported in FBCODE"
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_no_forward_input(self):
         self.checkModule(create_module_no_forward_input(), ())
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_no_forward_input(self):
         self.checkModule(create_submodule_no_forward_input(), ())
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_forward_multiple_inputs(self):
         self.checkModule(
             create_module_forward_multiple_inputs(), (["a"], "no_pre_hook")
         )
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_multiple_hooks_multiple_inputs(self):
         self.checkModule(
             create_module_multiple_hooks_multiple_inputs(), (["a"], "no_pre_hook")
         )
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_forward_single_input(self):
         self.checkModule(create_module_forward_single_input(), ("a",))
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_same_hook_repeated(self):
         self.checkModule(create_module_same_hook_repeated(), ("a",))
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_hook_return_nothing(self):
         self.checkModule(create_module_hook_return_nothing(), ("a",))
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_multiple_hooks_single_input(self):
         self.checkModule(create_module_multiple_hooks_single_input(), ("a",))
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_forward_multiple_inputs(self):
         self.checkModule(
             create_submodule_forward_multiple_inputs(), (["a"], "no_pre_hook")
         )
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_multiple_hooks_multiple_inputs(self):
         self.checkModule(
             create_submodule_multiple_hooks_multiple_inputs(), (["a"], "no_pre_hook"),
         )
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_forward_single_input(self):
         self.checkModule(create_submodule_forward_single_input(), ("a",))
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_called_directly_with_hooks(self):
         module = create_submodule_to_call_directly_with_hooks()
         module_scripted = torch.jit.script(module)
@@ -85,23 +71,18 @@ class TestHooks(JitTestCase):
 
         self.assertEqual(submodule("a"), scripted_submodule("a"))
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_same_hook_repeated(self):
         self.checkModule(create_submodule_same_hook_repeated(), ("a",))
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_hook_return_nothing(self):
         self.checkModule(create_submodule_hook_return_nothing(), ("a",))
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_multiple_hooks_single_input(self):
         self.checkModule(create_submodule_multiple_hooks_single_input(), (["a"]))
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_forward_tuple_input(self):
         self.checkModule(create_forward_tuple_input(), ((3,),))
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_forward_single_input_return_not_tupled(self):
         self.checkModule(
             create_submodule_forward_single_input_return_not_tupled(), ("a",)
@@ -165,7 +146,6 @@ class TestHooks(JitTestCase):
         ):
             torch.jit.script(m)
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_direct_forward_invocation(self):
         # Test that hooks are only invoked when the module is
         # called directly and not when forward is called.
@@ -188,7 +168,6 @@ class TestHooks(JitTestCase):
         self.assertEqual(m.forward("a"), m_scripted.forward("a"))
         self.assertNotEqual(m_scripted("a"), m_scripted.forward("a"))
 
-    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_direct_forward_invocation(self):
         m_submod_forward_call = ModuleDirectFowardSubmodCall(
             "outer_mod_name", "inner_mod_name"

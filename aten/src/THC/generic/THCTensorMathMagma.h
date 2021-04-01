@@ -12,8 +12,6 @@ TORCH_CUDA_CU_API void THCTensor_(gels)(
     THCTensor* b_,
     THCTensor* a_);
 TORCH_CUDA_CU_API void THCTensor_(
-    potri)(THCState* state, THCTensor* ra_, THCTensor* a, bool upper);
-TORCH_CUDA_CU_API void THCTensor_(
     geqrf)(THCState* state, THCTensor* ra_, THCTensor* rtau_, THCTensor* a_);
 
 #endif // defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)

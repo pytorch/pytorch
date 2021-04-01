@@ -1,8 +1,10 @@
 #include <ATen/ATen.h>
 
+#include <c10/util/irange.h>
+
 namespace at { namespace native {
 
-Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
+Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value) {
     TORCH_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ",
              pad.size());
 
@@ -20,7 +22,7 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
     bool all_pads_non_positive = true;
 
     auto c_input = self;
-    for (int i = l_diff; i < l_inp; i++) {
+    for (const auto i : c10::irange(l_diff, l_inp)) {
         auto pad_idx = 2 * (l_inp - i - 1);
         if (pad[pad_idx] < 0) {
             c_input = c_input.narrow(i, -pad[pad_idx], c_input.size(i) + pad[pad_idx]);
@@ -55,21 +57,21 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
     }
 
     at::Tensor output;
+    const auto memory_format = self.suggest_memory_format();
     if (self.is_quantized()) {
         const auto qscheme = self.qscheme();
         TORCH_CHECK(qscheme == kPerTensorAffine || qscheme == kPerTensorSymmetric,
                     "Only per-tensor padding is supported.");
-        const auto memory_format = self.suggest_memory_format();
         output = at::_empty_affine_quantized(
             new_shape, self.options().memory_format(memory_format),
             self.q_scale(), self.q_zero_point(), c10::nullopt);
     } else {
-        output = at::empty(new_shape, self.options());
+        output = at::empty(new_shape, self.options().memory_format(memory_format));
     }
     output.fill_(value);
 
     auto c_output = output;
-    for (int i = l_diff; i < l_inp; i++) {
+    for (const auto i : c10::irange(l_diff, l_inp)) {
         auto pad_idx = 2 * (l_inp - i - 1);
         if (pad[pad_idx] > 0) {
             c_output = c_output.narrow(i, pad[pad_idx], c_output.size(i) - pad[pad_idx]);

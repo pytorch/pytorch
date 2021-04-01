@@ -83,6 +83,15 @@ namespace test_head {
     static_assert(std::is_same<bool, head_t<typelist<bool>>>::value, "");
 }
 
+namespace test_head_with_default {
+    class MyClass {};
+    static_assert(std::is_same<int, head_with_default_t<bool, typelist<int, double>>>::value, "");
+    static_assert(std::is_same<const MyClass&, head_with_default_t<bool, typelist<const MyClass&, double>>>::value, "");
+    static_assert(std::is_same<MyClass&&, head_with_default_t<bool, typelist<MyClass&&, MyClass>>>::value, "");
+    static_assert(std::is_same<int, head_with_default_t<bool, typelist<int>>>::value, "");
+    static_assert(std::is_same<bool, head_with_default_t<bool, typelist<>>>::value, "");
+}
+
 namespace test_reverse {
     class MyClass {};
     static_assert(std::is_same<
@@ -178,4 +187,15 @@ namespace test_drop {
     static_assert(std::is_same<typelist<int64_t, int32_t>, drop_t<typelist<int64_t, int32_t>, 0>>::value, "");
     static_assert(std::is_same<typelist<int32_t>, drop_t<typelist<int64_t, int32_t>, 1>>::value, "");
     static_assert(std::is_same<typelist<>, drop_t<typelist<int64_t, int32_t>, 2>>::value, "");
+}
+
+namespace test_drop_if_nonempty {
+    static_assert(std::is_same<typelist<>, drop_if_nonempty_t<typelist<>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int64_t>, drop_if_nonempty_t<typelist<int64_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_if_nonempty_t<typelist<int64_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<int64_t, int32_t>, drop_if_nonempty_t<typelist<int64_t, int32_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int32_t>, drop_if_nonempty_t<typelist<int64_t, int32_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_if_nonempty_t<typelist<int64_t, int32_t>, 2>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_if_nonempty_t<typelist<>, 1>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_if_nonempty_t<typelist<int64_t, int32_t>, 3>>::value, "");
 }

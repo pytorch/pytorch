@@ -437,10 +437,7 @@ def _kl_transformed_transformed(p, q):
         raise NotImplementedError
     if p.event_shape != q.event_shape:
         raise NotImplementedError
-    # extra_event_dim = len(p.event_shape) - len(p.base_dist.event_shape)
-    extra_event_dim = len(p.event_shape)
-    base_kl_divergence = kl_divergence(p.base_dist, q.base_dist)
-    return _sum_rightmost(base_kl_divergence, extra_event_dim)
+    return kl_divergence(p.base_dist, q.base_dist)
 
 
 @register_kl(Uniform, Uniform)

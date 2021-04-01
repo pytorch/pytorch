@@ -10,7 +10,6 @@ import argparse
 from future.utils import viewitems
 import logging
 import numpy as np
-from six import with_metaclass
 import sys
 
 from caffe2.python import core, rnn_cell, workspace
@@ -33,7 +32,7 @@ def _weighted_sum(model, values, weight, output_name):
     )
 
 
-class Seq2SeqModelCaffe2EnsembleDecoderBase(with_metaclass(ABCMeta, object)):
+class Seq2SeqModelCaffe2EnsembleDecoderBase(metaclass=ABCMeta):
 
     @abstractmethod
     def get_model_file(self, model):

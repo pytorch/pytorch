@@ -3,14 +3,14 @@ import math
 import os
 import time
 
-from .benchmark_dataset import BenchmarkLMDataset, collate_sentences_lm
+from benchmark_dataset import BenchmarkLMDataset, collate_sentences_lm
 import torch
 from torch.distributed import rpc
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from torch.distributed.pipeline.sync import Pipe
-from torch.testing._internal.distributed.pipeline.utils import convert_to_balance
+from torch.distributed.pipeline.sync.utils import partition_model
 from torch.optim import Adam  # type: ignore
 
 def sizeof_fmt(num, suffix='B'):
@@ -248,7 +248,7 @@ def bench_single_process(args):
     model = blob["model"]
 
     balance = generate_balance(num_devices, len(model))
-    model = convert_to_balance(model, balance)
+    model = partition_model(model, balance)
     p = Pipe(
         model, chunks=args.chunks, checkpoint=args.checkpoint
     )

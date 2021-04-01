@@ -1,11 +1,13 @@
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/DilatedConvolutionUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <tuple>
-#include <ATen/ATen.h>
 #include <ATen/native/cuda/im2col.cuh>
 #include <ATen/native/cuda/vol2col.cuh>
+#include <ATen/native/DilatedConvolutionUtils.h>
+#include <c10/util/accumulate.h>
+
+#include <tuple>
 
 namespace at {
 namespace native {
@@ -188,8 +190,8 @@ void slow_conv_dilated_all_cuda_template(
   int64_t nInputPlane = weight.size(1);
   int64_t nOutputPlane = weight.size(0);
   // Temporary buffers:
-  const int64_t m = prod_intlist(kernel_size);
-  const int64_t output_vsize = prod_intlist(output_size);
+  const int64_t m = c10::multiply_integers(kernel_size);
+  const int64_t output_vsize = c10::multiply_integers(output_size);
   Tensor columns = at::empty({0}, options);
   if (output.defined() || grad_weight.defined() || grad_input.defined()) {
     columns.resize_({nInputPlane * m, output_vsize});
@@ -385,11 +387,13 @@ void slow_conv_dilated_all_cuda_template(
 Tensor slow_conv_dilated2d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<2>(
       input,
@@ -488,11 +492,13 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cuda(
 Tensor slow_conv_dilated3d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<3>(
       input,

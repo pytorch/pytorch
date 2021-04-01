@@ -50,6 +50,7 @@ struct TORCH_API Code {
   ~Code();
 
   const std::vector<GraphExecutor*>& grad_executors();
+  const std::vector<GraphExecutor*>& diff_graph_op_executors();
 
   explicit operator bool() const {
     return pImpl != nullptr;

@@ -44,6 +44,7 @@ void RunHeapSelectionImpl(
           outer_size,
           inner_size,
           k);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename T, bool kSelectMax = true>
@@ -61,6 +62,8 @@ void RunRadixSelectionImpl(
   gatherTopK<T, kSelectMax, int64_t>
       <<<outer_size, block, 0, context->cuda_stream()>>>(
           input, inner_size, k, outer_size, values, indices);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   // Unfortunately the output is not currently sorted, and there is no batch
   // sorting utility available. Iterate over all of the slices and sort them
   // in-place using Thrust.
@@ -292,6 +295,7 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
         inner_size,
         k_,
         flatten_indices->template mutable_data<int64_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -348,6 +352,8 @@ bool TopKGradientCudaOp<T, Context>::RunOnDevice() {
       origin_dims[axis_],
       k,
       output_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

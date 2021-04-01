@@ -35,7 +35,7 @@ def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
 
 def _dequantize(qx, scale, zero_point):
     """Dequantizes a numpy array."""
-    x = (qx.astype(np.float) - zero_point) * scale
+    x = (qx.astype(float) - zero_point) * scale
     return x
 
 
@@ -139,6 +139,16 @@ def override_quantized_engine(qengine):
         yield
     finally:
         torch.backends.quantized.engine = previous
+
+@contextmanager
+def override_cpu_allocator_for_qnnpack(qengine_is_qnnpack):
+    try:
+        if qengine_is_qnnpack:
+            torch._C._set_default_mobile_cpu_allocator()
+        yield
+    finally:
+        if qengine_is_qnnpack:
+            torch._C._unset_default_mobile_cpu_allocator()
 
 # TODO: Update all quantization tests to use this decorator.
 # Currently for some of the tests it seems to have inconsistent params

@@ -1,9 +1,9 @@
 import torch
-from collections import defaultdict
-from torch._six import container_abcs
+from collections import defaultdict, abc
 import warnings
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+from .common import amp_definitely_not_available
 
 
 class _MultiDeviceReplicator(object):
@@ -11,7 +11,7 @@ class _MultiDeviceReplicator(object):
     Lazily serves copies of a tensor to requested devices.  Copies are cached per-device.
     """
     def __init__(self, master_tensor: torch.Tensor) -> None:
-        assert master_tensor.is_cuda
+        assert master_tensor.is_cuda or master_tensor.device.type == 'xla'
         self.master = master_tensor
         self._per_device_tensors: Dict[torch.device, torch.Tensor] = {}
 
@@ -111,7 +111,7 @@ class GradScaler(object):
                  backoff_factor=0.5,
                  growth_interval=2000,
                  enabled=True):
-        if enabled and not torch.cuda.is_available():
+        if enabled and amp_definitely_not_available():
             warnings.warn("torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling.")
             self._enabled = False
         else:
@@ -158,7 +158,7 @@ class GradScaler(object):
 
         # Short-circuit for the common case.
         if isinstance(outputs, torch.Tensor):
-            assert outputs.is_cuda
+            assert outputs.is_cuda or outputs.device.type == 'xla'
             if self._scale is None:
                 self._lazy_init_scale_growth_tracker(outputs.device)
             assert self._scale is not None
@@ -169,14 +169,14 @@ class GradScaler(object):
 
         def apply_scale(val):
             if isinstance(val, torch.Tensor):
-                assert val.is_cuda
+                assert val.is_cuda or val.device.type == 'xla'
                 if len(stash) == 0:
                     if self._scale is None:
                         self._lazy_init_scale_growth_tracker(val.device)
                     assert self._scale is not None
                     stash.append(_MultiDeviceReplicator(self._scale))
                 return val * stash[0].get(val.device)
-            elif isinstance(val, container_abcs.Iterable):
+            elif isinstance(val, abc.Iterable):
                 iterable = map(apply_scale, val)
                 if isinstance(val, list) or isinstance(val, tuple):
                     return type(val)(iterable)
@@ -279,6 +279,12 @@ class GradScaler(object):
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(optimizer, inv_scale, found_inf, False)
         optimizer_state["stage"] = OptState.UNSCALED
 
+    def _maybe_opt_step(self, optimizer, optimizer_state, *args, **kwargs):
+        retval = None
+        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+            retval = optimizer.step(*args, **kwargs)
+        return retval
+
     def step(self, optimizer, *args, **kwargs):
         """
         :meth:`step` carries out the following two operations:
@@ -329,8 +335,7 @@ class GradScaler(object):
 
         assert len(optimizer_state["found_inf_per_device"]) > 0, "No inf checks were recorded for this optimizer."
 
-        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
-            retval = optimizer.step(*args, **kwargs)
+        retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
 
         optimizer_state["stage"] = OptState.STEPPED
 

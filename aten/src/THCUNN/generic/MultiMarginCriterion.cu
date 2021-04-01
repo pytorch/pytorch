@@ -5,15 +5,13 @@
 static inline void THNN_(MultiMarginCriterion_shapeCheck)(
                          THCState *state,
                          THCTensor *input, THCTensor *target) {
-  int64_t nframe, dim;
+  int64_t nframe;
   int64_t ndims = input->dim();
   bool valid_inputs = (ndims == 2 && input->size(1) != 0) || (ndims == 1 && input->size(0) != 0) || ndims == 0;
   if (ndims <= 1) {
     nframe = 1;
-    dim = ndims == 0 ? 1 : input->size(0);
   } else {
     nframe = input->size(0);
-    dim = input->size(1);
   }
 
   TORCH_CHECK(
@@ -69,6 +67,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         reduction == at::Reduction::Mean,
         margin
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     else if (p == 2)
     {
@@ -81,6 +80,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         reduction == at::Reduction::Mean,
         margin
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     THCudaCheck(cudaGetLastError());
   }
@@ -107,6 +107,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           false,
           margin
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
       else if (p == 2)
       {
@@ -119,6 +120,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           false,
           margin
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
       THCudaCheck(cudaGetLastError());
     }
@@ -137,6 +139,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           reduction == at::Reduction::Mean,
           margin
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
       else if (p == 2)
       {
@@ -149,11 +152,12 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           reduction == at::Reduction::Mean,
           margin
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
       THCudaCheck(cudaGetLastError());
       auto t = THTensor_wrap(output_);
       auto r = THTensor_wrap(output);
-      at::native::sum_out(r, t, at::IntArrayRef(std::vector<int64_t>{}), false, r.scalar_type());
+      at::native::sum_out(t, at::IntArrayRef(std::vector<int64_t>{}), false, r.scalar_type(), r);
       THCTensor_(free)(state, output_);
     }
   }
@@ -211,6 +215,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         margin,
         reduction != at::Reduction::None
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     else if (p == 2)
     {
@@ -225,6 +230,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         margin,
         reduction != at::Reduction::None
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     THCudaCheck(cudaGetLastError());
   }
@@ -249,6 +255,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         margin,
         reduction != at::Reduction::None
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     else if (p == 2)
     {
@@ -263,12 +270,13 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         margin,
         reduction != at::Reduction::None
       );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     THCudaCheck(cudaGetLastError());
   }
   else
   {
-    TORCH_CHECK(false, "Expected 2D input with optional zero batch dim, or 1D input with non-zero dims, but got sizes: ", 
+    TORCH_CHECK(false, "Expected 2D input with optional zero batch dim, or 1D input with non-zero dims, but got sizes: ",
     input->sizes());
   }
 

@@ -23,13 +23,13 @@
 #include "caffe2/onnx/offline_tensor.h"
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/opt/converter.h"
+#include "caffe2/opt/fakefp16_transform.h"
 #include "caffe2/opt/fusion.h"
 #include "caffe2/opt/mobile.h"
 #include "caffe2/opt/onnxifi_transformer.h"
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
 #include "caffe2/opt/shape_info.h"
-#include "caffe2/opt/fakefp16_transform.h"
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
@@ -85,13 +85,12 @@ Workspace* GetCurrentWorkspace() {
   return gWorkspace;
 }
 
-Workspace* GetWorkspaceByName(const std::string &name) {
+Workspace* GetWorkspaceByName(const std::string& name) {
   if (gWorkspaces.count(name)) {
     return gWorkspaces[name].get();
   }
   return nullptr;
 }
-
 
 class StringFetcher : public BlobFetcherBase {
  public:
@@ -376,10 +375,9 @@ void addObjectMethods(py::module& m) {
             py::gil_scoped_release g;
             CAFFE_ENFORCE(net->Run());
           })
-      .def("cancel",
-          [](NetBase* net) {
-            py::gil_scoped_release g;
-            net->Cancel();
+      .def("cancel", [](NetBase* net) {
+        py::gil_scoped_release g;
+        net->Cancel();
       });
 
   py::class_<ObserverBase<NetBase>>(m, "Observer")
@@ -1033,6 +1031,13 @@ void addObjectMethods(py::module& m) {
 
 void addGlobalMethods(py::module& m) {
   m.attr("is_asan") = py::bool_(C10_ASAN_ENABLED);
+  m.attr("has_fbgemm") = py::bool_(
+#ifdef USE_FBGEMM
+      true
+#else
+      false
+#endif
+  );
   m.def("get_build_options", []() { return GetBuildOptions(); });
 
   // The old mkl backend has been removed permanently, but we
@@ -1763,6 +1768,17 @@ void addGlobalMethods(py::module& m) {
         return true;
       });
   m.def(
+      "onnxifi_set_option",
+      [](const std::string& optionName,
+         const std::string& optionValue) -> bool {
+        OnnxifiOptionHelper ts;
+        return ts.setOnnxifiOption(optionName, optionValue);
+      });
+  m.def("onnxifi_get_option", [](const std::string& optionName) -> std::string {
+    OnnxifiOptionHelper ts;
+    return ts.getOnnxifiOption(optionName);
+  });
+  m.def(
       "onnxifi",
       [](const py::bytes& pred_net_str,
          const py::bytes& shapes_str,
@@ -1840,8 +1856,7 @@ void addGlobalMethods(py::module& m) {
   m.def("fakeFp16FuseOps", [](const py::bytes& net_str) {
     caffe2::NetDef netDef;
     CAFFE_ENFORCE(
-        ParseProtoFromLargeString(
-            net_str.cast<std::string>(), &netDef),
+        ParseProtoFromLargeString(net_str.cast<std::string>(), &netDef),
         "broken pred_net protobuf");
     opt::fakeFp16FuseOps(&netDef);
     std::string out_net;

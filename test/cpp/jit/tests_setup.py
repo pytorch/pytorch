@@ -72,8 +72,7 @@ class TorchSaveJitStream_CUDA(FileSetup):
 
         class Model(torch.nn.Module):
             def forward(self):
-                device_index = torch.cuda._current_device()
-                s = torch.jit.cuda.Stream(device_index, 0)
+                s = torch.jit.cuda.Stream()
                 a = torch.rand(3, 4, device="cuda")
                 b = torch.rand(3, 4, device="cuda")
 

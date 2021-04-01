@@ -20,18 +20,26 @@ Tensor min_quantized_cpu(const Tensor& self) {
 
 // TODO: move to TensorMath.cpp
 
-std::tuple<Tensor, Tensor> sort_quantized_cpu(
+std::tuple<Tensor, Tensor> sort_quantized_cpu_stable(
     const Tensor& self,
+    c10::optional<bool> stable,
     int64_t dim,
     bool descending) {
   Tensor sort_int;
   Tensor sort_indicies;
   std::tie(sort_int, sort_indicies) =
-      at::sort(self.int_repr(), dim, descending);
+      at::sort(self.int_repr(), stable, dim, descending);
   return std::forward_as_tuple(
       at::_make_per_tensor_quantized_tensor(
           sort_int, self.q_scale(), self.q_zero_point()),
       sort_indicies);
+}
+
+std::tuple<Tensor, Tensor> sort_quantized_cpu(
+    const Tensor& self,
+    int64_t dim,
+    bool descending) {
+  return sort_quantized_cpu_stable(self, /*stable=*/false, dim, descending);
 }
 
 } // namespace native

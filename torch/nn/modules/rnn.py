@@ -84,12 +84,12 @@ class RNNBase(Module):
                 real_hidden_size = proj_size if proj_size > 0 else hidden_size
                 layer_input_size = input_size if layer == 0 else real_hidden_size * num_directions
 
-                w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
-                w_hh = Parameter(torch.Tensor(gate_size, real_hidden_size))
-                b_ih = Parameter(torch.Tensor(gate_size))
+                w_ih = Parameter(torch.empty(gate_size, layer_input_size))
+                w_hh = Parameter(torch.empty(gate_size, real_hidden_size))
+                b_ih = Parameter(torch.empty(gate_size))
                 # Second bias vector included for CuDNN compatibility. Only one
                 # bias vector is needed in standard definition.
-                b_hh = Parameter(torch.Tensor(gate_size))
+                b_hh = Parameter(torch.empty(gate_size))
                 layer_params: Tuple[Tensor, ...] = ()
                 if self.proj_size == 0:
                     if bias:
@@ -97,7 +97,7 @@ class RNNBase(Module):
                     else:
                         layer_params = (w_ih, w_hh)
                 else:
-                    w_hr = Parameter(torch.Tensor(proj_size, hidden_size))
+                    w_hr = Parameter(torch.empty(proj_size, hidden_size))
                     if bias:
                         layer_params = (w_ih, w_hh, b_ih, b_hh, w_hr)
                     else:
@@ -850,11 +850,11 @@ class RNNCellBase(Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
-        self.weight_ih = Parameter(torch.Tensor(num_chunks * hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(num_chunks * hidden_size, hidden_size))
+        self.weight_ih = Parameter(torch.empty(num_chunks * hidden_size, input_size))
+        self.weight_hh = Parameter(torch.empty(num_chunks * hidden_size, hidden_size))
         if bias:
-            self.bias_ih = Parameter(torch.Tensor(num_chunks * hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(num_chunks * hidden_size))
+            self.bias_ih = Parameter(torch.empty(num_chunks * hidden_size))
+            self.bias_hh = Parameter(torch.empty(num_chunks * hidden_size))
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
@@ -867,23 +867,6 @@ class RNNCellBase(Module):
         if 'nonlinearity' in self.__dict__ and self.nonlinearity != "tanh":
             s += ', nonlinearity={nonlinearity}'
         return s.format(**self.__dict__)
-
-    def check_forward_input(self, input: Tensor) -> None:
-        if input.size(1) != self.input_size:
-            raise RuntimeError(
-                "input has inconsistent input_size: got {}, expected {}".format(
-                    input.size(1), self.input_size))
-
-    def check_forward_hidden(self, input: Tensor, hx: Tensor, hidden_label: str = '') -> None:
-        if input.size(0) != hx.size(0):
-            raise RuntimeError(
-                "Input batch size {} doesn't match hidden{} batch size {}".format(
-                    input.size(0), hidden_label, hx.size(0)))
-
-        if hx.size(1) != self.hidden_size:
-            raise RuntimeError(
-                "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
-                    hidden_label, hx.size(1), self.hidden_size))
 
     def reset_parameters(self) -> None:
         stdv = 1.0 / math.sqrt(self.hidden_size)
@@ -956,10 +939,8 @@ class RNNCell(RNNCellBase):
         self.nonlinearity = nonlinearity
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
-        self.check_forward_input(input)
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-        self.check_forward_hidden(input, hx, '')
         if self.nonlinearity == "tanh":
             ret = _VF.rnn_tanh_cell(
                 input, hx,
@@ -1030,26 +1011,24 @@ class LSTMCell(RNNCellBase):
 
     Examples::
 
-        >>> rnn = nn.LSTMCell(10, 20)
-        >>> input = torch.randn(3, 10)
-        >>> hx = torch.randn(3, 20)
+        >>> rnn = nn.LSTMCell(10, 20) # (input_size, hidden_size)
+        >>> input = torch.randn(2, 3, 10) # (time_steps, batch, input_size)
+        >>> hx = torch.randn(3, 20) # (batch, hidden_size)
         >>> cx = torch.randn(3, 20)
         >>> output = []
-        >>> for i in range(6):
+        >>> for i in range(input.size()[0]):
                 hx, cx = rnn(input[i], (hx, cx))
                 output.append(hx)
+        >>> output = torch.stack(output, dim=0)
     """
 
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True) -> None:
         super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4)
 
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
-        self.check_forward_input(input)
         if hx is None:
             zeros = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
             hx = (zeros, zeros)
-        self.check_forward_hidden(input, hx[0], '[0]')
-        self.check_forward_hidden(input, hx[1], '[1]')
         return _VF.lstm_cell(
             input, hx,
             self.weight_ih, self.weight_hh,
@@ -1123,10 +1102,8 @@ class GRUCell(RNNCellBase):
         super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3)
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
-        self.check_forward_input(input)
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
-        self.check_forward_hidden(input, hx, '')
         return _VF.gru_cell(
             input, hx,
             self.weight_ih, self.weight_hh,

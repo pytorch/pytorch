@@ -286,6 +286,12 @@ bool RpcAgent::isGILProfilingEnabled() {
   return profilingEnabled_.load();
 }
 
+std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> RpcAgent::getDeviceMap(
+    const WorkerInfo& dest) {
+  // Default implementation has no device map.
+  return {};
+}
+
 std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {
   /* This would later include more info other than metrics for eg: may include
      stack traces for the threads owned by the agent */

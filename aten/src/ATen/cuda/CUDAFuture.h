@@ -19,22 +19,41 @@
 #include <c10/macros/Export.h>
 #include <c10/util/intrusive_ptr.h>
 
-namespace at { namespace cuda {
+namespace at {
+namespace cuda {
 
 struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
  public:
-  using at::ivalue::Future::Future;
+  CUDAFuture(at::TypePtr type) : at::ivalue::Future(std::move(type)) {
+    // Use current device to initialize currentDevice_. This is necessary
+    // because preMarkCompletedHook won't be called when the Future contains
+    // an error. Uninitialized currentDevice_ could lead to crash when used
+    // in CUDAGuard.
+    currentDevice_ = c10::cuda::current_device();
+  }
 
- protected:
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) override {
     return c10::make_intrusive<CUDAFuture>(std::move(type));
   }
 
-  void postMarkCompletedHook(const at::IValue& value) override {
+ protected:
+  /**
+   * The dataPtrs field contains storage pointers of all tensors in the IValue.
+   * This method records CUDAEvents on participating devices and uses those
+   * CUDAEvents to synchronize streams when calling postWaitHook().
+   * If dataPtrs does not have a value, this method will try to inspect the
+   * given IValue by walking through all subvalues and extracting data pointers
+   * from CUDA tensors.
+   */
+  void preMarkCompletedHook(
+      const at::IValue& value,
+      c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
+          dataPtrs) override {
     currentDevice_ = c10::cuda::current_device();
 
     // Extract them once and cache them for later uses.
-    dataPtrs_ = extractDataPtrs(value);
+    dataPtrs_ =
+        dataPtrs.has_value() ? std::move(*dataPtrs) : extractDataPtrs(value);
 
     std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
     for (const at::DataPtr& data_ptr : dataPtrs_) {
@@ -82,7 +101,8 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
       for (const at::DataPtr& data_ptr : dataPtrs_) {
         if (data_ptr.device().is_cuda()) {
           c10::cuda::CUDACachingAllocator::recordStream(
-              data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+              data_ptr,
+              at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
         }
       }
 
@@ -94,14 +114,14 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
 
   void postWaitHook(const at::IValue& value) override {
     for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
-      cudaEvent.block(
-          at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+      cudaEvent.block(at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
     }
 
     for (const at::DataPtr& data_ptr : dataPtrs_) {
       if (data_ptr.device().is_cuda()) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+            data_ptr,
+            at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
       }
     }
   }

@@ -334,7 +334,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
          pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
     """Saves an object to a disk file.
 
-    See also: `saving-loading-tensors`
+    See also: :ref:`saving-loading-tensors`
 
     Args:
         obj: saved object
@@ -348,7 +348,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
 
     .. note::
         PyTorch preserves storage sharing across serialization. See
-        `preserve-storage-sharing` for more details.
+        :ref:`preserve-storage-sharing` for more details.
 
     .. note::
         The 1.6 release of PyTorch switched ``torch.save`` to use a new
@@ -818,7 +818,6 @@ def _get_restore_location(map_location):
             return result
     return restore_location
 
-
 def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickle_load_args):
     restore_location = _get_restore_location(map_location)
 
@@ -844,9 +843,26 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         storage = loaded_storages[key]
         return storage
 
+    load_module_mapping: Dict[str, str] = {
+        # See https://github.com/pytorch/pytorch/pull/51633
+        'torch.tensor': 'torch._tensor'
+    }
+
+    # Need to subclass Unpickler instead of directly monkey-patching the find_class method
+    # because it's marked readonly in pickle.
+    # The type: ignore is because mypy can't statically determine the type of this class.
+    class UnpicklerWrapper(pickle_module.Unpickler):  # type: ignore[name-defined]
+        # from https://stackoverflow.com/questions/13398462/unpickling-python-objects-with-a-changed-module-path/13405732
+        # Lets us override the imports that pickle uses when unpickling an object.
+        # This is useful for maintaining BC if we change a module path that tensor instantiation relies on.
+        def find_class(self, mod_name, name):
+            mod_name = load_module_mapping.get(mod_name, mod_name)
+            return super().find_class(mod_name, name)
+
     # Load the data (which may in turn use `persistent_load` to load tensors)
     data_file = io.BytesIO(zip_file.get_record(pickle_file))
-    unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
+
+    unpickler = UnpicklerWrapper(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
 

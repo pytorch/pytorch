@@ -1,3 +1,4 @@
+import torch
 import torch.autograd.profiler as prof
 from torch.autograd import ProfilerActivity
 
@@ -7,22 +8,28 @@ from warnings import warn
 
 
 class ProfilerAction(Enum):
+    """
+    Profiler actions that can be taken at the specified intervals
+    """
     NONE = 0
     WARMUP = 1
     RECORD = 2
     RECORD_AND_SAVE = 3
 
 
-def schedule(*, wait: int, warmup: int, active: int):
+def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0) -> Callable:
     """
-    Represents profiler behavior: wait for ``wait`` steps, then
+    Returns a callable that can be used as profiler ``schedule`` argument. The profiler will wait for ``wait`` steps, then
     do the warmup for the next ``warmup`` steps, then
     do the active recording for the next ``active`` steps and then
-    repeat the cycle staring with the next step.
+    repeat the cycle starting with the next step. The number of cycles is specified by the ``repeat`` parameter.
+    When the parameter's value is zero, the cycles will continue until the profiling is finished.
     """
     def schedule_fn(step: int) -> ProfilerAction:
         assert step >= 0
         num_steps = wait + warmup + active
+        if repeat > 0 and step / num_steps >= repeat:
+            return ProfilerAction.NONE
         mod_step = step % num_steps
         if mod_step < wait:
             return ProfilerAction.NONE
@@ -45,6 +52,30 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
     """
     return ProfilerAction.RECORD
 
+def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None):
+    """
+    Outputs tracing files to directory of ``dir_name``, then that directory can be
+    directly delivered to tensorboard as logdir.
+    ``worker_name`` should be unique for each worker in distributed scenario,
+    it will be set to '[hostname]_[pid]' by default.
+    """
+    import os
+    import socket
+    import time
+
+    def handler_fn(prof) -> None:
+        nonlocal worker_name
+        if not os.path.isdir(dir_name):
+            try:
+                os.makedirs(dir_name, exist_ok=True)
+            except Exception:
+                raise RuntimeError("Can't create directory: " + dir_name)
+        if not worker_name:
+            worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
+        file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
+        prof.export_chrome_trace(os.path.join(dir_name, file_name))
+    return handler_fn
+
 
 class profile(object):
     """
@@ -52,15 +83,18 @@ class profile(object):
 
     Args:
 
-    - ``activities`` - list of activity groups (CPU, CUDA) to use in profiling;
+    - ``activities`` - list of activity groups (CPU, CUDA) to use in profiling, supported values:
+      ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``;
+      default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA;
     - ``schedule`` - callable that takes step (int) as a single parameter and returns
-      ``ProfilerAction`` value that specifies the profiler action on each step;
-    - ``on_trace_ready`` (optional) - callable, called each time the trace is ready
+      ``ProfilerAction`` value that specifies the profiler action to perform at each step;
+    - ``on_trace_ready`` - callable that is called at each step when ``schedule`` returns ``ProfilerAction.RECORD_AND_SAVE``
       during the profiling;
     - ``record_shapes`` - save information about operator's input shapes;
     - ``profile_memory`` - track tensor memory allocation/deallocation;
-    - ``with_stack`` - save stack traces;
-    - ``use_gpu`` - (deprecated, use ``activities``).
+    - ``with_stack`` - record source information (file and line number) for the ops;
+    - ``with_flops`` - use formula to estimate the FLOPS of specific operators (matrix multiplication and 2D convolution);
+    - ``use_cuda`` - (deprecated, use ``activities``).
 
     .. note::
         Use ``torch.profiler.schedule`` to generate the callable schedule.
@@ -69,6 +103,18 @@ class profile(object):
         of the training process.
         The default schedule simply records all the events continuously for the
         duration of the context manager.
+
+    .. note::
+        Use ``torch.profiler.tensorboard_trace_handler`` to generate result files for TensorBoard:
+
+        ``on_trace_ready=torch.profiler.tensorboard_trace_handler(dir_name)``
+
+        After profiling, result files can be found in the specified directory. Use the command:
+
+        ``tensorboard --log_dir=dir_name``
+
+        to see the results in TensorBoard.
+        For more information, see `Pytorch Profiler <https://github.com/pytorch/kineto/tree/master/tb_plugin>`__
 
     .. note::
         Enabling shape and stack tracing results in additional overhead.
@@ -86,7 +132,7 @@ class profile(object):
         print(p.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1))
 
-    Usimg the profiler's ``schedule``, ``on_trace_ready`` and ``next_step`` functions:
+    Using the profiler's ``schedule``, ``on_trace_ready`` and ``step`` functions:
 
     .. code-block:: python
 
@@ -96,7 +142,7 @@ class profile(object):
         def trace_handler(prof):
             print(prof.key_averages().table(
                 sort_by="self_cuda_time_total", row_limit=-1))
-            # prof.export_chrome_trace("/tmp/test_trace_" + str(prof.step()) + ".json")
+            # prof.export_chrome_trace("/tmp/test_trace_" + str(prof.step_num) + ".json")
 
         with torch.profiler.profile(
             activities=[
@@ -116,11 +162,13 @@ class profile(object):
                 warmup=1,
                 active=2),
             on_trace_ready=trace_handler
+            # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
+            # used when outputting for tensorboard
             ) as p:
                 for iter in range(N):
                     code_iteration_to_profile(iter)
                     # send a signal to the profiler that the next iteration has started
-                    p.next_step()
+                    p.step()
     """
     def __init__(
             self,
@@ -131,18 +179,26 @@ class profile(object):
             record_shapes: bool = False,
             profile_memory: bool = False,
             with_stack: bool = False,
+            with_flops: bool = False,
             # deprecated:
-            use_gpu: Optional[bool] = None):
+            use_cuda: Optional[bool] = None):
         if activities:
-            self.activities = activities
+            self.activities = set(activities)
         else:
-            if use_gpu is not None:
-                warn("use_gpu is deprecated, use activities argument instead")
-                self.activities = set([ProfilerActivity.CPU])
-                if use_gpu:
-                    self.activities.add(ProfilerActivity.CUDA)
-            else:
-                raise RuntimeError("Profiler activities are not specified")
+            self.activities = set([ProfilerActivity.CPU])
+            if torch.cuda.is_available():
+                self.activities.add(ProfilerActivity.CUDA)
+
+        if use_cuda is not None:
+            warn("use_cuda is deprecated, use activities argument instead")
+            if use_cuda:
+                self.activities.add(ProfilerActivity.CUDA)
+            elif ProfilerActivity.CUDA in self.activities:
+                self.activities.remove(ProfilerActivity.CUDA)
+
+        assert len(self.activities) > 0, "No profiler activities specified"
+        assert (ProfilerActivity.CUDA not in self.activities) or torch.cuda.is_available(), \
+            "CUDA activity specified, but CUDA is not available"
 
         if schedule:
             self.schedule = schedule
@@ -153,6 +209,7 @@ class profile(object):
             self.record_steps = False
         self.on_trace_ready = on_trace_ready
         self.record_shapes = record_shapes
+        self.with_flops = with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.step_num = 0
@@ -172,7 +229,7 @@ class profile(object):
             self.step_rec_fn.__exit__(None, None, None)
         self._exit_actions()
 
-    def next_step(self):
+    def step(self):
         """
         Signals the profiler that the next profiling step has started.
         """
@@ -232,12 +289,6 @@ class profile(object):
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
 
-    def step(self):
-        """
-        Returns the current profiling step.
-        """
-        return self.step_num
-
     def export_chrome_trace(self, path: str):
         """
         Exports the collected trace in Chrome JSON format.
@@ -274,6 +325,14 @@ class profile(object):
         assert self.profiler
         return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
 
+    def events(self):
+        """
+        Returns the list of unaggregated profiler events,
+        to be used in the trace callback or after the profiling is finished
+        """
+        assert self.profiler
+        return self.profiler.function_events
+
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_warmup()
@@ -297,6 +356,7 @@ class profile(object):
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             record_shapes=self.record_shapes,
+            with_flops=self.with_flops,
             profile_memory=self.profile_memory,
             with_stack=self.with_stack,
             use_kineto=True,

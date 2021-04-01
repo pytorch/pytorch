@@ -1,6 +1,9 @@
+import functools
 import math
 import numbers
+import operator
 import weakref
+from typing import List
 
 import torch
 import torch.nn.functional as F
@@ -10,7 +13,6 @@ from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        vec_to_tril_matrix)
 from torch.nn.functional import pad
 from torch.nn.functional import softplus
-from typing import List
 
 __all__ = [
     'AbsTransform',
@@ -19,8 +21,10 @@ __all__ = [
     'ComposeTransform',
     'CorrCholeskyTransform',
     'ExpTransform',
+    'IndependentTransform',
     'LowerCholeskyTransform',
     'PowerTransform',
+    'ReshapeTransform',
     'SigmoidTransform',
     'TanhTransform',
     'SoftmaxTransform',
@@ -74,14 +78,10 @@ class Transform(object):
         sign (int or Tensor): For bijective univariate transforms, this
             should be +1 or -1 depending on whether transform is monotone
             increasing or decreasing.
-        event_dim (int): Number of dimensions that are correlated together in
-            the transform ``event_shape``. This should be 0 for pointwise
-            transforms, 1 for transforms that act jointly on vectors, 2 for
-            transforms that act jointly on matrices, etc.
     """
     bijective = False
+    domain: constraints.Constraint
     codomain: constraints.Constraint
-    event_dim = 0
 
     def __init__(self, cache_size=0):
         self._cache_size = cache_size
@@ -95,12 +95,10 @@ class Transform(object):
         super(Transform, self).__init__()
 
     @property
-    def input_event_dim(self):
-        return self.event_dim
-
-    @property
-    def output_event_dim(self):
-        return self.event_dim
+    def event_dim(self):
+        if self.domain.event_dim == self.codomain.event_dim:
+            return self.domain.event_dim
+        raise ValueError("Please use either .domain.event_dim or .codomain.event_dim")
 
     @property
     def inv(self):
@@ -185,35 +183,39 @@ class Transform(object):
     def __repr__(self):
         return self.__class__.__name__ + '()'
 
+    def forward_shape(self, shape):
+        """
+        Infers the shape of the forward computation, given the input shape.
+        Defaults to preserving shape.
+        """
+        return shape
+
+    def inverse_shape(self, shape):
+        """
+        Infers the shapes of the inverse computation, given the output shape.
+        Defaults to preserving shape.
+        """
+        return shape
+
 
 class _InverseTransform(Transform):
     """
     Inverts a single :class:`Transform`.
     This class is private; please instead use the ``Transform.inv`` property.
     """
-    def __init__(self, transform):
+    def __init__(self, transform: Transform):
         super(_InverseTransform, self).__init__(cache_size=transform._cache_size)
-        self._inv = transform
+        self._inv: Transform = transform
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False)
     def domain(self):
         assert self._inv is not None
         return self._inv.codomain
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False)
     def codomain(self):
         assert self._inv is not None
         return self._inv.domain
-
-    @property
-    def input_event_dim(self):
-        assert self._inv is not None
-        return self._inv.output_event_dim
-
-    @property
-    def output_event_dim(self):
-        assert self._inv is not None
-        return self._inv.input_event_dim
 
     @property
     def bijective(self):
@@ -224,11 +226,6 @@ class _InverseTransform(Transform):
     def sign(self):
         assert self._inv is not None
         return self._inv.sign
-
-    @property
-    def event_dim(self):
-        assert self._inv is not None
-        return self._inv.event_dim
 
     @property
     def inv(self):
@@ -244,6 +241,9 @@ class _InverseTransform(Transform):
         assert self._inv is not None
         return self._inv == other._inv
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}({repr(self._inv)})"
+
     def __call__(self, x):
         assert self._inv is not None
         return self._inv._inv_call(x)
@@ -251,6 +251,12 @@ class _InverseTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         assert self._inv is not None
         return -self._inv.log_abs_det_jacobian(y, x)
+
+    def forward_shape(self, shape):
+        return self._inv.inverse_shape(shape)
+
+    def inverse_shape(self, shape):
+        return self._inv.forward_shape(shape)
 
 
 class ComposeTransform(Transform):
@@ -263,7 +269,7 @@ class ComposeTransform(Transform):
         cache_size (int): Size of cache. If zero, no caching is done. If one,
             the latest single value is cached. Only 0 and 1 are supported.
     """
-    def __init__(self, parts, cache_size=0):
+    def __init__(self, parts: List[Transform], cache_size=0):
         if cache_size:
             parts = [part.with_cache(cache_size) for part in parts]
         super(ComposeTransform, self).__init__(cache_size=cache_size)
@@ -274,17 +280,35 @@ class ComposeTransform(Transform):
             return False
         return self.parts == other.parts
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False)
     def domain(self):
         if not self.parts:
             return constraints.real
-        return self.parts[0].domain
+        domain = self.parts[0].domain
+        # Adjust event_dim to be maximum among all parts.
+        event_dim = self.parts[-1].codomain.event_dim
+        for part in reversed(self.parts):
+            event_dim += part.domain.event_dim - part.codomain.event_dim
+            event_dim = max(event_dim, part.domain.event_dim)
+        assert event_dim >= domain.event_dim
+        if event_dim > domain.event_dim:
+            domain = constraints.independent(domain, event_dim - domain.event_dim)
+        return domain
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False)
     def codomain(self):
         if not self.parts:
             return constraints.real
-        return self.parts[-1].codomain
+        codomain = self.parts[-1].codomain
+        # Adjust event_dim to be maximum among all parts.
+        event_dim = self.parts[0].domain.event_dim
+        for part in self.parts:
+            event_dim += part.codomain.event_dim - part.domain.event_dim
+            event_dim = max(event_dim, part.codomain.event_dim)
+        assert event_dim >= codomain.event_dim
+        if event_dim > codomain.event_dim:
+            codomain = constraints.independent(codomain, event_dim - codomain.event_dim)
+        return codomain
 
     @lazy_property
     def bijective(self):
@@ -296,10 +320,6 @@ class ComposeTransform(Transform):
         for p in self.parts:
             sign = sign * p.sign
         return sign
-
-    @lazy_property
-    def event_dim(self):
-        return max(p.event_dim for p in self.parts) if self.parts else 0
 
     @property
     def inv(self):
@@ -325,16 +345,30 @@ class ComposeTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         if not self.parts:
             return torch.zeros_like(x)
-        result = 0
+
+        # Compute intermediates. This will be free if parts[:-1] are all cached.
+        xs = [x]
         for part in self.parts[:-1]:
-            y_tmp = part(x)
-            result = result + _sum_rightmost(part.log_abs_det_jacobian(x, y_tmp),
-                                             self.event_dim - part.event_dim)
-            x = y_tmp
-        part = self.parts[-1]
-        result = result + _sum_rightmost(part.log_abs_det_jacobian(x, y),
-                                         self.event_dim - part.event_dim)
-        return result
+            xs.append(part(xs[-1]))
+        xs.append(y)
+
+        terms = []
+        event_dim = self.domain.event_dim
+        for part, x, y in zip(self.parts, xs[:-1], xs[1:]):
+            terms.append(_sum_rightmost(part.log_abs_det_jacobian(x, y),
+                                        event_dim - part.domain.event_dim))
+            event_dim += part.codomain.event_dim - part.domain.event_dim
+        return functools.reduce(operator.add, terms)
+
+    def forward_shape(self, shape):
+        for part in self.parts:
+            shape = part.forward_shape(shape)
+        return shape
+
+    def inverse_shape(self, shape):
+        for part in reversed(self.parts):
+            shape = part.inverse_shape(shape)
+        return shape
 
     def __repr__(self):
         fmt_string = self.__class__.__name__ + '(\n    '
@@ -344,6 +378,136 @@ class ComposeTransform(Transform):
 
 
 identity_transform = ComposeTransform([])
+
+
+class IndependentTransform(Transform):
+    """
+    Wrapper around another transform to treat
+    ``reinterpreted_batch_ndims``-many extra of the right most dimensions as
+    dependent. This has no effect on the forward or backward transforms, but
+    does sum out ``reinterpreted_batch_ndims``-many of the rightmost dimensions
+    in :meth:`log_abs_det_jacobian`.
+
+    Args:
+        base_transform (:class:`Transform`): A base transform.
+        reinterpreted_batch_ndims (int): The number of extra rightmost
+            dimensions to treat as dependent.
+    """
+    def __init__(self, base_transform, reinterpreted_batch_ndims, cache_size=0):
+        super().__init__(cache_size=cache_size)
+        self.base_transform = base_transform.with_cache(cache_size)
+        self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
+
+    def with_cache(self, cache_size=1):
+        if self._cache_size == cache_size:
+            return self
+        return IndependentTransform(self.base_transform,
+                                    self.reinterpreted_batch_ndims,
+                                    cache_size=cache_size)
+
+    @constraints.dependent_property(is_discrete=False)
+    def domain(self):
+        return constraints.independent(self.base_transform.domain,
+                                       self.reinterpreted_batch_ndims)
+
+    @constraints.dependent_property(is_discrete=False)
+    def codomain(self):
+        return constraints.independent(self.base_transform.codomain,
+                                       self.reinterpreted_batch_ndims)
+
+    @property
+    def bijective(self):
+        return self.base_transform.bijective
+
+    @property
+    def sign(self):
+        return self.base_transform.sign
+
+    def _call(self, x):
+        if x.dim() < self.domain.event_dim:
+            raise ValueError("Too few dimensions on input")
+        return self.base_transform(x)
+
+    def _inverse(self, y):
+        if y.dim() < self.codomain.event_dim:
+            raise ValueError("Too few dimensions on input")
+        return self.base_transform.inv(y)
+
+    def log_abs_det_jacobian(self, x, y):
+        result = self.base_transform.log_abs_det_jacobian(x, y)
+        result = _sum_rightmost(result, self.reinterpreted_batch_ndims)
+        return result
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({repr(self.base_transform)}, {self.reinterpreted_batch_ndims})"
+
+    def forward_shape(self, shape):
+        return self.base_transform.forward_shape(shape)
+
+    def inverse_shape(self, shape):
+        return self.base_transform.inverse_shape(shape)
+
+
+class ReshapeTransform(Transform):
+    """
+    Unit Jacobian transform to reshape the rightmost part of a tensor.
+
+    Note that ``in_shape`` and ``out_shape`` must have the same number of
+    elements, just as for :meth:`torch.Tensor.reshape`.
+
+    Arguments:
+        in_shape (torch.Size): The input event shape.
+        out_shape (torch.Size): The output event shape.
+    """
+    bijective = True
+
+    def __init__(self, in_shape, out_shape, cache_size=0):
+        self.in_shape = torch.Size(in_shape)
+        self.out_shape = torch.Size(out_shape)
+        if self.in_shape.numel() != self.out_shape.numel():
+            raise ValueError("in_shape, out_shape have different numbers of elements")
+        super().__init__(cache_size=cache_size)
+
+    @constraints.dependent_property
+    def domain(self):
+        return constraints.independent(constraints.real, len(self.in_shape))
+
+    @constraints.dependent_property
+    def codomain(self):
+        return constraints.independent(constraints.real, len(self.out_shape))
+
+    def with_cache(self, cache_size=1):
+        if self._cache_size == cache_size:
+            return self
+        return ReshapeTransform(self.in_shape, self.out_shape, cache_size=cache_size)
+
+    def _call(self, x):
+        batch_shape = x.shape[:x.dim() - len(self.in_shape)]
+        return x.reshape(batch_shape + self.out_shape)
+
+    def _inverse(self, y):
+        batch_shape = y.shape[:y.dim() - len(self.out_shape)]
+        return y.reshape(batch_shape + self.in_shape)
+
+    def log_abs_det_jacobian(self, x, y):
+        batch_shape = x.shape[:x.dim() - len(self.in_shape)]
+        return x.new_zeros(batch_shape)
+
+    def forward_shape(self, shape):
+        if len(shape) < len(self.in_shape):
+            raise ValueError("Too few dimensions on input")
+        cut = len(shape) - len(self.in_shape)
+        if shape[cut:] != self.in_shape:
+            raise ValueError("Shape mismatch: expected {} but got {}".format(shape[cut:], self.in_shape))
+        return shape[:cut] + self.out_shape
+
+    def inverse_shape(self, shape):
+        if len(shape) < len(self.out_shape):
+            raise ValueError("Too few dimensions on input")
+        cut = len(shape) - len(self.out_shape)
+        if shape[cut:] != self.out_shape:
+            raise ValueError("Shape mismatch: expected {} but got {}".format(shape[cut:], self.out_shape))
+        return shape[:cut] + self.in_shape
 
 
 class ExpTransform(Transform):
@@ -399,6 +563,12 @@ class PowerTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         return (self.exponent * y / x).abs().log()
+
+    def forward_shape(self, shape):
+        return torch.broadcast_shapes(shape, getattr(self.exponent, "shape", ()))
+
+    def inverse_shape(self, shape):
+        return torch.broadcast_shapes(shape, getattr(self.exponent, "shape", ()))
 
 
 def _clipped_sigmoid(x):
@@ -494,15 +664,29 @@ class AffineTransform(Transform):
             for univariate random variables, 1 for distributions over vectors,
             2 for distributions over matrices, etc.
     """
-    domain = constraints.real
-    codomain = constraints.real
     bijective = True
 
     def __init__(self, loc, scale, event_dim=0, cache_size=0):
         super(AffineTransform, self).__init__(cache_size=cache_size)
         self.loc = loc
         self.scale = scale
-        self.event_dim = event_dim
+        self._event_dim = event_dim
+
+    @property
+    def event_dim(self):
+        return self._event_dim
+
+    @constraints.dependent_property(is_discrete=False)
+    def domain(self):
+        if self.event_dim == 0:
+            return constraints.real
+        return constraints.independent(constraints.real, self.event_dim)
+
+    @constraints.dependent_property(is_discrete=False)
+    def codomain(self):
+        if self.event_dim == 0:
+            return constraints.real
+        return constraints.independent(constraints.real, self.event_dim)
 
     def with_cache(self, cache_size=1):
         if self._cache_size == cache_size:
@@ -554,6 +738,16 @@ class AffineTransform(Transform):
             shape = shape[:-self.event_dim]
         return result.expand(shape)
 
+    def forward_shape(self, shape):
+        return torch.broadcast_shapes(shape,
+                                      getattr(self.loc, "shape", ()),
+                                      getattr(self.scale, "shape", ()))
+
+    def inverse_shape(self, shape):
+        return torch.broadcast_shapes(shape,
+                                      getattr(self.loc, "shape", ()),
+                                      getattr(self.scale, "shape", ()))
+
 
 class CorrCholeskyTransform(Transform):
     r"""
@@ -573,13 +767,7 @@ class CorrCholeskyTransform(Transform):
     """
     domain = constraints.real_vector
     codomain = constraints.corr_cholesky
-    input_event_dim = 1
-    output_event_dim = 2
     bijective = True
-
-    @property
-    def event_dim(self):
-        raise ValueError("Please use `.input_event_dim` or `.output_event_dim` instead.")
 
     def _call(self, x):
         x = torch.tanh(x)
@@ -622,6 +810,26 @@ class CorrCholeskyTransform(Transform):
         tanh_logdet = -2 * (x + softplus(-2 * x) - math.log(2.)).sum(dim=-1)
         return stick_breaking_logdet + tanh_logdet
 
+    def forward_shape(self, shape):
+        # Reshape from (..., N) to (..., D, D).
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        N = shape[-1]
+        D = round((0.25 + 2 * N) ** 0.5 + 0.5)
+        if D * (D - 1) // 2 != N:
+            raise ValueError("Input is not a flattend lower-diagonal number")
+        return shape[:-1] + (D, D)
+
+    def inverse_shape(self, shape):
+        # Reshape from (..., D, D) to (..., N).
+        if len(shape) < 2:
+            raise ValueError("Too few dimensions on input")
+        if shape[-2] != shape[-1]:
+            raise ValueError("Input is not square")
+        D = shape[-1]
+        N = D * (D - 1) // 2
+        return shape[:-2] + (N,)
+
 
 class SoftmaxTransform(Transform):
     r"""
@@ -632,9 +840,8 @@ class SoftmaxTransform(Transform):
     coordinate-wise (except for the final normalization), and thus is
     appropriate for coordinate-wise optimization algorithms.
     """
-    domain = constraints.real
+    domain = constraints.real_vector
     codomain = constraints.simplex
-    event_dim = 1
 
     def __eq__(self, other):
         return isinstance(other, SoftmaxTransform)
@@ -647,6 +854,16 @@ class SoftmaxTransform(Transform):
     def _inverse(self, y):
         probs = y
         return probs.log()
+
+    def forward_shape(self, shape):
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        return shape
+
+    def inverse_shape(self, shape):
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        return shape
 
 
 class StickBreakingTransform(Transform):
@@ -662,10 +879,9 @@ class StickBreakingTransform(Transform):
     This is bijective and appropriate for use in HMC; however it mixes
     coordinates together and is less appropriate for optimization.
     """
-    domain = constraints.real
+    domain = constraints.real_vector
     codomain = constraints.simplex
     bijective = True
-    event_dim = 1
 
     def __eq__(self, other):
         return isinstance(other, StickBreakingTransform)
@@ -694,6 +910,16 @@ class StickBreakingTransform(Transform):
         detJ = (-x + F.logsigmoid(x) + y[..., :-1].log()).sum(-1)
         return detJ
 
+    def forward_shape(self, shape):
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        return shape[:-1] + (shape[-1] + 1,)
+
+    def inverse_shape(self, shape):
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        return shape[:-1] + (shape[-1] - 1,)
+
 
 class LowerCholeskyTransform(Transform):
     """
@@ -703,9 +929,8 @@ class LowerCholeskyTransform(Transform):
     This is useful for parameterizing positive definite matrices in terms of
     their Cholesky factorization.
     """
-    domain = constraints.real
+    domain = constraints.independent(constraints.real, 2)
     codomain = constraints.lower_cholesky
-    event_dim = 2
 
     def __eq__(self, other):
         return isinstance(other, LowerCholeskyTransform)
@@ -733,7 +958,6 @@ class CatTransform(Transform):
     """
     def __init__(self, tseq, dim=0, lengths=None, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
-        self.event_dim = max(t.event_dim for t in tseq)
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
         super(CatTransform, self).__init__(cache_size=cache_size)
@@ -743,6 +967,10 @@ class CatTransform(Transform):
         self.lengths = list(lengths)
         assert len(self.lengths) == len(self.transforms)
         self.dim = dim
+
+    @lazy_property
+    def event_dim(self):
+        return max(t.event_dim for t in self.transforms)
 
     @lazy_property
     def length(self):

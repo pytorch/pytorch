@@ -19,6 +19,8 @@
 // *************************************************************************
 
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
+constexpr auto kProcessGroupDefaultTimeout =
+    std::chrono::milliseconds(10 * 1000);
 
 namespace c10d {
 
@@ -76,7 +78,12 @@ class ProcessGroup : public torch::CustomClassHolder {
   // this will be bound using pybind.
   class Work : public torch::CustomClassHolder {
    public:
-    Work(int rank = -1, OpType opType = OpType::UNKNOWN, const char* profilingTitle = nullptr);
+    Work(
+        int rank = -1,
+        OpType opType = OpType::UNKNOWN,
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt);
 
     virtual ~Work();
 
@@ -159,6 +166,21 @@ class ProcessGroup : public torch::CustomClassHolder {
     std::function<void()> recordFunctionEndCallback_;
   };
 
+  // ProcessGroup Options is a base struct that defines the basic options
+  // when constructing a ProcessGroup. Each ProcessGroup subclass should
+  // extend this struct and define its options if it wants to provide more
+  // config options (beyond basic ones defined here) to end user.
+  struct Options : torch::CustomClassHolder {
+    explicit Options(std::chrono::milliseconds timeout, std::string backend)
+        : timeout(timeout), backend(backend) {}
+    virtual ~Options() = default;
+
+    std::chrono::milliseconds timeout;
+
+    // backend name
+    const std::string backend;
+  };
+
   explicit ProcessGroup(int rank, int size);
   virtual ~ProcessGroup();
 
@@ -168,6 +190,10 @@ class ProcessGroup : public torch::CustomClassHolder {
 
   int getSize() const {
     return size_;
+  }
+
+  virtual const std::string getBackendName() const {
+    return "undefined";
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
@@ -239,6 +265,16 @@ class ProcessGroup : public torch::CustomClassHolder {
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) {
     throw std::runtime_error("ProcessGroup does not support alltoall");
+  }
+
+  virtual void monitoredBarrier(
+      const BarrierOptions& /* unused */) {
+    auto backendName = getBackendName();
+    throw std::runtime_error(
+        c10::str("ProcessGroup ",
+        backendName,
+        " does not support monitoredBarrier, only GLOO supports monitored barrier.")
+    );
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> send(

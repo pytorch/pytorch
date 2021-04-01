@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 
+#include <ATen/core/ivalue.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -19,6 +21,12 @@ enum CompareSelectOperation {
   kLT,
   kLE,
   kNE,
+};
+
+enum CompareSelectBias {
+  kUnbiased,
+  kLikely,
+  kUnlikely,
 };
 
 inline int getPrecedence(IRNodeType ty) {
@@ -361,6 +369,9 @@ class Ramp : public ExprNode<Ramp> {
       const ExprHandle& base,
       const ExprHandle& stride,
       int lanes) {
+    if (stride.dtype() != base.dtype()) {
+      throw malformed_input("Bad stride in Ramp");
+    }
     return ExprHandle(new Ramp(base.node(), stride.node(), lanes));
   }
   int lanes() const {
@@ -371,11 +382,7 @@ class Ramp : public ExprNode<Ramp> {
       : ExprNodeBase(Dtype(base->dtype(), lanes), kRamp),
         base_(base),
         stride_(stride),
-        lanes_(lanes) {
-    if (stride->dtype() != base->dtype()) {
-      throw malformed_input("Bad stride in Ramp");
-    }
-  }
+        lanes_(lanes) {}
 
  private:
   const Expr* base_;
@@ -410,6 +417,13 @@ class TORCH_API Load : public ExprNode<Load> {
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& mask);
+  static ExprHandle make(
+      Dtype dtype,
+      const BufHandle& buf,
+      const std::vector<ExprHandle>& indices);
+  static ExprHandle make(
+      const BufHandle& buf,
+      const std::vector<ExprHandle>& indices);
 
   Load(
       Dtype dtype,
@@ -422,8 +436,6 @@ class TORCH_API Load : public ExprNode<Load> {
       const Expr* mask);
 
  private:
-  void verify_dtypes() const;
-
   const Buf* buf_;
   std::vector<const Expr*> indices_;
   const Expr* mask_;
@@ -470,21 +482,20 @@ class IfThenElse : public ExprNode<IfThenElse> {
       const ExprHandle& c,
       const ExprHandle& t,
       const ExprHandle& f) {
+    if (!c.dtype().is_integral()) {
+      throw unsupported_dtype();
+    }
+    if (c.dtype().lanes() != 1) {
+      throw unsupported_dtype();
+    }
+    if (t.dtype() != f.dtype()) {
+      throw malformed_input("Bad dtype in IfThenElse");
+    }
     return ExprHandle(new IfThenElse(c.node(), t.node(), f.node()));
   }
 
   IfThenElse(const Expr* c, const Expr* t, const Expr* f)
-      : ExprNodeBase(t->dtype()), condition_(c), true_(t), false_(f) {
-    if (!c->dtype().is_integral()) {
-      throw unsupported_dtype();
-    }
-    if (c->dtype().lanes() != 1) {
-      throw unsupported_dtype();
-    }
-    if (t->dtype() != f->dtype()) {
-      throw malformed_input("Bad dtype in IfThenElse");
-    }
-  }
+      : ExprNodeBase(t->dtype()), condition_(c), true_(t), false_(f) {}
 
  private:
   const Expr* condition_;
@@ -561,11 +572,15 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   const Expr* ret_val2() const {
     return this->ret_val2_;
   }
+  CompareSelectBias bias() const {
+    return bias_;
+  }
 
   static ExprHandle make(
       const ExprHandle& lhs,
       const ExprHandle& rhs,
-      CompareSelectOperation cmp_op) {
+      CompareSelectOperation cmp_op,
+      CompareSelectBias bias = kUnbiased) {
     if (lhs.dtype() != rhs.dtype()) {
       throw malformed_input("bad dtype in CompareSelect");
     }
@@ -574,7 +589,8 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
         rhs.node(),
         IntImm::make(1).node(),
         IntImm::make(0).node(),
-        cmp_op));
+        cmp_op,
+        bias));
   }
 
   static ExprHandle make(
@@ -582,12 +598,18 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& rhs,
       const ExprHandle& ret_val1,
       const ExprHandle& ret_val2,
-      CompareSelectOperation cmp_op) {
+      CompareSelectOperation cmp_op,
+      CompareSelectBias bias = kUnbiased) {
     if (lhs.dtype() != rhs.dtype() || ret_val1.dtype() != ret_val2.dtype()) {
       throw malformed_input("bad dtype in CompareSelect");
     }
     return ExprHandle(new CompareSelect(
-        lhs.node(), rhs.node(), ret_val1.node(), ret_val2.node(), cmp_op));
+        lhs.node(),
+        rhs.node(),
+        ret_val1.node(),
+        ret_val2.node(),
+        cmp_op,
+        bias));
   }
 
   CompareSelect(
@@ -595,25 +617,28 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const Expr* rhs,
       const Expr* ret_val1,
       const Expr* ret_val2,
-      CompareSelectOperation cmp_op)
+      CompareSelectOperation cmp_op,
+      CompareSelectBias bias = kUnbiased)
       : ExprNodeBase(ret_val1->dtype()),
         lhs_(lhs),
         rhs_(rhs),
         ret_val1_(ret_val1),
         ret_val2_(ret_val2),
-        compare_op_(cmp_op) {
-    if (ret_val1->dtype() != ret_val2->dtype()) {
-      throw malformed_input("bad dtype in CompareSelect");
-    }
-  }
+        compare_op_(cmp_op),
+        bias_(bias) {}
 
-  CompareSelect(const Expr* lhs, const Expr* rhs, CompareSelectOperation cmp_op)
+  CompareSelect(
+      const Expr* lhs,
+      const Expr* rhs,
+      CompareSelectOperation cmp_op,
+      CompareSelectBias bias = kUnbiased)
       : ExprNodeBase(kInt),
         lhs_(lhs),
         rhs_(rhs),
         ret_val1_(new IntImm(1)),
         ret_val2_(new IntImm(0)),
-        compare_op_(cmp_op) {}
+        compare_op_(cmp_op),
+        bias_(bias) {}
 
  private:
   const Expr* lhs_;
@@ -621,6 +646,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   const Expr* ret_val1_;
   const Expr* ret_val2_;
   CompareSelectOperation compare_op_;
+  CompareSelectBias bias_;
 };
 
 enum IntrinsicsOp {

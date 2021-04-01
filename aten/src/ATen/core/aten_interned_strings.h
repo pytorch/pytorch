@@ -22,6 +22,8 @@ _(aten, __xor__) \
 _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
+_(aten, _amp_foreach_non_finite_check_and_unscale_) \
+_(aten, _amp_update_scale) \
 _(aten, _arange) \
 _(aten, _argmax) \
 _(aten, _argmin) \
@@ -78,7 +80,6 @@ _(aten, _fft_with_size) \
 _(aten, _fill) \
 _(aten, _floor) \
 _(aten, _fused_dropout) \
-_(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _ldexp) \
 _(aten, _linspace) \
@@ -274,6 +275,8 @@ _(aten, cudnn_convolution_transpose_backward) \
 _(aten, cudnn_convolution_transpose_backward_bias) \
 _(aten, cudnn_convolution_transpose_backward_input) \
 _(aten, cudnn_convolution_transpose_backward_weight) \
+_(aten, cudnn_convolution_relu) \
+_(aten, cudnn_convolution_add_relu) \
 _(aten, cudnn_grid_sampler) \
 _(aten, cudnn_grid_sampler_backward) \
 _(aten, cudnn_is_acceptable) \
@@ -289,6 +292,8 @@ _(aten, diag_embed) \
 _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, fill_diagonal_) \
+_(aten, diff) \
+_(aten, frexp) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
@@ -309,15 +314,12 @@ _(aten, embedding_sparse_backward) \
 _(aten, empty) \
 _(aten, empty_like) \
 _(aten, empty_strided) \
+_(aten, special_entr) \
 _(aten, eq) \
 _(aten, equal) \
-_(aten, erf) \
-_(aten, erfc) \
-_(aten, erfinv) \
 _(aten, exp) \
 _(aten, expand) \
 _(aten, expand_as) \
-_(aten, expm1) \
 _(aten, exponential) \
 _(aten, eye) \
 _(aten, feature_alpha_dropout) \
@@ -394,6 +396,7 @@ _(aten, is_coalesced) \
 _(aten, is_complex) \
 _(aten, is_contiguous) \
 _(aten, is_cuda) \
+_(aten, is_mlc) \
 _(aten, is_distributed) \
 _(aten, is_floating_point) \
 _(aten, is_nonzero) \
@@ -419,7 +422,6 @@ _(aten, leaky_relu) \
 _(aten, leaky_relu_backward) \
 _(aten, leaky_relu_forward) \
 _(aten, lerp) \
-_(aten, lgamma) \
 _(aten, linear) \
 _(aten, linspace) \
 _(aten, log) \
@@ -448,7 +450,6 @@ _(aten, masked_fill) \
 _(aten, masked_scatter) \
 _(aten, masked_select) \
 _(aten, matmul) \
-_(aten, matrix_power) \
 _(aten, matrix_rank) \
 _(aten, matrix_exp) \
 _(aten, max) \
@@ -545,7 +546,6 @@ _(aten, nuclear_norm) \
 _(aten, numel) \
 _(aten, ones) \
 _(aten, ones_like) \
-_(aten, orgqr) \
 _(aten, ormqr) \
 _(aten, pairwise_distance) \
 _(aten, _euclidean_dist) \
@@ -618,6 +618,7 @@ _(aten, rrelu_with_noise_forward) \
 _(aten, rsqrt) \
 _(aten, scatter) \
 _(aten, scatter_add) \
+_(aten, segment_reduce) \
 _(aten, select) \
 _(aten, selu) \
 _(aten, set) \
@@ -674,6 +675,7 @@ _(aten, svd) \
 _(aten, symeig) \
 _(aten, t) \
 _(aten, take) \
+_(aten, take_along_dim) \
 _(aten, tan) \
 _(aten, tanh) \
 _(aten, tensor) \

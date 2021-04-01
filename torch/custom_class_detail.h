@@ -79,11 +79,11 @@ call_torchbind_method_from_stack(
       typename c10::guts::infer_function_traits_t<Functor>::parameter_types;
   // TODO We shouldn't use c10::impl stuff directly here. We should use the KernelFunction API instead.
   return (functor)(c10::impl::ivalue_to_arg<
-                   std::remove_cv_t<std::remove_reference_t<
+                   typename c10::impl::decay_if_not_tensor<
                        c10::guts::typelist::
-                           element_t<ivalue_arg_indices, IValueArgTypes>>>,
-                   AllowDeprecatedTypes>::call(std::move(
-      torch::jit::peek(stack, ivalue_arg_indices, num_ivalue_args)))...);
+                           element_t<ivalue_arg_indices, IValueArgTypes>>::type,
+                   AllowDeprecatedTypes>::call(
+      torch::jit::peek(stack, ivalue_arg_indices, num_ivalue_args))...);
 }
 
 template <class Functor, bool AllowDeprecatedTypes>

@@ -65,5 +65,5 @@ Ret operator()(Params ...params) const {
 
 operator bool() const { return callback; }
 };
- 
+
 }

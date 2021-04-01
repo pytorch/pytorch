@@ -395,19 +395,19 @@ bool available(
     const bool transposed,
     const IntArrayRef /* output_padding */,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   return api::available() &&
          // Weight
          (4 == weight.ndimension()) &&
          (weight.size(Layout::Filter::height) > 0) &&
          (weight.size(Layout::Filter::width) > 0) &&
-         ((c10::DeviceType::CPU == weight.device().type()) ||
+         ((weight.device().is_cpu()) ||
           (c10::DeviceType::Vulkan == weight.device().type())) &&
          (kFloat == weight.scalar_type()) &&
          // Bias
          ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
-                                       ((c10::DeviceType::CPU == bias->device().type()) ||
+                                       ((bias->device().is_cpu()) ||
                                         (c10::DeviceType::Vulkan == bias->device().type())) &&
                                        (kFloat == bias->scalar_type()) &&
                                        (transposed ? false /* to be addded in the future */
@@ -511,6 +511,7 @@ void conv2d_dw(
         },
         VK_KERNEL(conv2d_dw),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -588,6 +589,7 @@ void conv2d_pw(
         },
         VK_KERNEL(conv2d_pw),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -685,6 +687,7 @@ void conv2d(
         },
         VK_KERNEL(conv2d),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -775,8 +778,8 @@ void conv2d_old(
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
         VK_KERNEL(conv2d_nogroup_clamp),
-        //VK_KERNEL(conv2d_nogroup_clamp_1x),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -850,8 +853,8 @@ Conv2dOpContext::Conv2dOpContext(
     const bool /* transposed */,
     const IntArrayRef /* output_padding */,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max)
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max)
   : packed_{
       pack_weights(pool, weight, groups),
       pack_biases(pool, bias, weight),
@@ -886,8 +889,8 @@ Conv2dOpContext Conv2dOpContext::create(
     const bool transposed,
     const IntArrayRef output_padding_arg,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   const auto stride = expand_param_if_needed(stride_arg, "stride", 2);
   const auto padding = expand_param_if_needed(padding_arg, "padding", 2);
   const auto dilation = expand_param_if_needed(dilation_arg, "dilation", 2);
@@ -1041,8 +1044,8 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   return c10::make_intrusive<Conv2dOpContext>(
       Conv2dOpContext::create(
           persistent()->pool,

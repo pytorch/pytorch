@@ -80,7 +80,7 @@ struct DescriptorDeleter {
 // initialized the first time you call set() or any other initializing
 // function.
 template <typename T, cudnnStatus_t (*ctor)(T**), cudnnStatus_t (*dtor)(T*)>
-class TORCH_CUDA_CU_API Descriptor {
+class TORCH_CUDA_CPP_API Descriptor {
  public:
   // TODO: Figure out why const-correctness doesn't work here
 
@@ -108,7 +108,7 @@ private:
   std::unique_ptr<T, DescriptorDeleter<T, dtor>> desc_;
 };
 
-class TORCH_CUDA_CU_API TensorDescriptor : public Descriptor<
+class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
                                                cudnnTensorStruct,
                                                &cudnnCreateTensorDescriptor,
                                                &cudnnDestroyTensorDescriptor> {
@@ -147,7 +147,7 @@ private:
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d);
 
-class TORCH_CUDA_CU_API FilterDescriptor : public Descriptor<
+class TORCH_CUDA_CPP_API FilterDescriptor : public Descriptor<
                                                cudnnFilterStruct,
                                                &cudnnCreateFilterDescriptor,
                                                &cudnnDestroyFilterDescriptor> {
@@ -163,7 +163,7 @@ private:
 
 std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d);
 
-struct TORCH_CUDA_CU_API ConvolutionDescriptor
+struct TORCH_CUDA_CPP_API ConvolutionDescriptor
     : public Descriptor<
           cudnnConvolutionStruct,
           &cudnnCreateConvolutionDescriptor,
@@ -186,7 +186,7 @@ struct TORCH_CUDA_CU_API ConvolutionDescriptor
   }
 };
 
-struct TORCH_CUDA_CU_API SpatialTransformerDescriptor
+struct TORCH_CUDA_CPP_API SpatialTransformerDescriptor
     : public Descriptor<
           cudnnSpatialTransformerStruct,
           &cudnnCreateSpatialTransformerDescriptor,
@@ -196,7 +196,7 @@ struct TORCH_CUDA_CU_API SpatialTransformerDescriptor
   }
 };
 
-struct TORCH_CUDA_CU_API DropoutDescriptor
+struct TORCH_CUDA_CPP_API DropoutDescriptor
     : public Descriptor<
           cudnnDropoutStruct,
           &cudnnCreateDropoutDescriptor,
@@ -206,7 +206,7 @@ struct TORCH_CUDA_CU_API DropoutDescriptor
   // Initialize a dropout descriptor's RNG state.
   // WARNING: This function is very expensive, avoid calling this function!
   void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed, const TensorOptions& options) {
-    AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
+    TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     size_t state_size;
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
     AT_ASSERT(options.device().type() == kCUDA);
@@ -217,7 +217,7 @@ struct TORCH_CUDA_CU_API DropoutDescriptor
 
   // Restore a dropout descriptor given a dropout probability and existing RNG state.
   void set(cudnnHandle_t handle, float dropout, at::Tensor state_) {
-    AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
+    TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     state = state_;
     void *state_ptr = state.data_ptr();
     size_t state_size = state.size(0);
@@ -235,7 +235,7 @@ struct TORCH_CUDA_CU_API DropoutDescriptor
   }
 };
 
-struct TORCH_CUDA_CU_API RNNDescriptor : public Descriptor<
+struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
                                              cudnnRNNStruct,
                                              &cudnnCreateRNNDescriptor,
                                              &cudnnDestroyRNNDescriptor> {
@@ -282,7 +282,7 @@ struct TORCH_CUDA_CU_API RNNDescriptor : public Descriptor<
   }
 };
 
-struct TORCH_CUDA_CU_API CTCLossDescriptor
+struct TORCH_CUDA_CPP_API CTCLossDescriptor
     : public Descriptor<
           cudnnCTCLossStruct,
           &cudnnCreateCTCLossDescriptor,
@@ -299,6 +299,23 @@ struct TORCH_CUDA_CU_API CTCLossDescriptor
         cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
   }
 #endif
+};
+
+struct TORCH_CUDA_CPP_API ActivationDescriptor
+    : public Descriptor<
+          cudnnActivationStruct,
+          &cudnnCreateActivationDescriptor,
+          &cudnnDestroyActivationDescriptor> {
+  void set(cudnnActivationMode_t mode) {
+    AT_ASSERT(
+        mode == CUDNN_ACTIVATION_RELU,
+        "TODO: support more cuDNN activation modes");
+    AT_CUDNN_CHECK(cudnnSetActivationDescriptor(
+        mut_desc(),
+        mode,
+        cudnnNanPropagation_t::CUDNN_NOT_PROPAGATE_NAN,
+        std::numeric_limits<double>::max()));
+  }
 };
 
 union Constant

@@ -69,6 +69,7 @@ Tensor adaptive_avg_pool2d(
           },
           VK_KERNEL(adaptive_avg_pool2d),
           v_output.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -211,6 +212,7 @@ Tensor avg_pool2d(
           },
           VK_KERNEL(avg_pool2d),
           v_output.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(

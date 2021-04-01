@@ -219,7 +219,10 @@ void RequestCallbackNoPython::processBaseScriptRemoteCall(
   c10::intrusive_ptr<OwnerRRef> ownerRRef;
   if (rrefId == forkId) {
     // Creating an owner RRef on self, should already exist in owners map
-    ownerRRef = ctx.getOwnerRRef(rrefId, /* forceCreated */ true)->constValue();
+    ownerRRef =
+        fromRRefInterface(ctx.getOwnerRRef(rrefId, /* forceCreated */ true)
+                              ->constValue()
+                              .toRRef());
   } else {
     ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
   }
@@ -268,7 +271,7 @@ void RequestCallbackNoPython::processScriptRRefFetchCall(
 
   if (futureOwner->completed()) { // optional fast-path
     // the OwnerRRef has been created
-    const auto& rref = futureOwner->constValue();
+    const auto& rref = fromRRefInterface(futureOwner->constValue().toRRef());
     if (rref->hasValue()) {
       markComplete(ScriptRRefFetchRet({rref->getValue()}).toMessage());
       return;
@@ -276,7 +279,7 @@ void RequestCallbackNoPython::processScriptRRefFetchCall(
   }
 
   futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
-    const auto& rref = futureOwner->constValue();
+    const auto& rref = fromRRefInterface(futureOwner->constValue().toRRef());
     auto whenValueSet = rref->getFuture();
 
     // Our response is satisfied when the rpc.remote() request
@@ -345,11 +348,19 @@ void RequestCallbackNoPython::processForwardAutogradReq(
     const std::shared_ptr<JitFuture>& responseFuture) const {
   auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
+  // Need to reverse the device map for the backward pass of distributed
+  // autograd.
+  std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
+  for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
+    reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
+  }
+
   // Attach 'recv' autograd function.
   auto autogradContext = addRecvRpcBackward(
       rpcWithAutograd.autogradMetadata(),
       rpcWithAutograd.tensors(),
-      rpcWithAutograd.fromWorkerId());
+      rpcWithAutograd.fromWorkerId(),
+      reverseDeviceMap);
   // For this recv thread on server side, before processRpc(),
   // set current_context_id_ to be context_id passed from client.
   // In this way, if there is nested rpc call in python rpc call, original

@@ -1,24 +1,28 @@
-
-from multiprocessing import Manager
+from enum import Enum
 from contextlib import contextmanager
+from multiprocessing import Manager
 from io import StringIO
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import logging
 import traceback
 import types
 
-from typing import NamedTuple
+from typing import NamedTuple, Union
 from functools import wraps
 
 import torch
 import torch.distributed as c10d
 
+import faulthandler
 from functools import partial, reduce
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA
+
+logger = logging.getLogger(__name__)
 
 class TestSkip(NamedTuple):
     exit_code: int
@@ -103,6 +107,52 @@ def skip_if_lt_x_gpu(x):
         return wrapper
 
     return decorator
+
+
+def with_nccl_blocking_wait(func):
+    """
+    Convenience decorator to set/unset NCCL_BLOCKING_WAIT flag. Note that use of
+    this decorator will override the setting of NCCL_ASYNC_ERROR_HANDLING for
+    the particular test. After the test, both NCCL_BLOCKING_WAIT and
+    NCCL_ASYNC_ERROR_HANDLING will be restored to their original values.
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Save and unset NCCL_ASYNC_ERROR_HANDLING
+        try:
+            cached_nccl_async_error_handling: Union[str, None] = os.environ[
+                "NCCL_ASYNC_ERROR_HANDLING"
+            ]
+            del os.environ["NCCL_ASYNC_ERROR_HANDLING"]
+        except KeyError:
+            # NCCL_ASYNC_ERROR_HANDLING was unset
+            cached_nccl_async_error_handling = None
+
+        # Save val of NCCL_BLOCKING_WAIT and set it.
+        try:
+            cached_nccl_blocking_wait: Union[str, None] = os.environ[
+                "NCCL_BLOCKING_WAIT"
+            ]
+        except KeyError:
+            cached_nccl_blocking_wait = None
+        finally:
+            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+
+        try:
+            ret = func(*args, **kwargs)
+            return ret
+        finally:
+            # restore old values.
+            if cached_nccl_async_error_handling is not None:
+                os.environ[
+                    "NCCL_ASYNC_ERROR_HANDLING"
+                ] = cached_nccl_async_error_handling
+
+            if cached_nccl_blocking_wait is not None:
+                os.environ["NCCL_BLOCKING_WAIT"] = cached_nccl_blocking_wait
+
+    return wrapper
+
 
 def requires_gloo():
     return unittest.skipUnless(
@@ -271,6 +321,10 @@ class MultiProcessTestCase(TestCase):
     # but we still want to ensure we didn't run into any other errors.
     TEST_ERROR_EXIT_CODE = 10
 
+    # do not early terminate for distributed tests.
+    def _should_stop_test_suite(self):
+        return False
+
     @property
     def world_size(self):
         return 4
@@ -281,12 +335,7 @@ class MultiProcessTestCase(TestCase):
             if self.rank == self.MAIN_PROCESS_RANK:
                 self._join_processes(fn)
             else:
-                try:
-                    fn()
-                except Exception as e:
-                    logging.error('Caught exception: \n{}exiting process with exit code: {}'
-                                  .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
-                    sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
+                fn()
         return types.MethodType(wrapper, self)
 
     # The main process spawns N subprocesses that run the test.
@@ -300,12 +349,15 @@ class MultiProcessTestCase(TestCase):
 
     def setUp(self):
         super().setUp()
+        self.faulthandler_files = []
         self.skip_return_code_checks = []
         self.processes = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         global TEST_SKIPS
         self.old_test_skips = TEST_SKIPS.copy()
+        # pid to pipe consisting of error message from process.
+        self.pid_to_pipe = {}
 
     def tearDown(self):
         super().tearDown()
@@ -316,6 +368,10 @@ class MultiProcessTestCase(TestCase):
         # it alive until the end of the entire suite. We must thus reset the
         # processes to prevent an effective file descriptor leak.
         self.processes = []
+
+        # Close all the files
+        for file in self.faulthandler_files:
+            file.close()
 
     def _current_test_name(self):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
@@ -330,12 +386,17 @@ class MultiProcessTestCase(TestCase):
 
         self.processes = []
         for rank in range(int(self.world_size)):
+            parent_conn, child_conn = torch.multiprocessing.Pipe()
+            faulthandler_file = tempfile.NamedTemporaryFile()
             process = proc(
                 target=self.__class__._run,
                 name='process ' + str(rank),
-                args=(rank, self._current_test_name(), self.file_name))
+                args=(rank, self._current_test_name(), self.file_name, child_conn, faulthandler_file.name))
             process.start()
+            logger.info(f'Started process {rank} with pid {process.pid}')
+            self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
+            self.faulthandler_files.append(faulthandler_file)
 
     def _fork_processes(self):
         proc = torch.multiprocessing.get_context("fork").Process
@@ -345,17 +406,98 @@ class MultiProcessTestCase(TestCase):
         proc = torch.multiprocessing.get_context("spawn").Process
         self._start_processes(proc)
 
+    class Event(Enum):
+        GET_TRACEBACK = 1
+
+    @staticmethod
+    def _event_listener(pipe, rank):
+        logger.info(f'Starting event listener thread for {rank}')
+        while True:
+            if pipe.poll(None):
+
+                if pipe.closed:
+                    logger.info(f'Pipe closed for process {rank}, stopping event listener thread')
+                    return
+
+                event = pipe.recv()
+                logger.info(f'Received event {event} on process {rank}')
+
+                if event == MultiProcessTestCase.Event.GET_TRACEBACK:
+                    # Return traceback to the parent process.
+                    with tempfile.NamedTemporaryFile(mode='r+') as tmp_file:
+                        faulthandler.dump_traceback(tmp_file)
+                        # Flush buffers and seek to read from the beginning
+                        tmp_file.flush()
+                        tmp_file.seek(0)
+                        pipe.send(tmp_file.read())
+
+                        logger.info(f'Process {rank} sent traceback')
+
     @classmethod
-    def _run(cls, rank, test_name, file_name):
+    def _run(cls, rank, test_name, file_name, pipe, faulthandler_file_name):
         self = cls(test_name)
+
+        # Start event listener thread.
+        threading.Thread(
+            target=MultiProcessTestCase._event_listener,
+            args=(pipe, rank),
+            daemon=True).start()
+
+        self._register_fault_handler(faulthandler_file_name)
         self.rank = rank
         self.file_name = file_name
 
-        # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
-        # We're retrieving a corresponding test and executing it.
-        getattr(self, test_name)()
+        self.run_test(test_name, pipe)
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
+
+    def _register_fault_handler(self, faulthandler_file_name):
+        # On windows, you can't reopen the temporary file and we can't pass a
+        # file object to a subprocess since it can't be pickled. As a result,
+        # don't use faulthandler on windows.
+        if sys.platform != 'win32':
+            faulthandler_file = open(faulthandler_file_name, mode='w')
+            faulthandler.enable(file=faulthandler_file)
+
+    def run_test(self, test_name, pipe):
+        # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
+        # We're retrieving a corresponding test and executing it.
+        try:
+            getattr(self, test_name)()
+            # Close pipe after done with test.
+            pipe.close()
+        except Exception as e:
+            logger.error(
+                f'Caught exception: \n{traceback.format_exc()} exiting '
+                'process with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
+            # Send error to parent process.
+            pipe.send(traceback.format_exc())
+            pipe.close()
+            sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
+
+    def _get_timedout_process_traceback(self):
+        pipes = []
+        for i, process in enumerate(self.processes):
+            if process.exitcode is None:
+                pipe = self.pid_to_pipe[process.pid]
+                try:
+                    pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
+                    pipes.append((i, pipe))
+                except BrokenPipeError as e:
+                    logger.error(f'Encountered error while trying to get traceback for process {i}: {e}')
+
+        # Wait for results.
+        for rank, pipe in pipes:
+            # Wait for traceback
+            if pipe.poll(5):
+                if pipe.closed:
+                    logger.info(f'Pipe closed for process {rank}, cannot retrieve traceback')
+                    continue
+
+                traceback = pipe.recv()
+                logger.error(f'Process {rank} timed out with traceback: \n\n{traceback}')
+            else:
+                logger.error(f'Could not retrieve traceback for timed out process: {rank}')
 
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())
@@ -368,7 +510,7 @@ class MultiProcessTestCase(TestCase):
                     # This is the exit code processes exit with if they
                     # encountered an exception.
                     if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
-                        print("Process {} terminated with exit code {}, terminating remaining processes.".format(i, p.exitcode))
+                        print(f'Process {i} terminated with exit code {p.exitcode}, terminating remaining processes.')
                         active_children = torch.multiprocessing.active_children()
                         for ac in active_children:
                             ac.terminate()
@@ -382,24 +524,38 @@ class MultiProcessTestCase(TestCase):
                 # Check if we should time out the test. If so, we terminate each process.
                 elapsed = time.time() - start_time
                 if elapsed > timeout:
-                    print(
-                        "Timing out after {} seconds and killing subprocesses.".format(
-                            timeout
-                        )
-                    )
+                    self._get_timedout_process_traceback()
+                    print(f'Timing out after {timeout} seconds and killing subprocesses.')
                     for p in self.processes:
                         p.terminate()
                     break
                 # Sleep to avoid excessive busy polling.
                 time.sleep(0.1)
+
             elapsed_time = time.time() - start_time
+
+            self._check_and_print_faults()
+
             if fn in self.skip_return_code_checks:
                 self._check_no_test_errors(elapsed_time)
             else:
                 self._check_return_codes(elapsed_time)
         finally:
+            # Close all pipes
+            for pid, pipe in self.pid_to_pipe.items():
+                pipe.close()
+
             global TEST_SKIPS
             TEST_SKIPS = self.old_test_skips
+
+    def _check_and_print_faults(self):
+        """
+        Checks fault handler files for any faults and prints them out appropriately.
+        """
+        for i, file in enumerate(self.faulthandler_files):
+            if os.path.getsize(file.name) != 0:
+                contents = file.read().decode('utf-8')
+                logger.error(f'Process {i} encountered the following fault:\n{contents}')
 
     def _check_no_test_errors(self, elapsed_time):
         """
@@ -428,10 +584,13 @@ class MultiProcessTestCase(TestCase):
             if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE
         ]
         if errored_processes:
-            error = "Processes {} exited with error code {}".format(
-                " ".join([str(i) for (i, _) in errored_processes]),
-                MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
-            )
+            error = ""
+            for i, process in errored_processes:
+                # Get error from pipe.
+                error_message = self.pid_to_pipe[process.pid].recv()
+                error += "Process {} exited with error code {} and exception:\n{}\n".format(
+                    i, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, error_message)
+
             raise RuntimeError(error)
         # If no process exited uncleanly, we check for timeouts, and then ensure
         # each process exited cleanly.

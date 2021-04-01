@@ -251,17 +251,17 @@ py::object PyRRef::createRRefProxy(
   }
 }
 
-py::object PyRRef::getRRefType(float timeout) {
+py::object PyRRef::getRRefType(float timeout, bool blocking) {
   // GIL is not released when calling this function.
   if (!type_.has_value()) {
     pybind11::gil_scoped_release release;
     auto& pythonRpcHandler = PythonRpcHandler::getInstance();
     auto& typeFuncs = pythonRpcHandler.getRRefTypeFunctions();
     pybind11::gil_scoped_acquire acquire;
-    type_ = isOwner() ? typeFuncs.onOwner_(*this)
-                      : typeFuncs.onUser_(*this, timeout);
+    type_ = isOwner() ? typeFuncs.onOwner_(*this, blocking)
+                      : typeFuncs.onUser_(*this, timeout, blocking);
   }
-
+  // Returns py::object that can be Python type or future.
   return *type_;
 }
 

@@ -382,6 +382,149 @@ class Module:
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
+    def get_submodule(self, target: str) -> "Module":
+        """
+        Returns the submodule given by ``target`` if it exists,
+        otherwise throws an error.
+
+        For example, let's say you have an ``nn.Module`` ``A`` that
+        looks like this:
+
+        .. code-block::text
+
+            A(
+                (net_b): Module(
+                    (net_c): Module(
+                        (conv): Conv2d(16, 33, kernel_size=(3, 3), stride=(2, 2))
+                    )
+                    (linear): Linear(in_features=100, out_features=200, bias=True)
+                )
+            )
+
+        (The diagram shows an ``nn.Module`` ``A``. ``A`` has a nested
+        submodule ``net_b``, which itself has two submodules ``net_c``
+        and ``linear``. ``net_c`` then has a submodule ``conv``.)
+
+        To check whether or not we have the ``linear`` submodule, we
+        would call ``get_submodule("net_b.linear")``. To check whether
+        we have the ``conv`` submodule, we would call
+        ``get_submodule("net_b.net_c.conv")``.
+
+        The runtime of ``get_submodule`` is bounded by the degree
+        of module nesting in ``target``. A query against
+        ``named_modules`` achieves the same result, but it is O(N) in
+        the number of transitive modules. So, for a simple check to see
+        if some submodule exists, ``get_submodule`` should always be
+        used.
+
+        Args:
+            target: The fully-qualified string name of the submodule
+                to look for. (See above example for how to specify a
+                fully-qualified string.)
+
+        Returns:
+            torch.nn.Module: The submodule referenced by ``target``
+
+        Raises:
+            AttributeError: If the target string references an invalid
+                path or resolves to something that is not an
+                ``nn.Module``
+        """
+        if target == "":
+            return self
+
+        atoms: List[str] = target.split(".")
+        mod: torch.nn.Module = self
+
+        for item in atoms:
+
+            if not hasattr(mod, item):
+                raise AttributeError(mod._get_name() + " has no "
+                                     "attribute `" + item + "`")
+
+            mod = getattr(mod, item)
+
+            if not isinstance(mod, torch.nn.Module):
+                raise AttributeError("`" + item + "` is not "
+                                     "an nn.Module")
+
+        return mod
+
+    def get_parameter(self, target: str) -> "Parameter":
+        """
+        Returns the parameter given by ``target`` if it exists,
+        otherwise throws an error.
+
+        See the docstring for ``get_submodule`` for a more detailed
+        explanation of this method's functionality as well as how to
+        correctly specify ``target``.
+
+        Args:
+            target: The fully-qualified string name of the Parameter
+                to look for. (See ``get_submodule`` for how to specify a
+                fully-qualified string.)
+
+        Returns:
+            torch.nn.Parameter: The Parameter referenced by ``target``
+
+        Raises:
+            AttributeError: If the target string references an invalid
+                path or resolves to something that is not an
+                ``nn.Parameter``
+        """
+        module_path, _, param_name = target.rpartition(".")
+
+        mod: torch.nn.Module = self.get_submodule(module_path)
+
+        if not hasattr(mod, param_name):
+            raise AttributeError(mod._get_name() + " has no attribute `"
+                                 + param_name + "`")
+
+        param: torch.nn.Parameter = getattr(mod, param_name)
+
+        if not isinstance(param, torch.nn.Parameter):
+            raise AttributeError("`" + param_name + "` is not an "
+                                 "nn.Parameter")
+
+        return param
+
+    def get_buffer(self, target: str) -> "Tensor":
+        """
+        Returns the buffer given by ``target`` if it exists,
+        otherwise throws an error.
+
+        See the docstring for ``get_submodule`` for a more detailed
+        explanation of this method's functionality as well as how to
+        correctly specify ``target``.
+
+        Args:
+            target: The fully-qualified string name of the buffer
+                to look for. (See ``get_submodule`` for how to specify a
+                fully-qualified string.)
+
+        Returns:
+            torch.Tensor: The buffer referenced by ``target``
+
+        Raises:
+            AttributeError: If the target string references an invalid
+                path or resolves to something that is not a
+                buffer
+        """
+        module_path, _, buffer_name = target.rpartition(".")
+
+        mod: torch.nn.Module = self.get_submodule(module_path)
+
+        if not hasattr(mod, buffer_name):
+            raise AttributeError(mod._get_name() + " has no attribute `"
+                                 + buffer_name + "`")
+
+        buffer: torch.Tensor = getattr(mod, buffer_name)
+
+        if buffer not in mod._buffers.values():
+            raise AttributeError("`" + buffer_name + "` is not a buffer")
+
+        return buffer
+
     def _apply(self, fn):
         for module in self.children():
             module._apply(fn)
@@ -776,7 +919,7 @@ class Module:
             inputs = (inputs,)
 
         # At this point we are sure that inputs and result are tuple of Tensors
-        out_grad_fn = set([r.grad_fn for r in result if r.grad_fn is not None])
+        out_grad_fn = {r.grad_fn for r in result if r.grad_fn is not None}
         if len(out_grad_fn) == 0 or (len(out_grad_fn) == 1 and grad_fn not in out_grad_fn):
             warnings.warn("Using a non-full backward hook when outputs are nested in python data structure "
                           "is deprecated and will be removed in future versions. This hook will be missing "
@@ -787,9 +930,9 @@ class Module:
                           "some grad_output. Please use register_full_backward_hook to get the documented behavior.")
         else:
             # At this point the grad_ouput part of the hook will most likely be correct
-            inputs_grad_fn = set([i.grad_fn for i in inputs if i.grad_fn is not None])
+            inputs_grad_fn = {i.grad_fn for i in inputs if i.grad_fn is not None}
 
-            next_functions = set([n[0] for n in grad_fn.next_functions])
+            next_functions = {n[0] for n in grad_fn.next_functions}
 
             if inputs_grad_fn != next_functions:
                 warnings.warn("Using a non-full backward hook when the forward contains multiple autograd Nodes "
@@ -850,7 +993,7 @@ class Module:
         recording_scopes = torch.jit._trace._trace_module_map is not None
         if recording_scopes:
             # type ignore was added because at this point one knows that
-            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any] 
+            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
             name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
             if name:
                 tracing_state.push_scope(name)
@@ -864,41 +1007,45 @@ class Module:
         return result
 
     def _call_impl(self, *input, **kwargs):
+        forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
+        # If we don't have any hooks, we want to skip the rest of the logic in
+        # this function, and just call forward.
+        if not (self._backward_hooks or self._forward_hooks or self._forward_pre_hooks or _global_backward_hooks
+                or _global_forward_hooks or _global_forward_pre_hooks):
+            return forward_call(*input, **kwargs)
         # Do not call functions when jit is used
         full_backward_hooks, non_full_backward_hooks = [], []
-        if len(self._backward_hooks) > 0 or len(_global_backward_hooks) > 0:
+        if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
-
-        for hook in itertools.chain(
-                _global_forward_pre_hooks.values(),
-                self._forward_pre_hooks.values()):
-            result = hook(self, input)
-            if result is not None:
-                if not isinstance(result, tuple):
-                    result = (result,)
-                input = result
+        if _global_forward_pre_hooks or self._forward_pre_hooks:
+            for hook in itertools.chain(
+                    _global_forward_pre_hooks.values(),
+                    self._forward_pre_hooks.values()):
+                result = hook(self, input)
+                if result is not None:
+                    if not isinstance(result, tuple):
+                        result = (result,)
+                    input = result
 
         bw_hook = None
-        if len(full_backward_hooks) > 0:
+        if full_backward_hooks:
             bw_hook = hooks.BackwardHook(self, full_backward_hooks)
             input = bw_hook.setup_input_hook(input)
 
-        if torch._C._get_tracing_state():
-            result = self._slow_forward(*input, **kwargs)
-        else:
-            result = self.forward(*input, **kwargs)
-        for hook in itertools.chain(
-                _global_forward_hooks.values(),
-                self._forward_hooks.values()):
-            hook_result = hook(self, input, result)
-            if hook_result is not None:
-                result = hook_result
+        result = forward_call(*input, **kwargs)
+        if _global_forward_hooks or self._forward_hooks:
+            for hook in itertools.chain(
+                    _global_forward_hooks.values(),
+                    self._forward_hooks.values()):
+                hook_result = hook(self, input, result)
+                if hook_result is not None:
+                    result = hook_result
 
         if bw_hook:
             result = bw_hook.setup_output_hook(result)
 
         # Handle the non-full backward hooks
-        if len(non_full_backward_hooks) > 0:
+        if non_full_backward_hooks:
             var = result
             while not isinstance(var, torch.Tensor):
                 if isinstance(var, dict):
@@ -1137,7 +1284,7 @@ class Module:
                 # This is used to avoid copying uninitialized parameters into
                 # non-lazy modules, since they dont have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.
-                is_param_lazy = isinstance(param, torch.nn.parameter.UninitializedParameter)
+                is_param_lazy = torch.nn.parameter.is_lazy(param)
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
                 if not is_param_lazy and len(param.shape) == 0 and len(input_param.shape) == 1:
                     input_param = input_param[0]
@@ -1306,7 +1453,7 @@ class Module:
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
-        for name, buf in self.named_buffers(recurse=recurse):
+        for _, buf in self.named_buffers(recurse=recurse):
             yield buf
 
     def named_buffers(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
@@ -1388,7 +1535,7 @@ class Module:
             1 -> Linear(in_features=2, out_features=2, bias=True)
 
         """
-        for name, module in self.named_modules():
+        for _, module in self.named_modules():
             yield module
 
     def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = ''):
@@ -1512,6 +1659,7 @@ class Module:
                     p.grad.zero_()
 
     def share_memory(self: T) -> T:
+        r"""See :meth:`torch.Tensor.share_memory_`"""
         return self._apply(lambda t: t.share_memory_())
 
     def _get_name(self):

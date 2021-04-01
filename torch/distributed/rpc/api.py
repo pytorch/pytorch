@@ -7,6 +7,7 @@ import threading
 from typing import Generic, TypeVar, Set, Any
 
 import torch
+from torch.futures import Future
 
 from torch._C._distributed_rpc import (
     PyRRef,
@@ -309,7 +310,7 @@ def shutdown(graceful=True):
     if graceful:
         _wait_all_workers()
         _delete_all_user_and_unforked_owner_rrefs()
-        _get_current_rpc_agent().join()
+        _get_current_rpc_agent().join(shutdown=True)
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)
@@ -346,7 +347,7 @@ def get_worker_info(worker_name=None):
         ``worker_name`` or :class:`~torch.distributed.rpc.WorkerInfo` of the
         current worker if ``worker_name`` is ``None``.
     """
-    if worker_name:
+    if worker_name is not None:
         return _get_current_rpc_agent().get_worker_info(worker_name)
     else:
         return _get_current_rpc_agent().get_worker_info()
@@ -361,17 +362,31 @@ def _to_worker_info(to):
         raise ValueError("Cannot get WorkerInfo from name {}".format(to))
 
 
-def _rref_typeof_on_owner(rref):
-    return type(rref.local_value())
+def _rref_typeof_on_owner(rref, blocking=True):
+    rref_type = type(rref.local_value())
+    if blocking:
+        return rref_type
+    else:
+        # Wrap result into a completed Future. This is so that if blocking=`False`
+        # is specified, we return a future regardless of if this call is on user
+        # or owner.
+        future = Future[type]()
+        future.set_result(rref_type)
+        return future
 
 
-def _rref_typeof_on_user(rref, timeout=UNSET_RPC_TIMEOUT):
-    return rpc_sync(
+def _rref_typeof_on_user(rref, timeout=UNSET_RPC_TIMEOUT, blocking=True):
+    fut = rpc_async(
         rref.owner(),
         _rref_typeof_on_owner,
         args=(rref,),
         timeout=timeout
     )
+    if blocking:
+        return fut.wait()
+    else:
+        return fut
+
 
 
 T = TypeVar("T")

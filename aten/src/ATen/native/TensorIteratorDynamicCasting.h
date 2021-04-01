@@ -7,10 +7,6 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
-#include <thrust/complex.h>
-#endif
-
 
 // This file includes utilties for dynamic_casting done by TensorIterator, see CUDALoops.cuh and Loops.h.
 

@@ -2,6 +2,7 @@
 
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
+#include <ATen/core/ivalue_to.h>
 #include <c10/util/C++17.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -291,6 +292,13 @@ struct TORCH_API IValue final {
     if (this->isTensor()) {
       const auto& thisTensor = this->toTensor();
       const auto& rhsTensor = rhs.toTensor();
+      // mkldnn tensors dont have views or storage, so we compare
+      // based on tensor impl. //TODO: find a way to use mkldnn storage
+      if (thisTensor.is_mkldnn() || rhsTensor.is_mkldnn()) {
+        return thisTensor.unsafeGetTensorImpl() ==
+            rhsTensor.unsafeGetTensorImpl();
+      }
+
       return thisTensor.is_alias_of(rhsTensor);
     }
 
@@ -358,6 +366,12 @@ struct TORCH_API IValue final {
   bool isTensor() const {
     return Tag::Tensor == tag;
   }
+
+ private:
+  // Outlined error path so that toTensor() can be inlined.
+  [[noreturn]] void reportToTensorTypeError() const;
+
+ public:
   at::Tensor toTensor() &&;
   at::Tensor& toTensor() &;
   const at::Tensor& toTensor() const&;
@@ -548,6 +562,12 @@ struct TORCH_API IValue final {
   c10::List<double> toDoubleList() const&;
   std::vector<double> toDoubleVector() const;
 
+  // ComplexDoubleList
+  bool isComplexDoubleList() const;
+  c10::List<c10::complex<double>> toComplexDoubleList() &&;
+  c10::List<c10::complex<double>> toComplexDoubleList() const&;
+  std::vector<c10::complex<double>> toComplexDoubleVector() const;
+
   // BoolList
   bool isBoolList() const;
   c10::List<bool> toBoolList() &&;
@@ -575,7 +595,9 @@ struct TORCH_API IValue final {
       std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
-  IValue(c10::List<T> v);
+  IValue(c10::List<T>&& v);
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  IValue(const c10::List<T>& v);
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
@@ -652,7 +674,7 @@ struct TORCH_API IValue final {
   }
 
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
-  IValue(at::Scalar s) : IValue() {
+  IValue(const at::Scalar& s) : IValue() {
     if (s.isFloatingPoint()) {
       *this = s.toDouble();
     } else if (s.isComplex()) {
@@ -775,7 +797,7 @@ struct TORCH_API IValue final {
   template <typename T>
   T to() &&;
   template <typename T>
-  T to() const&;
+  typename c10::detail::ivalue_to_const_ref_overload_return<T>::type to() const&;
 
   // ToOptional: convert a IValue to the Optional obj that accepts both T and
   // None
@@ -834,8 +856,15 @@ struct TORCH_API IValue final {
   struct HashAliasedIValue {
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        return reinterpret_cast<size_t>(
-            val.toTensor().storage().unsafeGetStorageImpl());
+        if (val.toTensor().is_mkldnn()) {
+          // MKLDNN tensors dont have storage and dont create views
+          // or aliasing so we can just use Tensor pointer, TODO: find way
+          // to use mkldnn storage
+          return reinterpret_cast<size_t>(val.toTensor().unsafeGetTensorImpl());
+        } else {
+          return reinterpret_cast<size_t>(
+              val.toTensor().storage().unsafeGetStorageImpl());
+        }
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
       // if they are the same pointer.

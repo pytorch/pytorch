@@ -180,7 +180,7 @@ Descriptor::Set& Descriptor::Set::bind(
       "This descriptor set is in an invalid state! "
       "Potential reason: This descriptor set is moved from.");
 
-  update({
+  update(Item{
       binding,
       shader_layout_signature_[binding],
       {
@@ -342,13 +342,14 @@ Descriptor::Pool::~Pool() {
     }
   }
   catch (const std::exception& e) {
-    LOG(WARNING)
-        << "Vulkan: Descriptor pool destructor raised an exception!  Error: "
-        << e.what();
+    TORCH_WARN(
+        "Vulkan: Descriptor pool destructor raised an exception! Error: ",
+        e.what());
   }
   catch (...) {
-    LOG(WARNING)
-        << "Vulkan: Descriptor pool destructor raised an unknown exception!";
+    TORCH_WARN(
+        "Vulkan: Descriptor pool destructor raised an exception! "
+        "Error: Unknown");
   }
 }
 

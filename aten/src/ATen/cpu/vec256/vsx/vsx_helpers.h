@@ -30,6 +30,7 @@ C10_ALWAYS_INLINE vfloat32 vec_float(const vint32& vec_in) {
 C10_ALWAYS_INLINE vint32 vec_signed(const vfloat32& vec_in) {
   vint32 vec_out;
   __asm__("xvcvspsxws %x0,%x1" : "=wa"(vec_out) : "wf"(vec_in));
+  return vec_out;
 }
 
 C10_ALWAYS_INLINE vint64 vec_signed(const vfloat64& vec_in) {
@@ -385,4 +386,3 @@ const vfloat64 vd_pi_2 = vfloat64{M_PI / 2.0, 0.0};
 } // namespace
 } // namespace vec256
 } // namespace at
-

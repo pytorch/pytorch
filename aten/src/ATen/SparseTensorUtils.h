@@ -19,7 +19,7 @@ using SparseType = Type;
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
 inline  SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
-  AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
+  TORCH_INTERNAL_ASSERT(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
@@ -94,7 +94,7 @@ TORCH_API Tensor flatten_indices(const Tensor& indices, IntArrayRef full_size, b
 //   new_indices = [ 3, 1, 3 ]  # uncoalesced
 TORCH_API Tensor flatten_indices_by_dims(const Tensor& indices, const IntArrayRef& sizes, const IntArrayRef& dims_to_flatten);
 
-// Find the CSR representation for a row `indices` from the COO format 
+// Find the CSR representation for a row `indices` from the COO format
 TORCH_API Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz);
 
 }} // namespace at::sparse

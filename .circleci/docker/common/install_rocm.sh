@@ -2,6 +2,22 @@
 
 set -ex
 
+install_magma() {
+    # "install" hipMAGMA into /opt/rocm/magma by copying after build
+    git clone https://bitbucket.org/icl/magma.git -b hipMAGMA
+    pushd magma
+    cp make.inc-examples/make.inc.hip-mkl-gcc make.inc
+    echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
+    echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
+    echo 'DEVCCFLAGS += --amdgpu-target=gfx803 --amdgpu-target=gfx900 --amdgpu-target=gfx906 --amdgpu-target=gfx908 --gpu-max-threads-per-block=256' >> make.inc
+    export PATH="${PATH}:/opt/rocm/bin"
+    make -f make.gen.hipMAGMA -j $(nproc)
+    make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
+    make testing/testing_dgemm -j $(nproc) MKLROOT=/opt/conda
+    popd
+    mv magma /opt/rocm
+}
+
 install_ubuntu() {
     apt-get update
     if [[ $UBUNTU_VERSION == 18.04 ]]; then
@@ -10,7 +26,6 @@ install_ubuntu() {
     fi
     apt-get install -y kmod
     apt-get install -y wget
-    apt-get install -y libopenblas-dev
 
     # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
     apt-get install -y libc++1
@@ -24,13 +39,7 @@ install_ubuntu() {
     DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
                    rocm-dev \
                    rocm-utils \
-                   rocfft \
-                   miopen-hip \
-                   rocblas \
-                   hipsparse \
-                   rocrand \
-                   hipcub \
-                   rocthrust \
+                   rocm-libs \
                    rccl \
                    rocprofiler-dev \
                    roctracer-dev
@@ -44,9 +53,11 @@ install_ubuntu() {
       DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
     fi
 
-  # Cleanup
-  apt-get autoclean && apt-get clean
-  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    install_magma
+
+    # Cleanup
+    apt-get autoclean && apt-get clean
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 }
 
 install_centos() {
@@ -70,16 +81,12 @@ install_centos() {
   yum install -y \
                    rocm-dev \
                    rocm-utils \
-                   rocfft \
-                   miopen-hip \
-                   rocblas \
-                   hipsparse \
-                   rocrand \
+                   rocm-libs \
                    rccl \
-                   hipcub \
-                   rocthrust \
                    rocprofiler-dev \
                    roctracer-dev
+
+  install_magma
 
   # Cleanup
   yum clean all

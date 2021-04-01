@@ -844,31 +844,49 @@ class MultiLabelMarginLoss(_Loss):
 class SmoothL1Loss(_Loss):
     r"""Creates a criterion that uses a squared term if the absolute
     element-wise error falls below beta and an L1 term otherwise.
-    It is less sensitive to outliers than the :class:`torch.nn.MSELoss` and in some cases
-    prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
-    Omitting a scaling factor of :attr:`beta`, this loss is also known as the Huber loss:
+    It is less sensitive to outliers than :class:`torch.nn.MSELoss` and in some cases
+    prevents exploding gradients (e.g. see the paper `Fast R-CNN`_ by Ross Girshick).
+
+    For a batch of size :math:`N`, the unreduced loss can be described as:
 
     .. math::
-        \text{loss}(x, y) = \frac{1}{n} \sum_{i} z_{i}
+        \ell(x, y) = L = \{l_1, ..., l_N\}^T
 
-    where :math:`z_{i}` is given by:
+    with
 
     .. math::
-        z_{i} =
-        \begin{cases}
-        0.5 (x_i - y_i)^2 / beta, & \text{if } |x_i - y_i| < beta \\
-        |x_i - y_i| - 0.5 * beta, & \text{otherwise }
+        l_n = \begin{cases}
+        0.5 (x_n - y_n)^2 / beta, & \text{if } |x_n - y_n| < beta \\
+        |x_n - y_n| - 0.5 * beta, & \text{otherwise }
         \end{cases}
 
-    :math:`x` and :math:`y` arbitrary shapes with a total of :math:`n` elements each
-    the sum operation still operates over all the elements, and divides by :math:`n`.
+    If `reduction` is not `none`, then:
 
-    :attr:`beta` is an optional parameter that defaults to 1.
+    .. math::
+        \ell(x, y) =
+        \begin{cases}
+            \operatorname{mean}(L), &  \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  &  \text{if reduction} = \text{`sum'.}
+        \end{cases}
 
-    Note: When :attr:`beta` is set to 0, this is equivalent to :class:`L1Loss`.
-    Passing a negative value in for :attr:`beta` will result in an exception.
+    .. note::
+        Smooth L1 loss can be seen as exactly :class:`L1Loss`, but with the :math:`|x - y| < beta`
+        portion replaced with a quadratic function such that its slope is 1 at :math:`|x - y| = beta`.
+        The quadratic segment smooths the L1 loss near :math:`|x - y| = 0`.
 
-    The division by :math:`n` can be avoided if sets ``reduction = 'sum'``.
+    .. note::
+        Smooth L1 loss is closely related to :class:`HuberLoss`, being
+        equivalent to :math:`huber(x, y) / beta` (note that Smooth L1's beta hyper-parameter is
+        also known as delta for Huber). This leads to the following differences:
+
+        * As beta -> 0, Smooth L1 loss converges to :class:`L1Loss`, while :class:`HuberLoss`
+          converges to a constant 0 loss.
+        * As beta -> :math:`+\infty`, Smooth L1 loss converges to a constant 0 loss, while
+          :class:`HuberLoss` converges to :class:`MSELoss`.
+        * For Smooth L1 loss, as beta varies, the L1 segment of the loss has a constant slope of 1.
+          For :class:`HuberLoss`, the slope of the L1 segment is beta.
+
+    .. _`Fast R-CNN`: https://arxiv.org/abs/1504.08083
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -887,15 +905,12 @@ class SmoothL1Loss(_Loss):
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
         beta (float, optional): Specifies the threshold at which to change between L1 and L2 loss.
-            This value defaults to 1.0.
+            The value must be non-negative. Default: 1.0
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means, any number of additional
-          dimensions
-        - Target: :math:`(N, *)`, same shape as the input
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then
-          :math:`(N, *)`, same shape as the input
-
+        - Input: :math:`(N, *)` where :math:`*` means any number of additional dimensions
+        - Target: :math:`(N, *)`; same shape as the input
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`; same shape as the input
     """
     __constants__ = ['reduction']
 
@@ -905,6 +920,66 @@ class SmoothL1Loss(_Loss):
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.smooth_l1_loss(input, target, reduction=self.reduction, beta=self.beta)
+
+
+class HuberLoss(_Loss):
+    r"""Creates a criterion that uses a squared term if the absolute
+    element-wise error falls below delta and a delta-scaled L1 term otherwise.
+    This loss combines advantages of both :class:`L1Loss` and :class:`MSELoss`; the
+    delta-scaled L1 region makes the loss less sensitive to outliers than :class:`MSELoss`,
+    while the L2 region provides smoothness over :class:`L1Loss` near 0. See
+    `Huber loss <https://en.wikipedia.org/wiki/Huber_loss>`_ for more information.
+
+    For a batch of size :math:`N`, the unreduced loss can be described as:
+
+    .. math::
+        \ell(x, y) = L = \{l_1, ..., l_N\}^T
+
+    with
+
+    .. math::
+        l_n = \begin{cases}
+        0.5 (x_n - y_n)^2, & \text{if } |x_n - y_n| < delta \\
+        delta * (|x_n - y_n| - 0.5 * delta), & \text{otherwise }
+        \end{cases}
+
+    If `reduction` is not `none`, then:
+
+    .. math::
+        \ell(x, y) =
+        \begin{cases}
+            \operatorname{mean}(L), &  \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  &  \text{if reduction} = \text{`sum'.}
+        \end{cases}
+
+    .. note::
+        When delta is set to 1, this loss is equivalent to :class:`SmoothL1Loss`.
+        In general, this loss differs from :class:`SmoothL1Loss` by a factor of delta (AKA beta
+        in Smooth L1).
+        See :class:`SmoothL1Loss` for additional discussion on the differences in behavior
+        between the two losses.
+
+    Args:
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
+        delta (float, optional): Specifies the threshold at which to change between delta-scaled L1 and L2 loss.
+            The value must be positive.  Default: 1.0
+
+    Shape:
+        - Input: :math:`(N, *)` where :math:`*` means any number of additional dimensions
+        - Target: :math:`(N, *)`; same shape as the input
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`; same shape as the input
+    """
+    __constants__ = ['reduction', 'delta']
+
+    def __init__(self, reduction: str = 'mean', delta: float = 1.0) -> None:
+        super().__init__(reduction=reduction)
+        self.delta = delta
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        return F.huber_loss(input, target, reduction=self.reduction, delta=self.delta)
 
 
 class SoftMarginLoss(_Loss):
@@ -1316,7 +1391,9 @@ class TripletMarginLoss(_Loss):
     Shape:
         - Input: :math:`(N, D)` where :math:`D` is the vector dimension.
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'``, or a scalar
-            otherwise.
+          otherwise.
+
+    Examples::
 
     >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
     >>> anchor = torch.randn(100, 128, requires_grad=True)
