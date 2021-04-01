@@ -34,6 +34,7 @@ class MyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
     ) -> Tuple[str, int, Tensor]:
+        # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
 
@@ -42,6 +43,7 @@ class RemoteMyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
     ) -> Tuple[str, int, Tensor]:
+        # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
     def forward_async(

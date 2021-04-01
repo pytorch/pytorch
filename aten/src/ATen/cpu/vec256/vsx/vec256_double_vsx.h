@@ -82,7 +82,7 @@ class Vec256<double> {
       blend(const Vec256<double>& a, const Vec256<double>& b) {
       return { a._vec0, b._vec1 };
   }
- 
+
 
   template <int64_t mask>
   static std::enable_if_t<blendChoiceDbl(mask) == 4, Vec256<double>> C10_ALWAYS_INLINE
@@ -206,7 +206,7 @@ class Vec256<double> {
     for (int i = 0; i < size()/2; i++) {
         ret._vec0[i] = f(_vec0[i], other._vec0[i]);
     }
-    for (int i = 0; i < size()/2; i++) {   
+    for (int i = 0; i < size()/2; i++) {
         ret._vec1[i] = f(_vec1[i], other._vec1[i]);
     }
     return ret;
@@ -314,7 +314,7 @@ class Vec256<double> {
   Vec256<double> C10_ALWAYS_INLINE sqrt() const {
     return {vec_sqrt(_vec0), vec_sqrt(_vec1)};
   }
-  Vec256<double> C10_ALWAYS_INLINE reciprocal() const { 
+  Vec256<double> C10_ALWAYS_INLINE reciprocal() const {
     return {
         vec_div(vd_one, _vec0), // vec_re(_vec0) is estimated one.
         vec_div(vd_one, _vec1)};

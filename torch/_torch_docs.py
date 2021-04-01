@@ -2987,6 +2987,9 @@ Computes the error function of each element. The error function is defined as fo
 .. math::
     \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erf`.
+
 Args:
     {input}
 
@@ -3009,6 +3012,9 @@ The complementary error function is defined as follows:
 .. math::
     \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erfc`.
+
 Args:
     {input}
 
@@ -3031,6 +3037,8 @@ The inverse error function is defined in the range :math:`(-1, 1)` as:
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erfinv`.
 
 Args:
     {input}
@@ -3074,7 +3082,10 @@ Computes the base two exponential function of :attr:`input`.
 
 .. math::
     y_{i} = 2^{x_{i}}
+
+.. note:: Alias for :func:`torch.special.exp2`.
 """ + r"""
+
 Args:
     {input}
 
@@ -3096,6 +3107,10 @@ of :attr:`input`.
 
 .. math::
     y_{i} = e^{x_{i}} - 1
+
+.. note:: This function provides greater precision than exp(x) - 1 for small values of x.
+
+.. note:: Alias for :func:`torch.special.expm1`.
 """ + r"""
 
 Args:
@@ -3248,6 +3263,36 @@ Example::
 
     >>> torch.frac(torch.tensor([1, 2.5, -3.2]))
     tensor([ 0.0000,  0.5000, -0.2000])
+""")
+
+add_docstr(torch.frexp,
+           r"""
+frexp(input, *, out=None) -> (Tensor mantissa, Tensor exponent)
+
+Decomposes :attr:`input` into mantissa and exponent tensors
+such that :math:`\text{input} = \text{mantissa} \times 2^{\text{exponent}}`.
+
+The range of mantissa is the open interval (-1, 1).
+
+Supports float inputs.
+
+Args:
+    input (Tensor): the input tensor
+
+
+Keyword args:
+    out (tuple, optional): the output tensors
+
+Example::
+
+    >>> x = torch.arange(9.)
+    >>> mantissa, exponent = torch.frexp(x)
+    >>> mantissa
+    >>> tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
+    >>> exponent
+    >>> tensor([0, 1, 2, 2, 3, 3, 3, 3, 4], dtype=torch.int32)
+    >>> torch.ldexp(mantissa, exponent)
+    tensor([0., 1., 2., 3., 4., 5., 6., 7., 8.])
 """)
 
 add_docstr(torch.from_numpy,
@@ -4847,7 +4892,7 @@ If :math:`m < n`, :func:`lstsq` solves the least-norm problem:
 
 .. math::
 
-   \begin{array}{ll}
+   \begin{array}{llll}
    \min_X & \|X\|_2 & \text{subject to} & AX = B.
    \end{array}
 
@@ -5036,37 +5081,12 @@ Example::
     tensor(9)
 """.format(**common_args))
 
-add_docstr(torch.matrix_power,
-           r"""
-matrix_power(input, n) -> Tensor
+add_docstr(torch.matrix_power, r"""
+matrix_power(input, n, *, out=None) -> Tensor
 
-Returns the matrix raised to the power :attr:`n` for square matrices.
-For batch of matrices, each individual matrix is raised to the power :attr:`n`.
+.. note:: :func:`torch.matrix_power` is deprecated, use :func:`torch.linalg.matrix_power` instead.
 
-If :attr:`n` is negative, then the inverse of the matrix (if invertible) is
-raised to the power :attr:`n`.  For a batch of matrices, the batched inverse
-(if invertible) is raised to the power :attr:`n`. If :attr:`n` is 0, then an identity matrix
-is returned.
-
-Args:
-    {input}
-    n (int): the power to raise the matrix to
-
-Example::
-
-    >>> a = torch.randn(2, 2, 2)
-    >>> a
-    tensor([[[-1.9975, -1.9610],
-             [ 0.9592, -2.3364]],
-
-            [[-1.2534, -1.3429],
-             [ 0.4153, -1.4664]]])
-    >>> torch.matrix_power(a, 3)
-    tensor([[[  3.9392, -23.9916],
-             [ 11.7357,  -0.2070]],
-
-            [[  0.2468,  -6.7168],
-             [  2.0774,  -0.8187]]])
+Alias for :func:`torch.linalg.matrix_power`
 """.format(**common_args))
 
 add_docstr(torch.matrix_exp,
@@ -6397,7 +6417,7 @@ Keyword args:
 Example::
 
     >>> eps = torch.finfo(torch.float32).eps
-    >>> torch.nextafter(torch.Tensor([1, 2]), torch.Tensor([2, 1])) == torch.Tensor([eps + 1, 2 - eps])
+    >>> torch.nextafter(torch.tensor([1.0, 2.0]), torch.tensor([2.0, 1.0])) == torch.tensor([eps + 1, 2 - eps])
     tensor([True, True])
 
 """.format(**common_args))
@@ -6650,21 +6670,9 @@ Example::
 
 add_docstr(torch.orgqr,
            r"""
-orgqr(input, input2) -> Tensor
+orgqr(input, tau) -> Tensor
 
-Computes the orthogonal matrix `Q` of a QR factorization, from the `(input, input2)`
-tuple returned by :func:`torch.geqrf`.
-
-This directly calls the underlying LAPACK function `?orgqr`.
-See `LAPACK documentation for orgqr`_ for further details.
-
-Args:
-    input (Tensor): the `a` from :func:`torch.geqrf`.
-    input2 (Tensor): the `tau` from :func:`torch.geqrf`.
-
-.. _LAPACK documentation for orgqr:
-    https://software.intel.com/en-us/mkl-developer-reference-c-orgqr
-
+Alias for :func:`torch.linalg.householder_product`.
 """)
 
 add_docstr(torch.ormqr,
@@ -7780,12 +7788,17 @@ add_docstr(torch.sgn,
            r"""
 sgn(input, *, out=None) -> Tensor
 
-For complex tensors, this function returns a new tensor whose elemants have the same angle as that of the
-elements of :attr:`input` and absolute value 1. For a non-complex tensor, this function
-returns the signs of the elements of :attr:`input` (see :func:`torch.sign`).
+This function is an extension of torch.sign() to complex tensors.
+It computes a new tensor whose elements have
+the same angles as the corresponding elements of :attr:`input` and
+absolute values (i.e. magnitudes) of one for complex tensors and
+is equivalent to torch.sign() for non-complex tensors.
 
-:math:`\text{out}_{i} = 0`, if :math:`|{\text{{input}}_i}| == 0`
-:math:`\text{out}_{i} = \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|}`, otherwise
+.. math::
+    \text{out}_{i} = \begin{cases}
+                    0 & |\text{{input}}_i| == 0 \\
+                    \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|} & \text{otherwise}
+                    \end{cases}
 
 """ + r"""
 Args:
@@ -7796,8 +7809,8 @@ Keyword args:
 
 Example::
 
-    >>> x=torch.tensor([3+4j, 7-24j, 0, 1+2j])
-    >>> x.sgn()
+    >>> t = torch.tensor([3+4j, 7-24j, 0, 1+2j])
+    >>> t.sgn()
     tensor([0.6000+0.8000j, 0.2800-0.9600j, 0.0000+0.0000j, 0.4472+0.8944j])
 """.format(**common_args))
 
@@ -8823,7 +8836,7 @@ takes the same shape as the indices.
 
 Args:
     {input}
-    indices (LongTensor): the indices into tensor
+    index (LongTensor): the indices into tensor
 
 Example::
 
@@ -8831,6 +8844,39 @@ Example::
     ...                     [6, 7, 8]])
     >>> torch.take(src, torch.tensor([0, 2, 5]))
     tensor([ 4,  5,  8])
+""".format(**common_args))
+
+add_docstr(torch.take_along_dim,
+           r"""
+take_along_dim(input, indices, dim, *, out=None) -> Tensor
+
+Selects values from :attr:`input` at the 1-dimensional indices from :attr:`indices` along the given :attr:`dim`.
+
+Functions that return indices along a dimension, like :func:`torch.argmax` and :func:`torch.argsort`,
+are designed to work with this function. See the examples below.
+
+.. note::
+    This function is similar to NumPy's `take_along_axis`.
+    See also :func:`torch.gather`.
+
+Args:
+    {input}
+    indices (tensor): the indices into :attr:`input`. Must have long dtype.
+    dim (int): dimension to select along.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> t = torch.tensor([[10, 30, 20], [60, 40, 50]])
+    >>> max_idx = torch.argmax(t)
+    >>> torch.take_along_dim(t, max_idx)
+    tensor([60])
+    >>> sorted_idx = torch.argsort(t, dim=1)
+    >>> torch.take_along_dim(t, sorted_idx, dim=1)
+    tensor([[10, 20, 30],
+            [40, 50, 60]])
 """.format(**common_args))
 
 add_docstr(torch.tan,
@@ -8968,7 +9014,7 @@ Example::
 
 add_docstr(torch.triangular_solve,
            r"""
-triangular_solve(input, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
 
 Solves a system of equations with a triangular coefficient matrix :math:`A`
 and multiple right-hand sides :math:`b`.
@@ -8980,11 +9026,11 @@ with the default keyword arguments.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
 
-Supports real-valued and complex-valued inputs.
+Supports input of float, double, cfloat and cdouble data types.
 
 Args:
-    input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
-                :math:`*` is zero of more batch dimensions (:math:`b`)
+    b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
+                :math:`*` is zero of more batch dimensions
     A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
                 where :math:`*` is zero or more batch dimensions
     upper (bool, optional): whether to solve the upper-triangular system
@@ -9558,8 +9604,9 @@ Example::
 """.format(**factory_like_common_args))
 
 add_docstr(torch.empty,
-           r"""
-empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
+           """
+empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False, \
+memory_format=torch.contiguous_format) -> Tensor
 
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`size`.
@@ -9579,11 +9626,10 @@ Keyword args:
 
 Example::
 
-    >>> torch.empty(2, 3)
-    tensor(1.00000e-08 *
-           [[ 6.3984,  0.0000,  0.0000],
-            [ 0.0000,  0.0000,  0.0000]])
-
+    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
+    >>> torch.empty_like(a)
+    tensor([[0, 0, 0],
+            [0, 0, 0]], device='cuda:0', dtype=torch.int32)
 """.format(**factory_common_args))
 
 add_docstr(torch.empty_like,
@@ -10571,9 +10617,9 @@ Example::
     device(type='cpu')
 """)
 
-add_docstr(torch.assert_async,
+add_docstr(torch._assert_async,
            r"""
-assert_async(tensor) -> void
+_assert_async(tensor) -> void
 
 Asynchronously assert that the contents of tensor are nonzero.  For CPU tensors,
 this is equivalent to ``assert tensor`` or ``assert tensor.is_nonzero()``; for

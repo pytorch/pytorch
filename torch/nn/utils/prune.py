@@ -1144,7 +1144,7 @@ def custom_from_mask(module, name, mask):
 
     Examples:
         >>> m = prune.custom_from_mask(
-                nn.Linear(5, 3), name='bias', mask=torch.Tensor([0, 1, 0])
+                nn.Linear(5, 3), name='bias', mask=torch.tensor([0, 1, 0])
             )
         >>> print(m.bias_mask)
         tensor([0., 1., 0.])
