@@ -13,7 +13,7 @@ from unittest import skipIf
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
-from torch.utils.data import IterDataPipe, RandomSampler, DataLoader
+from torch.utils.data import IterDataPipe, RandomSampler, DataLoader, construct_time_validation
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, TypeVar, Set, Union
 
 import torch.utils.data.datapipes as dp
@@ -698,8 +698,6 @@ class TestTyping(TestCase):
         self.assertTrue(dp.type.param == int)
 
     def test_construct_time(self):
-        from torch.utils.data import construct_time_validation
-
         class DP0(IterDataPipe[Tuple]):
             @construct_time_validation
             def __init__(self, dp: IterDataPipe):
