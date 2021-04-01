@@ -974,11 +974,6 @@ class DistributedDataParallel(Module):
         modifications to the model or data loading is required.
 
         .. warning::
-            This module works only with the multi-process, single-device usage
-            of :class:`torch.nn.parallel.DistributedDataParallel`,
-            which means that a single process works on a single GPU.
-
-        .. warning::
             This module currently does not support custom distributed collective
             operations in the forward pass, such as ``SyncBatchNorm`` or other
             custom defined collectives in the model's forward pass.
@@ -1035,12 +1030,6 @@ class DistributedDataParallel(Module):
           >>>  torch.cuda.synchronize(device=rank)
         """
         try:
-            if self.device_ids and len(self.device_ids) > 1:
-                raise ValueError(
-                    """DDP join() API does not support Single-Process Multi-GPU
-                    mode training. The recommended approach for DDP training is
-                    to spawn a single process that works on a single GPU."""
-                )
             has_error = False
             self.ddp_uneven_inputs_config = _DDPUnevenInputsConfig(
                 ddp_join_enabled=enable,
