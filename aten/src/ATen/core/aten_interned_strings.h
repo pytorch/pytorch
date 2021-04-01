@@ -227,7 +227,6 @@ _(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
-_(aten, chain_matmul) \
 _(aten, cholesky) \
 _(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
