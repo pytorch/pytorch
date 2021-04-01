@@ -85,7 +85,7 @@ PThreadPool* pthreadpool() {
     if (auto leaked = threadpool.release()) {
       auto num_threads = leaked->get_thread_count();
       threadpool.reset(new PThreadPool(num_threads));
-      TORCH_WARN("Leaking thread pool before fork.");
+      TORCH_WARN("Leaking Caffe2 thread-pool after fork.");
     }
   }
   return threadpool.get();
