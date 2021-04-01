@@ -2177,7 +2177,7 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__'}
+        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
