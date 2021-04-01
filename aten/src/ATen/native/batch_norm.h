@@ -35,4 +35,3 @@ static scalar_t* conditional_data_ptr(const Tensor& t) {
 } // namespace native
 
 } // namespace at
-
