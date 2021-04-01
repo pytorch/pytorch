@@ -2,7 +2,7 @@
 import os
 import ctypes
 import torch
-from typing import Tuple, List
+from typing import Tuple
 from torch.backends._nnapi.prepare import convert_model_to_nnapi
 from torch.testing._internal.common_utils import TestCase, run_tests
 
@@ -69,11 +69,11 @@ class TestNNAPI(TestCase):
         torch.manual_seed(29)
         inp_quant = qpt(inp_float, 0.03, 128)
         return [
-                ("float", inp_float),
-                ("float-nhwc", nhwc(inp_float)),
-                ("quant", inp_quant),
-                ("quant-nhwc", nhwc(inp_quant)),
-                ]
+            ("float", inp_float),
+            ("float-nhwc", nhwc(inp_float)),
+            ("quant", inp_quant),
+            ("quant-nhwc", nhwc(inp_quant)),
+        ]
 
     def test_prelu(self):
         arg = torch.tensor([[1.0, -1.0, 2.0, -2.0]]).unsqueeze(-1).unsqueeze(-1)
