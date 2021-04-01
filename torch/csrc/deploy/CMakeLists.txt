@@ -25,4 +25,3 @@ target_link_libraries(test_deploy PUBLIC gtest dl torch_deploy)
 add_executable(deploy_benchmark ${DEPLOY_DIR}/example/benchmark.cpp)
 target_include_directories(deploy_benchmark PRIVATE ${PYTORCH_ROOT}/torch)
 target_link_libraries(deploy_benchmark PUBLIC torch_deploy)
-
