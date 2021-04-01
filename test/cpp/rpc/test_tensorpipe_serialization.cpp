@@ -42,9 +42,12 @@ TEST(TensorpipeSerialize, Base) {
   EXPECT_EQ(recvingTpMessage.payloads.size(), sendingTpMessage.payloads.size());
   recvingTpMessage.tensors.reserve(sendingTpMessage.tensors.size());
   for (auto& tpTensor : sendingTpMessage.tensors) {
+    tensorpipe::CpuBuffer buffer;
+    buffer.ptr = nullptr;
+    buffer.length = tpTensor.buffer.unwrap<tensorpipe::CpuBuffer>().length;
+
     tensorpipe::Message::Tensor t;
-    t.buffer = tensorpipe::CpuBuffer{
-        nullptr, tpTensor.buffer.unwrap<tensorpipe::CpuBuffer>().length};
+    t.buffer = buffer;
     t.metadata = tpTensor.metadata;
     recvingTpMessage.tensors.push_back(std::move(t));
   }

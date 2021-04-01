@@ -104,23 +104,22 @@ class TestGradients(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
-            if sample.output_process_fn_grad is not None:
-                out_fn = sample.output_process_fn_grad
-
-                def variant_out_fn(*args, **kwargs):
-                    return out_fn(variant(*args, **kwargs))
-            else:
-                variant_out_fn = variant
-
+            # Note on TensorList inputs
+            #
+            # gradcheck does not support TensorList inputs so here we pass TensorList
+            # inputs of size n as n single Tensor inputs to gradcheck and wrap the op
+            # in a function that puts the n Tensor inputs back into a TensorList
             def fn(*inputs):
-                # Pack input back into TensorList since we splat it when passing to gradcheck
+                # Put tensors back into TensorList since we splat them when passing to gradcheck
                 if is_iterable_of_tensors(sample.input):
                     n = len(sample.input)
                     inputs = (inputs[:n], *inputs[n:])
-                output = variant_out_fn(*inputs, **sample.kwargs)
-                return op.output_func(output)
+                output = op.gradcheck_wrapper(variant, *inputs, **sample.kwargs)
+                if sample.output_process_fn_grad is not None:
+                    return sample.output_process_fn_grad(output)
+                return output
 
-            # Gradcheck does not support TensorList so we splat it with the remaining args
+            # Splat TensorList inputs into single Tensor inputs
             gradcheck_args = (sample.input,) if isinstance(sample.input, torch.Tensor) else tuple(sample.input)
             gradcheck_args += sample.args
 
@@ -294,11 +293,9 @@ class TestCommon(JitCommonTestCase):
             # Acquires variants to test
             func = op.get_op()
             method = op.get_method()
-            inplace = op.get_inplace()
             variants = {
+                # TODO: inplace tests currently fail, fix and add inplace variant
                 'function': func, 'method': method,
-                # TODO: inplace tests currently fail
-                # 'inplace': inplace,
             }
 
             # Test traced and scripted consistency
@@ -316,10 +313,16 @@ class TestCommon(JitCommonTestCase):
                     # Check scripted forward, grad, and grad grad
                     script_fn = create_script_fn(self, name, func_type)
 
+                    def out_fn(output):
+                        # Processes the output for autograd
+                        if sample.output_process_fn_grad is not None:
+                            return sample.output_process_fn_grad(output)
+                        return output
+
                     check_against_reference(self,
                                             script_fn,
                                             func,
-                                            op.output_func,
+                                            out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
                                             no_grad=not _requires_grad)
@@ -329,7 +332,7 @@ class TestCommon(JitCommonTestCase):
                     check_against_reference(self,
                                             traced_fn,
                                             func,
-                                            op.output_func,
+                                            out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
                                             no_grad=not _requires_grad)
