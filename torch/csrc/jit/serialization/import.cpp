@@ -114,8 +114,7 @@ class ScriptModuleDeserializer final {
       std::shared_ptr<CompilationUnit> cu,
       std::shared_ptr<PyTorchStreamReader> reader)
       : compilation_unit_(std::move(cu)),
-        reader_concrete_(std::move(reader)),
-        reader_(*reader_concrete_),
+        reader_(std::move(reader)),
         code_prefix_("code/"),
         pickle_dir_prefix_(""),
         tensor_dir_prefix_(""),
@@ -124,18 +123,17 @@ class ScriptModuleDeserializer final {
             &constants_table_,
             [this](const std::string& qualifier) {
               return findSourceInArchiveFromQualifier(
-                  reader_, code_prefix_, qualifier);
+                  *reader_, code_prefix_, qualifier);
             },
-            reader_concrete_->version()) {}
+            reader_->version()) {}
 
   ScriptModuleDeserializer(
       std::shared_ptr<CompilationUnit> cu,
-      PyTorchStreamReader& reader,
-      std::string code_prefix,
+      std::shared_ptr<PyTorchStreamReader> reader,
       std::string pickle_dir_prefix,
       std::string tensor_dir_prefix)
       : compilation_unit_(std::move(cu)),
-        reader_(reader),
+        reader_(std::move(reader)),
         code_prefix_(".data/ts_code/code/"),
         pickle_dir_prefix_(pickle_dir_prefix),
         tensor_dir_prefix_(tensor_dir_prefix),
@@ -144,9 +142,9 @@ class ScriptModuleDeserializer final {
             &constants_table_,
             [this](const std::string& qualifier) {
               return findSourceInArchiveFromQualifier(
-                  reader_, code_prefix_, qualifier);
+                  *reader_, code_prefix_, qualifier);
             },
-            reader_.version()) {}
+            reader_->version()) {}
 
   Module deserialize(
       c10::optional<at::Device> device,
@@ -156,8 +154,7 @@ class ScriptModuleDeserializer final {
   IValue readArchive(const std::string& archive_name);
 
   std::shared_ptr<CompilationUnit> compilation_unit_;
-  std::shared_ptr<PyTorchStreamReader> reader_concrete_;
-  PyTorchStreamReader& reader_;
+  std::shared_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
   std::vector<at::IValue> constants_table_;
   std::string code_prefix_;
@@ -207,13 +204,13 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     }
   };
   return readArchiveAndTensors(
-      archive_name,
-      pickle_dir_prefix_,
-      tensor_dir_prefix_,
+      /*archive_name=*/ archive_name,
+      /*pickle_prefix=*/ pickle_dir_prefix_,
+      /*tensor_prefi =*/ tensor_dir_prefix_,
       type_resolver,
       obj_loader,
       device_,
-      reader_);
+      *reader_.get());
 }
 
 void rewriteQuantizedConvForBC(const Module& module) {
@@ -283,21 +280,17 @@ Module ScriptModuleDeserializer::deserialize(
   // Load extra files.
   for (const auto& kv : extra_files) {
     const std::string& key = "extra/" + kv.first;
-    if (reader_.hasRecord(key)) {
+    if (reader_->hasRecord(key)) {
       at::DataPtr meta_ptr;
       size_t meta_size;
-      std::tie(meta_ptr, meta_size) = reader_.getRecord(key);
+      std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
       extra_files[kv.first] =
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
   }
-  if (reader_.hasRecord("model.json") && code_prefix_.compare("code/") == 0) {
+  if (reader_->hasRecord("model.json") && code_prefix_.compare("code/") == 0) {
 #if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
-    TORCH_INTERNAL_ASSERT(
-        reader_concrete_ != nullptr,
-        "torch.Package importer tried to run legacy deserializer");
-    return torch::jit::LEGACY_deserialize(
-        compilation_unit_, reader_concrete_, device_);
+    return torch::jit::LEGACY_deserialize(compilation_unit_, reader_, device_);
 #else
     AT_ERROR("Legacy model format is not supported on mobile.");
 #endif
@@ -333,18 +326,16 @@ Module import_ir_module(
 // For reading unified serialization format from torch.Package
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
-    PyTorchStreamReader& reader_,
+    std::shared_ptr<PyTorchStreamReader> reader,
     c10::optional<at::Device> device,
     std::string ts_id) {
-  std::string ts_package_location = ".data/ts_code/" + ts_id + "/";
   ScriptModuleDeserializer deserializer(
       std::move(cu),
-      reader_,
-      ts_package_location + "code/",
-      ts_package_location,
-      ".data/");
-  ExtraFilesMap temp = {};
-  return deserializer.deserialize(device, temp);
+      std::move(reader),
+      /* pickle_dir_prefix = */ ".data/ts_code/" + ts_id + "/",
+      /* tensor_dir_prefix = */ ".data/");
+  ExtraFilesMap extra_files;
+  return deserializer.deserialize(device, extra_files);
 }
 
 Module import_ir_module(
