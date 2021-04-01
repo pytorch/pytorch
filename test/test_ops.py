@@ -6,7 +6,7 @@ import torch
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor)
+    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, method_tests)
 from torch.testing._internal.common_device_type import \
@@ -113,19 +113,27 @@ class TestGradients(TestCase):
                 variant_out_fn = variant
 
             def fn(*inputs):
+                # Pack input back into TensorList since we splat it when passing to gradcheck
+                if is_iterable_of_tensors(sample.input):
+                    n = len(sample.input)
+                    inputs = (inputs[:n], *inputs[n:])
                 output = variant_out_fn(*inputs, **sample.kwargs)
                 return op.output_func(output)
 
+            # Gradcheck does not support TensorList so we splat it with the remaining args
+            gradcheck_args = (sample.input,) if isinstance(sample.input, torch.Tensor) else tuple(sample.input)
+            gradcheck_args += sample.args
+
             if check == 'gradcheck':
-                self.assertTrue(gradcheck(fn, (sample.input,) + sample.args,
+                self.assertTrue(gradcheck(fn, gradcheck_args,
                                           check_batched_grad=op.check_batched_grad,
                                           check_grad_dtypes=True))
             elif check == 'gradgradcheck':
-                self.assertTrue(gradgradcheck(fn, (sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=False,
                                               check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True))
-                self.assertTrue(gradgradcheck(fn, (sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=True,
                                               check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True))
@@ -229,8 +237,11 @@ class TestCommon(JitCommonTestCase):
                           (dtype.is_floating_point or op.supports_complex_autograd))
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
         for sample in samples:
+            # TODO: Check grad for all Tensors requiring grad if sample.input is TensorList
+            tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
+
             # Computes function forward and backward values
-            sample.input.grad = None
+            tensor.grad = None
             expected_forward = op(sample.input, *sample.args, **sample.kwargs)
             expected_grad = None
 
@@ -238,18 +249,17 @@ class TestCommon(JitCommonTestCase):
             #   the input dtype
             skip_inplace = False
             if (isinstance(expected_forward, torch.Tensor) and
-                    expected_forward.dtype is not sample.input.dtype):
+                    expected_forward.dtype is not tensor.dtype):
                 skip_inplace = True
 
             # TODO: backward consistency only supported for single tensor outputs
-            # TODO: backward consistency only checked on sample.input, not all
-            #   tensor inputs
+            # TODO: backward consistency only checked on first input Tensor
             # TODO: update to handle checking grads of all tensor inputs as
             #   derived from each tensor output
             if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
                     and (dtype.is_floating_point or op.supports_complex_autograd)):
                 expected_forward.sum().backward()
-                expected_grad = sample.input.grad
+                expected_grad = tensor.grad
 
             # Test eager consistency
             for variant in variants:
@@ -259,7 +269,7 @@ class TestCommon(JitCommonTestCase):
 
                 # Compares variant's forward
                 # Note: copies the to-be-modified input when testing the inplace variant
-                sample.input.grad = None
+                tensor.grad = None
                 cloned = clone_input_helper(sample.input) if variant in inplace_ops else sample.input
                 variant_forward = variant(cloned,
                                           *sample.args,
@@ -269,7 +279,7 @@ class TestCommon(JitCommonTestCase):
                 # Compares variant's backward
                 if expected_grad is not None and (variant not in inplace_ops or op.supports_inplace_autograd):
                     variant_forward.sum().backward()
-                    self.assertEqual(expected_grad, sample.input.grad)
+                    self.assertEqual(expected_grad, tensor.grad)
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (function, method, inplace)
@@ -469,19 +479,7 @@ class TestCommon(JitCommonTestCase):
         # Short-circuits if output is not a single tensor or an
         #   iterable of tensors
 
-        # Returns True if iterable is an iterable of tensors (includes empty iterables)
-        #   and False o.w.
-        def _is_iterable_of_tensors(iterable):
-            try:
-                for t in iter(iterable):
-                    if not isinstance(t, torch.Tensor):
-                        return False
-            except TypeError as te:
-                return False
-
-            return True
-
-        if not isinstance(expected, torch.Tensor) and not _is_iterable_of_tensors(expected):
+        if not isinstance(expected, torch.Tensor) and not is_iterable_of_tensors(expected, include_empty=True):
             self.skipTest("Skipped! Only supports single tensor or iterable of tensor outputs.")
 
         # A wrapper around map that works with single tensors and always

@@ -2122,7 +2122,10 @@ class TestQuantizeFx(QuantizationTestCase):
         m = prepare_fx(model, qconfig_dict)
         m(torch.rand(5, 5))
         m = convert_fx(m)
-        print(m)
+        occurrence = {
+            ns.call_method("dequantize"): 1
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=occurrence)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

@@ -237,20 +237,7 @@ class CatQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not self.all_node_args_are_tensors:
             return NotImplemented
-        cur_idx = quantizer.activation_post_process_indexes[node.name]
-        # activation_post_process = \
-        #     quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
         quantizer.activation_post_process_indexes[node.name] += 1
-        # scale, zero_point = activation_post_process.calculate_qparams()
-        # scale = float(scale)
-        # zero_point = int(zero_point)
-
-        # scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
-
-        # kwargs = {**load_arg(quantized=False)(node.kwargs), 'scale': scale_arg, 'zero_point': zero_point_arg}
-        # return quantizer.quantized_graph.create_node(
-        #     'call_function', torch.ops.quantized.cat, load_arg(quantized=[0])(node.args), kwargs)
-
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=True))
 
 # handle conv, maybe followed by relu
@@ -968,7 +955,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('detach')
 @register_quant_pattern('detach_')
 @register_quant_pattern('mean')
-@register_quant_pattern('numel')
 @register_quant_pattern('permute')
 @register_quant_pattern('relu')
 @register_quant_pattern('relu_')
@@ -976,8 +962,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('repeat_interleave')
 @register_quant_pattern('reshape')
 @register_quant_pattern('resize_')
-@register_quant_pattern('shape')
-@register_quant_pattern('size')
 @register_quant_pattern('squeeze')
 @register_quant_pattern('squeeze_')
 @register_quant_pattern('transpose')
@@ -989,6 +973,15 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
+@register_quant_pattern('numel')
+@register_quant_pattern('shape')
+@register_quant_pattern('size')
+class MetadataNodeQuantizeHandler(QuantizeHandler):
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
+                is_reference: bool = False,
+                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        return quantizer.quantized_graph.node_copy(node, load_arg())
 
 # Default quantization handler, used for quantization of input and output
 # of quantizable objects (e.g. modules and functionals)

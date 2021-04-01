@@ -8,6 +8,25 @@ from .utils import _parent_name
 QConfigAny = Union[torch.quantization.QConfig,
                    torch.quantization.QConfigDynamic, None]
 
+class NodeUse:
+    """ Represents a use of an fx node
+    """
+    def __init__(self, node_name: str, user: torch.fx.Node):
+        self.node_name = node_name
+        self.user = user
+
+    def __hash__(self):
+        return hash((self.node_name, self.user))
+
+    def __eq__(self, other):
+        if not isinstance(other, NodeUse):
+            return NotImplemented
+        return self.node_name == other.node_name and self.user == other.user
+
+    def __repr__(self):
+        return repr(self.node_name) + " " + repr(self.user)
+
+
 def get_flattened_qconfig_dict(qconfig_dict):
     """ flatten the global, object_type and module_name qconfig
     to the same qconfig_dict so that it can be used by

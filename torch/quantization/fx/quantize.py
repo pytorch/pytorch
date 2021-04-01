@@ -362,7 +362,6 @@ def insert_observers_for_model(
                     ('hardcoding list/dict outputs to be quantized is ' +
                      'not supported')
                 if prev_node.name not in observed_node_names_set:
-                    assert qconfig_map is not None
                     local_qconfig = qconfig_map[prev_node.name]
                     assert local_qconfig is not None, \
                         'qconfig of a node before a quantized output must exist'
@@ -879,13 +878,22 @@ class Quantizer:
         env: Dict[str, Node] = {}
         # TODO: merge quant_env with env
         quant_env: Dict[str, Tuple[Node, torch.dtype]] = {}
+        before_quant_env: Dict[str, Node] = {}
 
         graph_inputs: List[str] = []
         for node in model.graph.nodes:
             if node.op == 'placeholder':
                 graph_inputs.append(node.name)
 
+        def load_before_quant(n: Node) -> Node:
+            return before_quant_env[n.name]
+
         def load_non_quantized(n: Node) -> Node:
+            """
+              before_quant: loading a value before quantization
+              used for ops like size, shape which does not do computation
+              on the Tensor values
+            """
             if n.name not in env:
                 assert n.name in quant_env, \
                     'trying to load float node but did not find ' + \
@@ -909,6 +917,9 @@ class Quantizer:
                 return quant_env[n.name][0]
             else:
                 return env[n.name]
+
+        def load_arg_before_quant() -> Callable[[Node], Argument]:
+            return load_before_quant
 
         def load_arg(quantized: Optional[Union[List[int], bool, Tuple[int, ...]]]
                      ) -> Callable[[Node], Argument]:
@@ -1035,13 +1046,16 @@ class Quantizer:
                 _, prev_dtype = quant_env[prev_node.name]
                 current_dtype = observer_module.dtype
                 if prev_dtype == current_dtype:
+                    if prev_node.name in before_quant_env:
+                        before_quant_env[node.name] = before_quant_env[prev_node.name]
                     quant_env[node.name] = quant_env[prev_node.name]
                 else:
                     root_module = self.modules[""]
                     assert isinstance(prev_node, Node)
                     observer_dtype: torch.dtype = observer_module.dtype  # type: ignore
+                    before_quant_env[node.name] = load_non_quantized(prev_node)
                     quant_env[node.name] = (
-                        quantize_node(self, load_non_quantized(prev_node),  # type: ignore
+                        quantize_node(self, before_quant_env[node.name],  # type: ignore
                                       observer_module, node, is_input=True),  # type: ignore
                         observer_dtype)  # type: ignore
             else:
@@ -1049,8 +1063,9 @@ class Quantizer:
                 root_module = self.modules[""]
                 assert isinstance(node.args[0], Node)
                 dtype: torch.dtype = observer_module.dtype  # type: ignore
+                before_quant_env[node.name] = load_non_quantized(node.args[0])
                 quant_env[node.name] = (
-                    quantize_node(self, load_non_quantized(node.args[0]),  # type: ignore
+                    quantize_node(self, before_quant_env[node.name],  # type: ignore
                                   observer_module, node, is_input=True),  # type: ignore
                     dtype)  # type: ignore
 
@@ -1078,31 +1093,37 @@ class Quantizer:
             root_node, matched, matched_pattern, obj, qconfig = \
                 matches.get(node.name, (None, None, None, None, None))
             if root_node is node:
-                is_observed_standalone_module_node = (
-                    node.op == 'call_module' and
-                    is_observed_standalone_module(
-                        self.modules[node.target])  # type: ignore
-                )
-                if qconfig is None and not is_observed_standalone_module_node:
-                    result = self.quantized_graph.node_copy(
-                        node, load_non_quantized)
+                if type(obj) is MetadataNodeQuantizeHandler:
                     quantized = False
-                else:
-                    assert obj is not None
-                    # We will get whether the output is quantized or not before
-                    # convert for standalone module and after convert
-                    # for non-standalone module, since _standalone_module_output_quantized_idxs
-                    # is only available in observed standalone module
-                    if is_observed_standalone_module_node:
-                        out_quant_idxs = self.modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore
-                        assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
-                        quantized = 0 in out_quant_idxs
-
                     result = obj.convert(
-                        self, node, load_arg, is_reference=is_reference,
+                        self, node, load_arg_before_quant, is_reference=is_reference,
                         convert_custom_config_dict=convert_custom_config_dict)
-                    if not is_observed_standalone_module_node:
-                        quantized = is_output_quantized(node, obj)
+                else:
+                    is_observed_standalone_module_node = (
+                        node.op == 'call_module' and
+                        is_observed_standalone_module(
+                            self.modules[node.target])  # type: ignore
+                    )
+                    if qconfig is None and not is_observed_standalone_module_node:
+                        result = self.quantized_graph.node_copy(
+                            node, load_non_quantized)
+                        quantized = False
+                    else:
+                        assert obj is not None
+                        # We will get whether the output is quantized or not before
+                        # convert for standalone module and after convert
+                        # for non-standalone module, since _standalone_module_output_quantized_idxs
+                        # is only available in observed standalone module
+                        if is_observed_standalone_module_node:
+                            out_quant_idxs = self.modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore
+                            assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
+                            quantized = 0 in out_quant_idxs
+
+                        result = obj.convert(
+                            self, node, load_arg, is_reference=is_reference,
+                            convert_custom_config_dict=convert_custom_config_dict)
+                        if not is_observed_standalone_module_node:
+                            quantized = is_output_quantized(node, obj)
 
                 if quantized:
                     quant_env[node.name] = result, activation_dtype(qconfig)
@@ -1241,6 +1262,8 @@ class Quantizer:
                             quantized.graph.erase_node(node)
                             for arg in quant_args[1 :]:
                                 quantized.graph.erase_node(arg)
+
+        quantized = QuantizedGraphModule(quantized, quantized.graph)
         return quantized
 
     def convert(self, model: GraphModule, is_reference: bool = False,
