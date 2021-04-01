@@ -6,6 +6,8 @@ import numbers
 from typing import (Any, Dict, Iterator, List, Set, Sequence, Tuple,
                     TypeVar, Union, get_type_hints)
 from typing import _tp_cache, _type_check, _type_repr  # type: ignore
+# TODO: Use TypeAlias when Python 3.6 is deprecated
+# Please check [Note: TypeMeta and TypeAlias]
 try:
     from typing import GenericMeta  # Python 3.6
 except ImportError:  # Python > 3.6
@@ -185,6 +187,7 @@ def issubinstance(data, data_type):
     return True
 
 
+# [Note: TypeMeta and TypeAlias]
 # In order to keep compatibility for Python 3.6, use Meta for the typing.
 # TODO: When PyTorch drops the support for Python 3.6, it can be converted
 # into the Alias system and using `__class_getiterm__` for DataPipe. The
@@ -236,6 +239,9 @@ class _DataPipeMeta(GenericMeta):
     def __new__(cls, name, bases, namespace, **kargs):
         # For Python > 3.6
         cls.__origin__ = None
+        # Need to add _is_protocol for Python 3.7 _ProtocolMeta
+        if '_is_protocol' not in namespace:
+            namespace['_is_protocol'] = True
         if 'type' in namespace:
             return super().__new__(cls, name, bases, namespace)
 
@@ -307,11 +313,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
     # - add global switch for type checking at compile-time
     if '__iter__' in sub_cls.__dict__:
         iter_fn = sub_cls.__dict__['__iter__']
-        try:
-            hints = get_type_hints(iter_fn)
-        # Ignore TypeError causes by invalid string typing annotation in order to keep internal BC
-        except TypeError:
-            return
+        hints = get_type_hints(iter_fn)
         if 'return' in hints:
             return_hint = hints['return']
             # Plain Return Hint for Python 3.6
