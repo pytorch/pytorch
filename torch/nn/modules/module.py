@@ -8,7 +8,7 @@ from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
-from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
+from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List, Bool
 from ...utils.hooks import RemovableHandle
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
@@ -1538,7 +1538,7 @@ class Module:
         for _, module in self.named_modules():
             yield module
 
-    def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = '', remove_duplicate=True):
+    def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = '', remove_duplicate: Bool =True):
         r"""Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.
 
