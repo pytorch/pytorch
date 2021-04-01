@@ -49,7 +49,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         self.bn = _BN_CLASS_MAP[dim](out_channels, eps, momentum, True, True)
         self.weight_fake_quant = self.qconfig.weight()
         if bias:
-            self.bias = Parameter(torch.Tensor(out_channels))
+            self.bias = Parameter(torch.empty(out_channels))
         else:
             self.register_parameter('bias', None)
         self.reset_bn_parameters()
