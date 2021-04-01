@@ -263,7 +263,9 @@ void initTensorExprBindings(PyObject* module) {
       .def("prepare_for_codegen", &LoopNest::prepareForCodegen)
       .def(
           "get_loop_body_for",
-          &LoopNest::getLoopBodyFor,
+          [](const LoopNest& self, Tensor* t) {
+            return self.getLoopBodyFor(t);
+          },
           py::return_value_policy::reference)
       .def(
           "get_loops_for",
@@ -288,6 +290,44 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
+          "slice_head",
+          [](LoopNest& self, For* f, int factor) {
+            For *head = nullptr, *tail = nullptr;
+            self.sliceHead(f, factor, &head, &tail);
+            return std::make_tuple(head, tail);
+          },
+          py::return_value_policy::reference)
+      .def(
+          "slice_tail",
+          [](LoopNest& self, For* f, int factor) {
+            For *head = nullptr, *tail = nullptr;
+            self.sliceTail(f, factor, &head, &tail);
+            return std::make_tuple(head, tail);
+          },
+          py::return_value_policy::reference)
+      .def_static(
+          "normalize",
+          [](For* f) {
+            For* normalized = nullptr;
+            LoopNest::normalize(f, &normalized);
+            return normalized;
+          },
+          py::return_value_policy::reference)
+      .def_static(
+          "distribute_loop",
+          [](For* f) { return LoopNest::distributeLoop(f); },
+          py::return_value_policy::reference)
+      .def_static(
+          "distribute_loop",
+          [](For* f, const std::unordered_set<Stmt*>& pivots) {
+            return LoopNest::distributeLoop(f, pivots);
+          },
+          py::return_value_policy::reference)
+      .def_static(
+          "distribute_loop_over_inner_loops",
+          [](For* f) { return LoopNest::distributeLoopOverInnerLoops(f); },
+          py::return_value_policy::reference)
+      .def(
           "unroll",
           [](const LoopNest& self, For* f) {
             Stmt* unrolled = nullptr;
@@ -299,6 +339,18 @@ void initTensorExprBindings(PyObject* module) {
           "vectorize",
           [](const LoopNest& self, For* f) { self.vectorize(f); },
           py::return_value_policy::reference)
+      .def(
+          "cache_accesses",
+          [](LoopNest& self,
+             const Buf* producer,
+             const std::string& name,
+             Stmt* consumer) {
+            return self.cacheAccesses(producer, name, consumer);
+          },
+          py::return_value_policy::reference)
+      .def(
+          "compute_at",
+          [](LoopNest& self, Stmt* s, For* at) { self.computeAt(s, at); })
       .def(
           "compute_inline",
           [](LoopNest& self, Stmt* s) { self.computeInline(s); },
@@ -354,6 +406,14 @@ void initTensorExprBindings(PyObject* module) {
           &LoopNest::setGPUThreadIndex,
           py::return_value_policy::reference)
       .def(
+          "inline_intermediate_bufs",
+          [](LoopNest& self, bool allow_duplicated_work) {
+            self.inlineIntermediateBufs(allow_duplicated_work);
+          })
+      .def(
+          "eliminate_dead_stores",
+          [](LoopNest& self) { self.eliminateDeadStores(); })
+      .def(
           "__str__",
           [](const LoopNest& self) {
             std::stringstream ss;
@@ -371,14 +431,22 @@ void initTensorExprBindings(PyObject* module) {
       py::return_value_policy::reference);
 
   py::class_<CodeGen>(te, "CodeGen")
-      .def("call", [](CodeGen& self, const std::vector<at::Tensor>& values) {
-        std::vector<CodeGen::CallArg> value_ptrs;
-        value_ptrs.reserve(values.size());
-        for (const auto& value : values) {
-          value_ptrs.emplace_back(CodeGen::CallArg(value.data_ptr()));
-        }
-        self.call(value_ptrs);
-      });
+      .def(
+          "call",
+          [](CodeGen& self, const std::vector<at::Tensor>& values) {
+            std::vector<CodeGen::CallArg> value_ptrs;
+            value_ptrs.reserve(values.size());
+            for (const auto& value : values) {
+              value_ptrs.emplace_back(CodeGen::CallArg(value.data_ptr()));
+            }
+            self.call(value_ptrs);
+          })
+      .def(
+          "getCodeText",
+          [](CodeGen& self, const std::string& attr = "") {
+            return self.getCodeText(attr);
+          },
+          py::arg("attr") = "");
   py::class_<SimpleIREvaluator, CodeGen>(te, "SimpleIREvaluator"); // NOLINT
 #ifdef TORCH_ENABLE_LLVM
   py::class_<LLVMCodeGen, CodeGen>(te, "LLVMCodeGen"); // NOLINT

@@ -9,6 +9,59 @@ namespace c10 {
 using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
 class OperatorHandle;
 
+/*
+ * [Note: Argument forwarding in the dispatcher]
+ *
+ * The dispatcher uses a somewhat unusual way to forward arguments through several layers of
+ * wrapper functions. This can be confusing because an experienced C++ programmer would look at this
+ * and think "oh this is supposed to be forwarding a universal reference but the && is missing. This is a bug.".
+ * It is not a bug. The common way in C++ to forward arguments is to use universal references:
+ *
+ * > template<class T> void func(T&& arg) { func2(std::forward<T>(arg)); }
+ *
+ * but that relies on inferring the correct reference type (i.e. value vs & vs &&) from the argument.
+ * In our case, we cannot rely on the argument as supplied by the caller, because that could infer a
+ * different reference type than was used in the kernel function. The correct reference type
+ * is dictated by the kernel signature and must be identical since we cast function pointers
+ * through void* pointers and mismatches would be UB. So we need a forwarding pattern that determines
+ * the reference type to use by looking at the explicitly supplied operator signature, not by looking at
+ * the argument we're calling it with.
+ *
+ * What does std::forward do, exactly?
+ * ------------------------------------
+ * std::forward<T>(t) is a way to cast t to the reference type supplied in T.
+ * Let's assume decay_t<T> == U and T is either U or some reference of U.
+ *  - std::forward<T&>(t) will return U&, no matter what kind of reference t is.
+ *  - std::forward<T&&>(t) will return U&&, no matter what kind of reference t is.
+ *  - std::forward<T>(t) will return U&& (not U!), no matter what kind of reference t is.
+ *
+ * For universal references, that means that in the following function
+ * > template<class T> void func(T&& arg) { func2(std::forward<T>(arg)); }
+ *
+ *  - when called with arg being a rvalue reference or non-reference value, T gets inferred to be
+ *    a non-reference U, and std::forward<T>(t) will return U&&, correctly moving the argument.
+ *  - when called with arg behind a lvalue reference, T gets inferred to be U& because that's the only
+ *    way to match the signature (in C++, a type that is (T&)&& will collapse to T&).
+ *    That means std::forward<T>(t) will return U& and the value will not be moved but passed on as
+ *    a lvalue reference.
+ *
+ * How do we use that?
+ * ------------------------------------
+ * But std::forward can also be used outside of the common "universal forwarding" pattern to change
+ * reference types. So instead of following the common C++ pattern, we notice what
+ * std::forward<T>() actually does, and that is it takes a value and changes its reference to the
+ * type of reference passed in as T. If we don't infer T but explicitly specify it, we can use this
+ * to forward based on an explicitly specified reference type instead of the inferred argument type.
+ *
+ * This is why many of the dispatcher functions look like
+ * > template<class T> func(T t) { func2<T>(std::forward<T>(t)); }
+ * instead of the common
+ * > template<class T> func(T&& t) { func2(std::forward<T>(t)); }
+ *
+ * and are expected to be called by explicitly specifying the template parameters in a way that matches
+ * the expected operator signature at each call site.
+ */
+
 /**
  * Inherit from OperatorKernel to implement a c10 kernel.
  *
@@ -349,6 +402,7 @@ namespace impl {
     static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
       "Parameter types mismatch");
 
+    // See [Note: Argument forwarding in the dispatcher] for why ParameterTypes doesn't use &&
     static ReturnType call(OperatorKernel* functor, DispatchKeySet, ParameterTypes... args) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       // Note [Plumbing Keys Through The Dispatcher 2]
@@ -371,6 +425,7 @@ namespace impl {
     static_assert(std::is_same<guts::typelist::typelist<DispatchKeySet, ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
       "Parameter types mismatch");
 
+    // See [Note: Argument forwarding in the dispatcher] for why ParameterTypes doesn't use &&
     static ReturnType call(OperatorKernel* functor, DispatchKeySet dispatchKeySet, ParameterTypes... args) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       // We're explicitly taking in a dispatchKeySet and forwarding it to the registered kernel.
@@ -415,6 +470,10 @@ namespace impl {
 
   template<class OutputType, bool AllowDeprecatedTypes>
   struct push_outputs final {
+    // Contrary to [Note: Argument forwarding in the dispatcher], we use OutputType&& here
+    // to avoid one extra call to the move constructor in this case. This is still not a
+    // universal reference though because OutputType is an explicitly specified class
+    // template parameter.
     static void call(OutputType&& output, Stack* stack) {
       torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::call(std::forward<OutputType>(output)));
     }

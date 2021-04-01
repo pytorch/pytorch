@@ -36,7 +36,9 @@ endif()
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
 file(GLOB_RECURSE ATen_CORE_HEADERS  "core/*.h")
 file(GLOB_RECURSE ATen_CORE_SRCS "core/*.cpp")
-file(GLOB_RECURSE ATen_CORE_TEST_SRCS "core/*_test.cpp")
+if(NOT BUILD_LITE_INTERPRETER)
+  file(GLOB_RECURSE ATen_CORE_TEST_SRCS "core/*_test.cpp")
+endif()
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
 file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec256/*.h" "quantized/*.h")
@@ -116,7 +118,22 @@ append_filelist("jit_core_sources" ATen_CORE_SRCS)
 
 add_subdirectory(quantized)
 add_subdirectory(nnapi)
-set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp})
+
+if(BUILD_LITE_INTERPRETER)
+  set(all_cpu_cpp ${generated_cpp} ${core_generated_cpp} ${cpu_kernel_cpp})
+  append_filelist("jit_core_sources" all_cpu_cpp)
+  append_filelist("aten_cpu_source_non_codegen_list" all_cpu_cpp)
+  append_filelist("aten_native_source_non_codegen_list" all_cpu_cpp)
+  list(APPEND all_cpu_cpp ${Aten_TH_AVX_extra_src})
+else()
+  set(
+    all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp}
+    ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
+    ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp}
+    ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
+  )
+endif()
+
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
