@@ -2468,6 +2468,13 @@ def prim_shape(g, self):
 def prim_max(g, self, other):
     return g.op('Max', self, other)
 
+def prim_min(g, self):
+    if (_is_packed_list(self)):
+        self = stack(g, self, g.op("Constant", value_t=torch.tensor([0])))
+        return min(g, ten)
+    else:
+        return g.op("ReduceMin", self, axes_i=[0], keepdims_i=0)
+
 def prim_data(g, self):
     return self
 
