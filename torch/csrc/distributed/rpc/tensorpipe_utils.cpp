@@ -96,9 +96,15 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     if (!tensorData.storageHasDeleter()) {
       std::vector<char> storageData(
           tensorData.data(), tensorData.data() + tensorData.sizeInBytes());
-      tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
-          tensorpipe::CpuBuffer{storageData.data(), storageData.size()},
-          std::move(metadata)});
+      tensorpipe::CpuBuffer buffer;
+      buffer.ptr = storageData.data();
+      buffer.length = storageData.size();
+
+      tensorpipe::Message::Tensor tensor;
+      tensor.buffer = buffer;
+      tensor.metadata = std::move(metadata);
+
+      tpMessage.tensors.push_back(std::move(tensor));
       buffers.copiedTensors.push_back(std::move(storageData));
     } else {
       // TensorPipe uses the same Message class for both reading and writing, so
@@ -106,16 +112,28 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       char* tensorPtr = const_cast<char*>(tensorData.data());
       if (tensorDataVec[i].device().is_cpu()) {
-        tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
-            tensorpipe::CpuBuffer{tensorPtr, tensorData.sizeInBytes()},
-            std::move(metadata)});
+        tensorpipe::CpuBuffer buffer;
+        buffer.ptr = tensorPtr;
+        buffer.length = tensorData.sizeInBytes();
+
+        tensorpipe::Message::Tensor tensor;
+        tensor.buffer = buffer;
+        tensor.metadata = std::move(metadata);
+
+        tpMessage.tensors.push_back(std::move(tensor));
 #ifdef USE_CUDA_NOT_ROCM
       } else if (tensorDataVec[i].device().is_cuda()) {
         auto stream = ctx->getStream(tensorDataVec[i].device().index());
-        tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
-            tensorpipe::CudaBuffer{
-                tensorPtr, tensorData.sizeInBytes(), stream.stream()},
-            std::move(metadata)});
+        tensorpipe::CudaBuffer buffer;
+        buffer.ptr = tensorPtr;
+        buffer.length = tensorData.sizeInBytes();
+        buffer.stream = stream.stream();
+
+        tensorpipe::Message::Tensor tensor;
+        tensor.buffer = buffer;
+        tensor.metadata = std::move(metadata);
+
+        tpMessage.tensors.push_back(std::move(tensor));
         // record tensor data ptrs on TensorPipe streams, so that the tensors
         // won't be destructed before TensorPipe finishing sending them.
         c10::cuda::CUDACachingAllocator::recordStream(
