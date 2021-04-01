@@ -29,7 +29,7 @@ jobs:
           sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
           rm -r "shellcheck-${scversion}"
           shellcheck --version
-          find .jenkins/pytorch -name '*.sh' | xargs shellcheck
+          .jenkins/run-shellcheck.sh
       - name: Ensure correct trailing newlines
         run: |
           (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
