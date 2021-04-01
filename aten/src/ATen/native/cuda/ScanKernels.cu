@@ -4,6 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/native/Resize.h>
 #include <c10/util/accumulate.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
