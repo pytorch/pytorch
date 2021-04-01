@@ -7,7 +7,7 @@
 
 namespace at {
 
-void conjugateFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   // Situations to handle:
   //  1. Purely functional situation.  Easy: materialize all inputs and
   //     call it a day.
@@ -49,7 +49,7 @@ void conjugateFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) 
     // We assume that view operators automatically handle conjugation
     // correctly by propagating the Conjugate dispatch key in key_set.
     // This is not necessarily always right, so you should test these cases.
-    op.redispatchBoxed(c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::Conjugate), stack);
+    op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::Conjugate), stack);
     return;
   }
 
@@ -116,6 +116,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("real", torch::CppFunction::makeFallthrough());
   m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
+  m.impl("select", torch::CppFunction::makeFallthrough());
   // TODO: need to hit the view functions
 }
 
