@@ -6,7 +6,7 @@ import re
 from typing import Optional, List
 
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 import tools.codegen.api.python as python
 from tools.codegen.gen import parse_native_yaml, FileManager
 from tools.codegen.context import with_native_function
@@ -74,7 +74,7 @@ def process_function(f: NativeFunction) -> Optional[str]:
 
     return f"""\
 inline at::Tensor {name}({', '.join(formals)}) {{
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowInplaceOrView guard;
   return autograd::make_variable(at::{name}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
 }}
 """

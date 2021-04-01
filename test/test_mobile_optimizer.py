@@ -10,6 +10,12 @@ from torch.nn import functional as F
 from torch._C import MobileOptimizerType
 from torch.testing._internal.common_quantized import override_quantized_engine
 
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
 FileCheck = torch._C.FileCheck
 
 class TestOptimizer(TestCase):
@@ -172,6 +178,34 @@ class TestOptimizer(TestCase):
         opt_m = optimize_for_mobile(m, preserved_methods=["preserveThis"])
         preserveThis = getattr(opt_m, "preserveThis", None)
         self.assertNotEqual(preserveThis, None)
+
+        class OptimizeNoForwardTest(torch.nn.Module):
+            def __init__(self):
+                super(OptimizeNoForwardTest, self).__init__()
+                self.l = nn.Linear(10, 100)
+                self.l2 = nn.Linear(100, 1)
+                self.d = nn.Dropout(p=0.2)
+
+            @torch.jit.export
+            def foo(self, x):
+                x = self.d(F.relu(self.l(x)))
+                x = self.l2(x)
+                x = x + torch.ones(1, 100)
+                return F.relu(x)
+        input_data = torch.ones(1, 10)
+        m = torch.jit.script(OptimizeNoForwardTest())
+        m.eval()
+        initial_result = m.foo(input_data)
+
+        optimized_scripted_model = optimize_for_mobile(m, methods_to_optimize=['foo'])
+        optimized_result = optimized_scripted_model.foo(input_data)
+
+
+        FileCheck().check_not("dropout.__") \
+            .check_count("aten::_add_relu(", 1, exactly=True) \
+            .run(optimized_scripted_model.foo.graph)
+        torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
+
 
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."
@@ -427,6 +461,19 @@ class TestOptimizer(TestCase):
             m_res = m(data)
             m_optim_res = m_optim(data)
             torch.testing.assert_allclose(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+
+    @unittest.skipUnless(HAS_TORCHVISION, "Needs torchvision")
+    def test_mobilenet_optimize_for_mobile(self):
+        m = torchvision.models.mobilenet_v3_small()
+        m = torch.jit.script(m)
+        m = optimize_for_mobile(m)
+
+        # run forward 3 times until segfault, see https://github.com/pytorch/pytorch/issues/52463
+        x = torch.zeros(1, 3, 56, 56)
+        self.assertEqual(m(x).numel(), 1000)
+        self.assertEqual(m(x).numel(), 1000)
+        self.assertEqual(m(x).numel(), 1000)
+
 
 
 if __name__ == '__main__':
