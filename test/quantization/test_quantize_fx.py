@@ -647,7 +647,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         dict_input = {"input": torch.randn(1, 1, 1, 1)}
         m = M().eval()
-        qconfig_dict = {"": default_qconfig}
+        qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
         m = prepare_fx(m, qconfig_dict)
         m(dict_input)
         m = convert_fx(m)
@@ -1078,8 +1078,8 @@ class TestQuantizeFx(QuantizationTestCase):
         # the first transpose is not quantized because the input is not quantized
         node_list2 = [
             ns.call_module(nn.Conv2d),
-            ns.call_method("transpose"),
             ns.call_function(torch.quantize_per_tensor),
+            ns.call_method("transpose"),
             ns.call_module(nnq.Conv2d),
             ns.call_method("transpose"),
             ns.call_method("dequantize"),
@@ -2593,7 +2593,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = torch.sum(x, [1])
                 return x
 
-
         data = torch.randn(1, 2, 3, 4, dtype=torch.float)
         quant_type = QuantType.STATIC
         # testing for fp16 static quant
@@ -3611,7 +3610,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_conv_transpose_impl(
             torch.nn.ConvTranspose2d, nnq.ConvTranspose2d, torch.randn(4, 1, 4, 4))
 
-    @unittest.skip("disable temporarily")
     def test_reshape_fp16(self):
         class M(torch.nn.Module):
             def __init__(self, w, b):
@@ -3629,14 +3627,83 @@ class TestQuantizeFxOps(QuantizationTestCase):
         b = torch.randn(4)
         m = M(w, b).eval()
         qconfig_dict = {
+            # this has no effect on reshape since it's a CopyNode
             "": float16_static_qconfig,
             "object_type": [
                 (torch.nn.functional.linear, default_qconfig)
             ]
         }
         m = prepare_fx(m, qconfig_dict)
+        expected_occurrence = {
+            # input and weight of first and second linear, output of first and second linear
+            ns.call_module(torch.quantization.MinMaxObserver): 6,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence
+        )
         # make sure it runs
         m = convert_fx(m)
+        expected_occurrence = {
+            # we have extra quant/dequant after reshape since currently we do not
+            # propagate the information about the dtype of the output
+            # of CopyNode, we may improve this later and remove the
+            # extra quant/dequant
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 3,
+            ns.call_method("to"): 1,
+            ns.call_function(torch.ops.quantized.linear): 2
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence
+        )
+
+    def test_multiple_qconfigs_for_single_value(self):
+        """ Test multiple qconfigs for a single value"""
+        class M(torch.nn.Module):
+            def __init__(self, w, b):
+                super().__init__()
+                self.w = w
+                self.b = b
+
+            def forward(self, x):
+                x = torch.nn.functional.linear(x, self.w)
+                x = torch.sigmoid(x)
+                return x
+
+        w = torch.randn(4, 4)
+        b = torch.randn(4)
+        m = M(w, b).eval()
+        qconfig_dict = {
+            "": float16_static_qconfig,
+            "object_type": [
+                (torch.nn.functional.linear, default_qconfig)
+            ]
+        }
+        m = prepare_fx(m, qconfig_dict)
+        expected_occurrence = {
+            # input and weight of linear, output of linear
+            ns.call_module(torch.quantization.MinMaxObserver): 3,
+            # input and output of sigmoid
+            ns.call_module(torch.quantization.PlaceholderObserver): 2,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence
+        )
+        # make sure it runs
+        m = convert_fx(m)
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method("dequantize"): 3,
+            ns.call_method("to"): 2
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence
+        )
+
 
 
 class TestQuantizeFxModels(QuantizationTestCase):
