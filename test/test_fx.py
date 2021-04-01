@@ -1052,7 +1052,7 @@ class TestFX(JitTestCase):
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
             if node.op == 'output':
-                output_shape = node.args[0].shape
+                output_shape = node.args[0].meta['shape']
         self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
                                        'call_module', 'output']))
 
