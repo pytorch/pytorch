@@ -120,6 +120,9 @@ struct Flatten : IterArgs<Flatten> {
   Flatten(variable_list& out) : out(out) {}
   variable_list& out;
   void operator()(const at::Tensor& x) { out.emplace_back(x); }
+  void operator()(const c10::optional<at::Tensor>& x) {
+    if (x.has_value()) out.emplace_back(x.value());
+  }
   void operator()(at::ArrayRef<at::Tensor> xs) {
     out.insert(out.end(), xs.begin(), xs.end());
   }

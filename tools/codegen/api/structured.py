@@ -80,18 +80,18 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[B
     else:
         assert_never(a)
 
-def impl_arguments(g: StructuredNativeFunctions) -> List[Binding]:
+def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     args.extend(g.out.func.arguments.non_out)
     args.extend(g.out.func.arguments.out)
     return [r for arg in args for r in argument(arg)]
 
-def meta_arguments(g: StructuredNativeFunctions) -> List[Binding]:
+def meta_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     args.extend(g.functional.func.arguments.non_out)
     return [r for arg in args for r in argument(arg)]
 
-def out_arguments(g: StructuredNativeFunctions) -> List[Binding]:
+def out_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     args.extend(g.out.func.arguments.out)
     return [r for arg in args for r in argument(arg)]

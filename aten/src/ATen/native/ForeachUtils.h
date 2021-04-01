@@ -1,6 +1,8 @@
 #pragma once
 #include <ATen/ATen.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 namespace {
@@ -36,7 +38,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
 
-  for (int i = 0; i < tensors1.size(); i++) {
+  for (const auto i : c10::irange(tensors1.size())) {
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
   }
 }
@@ -48,7 +50,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
   TORCH_CHECK(tensors1.size() == tensors3.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors3.size());
 
-  for (int i = 0; i < tensors1.size(); i++) {
+  for (const auto i : c10::irange(tensors1.size())) {
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
     TORCH_CHECK(tensors1[i].sizes() == tensors3[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors3[i].sizes());
   }
