@@ -313,7 +313,7 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
     auto p_cpu = p_.to(kCPU);
-    c10::MaybeOwned<Tensor> p = expand_inplace_v2(self, p_cpu);
+    c10::MaybeOwned<Tensor> p = expand_inplace(self, p_cpu);
     auto iter = TensorIteratorConfig()
         .add_output(self)
         .add_input(*p)

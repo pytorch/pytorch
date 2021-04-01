@@ -351,7 +351,7 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
     return;
   }
   auto src_view = src.view(slicePrefix1sSize(src.sizes()));
-  c10::MaybeOwned<Tensor> b_src = expand_inplace_v2(dst, src_view, "setitem");
+  c10::MaybeOwned<Tensor> b_src = expand_inplace(dst, src_view, "setitem");
   dst.copy_(*b_src);
 }
 

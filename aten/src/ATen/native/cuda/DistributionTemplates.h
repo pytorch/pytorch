@@ -625,7 +625,7 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
     rng_engine_inputs = gen->philox_cuda_state(10);
   }
   auto p_CUDA = p_.to(kCUDA);
-  c10::MaybeOwned<Tensor> p = expand_inplace_v2(self, p_CUDA);
+  c10::MaybeOwned<Tensor> p = expand_inplace(self, p_CUDA);
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
       using self_t = scalar_t;

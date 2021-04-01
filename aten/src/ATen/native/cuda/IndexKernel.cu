@@ -442,7 +442,7 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
   TensorArg source_arg{source, "source", 3};
   checkAllSameGPU("masked_scatter_", {self_arg, mask_arg, source_arg});
 
-  c10::MaybeOwned<Tensor> b_mask = expand_inplace_v2(self, mask, "masked_scatter_");
+  c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_scatter_");
 
   if (b_mask->dtype() == ScalarType::Byte) {
     TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \

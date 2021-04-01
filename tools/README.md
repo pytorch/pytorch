@@ -49,6 +49,10 @@ Developer tools which you might find useful:
   appropriate subset of our `mypy*.ini` configs.
 * [test_history.py](test_history.py) - Query S3 to display history of a single
   test across multiple jobs over time.
+* [trailing_newlines.py](trailing_newlines.py) - Take names of UTF-8 files from
+  stdin, print names of nonempty files whose contents don't end in exactly one
+  trailing newline, exit with status 1 if no output printed or 0 if some
+  filenames were printed.
 
 Important if you want to run on AMD GPU:
 

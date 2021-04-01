@@ -38,6 +38,7 @@ from torch.testing._internal.common_distributed import (
     require_n_gpus_for_nccl_backend,
     requires_nccl_version,
     captured_output,
+    with_nccl_blocking_wait,
 )
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -191,10 +192,10 @@ class Task(nn.Module):
 
 class BatchNormNet(nn.Module):
 
-    def __init__(self):
+    def __init__(self, affine=True):
         super(BatchNormNet, self).__init__()
         self.fc1 = nn.Linear(2, 40, bias=False)
-        self.bn = nn.BatchNorm1d(4)
+        self.bn = nn.BatchNorm1d(4, affine=affine)
         self.fc2 = nn.Linear(40, 4, bias=False)
 
     def forward(self, x):
@@ -234,6 +235,7 @@ class EmbeddingNet(nn.Module):
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
+BN_NET_NO_AFFINE = BatchNormNet(affine=False)
 ONLY_SBN_NET = nn.SyncBatchNorm(2, momentum=0.99)
 
 def get_timeout(test_id):
@@ -2906,11 +2908,11 @@ class DistributedTest:
             for p_gpu, p_DDP in zip(param_gpu, param_DDP):
                 self.assertEqual(p_gpu, p_DDP)
 
-        def _test_DDP_5iter(
+        def _test_DDP_niter(
             self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save,
-            offset=None, world_size=0, zero_grad=False, memory_format=None
+            offset=None, world_size=0, zero_grad=False, memory_format=None, n_iter=5,
         ):
-            for idx in range(5):
+            for idx in range(n_iter):
                 # single cpu/gpu training
                 self._test_DDP_helper(model_base, input, target, loss, memory_format=memory_format)
 
@@ -2992,7 +2994,7 @@ class DistributedTest:
             global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
             # check two model parameters over 5 iterations
-            self._test_DDP_5iter(
+            self._test_DDP_niter(
                 model_gpu,
                 model_DDP,
                 input_cpu.cuda(gpu_subset[0]),
@@ -3023,7 +3025,7 @@ class DistributedTest:
             global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
             # check two model parameters over 5 iterations
-            self._test_DDP_5iter(
+            self._test_DDP_niter(
                 model_base,
                 model_DDP,
                 input_cpu,
@@ -3279,12 +3281,13 @@ class DistributedTest:
             self._test_DistributedDataParallel(
                 gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
 
-        def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset, output_device=None):
+        def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset,
+                                                        output_device=None, affine=True):
             # Run a simple end to end DDP model, use result of single node model
             # as baseline
 
             # cpu training setup
-            model = BN_NET
+            model = BN_NET if affine else BN_NET_NO_AFFINE
 
             # single gpu training setup
             model_gpu = copy.deepcopy(model)
@@ -3313,7 +3316,7 @@ class DistributedTest:
             loss = nn.MSELoss()
 
             # check two model parameters over 5 iterations
-            self._test_DDP_5iter(
+            self._test_DDP_niter(
                 model_gpu,
                 model_DDP,
                 input_cpu.cuda(gpu_subset[0]),
@@ -3324,7 +3327,8 @@ class DistributedTest:
                 global_bs,
                 True,
                 offset,
-                dist.get_world_size()
+                dist.get_world_size(),
+                5 if affine else 2,
             )
             self._barrier()
 
@@ -3350,7 +3354,7 @@ class DistributedTest:
             loss = nn.MSELoss()
 
             # check two model parameters over 5 iterations
-            self._test_DDP_5iter(
+            self._test_DDP_niter(
                 model_gpu,
                 model_DDP,
                 input_gpu,
@@ -3407,6 +3411,31 @@ class DistributedTest:
                 offset=bs_offset,
                 output_device=torch.device('cuda'))
 
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        def test_DistributedDataParallel_SyncBatchNorm_No_Affine(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            # DDP does not support replicating BN layers within a process, hence
+            # testing with one module replica per process
+            gpus = [rank]
+
+            num_processes = dist.get_world_size()
+            local_bs = 2
+            bs_offset = int(rank * 2)
+            global_bs = int(num_processes * 2)
+
+            self._test_DistributedDataParallel_SyncBatchNorm(
+                gpu_subset=gpus,
+                rank=rank,
+                local_bs=local_bs,
+                global_bs=global_bs,
+                offset=bs_offset,
+                affine=False)
+
+
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_no_gpu
@@ -3441,7 +3470,7 @@ class DistributedTest:
             # numerical issue created by the divergent code path.
             with torch.backends.cudnn.flags(False):
                 # check two model parameters over 5 iterations
-                self._test_DDP_5iter(
+                self._test_DDP_niter(
                     model_gpu,
                     model_DDP,
                     input_cpu.cuda(gpus[0]),
@@ -3489,7 +3518,7 @@ class DistributedTest:
             # numerical issue created by the divergent code path.
             with torch.backends.cudnn.flags(False):
                 # check two model parameters over 5 iterations
-                self._test_DDP_5iter(
+                self._test_DDP_niter(
                     model_gpu,
                     model_DDP,
                     input_cpu.cuda(gpus[0]),
@@ -3530,6 +3559,7 @@ class DistributedTest:
             running_mean, running_var = model.module.running_mean, model.module.running_var
             torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
             torch.testing.assert_allclose(running_var, all_input_var.var(1))
+
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -5170,15 +5200,13 @@ class DistributedTest:
                 # there are no errors here.
                 dist.monitored_barrier(subgroup, timeout)
 
+        @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_rocm
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_monitored_barrier_allreduce_hang(self):
             # tests expected behavior when nonzero rank hangs.
-            if "NCCL_ASYNC_ERROR_HANDLING" in os.environ:
-                del os.environ["NCCL_ASYNC_ERROR_HANDLING"]
-            os.environ["NCCL_BLOCKING_WAIT"] = "1"
             nccl_pg = dist.new_group(
                 ranks=list(i for i in range(int(self.world_size))),
                 timeout=timedelta(seconds=2),

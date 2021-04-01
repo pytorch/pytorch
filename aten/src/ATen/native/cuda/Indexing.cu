@@ -972,7 +972,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
   }
   at::assert_no_partial_overlap(self, mask);
 
-  c10::MaybeOwned<Tensor> b_mask = expand_inplace_v2(self, mask, "masked_fill_");
+  c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
 
   auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
