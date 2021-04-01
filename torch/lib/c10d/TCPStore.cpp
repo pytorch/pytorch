@@ -1,15 +1,15 @@
 #include <c10d/TCPStore.hpp>
 
 #ifdef _WIN32
-#include <winsock2.h>
 #include <io.h>
+#include <winsock2.h>
 #else
 #include <poll.h>
 #include <unistd.h>
 #endif
 
-#include <algorithm>
 #include <fcntl.h>
+#include <algorithm>
 #include <system_error>
 
 namespace c10d {
@@ -66,9 +66,9 @@ void BackgroundThread::join() {
 void BackgroundThread::initStopSignal() {
   ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, eventName_);
   if (ghStopEvent_ == NULL) {
-      throw std::runtime_error(
-          "Failed to create the control pipe to start the "
-          "BackgroundThread run");
+    throw std::runtime_error(
+        "Failed to create the control pipe to start the "
+        "BackgroundThread run");
   }
 }
 
@@ -106,12 +106,13 @@ void BackgroundThread::stop() {
 #endif
 
 // TCPStoreListener class methods
-ListenThread::ListenThread(int listenSocket)
-  : BackgroundThread(listenSocket) {
+ListenThread::ListenThread(int listenSocket) : BackgroundThread(listenSocket) {
   daemonThread_ = std::thread(&ListenThread::run, this);
 }
 
-void ListenThread::addCallback(std::string key, std::function<void(std::string, std::string)> cb) {
+void ListenThread::addCallback(
+    std::string key,
+    std::function<void(std::string, std::string)> cb) {
   keyToCallbacks_[key] = cb;
 }
 
@@ -120,7 +121,8 @@ void ListenThread::callbackHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   std::vector<uint8_t> currentValueVec = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> newValueVec = tcputil::recvVector<uint8_t>(socket);
-  std::string currentValue = std::string(currentValueVec.begin(), currentValueVec.end());
+  std::string currentValue =
+      std::string(currentValueVec.begin(), currentValueVec.end());
   std::string newValue = std::string(newValueVec.begin(), newValueVec.end());
   if (watchResponse != WatchResponseType::KEY_UPDATED) {
     throw std::runtime_error("KEY_UPDATED response is expected");
@@ -138,12 +140,12 @@ void ListenThread::run() {
     // Check control and exit early if triggered
     int res;
     SYSCHECK_ERR_RETURN_NEG1(
-      res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count()))
+        res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count()))
     if (res == 0) {
       auto rv = WaitForSingleObject(ghStopEvent_, 0);
       if (rv != WAIT_TIMEOUT) {
-          finished = true;
-          break;
+        finished = true;
+        break;
       }
       continue;
     }
@@ -322,7 +324,8 @@ void TCPStoreDaemon::wakeupWaitingClients(const std::string& key) {
   }
 }
 
-void TCPStoreDaemon::sendKeyUpdatesToClients(const std::string& key,
+void TCPStoreDaemon::sendKeyUpdatesToClients(
+    const std::string& key,
     std::vector<uint8_t>& oldData,
     std::vector<uint8_t>& newData) {
   for (int socket : watchedSockets_[key]) {
@@ -381,7 +384,8 @@ void TCPStoreDaemon::addHandler(int socket) {
     addVal += std::stoll(std::string(buf, len));
   }
   auto addValStr = std::to_string(addVal);
-  std::vector<uint8_t> newData = std::vector<uint8_t>(addValStr.begin(), addValStr.end());
+  std::vector<uint8_t> newData =
+      std::vector<uint8_t>(addValStr.begin(), addValStr.end());
   tcpStore_[key] = newData;
   // Now send the new value
   tcputil::sendValue<int64_t>(socket, addVal);
@@ -474,12 +478,12 @@ void TCPStoreDaemon::run() {
 
     int res;
     SYSCHECK_ERR_RETURN_NEG1(
-      res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count()))
+        res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count()))
     if (res == 0) {
       auto rv = WaitForSingleObject(ghStopEvent_, 0);
       if (rv != WAIT_TIMEOUT) {
-          finished = true;
-          break;
+        finished = true;
+        break;
       }
       continue;
     }
@@ -572,32 +576,36 @@ TCPStore::TCPStore(
     std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(masterPort);
   }
   try {
-      if (isServer_) {
-        // Now start the daemon
-        tcpStoreDaemon_ = std::make_unique<TCPStoreDaemon>(masterListenSocket_);
-      }
-      // Connect to the daemon
-      storeSocket_ = tcputil::connect(
-          tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-      if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
-        waitForWorkers();
-      }
+    if (isServer_) {
+      // Now start the daemon
+      tcpStoreDaemon_ = std::make_unique<TCPStoreDaemon>(masterListenSocket_);
+    }
+    // Connect to the daemon
+    storeSocket_ = tcputil::connect(
+        tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
+    if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
+      waitForWorkers();
+    }
 
-      // socket to handle requests from server
-      listenSocket_ = tcputil::connect(
-          tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-      watchListener_ = std::make_unique<ListenThread>(listenSocket_);
+#ifndef _WIN32
+    // socket to handle requests from server
+    listenSocket_ = tcputil::connect(
+        tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
+    watchListener_ = std::make_unique<ListenThread>(listenSocket_);
+#endif
   } catch (const std::exception&) {
     if (isServer_) {
-        tcpStoreDaemon_ = nullptr;
-        tcputil::closeSocket(masterListenSocket_);
+      tcpStoreDaemon_ = nullptr;
+      tcputil::closeSocket(masterListenSocket_);
     }
+#ifndef _WIN32
     watchListener_ = nullptr;
-    if (storeSocket_ != -1) {
-      tcputil::closeSocket(storeSocket_);
-    }
     if (listenSocket_ != -1) {
       tcputil::closeSocket(listenSocket_);
+    }
+#endif
+    if (storeSocket_ != -1) {
+      tcputil::closeSocket(storeSocket_);
     }
     throw;
   }
@@ -684,13 +692,19 @@ bool TCPStore::deleteKey(const std::string& key) {
   return (numDeleted == 1);
 }
 
-void TCPStore::watchKey(const std::string& key, std::function<void(std::string, std::string)> callback) {
+void TCPStore::watchKey(
+    const std::string& key,
+    std::function<void(std::string, std::string)> callback) {
+#ifdef _WIN32
+  TORCH_INTERNAL_ASSERT(false, "watchKey not implemented for windows.");
+#else
   std::string regKey = regularPrefix_ + key;
 
   watchListener_->addCallback(regKey, callback);
 
   tcputil::sendValue<QueryType>(listenSocket_, QueryType::WATCH_KEY);
   tcputil::sendString(listenSocket_, regKey);
+#endif
 }
 
 int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {
@@ -744,11 +758,12 @@ void TCPStore::waitHelper_(
   // Set the socket timeout if there is a wait timeout
   if (timeout != kNoTimeout) {
 #ifdef _WIN32
-    struct timeval timeoutTV = {timeout.count() / 1000,
-                                (timeout.count() % 1000) * 1000};
+    struct timeval timeoutTV = {
+        timeout.count() / 1000, (timeout.count() % 1000) * 1000};
 #else
-    struct timeval timeoutTV = {.tv_sec = timeout.count() / 1000,
-                                .tv_usec = (timeout.count() % 1000) * 1000};
+    struct timeval timeoutTV = {
+        .tv_sec = timeout.count() / 1000,
+        .tv_usec = (timeout.count() % 1000) * 1000};
 #endif
     SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
         storeSocket_,
