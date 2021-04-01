@@ -142,10 +142,13 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         values = expand(g, values, values_shape, None)
     values = g.op("Reshape", values, values_shape)
 
+    dtype = self.type().scalarType()
+    if dtype is not None and dtype != values.type().scalarType():
+        values = g.op("Cast", values, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+
     if accumulate:
-        dtype = self.type().scalarType()
-        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-        dtype = sym_help.scalar_type_to_pytorch_type[dtype]
         zeros = g.op("ConstantOfShape", g.op("Shape", self), value_t=torch.tensor([0], dtype=dtype))
         result = g.op("ScatterND", zeros, index, values)
         result = add(g, self, result)
