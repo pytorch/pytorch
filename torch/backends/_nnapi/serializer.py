@@ -865,7 +865,7 @@ class _NnapiSerializer(object):
 
         if in_oper.dim_order == DimOrder.CHANNELS_LAST:
             assert len(in_oper.shape) == 4
-            nnapi_dim = [ [0, 3, 1, 2][d] for d in dim ]
+            nnapi_dim = [[0, 3, 1, 2][d] for d in dim]
         else:
             nnapi_dim = dim
 
@@ -978,7 +978,7 @@ class _NnapiSerializer(object):
 
         assert in0_oper.op_type == in1_oper.op_type
         in0_id, in0_oper, in1_id, in1_oper = self.transpose_for_broadcast(
-                in0_id, in0_oper, in1_id, in1_oper)
+            in0_id, in0_oper, in1_id, in1_oper)
         # NOTE: PyTorch and NNAPI have the same broadcast semantics.
         out_shape = broadcast_shapes(in0_oper.shape, in1_oper.shape)
         out_oper = in0_oper._replace(shape=out_shape)
@@ -1027,7 +1027,7 @@ class _NnapiSerializer(object):
 
         op_map = {
             (-1, 1): NNAPI_OperationCode.RELU1,
-            ( 0, 6): NNAPI_OperationCode.RELU6,
+            ( 0, 6): NNAPI_OperationCode.RELU6,  # noqa: E201
         }
 
         opcode = op_map.get((min_val, max_val))

@@ -108,7 +108,7 @@ private:
   friend bool operator==(bitset lhs, bitset rhs) noexcept {
     return lhs.bitset_ == rhs.bitset_;
   }
-  
+
   bitset_type bitset_;
 };
 
