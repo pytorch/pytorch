@@ -26,19 +26,24 @@ namespace impl {
 
 // POD version of LocalDispatchKeySet.  Declared here just so that
 // we can put it in the guards.
+// This struct encapsulates special handling for TLS initialization
+// in set_included()/included() API so that they reflect the truth.
+// If you want to create PODLocalDispatchKeySet with non-zero state,
+// use set_included() instead of default constructor.
 struct C10_API PODLocalDispatchKeySet {
   uint64_t included_;
   uint64_t excluded_;
 
+  // See Note [TLS Initialization]
   DispatchKeySet included() const {
-    return DispatchKeySet(DispatchKeySet::RAW, included_);
+    return DispatchKeySet(DispatchKeySet::RAW, included_) ^ c10::default_included_set;
   }
   DispatchKeySet excluded() const {
     return DispatchKeySet(DispatchKeySet::RAW, excluded_);
   }
 
   void set_included(DispatchKeySet x) {
-    included_ = x.raw_repr();
+    included_ = (x ^ c10::default_included_set).raw_repr();
   }
   void set_excluded(DispatchKeySet x) {
     excluded_ = x.raw_repr();
