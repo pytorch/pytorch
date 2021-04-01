@@ -117,8 +117,6 @@ class TestLinalg(TestCase):
         run_test_case(zero_strided, b)
         run_test_case(a, zero_strided)
 
-    # https://github.com/pytorch/pytorch/issues/53976 tracks ROCm skip
-    @skipCUDAIfRocm
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -1383,6 +1381,7 @@ class TestLinalg(TestCase):
 
     # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
     # their matrix norm results match
+    @skipMeta  # https://github.com/pytorch/pytorch/issues/54082
     @skipCUDAIfNoMagma
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 2e-5})
@@ -1420,6 +1419,7 @@ class TestLinalg(TestCase):
                 for ord in ord_settings:
                     run_test_case(input, ord, dim, keepdim)
 
+    @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -1474,6 +1474,7 @@ class TestLinalg(TestCase):
                 actual = torch.linalg.cond(input, p)
                 self.assertEqual(actual, expected)
 
+    @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -3054,7 +3055,6 @@ class TestLinalg(TestCase):
 
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-7, torch.complex128: 1e-7})
     @skipCUDAIfNoMagma
-    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinv(self, device, dtype):
@@ -3654,6 +3654,7 @@ class TestLinalg(TestCase):
             a_inv = torch.linalg.tensorinv(a, ind=ind)
             self.assertEqual(a_inv.shape, a.shape[ind:] + a.shape[:ind])
 
+    @skipMeta  # See https://github.com/pytorch/pytorch/issues/53739
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -6036,7 +6037,6 @@ else:
 
     @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
-    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinverse(self, device, dtype):
@@ -6408,7 +6408,7 @@ else:
         run_test(3, 3, 4, 4)
         run_test(3, 3, 5, 5)
 
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_chain_matmul(self, device, dtype):
         def product(matrices):
             for mat in matrices[1:]:
