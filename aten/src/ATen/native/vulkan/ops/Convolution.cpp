@@ -14,6 +14,7 @@ using namespace api::utils;
 
 struct Experimentation final {
   static constexpr bool kUseConv2dOldApi = false;
+  static constexpr bool kUseWinogradConvs = false;
 };
 
 inline bool is_depthwise(
@@ -60,7 +61,7 @@ Conv2dMethod determine_method(
     return Conv2dOld;
   if (is_pointwise(filter))
     return Conv2dPointwise;
-  if (is_winograd_n_3(filter, stride, dilation))
+  if (Experimentation::kUseWinogradConvs && is_winograd_n_3(filter, stride, dilation))
     return Conv2dWinograd_2_3;
   return Conv2dSlidingWindow;
 }
@@ -1279,7 +1280,6 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
   }
 
   return convert(v_output);
-  //return convert(packed_.v_weight);
 }
 
 Conv2dOpContext::State Conv2dOpContext::unpack() const {

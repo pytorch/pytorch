@@ -1694,7 +1694,6 @@ class MobileNetV2 final : public OpsList {
   }
 };
 
-/*
 TEST(VulkanAPITest, mobilenetv2) {
   if (!at::is_vulkan_available()) {
     return;
@@ -1713,7 +1712,6 @@ TEST(VulkanAPITest, mobilenetv2) {
 
   ASSERT_TRUE(check);
 }
-*/
 
 } // namespace
 

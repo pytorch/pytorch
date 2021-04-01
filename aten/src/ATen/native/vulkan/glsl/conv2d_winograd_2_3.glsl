@@ -49,9 +49,6 @@ void main() {
         const ivec2 iposxy = ipos00.xy + ivec2(x,y);
         ivec2 wpos = ivec2(4*uBlock.size.w*x, 4*pos.z+y);
         for (int z4 = 0; z4 < uBlock.size.w; ++z4) {
-          //const ivec2 wpos00 = ivec2(4*uBlock.size.w*x + 4*z4, 4*pos.z);
-          //const int wposy = wpos00.y+y;
-          //const ivec4 wposx = wpos00.x + ivec4(0,1,2,3);
           const vec4 intex = texelFetch(uInput, ivec3(iposxy, z4), 0);
           dg[4*y+x] += vec4(
             dot(intex, texelFetch(uKernel, ivec3(wpos.x  , wpos.y, 0), 0)),
