@@ -240,7 +240,7 @@ class TestNNAPI(TestCase):
                 self.check(torch.nn.MaxPool2d((3, 4), (1, 2)), inp)
 
     def test_adaptive_avg_pool2d(self):
-        for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 3, 12, 16), 0.3, 128):
+        for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 4, 12, 16), 0.3, 128):
             with self.subTest(name):
                 self.check(torch.nn.AdaptiveAvgPool2d((1, 1)), inp)
                 with self.assertRaisesRegex(Exception, "with output size"):
