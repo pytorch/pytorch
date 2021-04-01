@@ -42,7 +42,7 @@ C10_HOST_DEVICE inline c10::complex<T> log2(const c10::complex<T> &x) {
 
 // Power functions
 //
-#if defined(_LIBCPP_VERSION) || (defined(_GLIBCXX_USE_C99_COMPLEX) && !_GLIBCXX_USE_C99_COMPLEX)
+#if defined(_LIBCPP_VERSION) || (defined(_GLIBCXX11_USE_C99_COMPLEX) && !_GLIBCXX11_USE_C99_COMPLEX)
 namespace _detail {
 TORCH_API c10::complex<float> sqrt(const c10::complex<float>& in);
 TORCH_API c10::complex<double> sqrt(const c10::complex<double>& in);
@@ -55,7 +55,7 @@ template<typename T>
 C10_HOST_DEVICE inline c10::complex<T> sqrt(const c10::complex<T> &x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<c10::complex<T>>(thrust::sqrt(c10_internal::cuda101bug_cast_c10_complex_to_thrust_complex(x)));
-#elif !(defined(_LIBCPP_VERSION) || (defined(_GLIBCXX_USE_C99_COMPLEX) && !_GLIBCXX_USE_C99_COMPLEX))
+#elif !(defined(_LIBCPP_VERSION) || (defined(_GLIBCXX11_USE_C99_COMPLEX) && !_GLIBCXX11_USE_C99_COMPLEX))
   return static_cast<c10::complex<T>>(std::sqrt(static_cast<std::complex<T>>(x)));
 #else
   return _detail::sqrt(x);
