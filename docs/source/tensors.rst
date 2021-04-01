@@ -181,6 +181,8 @@ Tensor class reference
       :func:`torch.tensor` for creating tensors from tensor-like objects (e.g. lists and tuples);
       or :func:`torch.empty` for creating uninitialized tensors with specific sizes (e.g. int).
 
+.. autoattribute:: Tensor.T
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -197,7 +199,6 @@ Tensor class reference
     Tensor.device
     Tensor.grad
     Tensor.ndim
-    Tensor.T
     Tensor.real
     Tensor.imag
 
@@ -220,7 +221,6 @@ Tensor class reference
     Tensor.addmm
     Tensor.addmm_
     Tensor.sspaddmm
-      :noindex:
     Tensor.addmv
     Tensor.addmv_
     Tensor.addr
@@ -307,7 +307,6 @@ Tensor class reference
     Tensor.dequantize
     Tensor.det
     Tensor.dense_dim
-      :noindex:
     Tensor.detach
     Tensor.detach_
     Tensor.diag
@@ -402,7 +401,6 @@ Tensor class reference
     Tensor.index_put
     Tensor.index_select
     Tensor.indices
-      :noindex:
     Tensor.inner
     Tensor.int
     Tensor.int_repr
@@ -422,7 +420,6 @@ Tensor class reference
     Tensor.is_shared
     Tensor.is_signed
     Tensor.is_sparse
-      :noindex:
     Tensor.istft
     Tensor.isreal
     Tensor.item
@@ -489,7 +486,6 @@ Tensor class reference
     Tensor.minimum
     Tensor.mm
     Tensor.smm
-      :noindex:
     Tensor.mode
     Tensor.movedim
     Tensor.moveaxis
@@ -602,9 +598,7 @@ Tensor class reference
     Tensor.sort
     Tensor.split
     Tensor.sparse_mask
-      :noindex:
     Tensor.sparse_dim
-      :noindex:
     Tensor.sqrt
     Tensor.sqrt_
     Tensor.square
@@ -628,7 +622,6 @@ Tensor class reference
     Tensor.swapdims
     Tensor.symeig
     Tensor.t
-    :noindex:
     Tensor.t_
     Tensor.tensor_split
     Tensor.tile
@@ -647,7 +640,6 @@ Tensor class reference
     Tensor.tolist
     Tensor.topk
     Tensor.to_sparse
-      :noindex:
     Tensor.trace
     Tensor.transpose
     Tensor.transpose_
@@ -670,7 +662,6 @@ Tensor class reference
     Tensor.unsqueeze
     Tensor.unsqueeze_
     Tensor.values
-      :noindex:
     Tensor.var
     Tensor.vdot
     Tensor.view
