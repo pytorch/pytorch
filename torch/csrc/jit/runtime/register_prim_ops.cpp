@@ -789,6 +789,11 @@ RegisterOperators reg(
          aten::polar,
          c10::polar(static_cast<double>(a), static_cast<double>(b)),
          complex),
+     DEFINE_SCALAR_BINARY_OP(
+         aten::polar,
+         c10::polar(static_cast<double>(a), static_cast<double>(b)),
+         c10::polar(static_cast<double>(a), static_cast<double>(b)),
+         Scalar)
      DEFINE_COMPARISON_OP(aten::lt, a < b),
      DEFINE_COMPARISON_OP(aten::gt, a > b),
      DEFINE_COMPARISON_OP(aten::le, a <= b),
