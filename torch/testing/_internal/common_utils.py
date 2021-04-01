@@ -830,6 +830,7 @@ def check_slow_test_from_stats(test):
 
     if test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
+        print(f'{test_name} is slowwwwwww')  # to see if anything shows up in normal PRs
 
 
 disabled_test_from_issues: Optional[Dict[str, Any]] = None
