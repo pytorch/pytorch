@@ -428,7 +428,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 Tensor cat_cuda(TensorList inputs, int64_t dimension) {
   ScalarType high_type = result_type(inputs);
   Tensor out = at::empty({0}, inputs.front().options().dtype(high_type));
-  cat_out_cuda(out, inputs, dimension);
+  at::native::cat_out_cuda(inputs, dimension, out);
   return out;
 }
 
@@ -451,7 +451,7 @@ inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) 
   return format.value();
 }
 
-Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
+Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
 
   // previously, size [0] tensors were the only possible empty tensors; thus, it
   // wasn't possible to cat empty tensors unless all the other tensors were
@@ -467,7 +467,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   int nDims = 0;
 
   // Check for type promotion
-  TORCH_CHECK(canCast(result_type(inputs), out.scalar_type()), "input types ",
+  TORCH_CHECK(canCast(result_type(inputs), out.scalar_type()), "torch.cat(): input types ",
                       " can't be cast to the desired output type ",
                       out.scalar_type());
 
@@ -476,7 +476,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     auto lap = at::get_overlap_status(out, inputs[i]);
     TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
                 lap != at::MemOverlapStatus::FULL,
-                "unsupported operation: the input tensors cannot refer to any "
+                "torch.cat(): unsupported operation: the input tensors cannot refer to any "
                 "of the output memory locations. Found overlap in input "
                 "tensor ", i);
   }
@@ -495,14 +495,19 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     return out;
   }
 
-  TORCH_CHECK(inputs.size() > 0, "invalid number of inputs ", inputs.size());
-  TORCH_CHECK(dimension >= 0, "invalid dimension ", dimension);
+  TORCH_CHECK(inputs.size() > 0, "torch.cat(): invalid number of inputs ", inputs.size());
+  TORCH_CHECK(dimension >= 0, "torch.cat(): invalid dimension ", dimension);
 
   for (const Tensor& t: inputs) {
     TORCH_CHECK(t.device() == notSkippedTensor->device(),
-                "All input tensors must be on the same device. Received ",
+                "torch.cat(): all input tensors must be on the same device. Received ",
                 t.device(), " and ", notSkippedTensor->device());
   }
+
+  TORCH_CHECK(
+      out.device() == notSkippedTensor->device(),
+      "torch.cat(): all input tensors and out must be on the same device, but inputs are on ",
+      notSkippedTensor->device(), " and out is on ", out.device());
 
   c10::MemoryFormat memory_format = compute_output_memory_format(inputs);
 
