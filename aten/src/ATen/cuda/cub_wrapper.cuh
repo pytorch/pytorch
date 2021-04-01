@@ -3,7 +3,7 @@
 
 namespace at {
 namespace cuda {
-namespace cub {
+namespace cub_wrapper {
 
 template<typename T>
 struct cuda_type {
