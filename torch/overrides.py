@@ -317,7 +317,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.cdist: lambda x1, x2, p=2.0, compute_mode='use_mm_for_euclid_dist_if_necessary': -1,
         torch.ceil: lambda input, out=None: -1,
         torch.celu: lambda input, alhpa=1., inplace=False: -1,
-        torch.chain_matmul: lambda *matrices: -1,
+        torch.chain_matmul: lambda *matrices, out=None: -1,
         torch.channel_shuffle: lambda input, groups : -1,
         torch.cholesky: lambda input, upper=False, out=None: -1,
         torch.linalg.cholesky: lambda input, out=None: -1,
