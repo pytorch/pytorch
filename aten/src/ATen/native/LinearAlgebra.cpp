@@ -848,7 +848,7 @@ static void addmm_impl_cpu_(
       m1_sizes[0], "x", m1_sizes[1], " @ ", m2_sizes[0], "x", m2_sizes[1], " != ",
       self_sizes[0], "x", self_sizes[1], ")");
 
-  native::resize_(result, self_sizes);
+  at::native::resize_output(result, self_sizes);
   const auto result_strides = result.strides();
   const auto result_sizes = result.sizes();
 
@@ -960,7 +960,7 @@ static void addbmm_impl_(
   TORCH_CHECK(self.size(0) == dim1 && self.size(1) == dim2,
       "self tensor does not match matmul output shape");
 
-  result.resize_as_(self);
+  at::native::resize_output(result, self.sizes());
 
   if (beta.to<c10::complex<double>>() != 0.0 && !self.is_same(result)) {
     result.copy_(self);
@@ -1027,7 +1027,7 @@ Tensor &addmm_cpu_(Tensor& self, const Tensor& mat1, const Tensor& mat2, const S
 Tensor& mm_cpu_out(const Tensor & self, const Tensor & mat2, Tensor & result) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
-  native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
+  at::native::resize_output(result, {self.sizes()[0], mat2.sizes()[1]});
   return addmm_cpu_out(result, self, mat2, 0, 1, result);
 }
 
@@ -1121,7 +1121,8 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   TORCH_CHECK(batch2_sizes[0] == bs && batch2_sizes[1] == contraction_size);
 
   if (is_bmm_out) {
-    self_or_result.resize_({bs, res_rows, res_cols});
+    // Here it is result
+    at::native::resize_output(self_or_result, {bs, res_rows, res_cols});
   } else {
     const auto self_sizes = self_or_result.sizes();
     TORCH_CHECK(self_sizes[0] == bs && self_sizes[1] == res_rows && self_sizes[2] == res_cols);
@@ -1188,7 +1189,7 @@ Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch
 Tensor& baddbmm_out_cpu(const Tensor& self_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
   Tensor self;
   std::tie(self) = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
-  result.resize_(self.sizes());
+  at::native::resize_output(result, self.sizes());
   result.copy_(self);
   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha);
 }
@@ -1944,7 +1945,7 @@ Tensor &frobenius_norm_out(const Tensor& self,
   // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
   //    However, norm_out and sqrt_out do not support automatic differentiation.
   //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
-  resize_output(result, result_.sizes());
+  at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
 }
@@ -1986,7 +1987,7 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
     auto permutation_reverse = create_reverse_permutation(permutation);
     result_ = result_.permute(permutation_reverse);
   }
-  resize_output(result, result_.sizes());
+  at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
 }
@@ -2011,29 +2012,27 @@ static void check_str_ord_valid(const std::string& str_ord, optional<IntArrayRef
 
 // Performs vector norm for ord = +/-infinity, and the second dimension reduction
 // for matrix norms.
-static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim) {
-  Tensor result;
-  if (self.numel() == 0 && self.sizes()[dim] > 0) {
+static Tensor _norm_min_max(Tensor& result, double ord, int64_t dim, bool keepdim) {
+  if (result.numel() == 0 && result.sizes()[dim] > 0) {
     // This special case is needed in matrix norm for tensors with 3 or more dims,
     // or in vector norm for order inf and -inf for tesnsors with 2 or more dims.
     // When the sizes of the dims to be reduced are greater than 0 but another dim
     // in the tensor is size 0 (thus numel == 0), we must either flatten or resize
     // the second reduction dim to 1, to avoid calling min/max, which would throw
     // an error.
-    if (self.sizes()[dim] != 1) {
-      auto new_sizes = self.sizes().vec();
+    if (result.sizes()[dim] != 1) {
+      auto new_sizes = result.sizes().vec();
       new_sizes[dim] = 1;
-      self.resize_(new_sizes);
+      at::native::resize_output(result, new_sizes);
     }
-    result = keepdim ? self : self.flatten(dim);
+    return keepdim ? result : result.flatten(dim);
   } else {
     if (ord > 0) {
-      result = std::get<0>(self.max(dim, keepdim));
+      return std::get<0>(result.max(dim, keepdim));
     } else {
-      result = std::get<0>(self.min(dim, keepdim));
+      return std::get<0>(result.min(dim, keepdim));
     }
   }
-  return result;
 }
 
 // Performs matrix norm
@@ -2098,7 +2097,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
       TORCH_CHECK(false, "Order ", ord, " not supported for matrix norm");
     }
   }
-  resize_output(result, result_.sizes());
+  at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
 }
@@ -2134,7 +2133,7 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
       Tensor result_ = at::linalg_vector_norm(self, opt_num_ord, opt_dim, keepdim, opt_dtype);
       // TODO: Resize and copy should be avoided with
       //       https://github.com/pytorch/pytorch/issues/52712
-      resize_output(result, result_.sizes());
+      at::native::resize_output(result, result_.sizes());
       result.copy_(result_);
     } else if (dim_.size() == 2) {
       _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
@@ -2535,7 +2534,7 @@ Tensor& kron_out(const Tensor& self, const Tensor& other, Tensor& result) {
       mul_shape[2 * i] = a_reshape[2 * i];
       mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
     }
-    resize_output(result, result_reshape);
+    at::native::resize_output(result, result_reshape);
     auto result_mul = at::_unsafe_view(result, mul_shape);
     at::mul_out(result_mul, self_view, other_view);
   }

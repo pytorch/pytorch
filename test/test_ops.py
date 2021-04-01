@@ -565,7 +565,7 @@ class TestCommon(JitCommonTestCase):
             return make_tensor(wrong_shape, dtype=t.dtype, device=t.device)
 
         out = _apply_out_transform(_case_two_transform, expected)
-        with self.assertWarnsRegex(UserWarning, "An output with one or more elements"):
+        with self.assertWarnsRegex(UserWarning, "An output with one or more elements", msg="Resized a non-empty tensor but did not warn about it."):
             op_out(out=out)
         self.assertEqual(expected, out)
 
@@ -601,7 +601,7 @@ class TestCommon(JitCommonTestCase):
                 return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
 
             out = _apply_out_transform(_case_four_transform, expected)
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(RuntimeError, msg=f"Expected RuntimeError when calling with input.device={device} and out.device={out.device}"):
                 op_out(out=out)
 
         # Case 5: out= with correct shape and device, but a dtype
@@ -614,13 +614,15 @@ class TestCommon(JitCommonTestCase):
         #   tensor is a floating point or complex dtype.
         _dtypes = floating_and_complex_types_and(torch.float16, torch.bfloat16)
         if (isinstance(expected, torch.Tensor) and expected.dtype in _dtypes or
-                (not isinstance(expected, torch.Tensor) and
-                 reduce(lambda cur, t: cur or t.dtype in _dtypes, expected, False))):
+            (not isinstance(expected, torch.Tensor) and any(t.dtype in _dtypes for t in expected))):
             def _case_five_transform(t):
                 return make_tensor(t.shape, dtype=torch.long, device=t.device)
 
-            out = out = _apply_out_transform(_case_five_transform, expected)
-            with self.assertRaises(RuntimeError):
+            out = _apply_out_transform(_case_five_transform, expected)
+            msg = "" if not isinstance(expected, torch.Tensor) else \
+                  ("Expected RuntimeError when doing an unsafe cast from an out "
+                   f"with dtype torch.long to expected.dtype={expected.dtype}")
+            with self.assertRaises(RuntimeError, msg=msg):
                 op_out(out=out)
 
 

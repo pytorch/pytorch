@@ -683,8 +683,9 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(const Tensor& self,
     bool descending,
     Tensor& values,
     Tensor& indices) {
-  values.resize_(self.sizes()).copy_(self);
-  indices.resize_(self.sizes());
+  at::native::resize_output(values, self.sizes());
+  values.copy_(self);
+  at::native::resize_output(indices, self.sizes());
 
   // check if self is scalar
   if (self.dim() == 0 && self.numel() == 1) {
