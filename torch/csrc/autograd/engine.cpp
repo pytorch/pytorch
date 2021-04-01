@@ -146,16 +146,25 @@ static thread_local std::shared_ptr<ReadyQueue> local_ready_queue = nullptr;
 // stream used to run the function OR the inputs are on different devices
 // and the function is responsible for properly acquiring them.
 //
-// The stream semantics of a backward() (or torch.autograd.grad()) call
-// with respect to surrounding ops are the same as for any other call.
+// User-facing stream semantics of a backward() (or torch.autograd.grad())
+// call with respect to surrounding ops are the same as for any other call.
 // See "Stream semantics of backward passes" on
 // https://pytorch.org/docs/stable/notes/cuda.html
 //
 // Internally, backward() runs ops (including leaf nodes) on side threads.
-// And streams are thread local. So the engine achieves the above semantics
-// by having GraphTask remember streams leaf nodes ran on. Then, after the
-// GraphTask finishes, execute() (which runs on the thread that called
-// backward() or grad()) syncs the current stream with the leaf streams.
+// And streams are thread local. So GraphTask achieves the above semantics by
+//  1. remembering the current and default streams on all active devices
+//     in the user-facing thread (aka, the thread that called execute() to
+//     launch the GraphTask)
+//  2. remembering the "leaf streams" (streams each backward leaf node ran on)
+//  3. during exec_post_processing, for each leaf stream, sync the remembered
+//     current and default streams (on the leaf stream's device) with that
+//     leaf stream.
+//
+// Syncing default streams (as well as current streams) with leaf streams is
+// done for temporary BC, and is more conservative than the usage guidance
+// (https://pytorch.org/docs/stable/notes/cuda.html) requires.
+// TODO: change 1, 2, 3 to sync only current streams with leaf streams.
 
 int NodeTask::getReentrantDepth() const {
   std::shared_ptr<GraphTask> graph_task = base_.lock();
