@@ -1,0 +1,57 @@
+name: Add annotations
+
+on:
+  workflow_run:
+    types:
+      - completed
+    workflows:
+      - Lint
+
+jobs:
+  annotate:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: flake8-py3
+            regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w+\d+) (?<errorDesc>.*)'
+          - name: clang-tidy
+            regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Download artifact
+        uses: actions/github-script@v3
+        with:
+          # https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+          script: |
+            const artifacts = await github.actions.listWorkflowRunArtifacts({
+               owner: context.repo.owner,
+               repo: context.repo.repo,
+               run_id: ${{ github.event.workflow_run.id }},
+            });
+            const matchArtifact = artifacts.data.artifacts.filter((artifact) => {
+              return artifact.name == '${{ matrix.name }}';
+            })[0];
+            const download = await github.actions.downloadArtifact({
+               owner: context.repo.owner,
+               repo: context.repo.repo,
+               artifact_id: matchArtifact.id,
+               archive_format: 'zip',
+            });
+            const fs = require('fs');
+            fs.writeFileSync('${{ github.workspace }}/linter-output.zip', Buffer.from(download.data));
+      - name: Unzip artifact
+        run: unzip linter-output.zip
+      - name: Get commit SHA
+        run: echo ::set-output name=commit-sha::$(cat commit-sha.txt)
+        id: get-commit-sha
+      - name: Add annotations
+        uses: pytorch/add-annotations-github-action@master
+        with:
+          check_name: ${{ matrix.name }}
+          linter_output_path: warnings.txt
+          commit_sha: ${{ steps.get-commit-sha.outputs.commit-sha }}
+          regex: ${{ matrix.regex }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
