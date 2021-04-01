@@ -359,12 +359,12 @@ class TORCH_API Tensor {
     return !at::impl::variable_excluded_from_dispatch();
   }
 
-  /// Returns a `Tensor`'s layout. Defined in Type.h
+  /// Returns a `Tensor`'s layout.
   Layout layout() const noexcept {
     return impl_->layout();
   }
 
-  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.cpp
+  /// Returns a `Tensor`'s dtype (`TypeMeta`).
   caffe2::TypeMeta dtype() const noexcept {
     return impl_->dtype();
   }
