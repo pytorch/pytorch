@@ -170,3 +170,7 @@ Example::
     >>> torch.expm1(torch.tensor([0, math.log(2.)]))
     tensor([ 0.,  1.])
 """.format(**common_args))
+
+xlog1py = _add_docstr(_special.special_xlog1py,
+                    r"""
+""".format(**common_args))
