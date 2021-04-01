@@ -232,7 +232,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_nodes_with_equal_types_do_not_get_matched(self):
         # verifies that by default, nodes with equivalent types do not get matched.
         # This is important for user defined types, for which we do not know
@@ -265,12 +265,15 @@ class TestFXGraphMatcher(QuantizationTestCase):
         results = get_matching_subgraph_pairs(mp, mq)
 
         # Conv2 should not be matched because we disabled quantization for it,
-        # so its type is the same in mp and mq. sigmoid and relu should not be
-        # matched because they use the same function in mp and mq.
+        # so its type is the same in mp and mq. sigmoid should not be
+        # matched because they use the same function in mp and mq. relu should
+        # be matched because it is in the allowlist of functions with same
+        # signature across dtypes.
         expected_types = {
             'base_op_torch.nn.Conv2d_0':
                 ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
             'base_op_torch.mul_0': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
+            'base_op_torch.relu_0': ((F.relu, F.relu), (F.relu, F.relu)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -592,6 +595,27 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m, (torch.randn(1, 1, 4, 4),),
             results_len=2,
             should_log_inputs=True)
+
+    @skipIfNoFBGEMM
+    def test_ops_with_same_fp32_and_int8_signature(self):
+        """
+        Verifies that we can match pairs of ops which have the same aten
+        signature for fp32 and int8 tensors.
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.max_pool_2d = nn.MaxPool2d(2)
+
+            def forward(self, x):
+                x = self.max_pool_2d(x)
+                x = F.relu(x)
+                return x
+
+        m = M().eval()
+        self._test_match_activations(
+            m, (torch.randn(1, 1, 2, 2),),
+            results_len=2)
 
     @skipIfNoFBGEMM
     def test_linear_fp16_weights(self):

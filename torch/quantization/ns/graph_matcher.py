@@ -84,6 +84,14 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
             torch.mul,
             toq.mul,
         ]),
+        # relu
+        'torch.relu': set([
+            F.relu,
+        ]),
+        # maxpool2d
+        'torch.nn.MaxPool2d': set([
+            nn.MaxPool2d,
+        ]),
     }
     return base_name_to_sets_of_related_ops
 
@@ -352,13 +360,29 @@ class GraphMatchingException(Exception):
 
 class SugraphTypeRelationship(enum.Enum):
     # same type
-    # example: F.linear and toq.linear, or nn.Conv2d and nn.Conv2d
+    # example: F.linear and F.linear, or nn.Conv2d and nn.Conv2d
     EQUAL = enum.auto()
+    # same type, and signature is the same for fp32 vs int8
+    # TODO(future PR): probably remove this and enable matching of
+    # nodes with equal types.
+    EQUAL_AND_SIGNATURE_SAME_ACROSS_DTYPES = enum.auto()
     # same subgraph_relationship set, but not the same type
     # example: F.linear and toq.linear
     RELATED_BUT_NOT_EQUAL = enum.auto()
     # not related
     NOT_RELATED = enum.auto()
+
+# TODO(future PR): full coverage
+def get_functions_signature_same_across_dtypes() -> Set[Callable]:
+    return set([
+        F.relu,
+    ])
+
+# TODO(future PR): full coverage
+def get_module_types_signature_same_across_dtypes() -> Set[Callable]:
+    return set([
+        nn.MaxPool2d,
+    ])
 
 def _get_subgraph_relationship_type(
     subgraph_a: NSSubgraph,
@@ -385,10 +409,16 @@ def _get_subgraph_relationship_type(
             elif (not node_a_has_prev) and node_b_has_prev:
                 return SugraphTypeRelationship.RELATED_BUT_NOT_EQUAL
             elif (not node_a_has_prev) and (not node_b_has_prev):
-                return SugraphTypeRelationship.EQUAL
+                if node_a.target in get_functions_signature_same_across_dtypes():
+                    return SugraphTypeRelationship.EQUAL_AND_SIGNATURE_SAME_ACROSS_DTYPES
+                else:
+                    return SugraphTypeRelationship.EQUAL
             else:
                 # TODO(future PR): check for matches start_op_node and base_op_node
-                return SugraphTypeRelationship.EQUAL
+                if node_a.target in get_functions_signature_same_across_dtypes():
+                    return SugraphTypeRelationship.EQUAL_AND_SIGNATURE_SAME_ACROSS_DTYPES
+                else:
+                    return SugraphTypeRelationship.EQUAL
 
         key = (node_a.target, node_b.target)
         if key in type_a_related_to_b:
@@ -406,7 +436,10 @@ def _get_subgraph_relationship_type(
         mod_b = getattr_from_fqn(gm_b, node_b.target)
         # modules with equivalent types always match (i.e. nn.Conv2d and nn.Conv2d)
         if type(mod_a) == type(mod_b):
-            return SugraphTypeRelationship.EQUAL
+            if type(mod_a) in get_module_types_signature_same_across_dtypes():
+                return SugraphTypeRelationship.EQUAL_AND_SIGNATURE_SAME_ACROSS_DTYPES
+            else:
+                return SugraphTypeRelationship.EQUAL
         key = (type(mod_a), type(mod_b))
         if key in type_a_related_to_b:
             return SugraphTypeRelationship.RELATED_BUT_NOT_EQUAL
