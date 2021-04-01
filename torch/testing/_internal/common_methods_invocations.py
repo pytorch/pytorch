@@ -2199,6 +2199,11 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/49224
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                 dtypes=[torch.int8], active_if=TEST_WITH_ASAN),
+                       # TODO: Fix test_out_arg_all_dtypes as torch.empty_like(expected_output) where expected_output=op(input)
+                       # We can break the logic of the loop over all possible types but it is OK.
+                       # https://github.com/pytorch/pytorch/blob/master/test/test_unary_ufuncs.py#L440-L449
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
+                                dtypes=[torch.cfloat, torch.cdouble]),
                    ),
                    supports_inplace_autograd=False,
                    assert_autodiffed=True),
