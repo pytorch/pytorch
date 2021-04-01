@@ -7,6 +7,7 @@ on:
 jobs:
   triage-issues:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - oncall_label: "oncall: jit"
