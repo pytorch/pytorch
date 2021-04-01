@@ -55,16 +55,18 @@ from torch.testing._internal.common_quantized import (
 
 # Reference method for fake quantize
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
-    res = (torch.clamp(torch.round(X * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale
-    return res
+    dtype = X.dtype
+    res = ((torch.clamp(torch.round(X.to(torch.float32) * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale)
+    return res.to(dtype)
 
 # Reference method for the gradient of the fake quantize operator
 def _fake_quantize_per_tensor_affine_grad_reference(dY, X, scale, zero_point, quant_min, quant_max):
-    Xq = torch.round(X * (1.0 / scale) + zero_point)
+    dtype = X.dtype
+    Xq = torch.round(X.to(torch.float32) * (1.0 / scale) + zero_point)
     mask = (Xq >= quant_min) * (Xq <= quant_max)
     res = torch.zeros_like(dY)
     res[mask] = dY[mask]
-    return res
+    return res.to(dtype)
 
 # Reference method for the gradients of the fake quantize operator
 def _fake_quantize_learnable_per_tensor_affine_grad_reference(dY, X, scale, zero_point, quant_min, quant_max, device):
@@ -206,7 +208,6 @@ def to_tensor(X, device):
 
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
-
 
 class TestObserver(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
@@ -862,22 +863,61 @@ class TestFakeQuantize(TestCase):
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
-    def _test_forward_per_tensor_cachemask_impl(self, device):
-        for torch_type in (torch.qint8, torch.quint8):
-            Xs = (torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)[:, ::2])
-            # pick the scale + zp so that some values get clipped
-            for X in Xs:
-                obs = torch.quantization.MinMaxObserver(torch_type)
-                obs(X * 0.75)
-                scale, zero_point = obs.calculate_qparams()
-                scale, zero_point = float(scale), int(zero_point)
-                quant_min, quant_max = obs._calculate_qmin_qmax()
+    def test_forward_backward_per_tensor_with_amp(self):
+        net = nn.Sequential(nn.Conv2d(1, 1, 3))
+        net.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        net_prep = torch.quantization.prepare_qat(net)
 
-                Y_test = torch.fake_quantize_per_tensor_affine(
-                    X, scale, zero_point, quant_min, quant_max)
-                Y_ref = _fake_quantize_per_tensor_affine_reference(
-                    X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
-                self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
+        with torch.cuda.amp.autocast():
+            x = torch.randn(4, 1, 5, 5)
+            out = net_prep(x).sum()
+            out.backward()
+            self.assertTrue(net_prep[0].weight.grad is not None)
+
+    def test_forward_per_tensor_half_precision_numerics(self):
+        scale = .1
+        zero = 0
+        maxi = 255
+        mini = 0
+
+        for i in range(20):
+            X1 = torch.randn(5, 5).to(torch.float16)
+            Y1 = torch.fake_quantize_per_tensor_affine(X1, scale, zero, mini, maxi)
+            Y1r = _fake_quantize_per_tensor_affine_reference(X1, scale, zero, mini, maxi)
+            self.assertTrue(torch.allclose(Y1, Y1r, rtol=tolerance, atol=tolerance))
+
+        # to force overflow
+        X2 = torch.tensor(2**15 + .01).to(torch.float16)
+        Y2 = torch.fake_quantize_per_tensor_affine(X2, scale, zero, mini, maxi)
+        Y2r = _fake_quantize_per_tensor_affine_reference(X2, scale, zero, mini, maxi)
+        self.assertTrue(torch.allclose(Y2, Y2r, rtol=tolerance, atol=tolerance))
+
+        scale = 10
+
+        # to force underflow
+        X3 = torch.tensor(2**-24).to(torch.float16)
+        Y3 = torch.fake_quantize_per_tensor_affine(X3, scale, zero, mini, maxi)
+        Y3r = _fake_quantize_per_tensor_affine_reference(X3, scale, zero, mini, maxi)
+        self.assertTrue(torch.allclose(Y3, Y3r, rtol=tolerance, atol=tolerance))
+
+    def _test_forward_per_tensor_cachemask_impl(self, device):
+        float_types = (torch.float32, torch.float16, torch.float64)
+        torch_types = (torch.qint8, torch.quint8)
+        Xs = (torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)[:, ::2])
+        for float_type, torch_type, X in itertools.product(float_types, torch_types, Xs):
+            # pick the scale + zp so that some values get clipped
+            X = X.to(float_type)
+            obs = torch.quantization.MinMaxObserver(torch_type)
+            obs(X * 0.75)
+            scale, zero_point = obs.calculate_qparams()
+            scale, zero_point = float(scale), int(zero_point)
+            quant_min, quant_max = obs._calculate_qmin_qmax()
+
+            Y_test = torch.fake_quantize_per_tensor_affine(
+                X, scale, zero_point, quant_min, quant_max)
+            Y_ref = _fake_quantize_per_tensor_affine_reference(
+                X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
+            self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
 
     def test_forward_per_tensor_cachemask_cpu(self):
         device = torch.device('cpu')
@@ -889,8 +929,10 @@ class TestFakeQuantize(TestCase):
         self._test_forward_per_tensor_cachemask_impl(device)
 
     def _test_backward_per_tensor_cachemask_impl(self, device):
-        for torch_type in (torch.qint8, torch.quint8):
-            X = torch.randn(4, 8).to(device)
+        float_types = (torch.float32, torch.float16, torch.float64)
+        torch_types = (torch.qint8, torch.quint8)
+        for float_type, torch_type in itertools.product(float_types, torch_types):
+            X = torch.randn(4, 8).to(device).to(float_type)
             X.requires_grad_()
             # pick the scale + zp so that some values get clipped
             obs = torch.quantization.MinMaxObserver(torch_type)

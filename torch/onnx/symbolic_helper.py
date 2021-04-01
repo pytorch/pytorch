@@ -304,7 +304,7 @@ def _generate_wrapped_number(g, scalar):
     wrapped as 0-dim int64 tensors and floating-point types are
     wrapped as 0-dim double tensors.
 
-    The input to this function is constant value. If the data type 
+    The input to this function is constant value. If the data type
     is a floating point type, it is converted to a 0-dim double
     tensor, else it is converted to a 0-dim tensor of its original type
     """
@@ -598,6 +598,13 @@ def _scatter_helper(g, self, dim, index, src):
         from torch.onnx.symbolic_opset11 import scatter  # type: ignore
     return scatter(g, self, dim, index, src)
 
+def _repeat_interleave_split_helper(g, self, reps, dim):
+    if _export_onnx_opset_version <= 12:
+        return g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
+    else:
+        from torch.onnx.symbolic_opset13 import split  # type: ignore
+        repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
+        return split(g, self, repeats, dim, _outputs=reps)
 
 def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     def _is_all_integral(scalars):

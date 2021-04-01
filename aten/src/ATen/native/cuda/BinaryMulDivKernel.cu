@@ -6,6 +6,8 @@
 #include <ATen/native/BinaryOps.h>
 #include <c10/cuda/CUDAGuard.h>
 
+#include <type_traits>
+
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
@@ -44,7 +46,7 @@ struct MulFunctor<bool> {
 };
 
 
-void div_true_kernel_cuda(TensorIterator& iter) {
+void div_true_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
@@ -64,7 +66,7 @@ void div_true_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void div_trunc_kernel_cuda(TensorIterator& iter) {
+void div_trunc_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
   if (isIntegralType(dtype, /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_trunc_cuda", [&]() {
@@ -93,7 +95,7 @@ void div_trunc_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void div_floor_kernel_cuda(TensorIterator& iter) {
+void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   // See NOTE: [Floor Division in Python]
   const auto dtype = iter.common_dtype();
   if (dtype == kByte) {
@@ -104,7 +106,7 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
   } else if (isIntegralType(dtype, /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
-        if ((a < 0) != (b < 0)) {
+        if (!std::is_unsigned<scalar_t>::value && (a < 0) != (b < 0)) {
           // Subtracts one from the results of truncation division if the
           // divisor and dividend have different sign(bit)s and the remainder of
           // the division is nonzero
@@ -168,7 +170,7 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void mul_kernel_cuda(TensorIterator& iter) {
+void mul_kernel_cuda(TensorIteratorBase& iter) {
   if (!isIntegralType(iter.common_dtype(), /*includeBool*/ true) &&
     (iter.is_cpu_scalar(1) || iter.is_cpu_scalar(2))) {
     //if common dtype is half the scalar constant can overflow in half precision, and yet the result can
