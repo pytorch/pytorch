@@ -69,7 +69,7 @@ struct InplaceConverter {
     std::unordered_map<Value*, Value*> alias_to_value_;
 
     struct aliasComp {
-      bool operator()(const Value* a, const Value* b) {
+      bool operator()(const Value* a, const Value* b) const {
         auto* n_a = a->node();
         auto* n_b = b->node();
         if (n_a == n_b) {
