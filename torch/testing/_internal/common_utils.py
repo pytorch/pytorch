@@ -2155,25 +2155,34 @@ def gradcheck(fn, inputs, **kwargs):
     # to be disabled to default for the public-facing api to avoid breaking user code.
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradcheck.
-    keys_enabled_by_default = (
-        "check_batched_grad",)
+    default_values = {
+        "check_batched_grad": True,
+        "fast_mode": True,
+    }
 
-    for key in keys_enabled_by_default:
-        kwargs[key] = kwargs.get(key, True)
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+        default_values["fast_mode"] = False
+
+    for key, value in default_values.items():
+        kwargs[key] = kwargs.get(key, value)
 
     return torch.autograd.gradcheck(fn, inputs, **kwargs)
-
 
 def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     # Wrapper around gradgradcheck that enables certain keys by default
     # See gradcheck above for an explanation of why we need something like this.
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
-    keys_enabled_by_default = (
-        "check_batched_grad",)
+    default_values = {
+        "check_batched_grad": True,
+        "fast_mode": True,
+    }
 
-    for key in keys_enabled_by_default:
-        kwargs[key] = kwargs.get(key, True)
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+        default_values["fast_mode"] = False
+
+    for key, value in default_values.items():
+        kwargs[key] = kwargs.get(key, value)
 
     return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
 
