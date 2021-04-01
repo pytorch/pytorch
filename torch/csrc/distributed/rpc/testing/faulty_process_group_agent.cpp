@@ -11,6 +11,7 @@ std::string fromVec(const std::vector<char>& vec) {
 }
 
 FaultyProcessGroupAgent::FaultyProcessGroupAgent(
+    const c10::intrusive_ptr<::c10d::Store>& store,
     std::string workerName,
     c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
@@ -19,6 +20,7 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
     const std::unordered_map<std::string, float>& messageTypesToDelay,
     int failNumSends)
     : ProcessGroupAgent(
+          store,
           std::move(workerName),
           std::move(pg),
           numSendRecvThreads,

@@ -42,9 +42,9 @@ optional<std::vector<size_t>> DistributedRandomSampler::next(
 }
 
 void DistributedRandomSampler::reset(optional<size_t> new_size) {
-  size_ = new_size.value_or(size_);  
+  size_ = new_size.value_or(size_);
   populate_indices();
-  
+
   std::mt19937 rand(epoch_);
   std::shuffle(all_indices_.begin(), all_indices_.end(), rand);
   sample_index_ = begin_index_;
@@ -78,7 +78,7 @@ void DistributedRandomSampler::save(serialize::OutputArchive& archive) const {
 }
 
 void DistributedRandomSampler::load(serialize::InputArchive& archive) {
-  auto tensor = torch::empty(1, torch::kInt64);  
+  auto tensor = torch::empty(1, torch::kInt64);
   archive.read("epoch_", tensor, /*is_buffer=*/true);
   epoch_ = tensor.item<int64_t>();
   // call reset() after loading epoch_ to populate indices.
