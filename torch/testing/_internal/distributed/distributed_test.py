@@ -38,6 +38,7 @@ from torch.testing._internal.common_distributed import (
     require_n_gpus_for_nccl_backend,
     requires_nccl_version,
     captured_output,
+    with_nccl_blocking_wait,
 )
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -5170,15 +5171,13 @@ class DistributedTest:
                 # there are no errors here.
                 dist.monitored_barrier(subgroup, timeout)
 
+        @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_rocm
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_monitored_barrier_allreduce_hang(self):
             # tests expected behavior when nonzero rank hangs.
-            if "NCCL_ASYNC_ERROR_HANDLING" in os.environ:
-                del os.environ["NCCL_ASYNC_ERROR_HANDLING"]
-            os.environ["NCCL_BLOCKING_WAIT"] = "1"
             nccl_pg = dist.new_group(
                 ranks=list(i for i in range(int(self.world_size))),
                 timeout=timedelta(seconds=2),
