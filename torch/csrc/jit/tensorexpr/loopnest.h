@@ -209,8 +209,10 @@ class TORCH_API LoopNest {
 
   // LoopOptions are propagated to tail.
   void sliceHead(For* f, int factor, For** head, For** tail);
+  void sliceHead(For* f, int factor);
   // LoopOptions are propagated to head.
   void sliceTail(For* f, int factor, For** head, For** tail);
+  void sliceTail(For* f, int factor);
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
