@@ -2005,7 +2005,7 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_instance_norm(self):
         max_sides = (4, 5)
-        shape_list = ([2, 2, 2, 2], [8, 8, 8, 8], [11, 11, 11, 11], [1, 32, 224, 224, 160])
+        shape_list = ([2, 2, 2, 2], [8, 8, 8, 8], [11, 11, 11, 11], [1, 4, 224, 224, 160])
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
