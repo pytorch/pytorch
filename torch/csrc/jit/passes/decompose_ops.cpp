@@ -98,8 +98,8 @@ bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
       // and both of those scalars are equal to 1.0, decompose this into an mm
       // followed by an add so that it can go through the existing optimization
       // (batchmm)
-      if (it->get<at::Scalar>(attr::alpha)->toDouble() != 1.0 ||
-          it->get<at::Scalar>(attr::beta)->toDouble() != 1.0) {
+      if (it->get<at::Scalar>(attr::alpha)->toComplexDouble() != 1.0 ||
+          it->get<at::Scalar>(attr::beta)->toComplexDouble() != 1.0) {
         continue;
       }
 

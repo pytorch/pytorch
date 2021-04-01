@@ -1052,7 +1052,7 @@ TEST(CustomChunkSize, BigTensorSerialization) {
   int64_t d2 = FLAGS_caffe2_test_big_tensor_size
       ? FLAGS_caffe2_test_big_tensor_size / d1
       : static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
-  int64_t size = d1 * d2;
+  BlobSerializationOptions options;
 
   Blob blob;
   TensorCPU* tensor = BlobGetMutableTensor(&blob, CPU);
@@ -1065,15 +1065,18 @@ TEST(CustomChunkSize, BigTensorSerialization) {
     std::lock_guard<std::mutex> guard(mutex);
     counter++;
   };
-  SerializeBlob(blob, "test", acceptor, size);
+  options.set_chunk_size(d1 * d2);
+  SerializeBlob(blob, "test", acceptor, options);
   EXPECT_EQ(counter, 1);
 
   counter = 0;
-  SerializeBlob(blob, "test", acceptor, (size / 2) + 1);
+  options.set_chunk_size((d1 * d2) / 2 + 1);
+  SerializeBlob(blob, "test", acceptor, options);
   EXPECT_EQ(counter, 2);
 
   counter = 0;
-  SerializeBlob(blob, "test", acceptor, kNoChunking);
+  options.set_chunk_size(-1);
+  SerializeBlob(blob, "test", acceptor, options);
   EXPECT_EQ(counter, 1);
 }
 

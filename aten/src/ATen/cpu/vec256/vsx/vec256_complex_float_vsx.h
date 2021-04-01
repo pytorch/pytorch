@@ -417,7 +417,7 @@ class Vec256<ComplexFlt> {
   }
 
   Vec256<ComplexFlt> sqrt() const {
-    return map(std::sqrt);  
+    return map(std::sqrt);
   }
 
   Vec256<ComplexFlt> reciprocal() const {
