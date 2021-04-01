@@ -1168,8 +1168,8 @@ void syevjBatched<c10::complex<double>, double>(
 #ifdef USE_CUSOLVER_64_BIT
 
 void xpotrs(
-    cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int63_t n, int64_t nrhs, cudaDataType dataTypeA, const void *A,
-    int63_t lda, cudaDataType dataTypeB, void *B, int64_t ldb, int *info) {
+    cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, int64_t nrhs, cudaDataType dataTypeA, const void *A,
+    int64_t lda, cudaDataType dataTypeB, void *B, int64_t ldb, int *info) {
   TORCH_CUSOLVER_CHECK(cusolverDnXpotrs(handle, params, uplo, n, nrhs, dataTypeA, A, lda, dataTypeB, B, ldb, info));
 }
 
