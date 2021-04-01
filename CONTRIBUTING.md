@@ -7,8 +7,10 @@
   - [Nightly Checkout & Pull](#nightly-checkout--pull)
   - [Codebase structure](#codebase-structure)
   - [Unit testing](#unit-testing)
+    - [Python Unit Testing](#python-unit-testing)
     - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
     - [Running `mypy`](#running-mypy)
+    - [C++ Unit Testing](#c-unit-testing)
   - [Writing documentation](#writing-documentation)
     - [Building documentation](#building-documentation)
       - [Tips](#tips)
@@ -349,17 +351,17 @@ command runs tests such as `TestNN.test_BCELoss` and
 
 ### Running `mypy`
 
-`mypy` is an optional static type checker for Python. We have a test
-suite that runs `mypy` on the entire codebase:
+`mypy` is an optional static type checker for Python. We have multiple `mypy`
+configs for the PyTorch codebase, so you can run them all using this command:
 
 ```bash
-python test/test_type_hints.py
+for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
 ```
 
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
 for more information on how to set up `mypy` and tackle type annotation
-tasks, as well as other ways to run `mypy` besides running that test suite.
+tasks.
 
 ### C++ Unit Testing
 
