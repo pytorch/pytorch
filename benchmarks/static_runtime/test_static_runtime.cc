@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include "deep_wide_pt.h"
 #include "test_scripts.h"
 
@@ -34,8 +36,8 @@ void compareTensorLists(
   for (int i = 0; i < l.size(); ++i) {
     ASSERT_TRUE(l[i].isTensor());
     ASSERT_TRUE(r[i].isTensor());
-    LOG(INFO) << "expect " << i << ": \n" << l[i] << std::endl;
-    LOG(INFO) << "output " << i << ": \n" << r[i] << std::endl;
+    VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
+    VLOG(2) << "output " << i << ": \n" << r[i] << std::endl;
     if (! l[i].toTensor().defined()) {
       EXPECT_TRUE(! r[i].toTensor().defined());
     } else {
@@ -49,8 +51,8 @@ void compareTensorLists(
     const std::vector<at::Tensor>& r /* values */) {
   EXPECT_TRUE(l.size() == r.size());
   for (int i = 0; i < l.size(); ++i) {
-    LOG(INFO) << "expect " << i << ": \n" << l[i] << std::endl;
-    LOG(INFO) << "output " << i << ": \n" << r[i] << std::endl;
+    VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
+    VLOG(2) << "output " << i << ": \n" << r[i] << std::endl;
     if (! l[i].defined()) {
       EXPECT_TRUE(! r[i].defined());
     } else {
@@ -93,7 +95,24 @@ void testStaticRuntime(
   // make sure inputs were not modified
   compareTensorLists(args_tensors, args_copy);
 }
+
+bool testHasInplaceOp(const std::string& jit_script) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  Method method = module.get_method("forward");
+  auto graph = module.get_method("forward").graph();
+
+  torch::jit::AliasDb alias_db(graph);
+  return torch::jit::HasInplaceOp(graph, alias_db);
+}
 } // namespace
+
+TEST(StaticRuntime, InPlace) {
+  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
+  EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
+  EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
+}
 
 TEST(StaticRuntime, UnaryOps) {
   auto a = at::ones({2, 3});
@@ -148,6 +167,8 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
   testStaticRuntime(reshape_script_3, args);
   testStaticRuntime(reshape_script_4, args);
   testStaticRuntime(reshape_script_5, args);
+  testStaticRuntime(reshape_inplace_script, args);
+  testStaticRuntime(reshape_incontiguous_script, args);
 }
 
 TEST(StaticRuntime, IndividualOps_flatten) {
