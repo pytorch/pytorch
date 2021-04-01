@@ -1052,7 +1052,7 @@ class TestFX(JitTestCase):
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
             if node.op == 'output':
-                output_shape = node.args[0].shape
+                output_shape = node.args[0].meta['shape']
         self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
                                        'call_module', 'output']))
 
@@ -1164,6 +1164,15 @@ class TestFX(JitTestCase):
         transformed = torch.fx.Transformer(symbolic_trace(rn18)).transform()
         inp = torch.randn(5, 3, 224, 224)
         self.assertEqual(transformed(inp), rn18(inp))
+
+    @skipIfNoTorchVision
+    def test_interpreter_gc_values(self):
+        rn18 = resnet18()
+        interp = Interpreter(symbolic_trace(rn18))
+        inp = torch.rand(5, 3, 224, 224)
+        out = interp.run(inp)
+        env_key_names = set(n.name for n in interp.env.keys())
+        self.assertEqual(env_key_names, set(['output']))
 
     def test_transformer_noop(self):
         class MyModule(torch.nn.Module):
@@ -2168,7 +2177,7 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat'}
+        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
