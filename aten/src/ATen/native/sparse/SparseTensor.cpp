@@ -127,7 +127,14 @@ Tensor empty_sparse(IntArrayRef size, c10::optional<ScalarType> dtype, c10::opti
 }
 
 /* Shape init */
-Tensor sparse_coo_tensor(ArrayRef<int64_t> size, const TensorOptions& options) {
+Tensor sparse_coo_tensor(IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   return at::_sparse_coo_tensor_with_dims(size.size(), 0, size, options.layout(at::kSparse));
 }
 
@@ -146,7 +153,14 @@ namespace {
   }
 }
 
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const TensorOptions& options) {
+Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   Tensor values = expand_values_if_needed(values_);
 
   // arg checking
@@ -235,12 +249,26 @@ void _validate_sparse_coo_tensor_args(const Tensor& indices, const Tensor& value
 }
 
 // NB: Got rid of the sizes == NULL case
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size, const TensorOptions& options) {
+Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   // arg checking
   TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
 
   at::native::_validate_sparse_coo_tensor_args(indices, values, size);
-  return at::native::_sparse_coo_tensor_unsafe(indices, values, size, options);
+  return at::native::_sparse_coo_tensor_unsafe(
+      indices,
+      values,
+      size,
+      optTypeMetaToScalarType(options.dtype_opt()),
+      options.layout_opt(),
+      options.device_opt(),
+      options.pinned_memory_opt());
 }
 
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
@@ -249,7 +277,14 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, ArrayRef<i
 // are guaranteed to be within bounds or if the caller is going to call
 // _validate_sparse_coo_tensor_args before using the tensor.
 // NB: Got rid of the size == NULL case
-Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, const TensorOptions& options) {
+Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   Tensor values = expand_values_if_needed(values_);
 
   int64_t sparse_dim = indices.size(0);
@@ -541,8 +576,8 @@ Tensor sparse_mask_helper_cpu(
       `t`             - coalesced sparse tensor input
       `mask_indices`  - mask indices tensor
 
-    Note: The nnz in the output tensor will be same as the `mask_indices`. So it will 
-    works independently if the mask is coalesced or not. 
+    Note: The nnz in the output tensor will be same as the `mask_indices`. So it will
+    works independently if the mask is coalesced or not.
   */
   TORCH_CHECK(t.is_sparse(), "t: input is not a sparse tensor");
   TORCH_CHECK(t.is_coalesced(), "t:  input is uncoalesced");
@@ -554,7 +589,7 @@ Tensor sparse_mask_helper_cpu(
   auto t_v = t._values();
   auto vsize = t_v.sizes().vec();
   vsize[0] = r_nnz;
- 
+
   Tensor r_values = at::zeros(vsize, t_v.options());
   auto t_i = t._indices();
   auto t_nnz = t._nnz();
@@ -583,7 +618,7 @@ Tensor sparse_mask_helper_cpu(
       }
     }
   });
-  return r_values; 
+  return r_values;
 }
 
 }} // namespace at::native

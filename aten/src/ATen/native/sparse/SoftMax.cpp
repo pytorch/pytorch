@@ -635,7 +635,7 @@ Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_, c10::option
   namedinference::propagate_names(result, input_);
   return result;
 }
-  
+
 Tensor _sparse_log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::_sparse_log_softmax(self, dimname_to_position(self, dim), dtype);
 }

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, Union, Sequence, Set, List, Dict, Tuple
 
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 from tools.codegen.gen import pythonify_default
 from tools.codegen.model import *
 
@@ -701,7 +701,7 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
             name='layout',
             type=OptionalType(BaseType(BaseTy.Layout)),
             default='strided' if pyi else 'torch.strided',
-            default_init='layout_from_backend(self.options().backend())' if is_like_or_new_function else None,
+            default_init='self.layout()' if is_like_or_new_function else None,
         ))
         tensor_options_args.append(PythonArgument(
             name='device',

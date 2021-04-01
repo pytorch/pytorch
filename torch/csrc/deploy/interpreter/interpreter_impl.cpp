@@ -32,8 +32,6 @@ using namespace py::literals;
 #define PYOBJ_ASSERT(obj) assert(NULL != obj);
 #endif
 
-static wchar_t* program;
-
 #define FOREACH_LIBRARY(_) \
   _(array)                 \
   _(_asyncio)              \
@@ -226,8 +224,8 @@ static py::object global_impl(const char* module, const char* name) {
 }
 
 using at::IValue;
-using torch::PickledObject;
-using torch::PythonObject;
+using torch::deploy::Obj;
+using torch::deploy::PickledObject;
 
 // Ensure GIL is held while this object is live,
 // note: we are not use py::gil_scoped_acquire here because
@@ -263,7 +261,7 @@ struct InitLockAcquire {
   std::mutex& init_lock_;
 };
 
-struct ConcreteInterpreterImpl : public torch::InterpreterImpl {
+struct ConcreteInterpreterImpl : public torch::deploy::InterpreterImpl {
   ConcreteInterpreterImpl() {
 #define APPEND_INIT(name) PyImport_AppendInittab(#name, PyInit_##name);
     FOREACH_LIBRARY(APPEND_INIT)
@@ -316,6 +314,7 @@ struct ConcreteInterpreterImpl : public torch::InterpreterImpl {
     // Release the GIL that PyInitialize acquires
     PyEval_SaveThread();
   }
+
   ~ConcreteInterpreterImpl() override {
     PyGILState_Ensure();
     // make sure pybind11 doesn't try to decref after we have destroyed python
@@ -329,9 +328,9 @@ struct ConcreteInterpreterImpl : public torch::InterpreterImpl {
       exit(1); // can't use TORCH_INTERNAL_ASSERT because we are in a
                // non-throwing destructor.
     }
-    PyMem_RawFree(program);
   }
-  torch::InterpreterSessionImpl* acquire_session() override;
+
+  torch::deploy::InterpreterSessionImpl* acquire_session() override;
   py::object save_storage;
   py::object load_storage;
   py::object get_package;
@@ -339,24 +338,25 @@ struct ConcreteInterpreterImpl : public torch::InterpreterImpl {
   std::mutex init_lock_;
 };
 
-struct ConcreteInterpreterSessionImpl : public torch::InterpreterSessionImpl {
+struct ConcreteInterpreterSessionImpl
+    : public torch::deploy::InterpreterSessionImpl {
   ConcreteInterpreterSessionImpl(ConcreteInterpreterImpl* interp)
       : interp_(interp) {}
-  PythonObject global(const char* module, const char* name) override {
+  Obj global(const char* module, const char* name) override {
     return wrap(global_impl(module, name));
   }
 
-  PythonObject from_ivalue(IValue value) override {
+  Obj from_ivalue(IValue value) override {
     return wrap(torch::jit::toPyObject(value));
   }
-  PythonObject create_or_get_package_importer_from_container_file(
+  Obj create_or_get_package_importer_from_container_file(
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           container_file_) override {
     InitLockAcquire guard(interp_->init_lock_);
     return wrap(interp_->get_package(container_file_));
   }
 
-  PickledObject pickle(PythonObject container, PythonObject obj) override {
+  PickledObject pickle(Obj container, Obj obj) override {
     py::tuple result = interp_->save_storage(unwrap(container), unwrap(obj));
     py::bytes bytes = py::cast<py::bytes>(result[0]);
     py::list storages = py::cast<py::list>(result[1]);
@@ -378,7 +378,7 @@ struct ConcreteInterpreterSessionImpl : public torch::InterpreterSessionImpl {
         std::move(dtypes_c),
         std::move(container_file)};
   }
-  PythonObject unpickle_or_get(int64_t id, const PickledObject& obj) override {
+  Obj unpickle_or_get(int64_t id, const PickledObject& obj) override {
     py::dict objects = interp_->objects;
     py::object id_p = py::cast(id);
     if (objects.contains(id_p)) {
@@ -411,12 +411,11 @@ struct ConcreteInterpreterSessionImpl : public torch::InterpreterSessionImpl {
     }
   }
 
-  IValue toIValue(PythonObject obj) const override {
+  IValue toIValue(Obj obj) const override {
     return torch::jit::toTypeInferredIValue(unwrap(obj));
   }
 
-  PythonObject call(PythonObject obj, at::ArrayRef<PythonObject> args)
-      override {
+  Obj call(Obj obj, at::ArrayRef<Obj> args) override {
     py::tuple m_args(args.size());
     for (size_t i = 0, N = args.size(); i != N; ++i) {
       m_args[i] = unwrap(args[i]);
@@ -424,7 +423,7 @@ struct ConcreteInterpreterSessionImpl : public torch::InterpreterSessionImpl {
     return wrap(call(unwrap(obj), m_args));
   }
 
-  PythonObject call(PythonObject obj, at::ArrayRef<IValue> args) override {
+  Obj call(Obj obj, at::ArrayRef<IValue> args) override {
     py::tuple m_args(args.size());
     for (size_t i = 0, N = args.size(); i != N; ++i) {
       m_args[i] = torch::jit::toPyObject(args[i]);
@@ -432,25 +431,42 @@ struct ConcreteInterpreterSessionImpl : public torch::InterpreterSessionImpl {
     return wrap(call(unwrap(obj), m_args));
   }
 
-  PythonObject attr(PythonObject obj, const char* attr) override {
+  Obj call_kwargs(Obj obj, std::vector<std::tuple<std::string, at::IValue>> kwargs) override {
+    std::vector<std::tuple<std::string, py::object>> kwargs_list;
+    kwargs_list.reserve(kwargs.size());
+    for (auto& kv: kwargs) {
+      kwargs_list.emplace_back(std::get<0>(kv), torch::jit::toPyObject(std::get<1>(kv)));
+    }
+    py::object o = py::cast(kwargs_list);
+    if(!o) {
+      throw py::error_already_set();
+    }
+    py::dict py_kwargs(o);
+    py::list py_args;
+    return wrap(call(unwrap(obj), py_args, py_kwargs));
+  }
+
+  Obj attr(Obj obj, const char* attr) override {
     return wrap(unwrap(obj).attr(attr));
   }
 
-  static py::object call(py::handle object, py::handle args) {
-    PyObject* result = PyObject_CallObject(object.ptr(), args.ptr());
+  static py::object call(py::handle object, py::handle args, py::handle kwargs = nullptr) {
+    PyObject* result = PyObject_Call(object.ptr(), args.ptr(), kwargs.ptr());
     if (!result) {
       throw py::error_already_set();
     }
     return py::reinterpret_steal<py::object>(result);
   }
 
-  py::handle unwrap(PythonObject obj) const {
+  py::handle unwrap(Obj obj) const {
     return objects_.at(ID(obj));
   }
-  PythonObject wrap(py::object obj) {
+
+  Obj wrap(py::object obj) {
     objects_.emplace_back(std::move(obj));
-    return PythonObject(this, objects_.size() - 1);
+    return Obj(this, objects_.size() - 1);
   }
+
   ~ConcreteInterpreterSessionImpl() override {
     objects_.clear();
   }
@@ -459,11 +475,13 @@ struct ConcreteInterpreterSessionImpl : public torch::InterpreterSessionImpl {
   std::vector<py::object> objects_;
 };
 
-torch::InterpreterSessionImpl* ConcreteInterpreterImpl::acquire_session() {
+torch::deploy::InterpreterSessionImpl* ConcreteInterpreterImpl::
+    acquire_session() {
   return new ConcreteInterpreterSessionImpl(this);
 }
 
-extern "C" __attribute__((visibility("default"))) torch::InterpreterImpl*
+extern "C" __attribute__((visibility("default")))
+torch::deploy::InterpreterImpl*
 new_interpreter_impl(void) {
   return new ConcreteInterpreterImpl();
 }

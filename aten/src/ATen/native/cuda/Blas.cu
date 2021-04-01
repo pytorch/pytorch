@@ -4,7 +4,7 @@
 
 namespace at { namespace native {
 
-Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
+Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta_, const Scalar& alpha_) {
   auto r_stride = result.stride(0);
   auto vec_stride = vec.stride(0);
 
