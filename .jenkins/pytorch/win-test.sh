@@ -28,15 +28,15 @@ PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR_WIN
 export PYTORCH_TEST_SKIP_NOARCH=1
 
-mkdir -p $TMP_DIR/build/torch
+mkdir -p "$TMP_DIR"/build/torch
 
 
 # This directory is used only to hold "pytorch_env_restore.bat", called via "setup_pytorch_env.bat"
 CI_SCRIPTS_DIR=$TMP_DIR/ci_scripts
-mkdir -p $CI_SCRIPTS_DIR
+mkdir -p "$CI_SCRIPTS_DIR"
 
-if [ -n "$(ls $CI_SCRIPTS_DIR/*)" ]; then
-    rm $CI_SCRIPTS_DIR/*
+if [ -n "$(ls "$CI_SCRIPTS_DIR"/*)" ]; then
+    rm "$CI_SCRIPTS_DIR"/*
 fi
 
 
@@ -61,22 +61,22 @@ run_tests() {
     done
 
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-        $SCRIPT_HELPERS_DIR/test_python.bat "$DETERMINE_FROM"
-        $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
-        $SCRIPT_HELPERS_DIR/test_custom_backend.bat
-        $SCRIPT_HELPERS_DIR/test_libtorch.bat
+        "$SCRIPT_HELPERS_DIR"/test_python.bat "$DETERMINE_FROM"
+        "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+        "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+        "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
         export PYTORCH_COLLECT_COVERAGE=1
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
-            $SCRIPT_HELPERS_DIR/test_python_first_shard.bat "$DETERMINE_FROM"
-            $SCRIPT_HELPERS_DIR/test_libtorch.bat
+            "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
+            "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
             if [[ "${USE_CUDA}" == "1" ]]; then
-              $SCRIPT_HELPERS_DIR/test_python_jit_legacy.bat "$DETERMINE_FROM"
+              "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat "$DETERMINE_FROM"
             fi
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-            $SCRIPT_HELPERS_DIR/test_python_second_shard.bat "$DETERMINE_FROM"
-            $SCRIPT_HELPERS_DIR/test_custom_backend.bat
-            $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
+            "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat "$DETERMINE_FROM"
+            "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+            "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         fi
     fi
 }
@@ -86,13 +86,13 @@ assert_git_not_dirty
 echo "TEST PASSED"
 
 if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]]; then
-  pushd $TEST_DIR
+  pushd "$TEST_DIR"
   python -mpip install coverage
   echo "Generating XML coverage report"
   time python -mcoverage xml
   popd
 
-  pushd $PROJECT_DIR
+  pushd "$PROJECT_DIR"
   python -mpip install codecov
   python -mcodecov
   popd

@@ -18,5 +18,5 @@ get_runtime_of_command () {
   runtime=${runtime#+++ $@}
   runtime=$(python -c "print($runtime)")
 
-  echo $runtime
+  echo "$runtime"
 }

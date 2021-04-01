@@ -1,3 +1,0 @@
-# Double quote to prevent globbing and word splitting.
-# https://github.com/koalaman/shellcheck/wiki/SC2086
-disable=SC2086

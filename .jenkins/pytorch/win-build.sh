@@ -33,10 +33,10 @@ fi
 
 # This directory is used only to hold "pytorch_env_restore.bat", called via "setup_pytorch_env.bat"
 CI_SCRIPTS_DIR=$TMP_DIR/ci_scripts
-mkdir -p $CI_SCRIPTS_DIR
+mkdir -p "$CI_SCRIPTS_DIR"
 
-if [ -n "$(ls $CI_SCRIPTS_DIR/*)" ]; then
-    rm $CI_SCRIPTS_DIR/*
+if [ -n "$(ls "$CI_SCRIPTS_DIR"/*)" ]; then
+    rm "$CI_SCRIPTS_DIR"/*
 fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
@@ -56,11 +56,11 @@ if [[ $PYLONG_API_CHECK == 0 ]]; then
 fi
 set -ex
 
-$SCRIPT_HELPERS_DIR/build_pytorch.bat
+"$SCRIPT_HELPERS_DIR"/build_pytorch.bat
 
 assert_git_not_dirty
 
-if [ ! -f ${TMP_DIR}/${IMAGE_COMMIT_TAG}.7z ] && [ ! ${BUILD_ENVIRONMENT} == "" ]; then
+if [ ! -f "${TMP_DIR}"/"${IMAGE_COMMIT_TAG}".7z ] && [ ! "${BUILD_ENVIRONMENT}" == "" ]; then
     exit 1
 fi
 echo "BUILD PASSED"
