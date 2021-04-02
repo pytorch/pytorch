@@ -397,10 +397,13 @@ class DistributedDataParallel(Module):
 
         self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
         distinct_device_types = {p.device.type for p in module.parameters()}
-        assert len(distinct_device_types) == 1, (
-            "DistributedDataParallel's input module must be on "
-            "the same type of devices, but input module parameters locate in {}."
-        ).format(distinct_device_types)
+        if len(distinct_device_types) != 1:
+            raise ValueError(
+                "DistributedDataParallel's input module must be on "
+                "the same type of devices, but input module parameters locate in {}.".format(
+                    distinct_device_types
+                )
+            )
         self.device_type = list(distinct_device_types)[0]
 
         if (
@@ -409,11 +412,16 @@ class DistributedDataParallel(Module):
             or self.device_type == "cpu"
             or self.is_multi_device_module
         ):
-            assert not device_ids and not output_device, (
-                "DistributedDataParallel device_ids and output_device arguments "
-                "only work with single-device GPU modules, but got "
-                "device_ids {}, output_device {}, and module parameters {}."
-            ).format(device_ids, output_device, {p.device for p in module.parameters()})
+            if device_ids or output_device:
+                raise ValueError(
+                    "DistributedDataParallel device_ids and output_device arguments "
+                    "only work with single-device/multiple-device GPU modules or CPU modules, "
+                    "but got device_ids {}, output_device {}, and module parameters {}.".format(
+                        device_ids,
+                        output_device,
+                        {p.device for p in module.parameters()}
+                    )
+                )
 
             self.device_ids = None
             self.output_device = None
