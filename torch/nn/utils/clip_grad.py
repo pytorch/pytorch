@@ -49,7 +49,7 @@ def clip_grad_norm_(
                 'set `error_if_nonfinite=False`')
         else:
             warnings.warn("Non-finite norm encountered in torch.nn.utils.clip_grad_norm_; continuing anyway. "
-                          "Note that this behavior will change in a future release to error out by default "
+                          "Note that the default behavior will change in a future release to error out "
                           "if a non-finite total norm is encountered. At that point, setting "
                           "error_if_nonfinite=false will be required to retain the old behavior.",
                           FutureWarning, stacklevel=2);
