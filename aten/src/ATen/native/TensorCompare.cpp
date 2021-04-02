@@ -10,12 +10,12 @@
 
 namespace at { namespace native {
 
-DEFINE_DISPATCH(where_kernel);
-DEFINE_DISPATCH(max_stub);
-DEFINE_DISPATCH(min_stub);
-DEFINE_DISPATCH(_aminmax_stub);
-DEFINE_DISPATCH(isposinf_stub);
-DEFINE_DISPATCH(isneginf_stub);
+DEFINE_DISPATCH(where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(min_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(_aminmax_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(isposinf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(isneginf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
@@ -66,7 +66,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
   // Computes allowed and actual error
   Tensor cast_other;
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     cast_other = other.to(at::get_default_dtype());
   } else {
     cast_other = other;
@@ -86,7 +86,7 @@ Tensor isnan(const Tensor& self) {
 
 Tensor isreal(const Tensor& self) {
   // Note: Integral and Floating tensor values are always real
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true) ||
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true) ||
       c10::isFloatingType(self.scalar_type())) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
@@ -96,7 +96,7 @@ Tensor isreal(const Tensor& self) {
 
 Tensor isinf(const Tensor &self) {
   // Note: Integral tensor values are never infinite
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
 
@@ -122,7 +122,7 @@ Tensor& isposinf_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(result.scalar_type() == at::kBool, "isposinf does not support non-boolean outputs.");
   result.resize_(self.sizes());
 
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     result.fill_(false);
   } else {
     auto iter = TensorIteratorConfig()
@@ -146,7 +146,7 @@ Tensor& isneginf_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(result.scalar_type() == at::kBool, "isneginf does not support non-boolean outputs.");
   result.resize_(self.sizes());
 
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     result.fill_(false);
   } else {
     auto iter = TensorIteratorConfig()
@@ -161,7 +161,7 @@ Tensor& isneginf_out(const Tensor& self, Tensor& result) {
 
 Tensor isfinite(const Tensor& self) {
   // Note: Integral tensor values are always finite
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
 
