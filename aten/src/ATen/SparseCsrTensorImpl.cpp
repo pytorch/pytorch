@@ -118,8 +118,8 @@ void SparseCsrTensorImpl::set_member_tensors(
       "expected crow_indices to be a strided tensor, but got crow_indices of layout ",
       crow_indices.layout());
   TORCH_CHECK(
-      values.layout() == kStrided,
-      "expected values to be a strided tensor, but got values of layout ",
+      values.layout() == kStrided && values.is_contiguous(),
+      "expected values to be a strided and contiguous tensor, but got values of layout ",
       values.layout());
 
   TORCH_CHECK(
