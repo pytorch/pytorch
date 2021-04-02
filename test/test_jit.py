@@ -4522,13 +4522,14 @@ def foo(xyz):
             def forward(self):
                 a: int = 4
                 b: int = 5
-                c: int = 3
-                with objmode(a="int", b="int", c="int"):
+                c: int = 0
+                with objmode(a="inp:int", b="inp:int", c="out:int"):
                     l = [2 for i in range(a) if i > 2]
                     c = l[0] + a + b
                     return c
                 return c
         s = torch.jit.script(A())
+        print(s.graph)
         self.assertEqual(s(), 11)
 
     def test_tensor_dtype(self):

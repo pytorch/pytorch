@@ -1,6 +1,7 @@
 import torch
 import sys
 import ast
+import astunparse
 import inspect
 import string
 from textwrap import dedent
@@ -20,6 +21,7 @@ from torch._utils_internal import get_source_lines_and_file
 
 from torch._jit_internal import SourceContext, should_drop, is_static_fn, FunctionModifiers
 import torch.jit.annotations
+from typing import Tuple
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
@@ -523,32 +525,65 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_With(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
-        # # HACK to recognize ignore context
+        # HACK to recognize ignore context
         if isinstance(stmt.items[0].context_expr, ast.Call):
             exp = stmt.items[0].context_expr
-            py_args = []
+
+            def process_ins_outs(args):
+                inputs = []
+                outputs = []
+                for arg in args:
+                    var_name = arg.arg
+                    var_ann = arg.value.value
+                    var_decl_type, var_ann = var_ann.split(":")
+                    if var_decl_type == "inp":
+                        inputs.append((var_name, var_ann))
+                    if var_decl_type == "out":
+                        outputs.append((var_name, var_ann))
+                return inputs, outputs
+
+            inputs, outputs = process_ins_outs(exp.keywords)
+
             dummy_function_str = "\ndef func_ignore("
-            for i in exp.keywords:
-                dummy_function_str += i.arg + " :"
-                dummy_function_str += i.value.value + ", "
-            dummy_function_str = dummy_function_str[:-2] + ") -> int: pass"
+            for var in inputs:
+                var_name, var_ann = var
+                dummy_function_str += var_name + " :" + var_ann + ", "
+            dummy_function_str = dummy_function_str[:-2] + ") -> "
+
+            return_type_ann = ""
+            if len(outputs) == 1:
+                return_type_ann = outputs[0][1]
+            if len(outputs) > 1:
+                return_type_ann = "Tuple["
+                for var in outputs:
+                    _, var_ann = var
+                    return_type_ann += var_ann + ","
+                return_type_ann = return_type_ann[:-2] + "]"
+
+            dummy_function_str += return_type_ann + ": pass"
             dummy_function = ast.parse(dummy_function_str).body[0]
             dummy_function.body = stmt.body
-            f = astunparse.unparse(dummy_function)
-            f = f + "\ncontainer[\"key\"]=func_ignore"
+            ignore_func_str = astunparse.unparse(dummy_function)
+            ignore_func_str = ignore_func_str + "\ncontainer[\"key\"]=func_ignore\nfunc_ignore._torchscript_modifier = FunctionModifiers.IGNORE"
             container = {}
-            exec(f)
-            exec("func_ignore._torchscript_modifier = FunctionModifiers.IGNORE")
-            def make_global(*args):
-                for arg in args:
-                    setattr(sys.modules[__name__], arg.__name__, arg)
-            make_global(container["key"])
-            assign_str = "{} = torch.jit.frontend.func_ignore(a, b, c)".format(exp.keywords[-1].arg)
-            assign_ast = ast.parse(assign_str)
-            assign_ast = assign_ast.body[0]
-            rhs = build_expr(ctx, assign_ast.value)
-            lhs = [build_expr(ctx, x) for x in assign_ast.targets]
-            return Assign(lhs, rhs)
+            exec(ignore_func_str)
+            setattr(sys.modules[__name__], container["key"].__name__, container[key])
+
+            assign_str_lhs = ""
+            for var in inputs:
+                var_name, _ = var
+                assign_str_lhs += var_name + ", "
+            assign_str_lhs = assign_str_lhs[:-2]
+
+            assign_str_rhs = "torch.jit.frontend.func_ignore("
+            for var in outputs:
+                var_name, _ = var
+                assign_str_rhs += var_name + ", "
+            assign_str_rhs = assign_str_rhs[:-2] + ")"
+            assign_str = assign_str_lhs + " = " + assign_str_rhs
+            assign_ast = ast.parse(assign_str).body[0]
+            return build_expr(assign_ast)
+
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
 
 class ExprBuilder(Builder):
