@@ -27,6 +27,7 @@ class PyTorchLinuxWorkflow:
                     docker_image_base=self.docker_image_base,
                 )
             )
+            output_file.write('\n')
         return output_file_path
 
 
