@@ -6,7 +6,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Tensor* conv2d_depthwise(
+TORCH_API Tensor* conv2d_depthwise(
     BufHandle input,
     BufHandle weight,
     BufHandle bias,
