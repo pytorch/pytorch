@@ -25,6 +25,7 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             false),
         strides_(strides.vec()) {
     set_has_contiguity_policy(HasContiguityPolicy::CustomBehavior);
+  }
 
   IntArrayRef strides() const override {
     return strides_;
