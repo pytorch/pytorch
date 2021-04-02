@@ -51,8 +51,8 @@ class ShapeProp(torch.fx.Interpreter):
         result = super().run_node(n)
 
         if isinstance(result, torch.Tensor):
-            n.shape = result.shape  # type: ignore
-            n.dtype = result.dtype  # type: ignore
+            n.meta['shape'] = result.shape  # type: ignore
+            n.meta['dtype'] = result.dtype  # type: ignore
 
         return result
 
