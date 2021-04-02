@@ -1030,7 +1030,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   // Work itself will create the CUDA events on all GPUs of tensors
   bool can_profile = outputs.size() == 1;
-  auto work = initWork(devices, rank_, opType, can_profile ? profilingTitle : nullptr, can_profile ? c10::optional<std::vector<at::Tensor>>(inputs) : c10::nullopt);
+  auto work = initWork(
+      devices,
+      rank_,
+      opType,
+      can_profile ? profilingTitle : nullptr,
+      can_profile ? c10::optional<std::vector<at::Tensor>>(inputs)
+                  : c10::nullopt);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
