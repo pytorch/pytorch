@@ -161,9 +161,7 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
 
-      // TODO: enable once we have an out variant for conv2d to use in the NNC's
-      // external call or when we have a performant TE representation for conv
-      // "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
   };
   // clang-format on
 
@@ -214,24 +212,6 @@ bool isSupported(Node* node) {
 
     if (FLAGS_torch_jit_disable_cat && node->kind() == aten::cat) {
       return false;
-    }
-
-    // We only support conv2d with constant strides/padding/dilation/groups
-    if (node->kind() == aten::conv2d) {
-      // Strides, padding and dilation are inputs 3, 4, and 5. They all must be
-      // an IntList of size 2.
-      for (size_t idx = 3; idx <= 5; idx++) {
-        if (node->input(idx)->node()->kind() != prim::Constant ||
-            !toIValue(node->input(idx))->isIntList() ||
-            toIValue(node->input(idx))->toIntList().size() != 2) {
-          return false;
-        }
-      }
-      // Groups is input 6. It must be a constant int.
-      if (node->input(6)->node()->kind() != prim::Constant ||
-          !toIValue(node->input(6))->isInt()) {
-        return false;
-      }
     }
 
     return true;
@@ -627,7 +607,10 @@ class TensorExprFuser {
   // until there is nothing we can pull in.
   std::pair<graph_node_list::iterator, bool> createFusionGroup(
       Node* fusion_node) {
-    if (min_group_size_ == 1) {
+    // Allow single-node groups containing conv2d, since we'll only select
+    // those in cases where the tensorexpr implementation is faster than the
+    // aten implementation.
+    if (min_group_size_ == 1 || fusion_node->kind() == aten::conv2d) {
       fusion_node = getOrCreateTensorExprSubgraph(fusion_node);
     }
 
@@ -756,13 +739,25 @@ class TensorExprFuser {
     return num;
   }
 
+  bool hasConv(Block* block) {
+    for (Node* n : block->nodes()) {
+      if (n->kind() == aten::conv2d) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool inlineIfTooSmall(Node* n) {
     if (n->kind() != prim::TensorExprGroup) {
       return false;
     }
     auto subgraph = SubgraphUtils::getSubgraph(n);
-    size_t num_modes = blockSize(subgraph->block());
-    if (num_modes < min_group_size_) {
+    size_t num_nodes = blockSize(subgraph->block());
+    // Allow small subgraphs containing conv2d, since we'll only select those
+    // in cases where the tensorexpr implementation is faster than the aten
+    // implementation.
+    if (num_nodes < min_group_size_ && !hasConv(subgraph->block())) {
       GRAPH_UPDATE("Fusion group is too small, unmerging: ", *n);
       SubgraphUtils::unmergeSubgraph(n);
       return true;
@@ -868,6 +863,11 @@ class TensorExprFuser {
 
   bool isFusableOnDevice(Node* node) {
     for (const auto& input : node->inputs()) {
+      if (input->node()->kind() == prim::ListConstruct) {
+        if (!isFusableOnDevice(input->node())) {
+          return false;
+        }
+      }
       if (!canFuseOnDevice(input)) {
         return false;
       }
@@ -984,7 +984,12 @@ class TensorExprFuser {
         }
       }
     }
-
+    if (node->kind() == aten::conv2d) {
+      if (!tensorexpr::conv2dIsSupported(node)) {
+        GRAPH_DEBUG("Params of conv2d are not supported");
+        return false;
+      }
+    }
     return true;
   }
 
