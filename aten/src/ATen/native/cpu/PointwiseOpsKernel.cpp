@@ -12,7 +12,29 @@ namespace {
 
 static void addcmul_cpu_kernel(TensorIterator& iter, const Scalar& value) {
   ScalarType dtype = iter.dtype(0);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcmul_cpu_out", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, dtype, "addcmul_cpu_out", [&] {
+    if (dtype == kBFloat16) {
+      float float_val = value.to<float>();
+      auto float_vec = Vec256<float>(float_val);
+      cpu_kernel_vec(
+          iter,
+          [=](BFloat16 self_val, BFloat16 t1_val, BFloat16 t2_val) -> BFloat16 {
+            return float(self_val) + float_val * float(t1_val) * float(t2_val);
+          },
+          [=](Vec256<BFloat16> self_vec,
+              Vec256<BFloat16> t1_vec,
+              Vec256<BFloat16> t2_vec) {
+            Vec256<float> self_vec0, self_vec1;
+            std::tie(self_vec0, self_vec1) = convert_bfloat16_float(self_vec);
+            Vec256<float> t1_vec0, t1_vec1, t2_vec0, t2_vec1;
+            std::tie(t1_vec0, t1_vec1) = convert_bfloat16_float(t1_vec);
+            std::tie(t2_vec0, t2_vec1) = convert_bfloat16_float(t2_vec);
+            self_vec0 = self_vec0 + float_vec * t1_vec0 * t2_vec0;
+            self_vec1 = self_vec1 + float_vec * t1_vec1 * t2_vec1;
+            return convert_float_bfloat16(self_vec0, self_vec1);
+          });
+      return;
+    }
     scalar_t scalar_val = value.to<scalar_t>();
     auto scalar_vec = Vec256<scalar_t>(scalar_val);
     cpu_kernel_vec(
@@ -30,7 +52,29 @@ static void addcmul_cpu_kernel(TensorIterator& iter, const Scalar& value) {
 
 static void addcdiv_cpu_kernel(TensorIterator& iter, const Scalar& value) {
   ScalarType dtype = iter.dtype(0);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcdiv_cpu_out", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, dtype, "addcdiv_cpu_out", [&] {
+    if (dtype == kBFloat16) {
+      float float_val = value.to<float>();
+      auto float_vec = Vec256<float>(float_val);
+      cpu_kernel_vec(
+          iter,
+          [=](BFloat16 self_val, BFloat16 t1_val, BFloat16 t2_val) -> BFloat16 {
+            return float(self_val) + float_val * float(t1_val) / float(t2_val);
+          },
+          [=](Vec256<BFloat16> self_vec,
+              Vec256<BFloat16> t1_vec,
+              Vec256<BFloat16> t2_vec) {
+            Vec256<float> self_vec0, self_vec1;
+            std::tie(self_vec0, self_vec1) = convert_bfloat16_float(self_vec);
+            Vec256<float> t1_vec0, t1_vec1, t2_vec0, t2_vec1;
+            std::tie(t1_vec0, t1_vec1) = convert_bfloat16_float(t1_vec);
+            std::tie(t2_vec0, t2_vec1) = convert_bfloat16_float(t2_vec);
+            self_vec0 = self_vec0 + float_vec * t1_vec0 / t2_vec0;
+            self_vec1 = self_vec1 + float_vec * t1_vec1 / t2_vec1;
+            return convert_float_bfloat16(self_vec0, self_vec1);
+          });
+      return;
+    }
     scalar_t scalar_val = value.to<scalar_t>();
     auto scalar_vec = Vec256<scalar_t>(scalar_val);
     cpu_kernel_vec(

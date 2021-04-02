@@ -672,6 +672,24 @@ void huber_kernel(TensorIterator& iter, double delta) {
 
 void sigmoid_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
+    if (iter.dtype() == kBFloat16) {
+      auto one_vec = Vec256<float>((float)(1));
+      cpu_kernel_vec(iter,
+        [=](BFloat16 a, BFloat16 b) -> BFloat16 {
+          float a0 = static_cast<float>(a);
+          float b0 = static_cast<float>(b);
+          return a0 * (float(1) - b0) * b0;
+        },
+        [=](Vec256<BFloat16> a, Vec256<BFloat16> b) {
+          Vec256<float> a0, a1, b0, b1;
+          std::tie(a0, a1) = convert_bfloat16_float(a);
+          std::tie(b0, b1) = convert_bfloat16_float(b);
+          a0 = a0 * (one_vec - b0) * b0;
+          a1 = a1 * (one_vec - b1) * b1;
+          return convert_float_bfloat16(a0, a1);
+        });
+      return;
+    }
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -747,7 +765,27 @@ void tanh_backward_kernel(TensorIterator& iter) {
       });
   });
   } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "tanh_backward_cpu", [&]() {
+      if (iter.dtype() == kBFloat16) {
+        auto one_vec = Vec256<float>(float{1});
+        cpu_kernel_vec(
+          iter,
+          [=](BFloat16 a, BFloat16 b) -> BFloat16 {
+            float a0 = float(a);
+            float b0 = float(b);
+            return a0 * (float{1} - b0 * b0);
+          },
+          [=](Vec256<BFloat16> a, Vec256<BFloat16> b) {
+            Vec256<float> a0, a1, b0, b1;
+            std::tie(a0, a1) = convert_bfloat16_float(a);
+            std::tie(b0, b1) = convert_bfloat16_float(b);
+            a0 = a0 * (one_vec - b0 * b0);
+            a1 = a1 * (one_vec - b1 * b1);
+            return convert_float_bfloat16(a0, a1);
+          }
+        );
+        return;
+      }
       auto one_vec = Vec256<scalar_t>(scalar_t{1});
       cpu_kernel_vec(
         iter,
