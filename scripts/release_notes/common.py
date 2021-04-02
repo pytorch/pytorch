@@ -17,8 +17,11 @@ categories = [
     'caffe2',
     'quantization',
     'amd',
+    'cuda',
     'benchmark',
     'profiler',
+    'performance_as_product',
+    'package',
     'dispatcher',
     'releng',
     'fx',
@@ -33,6 +36,7 @@ categories = [
     'build_frontend',
     'memory_format_frontend',
     'foreach_frontend',
+    'dataloader_frontend'
 ]
 
 topics = [
