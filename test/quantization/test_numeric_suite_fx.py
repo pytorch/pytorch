@@ -30,7 +30,7 @@ from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
     GraphMatchingException,
 )
-from torch.quantization.ns.numeric_suite_core_apis_fx import (
+from torch.quantization._numeric_suite_fx import (
     extract_weights,
     _extract_weights_impl,
     add_loggers,
