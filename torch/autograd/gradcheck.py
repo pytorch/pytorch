@@ -157,7 +157,10 @@ def compute_numerical_gradient(fn, entry, v, nbhd_checks_fn):
         v = v.reshape(entry.shape)
 
     if isinstance(v, torch.Tensor):
-        norm_v = v.norm()
+        # It doesn't matter what the norm (denom) is when v.numel() = 0, because
+        # the numerator `b - a` would always be 0, but we don't want it being 0
+        # as to avoid nans
+        norm_v = v.norm() if not v.numel() == 0 else 1
     else:
         norm_v = -1j * v if isinstance(v, complex) else v
 
