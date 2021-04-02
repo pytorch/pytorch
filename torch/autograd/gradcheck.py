@@ -115,7 +115,7 @@ def iter_tensor(x_tensor):
 
 
 def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
-                           grad_out=1.0) -> List[Tuple[torch.Tensor]]:
+                           grad_out=1.0) -> List[Tuple[torch.Tensor, ...]]:
     """Computes the numerical jacobian for a given fn and inputs. Returns M * N jacobians
     where M is the number of input tensors that require grad, and N is the number of output
     float/complex tensors.
@@ -134,7 +134,7 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
     """
-    jacobians: List[Tuple[torch.Tensor]] = []
+    jacobians: List[Tuple[torch.Tensor, ...]] = []
     if outputs is None:
         outputs = _as_tuple(fn(inputs))
     if target is None:
@@ -223,6 +223,9 @@ def get_numerical_jacobian_helper(fn, input, input_idx, inputs, outputs, eps, gr
             ds_dy_tup = compute_gradient(fn, inputs, input_idx, x, idx, eps * 1j, eps, input.layout)
 
             for ds_dx, ds_dy, d in zip(ds_dx_tup, ds_dy_tup, jacobians):
+                if not ds_dx.is_complex() and isinstance(grad_out, complex):
+                    # skip if grad_out is complex but output is real
+                    continue
                 # conjugate wirtinger derivative
                 conj_w_d = 0.5 * (ds_dx + ds_dy * 1j)
                 # wirtinger derivative
@@ -238,9 +241,10 @@ def get_numerical_jacobian_helper(fn, input, input_idx, inputs, outputs, eps, gr
                     #            = real(grad_out.conj() * ds_dx)
                     d[d_idx] = torch.real(grad_out.conjugate() * ds_dx)
                 else:   # R -> R
-                    # skip if grad_out is complex but output is real
-                    if not isinstance(grad_out, complex):
-                        d[d_idx] = ds_dx * grad_out
+                    if isinstance(grad_out, complex):
+                        # skip if grad_out is complex but output is real
+                        continue
+                    d[d_idx] = ds_dx * grad_out
     return jacobians
 
 
