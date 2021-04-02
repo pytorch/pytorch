@@ -254,13 +254,13 @@ std::string stacksToStr(const std::vector<std::string>& stacks) {
 } // namespace
 
 std::unique_ptr<libkineto::Metadata> convertMetadata(const c10::optional<Metadata>& metadata){
-  if (!metadata){
+  if (!metadata.has_value()){
     return nullptr;
   }
 
   // TODO: add options to config collect which options in future?
   auto result = std::make_unique<libkineto::Metadata>();
-  if (metadata->distributed_){
+  if (metadata->distributed_.has_value()){
     result->distributed_ = std::make_unique<libkineto::DistributedMetadata>();
     result->distributed_->backend_ = metadata->distributed_->backend_;
     result->distributed_->worldSize_ = metadata->distributed_->worldSize_;
@@ -277,7 +277,7 @@ std::unique_ptr<libkineto::Metadata> convertMetadata(const c10::optional<Metadat
 void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities,
-    const c10::optional<Metadata>& metadata) {
+    c10::optional<Metadata> metadata) {
   TORCH_CHECK(config.state == ProfilerState::KINETO,
       "Supported only in Kineto profiler");
 

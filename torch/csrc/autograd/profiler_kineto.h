@@ -216,12 +216,20 @@ struct TORCH_API ProfilerResult {
 };
 
 struct DistributedMetadata{
+  DistributedMetadata(std::string backend, int rank, int worldSize): 
+    backend_(std::move(backend)), rank_(rank), worldSize_(worldSize){
+  }
+
   std::string backend_;
   int rank_;
   int worldSize_;
 };
 
 struct GpuInfo{
+  GpuInfo(int id, std::string name, uint64_t totalMemory):
+    id_(id), name_(std::move(name)), totalMemory_(totalMemory){
+    }
+
   int id_;
   std::string name_;
   uint64_t totalMemory_;
@@ -241,7 +249,7 @@ TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 TORCH_API void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities,
-    const c10::optional<Metadata>& metadata);
+    c10::optional<Metadata> metadata);
 #endif // USE_KINETO
 
 } // namespace profiler

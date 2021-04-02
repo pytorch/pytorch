@@ -361,7 +361,9 @@ class profile(object):
             with_stack=self.with_stack,
             use_kineto=True,
         )
-        self.profiler._prepare_kineto_trace(self._collect_metadata())
+        # self.profiler._prepare_kineto_trace(self._collect_metadata())
+        # TODO: try the test firstly
+        self.profiler._prepare_kineto_trace(None)
 
     def _start_trace(self):
         assert self.profiler is not None
@@ -387,11 +389,7 @@ class profile(object):
             devices = []
             for i in range(device_count):
                 device_prop = torch.cuda.get_device_properties(i)
-                gpu = torch.autograd.GpuInfo()
-                gpu.id = i
-                gpu.name = device_prop.name
-                gpu.total_memory = device_prop.total_memory
-                devices.append(gpu)
+                devices.append(torch.autograd.GpuInfo(i, device_prop.name, device_prop.total_memory))
         return devices
 
     @staticmethod
@@ -400,8 +398,7 @@ class profile(object):
         if not dist.is_available() or not dist.is_initialized():
             return None
 
-        dist_metadata = torch.autograd.DistributedMetadata()
-        dist_metadata.backend = dist.get_backend()
-        dist_metadata.rank = dist.get_rank()
-        dist_metadata.world_size = dist.get_world_size()
-        return dist_metadata
+        return torch.autograd.DistributedMetadata(
+            dist.get_backend(),
+            dist.get_rank(),
+            dist.get_world_size())

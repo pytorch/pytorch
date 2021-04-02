@@ -64,11 +64,22 @@ class DistributedMetadata:
     backend: str
     rank: int
     world_size: int
+    def __init__(
+        self,
+        backend: str,
+        rank: int,
+        world_size: int) -> None: ...
 
 class GpuInfo:
     id: int
     name: str
     total_memory: int
+
+    def __init__(
+        self,
+        id: int,
+        name: str,
+        total_memory: int) -> None: ...
 
 class Metadata:
     gpus: List[GpuInfo]
