@@ -10206,10 +10206,10 @@ class TestNNInit(TestCase):
         super(TestNNInit, self).setUp()
         random.seed(123)
 
-    def _is_normal(self, tensor, mean, std):
+    def _assert_normal(self, tensor, mean, std):
         samples = tensor.view(-1).tolist()
         p_value = stats.kstest(samples, 'norm', args=(mean, std))[1]
-        return p_value > 0.0001
+        self.assertGreater(p_value, 0.0001)
 
     def _is_trunc_normal(self, tensor, mean, std, a, b):
         # scipy's trunc norm is suited for data drawn from N(0, 1),
@@ -10219,12 +10219,12 @@ class TestNNInit(TestCase):
         a0 = (a - mean) / std
         b0 = (b - mean) / std
         p_value = stats.kstest(z_samples, 'truncnorm', args=(a0, b0))[1]
-        return p_value > 0.0001
+        self.assertGreater(p_value, 0.0001)
 
-    def _is_uniform(self, tensor, a, b):
+    def _assert_uniform(self, tensor, a, b):
         samples = tensor.view(-1).tolist()
         p_value = stats.kstest(samples, 'uniform', args=(a, (b - a)))[1]
-        return p_value > 0.0001
+        self.assertGreater(p_value, 0.0001)
 
     def _create_random_nd_tensor(self, dims, size_min, size_max):
         size = [random.randint(size_min, size_max) for _ in range(dims)]
@@ -10284,7 +10284,7 @@ class TestNNInit(TestCase):
             a = self._random_float(-3, 3)
             b = a + self._random_float(1, 5)
             init.uniform_(input_tensor, a=a, b=b)
-            assert self._is_uniform(input_tensor, a, b)
+            self._assert_uniform(input_tensor, a, b)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_normal(self):
@@ -10294,7 +10294,7 @@ class TestNNInit(TestCase):
             std = self._random_float(1, 5)
             init.normal_(input_tensor, mean=mean, std=std)
 
-            assert self._is_normal(input_tensor, mean, std)
+            self._assert_normal(input_tensor, mean, std)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_trunc_normal(self):
@@ -10306,7 +10306,7 @@ class TestNNInit(TestCase):
             b = self._random_float(mean, mean + 2 * std)
             init.trunc_normal_(input_tensor, mean=mean, std=std, a=a, b=b)
 
-            assert self._is_trunc_normal(input_tensor, mean, std, a, b)
+            self._is_trunc_normal(input_tensor, mean, std, a, b)
 
     def test_constant(self):
         for dims in [1, 2, 4]:
@@ -10466,7 +10466,7 @@ class TestNNInit(TestCase):
 
                 expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
                 bounds = expected_std * math.sqrt(3)
-                assert self._is_uniform(input_tensor, -bounds, bounds)
+                self._assert_uniform(input_tensor, -bounds, bounds)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_xavier_normal(self):
@@ -10488,7 +10488,7 @@ class TestNNInit(TestCase):
                     fan_out *= input_tensor[0, 0].numel()
 
                 expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-                assert self._is_normal(input_tensor, 0, expected_std)
+                self._assert_normal(input_tensor, 0, expected_std)
 
     def test_kaiming_uniform_errors_on_inputs_smaller_than_2d(self):
         for dims in [0, 1]:
@@ -10528,7 +10528,7 @@ class TestNNInit(TestCase):
 
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
                     bounds = expected_std * math.sqrt(3.0)
-                    assert self._is_uniform(input_tensor, -bounds, bounds)
+                    self._assert_uniform(input_tensor, -bounds, bounds)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_uniform(self):
@@ -10553,7 +10553,7 @@ class TestNNInit(TestCase):
                     n = fan_in if mode == 'fan_in' else fan_out
                     expected_std = gain / math.sqrt(n)
                     bound = expected_std * math.sqrt(3.0)
-                    assert self._is_uniform(input_tensor, -bound, bound)
+                    self._assert_uniform(input_tensor, -bound, bound)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_normal_legacy(self):
@@ -10580,7 +10580,7 @@ class TestNNInit(TestCase):
                         n = fan_out
 
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
-                    assert self._is_normal(input_tensor, 0, expected_std)
+                    self._assert_normal(input_tensor, 0, expected_std)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_normal(self):
@@ -10604,7 +10604,7 @@ class TestNNInit(TestCase):
 
                     n = fan_in if mode == 'fan_in' else fan_out
                     expected_std = gain / math.sqrt(n)
-                    assert self._is_normal(input_tensor, 0, expected_std)
+                    self._assert_normal(input_tensor, 0, expected_std)
 
     def test_sparse_only_works_on_2d_inputs(self):
         for dims in [1, 3]:
@@ -10631,7 +10631,7 @@ class TestNNInit(TestCase):
                 column = input_tensor[:, col_idx]
                 assert column[column == 0].nelement() >= math.ceil(sparsity * rows)
 
-            assert self._is_normal(input_tensor[input_tensor != 0], 0, std)
+            self._assert_normal(input_tensor[input_tensor != 0], 0, std)
 
     @skipIfNoLapack
     def test_orthogonal(self):
