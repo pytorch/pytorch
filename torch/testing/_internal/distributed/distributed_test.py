@@ -5135,23 +5135,24 @@ class DistributedTest:
             # All ranks besides 1 call into barrier, rank 0 should report failure
             # while others report gloo error.
             failed_rank = 1
+            src_rank = 0
             if self.rank == failed_rank:
                 return
-            if self.rank == 0:
+            if self.rank == src_rank:
                 with self.assertRaisesRegex(
                     RuntimeError,
                     f"Rank {failed_rank} failed to pass monitoredBarrier"
                 ):
                     dist.monitored_barrier(timeout=timeout)
             else:
-                # It is permissible for other ranks that did not fail to
-                # successfully exit or crash in the monitored barrier, the main
-                # purpose of monitored barrier is to report the rank that hung
-                # on rank 0.
-                try:
+                # Other ranks should not pass barrier since rank 0 failed.
+                err_regex = (
+                    f"Rank {self.rank} successfully reached monitoredBarrier,"
+                    f" but received errors while waiting to be unblocked by rank"
+                    f" {src_rank}"
+                )
+                with self.assertRaisesRegex(RuntimeError, err_regex):
                     dist.monitored_barrier(timeout=timeout)
-                except RuntimeError:
-                    pass
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
@@ -5263,12 +5264,18 @@ class DistributedTest:
             # TODO(#54879): Provide ability to wait and report all failed ranks
             expected_first_failed_rank = 2
             timeout = timedelta(seconds=2)
-            if self.rank == 0:
+            src_rank = 0
+            if self.rank == src_rank:
                 with self.assertRaisesRegex(RuntimeError, f"Rank {expected_first_failed_rank}"):
                     dist.monitored_barrier(timeout=timeout)
             elif self.rank == 1:
-                # Successfully pass barrier
-                dist.monitored_barrier(timeout=timeout)
+                err_regex = (
+                    f"Rank {self.rank} successfully reached monitoredBarrier,"
+                    f" but received errors while waiting to be unblocked by rank"
+                    f" {src_rank}"
+                )
+                with self.assertRaisesRegex(RuntimeError, err_regex):
+                    dist.monitored_barrier(timeout=timeout)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
