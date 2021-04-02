@@ -6,7 +6,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.fx.quantize import is_activation_post_process
 
-from typing import Optional, Any, Tuple
+from typing import Optional, Any, Tuple, Callable
 
 # TODO(future PR): delete this after FX has a util for it
 def print_node(node: Optional[Node]) -> None:
@@ -37,7 +37,9 @@ class NodeInputOrOutputType(enum.Enum):
 
 
 def get_node_first_input_and_output_type(
-    node: Node, gm: GraphModule,
+    node: Node,
+    gm: GraphModule,
+    logger_cls: Callable,
 ) -> Tuple[NodeInputOrOutputType, NodeInputOrOutputType]:
     if node.op == 'call_function':
         fp32_fun_target_names = ('torch.nn.functional', 'torch.nn')
@@ -58,6 +60,15 @@ def get_node_first_input_and_output_type(
         assert node.op == 'call_module'
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
+        if isinstance(mod, logger_cls):  # type: ignore
+            # A logger's input and output type is the output type of
+            # the preceding node.
+            first_arg = node.args[0]
+            assert isinstance(first_arg, Node)
+            _prev_node_input_type, prev_node_output_type = \
+                get_node_first_input_and_output_type(
+                    first_arg, gm, logger_cls)
+            return (prev_node_output_type, prev_node_output_type)
         # For now, hacky check to see which mod is in which namespace
         # TODO(future PR): use a real mapping
         is_known_fp32_input_module = (
@@ -82,7 +93,7 @@ def get_node_first_input_and_output_type(
             prev_node = node.args[0]
             assert isinstance(prev_node, Node)
             _prev_node_input_type, prev_node_output_type = \
-                get_node_first_input_and_output_type(prev_node, gm)
+                get_node_first_input_and_output_type(prev_node, gm, logger_cls)
             return (prev_node_output_type, NodeInputOrOutputType.FP32)
 
         elif node.target == 'to':
@@ -93,7 +104,7 @@ def get_node_first_input_and_output_type(
             prev_node = node.args[0]
             assert isinstance(prev_node, Node)
             _prev_node_input_type, prev_node_output_type = \
-                get_node_first_input_and_output_type(prev_node, gm)
+                get_node_first_input_and_output_type(prev_node, gm, logger_cls)
 
             cur_node_dtype_target = node.args[1]
             assert cur_node_dtype_target is torch.float16, \
