@@ -17,3 +17,12 @@ def set_overwrite_module_params_on_conversion(value):
 
 def get_overwrite_module_params_on_conversion():
     return _overwrite_module_params_on_conversion
+
+_conj_view = False
+
+def set_conj_view(value):
+    global _conj_view
+    _conj_view = value
+
+def get_conj_view():
+    return _conj_view

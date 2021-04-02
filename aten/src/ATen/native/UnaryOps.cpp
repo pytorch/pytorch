@@ -268,10 +268,6 @@ Tensor resolve_conj(const Tensor& self) {
   return result.copy_(self);
 }
 
-// Tensor& conj_out(const Tensor& self, Tensor& result) {
-//
-// }
-
 Tensor conj(const Tensor& self) {
   if (!self.is_complex()) {
     return self;

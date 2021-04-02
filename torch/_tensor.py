@@ -410,6 +410,14 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.norm, (self,), self, p=p, dim=dim, keepdim=keepdim, dtype=dtype)
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    # rename this to conj
+    def conj_out_of_place(self):
+        if torch.__future__.get_conj_view():
+            return self.conj()
+        else:
+            result = torch.empty_like(self)
+            return result.copy_(self.conj())
+
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
