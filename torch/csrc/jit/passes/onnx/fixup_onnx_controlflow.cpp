@@ -373,7 +373,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   auto* if_node = node;
   auto* graph = if_node->owningGraph();
-  FixupONNXSubblockOutputs(node);
+  FixupONNXSubblockOutputs(if_node);
   ONNXFixupUninitializedOutput(if_node);
   GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());
   return if_node->outputs().vec();
