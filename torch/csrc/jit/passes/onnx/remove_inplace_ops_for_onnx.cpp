@@ -195,13 +195,10 @@ void RegisterInplaceNodeInIfBlocks(
 }
 
 // clang-format off
-<<<<<<< HEAD
-=======
 // Register inplace op node inputs/outputs through the blocks.
 // Eg. The IR before updating:
 //   = prim::Loop(%10, %27)
 //    block0(%stream_idx.1 : int):
->>>>>>> [ONNX] Support inplace operations on inplace indexing (#52063)
 //       = prim::Loop(%9, %27)
 //        block0(%i.1 : int):
 //          %36 : Tensor = aten::select(%bias.1, %26, %stream_idx.1)
@@ -678,12 +675,7 @@ void trackAndRegisterAttributesInBlocks(
       // If inside a block, keep the output value to register in block
       // output.
       auto block_ = n->owningBlock();
-<<<<<<< HEAD
-      Node* cloneNode =
-          addDummyClone(block_->owningGraph(), n->inputs().at(1), true, n);
-=======
       Node* cloneNode = insertCloneBeforeNode(graph, n->inputs().at(1), n);
->>>>>>> [ONNX] Support inplace operations on inplace indexing (#52063)
       if (block_->owningNode() &&
           (block_->owningNode()->kind() == prim::If ||
            block_->owningNode()->kind() == prim::Loop)) {
