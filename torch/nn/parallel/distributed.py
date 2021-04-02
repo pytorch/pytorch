@@ -477,6 +477,7 @@ class DistributedDataParallel(Module):
         dist._verify_model_across_ranks(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
+        # In debug mode, build a mapping of parameter index -> parameter.
         if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
             param_to_name_mapping = self._build_param_to_name_mapping(parameters)
         else:
@@ -557,7 +558,13 @@ class DistributedDataParallel(Module):
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
-        self._ddp_init_helper(parameters, expect_sparse_gradient)
+        # In debug mode, build a mapping of parameter index -> parameter.
+        if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
+            param_to_name_mapping = self._build_param_to_name_mapping(parameters)
+        else:
+            param_to_name_mapping = {}
+        # Builds reducer
+        self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
 
     def _replicate_modules_within_process(self):
         if self.device_ids and len(self.device_ids) > 1:
