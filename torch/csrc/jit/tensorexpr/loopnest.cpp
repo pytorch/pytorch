@@ -1140,6 +1140,10 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
 
   // TODO: record history of transformations
 }
+void LoopNest::sliceHead(For* f, int factor) {
+  For *head, *tail;
+  sliceHead(f, factor, &head, &tail);
+}
 
 void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
   if (dynamic_cast<const IntImm*>(f->start()) &&
@@ -1182,6 +1186,10 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
   }
 
   // TODO: record history of transformations
+}
+void LoopNest::sliceTail(For* f, int factor) {
+  For *head, *tail;
+  sliceTail(f, factor, &head, &tail);
 }
 
 void LoopNest::splitWithTail(For* f, int factor) {
