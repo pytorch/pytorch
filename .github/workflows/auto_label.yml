@@ -36,7 +36,7 @@ jobs:
             -X POST \
             -H "Authorization: token ${GITHUB_TOKEN}" \
             "https://api.github.com/repos/${OWNER}/${REPO}/issues/${ISSUE_NUMBER}/labels" \
-            -d '{"labels":["ROCm"]}'
+            -d '{"labels":["module: rocm"]}'
         fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
