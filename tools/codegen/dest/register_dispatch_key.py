@@ -2,6 +2,7 @@ from typing import List, Optional, Union
 import itertools
 from typing_extensions import Literal
 from dataclasses import dataclass
+import textwrap
 
 from tools.codegen.context import *
 from tools.codegen.utils import *
@@ -228,11 +229,13 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
         return f"""
 void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
                 TensorOptions options, DimnameList names) override {{
-    {self.gen_class_set_output_body(k)}
-    if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
+{textwrap.indent(self.gen_class_set_output_body(k), "    ")}
+    if (!names.empty()) {{
+      namedinference::propagate_names(outputs_[output_idx], names);
+    }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
-    {set_output_super}
+{textwrap.indent(set_output_super, "    ")}
 }}
 """
 
@@ -247,8 +250,9 @@ if (C10_UNLIKELY(current_device.has_value())) {
   guard_.reset_device(options.device());
 }
 """
+            maybe_set_guard_line = maybe_set_guard + "\n"
         else:
-            maybe_set_guard = ''
+            maybe_set_guard_line = maybe_set_guard = ''
 
         if k is SchemaKind.functional:
             if self.dispatch_key == DispatchKey.Meta:
@@ -274,8 +278,7 @@ if (strides.empty()) {
                     empty_strided_impl = "at::empty_strided"
                 else:
                     raise AssertionError("unsupported dispatch key")
-                return f"""
-{maybe_set_guard}
+                return f"""{maybe_set_guard_line}
 if (strides.empty()) {{
     outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
 }} else {{
@@ -293,8 +296,7 @@ if (strides.empty()) {{
                 # We can add one in if for the perf if we need to. But it'll be easier when external backends
                 # have access to meta functions, and we can write one for resize_.
                 resize_impl = "resize_output"
-            return f"""
-{maybe_set_guard}
+            return f"""{maybe_set_guard_line}
 bool resized = at::native::{resize_impl}(outputs_[output_idx], sizes);
 // Only restride if a resize occurred; otherwise we ignore the (advisory)
 // strides from the meta function and directly use the output tensor's
@@ -347,17 +349,20 @@ if (resized) {{
         else:
             guard_field = ''
 
-        return f"""
-struct {class_name} final : public {parent_class} {{
-    {self.gen_class_ctor(k, class_name)}
-    {self.gen_class_set_output(k, parent_class, generate_super)}
-    const Tensor& maybe_get_output(int64_t output_idx) override {{
-        return outputs_[output_idx];
-    }}
-    std::array<{output_type}, {len(f.func.returns)}> outputs_;
-    {guard_field}
-}};
-"""
+        indent = " " * 4
+        class_ctor_str = self.gen_class_ctor(k, class_name)
+        lines = (
+            f"struct {class_name} final : public {parent_class} {{",
+            f"{textwrap.indent(class_ctor_str, indent)}",
+            f"{textwrap.indent(self.gen_class_set_output(k, parent_class, generate_super), indent)}",
+            f"    const Tensor& maybe_get_output(int64_t output_idx) override {{",
+            f"        return outputs_[output_idx];",
+            f"    }}",
+            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
+            f"{textwrap.indent(guard_field, indent)}",
+            f"}};"
+        )
+        return '\n'.join(line for line in lines if line)
 
     @method_with_native_function
     def gen_one(self, f: NativeFunction) -> Optional[str]:
