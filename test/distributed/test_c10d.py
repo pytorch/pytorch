@@ -2450,7 +2450,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(2)
     def test_nccl_backend_multi_device_ids_not_allowed(self):
         int_devices = list(range(torch.cuda.device_count()))
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
@@ -2458,12 +2458,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             self._test_nccl_backend(devices, int_devices)
 
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(2)
     def test_nccl_backend_single_device_module_device_ids_None(self):
         self._test_nccl_backend(None, None)
 
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(2)
     def test_nccl_backend_single_device_module_empty_device_ids(self):
         # This tests the backward compatibility of accepting an empty list as `device_ids`,
         # although we no longer document this in favor of the default value of `None`,
