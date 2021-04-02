@@ -1,3 +1,4 @@
+import itertools
 import os
 import pickle
 import random
@@ -13,7 +14,7 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import IterDataPipe, RandomSampler, DataLoader
-from typing import List, Tuple, Dict, Any, Type
+from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar, Set, Union
 
 import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
@@ -26,6 +27,9 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
+
+
+T_co = TypeVar('T_co', covariant=True)
 
 
 def create_temp_dir_and_files():
@@ -269,12 +273,12 @@ class TestFunctionalIterDataPipe(TestCase):
 
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
             (dp.iter.Map, IDP(arr), (lambda x: x, ), {}),
-            (dp.iter.Collate, IDP(arr), (lambda x: xi, ), {}),
+            (dp.iter.Collate, IDP(arr), (lambda x: x, ), {}),
             (dp.iter.Filter, IDP(arr), (lambda x: x >= 5, ), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
             with warnings.catch_warnings(record=True) as wa:
-                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)
+                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore
                 self.assertEqual(len(wa), 1)
                 self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
                 with self.assertRaises(AttributeError):
@@ -288,7 +292,7 @@ class TestFunctionalIterDataPipe(TestCase):
             dp.iter.Concat()
 
         with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `IterDataPipe`"):
-            dp.iter.Concat(input_dp1, ())
+            dp.iter.Concat(input_dp1, ())  # type: ignore
 
         concat_dp = input_dp1.concat(input_dp2)
         self.assertEqual(len(concat_dp), 15)
@@ -532,7 +536,7 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
 
         # Single transform
-        input_dp = IDP_NoLen(inputs)
+        input_dp = IDP_NoLen(inputs)  # type: ignore
         transform = torchvision.transforms.ToTensor()
         tsfm_dp = input_dp.transforms(transform)
         with self.assertRaises(NotImplementedError):
@@ -542,9 +546,9 @@ class TestFunctionalIterDataPipe(TestCase):
 
     def test_zip_datapipe(self):
         with self.assertRaises(TypeError):
-            dp.iter.Zip(IDP(range(10)), list(range(10)))
+            dp.iter.Zip(IDP(range(10)), list(range(10)))  # type: ignore
 
-        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))
+        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))  # type: ignore
         with self.assertRaises(NotImplementedError):
             len(zipped_dp)
         exp = list((i, i) for i in range(5))
@@ -555,6 +559,53 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(zipped_dp), exp)
         # Reset
         self.assertEqual(list(zipped_dp), exp)
+
+
+class TestTyping(TestCase):
+    def test_subtype(self):
+        from torch.utils.data._typing import issubtype
+
+        basic_type = (int, str, bool, float, complex,
+                      list, tuple, dict, set, T_co)
+        for t in basic_type:
+            self.assertTrue(issubtype(t, t))
+            self.assertTrue(issubtype(t, Any))
+            if t == T_co:
+                self.assertTrue(issubtype(Any, t))
+            else:
+                self.assertFalse(issubtype(Any, t))
+        for t1, t2 in itertools.product(basic_type, basic_type):
+            if t1 == t2 or t2 == T_co:
+                self.assertTrue(issubtype(t1, t2))
+            else:
+                self.assertFalse(issubtype(t1, t2))
+
+        T = TypeVar('T', int, str)
+        S = TypeVar('S', bool, Union[str, int], Tuple[int, T])  # type: ignore
+        types = ((int, Optional[int]),
+                 (List, Union[int, list]),
+                 (Tuple[int, str], S),
+                 (Tuple[int, str], tuple),
+                 (T, S),
+                 (S, T_co),
+                 (T, Union[S, Set]))
+        for sub, par in types:
+            self.assertTrue(issubtype(sub, par))
+            self.assertFalse(issubtype(par, sub))
+
+        subscriptable_types = {
+            List: 1,
+            Tuple: 2,  # use 2 parameters
+            Set: 1,
+            Dict: 2,
+        }
+        for subscript_type, n in subscriptable_types.items():
+            for ts in itertools.combinations(types, n):
+                subs, pars = zip(*ts)
+                sub = subscript_type[subs]  # type: ignore
+                par = subscript_type[pars]  # type: ignore
+                self.assertTrue(issubtype(sub, par))
+                self.assertFalse(issubtype(par, sub))
 
 
 if __name__ == '__main__':
