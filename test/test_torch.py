@@ -130,7 +130,7 @@ class AbstractTestCases:
             from torch._torch_docs import __file__ as doc_file
             from torch._torch_docs import multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args
 
-            with open(doc_file, "r") as f:
+            with open(doc_file, "r", encoding="utf-8") as f:
                 doc_strs = f.read()
 
             for doc_str in re.findall(r'add_docstr\((.*?),.*?("""|\'\'\')(.*?)("""|\'\'\')\)', doc_strs, re.MULTILINE | re.DOTALL):
@@ -3272,10 +3272,12 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.gather(one_d, 0, torch.zeros((1,), dtype=torch.int64, device=device)).shape)
 
         # normal
+        # std must be >= 0
+        zero_d_ge_0 = torch.rand((), device=device)
         # documentation says out shape matches shape of mean
-        self.assertEqual((), torch.normal(zero_d, zero_d).shape)
-        self.assertEqual((1,), torch.normal(one_d, zero_d).shape)
-        self.assertEqual((), torch.normal(1, zero_d).shape)
+        self.assertEqual((), torch.normal(zero_d, zero_d_ge_0).shape)
+        self.assertEqual((1,), torch.normal(one_d, zero_d_ge_0).shape)
+        self.assertEqual((), torch.normal(1, zero_d_ge_0).shape)
         self.assertEqual((), torch.normal(zero_d, 1).shape)
         self.assertEqual((1,), torch.normal(one_d, 1).shape)
         # TODO: this behavior differs on CPU and GPU, see https://github.com/pytorch/pytorch/issues/30480.
