@@ -32,9 +32,11 @@ bool IsInplaceNode(const Node* n) {
   return false;
 }
 
-Node* addDummyCloneToBlock(Block* b, Value* orig_data) {
-  auto graph = b->owningGraph();
-
+Node* addDummyClone(
+    Graph* graph,
+    Value* orig_data,
+    bool insertBefore,
+    Node* referenceNode) {
   Node* newNode = nullptr;
   if (orig_data->type()->kind() == TypeKind::ListType) {
     newNode = graph->create(aten::list, /*num_outputs =*/1);
@@ -121,7 +123,11 @@ Value* MatchIfBlocksOutputForValue(
 //    %31 : Tensor = aten::copy_(%30, %29, %9)
 //    -> ()
 // After updating:
+//%23 : bool = aten::eq(%22, %13)
+//%51 : Tensor = prim::If(%23)
+//  block0():
 //    %24 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1, %spatial_size_1.1)
+//    %25 : Tensor = aten::ones(%24, %12, %12, %12, %12)
 //    %26 : Tensor = aten::slice(%state.1, %13, %13, %10, %11)
 //    %32 : Tensor?[] = prim::ListConstruct()
 //    %33 : Tensor = aten::expand_as(%25, %26)
@@ -202,6 +208,7 @@ void RegisterInplaceNodeInIfBlocks(
 //       = prim::Loop(%9, %27)
 //        block0(%i.1 : int):
 //          %36 : Tensor = aten::select(%bias.1, %26, %stream_idx.1)
+//          %41 : Tensor = aten::copy_(%37, %40, %25)
 //          -> (%27)
 //      -> (%27)
 //  After updating:
@@ -675,7 +682,8 @@ void trackAndRegisterAttributesInBlocks(
       // If inside a block, keep the output value to register in block
       // output.
       auto block_ = n->owningBlock();
-      Node* cloneNode = insertCloneBeforeNode(graph, n->inputs().at(1), n);
+      Node* cloneNode =
+          addDummyClone(block_->owningGraph(), n->inputs().at(1), true, n);
       if (block_->owningNode() &&
           (block_->owningNode()->kind() == prim::If ||
            block_->owningNode()->kind() == prim::Loop)) {

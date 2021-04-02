@@ -97,7 +97,8 @@ Value* addInputToBlock(Block* block) {
   return block->addInput();
 }
 
-::ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType(
+namespace {
+::ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType_aux(
     at::ScalarType at_type) {
   switch (at_type) {
     case at::kDouble:
@@ -127,6 +128,11 @@ Value* addInputToBlock(Block* block) {
     default:
       AT_ERROR("unexpected tensor scalar type");
   }
+}
+} // namespace
+
+int ATenTypeToOnnxType(at::ScalarType at_type) {
+  return static_cast<int>(ATenTypeToOnnxType_aux(at_type));
 }
 
 Node* createONNXUnsqueeze(

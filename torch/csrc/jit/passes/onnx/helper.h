@@ -3,10 +3,6 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace ONNX_NAMESPACE {
-enum TensorProto_DataType : int;
-}
-
 namespace torch {
 namespace jit {
 
@@ -47,6 +43,7 @@ TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
 TORCH_API int ATenTypeToOnnxType(at::ScalarType at_type);
 
 Node* createONNXUnsqueeze(
+    Graph* graph,
     Node* n_to_insert_before,
     Value* input,
     int axis,
