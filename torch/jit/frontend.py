@@ -563,11 +563,9 @@ class StmtBuilder(Builder):
             dummy_function = ast.parse(dummy_function_str).body[0]
             dummy_function.body = stmt.body
             ignore_func_str = astunparse.unparse(dummy_function)
-            container = {}
-            exec(ignore_func_str, globals(), container)
-            container["func_ignore"]._torchscript_modifier = FunctionModifiers.IGNORE
-            setattr(sys.modules[__name__], "func_ignore", container["func_ignore"])
-
+            ignore_func_str += "\nglobals()[\"func_ignore\"] = func_ignore"
+            exec(ignore_func_str)
+            globals()["func_ignore"]._torchscript_modifier = FunctionModifiers.IGNORE
             assign_str_lhs = ""
             for var in outputs:
                 var_name, _ = var
