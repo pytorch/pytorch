@@ -128,7 +128,7 @@ ScalarType result_type(const Tensor &tensor, const Tensor &other) {
 ScalarType result_type(const Tensor &tensor, const Scalar& other) {
   ResultTypeState state = {};
   state = update_result_type_state(tensor, state);
-  state = update_result_type_state(scalar, state);
+  state = update_result_type_state(other, state);
   return result_type(state);
 }
 
