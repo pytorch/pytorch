@@ -5286,8 +5286,8 @@ class DistributedTest:
                 ):
                     process_group.monitored_barrier(timeout)
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
+        @require_backend({"gloo"})
+        @require_backends_available({"gloo"})
         @skip_if_small_worldsize
         def test_monitored_barrier_failure_order(self):
             # Ensure that the first (in sorted order) rank is reported when
@@ -5302,8 +5302,8 @@ class DistributedTest:
                 # Successfully pass barrier
                 dist.monitored_barrier(timeout=timeout)
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
+        @require_backend({"gloo"})
+        @require_backends_available({"gloo"})
         @skip_if_small_worldsize
         def test_monitored_barrier_wait_all_ranks(self):
             # Tests simple case where > 1 rank does not call into monitored
