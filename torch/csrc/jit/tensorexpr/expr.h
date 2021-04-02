@@ -29,24 +29,15 @@ enum IRNodeType {
   kRshift,
   kXor,
   kCompareSelect,
-  kLet,
   kCast,
   kBitCast,
-  kBroadcast,
-  kRamp,
-  kPolynomial,
-  kTerm,
-  kRoundOff,
-  kMaxTerm,
-  kMinTerm,
-  kNone,
-  kExtra
+  kOther,
 };
 
 // The common base between all expression node.
 class Expr : public KernelScopedObject {
  public:
-  explicit Expr(Dtype dtype, IRNodeType expr_type = kNone)
+  explicit Expr(Dtype dtype, IRNodeType expr_type = kOther)
       : dtype_(dtype), expr_type_(expr_type) {}
   Dtype dtype() const {
     return dtype_;
