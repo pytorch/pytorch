@@ -119,25 +119,25 @@ Tensor sparse_csr_tensor(
 }
 
 // Access members of CSR tensors.
-const int64_t _nnz_sparse_csr(const SparseCsrTensor& self) {
+int64_t _nnz_sparse_csr(const SparseCsrTensor& self) {
   return get_sparse_csr_impl(self)->nnz();
 }
 
-const Tensor& values_sparse_csr(const Tensor& self) {
+Tensor values_sparse_csr(const Tensor& self) {
   return get_sparse_csr_impl(self)->values().alias();
 }
 
-const Tensor& crow_indices_sparse_csr(const Tensor& self) {
+Tensor crow_indices_sparse_csr(const Tensor& self) {
   return get_sparse_csr_impl(self)->crow_indices().alias();
 }
 
-const Tensor& col_indices_sparse_csr(const Tensor& self) {
+Tensor col_indices_sparse_csr(const Tensor& self) {
   return get_sparse_csr_impl(self)->col_indices().alias();
 }
 
 const bool _is_same_size_as_sparse_csr(
     const SparseCsrTensor& self,
-    const SparseCsrTensor& src) const {
+    const SparseCsrTensor& src) {
   return self.dim() == src.dim() && self.sizes().equals(src.sizes());
 }
 

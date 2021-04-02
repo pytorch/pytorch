@@ -13,8 +13,8 @@ DeviceType SparseCsrTensorSetToDeviceType(DispatchKeySet key_set) {
   } else if (key_set.has(DispatchKey::SparseCsrCUDA)) {
     return kCUDA;
   } else {
-    TORCH_CHECK(
-        "Cannot construct SparseTensor with non-sparse tensor type ID ",
+    TORCH_CHECK(false,
+        "Cannot construct SparseCsrTensor with non-sparse tensor type ID ",
         key_set);
   }
 }

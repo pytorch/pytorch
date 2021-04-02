@@ -9,7 +9,7 @@
 
 namespace at {
 namespace native {
-using namespace at::sparse;
+using namespace at::sparse_csr;
 Tensor& _sparse_mm_mkl_(
     Tensor& self,
     const SparseCsrTensor& sparse_,
@@ -24,6 +24,7 @@ Tensor& _sparse_mm_mkl_(
 #else
   AT_ERROR("sparse_mm_mkl: ATen not compiled with MKL support");
 #endif
+  return self;                  // for stopping compiler warnings.
 }
 } // namespace native
 } // namespace at
