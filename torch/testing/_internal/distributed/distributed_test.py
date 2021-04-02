@@ -1513,8 +1513,6 @@ class DistributedTest:
                 if is_async:
                     for work in works:
                         work.wait()
-                t = time.time() - start
-                print(f"took {t} seconds")
 
             def get_event(postfix):
                 return [event for event in prof.function_events if event.name.endswith(postfix)]
