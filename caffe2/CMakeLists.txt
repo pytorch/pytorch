@@ -522,6 +522,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/debug_info.cpp
        ${TORCH_SRC_DIR}/csrc/jit/serialization/source_range_serialization.cpp
        ${TORCH_SRC_DIR}/csrc/jit/frontend/source_range.cpp
+       # Later we can split serialization and deserialization logic
+       # to have better separation within build and only build relevant parts.
+       ${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/serialization/pickler.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/serialization/unpickler.cpp
        )
     list(APPEND MOBILE_DEBUG_SRCS ${MOBILE_EAGER_SYMOBLICATION_SRCS})
   endif()
