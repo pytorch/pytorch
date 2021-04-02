@@ -57,7 +57,7 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
       values_(std::move(values)) {}
 
 void SparseCsrTensorImpl::resize_and_clear_(
-    int64_t nnz_size,
+    const int64_t nnz_size,
     IntArrayRef size) {
   // call crow_indices().options() here since the struct contructor calls the
   // tensor constructor with args for device specific init.

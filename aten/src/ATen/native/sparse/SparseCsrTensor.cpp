@@ -12,10 +12,10 @@
 namespace at {
 namespace native {
 
-using namespace at::sparse;
+using namespace at::sparse_csr;
 
 // Construction of CSR tensors.
-SparseTensor new_csr_tensor(const TensorOptions& options) {
+SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for CSR tensor
   // constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
@@ -77,7 +77,7 @@ Tensor sparse_csr_tensor(
       "crow_indices.numel() must be size(0) + 1, but got: ",
       crow_indices.numel());
 
-  SparseTensor self = new_csr_tensor(options);
+  SparseCsrTensor self = new_csr_tensor(options);
   get_sparse_csr_impl(self)->resize_and_clear_(values.numel(), size);
   get_sparse_csr_impl(self)->set_member_tensors(
       crow_indices, col_indices, values);
@@ -115,7 +115,7 @@ Tensor sparse_csr_tensor(
 }
 
 // Access members of CSR tensors.
-int64_t _nnz_sparse_csr(const SparseTensor& self) {
+int64_t _nnz_sparse_csr(const SparseCsrTensor& self) {
   return get_sparse_csr_impl(self)->nnz();
 }
 
@@ -132,14 +132,14 @@ Tensor col_indices_sparse_csr(const Tensor& self) {
 }
 
 bool _is_same_size_as_sparse_csr(
-    const SparseTensor& self,
-    const SparseTensor& src) {
+    const SparseCsrTensor& self,
+    const SparseCsrTensor& src) {
   return self.dim() == src.dim() && self.sizes().equals(src.sizes());
 }
 
-SparseTensor& resize_as_sparse_csr_(
-    SparseTensor& self,
-    const SparseTensor& src) {
+SparseCsrTensor& resize_as_sparse_csr_(
+    SparseCsrTensor& self,
+    const SparseCsrTensor& src) {
   TORCH_CHECK(
       src.is_sparse_csr() && self.is_sparse_csr(),
       "resize_as_sparse_csr_: layout for self and src must be sparse_csr but got self, src: ",

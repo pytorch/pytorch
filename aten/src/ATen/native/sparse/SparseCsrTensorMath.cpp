@@ -16,9 +16,11 @@ namespace at {
 namespace native {
 
 // Functions for matrix multiplication.
+using namespace at::sparse_csr;
+// certain utiliy functions are usable from sparse COO too.
 using namespace at::sparse;
 
-bool is_msvc() {
+static constexpr bool is_msvc() {
 #ifdef _MSC_VER
   return true;
 #else
@@ -28,7 +30,7 @@ bool is_msvc() {
 
 Tensor& addmm_out_sparse_csr_dense_cpu(
     const Tensor& self,
-    const SparseTensor& op1,
+    const SparseCsrTensor& op1,
     const Tensor& op2,
     const Scalar& beta,
     const Scalar& alpha,
@@ -181,7 +183,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
 
 Tensor addmm_sparse_csr_dense_cpu(
     const Tensor& self,
-    const SparseTensor& sparse,
+    const SparseCsrTensor& sparse,
     const Tensor& dense,
     const Scalar& beta,
     const Scalar& alpha) {
@@ -190,17 +192,17 @@ Tensor addmm_sparse_csr_dense_cpu(
   return r;
 }
 
-SparseTensor& _sparse_csr_mm_out(
-    const SparseTensor& sparse,
+SparseCsrTensor& _sparse_csr_mm_out(
+    const SparseCsrTensor& sparse,
     const Tensor& dense,
-    SparseTensor& result) {
+    SparseCsrTensor& result) {
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0.0, 1.0); // redispatch!
 }
 
 Tensor _sparse_csr_addmm(
     const Tensor& t,
-    const SparseTensor& sparse,
+    const SparseCsrTensor& sparse,
     const Tensor& dense,
     const Scalar& beta,
     const Scalar& alpha) {
@@ -225,7 +227,7 @@ Tensor& add_sparse_csr_(Tensor& self, const Tensor& other, const Scalar& alpha) 
 Tensor& add_out_dense_sparse_csr_cpu(
     Tensor& out,
     const Tensor& dense,
-    const SparseTensor& src,
+    const SparseCsrTensor& src,
     const Scalar& alpha) {
   AT_ASSERT(dense.layout() == kStrided);
   AT_ASSERT(src.is_sparse_csr());
@@ -313,9 +315,9 @@ Tensor& add_out_dense_sparse_csr_cpu(
 
 Tensor& add_out_sparse_csr_cpu(
     const Tensor& self,
-    const SparseTensor& other,
+    const SparseCsrTensor& other,
     const Scalar& alpha,
-    SparseTensor& out) {
+    SparseCsrTensor& out) {
   if (self.layout() == kStrided) {
     return add_out_dense_sparse_csr_cpu(out, self, other, alpha);
   } else {

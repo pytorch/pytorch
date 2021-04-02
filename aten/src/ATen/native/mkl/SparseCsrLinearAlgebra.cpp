@@ -12,7 +12,7 @@ namespace native {
 using namespace at::sparse;
 Tensor& _sparse_mm_mkl_(
     Tensor& self,
-    const SparseTensor& sparse_,
+    const SparseCsrTensor& sparse_,
     const Tensor& dense,
     const Tensor& t,
     const Scalar& alpha,
@@ -42,7 +42,7 @@ Tensor& _sparse_mm_mkl_(
 
 namespace at {
 namespace native {
-using namespace at::sparse;
+using namespace at::sparse_csr;
 
 #ifdef MKL_ILP64
   static constexpr ScalarType TORCH_INT_TYPE = at::kLong;
@@ -160,7 +160,7 @@ static inline void sparse_mm_mkl_template(
       dense_size[1]);
 }
 
-static bool inline is_mkl_int32_index() {
+static bool inline constexpr is_mkl_int32_index() {
 #ifdef MKL_ILP64
   return false;
 #else
@@ -170,7 +170,7 @@ static bool inline is_mkl_int32_index() {
 
 Tensor& _sparse_mm_mkl_(
     Tensor& self,
-    const SparseTensor& sparse_,
+    const SparseCsrTensor& sparse_,
     const Tensor& dense,
     const Tensor& t,
     const Scalar& alpha,

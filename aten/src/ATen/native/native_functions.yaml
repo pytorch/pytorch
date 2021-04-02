@@ -4228,6 +4228,8 @@
 # the view relation is not tracked by autograd, but the version counter is still
 # shared. In other words, their outputs are non-differentiable views of the
 # sparse tensor.
+# FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
+# the default would never make sense.
 
 - func: sparse_csr_tensor.crow_col_value_size(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
 
