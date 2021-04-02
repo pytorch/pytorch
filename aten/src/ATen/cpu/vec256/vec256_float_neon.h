@@ -282,6 +282,19 @@ public:
     }
     return mask;
   }
+  Vec256<float> isnan() const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float res[size()];
+    store(tmp);
+    for (int64_t i = 0; i < size(); i++) {
+      if (_isnan(tmp[i])) {
+        std::memset(static_cast<void*>(&res[i]), 0xFF, sizeof(float));
+      } else {
+        std::memset(static_cast<void*>(&res[i]), 0, sizeof(float));
+      }
+    }
+    return loadu(res);
+  };
   Vec256<float> map(float (*f)(float)) const {
     __at_align32__ float tmp[size()];
     store(tmp);

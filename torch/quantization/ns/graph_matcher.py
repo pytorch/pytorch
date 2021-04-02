@@ -9,6 +9,7 @@ import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
+import torch.nn.intrinsic as nni
 toq = torch.ops.quantized
 
 from torch.fx import GraphModule
@@ -25,14 +26,28 @@ def _get_output_nodes(g: Graph) -> List[Node]:
 def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
     base_name_to_sets_of_related_ops: Dict[str, Set[Callable]] = {
         # conv modules
+        'torch.nn.Conv1d': set([
+            nn.Conv1d,
+            nnq.Conv1d,
+            nniqat.ConvBn1d,
+            nniq.ConvReLU1d,
+            nni.ConvReLU1d,
+        ]),
         'torch.nn.Conv2d': set([
             nn.Conv2d,
             nnq.Conv2d,
             nnqat.Conv2d,
-            # Note: matching weights may not work with nniqat.ConvBn2d directly
-            # leaving that as a problem for a future PR to solve.
             nniqat.ConvBn2d,
             nniq.ConvReLU2d,
+            nni.ConvReLU2d,
+        ]),
+        'torch.nn.Conv3d': set([
+            nn.Conv3d,
+            nnq.Conv3d,
+            nnqat.Conv3d,
+            nniqat.ConvBn3d,
+            nniq.ConvReLU3d,
+            nni.ConvReLU3d,
         ]),
         # linear modules
         'torch.nn.Linear': set([
@@ -135,7 +150,9 @@ def get_reversed_fusions() -> Set[Tuple[NSFusionType, int]]:
     # and reuse either quantization's syntax or something else.
     return set([
         ((F.relu, F.linear), 0),
+        ((nn.ReLU, nn.Conv1d), 0),
         ((nn.ReLU, nn.Conv2d), 0),
+        ((nn.ReLU, nn.Conv3d), 0),
         # linear-relu fp16 emulation:
         # fp16_to_fp32 -> linear -> relu -> fp32_to_fp16
         ((("to", torch.float16), F.relu, F.linear, "dequantize"), 1),
@@ -282,8 +299,7 @@ class _NSGraphMatchableSubgraphsIterator:
 
             self.seen_nodes.add(cur_start_node)
             # add args of previous nodes to stack
-            # TODO(future PR): handle kwargs as needed
-            for arg in cur_start_node.args:
+            for arg in cur_start_node.all_input_nodes:
                 self._recursively_add_node_arg_to_stack(arg)
 
             # skip observers, etc

@@ -8,7 +8,7 @@ namespace impl {
 // NB: POD, must be zero initialized!
 // Note [TLS Initialization]
 // We wanted raw_local_dispatch_key_set to be initialized with non-zero state
-// e.g. InplaceOrView in included set.  But certain Windows compiler (e.g the one
+// e.g. BackendSelect and InplaceOrView in included set.  But certain Windows compiler (e.g the one
 // used in ARVR tests) only allow TLS to be zero-initialized.
 // To preserve the invariant that raw TLS storage of the default state is zero,
 // we obtain the actual include keyset by XORing raw_local_dispatch_key_set.included_
