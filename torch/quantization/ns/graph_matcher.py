@@ -284,8 +284,7 @@ class _NSGraphMatchableSubgraphsIterator:
 
             self.seen_nodes.add(cur_start_node)
             # add args of previous nodes to stack
-            # TODO(future PR): handle kwargs as needed
-            for arg in cur_start_node.args:
+            for arg in cur_start_node.all_input_nodes:
                 self._recursively_add_node_arg_to_stack(arg)
 
             # skip observers, etc
