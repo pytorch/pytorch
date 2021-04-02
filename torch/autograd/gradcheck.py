@@ -36,7 +36,7 @@ def allocate_jacobians_with_inputs(input_tensors: Tuple, numel_output) -> Tuple[
     return tuple(out)
 
 
-def allocate_jacobians_with_outputs(output_tensors: Tuple, dtype=None, device=None, 
+def allocate_jacobians_with_outputs(output_tensors: Tuple, dtype=None, device=None,
                                     numel_input=None) -> Tuple[torch.Tensor, ...]:
     # Makes zero-filled tensors from outputs. If `dim` is not None, for each tensor in
     # `output_tensors`, returns a new zero-filled tensor with height of `dim` and width of
@@ -420,7 +420,7 @@ def compute_analytical_jacobian_rows(vjp_fn, sample_output, grad_out_scale) -> L
     return jacobians_rows
 
 
-def compute_fast_analytical_jacobian_rows(vjp_fn, sample_output, v, 
+def compute_fast_analytical_jacobian_rows(vjp_fn, sample_output, v,
                                           grad_out_scale) -> List[List[Optional[torch.Tensor]]]:
     # For each input, computes vjp_fn(v), which is *supposed* to be v^T J
     jacobians_rows: List[List[Optional[torch.Tensor]]] = []
