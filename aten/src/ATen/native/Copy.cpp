@@ -170,17 +170,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot copy out of meta tensor; no data!")
   }
 
-  if (self.is_mkldnn() && src.is_mkldnn()) {
-    return at::copy_opaque_to_opaque_(self, src, non_blocking);
-  } else if (self.is_mkldnn() || src.is_mkldnn()) {
-    TORCH_CHECK(
-        false,
-        "copy_() between dense and opaque Tensors is not implemented! Found self type = ",
-        self.toString(),
-        " and src type = ",
-        src.toString());
-  }
-
   // Re-dispatch copies when either src or self device not implemented here (e.g. XLA).
   // _copy_from has a proper device dispatch setup.
   // This includes:
