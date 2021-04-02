@@ -826,8 +826,8 @@ Tensor& narrow_copy_dense_cpu_out(
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   TORCH_CHECK(self.dtype() == output.dtype());
 
-  Tensor self_contig = self.contiguous();
-  const auto self_sizes = self_contig.sizes();
+  auto self_contig = self.expect_contiguous();
+  const auto self_sizes = self_contig->sizes();
 
   // wrap dim if negative and do bound check
   if (dim < 0) {
@@ -860,8 +860,8 @@ Tensor& narrow_copy_dense_cpu_out(
   const int64_t unit = c10::size_from_dim_(dim + 1, self_sizes);
   const int64_t num_blocks = c10::size_to_dim_(dim, self_sizes);
 
-  const auto itemsize = self_contig.dtype().itemsize();
-  size_t src_nbytes = itemsize * self_contig.numel();
+  const auto itemsize = self_contig->dtype().itemsize();
+  size_t src_nbytes = itemsize * self_contig->numel();
   size_t dst_nbytes = itemsize * output.numel();
 
   size_t src_block_size = unit * self_sizes[dim];
@@ -871,7 +871,7 @@ Tensor& narrow_copy_dense_cpu_out(
     return output;
   }
 
-  char* src_bytes = static_cast<char*>(self_contig.data_ptr());
+  char* src_bytes = static_cast<char*>(self_contig->data_ptr());
   char* dst_bytes = static_cast<char*>(output.data_ptr());
 
   size_t src_block_size_bytes = itemsize * src_block_size;
