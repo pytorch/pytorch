@@ -2265,18 +2265,19 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         gradient_as_bucket_view=False,
     ):
         model = Net()
+        device = devices[0] if devices else torch.device("cuda:%d" % self.rank)
         ddp_model = DistributedDataParallel(
-            copy.deepcopy(model).to(devices[0]),
+            copy.deepcopy(model).to(device),
             device_ids=device_ids,
             process_group=process_group,
             bucket_cap_mb=0.001,
             gradient_as_bucket_view=gradient_as_bucket_view,
         )
 
-        model.to(devices[0])
+        model.to(device)
 
-        input = torch.randn(global_batch_size, 2).to(devices[0])
-        target = torch.randn(global_batch_size, 4).to(devices[0])
+        input = torch.randn(global_batch_size, 2).to(device)
+        target = torch.randn(global_batch_size, 4).to(device)
 
         return model, ddp_model, input, target
 
@@ -2325,7 +2326,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         The `devices` argument is used to control placement of the model and
         must always be specified as list of `torch.Device` instances.
         """
-        local_batch_size = len(devices)
+        local_batch_size = 1 if devices is None else len(devices)
         global_batch_size = self.world_size * local_batch_size
 
         if multi_device:
@@ -2405,11 +2406,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     def test_gloo_backend_cpu_module(self):
-        self._test_gloo_backend([torch.device("cpu")], [])
+        self._test_gloo_backend([torch.device("cpu")], None)
 
     @requires_gloo()
     def test_gloo_backend_cpu_module_grad_is_view(self):
-        self._test_gloo_backend([torch.device("cpu")], [], gradient_as_bucket_view=True)
+        self._test_gloo_backend([torch.device("cpu")], None, gradient_as_bucket_view=True)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(2)
@@ -2430,14 +2431,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_gloo_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_gloo_backend(devices, [], multi_device=True)
+        self._test_gloo_backend(devices, None, multi_device=True)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(8)
     def test_gloo_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_gloo_backend(devices, [], multi_device=True)
+        self._test_gloo_backend(devices, None, multi_device=True)
 
     def _test_nccl_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
@@ -2447,6 +2448,34 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self._test_ddp_with_process_group(
             process_group, devices, device_ids, multi_device, gradient_as_bucket_view
         )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_backend_multi_device_ids_not_allowed(self):
+        int_devices = list(range(torch.cuda.device_count()))
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        with self.assertRaisesRegex(ValueError, "device_ids can only be None or contain a single element."):
+            self._test_nccl_backend(devices, int_devices)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_backend_single_device_module_device_ids_None(self):
+        self._test_nccl_backend(None, None)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_backend_single_device_module_empty_device_ids(self):
+        # This tests the backward compatibility of accepting an empty list as `device_ids`,
+        # although we no longer document this in favor of the default value of `None`,
+        # which is consistent with multi-device modules and CPU modules.
+        self._test_nccl_backend(None, [])
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_backend_multi_device_module_device_ids_None(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        self._test_nccl_backend(devices, None, multi_device=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -2467,14 +2496,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_nccl_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_nccl_backend(devices, [], multi_device=True)
+        self._test_nccl_backend(devices, None, multi_device=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(8)
     def test_nccl_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_nccl_backend(devices, [], multi_device=True)
+        self._test_nccl_backend(devices, None, multi_device=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -2496,7 +2525,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 model, output_device=gpus[1], process_group=process_group
             )
 
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
+        with self.assertRaisesRegex(ValueError, "device_ids can only be None or contain a single element."):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group
             )
@@ -2508,7 +2537,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             ddp_model = DistributedDataParallel(model, process_group=process_group)
 
         model = model.cpu()
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
+        with self.assertRaisesRegex(ValueError, "device_ids can only be None or contain a single element."):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group
             )
