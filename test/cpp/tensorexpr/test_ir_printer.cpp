@@ -92,7 +92,7 @@ TEST(IRPrinter, FunctionName) {
       R"IR(
  # CHECK:   for (int i
  # CHECK:    for (int j
- # CHECK:     consumer[i, j] = i * (chunk_1(i, j)IR";
+ # CHECK:     consumer[i, j] = i * (chunk_1[i, j])IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, ss.str());
 }

@@ -7394,18 +7394,11 @@ class TestNN(NNTestCase):
                               bidirectional=bidirectional,
                               batch_first=batch_first,
                               proj_size=proj_size).to(dtype)
-            # LSTM with projections is not supported with MIOpen
-            if TEST_WITH_ROCM and dtype == torch.float:
-                with self.assertRaisesRegex(RuntimeError,
-                                            "LSTM with projections is not supported with MIOpen"):
-                    outputs_gpu = forward_backward(
-                        True, rnn_gpu, input_val, grad_output, rnn.all_weights,
-                        hx_val, grad_hy, cx_val, grad_cy)
-            else:
-                outputs_gpu = forward_backward(
-                    True, rnn_gpu, input_val, grad_output, rnn.all_weights,
-                    hx_val, grad_hy, cx_val, grad_cy)
-                compare_cpu_gpu(outputs_cpu, outputs_gpu)
+
+            outputs_gpu = forward_backward(
+                True, rnn_gpu, input_val, grad_output, rnn.all_weights,
+                hx_val, grad_hy, cx_val, grad_cy)
+            compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
@@ -14637,16 +14630,10 @@ class TestNNDeviceType(NNTestCase):
             [False, [2, 1, 3, 2, 10, 5, 3]],
         ]
 
-        rocm_error_msg = "LSTM with projections is not supported with MIOpen"
         for enforce_sorted, seq_lens, in tests:
             for use_default_hiddens in (True, False):
                 for proj_size in [0, 2]:
-                    # LSTM with projections is not supported with MIOpen
-                    if device != 'cpu' and dtype == torch.float32 and TEST_WITH_ROCM and proj_size > 0:
-                        with self.assertRaisesRegex(RuntimeError, rocm_error_msg):
-                            check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
-                    else:
-                        check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
+                    check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
 
     def _test_batchnorm_update_stats(self, device, dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
