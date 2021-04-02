@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 #include <c10/util/Optional.h>
@@ -93,7 +94,7 @@ c10::optional<size_t> fusibleExpandTo(
     return c10::nullopt;
   }
 
-  for (size_t i = 0; i < from.size(); i++) {
+  for (const auto i : c10::irange(from.size())) {
     auto fdim = from[from.size() - 1 - i];
     auto tdim = to[to.size() - 1 - i];
     if (fdim != 1 && fdim != tdim) {
@@ -633,7 +634,7 @@ static void fuseListConstructListUnpack(Block* b) {
     }
     if (it->kind() == prim::ListUnpack &&
         it->input()->node()->kind() == prim::ListConstruct) {
-      for (size_t i = 0; i < it->outputs().size(); i++) {
+      for (const auto i : c10::irange(it->outputs().size())) {
         auto output = it->outputs().at(i);
         output->replaceAllUsesWith(it->input()->node()->inputs().at(i));
       }
