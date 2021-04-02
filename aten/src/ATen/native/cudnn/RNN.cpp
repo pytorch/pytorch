@@ -1407,10 +1407,8 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
   static std::vector<DropoutState> dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
   static std::mutex state_cache_mut;
 
-  int device = cuda::current_device();
-  AT_ASSERT(options.has_device());
   AT_ASSERT(options.device().is_cuda());
-  AT_ASSERT(options.device().index() == device);
+  int device = options.device().index();
 
   std::unique_lock<std::mutex> lock {state_cache_mut};
   auto& state = dropout_state_cache.at(device);
