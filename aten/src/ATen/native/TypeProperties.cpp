@@ -127,9 +127,9 @@ ScalarType result_type(const Tensor &tensor, const Tensor &other) {
 
 ScalarType result_type(const Tensor &tensor, const Scalar& other) {
   ResultTypeState state = {};
-  update_result_type_state(tensor, state);
-  update_result_type_state(scalar, state);
-  return state;
+  state = update_result_type_state(tensor, state);
+  state = update_result_type_state(scalar, state);
+  return result_type(state);
 }
 
 ScalarType result_type(const Scalar& scalar, const Tensor &tensor) {
@@ -137,9 +137,10 @@ ScalarType result_type(const Scalar& scalar, const Tensor &tensor) {
 }
 
 ScalarType result_type(const Scalar& scalar1, const Scalar& scalar2) {
-  auto tensor1 = scalar_to_tensor(scalar1);
-  tensor1.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return at::result_type(tensor1, scalar2);
+  ResultTypeState state = {};
+  state = update_result_type_state(scalar1, state);
+  state = update_result_type_state(scalar2, state);
+  return result_type(state);
 }
 
 bool can_cast(const at::ScalarType from, const at::ScalarType to) {
