@@ -3678,22 +3678,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         local_batch_size = 8
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
-    @unittest.skipIf(
-        True, "Re-enable when DDP with multiple GPUs per process is confirmed to work"
-    )
-    @requires_nccl()
-    @skip_if_lt_x_gpu(4)
-    def test_grad_layout_1devicemodule_2replicaperprocess(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
-        dev0 = torch.device("cuda:" + str(int_devices[0]))
-        dev1 = torch.device("cuda:" + str(int_devices[1]))
-        # Tells DDP to replicate the model to both of this process's devices.
-        replica_devices = [dev0, dev1]
-        # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
-        layer_devs = dev0
-        local_batch_size = 16
-        self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
-
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_if_rocm
