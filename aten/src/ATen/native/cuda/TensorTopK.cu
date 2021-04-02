@@ -1,0 +1,342 @@
+#include <ATen/ATen.h>
+//#include <ATen/Context.h>
+//#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/TensorInfo.cuh>
+#include <ATen/native/cuda/SortingCommon.cuh>
+#include <ATen/native/cuda/SortingRadixSelect.cuh>
+//#include <ATen/Dispatch.h>
+//#include <ATen/NativeFunctions.h>
+#include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
+
+#include <c10/macros/Macros.h>
+
+using namespace at::native;
+
+namespace at {
+namespace native {
+namespace {
+template <typename T, typename IndexType, int Dim, bool Order>
+C10_LAUNCH_BOUNDS_1(1024)
+__global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
+                           IndexType inputSliceSize,
+                           IndexType outputSliceSize, // aka `k`
+
+                           IndexType numInputSlices,
+                           IndexType inputWithinSliceStride,
+
+                           at::cuda::detail::TensorInfo<T, IndexType> topK,
+                           IndexType numTopKSlices,
+                           IndexType topKWithinSliceStride,
+
+                           at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
+                           IndexType indicesWithinSliceStride) {
+  // Indices are limited to integer fp precision, so counts can fit in
+  // int32, regardless of IndexType
+#ifdef __HIP_PLATFORM_HCC__
+  __shared__ int smem[64];
+#else
+  __shared__ int smem[32]; // one per each warp, up to warp limit
+#endif
+
+  IndexType slice = getLinearBlockId<IndexType>();
+  if (slice >= numInputSlices) {
+    return;
+  }
+
+  // Find the start offset for our slice
+  IndexType sliceStartIndex =
+    at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice, input);
+  IndexType topKSliceStartIndex =
+    at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice, topK);
+  IndexType indicesSliceStartIndex =
+    at::cuda::detail::IndexToOffset<int64_t, IndexType, Dim>::get(slice, indices);
+
+  T* inputSliceStart = &input.data[sliceStartIndex];
+  T* topKSliceStart = &topK.data[topKSliceStartIndex];
+  int64_t* indicesSliceStart = &indices.data[indicesSliceStartIndex];
+
+  // Find the k-th highest element in our input
+  T topKValue = ScalarConvert<int, T>::to(0);
+  radixSelect<T, typename TopKTypeConfig<T>::RadixType, IndexType, Order>(
+    inputSliceStart, outputSliceSize,
+    inputSliceSize, inputWithinSliceStride,
+    smem, &topKValue);
+  const auto topKConverted = at::native::TopKTypeConfig<T>::convert(topKValue);
+
+  // Every value that is strictly less/greater than `pattern`
+  // (depending on sort dir) in sorted int format is in the top-K.
+  // The top-K value itself might not be unique.
+  //
+  // Since there are a variable number of elements that we see that
+  // are within the top-k, we don't know at what index to write out
+  // the resulting values.
+  // In order to get this, we perform an exclusive prefix sum of
+  // `hasTopK`. This will return the resulting index into which we
+  // need to write the result, if a thread has a result.
+
+  // All threads need to participate in the loop and the prefix sum,
+  // but not necessarily in the load; hence loop bounds being rounded
+  // up to a multiple of the block dim.
+  IndexType numIterations = THCRoundUp(inputSliceSize, (IndexType) blockDim.x);
+  IndexType writeIndexStart = 0;
+
+  for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
+    bool inRange = (i < inputSliceSize);
+    T v =
+      inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
+    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
+    bool hasTopK;
+    if (Order) {
+      hasTopK = inRange && (convertedV > topKConverted);
+    } else {
+      hasTopK = inRange && (convertedV < topKConverted);
+    }
+
+    int index;
+    int carry;
+    exclusiveBinaryPrefixScan<int, true>(smem, hasTopK, &index, &carry, AddOp<int>());
+
+    if (hasTopK) {
+      int writeIndex = writeIndexStart + index;
+      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
+
+      IndexType topKOffset = writeIndex * topKWithinSliceStride;
+      IndexType indexOffset = writeIndex * indicesWithinSliceStride;
+
+      topKSliceStart[topKOffset] = v;
+      indicesSliceStart[indexOffset] = i;
+    }
+
+    writeIndexStart += carry;
+  }
+
+  // We need to fill in the rest with actual == top-K values.
+  // The number that we need is outputSliceSize -
+  // writeIndexStart. There might be more than that number available,
+  // in which case we have to choose the first seen set. We do this
+  // via a prefix sum to calculate indices for writing results.
+  CUDA_KERNEL_ASSERT(outputSliceSize >= writeIndexStart);
+  IndexType topKRemaining = (outputSliceSize - writeIndexStart);
+
+  for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
+    bool inRange = (i < inputSliceSize);
+    T v =
+      inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : ScalarConvert<int, T>::to(0);
+    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
+    bool hasTopK = inRange && (convertedV == topKConverted);
+
+    int index;
+    int carry;
+    exclusiveBinaryPrefixScan<int, true>(smem, hasTopK, &index, &carry, AddOp<int>());
+
+    if (hasTopK && index < topKRemaining) {
+      int writeIndex = writeIndexStart + index;
+      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
+
+      IndexType topKOffset = writeIndex * topKWithinSliceStride;
+      IndexType indexOffset = writeIndex * indicesWithinSliceStride;
+
+      topKSliceStart[topKOffset] = v;
+      indicesSliceStart[indexOffset] = i;
+    }
+
+    if (carry >= topKRemaining) {
+      break;
+    }
+
+    topKRemaining -= carry;
+    writeIndexStart += carry;
+  }
+
+};
+
+void topk(Tensor& topK,
+	  Tensor& indices, // does this need to be enforced as Long?
+          Tensor& input_,
+          int64_t k, int dim, int dir, int sorted) {
+  TensorArg topK_arg{topK, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{input_, "input_", 3};
+  checkAllSameGPU("topk", {topK_arg, indices_arg, input_arg});
+  dim = at::maybe_wrap_dim(dim, input_);
+  // are scalars possible here?
+  TORCH_CHECK(topK.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
+  TORCH_CHECK(indices.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
+  int numDims = input_.dim();
+  numDims = numDims == 0 ? 1 : numDims;
+  TORCH_CHECK(numDims <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
+  TORCH_CHECK(dim >= 0 && dim < numDims, "dim not in range");
+
+  int64_t sliceSize = input_.size(dim);
+  sliceSize = sliceSize == 0 ? 1: sliceSize;
+  TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
+  Tensor input = Tensor(input_);
+
+  // Build the output size, which is the dim being selected set to
+  // size k
+  std::vector<int64_t> topKSize = input.sizes().vec();
+  if (topKSize.size() > 0) {
+    topKSize[dim] = k;
+  }
+  //THCTensor_(resize)(state, topK, topKSize, {});
+  //THCudaLongTensor_resize(state, indices, topKSize, {});
+  topK.resize_(topKSize);
+  indices.resize_(topKSize);
+
+  // static_cast is required to ensure that the correct type (INDEX_T)
+  // is provided to the kernel for the arguments.
+
+#define RUN_K(INDEX_T, DIM, DIR)                                        \
+  gatherTopK<scalar_t, INDEX_T, DIM, DIR>                               \
+    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(            \
+      inputInfo,                                                        \
+      static_cast<INDEX_T>(sliceSize),                                  \
+      static_cast<INDEX_T>(k),                                          \
+      static_cast<INDEX_T>(inputSlices),                                \
+      /* The actual dimension that the k-selection is running in */     \
+      /* may have changed from collapseDims() */                        \
+      static_cast<INDEX_T>(inputInfo.strides[collapseInputDim]),        \
+      topKInfo,                                                         \
+      static_cast<INDEX_T>(topKSlices),                                 \
+      static_cast<INDEX_T>(topKInfo.strides[collapseTopKDim]),          \
+      indicesInfo,                                                      \
+      static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]));   \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+#define RUN_DIR(INDEX_T, DIM)                   \
+  if (dir) {                                    \
+    RUN_K(INDEX_T, DIM, true);                  \
+  } else {                                      \
+    RUN_K(INDEX_T, DIM, false);                 \
+  }
+
+#define RUN_DIM(INDEX_T)                        \
+  if (allDims == 1) {                           \
+    RUN_DIR(INDEX_T, 1);                        \
+  } else if (allDims == 2) {                    \
+    RUN_DIR(INDEX_T, 2);                        \
+  } else if (allDims == 3) {                    \
+    RUN_DIR(INDEX_T, 3);                        \
+  } else {                                      \
+    RUN_DIR(INDEX_T, -1);                       \
+  }
+
+#define RUN_T(INDEX_T)                                                  \
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "topk_cuda", [&] {\
+    at::cuda::detail::TensorInfo<scalar_t, INDEX_T> inputInfo =           \
+      at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(input);          \
+    at::cuda::detail::TensorInfo<scalar_t, INDEX_T> topKInfo =            \
+      at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(topK);           \
+    at::cuda::detail::TensorInfo<int64_t, INDEX_T> indicesInfo =          \
+      at::cuda::detail::getTensorInfo<int64_t, INDEX_T>(indices);         \
+                                                                          \
+    /* We use these structures solely to find the offset to */            \
+    /* each slice we are operating on */                                  \
+    inputInfo.sizes[dim] = 1;                                             \
+    topKInfo.sizes[dim] = 1;                                              \
+    indicesInfo.sizes[dim] = 1;                                           \
+                                                                          \
+    /* Collapse all other dims */                                         \
+    int collapseInputDim = inputInfo.collapseDims(dim);                   \
+    int collapseTopKDim = topKInfo.collapseDims(dim);                     \
+    int collapseIndicesDim = indicesInfo.collapseDims(dim);               \
+                                                                          \
+    int64_t inputSlices = 1;                                              \
+    for (int i = 0; i < inputInfo.dims; ++i) {                            \
+      inputSlices *= inputInfo.sizes[i];                                  \
+    }                                                                     \
+    int64_t topKSlices = 1;                                               \
+    for (int i = 0; i < topKInfo.dims; ++i) {                             \
+      topKSlices *= topKInfo.sizes[i];                                    \
+    }                                                                     \
+                                                                          \
+    dim3 grid;                                                            \
+    if (!THC_getGridFromTiles(inputSlices, grid)) {                       \
+      THError("Slice to sort is too large");                              \
+    }                                                                     \
+                                                                          \
+    dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) C10_WARP_SIZE), (int64_t) 1024)); \
+                                                                          \
+    /* This is used as a template parameter to calculate indices. */      \
+    /* We only specialize it if all collapsed dim sizes are the */        \
+    /* same; otherwise, we use -1 which is the specialization */          \
+    /* parameter for arbitrary dimensions */                              \
+    int allDims = inputInfo.dims;                                         \
+    if (topKInfo.dims != allDims || indicesInfo.dims != allDims) {        \
+      allDims = -1;                                                       \
+    }                                                                     \
+                                                                          \
+    RUN_DIM(INDEX_T);                                                     \
+  });
+
+  // the below is safe with 0-dimensional tensors because it is based on
+  // TensorInfo which implicitly expands to 1-dimensional.
+  if (input.numel() > 0) {
+    // Based on required index size, run the algorithm with the
+    // appropriate index type
+    if (at::cuda::detail::canUse32BitIndexMath(input) &&
+        at::cuda::detail::canUse32BitIndexMath(topK) &&
+        at::cuda::detail::canUse32BitIndexMath(indices)) {
+      RUN_T(uint32_t);
+    } else {
+      RUN_T(uint64_t);
+    }
+  }
+#undef RUN_T
+#undef RUN_DIM
+#undef RUN_DIR
+#undef RUN_K
+
+  // Sort the results if the user wants them sorted, since our
+  // selection routine does not ensure sorting
+  if (sorted && topK.(numel) > 1) {
+    // FIXME: the k/v inplace sort along slice only works for size <=
+    // 2048 at the moment
+    // Workaround:
+    // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
+    // and so for the double word types,
+    // we get "too many resources requested for launch" in the 2048 case
+#if CUDA_VERSION >= 8000
+#if defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_LONG)
+    int maxSliceSize = 1024;
+#else
+    int maxSliceSize = 2048;
+#endif
+#else
+    int maxSliceSize = 2048;
+#endif
+    if (sliceSize <= maxSliceSize) {
+      // This avoids any memory allocations and performs all sorting
+      // work inplace along the slice
+      THCTensor_(sortKeyValueInplace)(state, topK, indices, dim, dir);
+    } else {
+      // Depend upon the backup sort that returns indices, which we
+      // can use in conjunction with gather to produce the original
+      // indices.
+      // This is not the most efficient implementation, especially since
+      // there are memory allocations performed here. If the user desires
+      // greater performance, they should torch.gather() the results
+      // themselves using the reported indices, providing previously
+      // allocated tensors to receive the results.
+      THCTensor* sortedTopK = THCTensor_(new)(state);
+      THCudaLongTensor* sortedIndices = THCudaLongTensor_new(state);
+      THCTensor_(sort)(state, sortedTopK, sortedIndices, topK, dim, dir);
+
+      THCudaLongTensor* sortedTopKIndices = THCudaLongTensor_new(state);
+
+      THCudaLongTensor_resizeAs(state, sortedTopKIndices, indices);
+      THCudaLongTensor_gather(state, sortedTopKIndices, indices, dim, sortedIndices);
+
+      THCTensor_(freeCopyTo)(state, sortedTopK, topK);
+      THCudaLongTensor_freeCopyTo(state, sortedTopKIndices, indices);
+      THCudaLongTensor_free(state, sortedIndices);
+    }
+  }
+
+  THCudaLongTensor_free(state, input);
+
+  THCudaCheck(cudaGetLastError());
+
+}
+
+}
+} // at::native
+} // at
