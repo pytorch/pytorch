@@ -355,6 +355,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "_set_comm_hook_name",
           &::c10d::Logger::set_comm_hook,
           py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_uneven_input_join",
+          &::c10d::Logger::set_uneven_input_join,
           py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
@@ -1448,6 +1452,7 @@ Example::
           "avg_backward_compute_comm_overlap_time",
           &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time)
       .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook)
+      .def_readwrite("join_uneven_inputs", &c10::DDPLoggingData::join_uneven_inputs)
       .def_readwrite(
           "forward_compute_time", &c10::DDPLoggingData::forward_compute_time)
       .def_readwrite(
