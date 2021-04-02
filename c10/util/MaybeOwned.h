@@ -37,7 +37,7 @@ class MaybeOwned final {
   , own_(std::forward<Args>(args)...) {}
 
  public:
-
+  explicit MaybeOwned(): isBorrowed_(true), borrow_(nullptr) {}
   MaybeOwned(const MaybeOwned&) = delete;
   MaybeOwned& operator=(const MaybeOwned&) = delete;
 
@@ -91,10 +91,16 @@ class MaybeOwned final {
   }
 
   const T& operator*() const {
+    if (isBorrowed_) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(borrow_ != nullptr);
+    }
     return isBorrowed_ ? *borrow_ : own_;
   }
 
   const T* operator->() const {
+    if (isBorrowed_) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(borrow_ != nullptr);
+    }
     return isBorrowed_ ? borrow_ : &own_;
   }
 };
