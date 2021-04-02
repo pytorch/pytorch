@@ -7,7 +7,7 @@ from torch.utils.data.dataset import \
 from torch.utils.data.dataset import IterableDataset as IterDataPipe
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader, _DatasetKind, get_worker_info
-from torch.utils.data.decorator import \
+from torch.utils.data._decorator import \
     (functional_datapipe, guaranteed_datapipes_determinism, non_deterministic,
      construct_time_validation, runtime_validation)
 
