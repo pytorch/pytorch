@@ -45,11 +45,7 @@ LoopNest::LoopNest(
 }
 
 LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
-  // Find all tensors we need to compute (including dependencies) and put them
-  // in a topological order
-  std::vector<Tensor*> tensors_to_compute =
-      findAllNeededTensors(output_tensors);
-  initialize(output_tensors, tensors_to_compute);
+  initialize(output_tensors, output_tensors);
   verify(root_stmt_);
 }
 
