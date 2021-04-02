@@ -1,4 +1,4 @@
-from typing import List, Set
+from typing import List, Optional, Set
 from enum import Enum
 
 # Defined in tools/autograd/init.cpp
@@ -60,8 +60,22 @@ class ProfilerResult:
     def legacy_events(self) -> List[List[ProfilerEvent]]: ...
     def save(self, str) -> None: ...
 
+class DistributedMetadata:
+    backend: str
+    rank: int
+    world_size: int
+
+class GpuInfo:
+    id: int
+    name: str
+    total_memory: int
+
+class Metadata:
+    gpus: List[GpuInfo]
+    distributed: Optional[DistributedMetadata]
+
 def _enable_profiler(config: ProfilerConfig, activities: Set[ProfilerActivity]) -> None: ...
-def _prepare_profiler(config: ProfilerConfig, activities: Set[ProfilerActivity]) -> None: ...
+def _prepare_profiler(config: ProfilerConfig, activities: Set[ProfilerActivity], metadata: Optional[Metadata]) -> None: ...
 def _disable_profiler() -> ProfilerResult: ...
 def _profiler_enabled() -> bool: ...
 def kineto_available() -> bool: ...

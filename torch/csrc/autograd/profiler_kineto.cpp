@@ -13,14 +13,6 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAContext.h>
-#endif
-#ifndef C10_MOBILE
-#include <pybind11/pybind11.h>
-#include <torch/csrc/utils/pybind.h>
-#endif
-
 // TODO: TO be removed, once this properly works from libkineto
 // Literal copy-n-paste from third_party/kineto/libkineto/src/WeakSymbols.cpp
 extern "C" {
@@ -261,53 +253,31 @@ std::string stacksToStr(const std::vector<std::string>& stacks) {
 
 } // namespace
 
-#ifdef USE_CUDA
-std::vector<libkineto::GpuInfo> collectCudaDevices(){
-  auto result = std::vector<libkineto::GpuInfo>();
-  auto num_gpu = at::cuda::device_count();
-  for (size_t i = 0; i < num_gpu; i++){
-    auto device = at::cuda::getDeviceProperties(i);
-    result.push_back({i, device->name, device->totalGlobalMem
-    });
+std::unique_ptr<libkineto::Metadata> convertMetadata(const c10::optional<Metadata>& metadata){
+  if (!metadata){
+    return nullptr;
   }
 
-  return result;
-}
-#endif
-
-#ifndef C10_MOBILE
-std::unique_ptr<libkineto::DistributedMetadata> collectDistMetadata(){
-  auto py_module = py::module::import("torch.distributed");
-  if (!py::cast<bool>(py_module.attr("is_available")()) ||
-      !py::cast<bool>(py_module.attr("is_initialized")())){
-        return nullptr;
-      }
-
-  auto result = std::make_unique<libkineto::DistributedMetadata>();
-  result->backend_ = py::cast<std::string>(py_module.attr("get_backend")());
-  result->worldSize_ = py::cast<int>(py_module.attr("get_world_size")());
-  result->rank_ = py::cast<int>(py_module.attr("rank")());
-
-  return result;
-}
-#endif
-
-std::unique_ptr<libkineto::Metadata> collectMetadata(){
   // TODO: add options to config collect which options in future?
   auto result = std::make_unique<libkineto::Metadata>();
-#ifdef USE_CUDA
-  result->gpus_ = collectCudaDevices();
-#endif
-#ifndef C10_MOBILE
-  result->distributed_ = collectDistMetadata();
-#endif
+  if (metadata->distributed_){
+    result->distributed_ = std::make_unique<libkineto::DistributedMetadata>();
+    result->distributed_->backend_ = metadata->distributed_->backend_;
+    result->distributed_->worldSize_ = metadata->distributed_->worldSize_;
+    result->distributed_->rank_ = metadata->distributed_->rank_;
+  }
+
+  for (auto&& gpu : metadata->gpus_){
+      result->gpus_.push_back({gpu.id_, gpu.name_, gpu.totalMemory_});
+  }
 
   return result;
 }
 
 void prepareProfiler(
     const ProfilerConfig& config,
-    const std::set<ActivityType>& activities) {
+    const std::set<ActivityType>& activities,
+    const c10::optional<Metadata>& metadata) {
   TORCH_CHECK(config.state == ProfilerState::KINETO,
       "Supported only in Kineto profiler");
 
@@ -342,7 +312,7 @@ void prepareProfiler(
     libkineto::api().initProfilerIfRegistered();
   }
 
-  libkineto::api().activityProfiler().prepareTrace(k_activities, collectMetadata());
+  libkineto::api().activityProfiler().prepareTrace(k_activities, convertMetadata(metadata));
 }
 
 void enableProfiler(

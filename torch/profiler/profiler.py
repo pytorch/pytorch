@@ -361,7 +361,7 @@ class profile(object):
             with_stack=self.with_stack,
             use_kineto=True,
         )
-        self.profiler._prepare_kineto_trace()
+        self.profiler._prepare_kineto_trace(self._collect_metadata())
 
     def _start_trace(self):
         assert self.profiler is not None
@@ -370,3 +370,38 @@ class profile(object):
     def _stop_trace(self):
         assert self.profiler is not None
         self.profiler.__exit__(None, None, None)
+
+    def _collect_metadata(self):
+        # TODO: need we add option to control which kinds of metadata need to be captured?
+        metadata = torch.autograd.Metadata()
+        metadata.gpus = self.get_cuda_devices()
+        metadata.distributed = self.get_distributed_info()
+        return metadata
+
+    @staticmethod
+    def get_cuda_devices():
+        device_count = torch.cuda.device_count()
+        if device_count == 0:
+            return []
+        else:
+            devices = []
+            for i in range(device_count):
+                device_prop = torch.cuda.get_device_properties(i)
+                gpu = torch.autograd.GpuInfo()
+                gpu.id = i
+                gpu.name = device_prop.name
+                gpu.total_memory = device_prop.total_memory
+                devices.append(gpu)
+        return devices
+
+    @staticmethod
+    def get_distributed_info():
+        import torch.distributed as dist
+        if not dist.is_available() or not dist.is_initialized():
+            return None
+
+        dist_metadata = torch.autograd.DistributedMetadata()
+        dist_metadata.backend = dist.get_backend()
+        dist_metadata.rank = dist.get_rank()
+        dist_metadata.world_size = dist.get_world_size()
+        return dist_metadata

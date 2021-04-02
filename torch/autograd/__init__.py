@@ -256,7 +256,7 @@ from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, Pro
                                 _enable_record_function, _set_empty_test_observer, kineto_available)
 
 if kineto_available():
-    from torch._C._autograd import (ProfilerResult, KinetoEvent,
+    from torch._C._autograd import (ProfilerResult, KinetoEvent, DistributedMetadata, GpuInfo, Metadata,
                                     _prepare_profiler, _enable_profiler, _disable_profiler)
 
 from . import profiler
