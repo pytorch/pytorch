@@ -9,15 +9,15 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/mkl/SparseCsrLinearAlgebra.h>
 
 #include <algorithm>
 
 namespace at {
 namespace native {
 
-// Functions for matrix multiplication.
 using namespace at::sparse_csr;
-// certain utiliy functions are usable from sparse COO too.
+// certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
 
 static constexpr bool is_msvc() {
@@ -28,6 +28,7 @@ static constexpr bool is_msvc() {
 #endif
 }
 
+// Functions for matrix multiplication.
 Tensor& addmm_out_sparse_csr_dense_cpu(
     const Tensor& self,
     const SparseCsrTensor& op1,
@@ -105,7 +106,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
 
   // Do not use MKL for Windows due to linking issues with sparse MKL routines.
   if (at::hasMKL() && !is_msvc()) {
-    at::_sparse_mm_mkl_(out, op1, op2, expand_self, alpha, beta);
+    _sparse_mm_mkl_(out, op1, op2, expand_self, alpha, beta);
   } else {
     int64_t dense_stride0 = op1.stride(0);
     int64_t dense_stride1 = op1.stride(1);

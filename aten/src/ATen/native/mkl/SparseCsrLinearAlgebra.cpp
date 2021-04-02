@@ -1,5 +1,4 @@
-#include <ATen/ATen.h>
-#include <ATen/SparseCsrTensorUtils.h>
+#include "SparseCsrLinearAlgebra.h"
 
 // Don't compile with MKL for MSVC/macos since linking the sparse MKL routines
 // needs some build fixes.
@@ -10,8 +9,7 @@
     defined(__MACH__)
 
 namespace at {
-namespace native {
-using namespace at::sparse_csr;
+namespace sparse_csr {
 Tensor& _sparse_mm_mkl_(
     Tensor& self,
     const SparseCsrTensor& sparse_,
@@ -44,8 +42,7 @@ Tensor& _sparse_mm_mkl_(
 #include <ATen/SparseCsrTensorImpl.h>
 
 namespace at {
-namespace native {
-using namespace at::sparse_csr;
+namespace sparse_csr {
 
 #ifdef MKL_ILP64
 static constexpr ScalarType TORCH_INT_TYPE = at::kLong;
