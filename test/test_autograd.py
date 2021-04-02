@@ -465,7 +465,7 @@ class TestAutograd(TestCase):
         s.abs_().clamp_(0.0001)
         for sign in (-1, 1):
             s[-1] = sign
-            mat = torch.chain_matmul(u, s.diag(), v.t()).requires_grad_()
+            mat = torch.linalg.multi_dot([u, s.diag(), v.t()]).requires_grad_()
             gradcheck(sign_mul_logdet, mat)
             gradgradcheck(sign_mul_logdet, mat)
 
@@ -3021,20 +3021,6 @@ class TestAutograd(TestCase):
         gradcheck(torch.igamma, (s, x))
         gradgradcheck(torch.igamma, (s, x))
 
-    def test_chain_matmul(self):
-        def gen_matrices(p):
-            matrices = []
-            for (pi, pi_1) in zip(p[:-1], p[1:]):
-                matrices.append(torch.randn(pi, pi_1).requires_grad_())
-            return matrices
-
-        gradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
-        gradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
-        gradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
-        gradgradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
-        gradgradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
-        gradgradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
-
     def test_profiler_tracing(self):
         t1, t2 = torch.ones(1), torch.ones(1)
         with torch.autograd.profiler.profile(use_kineto=kineto_available()) as prof:
@@ -5325,8 +5311,6 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
-    'test_unfold_scalar',
-    'test_unfold_scalar_neg0',
     'test_to_sparse',
 ])
 
