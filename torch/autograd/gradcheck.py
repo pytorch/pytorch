@@ -152,7 +152,6 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
 def compute_numerical_gradient(fn, entry, v, nbhd_checks_fn):
     # Performs finite differencing by perturbing `entry` in-place by `v` and
     # returns the gradient of each of the outputs wrt to x at idx.
-    # we currently assume that the norm of delta equals eps
     if isinstance(v, torch.Tensor) and v.layout != torch.sparse_coo:
         v = v.reshape(entry.shape)
 
@@ -220,6 +219,8 @@ def compute_numerical_jacobian_cols(jvp_fn, delta, input_is_complex, grad_out) -
 
 def combine_jacobian_cols(jacobians_cols: Dict[int, List[torch.Tensor]], outputs, input,
                           numel) -> Tuple[torch.Tensor, ...]:
+    # jacobian_cols is a data structure that maps column_idx -> output_idx -> column of jacobian Tensor
+    # we return a list that maps output_idx -> full jacobian Tensor
     jacobians = allocate_jacobians_with_outputs(outputs, input.dtype, input.device, numel)
     for i, jacobian in enumerate(jacobians):
         for k, v in jacobians_cols.items():
