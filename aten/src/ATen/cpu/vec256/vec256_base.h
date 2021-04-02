@@ -199,6 +199,17 @@ public:
     }
     return mask;
   }
+  Vec256<T> isnan() const {
+    Vec256<T> vec;
+    for (int64_t i = 0; i != size(); i++) {
+      if (_isnan(values[i])) {
+        std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));
+      } else {
+        std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));
+      }
+    }
+    return vec;
+  }
   Vec256<T> map(T (*f)(T)) const {
     Vec256<T> ret;
     for (int64_t i = 0; i != size(); i++) {
