@@ -677,6 +677,39 @@ Vec256<BFloat16> inline fmadd(const Vec256<BFloat16>& a,
   return cvtfp32_bf16(o1, o2);
 }
 
+inline std::tuple<Vec256<float>, Vec256<float>> convert_bfloat16_float(const Vec256<BFloat16>& a) {
+  __m256 o1, o2;
+  cvtbf16_fp32(__m256i(a), o1, o2);
+  return std::make_tuple(o1, o2);
+}
+
+inline Vec256<BFloat16> convert_float_bfloat16(const Vec256<float>& a, const Vec256<float>& b) {
+ return cvtfp32_bf16(__m256(a), __m256(b));
+}
+
+#else //defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+
+inline std::tuple<Vec256<float>, Vec256<float>> convert_bfloat16_float(const Vec256<BFloat16>& a) {
+  constexpr int64_t K = Vec256<BFloat16>::size();
+  __at_align32__ float arr[K];
+  __at_align32__ BFloat16 arr2[K];
+  a.store(arr2);
+  convert(arr2, arr, K);
+  return std::make_tuple(
+      Vec256<float>::loadu(arr),
+      Vec256<float>::loadu(arr + Vec256<float>::size()));
+}
+
+inline Vec256<BFloat16> convert_float_bfloat16(const Vec256<float>& a, const Vec256<float>& b) {
+  constexpr int64_t K = Vec256<BFloat16>::size();
+  __at_align32__ float arr[K];
+  __at_align32__ BFloat16 arr2[K];
+  a.store(arr);
+  b.store(arr + Vec256<float>::size());
+  convert(arr, arr2, K);
+  return Vec256<BFloat16>::loadu(arr2);
+}
+
 #endif
 
 }}}

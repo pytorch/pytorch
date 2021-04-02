@@ -97,7 +97,8 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
       c10::BFloat16* out, const c10::BFloat16* in, int64_t size) {                \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {           \
       DL_RUNTIME_BUG_BFLOAT16()                                                   \
-      map([](const Vec256<c10::BFloat16>& x) { return x.op(); },                  \
+      using vecscalar_t = vec_scalar_t<c10::BFloat16>;                            \
+      map([](const Vec256<vecscalar_t>& x) { return x.op(); },                    \
           out + begin,                                                            \
           in + begin,                                                             \
           end - begin);                                                           \
@@ -108,7 +109,8 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   template <typename scalar_t>                                          \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
     parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
-      map([](const Vec256<scalar_t>& x) { return x.op(); },             \
+      using vecscalar_t = vec_scalar_t<scalar_t>;                       \
+      map([](const Vec256<vecscalar_t>& x) { return x.op(); },          \
           out + begin,                                                  \
           in + begin,                                                   \
           end - begin);                                                 \
