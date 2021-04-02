@@ -899,7 +899,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/LossNLL.cpp",
     "aten/src/ATen/native/LossNLL2d.cpp",
     "aten/src/ATen/native/MaxPooling.cpp",
-    "aten/src/ATen/native/cpu/MaxPoolKernel.cpp",
     "aten/src/ATen/native/MaxUnpooling.cpp",
     "aten/src/ATen/native/Memory.cpp",
     "aten/src/ATen/native/MetaTensor.cpp",
