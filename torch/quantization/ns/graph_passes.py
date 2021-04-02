@@ -7,7 +7,6 @@ from torch.quantization.fx.utils import get_new_attr_name_with_prefix
 from .utils import (
     get_node_first_input_and_output_type,
     getattr_from_fqn,
-    print_node,
     NodeInputOrOutputType,
     return_first_non_observer_node,
     get_number_of_non_param_args,
@@ -44,7 +43,6 @@ def _insert_logger_after_node(
     # create new name
     logger_node_name = \
         get_new_attr_name_with_prefix(node.name + logger_node_name_suffix)(gm)
-    # print('node.name', node.name, 'suffix', logger_node_name_suffix, 'new name', logger_node_name)
     # create a string representation of the node's target type
     target_type = ''
     if node.op == 'call_function':
@@ -458,13 +456,6 @@ def create_a_shadows_b(
                 assert node_b_is_end_node
                 subgraph_a, ref_name = \
                     end_node_b_to_matched_subgraph_a_and_name[node_b]
-
-            if False:
-                print('b')
-                print_node(node_b)
-                print('a')
-                print_node(subgraph_a.start_node)
-                print_node(subgraph_a.end_node)
 
             if node_b_is_start_node:
 
