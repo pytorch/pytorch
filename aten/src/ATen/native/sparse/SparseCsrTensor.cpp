@@ -135,7 +135,7 @@ Tensor col_indices_sparse_csr(const Tensor& self) {
   return get_sparse_csr_impl(self)->col_indices().alias();
 }
 
-const bool _is_same_size_as_sparse_csr(
+bool _is_same_size_as_sparse_csr(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
   return self.sizes().equals(src.sizes());
