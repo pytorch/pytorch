@@ -30,6 +30,8 @@ class Logger {
   std::vector<int> get_bucket_sizes();
   // Set comm. hook, if used
   void set_comm_hook(const std::string& hook);
+  // Set running with uneven input detection (model.join() context manager)
+  void set_uneven_input_join();
 
   // Calculate avg stats using cpu timer and gpu timer
   // that has been recorded in reducer.
