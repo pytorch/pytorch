@@ -330,7 +330,7 @@ public:
 		store(tmp);
 		sign.store(tmp_sign);
     for (int64_t i = 0; i < size(); i++) {
-      ret[i] = std::copysign(tmp[i], tmp_sign[i]);
+      tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
     }
     return loadu(tmp);
   }
