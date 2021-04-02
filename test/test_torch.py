@@ -130,7 +130,7 @@ class AbstractTestCases:
             from torch._torch_docs import __file__ as doc_file
             from torch._torch_docs import multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args
 
-            with open(doc_file, "r") as f:
+            with open(doc_file, "r", encoding="utf-8") as f:
                 doc_strs = f.read()
 
             for doc_str in re.findall(r'add_docstr\((.*?),.*?("""|\'\'\')(.*?)("""|\'\'\')\)', doc_strs, re.MULTILINE | re.DOTALL):
