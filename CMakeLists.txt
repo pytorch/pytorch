@@ -368,7 +368,7 @@ cmake_dependent_option(
 
 if(NOT USE_SYSTEM_ONNX)
   set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
-elseif()
+else()
   set(ONNX_NAMESPACE "onnx" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 endif()
 set(SELECTED_OP_LIST "" CACHE STRING

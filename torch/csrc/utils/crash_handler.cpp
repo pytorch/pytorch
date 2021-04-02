@@ -1,7 +1,7 @@
 #include <iostream>
 
-#ifdef __linux__
-#include <client/linux/handler/exception_handler.h> // NOLINT
+#ifdef ADD_BREAKPAD_SIGNAL_HANDLER
+#include <breakpad/client/linux/handler/exception_handler.h>
 #endif
 
 #include <c10/util/Exception.h>
@@ -10,7 +10,7 @@
 namespace torch {
 namespace crash_handler {
 
-#ifdef __linux__
+#ifdef ADD_BREAKPAD_SIGNAL_HANDLER
 
 bool dumpCallback(
     const google_breakpad::MinidumpDescriptor& descriptor,

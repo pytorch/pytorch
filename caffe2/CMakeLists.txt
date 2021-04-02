@@ -581,6 +581,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
       ${TORCH_SRC_DIR}/csrc/utils/crash_handler.cpp
     )
+
     # Disable legacy import of building without Caffe2 support
     if(BUILD_CAFFE2)
       list(APPEND TORCH_SRCS
@@ -901,10 +902,6 @@ if(NOT MSVC AND USE_XNNPACK)
   TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
 endif()
 
-if(USE_BREAKPAD)
-  target_link_libraries(torch_cpu PUBLIC breakpad)
-endif()
-
 # ==========================================================
 # formerly-libtorch flags
 # ==========================================================
@@ -958,9 +955,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
       ${TORCH_ROOT}/aten/src
       ${CMAKE_CURRENT_BINARY_DIR}/aten/src
+      
       ${CMAKE_BINARY_DIR}/aten/src)
-    target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
-  endif()
+      target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
+      endif()
 
   set(ATen_CPU_INCLUDE
     ${TORCH_ROOT}/aten/src
@@ -971,6 +969,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 if(USE_TBB)
   list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
   target_link_libraries(torch_cpu PUBLIC tbb)
+endif()
+
+
+find_library(BREAKPAD_LIB breakpad_client)
+find_path(BREAKPAD_INCLUDE_DIR breakpad)
+if(NOT BREAKPAD_LIB OR NOT BREAKPAD_INCLUDE_DIR)
+  message(STATUS "breakpad library not found")
+else()
+  target_link_libraries(torch_cpu PRIVATE ${BREAKPAD_LIB})
+  add_compile_definitions(ADD_BREAKPAD_SIGNAL_HANDLER)
+  target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
 endif()
 
 
@@ -1501,7 +1510,8 @@ if(USE_ROCM)
     # correct dependency from generated files.)
     target_link_libraries(torch_hip PRIVATE ATEN_CUDA_FILES_GEN_LIB)
   endif()
-  target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_HIP_DEPENDENCY_LIBS})
+  target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
+  target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
@@ -1864,11 +1874,4 @@ if(BUILD_PYTHON)
   # Caffe2 proto files
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
-endif()
-
-if(USE_BREAKPAD)
-  # TODO: Something less hacky (create/map an include dir somewhere?)
-  add_custom_command(TARGET torch_cpu
-                     POST_BUILD
-                     COMMAND rm -rf ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/breakpad/src/third_party/lss)
 endif()

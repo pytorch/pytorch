@@ -750,29 +750,33 @@
   dispatch:
     CPU, CUDA: bitwise_not_out
 
+- func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: copysign_out
+
 - func: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: copysign
+  structured_delegate: copysign.out
 
 - func: copysign_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU, CUDA: copysign_
-
-- func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: copysign_out
+  structured_delegate: copysign.out
 
 - func: copysign.Scalar(Tensor self, Scalar other) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: copysign
+    CompositeExplicitAutograd: copysign
 
 - func: copysign_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU, CUDA: copysign_
+    CompositeExplicitAutograd: copysign_
+
+- func: copysign.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: copysign_out
 
 - func: logical_not(Tensor self) -> Tensor
   variants: function, method
@@ -879,8 +883,12 @@
   dispatch:
     CPU, CUDA: ceil_out
 
+# alias for torch.linalg.multi_dot
 - func: chain_matmul(Tensor[] matrices) -> Tensor
   variants: function
+
+# alias for torch.linalg.multi_dot
+- func: chain_matmul.out(Tensor[] matrices, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: unsafe_chunk(Tensor self, int chunks, int dim=0) -> Tensor[]
   variants: function, method
@@ -6007,6 +6015,7 @@
 - func: min.other(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
+# The following quantile signatures are DEPRECATED in favor of the new ones with the interpolation kwarg.
 - func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
@@ -6025,6 +6034,28 @@
 - func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+  variants: method, function
+
+# To keep backward and forward compatibility, and to avoid ambiguity with the original signatures, dim, keepdim and interpolation
+# parameters are required for now. Once the deprecated signatures are removed they will be made optional.
+- func: quantile.new_scalar_out(Tensor self, float q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
+
+- func: quantile.new_scalar(Tensor self, float q, int? dim, bool keepdim, *, str interpolation) -> Tensor
+  variants: method, function
+
+- func: quantile.new_out(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
+
+- func: quantile.new(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation) -> Tensor
+  variants: method, function
+
+- func: nanquantile.new_scalar_out(Tensor self, float q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
+
+- func: nanquantile.new_scalar(Tensor self, float q, int? dim, bool keepdim, *, str interpolation) -> Tensor
+  variants: method, function
+
+- func: nanquantile.new_out(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
+
+- func: nanquantile.new(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation) -> Tensor
   variants: method, function
 
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
@@ -8540,7 +8571,7 @@
   dispatch:
     CompositeExplicitAutograd: linalg_lstsq
 
-- func: _lstsq_helper(Tensor a, Tensor b, float cond, str? driver_name) -> (Tensor, Tensor, Tensor)
+- func: _lstsq_helper_(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float cond, str driver_name) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _lstsq_helper_cpu
@@ -8758,6 +8789,12 @@
 - func: linalg_matrix_rank.out(Tensor self, float? tol=None, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+
+- func: linalg_multi_dot(Tensor[] tensors) -> Tensor
+  python_module: linalg
+
+- func: linalg_multi_dot.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
