@@ -481,7 +481,7 @@ TEST(Reductions, ReduceAsProducer) {
       [&](const VarHandle& l, const VarHandle& n) {
         return c->call(l, n) * a.load(l, n);
       });
-  LoopNest loop({d});
+  LoopNest loop({d}, {c, d});
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -525,7 +525,7 @@ TEST(Reductions, ReduceAsConsumer) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
   Tensor* d = Reduce("sum", {{2, "l1"}}, Sum(), c, {{3, "n1"}, {m, "m1"}});
-  LoopNest loop({d});
+  LoopNest loop({d}, {c, d});
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1345,7 +1345,7 @@ TEST(Reductions, ReduceInlineReduction) {
     }
   }
 
-  LoopNest l1({y});
+  LoopNest l1({y}, {x, y});
   // Cannot inline a reduction computation
   ASSERT_FALSE(l1.computeInline(x->buf()));
 }
@@ -1379,7 +1379,7 @@ TEST(Reductions, ReduceInlineConsumer) {
     }
   }
 
-  LoopNest l1({y});
+  LoopNest l1({y}, {x, y});
   LoopNest l2(l1);
   l2.computeInline(x->buf());
 
@@ -1437,7 +1437,7 @@ TEST(Reductions, ReduceInlineReducerInternal) {
     }
   }
 
-  LoopNest l1({y});
+  LoopNest l1({y}, {x, y});
   LoopNest l2(l1);
   l2.computeInline(x->buf());
 
@@ -1484,7 +1484,7 @@ TEST(Reductions, ReductionCacheAccessesOuter) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
   Stmt* d_loop = l.getLoopStmtsFor(d)[1];
   l.cacheAccesses(d->buf(), "d_local", d_loop);
@@ -1533,7 +1533,7 @@ TEST(Reductions, ReductionCacheAccessesInner) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
   Stmt* d_loop = l.getLoopStmtsFor(d)[2];
   l.cacheAccesses(d->buf(), "d_local", d_loop);
@@ -1578,7 +1578,7 @@ TEST(Reductions, ReductionCacheBodyAccess) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
   Stmt* d_loop = l.getLoopStmtsFor(d)[1];
   l.cacheAccesses(c->buf(), "scale_local", d_loop);
@@ -1619,7 +1619,7 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
   For* outer;
   For* inner;
@@ -1662,7 +1662,7 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
   For* outer;
   For* inner;
@@ -1710,7 +1710,7 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
   For* outer;
   For* inner;
