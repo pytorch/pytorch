@@ -52,7 +52,7 @@ def clip_grad_norm_(
                           "Note that the default behavior will change in a future release to error out "
                           "if a non-finite total norm is encountered. At that point, setting "
                           "error_if_nonfinite=false will be required to retain the old behavior.",
-                          FutureWarning, stacklevel=2);
+                          FutureWarning, stacklevel=2)
     clip_coef = max_norm / (total_norm + 1e-6)
     if clip_coef < 1:
         for p in parameters:
