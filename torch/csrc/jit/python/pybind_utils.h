@@ -368,7 +368,7 @@ inline InferredType tryToInferType(py::handle input) {
     // qualified name and return it.
     if (class_compiled) {
       auto script_class = py::module::import("torch.jit._state")
-                           .attr("_get_script_class")(input.get_type());
+                              .attr("_get_script_class")(input.get_type());
 
       if (!script_class.is_none()) {
         auto class_type = py::cast<ClassTypePtr>(script_class);

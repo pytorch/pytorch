@@ -7,5 +7,3 @@ from .importer import (
 )
 from .package_exporter import DeniedModuleError, EmptyMatchError, PackageExporter
 from .package_importer import PackageImporter
-from .dep import Dep
-from .shell import PackageShell
