@@ -195,13 +195,13 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               PyErr_Clear();
             }
             // Log and ignore exceptions raised through the callback
-            VLOG(1) << "Got the following error when running the callback: "
-                    << e.what();
+            LOG(ERROR) << "Got the following error when running the callback: "
+                       << e.what();
 
-          } catch (std::exception& e) {
+          } catch (const std::exception& e) {
             // Log and ignore exceptions raised through the callback
-            VLOG(1) << "Got the following error when running the callback: "
-                    << e.what();
+            LOG(ERROR) << "Got the following error when running the callback: "
+                       << e.what();
           }
         },
         std::move(pf)));
@@ -334,17 +334,12 @@ inline InferredType tryToInferType(py::handle input) {
   py::bool_ isClass =
       py::module::import("inspect").attr("isclass")(input.get_type());
   if (py::cast<bool>(isClass)) {
-    py::str qualifiedName = py::module::import("torch._jit_internal")
-                                .attr("_qualified_name")(input.get_type());
-    auto pyClass = py::module::import("torch.jit._state")
-                       .attr("_get_script_class")(qualifiedName);
-    if (!pyClass.is_none()) {
-      auto cu = get_python_cu();
-      const auto classname =
-          c10::QualifiedName(py::cast<std::string>(qualifiedName));
-      auto class_type = cu->get_class(classname);
-      TORCH_INTERNAL_ASSERT(class_type);
-      return InferredType(class_type);
+    auto scriptClass = py::module::import("torch.jit._state")
+                           .attr("_get_script_class")(input.get_type());
+    if (!scriptClass.is_none()) {
+      auto classType = py::cast<ClassTypePtr>(scriptClass);
+      TORCH_INTERNAL_ASSERT(classType);
+      return InferredType(classType);
     }
   }
 
@@ -630,13 +625,14 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   }
 }
 
-inline py::object getScriptedClassOrError(const std::string& name) {
-  auto py_class = py::module::import("torch.jit._state")
-                      .attr("_get_script_class")(name.c_str());
+inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
+  auto py_class =
+      py::module::import("torch.jit._state")
+          .attr("_get_python_class")(classType->name()->qualifiedName());
   if (py_class.is_none()) {
     std::stringstream err;
     err << "Unknown reference to ScriptClass ";
-    err << name;
+    err << classType->name()->qualifiedName();
     err << ". (Did you forget to import it?)";
     throw std::runtime_error(err.str());
   }
@@ -724,7 +720,7 @@ inline py::object toPyObject(IValue ivalue) {
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
-    auto pyClass = getScriptedClassOrError(obj->name());
+    auto pyClass = getScriptedClassOrError(obj->type());
     auto pyObj = pyClass.attr("__new__")(pyClass);
 
     const auto numAttrs = classType->numAttributes();
@@ -745,9 +741,7 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
   } else if (ivalue.isEnum()) {
     auto enum_holder = ivalue.toEnumHolder();
-    auto qualified_class_name = enum_holder->qualifiedClassName();
-
-    auto py_class = getScriptedClassOrError(qualified_class_name);
+    auto py_class = getScriptedClassOrError(enum_holder->type());
     return py_class.attr(enum_holder->name().c_str());
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
