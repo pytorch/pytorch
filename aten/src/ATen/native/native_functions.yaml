@@ -1917,6 +1917,7 @@
 
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
   variants: function
+  device_guard: False
   dispatch:
     CPU, CUDA: _index_put_impl_
 
