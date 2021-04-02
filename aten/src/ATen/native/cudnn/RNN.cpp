@@ -1408,6 +1408,10 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
   static std::mutex state_cache_mut;
 
   int device = cuda::current_device();
+  AT_ASSERT(options.has_device());
+  AT_ASSERT(options.device().is_cuda());
+  AT_ASSERT(options.device().index() == device);
+
   std::unique_lock<std::mutex> lock {state_cache_mut};
   auto& state = dropout_state_cache.at(device);
   if (train && dropout_p > 0 && !state.buffer.defined()) {
