@@ -13,6 +13,10 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
+#include <ATen/cuda/CUDAContext.h>
+#include <pybind11/pybind11.h>
+#include <torch/csrc/utils/pybind.h>
+
 // TODO: TO be removed, once this properly works from libkineto
 // Literal copy-n-paste from third_party/kineto/libkineto/src/WeakSymbols.cpp
 extern "C" {
@@ -253,6 +257,43 @@ std::string stacksToStr(const std::vector<std::string>& stacks) {
 
 } // namespace
 
+
+std::vector<libkineto::GpuInfo> collectCudaDevices(){
+  auto result = std::vector<libkineto::GpuInfo>();
+  auto num_gpu = at::cuda::device_count();
+  for (size_t i = 0; i < num_gpu; i++){
+    auto device = at::cuda::getDeviceProperties(i);
+    result.push_back({i, device->name, device->totalGlobalMem
+    });
+  }
+
+  return result;
+}
+
+std::unique_ptr<libkineto::DistributedMetadata> collectDistMetadata(){
+  auto py_module = py::module::import("torch.distributed");
+  if (!py::cast<bool>(py_module.attr("is_available")()) ||
+      !py::cast<bool>(py_module.attr("is_initialized")())){
+        return nullptr;
+      }
+
+  auto result = std::make_unique<libkineto::DistributedMetadata>();
+  result->backend_ = py::cast<std::string>(py_module.attr("get_backend")());
+  result->worldSize_ = py::cast<int>(py_module.attr("get_world_size")());
+  result->rank_ = py::cast<int>(py_module.attr("rank")());
+
+  return result;
+}
+
+std::unique_ptr<libkineto::Metadata> collectMetadata(){
+  // TODO: add options to config collect which options in future?
+  auto result = std::make_unique<libkineto::Metadata>();
+  result->gpus_ = collectCudaDevices();
+  result->distributed_ = collectDistMetadata();
+
+  return result;
+}
+
 void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities) {
@@ -290,7 +331,7 @@ void prepareProfiler(
     libkineto::api().initProfilerIfRegistered();
   }
 
-  libkineto::api().activityProfiler().prepareTrace(k_activities);
+  libkineto::api().activityProfiler().prepareTrace(k_activities, collectMetadata());
 }
 
 void enableProfiler(
