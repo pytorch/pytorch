@@ -25,7 +25,8 @@ void LayerNormKernelImplInternal(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  using Vec = vec256::Vec256<T>;
+  using T_ACC = vec256::vec_scalar_t<T>;
+  using Vec = vec256::Vec256<T_ACC>;
   DCHECK_EQ(X.numel(), M * N);
   DCHECK(!gamma.defined() || gamma.numel() == N);
   DCHECK(!beta.defined() || beta.numel() == N);
@@ -35,27 +36,27 @@ void LayerNormKernelImplInternal(
   T* Y_data = Y->data_ptr<T>();
   T* mean_data = mean->data_ptr<T>();
   T* rstd_data = rstd->data_ptr<T>();
-  const T c = T(1) / static_cast<T>(N);
+  const T_ACC c = T_ACC(1) / static_cast<T_ACC>(N);
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
   at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
     for (int64_t i = start; i < end; ++i) {
       T* X_ptr = X_data + i * N;
       T* Y_ptr = Y_data + i * N;
-      T mean_val = vec256::reduce_all<T>(
+      T_ACC mean_val = vec256::reduce_all<T>(
           [](Vec& x, Vec& y) { return x + y; },
           X_ptr,
           N);
-      T rstd_val = vec256::map_reduce_all<T>(
+      T_ACC rstd_val = vec256::map_reduce_all<T>(
           [](Vec x) { return x * x; },
           [](Vec x, Vec y) { return x + y; },
           X_ptr,
           N);
       mean_val *= c;
-      rstd_val = std::max(rstd_val * c - mean_val * mean_val, T(0));
-      rstd_val = T(1) / std::sqrt(rstd_val + eps);
-      const T scale = rstd_val;
-      const T bias = -rstd_val * mean_val;
+      rstd_val = std::max(rstd_val * c - mean_val * mean_val, T_ACC(0));
+      rstd_val = T_ACC(1) / std::sqrt(rstd_val + T_ACC(eps));
+      const T_ACC scale = rstd_val;
+      const T_ACC bias = -rstd_val * mean_val;
       if (gamma_null || beta_null) {
         for (int64_t j = 0; j < N; ++j) {
           const T gamma_v = gamma_null ? T(1) : gamma_data[j];
@@ -89,7 +90,8 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES(X.scalar_type(), "LayerNormKernelImpl", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(),
+      "LayerNormKernelImpl", [&]() {
     LayerNormKernelImplInternal<scalar_t>(
         X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
   });
@@ -107,7 +109,8 @@ void LayerNormBackwardKernelImplInternal(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  using Vec = vec256::Vec256<T>;
+  using T_ACC = vec256::vec_scalar_t<T>;
+  using Vec = vec256::Vec256<T_ACC>;
   DCHECK_EQ(dY.numel(), M * N);
   DCHECK_EQ(X.numel(), M * N);
   DCHECK_EQ(mean.numel(), M);
@@ -121,7 +124,7 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   T* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
   T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
-  const T scale = T(1) / static_cast<T>(N);
+  const T_ACC scale = T_ACC(1) / static_cast<T_ACC>(N);
   const bool gamma_null = gamma_data == nullptr;
   const bool dX_null = dX_data == nullptr;
   const bool dgamma_null = dgamma_data == nullptr;
@@ -155,8 +158,8 @@ void LayerNormBackwardKernelImplInternal(
       const T* dY_ptr = dY_data + i * N;
       const T* X_ptr = X_data + i * N;
       if (!dgamma_null) {
-        const T a = rstd_data[i];
-        const T b = -a * mean_data[i];
+        const T_ACC a = rstd_data[i];
+        const T_ACC b = -a * mean_data[i];
         // Scalar math:
         // for (int64_t j = 0; j < N; ++j) {
         //   dgamma_data[j] += dY_ptr[j] * (a * X_ptr[j] + b);
@@ -183,8 +186,8 @@ void LayerNormBackwardKernelImplInternal(
       }
       if (!dX_null) {
         T* dX_ptr = dX_data + i * N;
-        T ds = T(0);
-        T db = T(0);
+        T_ACC ds = T_ACC(0);
+        T_ACC db = T_ACC(0);
         // Scalar math:
         // for (int64_t j = 0; j < N; ++j) {
         //   const T gamma_v = gamma_null ? T(1) : gamma_data[j];
@@ -217,9 +220,9 @@ void LayerNormBackwardKernelImplInternal(
               gamma_data,
               N);
         }
-        const T a = rstd_data[i];
-        const T b = (db * mean_data[i] - ds) * a * a * a * scale;
-        const T c = -b * mean_data[i] - db * a * scale;
+        const T_ACC a = rstd_data[i];
+        const T_ACC b = (db * mean_data[i] - ds) * a * a * a * scale;
+        const T_ACC c = -b * mean_data[i] - db * a * scale;
         // Scalar math:
         // for (int64_t j = 0; j < N; ++j) {
         //   const T gamma_v = gamma_null ? T(1) : gamma_data[j];
@@ -249,17 +252,17 @@ void LayerNormBackwardKernelImplInternal(
   if (buffer_data != nullptr) {
     parallel_for(0, N, 1, [&](int64_t start, int64_t end) {
       for (int64_t j = start; j < end; ++j) {
-        T dgamma_v = T(0);
-        T dbeta_v = T(0);
+        T_ACC dgamma_v = T_ACC(0);
+        T_ACC dbeta_v = T_ACC(0);
         for (int64_t i = 0; i < num_threads; ++i) {
           dgamma_v += buffer_data[i * N + j];
           dbeta_v += buffer_data[num_threads * N + i * N + j];
         }
         if (!dgamma_null) {
-          dgamma_data[j] = dgamma_v;
+          dgamma_data[j] = static_cast<T>(dgamma_v);
         }
         if (!dbeta_null) {
-          dbeta_data[j] = dbeta_v;
+          dbeta_data[j] = static_cast<T>(dbeta_v);
         }
       }
     });
@@ -277,11 +280,11 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES(
-      X.scalar_type(), "LayerNormBackwardKernelImpl", [&]() {
-        LayerNormBackwardKernelImplInternal<scalar_t>(
-            dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
-      });
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(),
+      "LayerNormBackwardKernelImpl", [&]() {
+    LayerNormBackwardKernelImplInternal<scalar_t>(
+        dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+  });
 }
 
 } // namespace
