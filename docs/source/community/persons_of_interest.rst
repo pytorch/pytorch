@@ -97,8 +97,9 @@ MKLDNN
 AMD/ROCm/HIP
 ~~~~~~~~~~~~
 
--  Junjie Bai (`bddppq <https://github.com/bddppq>`__)
--  Johannes M. Dieterich (`iotamudelta <https://github.com/iotamudelta>`__)
+-  Peng Sun (`sunway513 <https://github.com/sunway513>`__)
+-  Jithun Nair (`jithunnair-amd <https://github.com/jithunnair-amd>`__)
+-  Jeff Daily (`jeffdaily <https://github.com/jeffdaily>`__)
 
 Build + CI
 ~~~~~~~~~~
