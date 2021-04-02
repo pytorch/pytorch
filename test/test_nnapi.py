@@ -252,8 +252,7 @@ class TestNNAPI(TestCase):
                 self.check(torch.nn.MaxPool2d((3, 4)), inp)
                 self.check(torch.nn.MaxPool2d((3, 4), (1, 2)), inp)
 
-    # Currently causing alignment issues.
-    def _test_adaptive_avg_pool2d(self):
+    def test_adaptive_avg_pool2d(self):
         for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 3, 12, 16), 0.3, 128):
             with self.subTest(name):
                 self.check(torch.nn.AdaptiveAvgPool2d((1, 1)), inp)
