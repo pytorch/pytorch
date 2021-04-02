@@ -1328,7 +1328,6 @@
   dispatch:
     SparseCPU, SparseCUDA: div_sparse_
 
-
 - func: div.out_mode(Tensor self, Tensor other, *, str? rounding_mode, Tensor(a!) out) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
