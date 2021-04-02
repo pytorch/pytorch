@@ -1,8 +1,13 @@
-from typing import Any, Callable, Optional, Type, Union
+import inspect
+from functools import wraps
+from typing import Any, Callable, Optional, Type, Union, get_type_hints
 from torch.utils.data import IterDataPipe
 from torch.utils.data._typing import _DataPipeMeta
 
 
+######################################################
+# Functional API
+######################################################
 class functional_datapipe(object):
     name: str
 
@@ -23,6 +28,9 @@ class functional_datapipe(object):
         return cls
 
 
+######################################################
+# Determinism
+######################################################
 _determinism: bool = False
 
 
@@ -94,3 +102,34 @@ class non_deterministic(object):
                             "for this DataPipe if that is acceptable for your application"
                             .format(self.cls.__name__))  # type: ignore
         return self.cls(*args, **kwargs)  # type: ignore
+
+
+######################################################
+# typing
+######################################################
+# Construct-time checking
+# Validate each DataPipe with hint as a subtype of the hint.
+def construct_time_validation(f):
+    if f.__name__ not in ('__init__', '__new__'):
+        raise TypeError("Can not decorate function {} with 'construct_time_validation'"
+                        .format(f.__name__))
+    signature = inspect.signature(f)
+    hints = get_type_hints(f)
+
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        bound = signature.bind(*args, **kwargs)
+        for argument_name, value in bound.arguments.items():
+            if argument_name in hints and isinstance(hints[argument_name], _DataPipeMeta):
+                hint = hints[argument_name]
+                if not isinstance(value, IterDataPipe):
+                    raise TypeError("Expected argument '{}' as a IterDataPipe, but found {}"
+                                    .format(argument_name, type(value)))
+                if not value.type.issubtype(hint.type):
+                    raise TypeError("Expected type of argument '{}' as a subtype of "
+                                    "hint {}, but found {}"
+                                    .format(argument_name, hint.type, value.type))
+
+        return f(*args, **kwargs)
+
+    return wrapper
