@@ -1127,3 +1127,745 @@ Expression Lists
     starred_item    ::=  '*' primary
 
 A starred item can only appear on the left-hand side of an assignment statement, e.g. ``a, *b, c = ...``.
+
+.. statements:
+
+Simple Statements
+~~~~~~~~~~~~~~~~~
+
+The following section describes the syntax of simple statements that are supported in TorchScript.
+It is modeled after `the simple statements chapter of the Python language reference <https://docs.python.org/3/reference/simple_stmts.html>`_.
+
+Expression statements:
+^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    expression_stmt ::=  starred_expression
+    starred_expression ::=  expression | (starred_item ",")* [starred_item]
+    starred_item       ::=  assignment_expression | "*" or_expr
+
+Assignment Statements:
+^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    assignment_stmt ::=  (target_list "=")+ (starred_expression)
+    target_list     ::=  target ("," target)* [","]
+    target          ::=  identifier
+                     | "(" [target_list] ")"
+                     | "[" [target_list] "]"
+                     | attributeref
+                     | subscription
+                     | slicing
+                     | "*" target
+
+Augmented assignment statements:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    augmented_assignment_stmt ::=  augtarget augop (expression_list)
+    augtarget ::=  identifier | attributeref | subscription
+    augop ::=  "+=" | "-=" | "*=" | "/=" | "//=" | "%=" |
+                "**="| ">>=" | "<<=" | "&=" | "^=" | "|="
+
+
+Annotated assignment statements:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+::
+
+    annotated_assignment_stmt ::=  augtarget ":" expression
+                               ["=" (starred_expression)]
+
+The ``raise`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    raise_stmt ::=  "raise" [expression ["from" expression]]
+
+* Raise statements in TorchScript do not support ``try\except\finally``.
+
+The ``assert`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    assert_stmt ::=  "assert" expression ["," expression]
+
+* Assert statements in TorchScript do not support ``try\except\finally``.
+
+The ``return`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    return_stmt ::=  "return" [expression_list]
+
+* Return statements in TorchScript do not support ``try\except\finally``.
+
+The ``del`` statement:
+^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    del_stmt ::=  "del" target_list
+
+The ``pass`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    pass_stmt ::= "pass"
+
+The ``print`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    print_stmt ::= "print" "(" expression  [, expression] [.format{expression_list}] ")"
+
+The ``break`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    break_stmt ::= "break"
+
+The ``continue`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    continue_stmt ::= "continue"
+
+Compound Statements
+~~~~~~~~~~~~~~~~~~~
+
+The following section describes the syntax of compound statements that are supported in TorchScript.
+The section also highlights how Torchscript differs from regular Python statements.
+It is modeled after `the compound statements chapter of the Python language reference <https://docs.python.org/3/reference/compound_stmts.html>`_.
+
+The ``if`` statement:
+^^^^^^^^^^^^^^^^^^^^^
+* Torchscript supports both basic ``if/else`` and ternary ``if/else``.
+
+Basic ``if/else`` statement:
+""""""""""""""""""""""""""""
+
+::
+
+    if_stmt ::=  "if" assignment_expression ":" suite
+             ("elif" assignment_expression ":" suite)
+             ["else" ":" suite]
+
+* ``elif`` statement can repeat for arbitrary number of times, but it needs to be before ``else`` statement.
+
+Ternary ``if/else`` statement:
+""""""""""""""""""""""""""""""
+
+::
+
+    if_stmt ::=  return [expression_list] "if" assignment_expression "else" [expression_list]
+
+**Example**
+
+* ``Tensor`` with 1 dimension is promoted to ``bool``
+
+.. testcode::
+
+    import torch
+
+    @torch.jit.script
+    def fn(x: torch.Tensor):
+        if x: # The tensor gets promoted to bool
+            return True
+        return False
+    print(fn(torch.rand(1)))
+
+.. testoutput::
+
+    True
+
+* ``Tensor`` with multi dimensions are not promoted to ``bool``
+
+**Example**
+
+::
+
+    import torch
+
+    # Multi dimensional Tensors error out.
+
+    @torch.jit.script
+    def fn():
+        if torch.rand(2):
+            print("Tensor is available")
+
+        if torch.rand(4,5,6):
+            print("Tensor is available")
+
+    print(fn())
+
+The above code results in the below RuntimeError
+
+::
+
+    RuntimeError: The following operation failed in the TorchScript interpreter.
+    Traceback of TorchScript (most recent call last):
+    @torch.jit.script
+    def fn():
+        if torch.rand(2):
+           ~~~~~~~~~~~~ <--- HERE
+            print("Tensor is available")
+    RuntimeError: Boolean value of Tensor with more than one value is ambiguous
+
+* If a conditional variable is annotated as Final, either true or false branch is
+* evaluated depending on the evaluation of the conditional variable.
+
+**Example**
+
+::
+
+    import torch
+
+    a : torch.jit.final[Bool] = True
+
+    if a:
+        return torch.Tensor(2,3)
+    else:
+        return []
+
+Here, only True branch is evaluated, since ``a`` is annotated as ``final`` and set to ``True``
+
+The ``while`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    while_stmt ::=  "while" assignment_expression ":" suite
+
+* `while...else` statements are not supported in Torchscript. It results in a `RuntimeError`
+
+The ``for-in`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    for_stmt ::=  "for" target_list "in" expression_list ":" suite
+                  ["else" ":" suite]
+
+* ``for...else`` statements are not supported in Torchscript. It results in a ``RuntimeError``
+
+* for loops on tuples: These unroll the loop, generating a body for each member of the tuple.The body must type-check correctly for each member.
+
+**Example**
+
+.. testcode::
+
+    import torch
+    from typing import Tuple
+
+    @torch.jit.script
+    def fn():
+        tup = (3, torch.ones(4))
+        for x in tup:
+            print(x)
+
+    fn()
+
+.. testoutput::
+
+    3
+     1
+     1
+     1
+     1
+    [ CPUFloatType{4} ]
+
+
+*  for loops on lists: For loops over a ``nn.ModuleList`` will unroll the body of the loop at compile time, with each member of the module list.
+
+**Example**
+
+::
+
+    class SubModule(torch.nn.Module):
+        def __init__(self):
+            super(SubModule, self).__init__()
+            self.weight = nn.Parameter(torch.randn(2))
+
+        def forward(self, input):
+            return self.weight + input
+
+    class MyModule(torch.nn.Module):
+
+        def __init__(self):
+            super(MyModule, self).init()
+            self.mods = torch.nn.ModuleList([SubModule() for i in range(10)])
+
+        def forward(self, v):
+            for module in self.mods:
+                v = module(v)
+            return v
+
+    model = torch.jit.script(MyModule())
+
+The ``with`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^
+* The ``with`` statement is used to wrap the execution of a block with methods defined by a context manager
+
+::
+
+    with_stmt ::=  "with" with_item ("," with_item) ":" suite
+    with_item ::=  expression ["as" target]
+
+* If a target was included in the ``with`` statement, the return value from context manager’s ``__enter__()``
+* is assigned to it. Unlike python, if an exception caused the suite to be exited, its type, value, and traceback are
+* not passed as arguments to ``__exit__()``. Three ``None`` arguments are supplied.
+
+* ``try/except/finally`` statements are not supported inside ``with`` blocks.
+*  Exceptions raised within ``with`` block cannot be suppressed.
+
+The ``tuple`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    tuple_stmt ::= tuple([iterables])
+
+* Iterable types in TorchScript include ``Tensors``, ``lists``,``tuples``, ``dictionaries``, ``strings``,``torch.nn.ModuleList`` and ``torch.nn.ModuleDict``.
+* Cannot convert a List to Tuple by using this built-in function.
+* Unpacking all outputs into a tuple is covered by:
+
+::
+
+    abc = func() # Function that returns a tuple
+    a,b = func()
+
+The ``getattr`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    getattr_stmt ::= getattr(object, name[, default])
+
+* Attribute name must be a literal string.
+* Module type object is not supported for example, torch._C
+* Custom Class object is not supported for example, torch.classes.*
+
+The ``hasattr`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    hasattr_stmt ::= hasattr(object, name)
+
+* Attribute name must be a literal string.
+* Module type object is not supported for example, torch._C
+* Custom Class object is not supported for example, torch.classes.*
+
+The ``zip`` statement:
+^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    zip_stmt ::= zip(iterable1, iterable2)
+
+* Arguments must be iterables.
+* Two iterables of same outer container type but different length are supported.
+
+**Example**
+
+.. testcode::
+
+    a = [1, 2] # List
+    b = [2, 3, 4] # List
+    zip(a, b) # works
+
+* Both the iterables must be of the same container type - (List here).
+
+**Example**
+
+::
+
+    a = (1, 2) # Tuple
+    b = [2, 3, 4] # List
+    zip(a, b) # Runtime error
+
+The above code results in the below RuntimeError
+
+::
+
+    RuntimeError: Can not iterate over a module list or
+        tuple with a value that does not have a statically determinable length.
+
+* Two iterables of same container Type but different data type is supported
+
+**Example**
+
+.. testcode::
+
+    a = [1.3, 2.4]
+    b = [2, 3, 4]
+    zip(a, b) # Works
+
+* Iterable types in TorchScript include ``Tensors``, ``lists``, ``tuples``, ``dictionaries``, ``strings``, ``torch.nn.ModuleList`` and ``torch.nn.ModuleDict``.
+
+The ``enumerate`` statement:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+::
+
+    enumerate_stmt ::= enumerate([iterable])
+
+* Arguments must be iterables.
+* Iterable types in TorchScript include ``Tensors``, ``lists``, ``tuples``, ``dictionaries``, ``strings``, ``torch.nn.ModuleList`` and ``torch.nn.ModuleDict``.
+
+
+.. _python-values-torch-script:
+
+Python Values
+~~~~~~~~~~~~~
+
+.. _python-builtin-functions-values-resolution:
+
+Resolution Rules
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+When given a Python value, TorchScript attempts to resolve it in following five different ways:
+
+* Compilable Python Implementation:
+    * When a Python value is backed by a Python implementation that can be compiled by TorchScript, TorchScript compiles and uses the underlying Python implementation.
+    * Example: ``torch.jit.Attribute``
+* Op Python Wrapper:
+    * When a Python value is a wrapper of a native PyTorch op, TorchScript emits corresponding operator.
+    * Example: ``torch.jit._logging.add_stat_value``
+* Python Object Identity Match:
+    * For a limited set of ``torch.*`` API calls (in the form of Python values) that TorchScript supports, TorchScript attempts to match a Python value against each item in the set.
+    * When matched, TorchScript generates a corresponding ``SugaredValue`` instance that contains lowering logic for these values.
+    * Example: ``torch.jit.isinstance``
+* Name Match:
+    * For Python built-in functions and constants, TorchScript identifies them by name, and creates a corresponding SugaredValue instance that implements their functionality.
+    * Example: ``all()``
+* Value Snapshot:
+    * For Python values from unrecognized modules, TorchScript attempts to take a snapshot of the value and converts to a constant in the graph of the function(s) or method(s) being compiled
+    * Example: ``math.pi``
+
+
+
+.. _python-builtin-functions-support:
+
+Python Builtin Functions Support
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. list-table:: TorchScript Support for Python Builtin Functions
+   :widths: 25 25 50
+   :header-rows: 1
+
+   * - Builtin Function
+     - Support Level
+     - Notes
+   * - ``abs()``
+     - Partial
+     - Only supports ``Tensor``/``Int``/``Float`` type inputs | Doesn't honor ``__abs__`` override
+   * - ``all()``
+     - Full
+     -
+   * - ``any()``
+     - Full
+     -
+   * - ``ascii()``
+     - None
+     -
+   * - ``bin()``
+     - Partial
+     - Only supports ``Int``-type input
+   * - ``bool()``
+     - Partial
+     - Only supports ``Tensor``/``Int``/``Float`` type inputs
+   * - ``breakpoint()``
+     - None
+     -
+   * - ``breakpoint()``
+     - None
+     -
+   * - ``bytearray()``
+     - None
+     -
+   * - ``bytes()``
+     - None
+     -
+   * - ``callable()``
+     - None
+     -
+   * - ``chr()``
+     - Partial
+     - Only ASCII character set is supported
+   * - ``classmethod()``
+     - Full
+     -
+   * - ``compile()``
+     - None
+     -
+   * - ``complex()``
+     - None
+     -
+   * - ``delattr()``
+     - None
+     -
+   * - ``dict()``
+     - Full
+     -
+   * - ``dir()``
+     - None
+     -
+   * - ``divmod()``
+     - Full
+     -
+   * - ``enumerate()``
+     - Full
+     -
+   * - ``eval()``
+     - None
+     -
+   * - ``exec()``
+     - None
+     -
+   * - ``filter()``
+     - None
+     -
+   * - ``filter()``
+     - None
+     -
+   * - ``float()``
+     - Partial
+     - Doesn't honor ``__index__`` override
+   * - ``format()``
+     - Partial
+     - Manual index specification not supported | Format type modifier not supported
+   * - ``frozenset()``
+     - None
+     -
+   * - ``getattr()``
+     - Partial
+     - Attribute name must be string literal
+   * - ``globals()``
+     - None
+     -
+   * - ``hasattr()``
+     - Full
+     -
+   * - ``hash()``
+     - Full
+     - `Tensor`'s hash is based on identity not numeric value
+   * - ``hex()``
+     - Partial
+     - Only supports ``Int``-type input
+   * - ``id()``
+     - Full
+     - Only supports ``Int``-type input
+   * - ``input()``
+     - None
+     -
+   * - ``int()``
+     - Partial
+     - ``base`` argument not supported | Doesn't honor ``__index__`` override
+   * - ``isinstance()``
+     - Full
+     - ``torch.jit.isintance`` provides better support when checking against container types like ``Dict[str, int]``
+   * - ``issubclass()``
+     - None
+     -
+   * - ``iter()``
+     - None
+     -
+   * - ``len()``
+     - Full
+     -
+   * - ``list()``
+     - Full
+     -
+   * - ``ord()``
+     - Partial
+     - Only ASCII character set is supported
+   * - ``pow()``
+     - Full
+     -
+   * - ``print()``
+     - Partial
+     - ``separate``, ``end`` and ``file`` arguments are not supported
+   * - ``property()``
+     - None
+     -
+   * - ``range()``
+     - Full
+     -
+   * - ``repr()``
+     - None
+     -
+   * - ``reversed()``
+     - None
+     -
+   * - ``round()``
+     - Partial
+     - ``ndigits`` argument is not supported
+   * - ``set()``
+     - None
+     -
+   * - ``setattr()``
+     - None
+     - Partial
+   * - ``slice()``
+     - Full
+     -
+   * - ``sorted()``
+     - Partial
+     - ``key`` argument is not supported
+   * - ``staticmethod()``
+     - Full
+     -
+   * - ``str()``
+     - Partial
+     - ``encoding`` and ``errors`` arguments are not supported
+   * - ``sum()``
+     - Full
+     -
+   * - ``super()``
+     - Partial
+     - It can only be used in ``nn.Module``'s ``__init__`` method.
+   * - ``type()``
+     - None
+     -
+   * - ``vars()``
+     - None
+     -
+   * - ``zip()``
+     - Full
+     -
+   * - ``__import__()``
+     - None
+     -
+
+.. _python-builtin-values-support:
+
+Python Builtin Values Support
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. list-table:: TorchScript Support for Python Builtin Values
+   :widths: 25 25 50
+   :header-rows: 1
+
+   * - Builtin Value
+     - Support Level
+     - Notes
+   * - ``False``
+     - Full
+     -
+   * - ``True``
+     - Full
+     -
+   * - ``None``
+     - Full
+     -
+   * - ``NotImplemented``
+     - None
+     -
+   * - ``Ellipsis``
+     - Full
+     -
+
+
+.. _torch_apis_in_torchscript:
+
+``torch.*`` APIs Support in TorchScript
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. _torch_apis_in_torchscript_rpc:
+
+Remote Procedure Calls
+^^^^^^^^^^^^^^^^^^^^^^
+
+TorchScript supports a subset of RPC APIs that supports running a function on
+on a specified remote worker instead of locally.
+
+Specifically, following APIs are fully supported:
+
+- ``torch.distributed.rpc.rpc_sync()``
+    - ``rpc_sync()`` makes a blocking RPC call to run a function on remote worker. RPC messages are sent and received in parallel to execution of Python code.
+    - More deatils about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_sync`.
+
+- ``torch.distributed.rpc.rpc_async()``
+    - ``rpc_async()`` makes a non-blocking RPC call to run a function on remote worker. RPC messages are sent and received in parallel to execution of Python code.
+    - More deatils about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_async`.
+- ``torch.distributed.rpc.remote()``
+    - Executing a remote call on worker and getting a Remote Reference ``RRef`` as return value.
+    - More deatils about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_async`.
+
+.. _torch_apis_in_torchscript_async:
+
+Asynchronous Execution
+^^^^^^^^^^^^^^^^^^^^^^
+
+TorchScript allows creating asynchronous computation tasks to make better use
+of computation resources. This is done via supporting a list of APIs that are
+only usable within TorchScript:
+
+- ``torch.jit.fork()``
+    - Creates an asynchronous task executing func and a reference to the value of the result of this execution. fork will return immediately.
+    - Synonymous to ``torch.jit._fork``, which is only kept for backward compatibility reasons.
+    - More deatils about its usage and examples can be found in :meth:`~torch.jit.fork`.
+- ``torch.jit.wait()``
+    - Forces completion of a ``torch.jit.Future[T]`` asynchronous task, returning the result of the task.
+    - Synonymous to ``torch.jit._wait``, which is only kept for backward compatibility reasons.
+    - More deatils about its usage and examples can be found in :meth:`~torch.jit.wait`.
+
+
+.. _torch_apis_in_torchscript_annotation:
+
+Type Annotations
+^^^^^^^^^^^^^^^^
+
+TorchScript is statically-typed, it provides and supports a set of utilities to help annotate variables and attributes.:
+
+- ``torch.jit.annotate()``
+    - Provides a type hint to TorchScript where Python 3 style type hints do not work well.
+    - One common example is to annotate type for expressions like ``[]``. ``[]`` is treated as ``List[torch.Tensor]`` by default, when a different type is needed, one can use following code to hint TorchScript: ``torch.jit.annotate(List[int], [])``.
+    - More details can be found in :meth:`~torch.jit.annotate`
+- ``torch.jit.Attribute``
+    - Common use cases include providing type hint for ``torch.nn.Module`` attributes. Because their ``__init__`` methods are not parsed by TorchScript, ``torch.jit.Attribute`` should be used instead of ``torch.jit.annotate`` in module's ``__init__`` methods.
+    - More details can be found in :meth:`~torch.jit.Attribute`
+- ``torch.jit.Final``
+    - An alias for Python's ``typing.Final``. ``torch.jit.Final`` is only kept for backward compatibility reasons.
+
+
+.. _torch_apis_in_torchscript_meta_programming:
+
+Meta Programming
+^^^^^^^^^^^^^^^^
+
+TorchScript provides a set of utilities to facilitate meta programming.
+
+- ``torch.jit.is_scripting()``
+    - Returns a boolean value indicating whether current program is compiled by ``torch.jit.script`` or not.
+    - When used in an ``assert`` or ``if`` statement, the scope or branch where ``torch.jit.is_scripting()`` evaluates to ``False`` is not compiled.
+    - Its value can be evaluated statically at compile time, thus commonly used in ``if`` statement to stop TorchScript from compiling one of the branches.
+    - More details and examples can be found in :meth:`~torch.jit.is_scripting`
+- ``@torch.jit.ignore``
+    - This decorator indicates to the compiler that a function or method should be ignored and left as a Python function.
+    - This allows you to leave code in your model that is not yet TorchScript compatible.
+    - If a function decorated by ``@torch.jit.ignore`` is called from TorchScript, ignored functions will dispatch the call to the Python interpreter.
+    - Models with ignored functions cannot be exported.
+    - More details and examples can be found in :meth:`~torch.jit.ignore`
+- ``@torch.jit.unused``
+    - This decorator indicates to the compiler that a function or method should be ignored and replaced with the raising of an exception.
+    - This allows you to leave code in your model that is not yet TorchScript compatible and still export your model.
+    - If a function decorated by ``@torch.jit.unused`` is called from TorchScript, a runtime error will be raised.
+    - More details and examples can be found in :meth:`~torch.jit.unused`
+
+.. _torch_apis_in_torchscript_type_refinement:
+
+Type Refinement
+^^^^^^^^^^^^^^^
+
+- ``torch.jit.isinstance()``
+    - Returns a boolean indicating whether a variable is of specified type.
+    - More deatils about its usage and examples can be found in :meth:`~torch.jit.isinstance`.
