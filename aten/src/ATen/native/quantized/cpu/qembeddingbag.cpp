@@ -685,33 +685,6 @@ Tensor& embedding_bag_byte_rowwise_offsets_out(
       false /* is_embedding_op */);
 }
 
-namespace {
-
-Tensor embedding_bag_byte_rowwise_offsets(
-    const Tensor& weight,
-    const Tensor& indices,
-    const c10::optional<Tensor>& offsets_in,
-    const bool /* scale_grad_by_freq */,
-    const int64_t /* mode */,
-    bool pruned_weights,
-    const c10::optional<Tensor>& per_sample_weights_,
-    const c10::optional<Tensor>& compressed_indices_mapping,
-    bool include_last_offset) {
-  auto output = at::empty({0}, weight.options().dtype(at::kFloat));
-  embedding_bag_byte_rowwise_offsets_out(
-      output,
-      weight,
-      indices,
-      offsets_in,
-      false /*unused scale_grad_by_freq*/,
-      0 /*unused mode*/,
-      pruned_weights,
-      per_sample_weights_,
-      compressed_indices_mapping,
-      include_last_offset);
-  return output;
-}
-
 Tensor& embedding_bag_4bit_rowwise_offsets_out(
     Tensor& output,
     const Tensor& weight,
@@ -745,6 +718,41 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
       include_last_offset);
 }
 
+namespace {
+
+
+inline at::Tensor create_empty_from(
+    const at::Tensor& t,
+    c10::ScalarType dtype) {
+  return at::detail::empty_cpu(
+      {0}, dtype, t.layout(), t.device(), c10::nullopt, c10::nullopt);
+}
+
+Tensor embedding_bag_byte_rowwise_offsets(
+    const Tensor& weight,
+    const Tensor& indices,
+    const c10::optional<Tensor>& offsets_in,
+    const bool /* scale_grad_by_freq */,
+    const int64_t /* mode */,
+    bool pruned_weights,
+    const c10::optional<Tensor>& per_sample_weights_,
+    const c10::optional<Tensor>& compressed_indices_mapping,
+    bool include_last_offset) {
+  auto output = create_empty_from(weight, at::kFloat);
+  embedding_bag_byte_rowwise_offsets_out(
+      output,
+      weight,
+      indices,
+      offsets_in,
+      false /*unused scale_grad_by_freq*/,
+      0 /*unused mode*/,
+      pruned_weights,
+      per_sample_weights_,
+      compressed_indices_mapping,
+      include_last_offset);
+  return output;
+}
+
 Tensor embedding_bag_4bit_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
@@ -756,7 +764,7 @@ Tensor embedding_bag_4bit_rowwise_offsets(
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
 
-  auto output = at::empty({0}, weight.options().dtype(at::kFloat));
+  auto output = create_empty_from(weight, at::kFloat);
   embedding_bag_4bit_rowwise_offsets_out(
     output,
     weight,

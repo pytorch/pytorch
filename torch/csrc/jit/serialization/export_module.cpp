@@ -398,7 +398,6 @@ class ScriptModuleSerializer {
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
     TensorIndexMap constants_from_jit;
-
     // Use constants_from_jit to store the mapping (tensor) -> (archive_name,
     // index), such that when later writing bytecode archive, if the tensor is
     // the same as one from jit, it will just update bytecode.pkl and won't
