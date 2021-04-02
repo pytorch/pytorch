@@ -25,6 +25,28 @@ constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
 // Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
 constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
+// Locates a specific variable by replica index and variable index.
+struct VariableIndex {
+  size_t replica_index;
+  size_t variable_index;
+
+  VariableIndex() = default;
+
+  VariableIndex(size_t replica_index_, size_t variable_index_) {
+    replica_index = replica_index_;
+    variable_index = variable_index_;
+  }
+
+  static size_t hash(const VariableIndex& key) {
+    return c10::get_hash(key.replica_index, key.variable_index);
+  }
+};
+
+inline bool operator==(const VariableIndex& lhs, const VariableIndex& rhs) {
+  return lhs.replica_index == rhs.replica_index
+    && lhs.variable_index == rhs.variable_index;
+}
+
 class Reducer {
  public:
   // The constructor takes a list of variables for every model replica.
@@ -96,7 +118,8 @@ class Reducer {
   // buckets once after the first iteration and never rebuild them if
   // find_unused_parameters_.
   inline bool should_rebuild_buckets() const {
-    return !find_unused_parameters_ && !has_rebuilt_bucket_;
+    return !find_unused_parameters_ && !has_rebuilt_bucket_
+      && (unused_parameters_.size() == 0);
   }
 
   // Pushes all parameters to be rebuilt.
@@ -125,21 +148,12 @@ class Reducer {
   // Speficy the training graph is static.
   void set_static_graph();
 
+  // Delay all reduce to be after all gradients' calculation is complete.
+  void delay_all_reduce();
+
  protected:
   // Forward declaration.
   struct Bucket;
-  // Locates a specific variable by replica index and variable index.
-  struct VariableIndex {
-    size_t replica_index;
-    size_t variable_index;
-
-    VariableIndex() = default;
-
-    VariableIndex(size_t replica_index_, size_t variable_index_) {
-      replica_index = replica_index_;
-      variable_index = variable_index_;
-    }
-  };
 
   void push_rebuilt_params(const VariableIndex& index);
 
@@ -420,6 +434,11 @@ class Reducer {
   int divFactor_;
 
   bool static_graph_ = false;
+
+  // Map will not change after 1st iteration.
+  std::unordered_map<VariableIndex, int, c10::hash<VariableIndex>> numGradHooksTriggeredMap_;
+  // Map will change after 1st iteration to track a grad is ready for communication or not.
+  std::unordered_map<VariableIndex, int, c10::hash<VariableIndex>> numGradHooksTriggeredMapPerIteration_;
 
  private:
   void reset_bucket_counting();

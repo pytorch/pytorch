@@ -9,6 +9,7 @@ from typing import NamedTuple
 
 import torch
 import torch.distributed as dist
+from torch.autograd import Variable, Function
 
 from . import comm
 
@@ -108,6 +109,19 @@ class _DDPUnevenInputsConfig(NamedTuple):
     ddp_join_enabled: bool
     ddp_join_divide_by_initial_world_size: bool
 
+# Add a DDPSink to queue call back of out-most backward/graph task,
+# this helps call back is fired after all gradients' calculation
+# is completed.
+class DDPSink(Function):
+    @staticmethod
+    def forward(ctx, input, reducer):
+        ctx.reducer = reducer
+        return input
+
+    @staticmethod
+    def backward(ctx, input):
+        Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
+        return input, None
 
 class DistributedDataParallel(Module):
     r"""Implements distributed data parallelism that is based on
@@ -422,6 +436,7 @@ class DistributedDataParallel(Module):
         else:
             self.process_group = process_group
 
+        self.static_graph = False
         self.dim = dim
         self.module = module
         self.device = list(self.module.parameters())[0].device
@@ -805,6 +820,11 @@ class DistributedDataParallel(Module):
         else:
             self.require_forward_param_sync = False
 
+        # TODO. Right now we add this sink for static_graph training only. once
+        # this feature is stable, we will add this sink for all cases. E.g.
+        # This sink can help capture more accuracte backward start time as well.
+        if self.static_graph:
+            output = DDPSink.apply(output, self.reducer)
         return output
 
     def scatter(self, inputs, kwargs, device_ids):
@@ -1402,5 +1422,6 @@ class DistributedDataParallel(Module):
     # or there are unused parameters, as DDP will not search graph in each
     # iteraton to detect unused parameters when static_graph is set to be True.
     def _set_static_graph(self):
+        self.static_graph = True
         self.reducer._set_static_graph()
         self.logger._set_static_graph()

@@ -4200,8 +4200,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     class CheckpointOnceModule(nn.Module):
         def __init__(self):
             super().__init__()
-            self.l1 = nn.Linear(2000, 2000)
-            self.l2 = nn.Linear(2000, 2000)
+            self.l1 = nn.Linear(20, 20)
+            self.l2 = nn.Linear(20, 20)
 
         def forward(self, inp):
             x = self.l1(inp)
@@ -4218,100 +4218,121 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             x = checkpoint(self.l2, x)
             return x
 
-    def _test_ddp_checkpointing(self, checkpoint_once, process_group, use_bucket_view, find_unused_parameters=False):
+    def _prepare_dummy_data(self):
+        ddp_bs = 16
+        bs = ddp_bs * self.world_size
+        input = torch.rand((bs, 20), device="cuda", requires_grad=True)
+        target = torch.randn((bs, 20), device="cuda")
+        offset = self.rank * ddp_bs
+        ddp_input = input[offset: offset + ddp_bs]
+        ddp_target = target[offset: offset + ddp_bs]
+        return input, ddp_input, target, ddp_target
+
+    def _train_model(self, model, input_var, target, loss, run_checkpoint=False):
+        model.train()
+        if run_checkpoint:
+            output = checkpoint(model, input_var)
+        else:
+            output = model(input_var)
+        l = loss(output, target)
+        l.backward()
+
+    def _test_ddp_checkpointing(
+        self,
+        input_model,
+        process_group,
+        use_bucket_view,
+        find_unused_parameters=False,
+        static_graph=False,
+        run_checkpoint=False
+    ):
         # to reprodce the same training results
         torch.cuda.set_device(self.rank)
         torch.manual_seed(31415)
-        if checkpoint_once:
-            model = self.CheckpointOnceModule().cuda()
-        else:
-            model = self.CheckpointTwiceModule().cuda()
-        model = nn.parallel.DistributedDataParallel(model,
-                                                    bucket_cap_mb=1,
-                                                    gradient_as_bucket_view=use_bucket_view,
-                                                    device_ids=[self.rank],
-                                                    process_group=process_group,
-                                                    find_unused_parameters=find_unused_parameters)
-        input_tensor = torch.rand((64, 2000), device="cuda", requires_grad=True)
-        output_tensor = model(input_tensor)
-        output_tensor.sum().backward()
-        return model
+        model = copy.deepcopy(input_model).cuda()
+        ddp_model = copy.deepcopy(input_model).cuda()
+        ddp_model = nn.parallel.DistributedDataParallel(
+            ddp_model,
+            bucket_cap_mb=1,
+            gradient_as_bucket_view=use_bucket_view,
+            device_ids=[self.rank],
+            process_group=process_group,
+            find_unused_parameters=find_unused_parameters
+        )
+        if static_graph:
+            ddp_model._set_static_graph()
+        self.assertEqual(ddp_model.get_ddp_logging_data().static_graph, static_graph)
+        input, ddp_input, target, ddp_target = self._prepare_dummy_data()
+        loss = nn.MSELoss()
+        for i in range(5):
+            model.zero_grad(set_to_none=False)
+            ddp_model.zero_grad(set_to_none=False)
+            self._train_model(model, input, target, loss, run_checkpoint=run_checkpoint)
+            self._train_model(ddp_model, ddp_input, ddp_target, loss, run_checkpoint=run_checkpoint)
+            for i, j in zip(model.parameters(), ddp_model.parameters()):
+                self.assertTrue(i.grad is not None)
+                self.assertTrue(j.grad is not None)
+                self.assertEqual(i.grad, j.grad)
 
     # DDP works as expect when layer is checkpointed only once
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_once(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        for use_bucket_view in (True, False):
-            model = self._test_ddp_checkpointing(checkpoint_once=True,
-                                                 process_group=process_group,
-                                                 use_bucket_view=use_bucket_view)
-            norm = 0.0
-            for p in model.parameters():
-                self.assertTrue(p.grad is not None)
-                norm += p.grad.norm().item()
-            assert numpy.allclose(norm, 78053), norm
+        for use_bucket_view, static_graph in product((False, True), (False, True)):
+            self._test_ddp_checkpointing(self.CheckpointOnceModule(),
+                                         process_group=process_group,
+                                         use_bucket_view=use_bucket_view,
+                                         static_graph=static_graph)
 
     # DDP will fail when there are unused_parameters in the model
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_unused_params(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         for use_bucket_view in (True, False):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Expected to mark a variable ready only once.",
-            ):
-                model = self._test_ddp_checkpointing(checkpoint_once=True,
-                                                     process_group=process_group,
-                                                     use_bucket_view=use_bucket_view,
-                                                     find_unused_parameters=True)
+            model = self._test_ddp_checkpointing(self.CheckpointOnceModule(),
+                                                 process_group=process_group,
+                                                 use_bucket_view=use_bucket_view,
+                                                 find_unused_parameters=True,
+                                                 static_graph=True)
 
     # DDP will fail when the same layer is checkponted twice
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_twice(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         for use_bucket_view in (True, False):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Expected to mark a variable ready only once.",
-            ):
-                model = self._test_ddp_checkpointing(checkpoint_once=False,
-                                                     process_group=process_group,
-                                                     use_bucket_view=use_bucket_view,
-                                                     find_unused_parameters=True)
+            model = self._test_ddp_checkpointing(self.CheckpointTwiceModule(),
+                                                 process_group=process_group,
+                                                 use_bucket_view=use_bucket_view,
+                                                 static_graph=True)
 
     # DDP works as expected if there is weight sharing among layers
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_weight_sharing(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         torch.cuda.set_device(self.rank)
-        for use_bucket_view in (True, False):
+        for use_bucket_view, static_graph in product((False, True), (False, True)):
             torch.manual_seed(31415)
-            l1 = nn.Linear(2000, 2000)
-            l2 = nn.Linear(2000, 2000)
+            l1 = nn.Linear(20, 20)
+            l2 = nn.Linear(20, 20)
             l1.weight = l2.weight
-            model = nn.Sequential(l1, l2).cuda()
-            model = nn.parallel.DistributedDataParallel(model,
-                                                        bucket_cap_mb=1,
-                                                        gradient_as_bucket_view=use_bucket_view,
-                                                        device_ids=[self.rank],
-                                                        process_group=process_group)
-            input_tensor = torch.rand((64, 2000), device="cuda", requires_grad=True)
-            output_tensor = checkpoint(model, input_tensor)
-            output_tensor.sum().backward()
-            norm = 0.0
-            for p in model.parameters():
-                self.assertTrue(p.grad is not None)
-                norm += p.grad.norm().item()
-            assert numpy.allclose(norm, 57004), norm
+            model = nn.Sequential(l1, l2)
+            self._test_ddp_checkpointing(model,
+                                         process_group=process_group,
+                                         use_bucket_view=use_bucket_view,
+                                         static_graph=static_graph,
+                                         run_checkpoint=True)
 
+    # TODO adding more tests
+    def test_more(self):
+        pass
 
 class ReducerModule(nn.Module):
     def __init__(self):
