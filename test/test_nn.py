@@ -10503,7 +10503,7 @@ class TestNNInit(TestCase):
                 init.kaiming_normal_(tensor)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    def test_kaiming_uniform(self):
+    def test_kaiming_uniform_legacy(self):
         for use_a in [True, False]:
             for dims in [2, 4]:
                 for mode in ['fan_in', 'fan_out']:
@@ -10531,7 +10531,32 @@ class TestNNInit(TestCase):
                     assert self._is_uniform(input_tensor, -bounds, bounds)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    def test_kaiming_normal(self):
+    def test_kaiming_uniform(self):
+        for use_gain in [True, False]:
+            for dims in [2, 4]:
+                for mode in ['fan_in', 'fan_out']:
+                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
+                    gain = math.sqrt(2.)
+
+                    if use_gain:
+                        gain = self._random_float(0.1, 2)
+                        init.kaiming_uniform_(input_tensor, gain=gain)
+                    else:
+                        init.kaiming_uniform_(input_tensor)
+
+                    fan_in = input_tensor.size(1)
+                    fan_out = input_tensor.size(0)
+                    if input_tensor.dim() > 2:
+                        fan_in *= input_tensor[0, 0].numel()
+                        fan_out *= input_tensor[0, 0].numel()
+
+                    n = fan_in if mode == 'fan_in' else fan_out
+                    expected_std = gain / math.sqrt(n)
+                    bound = expected_std * math.sqrt(3.0)
+                    assert self._is_uniform(input_tensor, -bound, bound)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_kaiming_normal_legacy(self):
         for use_a in [True, False]:
             for dims in [2, 4]:
                 for mode in ['fan_in', 'fan_out']:
@@ -10555,6 +10580,30 @@ class TestNNInit(TestCase):
                         n = fan_out
 
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
+                    assert self._is_normal(input_tensor, 0, expected_std)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_kaiming_normal(self):
+        for use_gain in [True, False]:
+            for dims in [2, 4]:
+                for mode in ['fan_in', 'fan_out']:
+                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
+                    gain = math.sqrt(2.)
+
+                    if use_gain:
+                        gain = self._random_float(0.1, 2)
+                        init.kaiming_normal_(input_tensor, gain=gain)
+                    else:
+                        init.kaiming_normal_(input_tensor)
+
+                    fan_in = input_tensor.size(1)
+                    fan_out = input_tensor.size(0)
+                    if input_tensor.dim() > 2:
+                        fan_in *= input_tensor[0, 0].numel()
+                        fan_out *= input_tensor[0, 0].numel()
+
+                    n = fan_in if mode == 'fan_in' else fan_out
+                    expected_std = gain / math.sqrt(n)
                     assert self._is_normal(input_tensor, 0, expected_std)
 
     def test_sparse_only_works_on_2d_inputs(self):
