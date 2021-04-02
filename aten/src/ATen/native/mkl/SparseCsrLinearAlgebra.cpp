@@ -40,15 +40,15 @@ Tensor& _sparse_mm_mkl_(
 #include <ATen/ExpandUtils.h>
 #include <ATen/SparseCsrTensorImpl.h>
 
-#ifdef MKL_ILP64
-#define TORCH_INT_TYPE at::kLong
-#else
-#define TORCH_INT_TYPE at::kInt
-#endif
-
 namespace at {
 namespace native {
 using namespace at::sparse;
+
+#ifdef MKL_ILP64
+  static constexpr ScalarType TORCH_INT_TYPE = at::kLong;
+#else
+  static constexpr ScalarType TORCH_INT_TYPE = at::kInt;
+#endif
 
 static inline void sparse_mm_mkl_impl(
     float* res,

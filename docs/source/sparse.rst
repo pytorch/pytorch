@@ -378,7 +378,10 @@ A CSR sparse tensor consists of three 1-D tensors: ``crow_indices``, ``col_indic
 and ``values``:
 
   - The ``crow_indices`` tensor consists of compressed row indices. This is a 1-D tensor
-    of size ``size[0] + 1``. The last element is the number of non-zeros.
+    of size ``size[0] + 1``. The last element is the number of non-zeros. This tensor
+    encodes the index in ``values`` and ``col_indices`` depending on where the given row
+    starts. Each successive number in the tensor subtracted by the number before it denotes
+    the number of elements in a given row.
   - The ``col_indices`` tensor contains the column indices of each value. This is a 1-D
     tensor of size ``nnz``.
   - The ``values`` tensor  contains the values of the CSR tensor. This is a 1-D tensor
