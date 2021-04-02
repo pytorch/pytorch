@@ -18,6 +18,7 @@ static at::Tensor genTestData(c10::IntArrayRef args) {
   return at::trunc(at::randn(args) * 256.0f) / 256.0f;
 }
 
+#ifdef TORCH_ENABLE_LLVM
 TEST(Conv, DepthwiseConv2D) {
   te::KernelScope kernel_scope;
   constexpr int N = 1, C = 72, H = 56, W = 56;
@@ -49,6 +50,7 @@ TEST(Conv, DepthwiseConv2D) {
 
   ASSERT_TRUE(at::allclose(ref, ot));
 }
+#endif
 
 TEST(Conv, Conv2D) {
   te::KernelScope kernel_scope;

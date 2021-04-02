@@ -1,7 +1,16 @@
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
+
+void assert_dims_constant(const BufHandle& buf) {
+  for (auto const& dim : buf.node()->dims()) {
+    TORCH_INTERNAL_ASSERT(dim->isConstant());
+  }
+}
 
 Tensor* conv2d_depthwise(
     BufHandle input,
@@ -12,6 +21,10 @@ Tensor* conv2d_depthwise(
     int groups) {
   TORCH_INTERNAL_ASSERT(input.ndim() == 4);
   TORCH_INTERNAL_ASSERT(weight.ndim() == 4);
+
+  assert_dims_constant(input);
+  assert_dims_constant(weight);
+  assert_dims_constant(bias);
 
   auto const& N = immediateAs<int>(input.dim(0));
   auto const& C = immediateAs<int>(input.dim(1));
@@ -80,4 +93,6 @@ Tensor* conv2d_depthwise(
   return new Tensor(conv->buf(), nest.root_stmt());
 }
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
