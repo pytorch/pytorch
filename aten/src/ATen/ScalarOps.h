@@ -60,4 +60,3 @@ inline Tensor wrapped_scalar_tensor(const Scalar& scalar, const Device device = 
 
 } // namespace native
 } // namsepace at
-
