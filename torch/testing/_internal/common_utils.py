@@ -2051,6 +2051,14 @@ class BytesIOContext(io.BytesIO):
         pass
 
 
+def has_complex_inputs_or_outputs(fn, inputs):
+    from torch.autograd.gradcheck import _as_tuple, has_complex_inputs_or_outputs
+
+    tupled_inputs = _as_tuple(inputs)
+    func_out = fn(*tupled_inputs)
+    return has_complex_inputs_or_outputs(tupled_inputs, func_out)
+
+
 def gradcheck(fn, inputs, **kwargs):
     # Wrapper around gradcheck that enables certain keys by default.
     # Use this testing-internal gradcheck instead of autograd.gradcheck so that new features like vmap and
@@ -2058,11 +2066,13 @@ def gradcheck(fn, inputs, **kwargs):
     # to be disabled to default for the public-facing api to avoid breaking user code.
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradcheck.
-    keys_enabled_by_default = (
-        "check_batched_grad",)
+    default_values = {
+        "check_batched_grad": True
+    }
+    default_values["fast_mode"] = not has_complex_inputs_or_outputs(fn, inputs)
 
-    for key in keys_enabled_by_default:
-        kwargs[key] = kwargs.get(key, True)
+    for key, value in default_values.items():
+        kwargs[key] = kwargs.get(key, value)
 
     return torch.autograd.gradcheck(fn, inputs, **kwargs)
 
@@ -2071,11 +2081,13 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     # See gradcheck above for an explanation of why we need something like this
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
-    keys_enabled_by_default = (
-        "check_batched_grad",)
+    default_values = {
+        "check_batched_grad": True
+    }
+    default_values["fast_mode"] = not has_complex_inputs_or_outputs(fn, inputs)
 
-    for key in keys_enabled_by_default:
-        kwargs[key] = kwargs.get(key, True)
+    for key, value in default_values.items():
+        kwargs[key] = kwargs.get(key, value)
 
     return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
 
