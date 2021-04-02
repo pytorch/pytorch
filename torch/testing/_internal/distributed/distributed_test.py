@@ -5308,11 +5308,13 @@ class DistributedTest:
         def test_monitored_barrier_wait_all_ranks(self):
             # Tests simple case where > 1 rank does not call into monitored
             # barrier and verifies all ranks are reported by rank 0.
-            if self.rank != 0:
-                return
+            if self.rank == 0:
+                timeout = timedelta(seconds=0.1)
+                rank_str = ", ".join([str(i) for i in range(1, int(self.world_size))])
+                err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
+                with self.assertRaisesRegex(RuntimeError, err_regex):
+                    dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
 
-            timeout = timedelta(seconds=0.1)
-            rank_str = ", ".join([str(i) for i in range(1, int(self.world_size))])
-            err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
-            with self.assertRaisesRegex(RuntimeError, err_regex):
-                dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
+            # We need a barrier since otherwise non-zero ranks exit too early
+            # and cause a timeout.
+            self._barrier(timeout=30)
