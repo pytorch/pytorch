@@ -27,4 +27,3 @@ test_cpu_speed_torch () {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   run_test test_cpu_speed_torch "$@"
 fi
-
