@@ -104,8 +104,6 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-        with:
-          submodules: recursive
       - name: Log in to ECR
         run: |
           $(aws ecr get-login --no-include-email --region us-east-1)
