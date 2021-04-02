@@ -543,7 +543,6 @@ class StmtBuilder(Builder):
                 return inputs, outputs
 
             inputs, outputs = process_ins_outs(exp.keywords)
-
             dummy_function_str = "\ndef func_ignore("
             for var in inputs:
                 var_name, var_ann = var
@@ -557,32 +556,33 @@ class StmtBuilder(Builder):
                 return_type_ann = "Tuple["
                 for var in outputs:
                     _, var_ann = var
-                    return_type_ann += var_ann + ","
+                    return_type_ann += var_ann + ", "
                 return_type_ann = return_type_ann[:-2] + "]"
 
             dummy_function_str += return_type_ann + ": pass"
             dummy_function = ast.parse(dummy_function_str).body[0]
             dummy_function.body = stmt.body
             ignore_func_str = astunparse.unparse(dummy_function)
-            ignore_func_str = ignore_func_str + "\ncontainer[\"key\"]=func_ignore\nfunc_ignore._torchscript_modifier = FunctionModifiers.IGNORE"
             container = {}
-            exec(ignore_func_str)
-            setattr(sys.modules[__name__], container["key"].__name__, container[key])
+            exec(ignore_func_str, globals(), container)
+            container["func_ignore"]._torchscript_modifier = FunctionModifiers.IGNORE
+            setattr(sys.modules[__name__], "func_ignore", container["func_ignore"])
 
             assign_str_lhs = ""
-            for var in inputs:
+            for var in outputs:
                 var_name, _ = var
                 assign_str_lhs += var_name + ", "
             assign_str_lhs = assign_str_lhs[:-2]
 
             assign_str_rhs = "torch.jit.frontend.func_ignore("
-            for var in outputs:
+            for var in inputs:
                 var_name, _ = var
                 assign_str_rhs += var_name + ", "
             assign_str_rhs = assign_str_rhs[:-2] + ")"
+
             assign_str = assign_str_lhs + " = " + assign_str_rhs
             assign_ast = ast.parse(assign_str).body[0]
-            return build_expr(assign_ast)
+            return build_stmt(ctx, assign_ast)
 
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
 

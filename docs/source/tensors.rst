@@ -160,6 +160,11 @@ view of a storage and defines numeric operations on it.
    - To create a tensor with similar type but different size as another tensor,
      use ``tensor.new_*`` creation ops.
 
+   .. warning::
+      The :class:`torch.Tensor` constructor is deprecated. Instead, consider using:
+      :func:`torch.tensor` for creating tensors from tensor-like objects (e.g. lists and tuples);
+      or :func:`torch.empty` for creating uninitialized tensors with specific sizes (e.g. int).
+
    .. automethod:: new_tensor
    .. automethod:: new_full
    .. automethod:: new_empty
@@ -617,6 +622,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: to
    .. automethod:: to_mkldnn
    .. automethod:: take
+   .. automethod:: take_along_dim
    .. automethod:: tan
    .. automethod:: tan_
    .. automethod:: tanh

@@ -4523,14 +4523,15 @@ def foo(xyz):
                 a: int = 4
                 b: int = 5
                 c: int = 0
-                with objmode(a="inp:int", b="inp:int", c="out:int"):
+                d: int = 6
+                with objmode(a="inp:int", b="inp:int", c="out:int", d="out:int"):
                     l = [2 for i in range(a) if i > 2]
                     c = l[0] + a + b
-                    return c
-                return c
+                    d = 9
+                    return c, d
+                return c + d
         s = torch.jit.script(A())
-        print(s.graph)
-        self.assertEqual(s(), 11)
+        self.assertEqual(s(), 20)
 
     def test_tensor_dtype(self):
         x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
