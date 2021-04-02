@@ -1,5 +1,6 @@
 from typing import Any, Callable, Optional, Type, Union
 from torch.utils.data import IterDataPipe
+from torch.utils.data._typing import _DataPipeMeta
 
 
 class functional_datapipe(object):
@@ -10,7 +11,7 @@ class functional_datapipe(object):
 
     def __call__(self, cls):
         if isinstance(cls, Type):  # type: ignore
-            if not issubclass(cls, IterDataPipe):
+            if not isinstance(cls, _DataPipeMeta):
                 raise TypeError('`functional_datapipe` can only decorate IterDataPipe')
         # with non_deterministic decorator
         else:
