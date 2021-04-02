@@ -164,7 +164,6 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::BasicBlock* bb_;
   llvm::Value* value_{nullptr};
   llvm::JITTargetAddress kernelAddress_;
-  std::unique_ptr<void* []> argv_ { nullptr };
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
@@ -217,7 +216,6 @@ class LLVMCodeGenImpl : public IRVisitor {
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
-  void** getArgvAddress() const;
 
   void visit(const Add* v) override;
   void visit(const Sub* v) override;
@@ -247,9 +245,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(const Store* v) override;
   void visit(const Broadcast* v) override;
   void visit(const IfThenElse* v) override;
-  void visit(const BaseCallNode* v) override;
   void visit(const Intrinsics* v) override;
-  void visit(const FunctionCall* v) override;
   void visit(const Allocate* v) override;
   void visit(const Free* v) override;
   void visit(const Let* v) override;
@@ -337,13 +333,15 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
     throw malformed_input("wrong number of args in call");
   }
 
-  void** argv = impl_->getArgvAddress();
+  constexpr unsigned nargs = 8;
+  c10::SmallVector<void*, nargs> argv;
+  argv.resize(buf_args.size());
   for (size_t i = 0, e = buf_args.size(); i < e; i++) {
     auto const& bufferArg = buf_args[i];
     auto const& callArg = args[i];
     argv[i] = argToPtr(bufferArg, callArg);
   }
-  value<float>(argv);
+  value<float>(argv.data());
   USE_TRIGGER(llvm_codegen_executed);
 }
 
@@ -372,10 +370,6 @@ std::string LLVMCodeGen::getCodeText(const std::string& attr /*=""*/) {
 
 llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
-}
-
-void** LLVMCodeGenImpl::getArgvAddress() const {
-  return argv_.get();
 }
 
 LLVMCodeGenImpl::LLVMCodeGenImpl(
@@ -440,7 +434,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   jit_->addModule(std::move(module_), std::move(context_));
   auto sym = jit_->findSymbol("wrapper");
   kernelAddress_ = assertSuccess(sym.getAddress());
-  argv_ = std::make_unique<void*[]>(params.size());
 
   USE_TRIGGER(llvm_codegen_created);
 }
@@ -1547,10 +1540,6 @@ void LLVMCodeGenImpl::visit(const IfThenElse* v) {
   value_ = phi;
 }
 
-void LLVMCodeGenImpl::visit(const BaseCallNode* v) {
-  throw unimplemented_lowering(v);
-}
-
 static void applyMathFunctionAttributes(llvm::Function* f) {
   f->addFnAttr(llvm::Attribute::ReadNone);
   f->addFnAttr(llvm::Attribute::NoUnwind);
@@ -1832,10 +1821,6 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
       value_ = irb_.CreateInsertElement(value_, val, i);
     }
   }
-}
-
-void LLVMCodeGenImpl::visit(const FunctionCall* v) {
-  throw unimplemented_lowering(v);
 }
 
 void LLVMCodeGenImpl::visit(const ExternalCall* v) {

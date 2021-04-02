@@ -6,7 +6,8 @@
 #include <torch/csrc/jit/ir/scope.h>
 
 // helpers for handling constants in the IR
-// - create constant nodes from ints, floats, intlist, Tensors, and other types
+// - create constant nodes from ints, floats, complex, intlist, Tensors, and
+// other types
 // - implement primitive constant ops.
 namespace torch {
 namespace jit {

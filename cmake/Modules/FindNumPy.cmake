@@ -55,4 +55,3 @@ if(NUMPY_FOUND)
 endif()
 
 caffe_clear_vars(__result __output __error_value __values __ver_check __error_value)
-
