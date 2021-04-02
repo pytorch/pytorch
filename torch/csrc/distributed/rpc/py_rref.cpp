@@ -91,8 +91,7 @@ TypePtr tryInferTypeWithTypeHint(
   py::bool_ can_compile = py::module::import("torch._jit_internal").attr("can_compile_class")(value.get_type());
 
   if (py::cast<bool>(can_compile)) {
-    py::str qualified_name = py::module::import("torch._jit_internal").attr("_qualified_name")(value.get_type());
-    py::object existing_ty = py::module::import("torch.jit._state").attr("_get_script_class")(qualified_name);
+    py::object existing_ty = py::module::import("torch.jit._state").attr("_get_script_class")(value.get_type());
 
     if (existing_ty.is_none()) {
       return PyObjectType::get();

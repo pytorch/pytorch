@@ -154,6 +154,10 @@ class Node:
         self._repr_fn : Optional[Callable[[Node], str]] = None
         self._stack_trace : Optional[str] = None
 
+        # Dictionary to store metadata passes need to do their
+        # transformations. This metadata is preserved across node copies
+        self.meta : Dict[str, Any] = {}
+
     @property
     def next(self) -> 'Node':
         """
