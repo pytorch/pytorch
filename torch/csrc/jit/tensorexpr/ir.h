@@ -66,7 +66,7 @@ inline int getPrecedence(IRNodeType ty) {
 
 class Placeholder;
 
-class Cast : public ExprNode<Cast> {
+class TORCH_API Cast : public ExprNode<Cast> {
  public:
   const Expr* src_value() const {
     return src_value_;
@@ -91,7 +91,7 @@ ExprHandle cast(const ExprHandle& src_value) {
 }
 
 // This is a bitwise cast, akin to bitcast in LLVM
-class BitCast : public ExprNode<BitCast> {
+class TORCH_API BitCast : public ExprNode<BitCast> {
  public:
   const Expr* src_value() const {
     return src_value_;
@@ -157,31 +157,31 @@ class BinaryOpNode : public ExprNode<Op> {
   const Expr* rhs_;
 };
 
-class Add : public BinaryOpNode<Add> {
+class TORCH_API Add : public BinaryOpNode<Add> {
  public:
   Add(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kAdd) {}
 };
 
-class Sub : public BinaryOpNode<Sub> {
+class TORCH_API Sub : public BinaryOpNode<Sub> {
  public:
   Sub(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kSub) {}
 };
 
-class Mul : public BinaryOpNode<Mul> {
+class TORCH_API Mul : public BinaryOpNode<Mul> {
  public:
   Mul(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kMul) {}
 };
 
-class Div : public BinaryOpNode<Div> {
+class TORCH_API Div : public BinaryOpNode<Div> {
  public:
   Div(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kDiv) {}
 };
 
-class Mod : public BinaryOpNode<Mod> {
+class TORCH_API Mod : public BinaryOpNode<Mod> {
  public:
   Mod(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kMod) {}
@@ -204,36 +204,38 @@ class BitwiseOpNode : public BinaryOpNode<Op> {
   }
 };
 
-class And : public BitwiseOpNode<And> {
+class TORCH_API And : public BitwiseOpNode<And> {
  public:
   And(const Expr* lhs, const Expr* rhs)
       : BitwiseOpNode(lhs, rhs, IRNodeType::kAnd) {}
 };
 
-class Or : public BitwiseOpNode<Or> {
+class TORCH_API Or : public BitwiseOpNode<Or> {
  public:
   Or(const Expr* lhs, const Expr* rhs)
       : BitwiseOpNode(lhs, rhs, IRNodeType::kOr) {}
 };
 
-class Xor : public BitwiseOpNode<Xor> {
+class TORCH_API Xor : public BitwiseOpNode<Xor> {
  public:
   Xor(const Expr* lhs, const Expr* rhs)
       : BitwiseOpNode(lhs, rhs, IRNodeType::kXor) {}
 };
 
-class Lshift : public BitwiseOpNode<Lshift> {
+class TORCH_API Lshift : public BitwiseOpNode<Lshift> {
  public:
   Lshift(const Expr* lhs, const Expr* rhs)
       : BitwiseOpNode(lhs, rhs, IRNodeType::kLshift) {}
 };
 
-class Rshift : public BitwiseOpNode<Rshift> {
+class TORCH_API Rshift : public BitwiseOpNode<Rshift> {
  public:
   Rshift(const Expr* lhs, const Expr* rhs)
       : BitwiseOpNode(lhs, rhs, IRNodeType::kRshift) {}
 };
 
+// TODO: add TORCH_API
+// Currently adding it results in a compilation error on Windows
 class Max : public BinaryOpNode<Max> {
  private:
   bool propagate_nans_;
@@ -256,6 +258,8 @@ class Max : public BinaryOpNode<Max> {
   }
 };
 
+// TODO: add TORCH_API
+// Currently adding it results in a compilation error on Windows
 class Min : public BinaryOpNode<Min> {
  private:
   bool propagate_nans_;
@@ -280,7 +284,7 @@ class Min : public BinaryOpNode<Min> {
 
 // Encode typed immediate values e.g. IntImm, FloatImm.
 #define IMM_DECLARE(Type, Name)                               \
-  class Name##Imm : public ExprNode<Name##Imm> {              \
+  class TORCH_API Name##Imm : public ExprNode<Name##Imm> {    \
    public:                                                    \
     Name##Imm(Type value)                                     \
         : ExprNodeBase(k##Name, kPrimitive), value_(value) {} \
@@ -357,7 +361,7 @@ bool immediateIsNegative(const T* e) {
 
 // Represents a ramp vector node:
 //     [base, base + 1 * stride, ... , base + (lanes - 1) * stride]
-class Ramp : public ExprNode<Ramp> {
+class TORCH_API Ramp : public ExprNode<Ramp> {
  public:
   const Expr* base() const {
     return base_;
@@ -441,7 +445,7 @@ class TORCH_API Load : public ExprNode<Load> {
   const Expr* mask_;
 };
 
-class Broadcast : public ExprNode<Broadcast> {
+class TORCH_API Broadcast : public ExprNode<Broadcast> {
  public:
   const Expr* value() const {
     return value_;
@@ -462,7 +466,7 @@ class Broadcast : public ExprNode<Broadcast> {
   int lanes_;
 };
 
-class IfThenElse : public ExprNode<IfThenElse> {
+class TORCH_API IfThenElse : public ExprNode<IfThenElse> {
  public:
   const Expr* condition() const {
     return condition_;
@@ -633,7 +637,7 @@ enum IntrinsicsOp {
   kRand, // We need more discussions on this. Should we consider stateful?
 };
 
-class Intrinsics : public ExprNode<Intrinsics> {
+class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
  public:
   static ExprHandle make(IntrinsicsOp op_type, const ExprHandle& v1) {
     return ExprHandle(new Intrinsics(op_type, v1.node()));
@@ -790,13 +794,10 @@ class Intrinsics : public ExprNode<Intrinsics> {
   }
 
  private:
-  TORCH_API static int OpArgCount(IntrinsicsOp op_type);
-  TORCH_API static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1);
-  TORCH_API static Dtype IntrinsicsDtype(
-      IntrinsicsOp op_type,
-      Dtype dt1,
-      Dtype dt2);
-  TORCH_API static Dtype IntrinsicsDtype(
+  static int OpArgCount(IntrinsicsOp op_type);
+  static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1);
+  static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2);
+  static Dtype IntrinsicsDtype(
       IntrinsicsOp op_type,
       const std::vector<const Expr*>& params);
 
