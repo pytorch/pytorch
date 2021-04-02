@@ -209,6 +209,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 
 // See Note [TLS Initialization]
 constexpr DispatchKeySet default_included_set = DispatchKeySet({
+    DispatchKey::BackendSelect,
     DispatchKey::InplaceOrView,
 });
 
