@@ -1787,6 +1787,7 @@ def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_me
     if sym_help._is_value(fill_value):
         dtype = 6 if dtype is None else dtype
         tmp = zeros_like(g, input, dtype, layout, device)
+        fill_value = g.op("Cast", fill_value, to_i=1)
         return add(g, tmp, fill_value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = sym_help._get_const(dtype, 'i', 'dtype')
@@ -2468,12 +2469,12 @@ def prim_shape(g, self):
 def prim_max(g, self, other):
     return g.op('Max', self, other)
 
-def prim_min(g, self):
-    if (_is_packed_list(self)):
-        self = stack(g, self, g.op("Constant", value_t=torch.tensor([0])))
-        return min(g, ten)
-    else:
-        return g.op("ReduceMin", self, axes_i=[0], keepdims_i=0)
+def prim_min(g, self, other=None):
+    if not other:
+        if (sym_help._is_packed_list(self)):
+            self = stack(g, self, g.op("Constant", value_t=torch.tensor([0])))
+        return min(g, self)
+    return min(g, self, other)
 
 def prim_data(g, self):
     return self

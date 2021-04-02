@@ -1615,6 +1615,22 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.rand((22, 256))
         self.run_test(InputIndexSlice(), (x, y))
 
+    def test_prim_min(self):
+        @torch.jit.script
+        def list_append(boxes: List[torch.Tensor]):
+            temp = []
+            for i, b in enumerate(boxes):
+                temp.append(torch.full_like(b[:, 1], i))
+            return temp[0]
+
+        class Min(torch.nn.Module):
+            def forward(self, x):
+                boxes = [x, x, x]
+                return list_append(boxes)
+
+        x = torch.rand(5, 5)
+        self.run_test(Min(), (x,))
+
     @skipIfUnsupportedMinOpsetVersion(10)
     @disableScriptTest()  # scripting tuple/list append
     def test_slice_dynamic(self):
