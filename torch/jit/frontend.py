@@ -550,18 +550,27 @@ class StmtBuilder(Builder):
             dummy_function_str = dummy_function_str[:-2] + ") -> "
 
             return_type_ann = ""
+            return_statement_str ="return "
             if len(outputs) == 1:
                 return_type_ann = outputs[0][1]
+                return_statement_str += outputs[0][0]
             if len(outputs) > 1:
                 return_type_ann = "Tuple["
                 for var in outputs:
-                    _, var_ann = var
+                    var_name, var_ann = var
                     return_type_ann += var_ann + ", "
+                    return_statement_str += var_name + ", "
                 return_type_ann = return_type_ann[:-2] + "]"
+                return_statement_str = return_statement_str[:-2]
 
             dummy_function_str += return_type_ann + ": pass"
             dummy_function = ast.parse(dummy_function_str).body[0]
             dummy_function.body = stmt.body
+
+            # insert return statement
+            return_statement = ast.parse(return_statement_str).body[0]
+            dummy_function.body.append(return_statement)
+
             ignore_func_str = astunparse.unparse(dummy_function)
             ignore_func_str += "\nglobals()[\"func_ignore\"] = func_ignore"
             exec(ignore_func_str)

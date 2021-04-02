@@ -4528,7 +4528,6 @@ def foo(xyz):
                     l = [2 for i in range(a) if i > 2]
                     c = l[0] + a + b
                     d = 9
-                    return c, d
                 return c + d
         s = torch.jit.script(A())
         self.assertEqual(s(), 20)
