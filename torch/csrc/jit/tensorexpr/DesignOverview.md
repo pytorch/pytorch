@@ -1,4 +1,4 @@
-# IR Specification (Updated 2/26/21)
+# IR Specification (Updated 3/30/21)
 Stmt
 = Block(stmts_ = [Stmt])
 | Store(buf_ = Buf, indices = [Expr], value_ = Expr, mask_ = Expr)
@@ -26,7 +26,7 @@ Expr
 | Load(buf_ = Buf, indices = [Expr], mask_ = Expr)
 | Broadcast(value_ = Expr, lanes_ = int)
 | IfThenElse(condition_ = Expr, true_ = Expr, false_ = Expr)
-| CallNode(call_type_ = {kIntrinsics, kFunctionCall}, params_ = [Expr])
+| Intrinsics(op_type_ = {kSin, kPow, kExp, ...}, params_ = [Expr])
 | CompareSelect(lhs_ = Expr, rhs_ = Expr, ret_val1_ = Expr, ret_val2_ = Expr, compare_op_ = {kEQ, kGT, kGE, ...}, bias_ = {kUnbiased, kLikely, kUnlikely})
 | ReduceOp(body_ = Expr, reduce_args_ = [Var], reducer = Reducer)
 # Current workflow
