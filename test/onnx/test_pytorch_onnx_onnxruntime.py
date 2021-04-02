@@ -129,7 +129,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    example_outputs=output, do_constant_folding=do_constant_folding,
                                    keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                    dynamic_axes=dynamic_axes, input_names=input_names,
-                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=training,
+                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=None,
                                    onnx_shape_inference=self.onnx_shape_inference)
         # compute onnxruntime output prediction
         ort_outs = run_ort(ort_sess, input)
@@ -247,8 +247,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   do_constant_folding=do_constant_folding,
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
-                                  fixed_batch_size=fixed_batch_size, dict_check=dict_check,
-                                  training=training)
+                                  fixed_batch_size=fixed_batch_size, dict_check=dict_check)
         if self.is_script_test_enabled:
             script_model = torch.jit.script(model)
             _run_test(script_model)
@@ -7100,7 +7099,6 @@ class TestONNXRuntime(unittest.TestCase):
                 super().__init__()
                 self.weights = InnerModule2.get_embedding(embedding_dim)
                 self.register_buffer("_float_tensor", torch.FloatTensor(1))
-                self.const = 2
 
             @staticmethod
             def get_embedding(embedding_dim: int):
@@ -7110,11 +7108,9 @@ class TestONNXRuntime(unittest.TestCase):
 
             def forward(self, input, incremental_state: Optional[torch.Tensor] = None):
                 bsz, seq_len = input.shape[0], input.shape[1]
-                self.const = 3
                 if self.weights is None:
                     self.weights = InnerModule.get_embedding(self.embedding_dim)
                 self.weights = self.weights.to(self._float_tensor)
-                self.weights = self.weights * self.const
                 if incremental_state is not None:
                     pos = seq_len
                     return self.weights[1 + pos, :].expand(bsz, 1, -1)
@@ -7154,7 +7150,6 @@ class TestONNXRuntime(unittest.TestCase):
             def __init__(self, embedding_dim):
                 super().__init__()
                 self.embedding_dim = embedding_dim
-                self.const = 2.5
                 self.weights = InnerModule.get_embedding(self.embedding_dim)
                 self.register_buffer("_float_tensor", torch.FloatTensor(1))
 
@@ -7166,11 +7161,10 @@ class TestONNXRuntime(unittest.TestCase):
 
             def forward(self, input, incremental_state: Optional[torch.Tensor] = None):
                 bsz, seq_len = input.shape[0], input.shape[1]
-                self.const = 1.5
                 self.weights = InnerModule.get_embedding(self.embedding_dim)
                 return (
                     self.weights.index_select(0, torch.ones((bsz * seq_len), dtype=torch.int64)).view(bsz, seq_len, -1)
-                ) * self.const
+                )
 
         class Module(torch.nn.Module):
             def __init__(self):
