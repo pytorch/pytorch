@@ -4067,7 +4067,7 @@ class TestAutograd(TestCase):
                 gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=False, check_batched_grad=False,
                           fast_mode=fast_mode)
             self.assertFalse(gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=False,
-                                    check_batched_grad=False, raise_exception=False, fast_mode=fast_mode))
+                                       check_batched_grad=False, raise_exception=False, fast_mode=fast_mode))
 
             # when none of the inputs require grad (always raises even if raise_exception=False)
             x = torch.rand(10, requires_grad=False)
@@ -4095,7 +4095,7 @@ class TestAutograd(TestCase):
             x = torch.rand(10, requires_grad=True).to_sparse()
             with self.assertRaisesRegex(ValueError, 'Sparse output is not supported at gradcheck yet'):
                 gradcheck(lambda x: x, (x,), check_sparse_nnz=True, check_batched_grad=False, raise_exception=False,
-                        fast_mode=fast_mode)
+                          fast_mode=fast_mode)
 
             # when mkldnn outputs (always raise even if raise_exception=False)
             root = torch.randn(4, 5, dtype=torch.float32, requires_grad=True)
@@ -4124,7 +4124,7 @@ class TestAutograd(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'gradcheck or gradgradcheck failed while testing batched gradient'):
                 gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=True, check_batched_grad=True, fast_mode=fast_mode)
             self.assertFalse(gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=True, check_batched_grad=True,
-                                    raise_exception=False, fast_mode=fast_mode))
+                                       raise_exception=False, fast_mode=fast_mode))
         check(fast_mode=True)
         check(fast_mode=False)
 
@@ -4143,7 +4143,7 @@ class TestAutograd(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'grad is sparse tensor, but has incorrect sparse_dim'):
                 gradcheck(fn, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False, fast_mode=fast_mode)
             self.assertFalse(gradcheck(fn, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False,
-                                    raise_exception=False, fast_mode=fast_mode))
+                                       raise_exception=False, fast_mode=fast_mode))
 
             # when backward not multiplied by grad_output (non-sparse case)
             def fn2(x):
@@ -4164,7 +4164,7 @@ class TestAutograd(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'backward not multiplied by grad_output'):
                 gradcheck(fn3, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False, fast_mode=fast_mode)
             self.assertFalse(gradcheck(fn3, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False,
-                                    raise_exception=False, fast_mode=fast_mode))
+                                       raise_exception=False, fast_mode=fast_mode))
 
             # when layout of grad_input is not the same as input
             class Test(Function):
