@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import unittest
 from torch.testing._internal.jit_utils import JitTestCase
+from torch._C import parse_ir
 
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantized import override_quantized_engine
@@ -1825,6 +1827,32 @@ class TestFrozenOptimizations(JitTestCase):
 
             self.assertEqual(mod_eager(inp), frozen_mod(inp))
 
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_hardswish_hardsigmoid(self):
+        with set_default_dtype(torch.float):
+            op_map = {
+                'prim::MKLDNNHardSwish' : F.hardswish,
+                'prim::MKLDNNHardSigmoid' : F.hardsigmoid
+            }
+
+            input_sizes = ([0], [1], [3], [1, 3, 8, 8])
+            for (mkldnn_opname, aten_op) in op_map.items():
+                for size in input_sizes:
+                    for inplace in (True, False):
+                        inplace_str = "_" if inplace else ""
+                        inplace_tgt = "%34" if inplace else "%35"
+                        graph_str = f"""graph(%input.1 : Tensor):
+                            %33 : None = prim::Constant()
+                            %34 : Tensor = aten::to_mkldnn(%input.1, %33)
+                            %35 : Tensor = {mkldnn_opname}{inplace_str}(%34)
+                            return ({inplace_tgt})
+                        """
+                        g = parse_ir(graph_str)
+                        m = self.createFunctionFromGraph(g)
+                        x = torch.rand(size)
+                        x_copy = x.detach().clone()
+                        self.assertTrue(torch.allclose(aten_op(x, inplace=inplace), m(x_copy).to_dense()))
+
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
     def setUp(self):
@@ -1851,9 +1879,11 @@ class TestMKLDNNReinplacing(JitTestCase):
 
     def test_successful(self):
         # simple conv-relu
-        mod_eager = nn.Sequential(self.getConv(), nn.ReLU(), nn.ReLU())
+
+        mod_eager = nn.Sequential(self.getConv(), nn.Hardswish(), nn.ReLU())
         mod = self.freezeAndConvert(mod_eager)
-        FileCheck().check("mkldnn_convolution").check_next("aten::relu_").check_next("aten::relu_").run(mod.graph)
+        print(mod.graph)
+        FileCheck().check("mkldnn_convolution").check_next("prim::MKLDNNHardSwish_").check_next("aten::relu_").run(mod.graph)
         self.checkResults(mod_eager, mod)
 
     def test_merge_liveness(self):
