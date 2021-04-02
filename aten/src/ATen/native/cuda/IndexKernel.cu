@@ -11,6 +11,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <c10/util/MaybeOwned.h>
 #include <THC/THCTensorInfo.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
@@ -295,10 +296,14 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
 
-  Tensor _mask = (mask.dim() == 0) ? mask.unsqueeze(0) : mask;
-  Tensor _self = (self.dim() == 0) ? self.unsqueeze(0) : self;
-  std::tie(_mask, _self) = expand_outplace(_mask, _self);
-  at::native::index_out(result, _self, c10::List<c10::optional<at::Tensor>>({_mask}));
+  c10::MaybeOwned<Tensor> mask_temp = (mask.dim() == 0) ? mask.unsqueeze(0) : mask;
+  c10::MaybeOwned<Tensor> self_temp = (self.dim() == 0) ? self.unsqueeze(0) : self;
+
+  // Cannot reassign to mask_temp and self_temp here! if they are
+  // owning and expand_outplace returns a borrow, the returned borrow
+  // would dangle.
+  auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
+  at::native::index_out(result, *std::get<1>(mask_self_expanded), c10::List<c10::optional<at::Tensor>>({*std::get<0>(std::move(mask_self_expanded))}));
 
   return result;
 }
