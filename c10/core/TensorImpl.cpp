@@ -386,6 +386,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->device_opt_ = src_impl->device_opt_;
   dest_impl->key_set_ = src_impl->key_set_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
+  dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
   dest_impl->is_channels_last_3d_contiguous_ = src_impl->is_channels_last_3d_contiguous_;
   dest_impl->is_channels_last_ = src_impl->is_channels_last_;
