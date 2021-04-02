@@ -300,7 +300,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
 
   // Promotes common dtype to the default float scalar type, if needed
   if (config.promote_integer_inputs_to_float_ &&
-      c10::isIntegralType(common_dtype_, /*include_bool=*/true)) {
+      c10::isIntegralType(common_dtype_, /*includeBool=*/true)) {
     common_dtype_ = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 
@@ -570,7 +570,7 @@ bool TensorIteratorBase::is_dim_reduced(int dim) const {
 }
 
 void TensorIteratorBase::permute_dimensions(IntArrayRef perm) {
-  TORCH_INTERNAL_ASSERT(perm.size() == ndim());
+  TORCH_INTERNAL_ASSERT(perm.size() == static_cast<unsigned>(ndim()));
 
   auto reorder = [perm](IntArrayRef data) {
     auto res = DimVector(data.size(), 0);
@@ -637,7 +637,7 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
     return;
   }
   auto strides = get_strides();
-  while (strides.size() < 2 * ntensors()) {
+  while (strides.size() < 2U * ntensors()) {
     strides.push_back(0);
   }
 
@@ -1100,7 +1100,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
     case FastSetupType::NON_OVERLAPPING_DENSE:
       {
         // find the index of a defined tensor in operands_ start from input tensor
-        int i_defined;
+        int i_defined; // NOLINT(cppcoreguidelines-init-variables)
         for (i_defined = ntensors() - 1; i_defined >= 0; --i_defined) {
           if (operands_[i_defined].tensor.defined()) break;
         }
@@ -1187,7 +1187,7 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
   return FastSetupType::NONE;
 }
 
-TensorIteratorBase::TensorIteratorBase() {}
+TensorIteratorBase::TensorIteratorBase() = default;
 
 void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // populate some persistent configuration fields

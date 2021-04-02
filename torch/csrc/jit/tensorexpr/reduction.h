@@ -125,7 +125,7 @@ class TORCH_API Reducer {
 // to be reduced and interaction.
 //
 // This is intended to be expanded in the loopnest and not make it to codegen.
-class ReduceOp : public ExprNode<ReduceOp> {
+class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
  public:
   ReduceOp(
       const Expr* body,
