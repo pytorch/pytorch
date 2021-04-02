@@ -809,6 +809,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(ArithmeticModule(), input=x, train=False, batch_size=BATCH_SIZE)
 
+    @skipIfUnsupportedMinOpsetVersion(9)  # Where op not supported for lower opsets
     def test_embedding(self):
         model = nn.Embedding(10, 3, padding_idx=-1)
         input = torch.LongTensor(list(range(10))[::-1])
