@@ -10540,9 +10540,9 @@ class TestNNInit(TestCase):
 
                     if use_gain:
                         gain = self._random_float(0.1, 2)
-                        init.kaiming_uniform_(input_tensor, gain=gain)
+                        init.kaiming_uniform_(input_tensor, mode=mode, gain=gain)
                     else:
-                        init.kaiming_uniform_(input_tensor)
+                        init.kaiming_uniform_(input_tensor, mode=mode)
 
                     fan_in = input_tensor.size(1)
                     fan_out = input_tensor.size(0)
@@ -10592,9 +10592,9 @@ class TestNNInit(TestCase):
 
                     if use_gain:
                         gain = self._random_float(0.1, 2)
-                        init.kaiming_normal_(input_tensor, gain=gain)
+                        init.kaiming_normal_(input_tensor, mode=mode, gain=gain)
                     else:
-                        init.kaiming_normal_(input_tensor)
+                        init.kaiming_normal_(input_tensor, mode=mode)
 
                     fan_in = input_tensor.size(1)
                     fan_out = input_tensor.size(0)
