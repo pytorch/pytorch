@@ -955,6 +955,7 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('detach')
 @register_quant_pattern('detach_')
 @register_quant_pattern('mean')
+@register_quant_pattern('numel')
 @register_quant_pattern('permute')
 @register_quant_pattern('relu')
 @register_quant_pattern('relu_')
@@ -962,6 +963,8 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('repeat_interleave')
 @register_quant_pattern('reshape')
 @register_quant_pattern('resize_')
+@register_quant_pattern('shape')
+@register_quant_pattern('size')
 @register_quant_pattern('squeeze')
 @register_quant_pattern('squeeze_')
 @register_quant_pattern('transpose')
@@ -973,15 +976,6 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
-
-@register_quant_pattern('numel')
-@register_quant_pattern('shape')
-@register_quant_pattern('size')
-class MetadataNodeQuantizeHandler(QuantizeHandler):
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        return quantizer.quantized_graph.node_copy(node, load_arg())
 
 # Default quantization handler, used for quantization of input and output
 # of quantizable objects (e.g. modules and functionals)

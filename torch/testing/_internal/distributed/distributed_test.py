@@ -4287,6 +4287,9 @@ class DistributedTest:
             self.assertSetEqual({max_rank}, set(tensor.item() for tensor in tensor_list))
             # Ensure that all models are the same across ranks after all have joined.
             self.validate_net_equivalence(net)
+            # Ensure that running with DDP uneven inputs was logged.
+            ddp_logging_data = net.get_ddp_logging_data()
+            self.assertTrue(ddp_logging_data.join_uneven_inputs)
             dist.barrier()
 
         @require_backend({"gloo", "nccl"})

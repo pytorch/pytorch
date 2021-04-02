@@ -3488,7 +3488,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_function(torch.ops.quantized.mul),
                 ns.call_function(torch.ops.quantized.mul),
                 ns.call_function(torch.ops.quantized.add_relu),
-                ns.call_function(torch.ops.quantized.cat),
+                ns.call_function(torch.cat),
                 ns.call_method('dequantize')
             ]
             m = convert_fx(m)
