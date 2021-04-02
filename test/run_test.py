@@ -66,7 +66,6 @@ TESTS = [
     'test_multiprocessing_spawn',
     'distributed/test_nccl',
     'test_native_functions',
-    'test_nnapi',
     'test_numba_integration',
     'test_nn',
     'test_ops',
