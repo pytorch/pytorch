@@ -4,8 +4,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
-// TODO: it's probably not kosher to import aten from c10
-#include <ATen/DynamicLayer.h>
+#include <c10/core/DynamicLayer.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
