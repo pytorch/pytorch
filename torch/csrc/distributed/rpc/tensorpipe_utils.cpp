@@ -190,13 +190,13 @@ TensorpipeReadBuffers tensorpipeAllocate(
   tpMessage.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
 
   for (auto& tensor : tpMessage.tensors) {
-    if (tensor.buffer.device().type == tensorpipe::kCpuDeviceType) {
+    if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCpu) {
       buffers.tensors.emplace_back(
           at::getCPUAllocator()->allocate(tensor.length));
       tensor.buffer.unwrap<tensorpipe::CpuBuffer>().ptr =
           buffers.tensors.back().get();
 #ifdef USE_CUDA_NOT_ROCM
-    } else if (tensor.buffer.device().type == tensorpipe::kCudaDeviceType) {
+    } else if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCuda) {
       auto deviceIndex = std::stoi(tensor.metadata);
       auto stream = ctx->getStream(deviceIndex);
       // CUDACachingAllocator will call recordStream accordingly on the current
