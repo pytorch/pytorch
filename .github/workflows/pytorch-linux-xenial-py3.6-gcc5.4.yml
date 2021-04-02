@@ -54,7 +54,7 @@ jobs:
       - name: Build PyTorch
         run: |
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
-          MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
+          MEMORY_LIMIT_MAX_JOBS=8 # our "linux.2xlarge" runner has 16 vCPUs, if we use all of them we'll OOM
           MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
           docker run \
             -e BUILD_ENVIRONMENT \
