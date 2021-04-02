@@ -1027,6 +1027,8 @@ class DistributedDataParallel(Module):
           >>>  # blocking for rank 1's allreduce to complete.
           >>>  torch.cuda.synchronize(device=rank)
         """
+        # Log uneven input API usage.
+        self.logger._set_uneven_input_join()
         try:
             if self.device_ids and len(self.device_ids) > 1:
                 raise ValueError(
