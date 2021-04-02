@@ -19,11 +19,13 @@ SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for CSR tensor
   // constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  AT_ASSERT(options.layout() == kSparseCsr);
+  TORCH_INTERNAL_ASSERT(options.layout() == kSparseCsr);
   DispatchKey dispatch_key;
+
   if (options.device().is_cuda()) {
     dispatch_key = DispatchKey::SparseCsrCUDA;
   } else {
+    TORCH_INTERNAL_ASSERT(options.device().is_cpu());
     dispatch_key = DispatchKey::SparseCsrCPU;
   }
 
@@ -99,9 +101,11 @@ Tensor sparse_csr_tensor(
       !options.has_layout() || options.layout() == kSparseCsr,
       "expected sparse CSR layout, but got layout ",
       options.layout());
-  std::vector<int64_t> size(2);
+  TORCH_CHECK(crow_indices.numel() >= 1, "expected crow_indices.numel() >= 1, but got ",
+              crow_indices.numel());
+  std::array<int64_t, 2> size;
 
-  if (crow_indices.numel() > 0 && col_indices.numel() > 0) {
+  if (col_indices.numel() > 0) {
     size[0] = crow_indices.numel() - 1;
     Tensor max_col_indices = std::get<0>(col_indices.max(0, false));
     size[1] = *max_col_indices.data_ptr<int64_t>() + 1;
@@ -115,25 +119,25 @@ Tensor sparse_csr_tensor(
 }
 
 // Access members of CSR tensors.
-int64_t _nnz_sparse_csr(const SparseCsrTensor& self) {
+const int64_t _nnz_sparse_csr(const SparseCsrTensor& self) {
   return get_sparse_csr_impl(self)->nnz();
 }
 
-Tensor values_sparse_csr(const Tensor& self) {
+const Tensor& values_sparse_csr(const Tensor& self) {
   return get_sparse_csr_impl(self)->values().alias();
 }
 
-Tensor crow_indices_sparse_csr(const Tensor& self) {
+const Tensor& crow_indices_sparse_csr(const Tensor& self) {
   return get_sparse_csr_impl(self)->crow_indices().alias();
 }
 
-Tensor col_indices_sparse_csr(const Tensor& self) {
+const Tensor& col_indices_sparse_csr(const Tensor& self) {
   return get_sparse_csr_impl(self)->col_indices().alias();
 }
 
-bool _is_same_size_as_sparse_csr(
+const bool _is_same_size_as_sparse_csr(
     const SparseCsrTensor& self,
-    const SparseCsrTensor& src) {
+    const SparseCsrTensor& src) const {
   return self.dim() == src.dim() && self.sizes().equals(src.sizes());
 }
 

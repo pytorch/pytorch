@@ -77,7 +77,7 @@ static inline void sparse_mm_mkl_impl(
   TORCH_CHECK(
       retval == 0, "mkl_sparse_s_create_csr failed with error code: ", retval);
 
-  mkl_sparse_s_mm(
+  int stat = mkl_sparse_s_mm(
       SPARSE_OPERATION_NON_TRANSPOSE,
       alpha,
       A,
@@ -89,6 +89,7 @@ static inline void sparse_mm_mkl_impl(
       beta,
       res,
       dense_ncols);
+  TORCH_CHECK(stat == 0, "mkl_sparse_s_mm failed with error code: ", retval);
   mkl_sparse_destroy(A);
 }
 
@@ -119,7 +120,7 @@ static inline void sparse_mm_mkl_impl(
   TORCH_CHECK(
       retval == 0, "mkl_sparse_d_create_csr failed with error code: ", retval);
 
-  mkl_sparse_d_mm(
+  int stat = mkl_sparse_d_mm(
       SPARSE_OPERATION_NON_TRANSPOSE,
       alpha,
       A,
@@ -131,6 +132,7 @@ static inline void sparse_mm_mkl_impl(
       beta,
       res,
       dense_ncols);
+  TORCH_CHECK(stat == 0, "mkl_sparse_d_mm failed with error code: ", stat);
   mkl_sparse_destroy(A);
 }
 
