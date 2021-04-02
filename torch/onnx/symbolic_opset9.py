@@ -1785,9 +1785,10 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
 def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
     fill_value = sym_help._maybe_get_const(fill_value, 'f')
     if sym_help._is_value(fill_value):
+        dtype = None if dtype.node().mustBeNone() else dtype
         dtype = 6 if dtype is None else dtype
         tmp = zeros_like(g, input, dtype, layout, device)
-        fill_value = g.op("Cast", fill_value, to_i=1)
+        fill_value = g.op("Cast", fill_value, to_i=sym_help.scalar_type_to_onnx[dtype])
         return add(g, tmp, fill_value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = sym_help._get_const(dtype, 'i', 'dtype')
