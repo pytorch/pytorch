@@ -6,7 +6,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.fx.quantize import is_activation_post_process
 
-from typing import Optional, Any
+from typing import Optional, Any, Tuple
 
 # TODO(future PR): delete this after FX has a util for it
 def print_node(node: Optional[Node]) -> None:
@@ -27,13 +27,18 @@ def getattr_from_fqn(gm: GraphModule, fqn: str) -> Any:
         cur_val = getattr(cur_val, part)
     return cur_val
 
-class NodeInputType(enum.Enum):
-    FP32 = enum.auto()  # first input fp32
-    INT8 = enum.auto()  # first input int8
+# TODO(future PR): consider deleting this enum and using the torch types
+# directly.  This might be tricky because it is not a one to one mapping.
+class NodeInputOrOutputType(enum.Enum):
+    FP32 = enum.auto()  # torch.float
+    INT8 = enum.auto()  # torch.qint8 or torch.quint8
+    FP16 = enum.auto()  # torch.float16
     # TODO(future PRs): dynamic quant, fake quant, etc
 
 
-def get_node_input_type(node: Node, gm: GraphModule) -> NodeInputType:
+def get_node_first_input_and_output_type(
+    node: Node, gm: GraphModule,
+) -> Tuple[NodeInputOrOutputType, NodeInputOrOutputType]:
     if node.op == 'call_function':
         fp32_fun_target_names = ('torch.nn.functional', 'torch.nn')
         # hack alert: this is not ready for production
@@ -43,12 +48,13 @@ def get_node_input_type(node: Node, gm: GraphModule) -> NodeInputType:
         # For now, hacky check to see which op is in which namespace
         # TODO(future PR): use a real mapping
         if node.target.__module__ in fp32_fun_target_names or node.target in fp32_funs:
-            return NodeInputType.FP32
+            return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
         else:
             assert node.target.__module__ in int8_fun_target_names, \
                 'unknown node target %s with module %s' % (node.target, node.target.__module__)
-            return NodeInputType.INT8
-    else:
+            return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
+
+    elif node.op == 'call_module':
         assert node.op == 'call_module'
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
@@ -59,14 +65,47 @@ def get_node_input_type(node: Node, gm: GraphModule) -> NodeInputType:
             mod.__module__.startswith('torch.nn.quantized.dynamic')
         )
         if is_known_fp32_input_module:
-            return NodeInputType.FP32
+            return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
         else:
             is_known_int8_module = (
                 mod.__module__.startswith('torch.nn.quantized') or
                 mod.__module__.startswith('torch.nn.intrinsic.quantized')
             )
             assert is_known_int8_module, 'unknown node target %s' % mod
-            return NodeInputType.INT8
+            return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
+
+    elif node.op == 'call_method':
+        if node.target == 'dequantize':
+            # Dequantize is a special node because it allows multiple input types.
+            # So, we look up the output type of the previous node and return that
+            # as the input type of this node instance.
+            prev_node = node.args[0]
+            assert isinstance(prev_node, Node)
+            _prev_node_input_type, prev_node_output_type = \
+                get_node_first_input_and_output_type(prev_node, gm)
+            return (prev_node_output_type, NodeInputOrOutputType.FP32)
+
+        elif node.target == 'to':
+            # to is a special node because it allows multiple input types.
+            # So, we look up the output type of the previous node and return that
+            # as the input type of this node instance. We also look up the target
+            # of to and return the correct output type.
+            prev_node = node.args[0]
+            assert isinstance(prev_node, Node)
+            _prev_node_input_type, prev_node_output_type = \
+                get_node_first_input_and_output_type(prev_node, gm)
+
+            cur_node_dtype_target = node.args[1]
+            assert cur_node_dtype_target is torch.float16, \
+                f"{cur_node_dtype_target} handling needs to be added"
+
+            return (prev_node_output_type, NodeInputOrOutputType.FP16)
+
+        # TODO(future PR): improve this instead of guessing
+        return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
+    else:
+        # TODO(future PR): improve this instead of guessing
+        return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
 
 def return_first_non_observer_node(
     node: Node,
