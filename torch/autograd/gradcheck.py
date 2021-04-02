@@ -129,7 +129,7 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
         grad_out: grad output value used to calculate gradients.
 
     Returns:
-        M lists of N-tuples of jacobians
+        A list of M N-tuples of tensors
 
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
