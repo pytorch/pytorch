@@ -81,23 +81,6 @@ std::pair<IValue, IValue> getFunctionTuple(
     if (ins.op == OP || ins.op == OPN) {
       auto node = code.instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
-      int64_t debug_handle{-1};
-      if (debug_handle_manager_ptr) {
-        if (node->callstack().has_value()) {
-          debug_handle =
-              debug_handle_manager_ptr
-                  ->getNextDebugHandleForInlinedCallStackPtr(
-                      node->sourceRange(), node->callstack().value());
-        } else {
-          // If node has no callstack, it is the top level node.
-          // In that case just save source range.
-          debug_handle = debug_handle_manager_ptr
-                             ->getNextDebugHandleForInlinedCallStackPtr(
-                                 node->sourceRange(),
-                                 c10::intrusive_ptr<InlinedCallStack>());
-        }
-      }
-      op_debug_handles.emplace_back(debug_handle);
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
     // functions that were not inlined. Here we convert the CALL
@@ -154,6 +137,25 @@ std::pair<IValue, IValue> getFunctionTuple(
           toString(ins.op),
           " is not supported in mobile module.");
     }
+    int64_t debug_handle{-1};
+    if (debug_handle_manager_ptr) {
+      auto node = code.instructions_source()[i];
+      if (node->callstack().has_value()) {
+        debug_handle =
+            debug_handle_manager_ptr
+                ->getNextDebugHandleForInlinedCallStackPtr(
+                    node->sourceRange(), node->callstack().value());
+      } else {
+        // If node has no callstack, it is the top level node.
+        // In that case just save source range.
+        debug_handle = debug_handle_manager_ptr
+                           ->getNextDebugHandleForInlinedCallStackPtr(
+                               node->sourceRange(),
+                               c10::intrusive_ptr<InlinedCallStack>());
+      }
+    }
+    // Note 1-to-1 correspondence between instructions and debug handles
+    op_debug_handles.emplace_back(debug_handle);
   }
 
   // instructions

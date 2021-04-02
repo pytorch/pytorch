@@ -379,8 +379,13 @@ class TestLiteScriptModule(TestCase):
         loaded = self.getScriptExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest3)
 
-        with self.assertRaisesRegex(RuntimeError, 'test_lite_script_module.py\", line {}'.format(lineno + 3)):
+        try:
             loaded(torch.rand(3, 4), torch.rand(3, 4), torch.rand(30, 40))
+        except RuntimeError as e:
+            error_message = f"{e}"
+        self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 3) in error_message)
+        self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 9) in error_message)
+        self.assertTrue('top(FooTest3)' in error_message)
 
     def test_source_range_no_debug_info(self):
 
@@ -398,6 +403,34 @@ class TestLiteScriptModule(TestCase):
             error_message = f"{e}"
         self.assertTrue("test_lite_script_module.py" not in error_message)
 
+    def test_source_range_raise_exc(self):
+        class FooTest5(torch.jit.ScriptModule):
+            def __init__(self, val: int):
+                super(FooTest5, self).__init__()
+                self.val = val
+
+            @torch.jit.script_method
+            def add_method(self, val: int, x, w):
+                if (val == self.val):
+                    raise RuntimeError('self.val and val are same')
+                return x + w
+
+            @torch.jit.script_method
+            def forward(self, val: int, x, y, w):
+                x = x * y
+                x = x + 2
+                return self.add_method(val, x, w)
+
+        ft = FooTest5(42)
+        loaded = self.getScriptExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest5)
+
+        try:
+            loaded(42, torch.rand(3, 4), torch.rand(3, 4), torch.rand(30, 40))
+        except RuntimeError as e:
+            error_message = f"{e}"
+        self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 8) in error_message)
+        self.assertTrue('top(FooTest5)' in error_message)
 
 if __name__ == '__main__':
     run_tests()
