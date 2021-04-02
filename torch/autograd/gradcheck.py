@@ -23,7 +23,7 @@ def is_float_or_complex_tensor(obj):
     return is_tensor_like(obj) and (obj.is_floating_point() or obj.is_complex())
 
 
-def allocate_jacobians_with_inputs(input_tensors: Tuple, numel_output):
+def allocate_jacobians_with_inputs(input_tensors: Tuple, numel_output) -> Tuple[torch.Tensor, ...]:
     # Makes zero-filled tensors from inputs. If `numel_output` is not None, for each tensor in
     # `input_tensors`, returns a new zero-filled tensor with height of `t.numel` and width
     # of `numel_output`. Otherwise, for each tensor, returns a 1-d tensor with size `(t.numel,)`.
@@ -36,7 +36,7 @@ def allocate_jacobians_with_inputs(input_tensors: Tuple, numel_output):
     return tuple(out)
 
 
-def allocate_jacobians_with_outputs(output_tensors: Tuple, numel_input, dtype=None, device=None):
+def allocate_jacobians_with_outputs(output_tensors: Tuple, numel_input, dtype=None, device=None) -> Tuple[torch.Tensor, ...]:
     # Makes zero-filled tensors from outputs. If `numel_input` is not None, for each tensor in
     # `output_tensors`, returns a new zero-filled tensor with height of `numel_input` and width of
     # `t.numel`. Otherwise, for each tensor, returns a 1-d tensor with size (t.numel,).
@@ -115,7 +115,7 @@ def iter_tensor(x_tensor):
 
 
 def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
-                           grad_out=1.0) -> List[Tuple[torch.Tensor]]:
+                           grad_out=1.0) -> List[Tuple[torch.Tensor, ...]]:
     """Computes the numerical jacobian for a given fn and inputs. Returns M * N jacobians
     where M is the number of input tensors that require grad, and N is the number of output
     float/complex tensors.
@@ -134,7 +134,7 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
     """
-    jacobians: List[Tuple[torch.Tensor]] = []
+    jacobians: List[Tuple[torch.Tensor, ...]] = []
     if outputs is None:
         outputs = _as_tuple(fn(inputs))
     if target is None:
@@ -165,18 +165,22 @@ def compute_numerical_gradient(fn, entry, v, nbhd_checks_fn):
     return tuple(compute(a, b) for (a, b) in zip(outa, outb))
 
 
-def compute_numerical_jacobian_cols(jvp_fn, delta, input_is_complex, grad_out):
+def compute_numerical_jacobian_cols(jvp_fn, delta, input_is_complex, grad_out) -> List[torch.Tensor]:
     # Computing the jacobian only works for pure real or pure imaginary delta
     # for details on the algorithm used here, refer:
     # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
     # s = fn(z) where z = x for real valued input
     # and z = x + yj for complex valued input
-    jacobians_cols: List[Optional[torch.Tensor]] = []
+    jacobians_cols: List[torch.Tensor] = []
     ds_dx_tup = jvp_fn(delta)
 
     if input_is_complex:            # C -> C, C -> R
         ds_dy_tup = jvp_fn(delta * 1j)
         for ds_dx, ds_dy in zip(ds_dx_tup, ds_dy_tup):
+            if not ds_dx.is_complex() and isinstance(grad_out, complex):
+                # placeholder if grad_out is complex but output is not
+                jacobians_cols.append(torch.zeros_like(ds_dx))
+                continue
             # conjugate wirtinger derivative
             conj_w_d = 0.5 * (ds_dx + ds_dy * 1j)
             # wirtinger derivative
@@ -192,15 +196,16 @@ def compute_numerical_jacobian_cols(jvp_fn, delta, input_is_complex, grad_out):
                 #            = real(grad_out.conj() * ds_dx)
                 jacobians_cols.append(torch.real(grad_out.conjugate() * ds_dx))
             else:                   # R -> R
-                # skip if grad_out is complex but output is real
-                if not isinstance(grad_out, complex):
-                    jacobians_cols.append(ds_dx * grad_out)
-                else:
-                    jacobians_cols.append(None)
+                if isinstance(grad_out, complex):
+                    # placeholder if grad_out is complex but output is not
+                    jacobians_cols.append(torch.zeros_like(ds_dx))
+                    continue
+                jacobians_cols.append(ds_dx * grad_out)
     return jacobians_cols
 
 
-def combine_jacobian_cols(jacobians_cols, outputs, input, numel):
+def combine_jacobian_cols(jacobians_cols: Dict[int, List[torch.Tensor]], outputs, input,
+                          numel) -> Tuple[torch.Tensor, ...]:
     jacobians = allocate_jacobians_with_outputs(outputs, numel, input.dtype, input.device)
     for i, jacobian in enumerate(jacobians):
         for k, v in jacobians_cols.items():
@@ -208,7 +213,7 @@ def combine_jacobian_cols(jacobians_cols, outputs, input, numel):
     return jacobians
 
 
-def prepped_input(input, maybe_perturbed_input):
+def prepped_input(input: torch.Tensor, maybe_perturbed_input: Optional[torch.Tensor]) -> torch.Tensor:
     # Prepares the inputs to be passed into the function while including the new modified input.
     if input.layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
         # Convert back to mkldnn
@@ -230,7 +235,7 @@ def prepped_input(input, maybe_perturbed_input):
         return input
 
 
-def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, idx, eps):
+def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, idx, eps) -> None:
     # Check that the returned outputs don't have different dtype or shape when you
     # perturb the input
     assert output1.shape == output2.shape, \
@@ -243,7 +248,8 @@ def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, idx, ep
          f" dtypes {output1.dtype} and {output2.dtype}.")
 
 
-def get_numerical_jacobian_wrt_specific_input(fn, input, input_idx, inputs, outputs, eps, grad_out):
+def get_numerical_jacobian_wrt_specific_input(fn, input, input_idx, inputs, outputs, eps,
+                                              grad_out) -> Tuple[torch.Tensor, ...]:
     # Computes the numerical jacobians wrt to a single input. Returns N jacobian
     # tensors, where N is the number of outputs. Input must require grad.
     assert input.requires_grad
@@ -251,7 +257,7 @@ def get_numerical_jacobian_wrt_specific_input(fn, input, input_idx, inputs, outp
     # the ith entry of jacobian_cols[j] is the jth column of jacobian w.r.t. the ith output
     # and input at `input_idx`. The ith entry may be None for when grad_out is 1j but the ith output
     # is not complex.
-    jacobian_cols: Dict[int, List[Optional[torch.Tensor]]] = {}
+    jacobian_cols: Dict[int, List[torch.Tensor]] = {}
 
     for x, idx, d_idx in iter_tensor(input):
         def wrapped_fn():
@@ -278,7 +284,7 @@ def check_jacobians_equal(j1, j2, atol):
     return True
 
 
-def combine_jacobian_rows(jacobians_rows, inputs, numel_outputs):
+def combine_jacobian_rows(jacobians_rows, inputs, numel_outputs) -> Tuple[Tuple[torch.Tensor, ...], bool, bool]:
     out_jacobians = allocate_jacobians_with_inputs(inputs, numel_outputs)
     diff_input_list = list(iter_tensors(inputs, True))
     correct_grad_sizes = True
@@ -301,7 +307,7 @@ def combine_jacobian_rows(jacobians_rows, inputs, numel_outputs):
 
 
 def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_scale, check_grad_dtypes,
-                                         raise_exception, custom_vjp_fn=None):
+                                         raise_exception, custom_vjp_fn=None) -> Tuple[Tuple[torch.Tensor, ...], bool]:
     diff_input_list = list(iter_tensors(inputs, True))
 
     def backward_fn(grad_output):
@@ -337,7 +343,7 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_sc
     return jacobians, failed
 
 
-def compute_analytical_jacobian_rows(vjp_fn, sample_output, grad_out_scale):
+def compute_analytical_jacobian_rows(vjp_fn, sample_output, grad_out_scale) -> List[List[Optional[torch.Tensor]]]:
     # Computes Jacobian row-by-row using backward function `vjp_fn` = v^T J
     # NB: this function does not assume vjp_fn(v) to return tensors with
     # the same number of elements for different v. This is checked when we
