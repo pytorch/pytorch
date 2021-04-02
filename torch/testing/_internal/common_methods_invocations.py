@@ -14,7 +14,7 @@ import collections.abc
 from typing import List, Sequence, Tuple, Dict, Any, Union
 
 from torch.testing import \
-    (make_non_contiguous, floating_types, floating_types_and,
+    (make_non_contiguous, floating_types, floating_types_and, complex_types,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex,
      integral_types_and, all_types)
@@ -2320,6 +2320,10 @@ def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
                                     low=low,
                                     requires_grad=requires_grad)))
 
+def sample_inputs_real_imag(op_info, device, dtype, requires_grad):
+    return (SampleInput(make_tensor((S, S, S), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad)),)
 
 def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
@@ -3852,6 +3856,26 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.complex64])
                    )),
+    OpInfo('real',
+           op=torch.real,
+           dtypes=complex_types(),
+           dtypesIfCPU=complex_types(),
+           dtypesIfCUDA=complex_types(),
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_real_imag,),
+    OpInfo('imag',
+           op=torch.imag,
+           dtypes=complex_types(),
+           dtypesIfCPU=complex_types(),
+           dtypesIfCUDA=complex_types(),
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_real_imag,),
     OpInfo('rsub',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
            variant_test_name='rsub_tensor',
@@ -4735,8 +4759,6 @@ def method_tests():
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
-        ('real', (S, S, S), NO_ARGS, 'complex'),
-        ('imag', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_complex', (S, S, 2), NO_ARGS),
         ('complex', (S, S, S), ((S, S, S),), ''),
