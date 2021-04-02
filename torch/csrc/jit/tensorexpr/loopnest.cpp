@@ -49,28 +49,6 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   verify(root_stmt_);
 }
 
-class FunctionCallUseCount : public IRVisitor {
- public:
-  std::unordered_map<const Buf*, size_t> findUses(Stmt* s) {
-    s->accept(this);
-    return uses_;
-  }
-
- private:
-  void visit(const FunctionCall* v) override {
-    if (function_calls_[v->tensor()->buf()].insert(v).second) {
-      uses_[v->tensor()->buf()] = uses_[v->tensor()->buf()] + 1;
-    }
-    IRVisitor::visit(v);
-  }
-
-  std::unordered_map<const Buf*, size_t> uses_;
-
-  // Sets of FunctionCalls in order to keep the results unique
-  std::unordered_map<const Buf*, std::unordered_set<const FunctionCall*>>
-      function_calls_;
-};
-
 const std::unordered_set<const Buf*> LoopNest::getIntermediateBufs() const {
   std::unordered_set<const Buf*> result;
   auto input_bufs = getInputBufs();
@@ -477,21 +455,6 @@ void LoopNest::vectorize(For* f) {
   b->replace_stmt(f, IRSimplifier::simplify(new_f));
 }
 
-class Flattener : public IRMutator {
- private:
-  Expr* mutate(const FunctionCall* v) override {
-    const Tensor* t = v->tensor();
-    const Buf* b = t->buf();
-    Placeholder buffer = Placeholder(BufHandle(b));
-    const std::vector<const Expr*>& params = v->params();
-    std::vector<ExprHandle> params_expr(params.size());
-    for (size_t i = 0; i < params.size(); i++) {
-      params_expr[i] = ExprHandle(params[i]);
-    }
-    return buffer.load(params_expr).node();
-  }
-};
-
 void LoopNest::initialize(
     const std::vector<Tensor*>& output_tensors,
     const std::vector<Tensor*>& tensors_to_compute) {
@@ -587,22 +550,6 @@ class FunctionInliner : public IRMutator {
       inline_mapping_.erase(v);
     }
     return result;
-  }
-
-  // For the target function, insert the caller/callee pair into the replacement
-  // mapping.
-  const Expr* mutate(const FunctionCall* v) override {
-    const Tensor* t = v->tensor();
-    const Buf* buf = t->buf();
-    if (buf != buf_) {
-      return IRMutator::mutate(v);
-    }
-
-    if (v->nparams() != buf->ndim()) {
-      throw malformed_input(
-          "Placeholder indexed access is inconsistent with its rank", v);
-    }
-    return mutate_loads(buf, v->params());
   }
 
   const Expr* mutate(const Load* v) override {
@@ -773,8 +720,6 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
   if (allow_duplicated_work) {
     bufs_to_inline.insert(intermediate_bufs.begin(), intermediate_bufs.end());
   } else {
-    FunctionCallUseCount fcu;
-    auto function_call_uses = fcu.findUses(root_stmt_);
     auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
     auto input_bufs = getInputBufs();
 
@@ -803,9 +748,8 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
       // all bufs will have at least one store (if they have > 1 they cant be
       // inlined anyway)
       size_t reads = uses.size() - 1;
-      size_t function_call_reads = function_call_uses[buf];
       // if only one read, we can inline it without duplicating work
-      if ((reads + function_call_reads) <= 1) {
+      if (reads <= 1) {
         bufs_to_inline.insert(buf);
       }
     }
@@ -1022,10 +966,6 @@ void LoopNest::prepareForCodegen() {
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
-
-  // Flatten function calls.
-  Flattener flattener;
-  root_stmt_ = root_stmt_->accept_mutator(&flattener);
 
   root_stmt_ = FlattenIndexes(root_stmt_);
 
@@ -1919,17 +1859,6 @@ class LoopComputeAtRewriter : public IRMutator {
     }
     return new Load(v->dtype(), new_buf_, new_indices, v->mask());
   }
-  const Expr* mutate(const FunctionCall* v) override {
-    if (v->tensor()->buf() != buf_) {
-      return v;
-    }
-    std::vector<const Expr*> new_indices;
-    for (size_t i = 0; i < v->nparams(); i++) {
-      new_indices.push_back(
-          IRSimplifier::simplify(new Sub(v->param(i), offsets_[i])));
-    }
-    return new Load(v->dtype(), new_buf_, new_indices, new IntImm(1));
-  }
 };
 
 static Store* getStoreStmtOfProducer(Stmt* s) {
@@ -1967,27 +1896,6 @@ class CacheReplacer : public IRMutator {
       : buf_(buffer), cache_(cache), offsets_(offsets) {}
 
  private:
-  const Expr* mutate(const FunctionCall* v) override {
-    const Buf* buf = v->tensor()->buf();
-    if (buf != buf_) {
-      return IRMutator::mutate(v);
-    }
-
-    // for reductions the size of tensor->args() is not equal to the size of the
-    // output buffer, but they should be ordered so that the output args are at
-    // the beginning even if the loops are reordered later.
-    // Map indices to call-parameters.
-    std::vector<const Expr*> newIndices;
-    for (size_t i = 0; i < offsets_.size(); ++i) {
-      const Expr* index = v->param(i)->accept_mutator(this);
-      const Expr* offset = offsets_[i];
-      const Expr* sub = IRSimplifier::simplify(new Sub(index, offset));
-      newIndices.push_back(sub);
-    }
-
-    return new Load(cache_, newIndices, new IntImm(1));
-  }
-
   const Expr* mutate(const Load* v) override {
     const Buf* buf = v->buf();
     if (buf != buf_) {

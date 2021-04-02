@@ -40,7 +40,6 @@ class ExprHandle;
 class Expr;
 class BaseCallNode;
 class Intrinsics;
-class FunctionCall;
 class Allocate;
 class Free;
 class Let;
@@ -93,7 +92,6 @@ class TORCH_API IRMutator {
   // that.
   virtual const Expr* mutate(const BaseCallNode* v);
   virtual const Expr* mutate(const Intrinsics* v);
-  virtual const Expr* mutate(const FunctionCall* v);
 
   virtual const Expr* mutate(const Term* v);
   virtual const Expr* mutate(const Polynomial* v);

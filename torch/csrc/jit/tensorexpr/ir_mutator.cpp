@@ -239,11 +239,6 @@ const Expr* IRMutator::mutate(const Intrinsics* v) {
   return this->mutate(base);
 }
 
-const Expr* IRMutator::mutate(const FunctionCall* v) {
-  const BaseCallNode* base = v;
-  return this->mutate(base);
-}
-
 const Expr* IRMutator::mutate(const Term* v) {
   const Expr* newScalar = v->scalar()->accept_mutator(this);
 

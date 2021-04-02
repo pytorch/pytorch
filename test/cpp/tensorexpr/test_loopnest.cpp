@@ -1885,7 +1885,7 @@ TEST(LoopNest, Reduce2dComputeAt) {
 # CHECK:     cons[cy, cx] = int(0);
 # CHECK:     for (int r = 0; r < 2; r++) {
 # CHECK:       for (int s = 0; s < 2; s++) {
-# CHECK:         cons[cy, cx] = ReduceOp((cons[cy, cx]) + (prod(cy + r, cx + s)), reduce_args={r, s});
+# CHECK:         cons[cy, cx] = ReduceOp((cons[cy, cx]) + (prod[cy + r, cx + s]), reduce_args={r, s});
 # CHECK:       }
 # CHECK:     }
 # CHECK:   }

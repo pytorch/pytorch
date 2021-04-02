@@ -166,11 +166,6 @@ void IRVisitor::visit(const Intrinsics* v) {
   this->visit(base);
 }
 
-void IRVisitor::visit(const FunctionCall* v) {
-  const BaseCallNode* base = v;
-  this->visit(base);
-}
-
 void IRVisitor::visit(const Allocate* v) {
   v->buffer_var()->accept(this);
   std::vector<const Expr*> dims = v->dims();
