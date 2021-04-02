@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-import jinja2
 
-import os.path
 from pathlib import Path
+
+import jinja2
 
 DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
