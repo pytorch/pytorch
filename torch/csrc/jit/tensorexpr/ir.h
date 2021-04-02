@@ -503,58 +503,6 @@ class IfThenElse : public ExprNode<IfThenElse> {
   const Expr* false_;
 };
 
-class BaseCallNode : public Expr {
- public:
-  enum CallType {
-    kIntrinsics,
-    kFunctionCall,
-  };
-
-  int nparams() const {
-    return params_.size();
-  }
-
-  const Expr* param(int index) const {
-    return params_[index];
-  }
-  const std::vector<const Expr*>& params() const {
-    return params_;
-  }
-
-  virtual std::string func_name() const = 0;
-
-  CallType call_type() const {
-    return call_type_;
-  }
-
- protected:
-  BaseCallNode(
-      Dtype dtype,
-      CallType call_type,
-      const std::vector<const Expr*>& params)
-      : Expr(dtype), call_type_(call_type), params_(params) {}
-
- private:
-  // The handler for the default ir_mutator to make a copy of this node with new
-  // params.
-  virtual const Expr* DefaultMutator(
-      const std::vector<const Expr*>& new_params) const = 0;
-
-  template <class U, class B>
-  friend class ExprNode;
-  friend class IRMutator;
-
-  CallType call_type_;
-  std::vector<const Expr*> params_;
-};
-
-template <typename Op>
-class CallNode : public ExprNode<Op, BaseCallNode> {
- public:
-  using BaseClass = ExprNode<Op, BaseCallNode>;
-  using BaseClass::BaseClass;
-};
-
 class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
  public:
   CompareSelectOperation compare_select_op() const {
@@ -685,7 +633,7 @@ enum IntrinsicsOp {
   kRand, // We need more discussions on this. Should we consider stateful?
 };
 
-class Intrinsics : public CallNode<Intrinsics> {
+class Intrinsics : public ExprNode<Intrinsics> {
  public:
   static ExprHandle make(IntrinsicsOp op_type, const ExprHandle& v1) {
     return ExprHandle(new Intrinsics(op_type, v1.node()));
@@ -716,7 +664,7 @@ class Intrinsics : public CallNode<Intrinsics> {
     return op_type_;
   }
 
-  std::string func_name() const override {
+  std::string func_name() const {
     switch (op_type()) {
       case kSin:
         return "sin";
@@ -789,10 +737,10 @@ class Intrinsics : public CallNode<Intrinsics> {
             "invalid op_type: " + c10::to_string(op_type()));
     }
   }
-  using BaseClass = CallNode<Intrinsics>;
 
   Intrinsics(IntrinsicsOp op_type, Dtype dtype)
-      : BaseClass(IntrinsicsDtype(op_type, dtype), kIntrinsics, {}),
+      : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
+        params_({}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 0) {
       throw malformed_input("bad arg count in Intrinsics");
@@ -800,7 +748,8 @@ class Intrinsics : public CallNode<Intrinsics> {
   }
 
   Intrinsics(IntrinsicsOp op_type, const Expr* v1)
-      : BaseClass(IntrinsicsDtype(op_type, v1->dtype()), kIntrinsics, {v1}),
+      : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype())),
+        params_({v1}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 1) {
       throw malformed_input("bad arg count in Intrinsics");
@@ -808,10 +757,8 @@ class Intrinsics : public CallNode<Intrinsics> {
   }
 
   Intrinsics(IntrinsicsOp op_type, const Expr* v1, const Expr* v2)
-      : BaseClass(
-            IntrinsicsDtype(op_type, v1->dtype(), v2->dtype()),
-            kIntrinsics,
-            {v1, v2}),
+      : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype(), v2->dtype())),
+        params_({v1, v2}),
         op_type_(op_type) {
     if (OpArgCount(op_type) != 2) {
       throw malformed_input("bad arg count in Intrinsics");
@@ -819,7 +766,8 @@ class Intrinsics : public CallNode<Intrinsics> {
   }
 
   Intrinsics(IntrinsicsOp op_type, const std::vector<const Expr*>& params)
-      : BaseClass(IntrinsicsDtype(op_type, params), kIntrinsics, params),
+      : ExprNodeBase(IntrinsicsDtype(op_type, params)),
+        params_(params),
         op_type_(op_type) {
     if (OpArgCount(op_type) != nparams()) {
       throw malformed_input("bad arg count in Intrinsics");
@@ -830,14 +778,19 @@ class Intrinsics : public CallNode<Intrinsics> {
     return op_type_ != kRand;
   }
 
- private:
-  TORCH_API static int OpArgCount(IntrinsicsOp op_type);
-
-  const Expr* DefaultMutator(
-      const std::vector<const Expr*>& new_params) const override {
-    return new Intrinsics(this->op_type(), new_params);
+  int nparams() const {
+    return params_.size();
   }
 
+  const Expr* param(int index) const {
+    return params_[index];
+  }
+  const std::vector<const Expr*>& params() const {
+    return params_;
+  }
+
+ private:
+  TORCH_API static int OpArgCount(IntrinsicsOp op_type);
   TORCH_API static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1);
   TORCH_API static Dtype IntrinsicsDtype(
       IntrinsicsOp op_type,
@@ -847,6 +800,7 @@ class Intrinsics : public CallNode<Intrinsics> {
       IntrinsicsOp op_type,
       const std::vector<const Expr*>& params);
 
+  std::vector<const Expr*> params_;
   IntrinsicsOp op_type_;
 };
 
