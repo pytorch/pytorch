@@ -229,12 +229,8 @@ struct C10_API VariableVersion {
   c10::intrusive_ptr<VersionCounter> version_counter_;
 
  public:
-  // Returns true for inference tensor.
-  // `as_view` on inference tensor in normal mode checks unique() so
-  // we cannot throw here. If Inplace and View were separate dispatch
-  // keys we can just put Inplace in the default_included_set, so that
-  // view ops on inference tensor doesn't have to go through as_view
-  // even outside InferenceMode.
+  // It's okay to return true even for inference tensor which
+  // doesn't have version counter enabled.
   bool unique() const {
     return this->enabled() ? 1 == version_counter_.use_count() : true;
   }
@@ -277,23 +273,19 @@ struct C10_API VariableVersion {
   void bump() {
     bool enabled = this->enabled();
     TORCH_CHECK(enabled || InferenceMode::is_enabled(),
-      "Inplace update to inference tensor in normal mode is not allowed. You can make "
-      "a clone to get a normal tensor before doing inplace update.");
-
+      "Inplace update to inference tensor outside InferenceMode is not allowed."
+      "You can make a clone to get a normal tensor before doing inplace update.");
     if (enabled) {
       ++version_counter_->version_;
     }
   }
 
-  // Returns 0 for inference tensor in InferenceMode.  We'd like user
-  // code that runs in normal mode still runs in InferenceMode with
-  // minimal change, thus it returns 0 instead of throwing.
+  // Inference tensor doesn't have version counter so it shouldn't be
+  // accessed.
   uint32_t current_version() const {
-    bool enabled = this->enabled();
-    TORCH_CHECK(enabled || InferenceMode::is_enabled(),
-      "Accessing version counter of inference tensor is not allowed.");
-
-    return enabled ? (uint32_t) version_counter_->version_ : 0;
+    TORCH_CHECK(this->enabled(),
+      "Accessing version_counter of inference tensor is not allowed.");
+    return version_counter_->version_;
   }
 };
 
@@ -615,6 +607,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   // Inference tensor doesn't have autograd or InplaceOrView key.
+  // Invariant:
+  //   is_inference_tensor() == !version_counter_.enabled()
   bool is_inference_tensor() {
     bool no_InplaceOrView = !key_set_.has(c10::DispatchKey::InplaceOrView);
     bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();

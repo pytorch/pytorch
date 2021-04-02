@@ -1025,7 +1025,7 @@ Tensor alias_with_sizes_and_strides(
     self_ = Tensor(std::move(impl));
   } else {
     auto impl = c10::make_intrusive<TensorImpl>(
-        Storage(self.storage()), self.key_set(), self.dtype(), true);
+        Storage(self.storage()), self.key_set(), self.dtype(), /*is_view=*/true);
     impl->set_storage_offset(self.storage_offset());
     impl->set_sizes_and_strides(sizes, strides);
     self_ = Tensor(std::move(impl));

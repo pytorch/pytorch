@@ -151,7 +151,7 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeInplaceOp) {
       inference_tensor = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
     }
     ASSERT_THROWS_WITH(inplace_op(inference_tensor), // go through kernels: InplaceOrView, CPU
-      "Inplace update to inference tensor in normal mode is not allowed");
+      "Inplace update to inference tensor outside InferenceMode is not allowed");
   }
 }
 
@@ -164,8 +164,8 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeViewOp) {
     }
     torch::Tensor out = view_op(inference_tensor); // go through kernels: InplaceOrView, CPU
     ASSERT_TRUE(is_inference_tensor(out));
-    ASSERT_EQ(out.requires_grad(), requires_grad);
-    ASSERT_TRUE(out.is_view());
+    ASSERT_FALSE(out.requires_grad());
+    ASSERT_FALSE(out.is_view());
     ASSERT_TRUE(out.is_leaf());
   }
 }
@@ -350,7 +350,7 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorInplaceOp) {
       a.mul_(c);
 
       ASSERT_THROWS_WITH(torch::mul_out(c, s, s), // go through kernels: VariableType, InplaceOrView(ERROR!), CPU
-        "Inplace update to inference tensor in normal mode is not allowed");
+        "Inplace update to inference tensor outside InferenceMode is not allowed");
     }
   }
 }
@@ -445,7 +445,7 @@ TEST(InferenceModeTest, TestInplaceCopyOnInferenceTensor) {
     }
 
     ASSERT_THROWS_WITH(t.copy_(s),
-      "Inplace update to inference tensor in normal mode is not allowed");
+      "Inplace update to inference tensor outside InferenceMode is not allowed");
   }
 }
 
@@ -465,13 +465,14 @@ TEST(InferenceModeTest, TestAccessVersionCounter) {
   {
     InferenceMode guard;
     t = torch::ones({1, 2, 3});
-    t.unsafeGetTensorImpl()->version_counter().current_version();
+    ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->version_counter().current_version(),
+      "Accessing version_counter of inference tensor is not allowed.");
     t.unsafeGetTensorImpl()->bump_version();
   }
   ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->version_counter().current_version(),
-    "Accessing version counter of inference tensor is not allowed.");
+    "Accessing version_counter of inference tensor is not allowed.");
   ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->bump_version(),
-    "Inplace update to inference tensor in normal mode is not allowed.");
+    "Inplace update to inference tensor outside InferenceMode is not allowed.");
 }
 
 TEST(InferenceModeTest, TestInplaceUpdateInferenceTensorWithNormalTensor) {
@@ -485,5 +486,5 @@ TEST(InferenceModeTest, TestInplaceUpdateInferenceTensorWithNormalTensor) {
   }
   s.copy_(t);
   ASSERT_THROWS_WITH(t.copy_(s),
-    "Inplace update to inference tensor in normal mode is not allowed");
+    "Inplace update to inference tensor outside InferenceMode is not allowed");
 }

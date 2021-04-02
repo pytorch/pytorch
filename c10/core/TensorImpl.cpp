@@ -82,19 +82,24 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
     // UndefinedTensorImpl is a singleton, so we skip logging it
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }
-  // After we removed Autograd keys from globally enabled set, every Tensor must be created with
-  // a backend DispatchKey and an AutogradBackend key.
-  // We automatically add the corresponding autograd key to key_set_ so that backends can stay
-  // in the old way of only registering with backend key like DispatchKey::CPU.
-  if (is_view || c10::InferenceMode::is_enabled()) {
+
+  bool inference_mode = c10::InferenceMode::is_enabled();
+
+  // Inference tensor doesn't have autograd related keys.
+  // View tensor preserves key_set from their base.
+  if (is_view || inference_mode) {
     // See Note [Expected TLS state in InferenceMode] for why we don't add Autograd & InplaceOrView keys.
     key_set_ = key_set;
-    version_counter_ = VariableVersion(/*enabled=*/false);
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]
     DispatchKey k = key_set.highestPriorityBackendTypeId();
     key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
+  }
+
+  // Inference tensor doesn't have version counter.
+  if (this->is_inference_tensor()) {
+    version_counter_ = VariableVersion(/*enabled=*/false);
   }
 
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
