@@ -225,18 +225,23 @@ expand_outplace(Tensor &&to_expand1,
                 Tensor &&to_expand2,
                 Tensor &&to_expand3, const char *api_name) = delete;
 
-inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntArrayRef sizes) {
-  if(to_expand.sizes().equals(sizes)) {
-    return std::make_tuple(to_expand);
+inline c10::MaybeOwned<Tensor> expand_size(const Tensor &to_expand, IntArrayRef sizes) {
+  if (to_expand.sizes().equals(sizes)) {
+    return c10::MaybeOwned<Tensor>::borrowed(to_expand);
   }
 
-  return std::make_tuple(to_expand.expand(sizes, /*implicit=*/true)); // see [expand implicit]
+  return c10::MaybeOwned<Tensor>::owned(to_expand.expand(sizes, /*implicit=*/true)); // see [expand implicit]
 }
 
-inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntArrayRef sizes, const char *api_name) {
+inline c10::MaybeOwned<Tensor> expand_size(Tensor &&to_expand, IntArrayRef sizes) = delete;
+
+
+inline c10::MaybeOwned<Tensor> expand_size(const Tensor &to_expand, IntArrayRef sizes, const char *api_name) {
   check_defined({to_expand}, api_name);
   return expand_size(to_expand, sizes);
 }
+
+inline c10::MaybeOwned<Tensor> expand_size(Tensor &&to_expand, IntArrayRef sizes, const char *api_name) = delete;
 
 inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   // expands a list of Tensors; ignores undefined (null) tensors
