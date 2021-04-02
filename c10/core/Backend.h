@@ -219,6 +219,10 @@ static inline const char* toString(Backend b) {
       return "SparseHIP";
     case Backend::SparseXPU:
       return "SparseXPU";
+    case Backend::SparseCsrCPU:
+      return "SparseCsrCPU";
+    case Backend::SparseCsrCUDA:
+      return "SparseCsrCUDA";
     case Backend::MkldnnCPU:
       return "MkldnnCPU";
     case Backend::Vulkan:
@@ -242,6 +246,16 @@ static inline bool isSparse(Backend b) {
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static inline bool isSparseCsr(Backend b) {
+  switch(b) {
+    case Backend::SparseCsrCPU:
+    case Backend::SparseCsrCUDA:
       return true;
     default:
       return false;

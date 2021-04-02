@@ -4,8 +4,10 @@
 // Don't compile with MKL for MSVC/macos since linking the sparse MKL routines
 // needs some build fixes.
 // https://github.com/pytorch/pytorch/pull/50937#issuecomment-778732740
-// Macros source: https://web.archive.org/web/20191012035921/http://nadeausoftware.com/articles/2012/01/c_c_tip_how_use_compiler_predefined_macros_detect_operating_system
-#if !AT_MKL_ENABLED() || defined(_MSC_VER) || defined(__APPLE__) || defined(__MACH__)
+// Macros source:
+// https://web.archive.org/web/20191012035921/http://nadeausoftware.com/articles/2012/01/c_c_tip_how_use_compiler_predefined_macros_detect_operating_system
+#if !AT_MKL_ENABLED() || defined(_MSC_VER) || defined(__APPLE__) || \
+    defined(__MACH__)
 
 namespace at {
 namespace native {
@@ -24,7 +26,7 @@ Tensor& _sparse_mm_mkl_(
 #else
   AT_ERROR("sparse_mm_mkl: ATen not compiled with MKL support");
 #endif
-  return self;                  // for stopping compiler warnings.
+  return self; // for stopping compiler warnings.
 }
 } // namespace native
 } // namespace at
@@ -46,96 +48,111 @@ namespace native {
 using namespace at::sparse_csr;
 
 #ifdef MKL_ILP64
-  static constexpr ScalarType TORCH_INT_TYPE = at::kLong;
+static constexpr ScalarType TORCH_INT_TYPE = at::kLong;
 #else
-  static constexpr ScalarType TORCH_INT_TYPE = at::kInt;
+static constexpr ScalarType TORCH_INT_TYPE = at::kInt;
 #endif
 
-static inline void sparse_mm_mkl_impl(
-    float* res,
-    MKL_INT* col_indices,
-    MKL_INT* crow_indices,
-    float* values,
-    float* dense,
-    float* t,
-    float alpha,
-    float beta,
-    MKL_INT nrows,
-    MKL_INT ncols,
-    MKL_INT dense_ncols) {
+class SparseCsrMKLInterface {
+ private:
   sparse_matrix_t A = 0;
   matrix_descr desc;
-  desc.type = SPARSE_MATRIX_TYPE_GENERAL;
-  int retval = mkl_sparse_s_create_csr(
-      &A,
-      SPARSE_INDEX_BASE_ZERO,
-      nrows,
-      ncols,
-      crow_indices,
-      crow_indices + 1,
-      col_indices,
-      values);
-  TORCH_CHECK(
-      retval == 0, "mkl_sparse_s_create_csr failed with error code: ", retval);
 
-  int stat = mkl_sparse_s_mm(
-      SPARSE_OPERATION_NON_TRANSPOSE,
-      alpha,
-      A,
-      desc,
-      SPARSE_LAYOUT_ROW_MAJOR,
-      dense,
-      dense_ncols,
-      dense_ncols,
-      beta,
-      res,
-      dense_ncols);
-  TORCH_CHECK(stat == 0, "mkl_sparse_s_mm failed with error code: ", retval);
-  mkl_sparse_destroy(A);
-}
+ public:
+  SparseCsrMKLInterface(
+      MKL_INT* col_indices,
+      MKL_INT* crow_indices,
+      double* values,
+      MKL_INT nrows,
+      MKL_INT ncols) {
+    desc.type = SPARSE_MATRIX_TYPE_GENERAL;
+    int retval = mkl_sparse_d_create_csr(
+        &A,
+        SPARSE_INDEX_BASE_ZERO,
+        nrows,
+        ncols,
+        crow_indices,
+        crow_indices + 1,
+        col_indices,
+        values);
+    TORCH_CHECK(
+        retval == 0,
+        "mkl_sparse_d_create_csr failed with error code: ",
+        retval);
+  }
 
-static inline void sparse_mm_mkl_impl(
-    double* res,
-    MKL_INT* col_indices,
-    MKL_INT* crow_indices,
-    double* values,
-    double* dense,
-    double* t,
-    double alpha,
-    double beta,
-    MKL_INT nrows,
-    MKL_INT ncols,
-    MKL_INT dense_ncols) {
-  sparse_matrix_t A = 0;
-  matrix_descr desc;
-  desc.type = SPARSE_MATRIX_TYPE_GENERAL;
-  int retval = mkl_sparse_d_create_csr(
-      &A,
-      SPARSE_INDEX_BASE_ZERO,
-      nrows,
-      ncols,
-      crow_indices,
-      crow_indices + 1,
-      col_indices,
-      values);
-  TORCH_CHECK(
-      retval == 0, "mkl_sparse_d_create_csr failed with error code: ", retval);
+  SparseCsrMKLInterface(
+      MKL_INT* col_indices,
+      MKL_INT* crow_indices,
+      float* values,
+      MKL_INT nrows,
+      MKL_INT ncols) {
+    desc.type = SPARSE_MATRIX_TYPE_GENERAL;
+    int retval = mkl_sparse_s_create_csr(
+        &A,
+        SPARSE_INDEX_BASE_ZERO,
+        nrows,
+        ncols,
+        crow_indices,
+        crow_indices + 1,
+        col_indices,
+        values);
+    TORCH_CHECK(
+        retval == 0,
+        "mkl_sparse_s_create_csr failed with error code: ",
+        retval);
+  }
 
-  int stat = mkl_sparse_d_mm(
-      SPARSE_OPERATION_NON_TRANSPOSE,
-      alpha,
-      A,
-      desc,
-      SPARSE_LAYOUT_ROW_MAJOR,
-      dense,
-      dense_ncols,
-      dense_ncols,
-      beta,
-      res,
-      dense_ncols);
-  TORCH_CHECK(stat == 0, "mkl_sparse_d_mm failed with error code: ", stat);
-  mkl_sparse_destroy(A);
-}
+  inline void sparse_mm(
+      float* res,
+      float* dense,
+      float alpha,
+      float beta,
+      MKL_INT nrows,
+      MKL_INT ncols,
+      MKL_INT dense_ncols) {
+    int stat = mkl_sparse_s_mm(
+        SPARSE_OPERATION_NON_TRANSPOSE,
+        alpha,
+        A,
+        desc,
+        SPARSE_LAYOUT_ROW_MAJOR,
+        dense,
+        dense_ncols,
+        dense_ncols,
+        beta,
+        res,
+        dense_ncols);
+    TORCH_CHECK(stat == 0, "mkl_sparse_s_mm failed with error code: ", stat);
+  }
+
+  inline void sparse_mm(
+      double* res,
+      double* dense,
+      double alpha,
+      double beta,
+      MKL_INT nrows,
+      MKL_INT ncols,
+      MKL_INT dense_ncols) {
+    int stat = mkl_sparse_d_mm(
+        SPARSE_OPERATION_NON_TRANSPOSE,
+        alpha,
+        A,
+        desc,
+        SPARSE_LAYOUT_ROW_MAJOR,
+        dense,
+        dense_ncols,
+        dense_ncols,
+        beta,
+        res,
+        dense_ncols);
+    TORCH_CHECK(stat == 0, "mkl_sparse_d_mm failed with error code: ", stat);
+  }
+
+  ~SparseCsrMKLInterface() {
+    mkl_sparse_destroy(A);
+  }
+};
 
 template <typename scalar_t>
 static inline void sparse_mm_mkl_template(
@@ -149,13 +166,15 @@ static inline void sparse_mm_mkl_template(
     const Scalar& beta,
     IntArrayRef size,
     IntArrayRef dense_size) {
-  sparse_mm_mkl_impl(
-      res.data_ptr<scalar_t>(),
+  SparseCsrMKLInterface mkl_impl(
       col_indices.data_ptr<MKL_INT>(),
       crow_indices.data_ptr<MKL_INT>(),
       values.data_ptr<scalar_t>(),
+      size[0],
+      size[1]);
+  mkl_impl.sparse_mm(
+      res.data_ptr<scalar_t>(),
       dense.data_ptr<scalar_t>(),
-      t.data_ptr<scalar_t>(),
       alpha.to<scalar_t>(),
       beta.to<scalar_t>(),
       size[0],

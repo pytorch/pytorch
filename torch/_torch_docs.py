@@ -8036,7 +8036,9 @@ at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
 
 Args:
     crow_indices (array_like): One-dimensional array of size size[0] + 1. The last element
-        is the number of non-zeros.
+        is the number of non-zeros. This tensor encodes the index in values and col_indices
+        depending on where the given row starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of elements in a given row.
     col_indices (array_like): Column co-ordinates of each element in values. Strictly one
         dimensional tensor with the same length as values.
     values (array_list): Initial values for the tensor. Can be a list, tuple, NumPy ``ndarray``, scalar,
@@ -8063,7 +8065,7 @@ Example ::
     tensor(crow_indices=tensor([0, 2, 4]),
            col_indices=tensor([0, 1, 0, 1]),
            values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
-           dtype=torch.float64)
+           dtype=torch.float64, layout=torch.sparse_csr)
 """.format(**factory_common_args))
 
 add_docstr(torch.sparse_coo_tensor,

@@ -48,7 +48,7 @@ Tensor sparse_csr_tensor(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
   TORCH_CHECK(
-      !options.has_layout() || options.layout() == kSparseCsr,
+      options.layout() == kSparseCsr,
       "expected sparse CSR layout, but got layout ",
       options.layout());
 
@@ -98,7 +98,7 @@ Tensor sparse_csr_tensor(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   TORCH_CHECK(
-      !options.has_layout() || options.layout() == kSparseCsr,
+      options.layout() == kSparseCsr,
       "expected sparse CSR layout, but got layout ",
       options.layout());
   TORCH_CHECK(crow_indices.numel() >= 1, "expected crow_indices.numel() >= 1, but got ",
@@ -138,7 +138,7 @@ Tensor col_indices_sparse_csr(const Tensor& self) {
 const bool _is_same_size_as_sparse_csr(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
-  return self.dim() == src.dim() && self.sizes().equals(src.sizes());
+  return self.sizes().equals(src.sizes());
 }
 
 SparseCsrTensor& resize_as_sparse_csr_(

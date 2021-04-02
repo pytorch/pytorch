@@ -430,7 +430,8 @@ be interpreted as missing values in the sparse tensor:
           values=tensor([1., 1., 2.]), size=(3, 4), nnz=3, dtype=torch.float64)
 
 The sparse matrix-vector multiplication can be performed with the
-:meth:`tensor.matmul` method:
+:meth:`tensor.matmul` method. This is currently the only math operation
+supported on CSR tensors.
 
     >>> vec = torch.randn(4, 1, dtype=torch.float64)
     >>> sp.matmul(vec)
