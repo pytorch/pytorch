@@ -2855,9 +2855,7 @@ op_db: List[OpInfo] = [
            # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           sample_inputs_func=sample_inputs_linalg_multi_dot,
-           # test_variant_consistency_jit does not work with TensorList inputs
-           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
+           sample_inputs_func=sample_inputs_linalg_multi_dot,),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
