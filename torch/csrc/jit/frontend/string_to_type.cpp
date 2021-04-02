@@ -6,6 +6,10 @@ using namespace c10;
 const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
   static std::unordered_map<std::string, TypePtr> map = {
       {"Tensor", TensorType::get()},
+      // Dtype constraints are not constrained in compilation. Therefore, we map
+      // all tensor subclasses with different dtypes to a same underlying
+      // Tensor. But, we give warning about possible dtype change whenever user
+      // uses any of the tensor subclasses such as LongTensor.
       {"LongTensor", TensorType::get()},
       {"DoubleTensor", TensorType::get()},
       {"FloatTensor", TensorType::get()},
