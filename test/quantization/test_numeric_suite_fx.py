@@ -407,13 +407,42 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_extract_weights_mod(self):
-        m = nn.Sequential(
-            nn.Conv2d(1, 1, 1),
-            nn.Conv2d(1, 1, 1),
-            nn.Conv2d(1, 1, 1),
-            nn.ReLU(),
-        ).eval()
-        self._test_extract_weights(m, results_len=3)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # conv1d
+                self.conv1d_0 = nn.Conv1d(1, 1, 1)
+                # conv1d - relu
+                self.conv1d_1 = nn.Conv1d(1, 1, 1)
+                self.relu_0 = nn.ReLU()
+                # conv2d
+                self.conv2d_0 = nn.Conv2d(1, 1, 1)
+                # conv2d - relu
+                self.conv2d_1 = nn.Conv2d(1, 1, 1)
+                self.relu_1 = nn.ReLU()
+                # conv3d
+                self.conv3d_0 = nn.Conv3d(1, 1, 1)
+                # conv3d - relu
+                self.conv3d_1 = nn.Conv3d(1, 1, 1)
+                self.relu_2 = nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv1d_0(x)
+                x = self.conv1d_1(x)
+                x = self.relu_0(x)
+                x = x.reshape(1, 1, 1, 1)
+                x = self.conv2d_0(x)
+                x = self.conv2d_1(x)
+                x = self.relu_1(x)
+                x = x.reshape(1, 1, 1, 1, 1)
+                x = self.conv3d_0(x)
+                x = self.conv3d_1(x)
+                x = self.relu_2(x)
+                return x
+
+        m = M().eval()
+        self._test_extract_weights(m, results_len=6)
 
     @skipIfNoFBGEMM
     def test_extract_weights_fun(self):
