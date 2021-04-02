@@ -168,7 +168,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       result_ptr, result_ld
     );
   });
-  if (result.data_ptr() != result_->data_ptr()) {
+  if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
   return result;
