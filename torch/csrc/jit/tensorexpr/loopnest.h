@@ -25,10 +25,12 @@ class Dtype;
 class TORCH_API LoopNest {
  public:
   // A constructor for building a LoopNest from a list of Tensors
-  LoopNest(const std::vector<Tensor*>& output_tensors);
   LoopNest(
       const std::vector<Tensor*>& output_tensors,
       const std::vector<Tensor*>& tensors_to_compute);
+
+  // A convenience constructor for the case when all tensors are output tensors
+  LoopNest(const std::vector<Tensor*>& output_tensors);
 
   // A constructor for building a LoopNest from an Stmt and a list of output
   // buffers.
@@ -209,8 +211,10 @@ class TORCH_API LoopNest {
 
   // LoopOptions are propagated to tail.
   void sliceHead(For* f, int factor, For** head, For** tail);
+  void sliceHead(For* f, int factor);
   // LoopOptions are propagated to head.
   void sliceTail(For* f, int factor, For** head, For** tail);
+  void sliceTail(For* f, int factor);
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
