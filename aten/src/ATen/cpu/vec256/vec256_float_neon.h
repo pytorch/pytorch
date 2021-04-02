@@ -327,8 +327,8 @@ public:
   Vec256<float> copysign(const Vec256<float> &sign) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_sign[size()];
-		store(tmp);
-		sign.store(tmp_sign);
+    store(tmp);
+    sign.store(tmp_sign);
     for (int64_t i = 0; i < size(); i++) {
       tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
     }
