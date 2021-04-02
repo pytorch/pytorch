@@ -357,7 +357,7 @@ def _calculate_correct_fan(tensor, mode):
     return fan_in if mode == 'fan_in' else fan_out
 
 
-def _legacy_gain(a, nonlinearity, gain):
+def _legacy_kaiming_gain(a, nonlinearity, gain):
     msg = "nonlinearity and a args are deprecated, please use gain={} instead."
     if nonlinearity is not None:
         warnings.warn(msg.format(f"nn.init.calculate_gain('{nonlinearity}', {a}))"))
@@ -365,10 +365,11 @@ def _legacy_gain(a, nonlinearity, gain):
     elif a is not None:
         warnings.warn(msg.format(f"nn.init.calculate_gain('leaky_relu', {a}))"))
         gain = calculate_gain('leaky_relu', a)
+
     return gain
 
 
-def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu',
+def kaiming_uniform_(tensor, a=None, mode='fan_in', nonlinearity=None,
                      gain: float = 2. ** .5):
     r"""Fills the input `Tensor` with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
@@ -405,14 +406,14 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu',
         >>> nn.init.kaiming_uniform_(w, mode='fan_in', gain=relu_gain)
     """
     fan = _calculate_correct_fan(tensor, mode)
-    gain = _legacy_gain(a, nonlinearity, gain)
+    gain = _legacy_kaiming_gain(a, nonlinearity, gain)
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
     with torch.no_grad():
         return tensor.uniform_(-bound, bound)
 
 
-def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu',
+def kaiming_normal_(tensor, a=None, mode='fan_in', nonlinearity=None,
                     gain: float = 2. ** .5):
     r"""Fills the input `Tensor` with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
@@ -449,7 +450,7 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu',
         >>> nn.init.kaiming_normal_(w, mode='fan_out', gain=relu_gain)
     """
     fan = _calculate_correct_fan(tensor, mode)
-    gain = _legacy_gain(a, nonlinearity, gain)
+    gain = _legacy_kaiming_gain(a, nonlinearity, gain)
     std = gain / math.sqrt(fan)
     with torch.no_grad():
         return tensor.normal_(0, std)
