@@ -133,3 +133,24 @@ def construct_time_validation(f):
         return f(*args, **kwargs)
 
     return wrapper
+
+
+# Runtime checking
+# Validate output data is subtype of return hint
+def runtime_validation(f):
+    # TODO:
+    # Can be extended to validate '__getitem__' and nonblocking
+    if f.__name__ != '__iter__':
+        raise TypeError("Can not decorate function {} with 'runtime_validation'"
+                        .format(f.__name__))
+
+    @wraps(f)
+    def wrapper(self):
+        it = f(self)
+        for d in it:
+            if not self.type.issubtype_of_instance(d):
+                raise RuntimeError("Expected an instance of subtype {}, but found {}"
+                                   .format(self.type, d))
+            yield d
+
+    return wrapper
