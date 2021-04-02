@@ -13,7 +13,9 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
+#ifdef USE_CUDA
 #include <ATen/cuda/CUDAContext.h>
+#endif
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -257,7 +259,7 @@ std::string stacksToStr(const std::vector<std::string>& stacks) {
 
 } // namespace
 
-
+#ifdef USE_CUDA
 std::vector<libkineto::GpuInfo> collectCudaDevices(){
   auto result = std::vector<libkineto::GpuInfo>();
   auto num_gpu = at::cuda::device_count();
@@ -269,6 +271,7 @@ std::vector<libkineto::GpuInfo> collectCudaDevices(){
 
   return result;
 }
+#endif
 
 std::unique_ptr<libkineto::DistributedMetadata> collectDistMetadata(){
   auto py_module = py::module::import("torch.distributed");
@@ -288,7 +291,9 @@ std::unique_ptr<libkineto::DistributedMetadata> collectDistMetadata(){
 std::unique_ptr<libkineto::Metadata> collectMetadata(){
   // TODO: add options to config collect which options in future?
   auto result = std::make_unique<libkineto::Metadata>();
+#ifdef USE_CUDA
   result->gpus_ = collectCudaDevices();
+#endif
   result->distributed_ = collectDistMetadata();
 
   return result;
