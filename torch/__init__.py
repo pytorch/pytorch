@@ -293,6 +293,17 @@ def is_storage(obj):
 
     Args:
         obj (Object): Object to test
+    Example::
+
+        >>> a = torch.FloatStorage(6)
+        >>> out = torch.is_storage(a)
+        >>> out
+        True
+        >>> a = torch.randn(4, 6)
+        >>> out = torch.is_storage(a)
+        >>> out
+        False
+
     """
     return type(obj) in _storage_classes
 
