@@ -206,6 +206,8 @@ def compute_numerical_jacobian_cols(jvp_fn, delta, input_is_complex, grad_out) -
 
 def combine_jacobian_cols(jacobians_cols: Dict[int, List[torch.Tensor]], outputs, input,
                           numel) -> Tuple[torch.Tensor, ...]:
+    # jacobian_cols is a data structure that maps column_idx -> output_idx -> column of jacobian Tensor
+    # we return a list that maps output_idx -> full jacobian Tensor
     jacobians = allocate_jacobians_with_outputs(outputs, numel, input.dtype, input.device)
     for i, jacobian in enumerate(jacobians):
         for k, v in jacobians_cols.items():
