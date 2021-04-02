@@ -5,7 +5,16 @@
 namespace c10 {
 namespace impl {
 
-thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set {DispatchKeySet(DispatchKey::InplaceOrView).raw_repr()};
+// NB: POD, must be zero initialized!
+// Note [TLS Initialization]
+// We wanted raw_local_dispatch_key_set to be initialized with non-zero state
+// e.g. BackendSelect and InplaceOrView in included set.  But certain Windows compiler (e.g the one
+// used in ARVR tests) only allow TLS to be zero-initialized.
+// To preserve the invariant that raw TLS storage of the default state is zero,
+// we obtain the actual include keyset by XORing raw_local_dispatch_key_set.included_
+// with c10::default_included_set.  This logic is encapsulated in struct
+// PODLocalDispatchKeySet.
+thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
 #if defined(_MSC_VER) || defined(C10_ANDROID)
 LocalDispatchKeySet tls_local_dispatch_key_set() {
@@ -14,10 +23,8 @@ LocalDispatchKeySet tls_local_dispatch_key_set() {
 #endif // defined(_MSC_VER) || defined(C10_ANDROID)
 
 void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
-  raw_local_dispatch_key_set = PODLocalDispatchKeySet {
-    key_set.included_.raw_repr(),
-    key_set.excluded_.raw_repr()
-  };
+  raw_local_dispatch_key_set.set_included(key_set.included_);
+  raw_local_dispatch_key_set.set_excluded(key_set.excluded_);
 }
 
 // An RAII guard could snapshot and restore the entire state (entire DispatchKeySet) as
