@@ -28,7 +28,7 @@ bool InferenceMode::is_enabled() {
   return false;
 }
 
-void GradMode::set_enabled(bool enabled) {
+void InferenceMode::set_enabled(bool enabled) {
   throw std::runtime_error("InferenceMode::set_enabled is not supported on mobile");
 }
 
