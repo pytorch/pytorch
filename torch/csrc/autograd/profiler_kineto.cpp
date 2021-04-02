@@ -16,8 +16,10 @@
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAContext.h>
 #endif
+#ifndef C10_MOBILE
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/pybind.h>
+#endif
 
 // TODO: TO be removed, once this properly works from libkineto
 // Literal copy-n-paste from third_party/kineto/libkineto/src/WeakSymbols.cpp
@@ -273,6 +275,7 @@ std::vector<libkineto::GpuInfo> collectCudaDevices(){
 }
 #endif
 
+#ifndef C10_MOBILE
 std::unique_ptr<libkineto::DistributedMetadata> collectDistMetadata(){
   auto py_module = py::module::import("torch.distributed");
   if (!py::cast<bool>(py_module.attr("is_available")()) ||
@@ -287,6 +290,7 @@ std::unique_ptr<libkineto::DistributedMetadata> collectDistMetadata(){
 
   return result;
 }
+#endif
 
 std::unique_ptr<libkineto::Metadata> collectMetadata(){
   // TODO: add options to config collect which options in future?
@@ -294,7 +298,9 @@ std::unique_ptr<libkineto::Metadata> collectMetadata(){
 #ifdef USE_CUDA
   result->gpus_ = collectCudaDevices();
 #endif
+#ifndef C10_MOBILE
   result->distributed_ = collectDistMetadata();
+#endif
 
   return result;
 }
