@@ -26,8 +26,6 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -46,7 +44,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           submodules: recursive
       - name: Log in to ECR
         run: |
@@ -108,7 +105,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           submodules: recursive
       - name: Log in to ECR
         run: |
