@@ -98,8 +98,8 @@ class PowerSGDState(object):
     Compression statistics are logged every ``compression_stats_logging_frequency`` iterations once PowerSGD compression starts.
 
     .. warning ::
-        If error feedback or warm-up is enabled, the minimum value of ``start_powerSGD_iter`` allowed in DDP is 2.
-        This is because there is another internal optimization that rebuilds buckets at iteration 1 in DDP,
+        If error feedback or warm-up is enabled, the minimum value of ``start_powerSGD_iter`` allowed in DDP is 3.
+        This is because there is another internal optimization that rebuilds buckets at iteration 2 in DDP,
         and this can conflict with any tensor memorized before the rebuild process.
     """  # noqa
 
