@@ -543,6 +543,8 @@ class StmtBuilder(Builder):
                 return inputs, outputs
 
             inputs, outputs = process_ins_outs(exp.keywords)
+
+            # build the replacement function str with given inputs and outputs
             dummy_function_str = "\ndef func_ignore("
             for var in inputs:
                 var_name, var_ann = var
@@ -565,16 +567,21 @@ class StmtBuilder(Builder):
 
             dummy_function_str += return_type_ann + ": pass"
             dummy_function = ast.parse(dummy_function_str).body[0]
+            # dump the body of context manager to dummy function
             dummy_function.body = stmt.body
 
-            # insert return statement
+            # insert return statement to the function
             return_statement = ast.parse(return_statement_str).body[0]
             dummy_function.body.append(return_statement)
 
+            # registers the custom function in the global context
             ignore_func_str = astunparse.unparse(dummy_function)
             ignore_func_str += "\nglobals()[\"func_ignore\"] = func_ignore"
             exec(ignore_func_str)
             globals()["func_ignore"]._torchscript_modifier = FunctionModifiers.IGNORE
+
+            # build the statements as:
+            # <out_1>, <out_2>, ... = torch.jit.frontend.<func>(<in_1>, <in_2>)
             assign_str_lhs = ""
             for var in outputs:
                 var_name, _ = var
