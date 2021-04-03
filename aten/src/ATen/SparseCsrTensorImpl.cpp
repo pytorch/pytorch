@@ -22,7 +22,7 @@ DeviceType SparseCsrTensorSetToDeviceType(DispatchKeySet key_set) {
 
 SparseCsrTensorImpl::SparseCsrTensorImpl(
     at::DispatchKeySet key_set,
-    const caffe2::TypeMeta& data_type)
+    const caffe2::TypeMeta data_type)
     : SparseCsrTensorImpl(
           key_set,
           data_type,
@@ -47,7 +47,7 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
 
 SparseCsrTensorImpl::SparseCsrTensorImpl(
     at::DispatchKeySet key_set,
-    const caffe2::TypeMeta& data_type,
+    const caffe2::TypeMeta data_type,
     at::Tensor crow_indices,
     at::Tensor col_indices,
     at::Tensor values)

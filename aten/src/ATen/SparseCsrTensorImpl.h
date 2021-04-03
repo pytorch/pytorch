@@ -33,7 +33,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   Tensor values_;
 
  public:
-  explicit SparseCsrTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
+  explicit SparseCsrTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta);
 
   void resize_and_clear_(const int64_t nnz_size, IntArrayRef size);
   void resize_as_sparse_csr_tensor_(const Tensor& src);
@@ -58,7 +58,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
  private:
   explicit SparseCsrTensorImpl(
       at::DispatchKeySet key_set,
-      const caffe2::TypeMeta& data_type,
+      const caffe2::TypeMeta data_type,
       at::Tensor crow_indices,
       at::Tensor col_indices,
       at::Tensor values);
