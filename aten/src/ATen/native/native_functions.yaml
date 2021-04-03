@@ -6854,16 +6854,6 @@
     CPU: foreach_tensor_minimum_slow
     CUDA: foreach_tensor_minimum_cuda
 
-- func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
-  dispatch:
-    CPU: legacy::cpu::_th_mode
-    CUDA: legacy::cuda::_th_mode
-
-- func: _mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
-  dispatch:
-    CPU: legacy::cpu::_th_mode_out
-    CUDA: legacy::cuda::_th_mode_out
-
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu

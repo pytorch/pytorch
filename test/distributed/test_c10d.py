@@ -4403,7 +4403,16 @@ class ReducerTest(TestCase):
             find_unused_parameters=find_unused_parameters,
         )
 
-    def test_forward_backward_single_replica(self):
+    def test_reducer_no_multi_replicas(self):
+        num_replicas = 2
+        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected exactly one model replica.",
+        ):
+            reducer = self._create_reducer_for_models(models)
+
+    def test_forward_backward(self):
         batch_size = 10
         model = self._create_mixed_precision_model()
         reducer = self._create_reducer_for_models([model])
@@ -4414,26 +4423,6 @@ class ReducerTest(TestCase):
         output = loss(model(input), target)
         reducer.prepare_for_backward(output)
         output.backward()
-
-    def test_forward_backward_multi_replica(self):
-        batch_size = 10
-        num_replicas = 2
-        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
-        reducer = self._create_reducer_for_models(models)
-        reducer.prepare_for_forward()
-        loss = nn.CrossEntropyLoss()
-        input = torch.rand([batch_size, 2], dtype=torch.double).chunk(num_replicas)
-        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
-        outputs = [models[i](input[i]) for i in range(num_replicas)]
-        output = loss(torch.cat(outputs), target)
-        reducer.prepare_for_backward(output)
-        output.backward()
-
-        # The reducer will have reduced the gradients for all model replicas.
-        # Verify that they are equal across model replicas.
-        for parameters in zip(*[model.parameters() for model in models]):
-            for parameter in parameters:
-                self.assertEqual(parameters[0].grad, parameter.grad)
 
     def test_forward_backward_unused_parameters(self):
         batch_size = 10
@@ -4478,27 +4467,6 @@ class ReducerTest(TestCase):
             reducer.prepare_for_backward(output)
             output.backward()
             optimizer.step()
-
-    def test_ddp_comm_hook_multiple_replica_check(self):
-        """
-        DDP communication hook does not support single process multiple device mode.
-        This unit test validates this condition is properly checked by reducer.
-        Related to GH Issue #42542.
-        """
-        num_replicas = 2
-        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
-        reducer = self._create_reducer_for_models(models)
-
-        def dummy_hook(state, bucket):
-            fut = torch.futures.Future()
-            fut.set_result(bucket.get_tensors())
-            return fut
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Communication hook does not support single-process multiple-device mode.",
-        ):
-            dist._register_comm_hook(reducer, None, dummy_hook)
 
 
 class ComputeBucketAssignmentTest(TestCase):
