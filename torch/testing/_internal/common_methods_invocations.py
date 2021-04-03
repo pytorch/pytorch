@@ -1669,6 +1669,30 @@ def sample_inputs_cumprod(op_info, device, dtype, requires_grad):
 
     return list(sample_generator())
 
+def sample_inputs_copysign(op_info, device, dtype, requires_grad):
+    def _make_tensor(*shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    cases = (
+        # no broadcast
+        (_make_tensor(S, S, S), _make_tensor(S, S, S)),
+        # broadcast rhs
+        (_make_tensor(S, S, S), _make_tensor(S, S)),
+        # broadcast lhs
+        (_make_tensor(S, S), _make_tensor(S, S, S)),
+        # broadcast all
+        (_make_tensor(S, 1, S), _make_tensor(M, S)),
+
+        # scalar
+        (_make_tensor(S, S), 3.14),
+        # scalar positive zero
+        (_make_tensor(S, S), 0.0),
+        # scalar negative zero
+        (_make_tensor(S, S), -0.0),
+    )
+
+    return [SampleInput(input, args=(args,)) for input, args in cases]
+
 def sample_inputs_prod(op_info, device, dtype, requires_grad):
     def make_arg(shape):
         # shrink values to be in the interval [-1, +1] for better precision in gradgradcheck
@@ -2494,6 +2518,11 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.int],
                                 active_if=IS_WINDOWS),
                    )),
+    OpInfo('copysign',
+           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_copysign,
+           supports_inplace_autograd=False,
+           ),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -2855,9 +2884,7 @@ op_db: List[OpInfo] = [
            # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           sample_inputs_func=sample_inputs_linalg_multi_dot,
-           # test_variant_consistency_jit does not work with TensorList inputs
-           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
+           sample_inputs_func=sample_inputs_linalg_multi_dot,),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -4079,15 +4106,6 @@ def method_tests():
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
-        ('copysign', (S, S, S), ((S, S, S),), '', (False,)),
-        ('copysign', (S, S, S), ((S, S),), 'broadcast_rhs', (False,)),
-        ('copysign', (S, S), ((S, S, S),), 'broadcast_lhs', (False,)),
-        ('copysign', (S, 1, S), ((M, S),), 'broadcast_all', (False,)),
-        ('copysign', (S, S), (3.14,), 'scalar', (False,)),
-        ('copysign', (S, S), (0.0,), 'scalar_pos_zero', (False,)),
-        # TorchScript does not recognize -0.0: Issue #46848
-        # https://github.com/pytorch/pytorch/issues/46848
-        # ('copysign', (S, S), (-0.0,), 'scalar_neg_zero', (False,)),
         ('real', (S, S, S), NO_ARGS, 'complex'),
         ('imag', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
@@ -4139,12 +4157,20 @@ def method_tests():
         ('quantile', (S, S, S), (0.5,)),
         ('quantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
         ('quantile', (S, S, S), (0.5, None, True), 'keepdim'),
-        ('quantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
+        ('quantile', (S, S, S), (0.5, 0, False), 'linear', (), [1], NO_ARGS, ident, {'interpolation': 'linear'}),
+        ('quantile', (S, S, S), (0.5, 0, False), 'lower', (), [1], NO_ARGS, ident, {'interpolation': 'lower'}),
+        ('quantile', (S, S, S), (0.5, 0, False), 'higher', (), [1], NO_ARGS, ident, {'interpolation': 'higher'}),
+        ('quantile', (S, S, S), (0.5, 0, False), 'midpoint', (), [1], NO_ARGS, ident, {'interpolation': 'midpoint'}),
+        ('quantile', (S, S, S), (0.5, 0, False), 'nearest', (), [1], NO_ARGS, ident, {'interpolation': 'nearest'}),
         ('quantile', (), (0.5,), 'scalar'),
         ('nanquantile', (S, S, S), (0.5,)),
         ('nanquantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
         ('nanquantile', (S, S, S), (0.5, None, True), 'keepdim'),
-        ('nanquantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
+        ('nanquantile', (S, S, S), (0.5, 0, False), 'linear', (), [1], NO_ARGS, ident, {'interpolation': 'linear'}),
+        ('nanquantile', (S, S, S), (0.5, 0, False), 'lower', (), [1], NO_ARGS, ident, {'interpolation': 'lower'}),
+        ('nanquantile', (S, S, S), (0.5, 0, False), 'higher', (), [1], NO_ARGS, ident, {'interpolation': 'higher'}),
+        ('nanquantile', (S, S, S), (0.5, 0, False), 'midpoint', (), [1], NO_ARGS, ident, {'interpolation': 'midpoint'}),
+        ('nanquantile', (S, S, S), (0.5, 0, False), 'nearest', (), [1], NO_ARGS, ident, {'interpolation': 'nearest'}),
         ('nanquantile', (), (0.5,), 'scalar'),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
