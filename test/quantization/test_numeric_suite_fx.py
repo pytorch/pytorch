@@ -51,7 +51,7 @@ class LinearReluFunctional(nn.Module):
         super().__init__()
         self.w1 = nn.Parameter(torch.Tensor(4, 4))
         self.b1 = nn.Parameter(torch.zeros(4))
-        torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+        torch.nn.init.kaiming_uniform_(self.w1, gain=math.sqrt(1 / 3))
 
     def forward(self, x):
         x = F.linear(x, self.w1, self.b1)
@@ -84,7 +84,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 super().__init__()
                 self.w = nn.Parameter(torch.Tensor(1, 4))
                 self.b = nn.Parameter(torch.zeros(1))
-                torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
+                torch.nn.init.kaiming_uniform_(self.w, gain=math.sqrt(1 / 3))
 
             def forward(self, x):
                 return F.linear(x, self.w, self.b)
@@ -451,7 +451,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 super().__init__()
                 self.w = nn.Parameter(torch.Tensor(4, 4))
                 self.b = nn.Parameter(torch.zeros(4))
-                torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
+                torch.nn.init.kaiming_uniform_(self.w, gain=math.sqrt(1 / 3))
 
             def forward(self, x):
                 x = F.linear(x, self.w, self.b)
@@ -486,8 +486,8 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 self.b1 = nn.Parameter(torch.zeros(4))
                 self.w2 = nn.Parameter(torch.Tensor(4, 4))
                 self.b2 = nn.Parameter(torch.zeros(4))
-                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
-                torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
+                torch.nn.init.kaiming_uniform_(self.w1, gain=math.sqrt(1 / 3))
+                torch.nn.init.kaiming_uniform_(self.w2, gain=math.sqrt(1 / 3))
 
             def forward(self, x):
                 x = F.linear(x, self.w1, self.b1)
@@ -522,8 +522,8 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 self.b1 = nn.Parameter(torch.zeros(4))
                 self.w2 = nn.Parameter(torch.Tensor(4, 4))
                 self.b2 = nn.Parameter(torch.zeros(4))
-                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
-                torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
+                torch.nn.init.kaiming_uniform_(self.w1, gain=math.sqrt(1 / 3))
+                torch.nn.init.kaiming_uniform_(self.w2, gain=math.sqrt(1 / 3))
 
             def forward(self, x):
                 x = F.linear(x, self.w1, self.b1)

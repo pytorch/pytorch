@@ -12918,7 +12918,7 @@ dedent """
                 self.reset_parameters()
 
             def reset_parameters(self):
-                torch.nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+                torch.nn.init.kaiming_uniform_(self.weight, gain=math.sqrt(1 / 3))
                 if self.bias is not None:
                     fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(self.weight)
                     bound = 1 / math.sqrt(fan_in)
