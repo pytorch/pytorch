@@ -14,7 +14,7 @@ inline double clip_grad_norm_(
     std::vector<Tensor> parameters,
     double max_norm,
     double norm_type = 2.0,
-    bool error_if_nonfinite = true) {
+    bool error_if_nonfinite = false) {
   std::vector<Tensor> params_with_grad;
 
   for (const auto& param : parameters) {
@@ -40,12 +40,17 @@ inline double clip_grad_norm_(
     }
     total_norm = std::pow(total_norm, 1.0 / norm_type);
   }
-  if (error_if_nonfinite) {
-    TORCH_CHECK(std::isfinite(total_norm),
+  if (!std::isfinite(total_norm)) {
+    TORCH_CHECK(!error_if_nonfinite,
       "The total norm of order ", norm_type, " for gradients from `parameters` ",
       "is non-finite, so it cannot be clipped. To disable this error and scale ",
       "the gradients with the non-finite norm anyway, set ",
       "`error_if_nonfinite=false`");
+
+    TORCH_WARN_ONCE("Non-finite norm encountered in torch.nn.utils.clip_grad_norm_; continuing anyway. "
+                    "Note that the default behavior will change in a future release to error out "
+                    "if a non-finite total norm is encountered. At that point, setting "
+                    "error_if_nonfinite=false will be required to retain the old behavior.");
   }
 
   auto clip_coef = max_norm / (total_norm + 1e-6);
@@ -63,7 +68,7 @@ inline double clip_grad_norm_(
     std::initializer_list<Tensor> parameters,
     double max_norm,
     double norm_type = 2.0,
-    bool error_if_nonfinite = true) {
+    bool error_if_nonfinite = false) {
   return clip_grad_norm_(std::vector<Tensor>(parameters), max_norm, norm_type, error_if_nonfinite);
 }
 
@@ -73,7 +78,7 @@ inline double clip_grad_norm_(
     Tensor parameter,
     double max_norm,
     double norm_type = 2.0,
-    bool error_if_nonfinite = true) {
+    bool error_if_nonfinite = false) {
   std::vector<Tensor> params = {parameter};
   return clip_grad_norm_(params, max_norm, norm_type, error_if_nonfinite);
 }
