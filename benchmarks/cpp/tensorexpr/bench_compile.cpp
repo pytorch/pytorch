@@ -28,7 +28,7 @@ static void BM_CompileSwish(benchmark::State& state) {
     te::Tensor* sixth = te::Compute("sixth", {{n, "n"}}, [&](const te::VarHandle& i) {
       return times->call(i) * 1.f / 6.f;
     });
-    te::LoopNest nest({sixth});
+    te::LoopNest nest({sixth}, {relu, min6, plus3, times});
     for (auto tensor : {relu, min6, plus3, times}) {
       nest.computeInline(tensor->buf());
     }
@@ -58,7 +58,7 @@ static void BM_CompileSwishLLVMOnly(benchmark::State& state) {
   te::Tensor* sixth = te::Compute("sixth", {{n, "n"}}, [&](const te::VarHandle& i) {
     return times->call(i) * 1.f / 6.f;
   });
-  te::LoopNest nest({sixth});
+  te::LoopNest nest({sixth}, {relu, min6, plus3, times, sixth});
   for (auto tensor : {relu, min6, plus3, times}) {
     nest.computeInline(tensor->buf());
   }
