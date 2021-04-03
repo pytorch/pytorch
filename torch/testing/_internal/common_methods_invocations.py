@@ -1056,6 +1056,23 @@ def sample_inputs_index_copy(op_info, device, dtype, requires_grad):
     samples.extend(SampleInput(t, args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
     return samples
 
+def sample_inputs_mode(op_info, device, dtype, requires_grad):
+    inputs = []
+    args = (
+        ((S, S, S), (),),
+        ((S, S, S), (1, ),),
+        ((S, S, S), (1, True, ),),
+        ((), (),),
+        ((), (0,),),
+        ((), (0, True,),),
+    )
+    inputs = list((SampleInput(make_tensor(input_tensor, device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                               args=args,))
+                  for input_tensor, args in args)
+    return inputs
+
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
     return (
         SampleInput(
@@ -3179,6 +3196,12 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
+    OpInfo('mode',
+           op=torch.mode,
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           sample_inputs_func=sample_inputs_mode,),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
@@ -4267,12 +4290,6 @@ def method_tests():
         ('nanmedian', (), NO_ARGS, 'scalar'),
         ('nanmedian', (), (0,), 'scalar_dim', (), [0]),
         ('nanmedian', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('mode', (S, S, S), NO_ARGS),
-        ('mode', (S, S, S), (1,), 'dim', (), [0]),
-        ('mode', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
-        ('mode', (), NO_ARGS, 'scalar'),
-        ('mode', (), (0,), 'scalar_dim', (), [0]),
-        ('mode', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
         ('sum', (S, S, S), NO_ARGS),
         ('sum', (S, S, S), (1,), 'dim', (), [0]),
         ('sum', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
