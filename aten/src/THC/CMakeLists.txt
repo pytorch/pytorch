@@ -57,10 +57,6 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${extra_src}
   PARENT_SCOPE)
 
-set(ATen_CUDA_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY}
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMode.cu
-  PARENT_SCOPE)
-
 install(FILES
           THC.h
           ${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h
@@ -111,7 +107,6 @@ install(FILES
           THCTensorTypeUtils.cuh
           THCTensorMathMagma.cuh
           THCThrustAllocator.cuh
-          THCTensorMode.cuh
           THCTensorTopK.cuh
           # See Note [TH abstraction violation]
           THCTensor.hpp
@@ -147,8 +142,6 @@ install(FILES
           generic/THCTensorIndex.cu
           generic/THCTensorSort.h
           generic/THCTensorSort.cu
-          generic/THCTensorMode.h
-          generic/THCTensorMode.cu
           generic/THCTensorTopK.h
           generic/THCTensorTopK.cu
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")

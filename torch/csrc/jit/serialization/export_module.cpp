@@ -34,6 +34,8 @@ char const* toString(OpCode op);
 
 namespace {
 
+static constexpr const char* kArchiveNameConstants = "constants";
+
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
   return func;
@@ -237,7 +239,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   auto codeTable = Table(
       {{"instructions", Tup(instructions)},
        {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
+       {kArchiveNameConstants, Tup(constants)},
        {"types", Tup(types)},
        {"register_size", register_size}});
 
@@ -397,25 +399,26 @@ class ScriptModuleSerializer {
     // data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
-    TensorIndexMap constants_from_jit;
-    // Use constants_from_jit to store the mapping (tensor) -> (archive_name,
-    // index), such that when later writing bytecode archive, if the tensor is
-    // the same as one from jit, it will just update bytecode.pkl and won't
-    // write the tensor in bytecode folder.
-    for (size_t i = 0; i < ivalue_constants.size(); i++) {
-      if (ivalue_constants[i].isTensor() &&
-          constants_from_jit.find(ivalue_constants[i].toTensor()) ==
-              constants_from_jit.end()) {
-        constants_from_jit[ivalue_constants[i].toTensor()] =
-            std::make_pair("constants", i);
-      }
-    }
 
-    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    writeArchive(kArchiveNameConstants, c10::ivalue::Tuple::create(ivalue_constants));
     // Only generate bytecode when a valid version is given.
     if (version.has_value()) {
+      static constexpr uint64_t bytecode_v5 = 0x5l;
+      if(version.value() == bytecode_v5) {
+        use_tensors_archive_table_ = true;
+      }
+      if(use_tensors_archive_table_) {
+        for (size_t i = 0; i < ivalue_constants.size(); i++) {
+          if (ivalue_constants[i].isTensor() &&
+              tensors_archive_table_.find(ivalue_constants[i].toTensor()) ==
+              tensors_archive_table_.end()) {
+            tensors_archive_table_[ivalue_constants[i].toTensor()] =
+                std::make_pair(kArchiveNameConstants, i);
+          }
+        }
+      }
       writeByteCode(
-          module, save_mobile_debug_info, constants_from_jit, version.value());
+          module, save_mobile_debug_info, version.value());
       writeMobileMetadata(module, extra_files);
     }
 
@@ -560,9 +563,7 @@ class ScriptModuleSerializer {
   void writeByteCode(
       const Module& module,
       bool save_mobile_debug_info,
-      const TensorIndexMap& constants_from_jit,
       uint64_t version = caffe2::serialize::kProducedBytecodeVersion) {
-    const uint64_t bytecode_v5 = 0x5l;
     // Can only support generating model version within
     // kMinProducedBytecodeVersion and kProducedBytecodeVersion. bytecode
     // version difference chart is following: v4 - jit and mobile both write
@@ -601,11 +602,6 @@ class ScriptModuleSerializer {
         module, elements, debug_info_elements, save_mobile_debug_info);
     auto telements = Tup(std::move(elements));
 
-    if (version == bytecode_v5) {
-      // tensors_archive_table_ will be passed to the bytcode's pickler later.
-      tensors_archive_table_.insert(
-          constants_from_jit.begin(), constants_from_jit.end());
-    }
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
@@ -644,6 +640,7 @@ class ScriptModuleSerializer {
 
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
+  bool use_tensors_archive_table_;
   TensorIndexMap tensors_archive_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
