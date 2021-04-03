@@ -82,7 +82,7 @@ def make_columns(
         if job in omitted:
             total_omitted += omitted[job]
     if total_omitted > 0:
-        columns.append(f'({total_omitted} S3 reports omitted)')
+        columns.append(f'({total_omitted} job re-runs omitted)')
     if total_suites > 0:
         columns.append(f'({total_suites} matching suites omitted)')
     return ' '.join(columns)
@@ -91,31 +91,29 @@ def make_columns(
 def make_lines(
     *,
     jobs: Set[str],
-    jsons: Dict[str, Report],
-    omitted: Dict[str, int],
+    jsons: Dict[str, List[Report]],
     filename: Optional[str],
     suite_name: Optional[str],
     test_name: str,
 ) -> List[str]:
     lines = []
-    for job, data in jsons.items():
-        cases = get_cases(
-            data=data,
-            filename=filename,
-            suite_name=suite_name,
-            test_name=test_name,
-        )
-        if cases:
-            case = cases[0]
-            status = case['status']
-            line = f'{job} {case["seconds"]}s{f" {status}" if status else ""}'
-            if job in omitted and omitted[job] > 0:
-                line += f' ({omitted[job]} S3 reports omitted)'
-            if len(cases) > 1:
-                line += f' ({len(cases) - 1} matching suites omitted)'
-            lines.append(line)
-        elif job in jobs:
-            lines.append(f'{job} (test not found)')
+    for job, reports in jsons.items():
+        for data in reports:
+            cases = get_cases(
+                data=data,
+                filename=filename,
+                suite_name=suite_name,
+                test_name=test_name,
+            )
+            if cases:
+                case = cases[0]
+                status = case['status']
+                line = f'{job} {case["seconds"]}s{f" {status}" if status else ""}'
+                if len(cases) > 1:
+                    line += f' ({len(cases) - 1} matching suites omitted)'
+                lines.append(line)
+            elif job in jobs:
+                lines.append(f'{job} (test not found)')
     if lines:
         return lines
     else:
@@ -143,18 +141,18 @@ def history_lines(
             summaries = get_test_stats_summaries(sha=sha)
         else:
             summaries = get_test_stats_summaries(sha=sha, jobs=jobs)
-        # we assume that get_test_stats_summaries here doesn't return empty lists
-        omitted = {
-            job: len(l) - 1
-            for job, l in summaries.items()
-            if len(l) > 1
-        }
-        jsons = {job: l[0] for job, l in summaries.items()}
         if mode == 'columns':
             assert jobs is not None
+            # we assume that get_test_stats_summaries here doesn't
+            # return empty lists
+            omitted = {
+                job: len(l) - 1
+                for job, l in summaries.items()
+                if len(l) > 1
+            }
             lines = [make_columns(
                 jobs=jobs,
-                jsons=jsons,
+                jsons={job: l[0] for job, l in summaries.items()},
                 omitted=omitted,
                 filename=filename,
                 suite_name=suite_name,
@@ -165,8 +163,7 @@ def history_lines(
             assert mode == 'multiline'
             lines = make_lines(
                 jobs=set(jobs or []),
-                jsons=jsons,
-                omitted=omitted,
+                jsons=summaries,
                 filename=filename,
                 suite_name=suite_name,
                 test_name=test_name,
@@ -206,8 +203,10 @@ Example:
     2021-02-10 10:09:10Z 2e35fe95 (no reports in S3)
     2021-02-10 10:09:07Z ff73be7e (no reports in S3)
     2021-02-10 10:05:39Z 74082f0d (no reports in S3)
-    2021-02-10 07:42:29Z 0620c96f pytorch_linux_xenial_py3_6_gcc5_4_test 0.414s (1 S3 reports omitted)
-    2021-02-10 07:42:29Z 0620c96f pytorch_linux_xenial_py3_6_gcc7_test 0.377s (1 S3 reports omitted)
+    2021-02-10 07:42:29Z 0620c96f pytorch_linux_xenial_py3_6_gcc5_4_test 0.414s
+    2021-02-10 07:42:29Z 0620c96f pytorch_linux_xenial_py3_6_gcc5_4_test 0.476s
+    2021-02-10 07:42:29Z 0620c96f pytorch_linux_xenial_py3_6_gcc7_test 0.377s
+    2021-02-10 07:42:29Z 0620c96f pytorch_linux_xenial_py3_6_gcc7_test 0.326s
 
 Another multiline example, this time with the --all flag:
 
@@ -235,7 +234,7 @@ command line. Example:
     2021-02-10 10:09:10Z 2e35fe95
     2021-02-10 10:09:07Z ff73be7e
     2021-02-10 10:05:39Z 74082f0d
-    2021-02-10 07:42:29Z 0620c96f    0.414s    0.377s (2 S3 reports omitted)
+    2021-02-10 07:42:29Z 0620c96f    0.414s    0.377s (2 job re-runs omitted)
     2021-02-10 07:27:53Z 33afb5f1    0.381s    0.294s
 
 Minor note: in columns mode, a blank cell means that no report was found

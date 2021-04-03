@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace {
@@ -17,13 +19,6 @@ IValue deepCopy(const IValue& self) {
   // Tensors need special handling, since copy assignment creates an alias
   if (self.isTensor()) {
     return IValue(self.toTensor().clone(at::MemoryFormat::Preserve));
-  }
-  if (self.isTensorList()) {
-    c10::List<at::Tensor> newList;
-    for (const at::Tensor& oldTensor : self.toTensorVector()) {
-      newList.push_back(oldTensor.clone(at::MemoryFormat::Preserve));
-    }
-    return newList;
   }
 
   // Lists of ivalues should recursively deep copy their contents
@@ -69,6 +64,20 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
     return lhs.toTensor().equal(rhs.toTensor());
   }
 
+  if (lhs.isTensorList() && rhs.isTensorList()) {
+    const auto a = lhs.toTensorList();
+    const auto b = rhs.toTensorList();
+    if (a.size() != b.size()) {
+      return false;
+    }
+    for (auto i = decltype(a.size()){0}; i < a.size(); ++i) {
+      if (!a[i].equal(b[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   return lhs == rhs;
 }
 
@@ -82,8 +91,8 @@ struct AliasAndIValue {
 
 // No inputs should alias each other
 void checkInputPreconditions(const Stack& inputs) {
-  for (size_t i = 0; i < inputs.size(); i++) {
-    for (size_t j = 0; j < inputs.size(); j++) {
+  for (const auto i : c10::irange(inputs.size())) {
+    for (const auto j : c10::irange(inputs.size())) {
       if (i == j) {
         continue;
       }
@@ -124,7 +133,7 @@ void checkWrites(
     const std::vector<AliasAndIValue>& inputs,
     const std::vector<IValue>& deepCopiedInputs) {
   AT_ASSERT(inputs.size() == deepCopiedInputs.size());
-  for (size_t i = 0; i < inputs.size(); i++) {
+  for (const auto i : c10::irange(inputs.size())) {
     const auto& input = inputs[i];
     const auto& deepCopiedInput = deepCopiedInputs[i];
     if (!input.aliasInfo || !input.aliasInfo->isWrite()) {
@@ -232,7 +241,7 @@ void checkAliasAnnotation(
   const auto schema = node->schema();
 
   std::vector<AliasAndIValue> inputsToCheck;
-  for (size_t i = 0; i < schema.arguments().size(); i++) {
+  for (const auto i : c10::irange(schema.arguments().size())) {
     inputsToCheck.emplace_back(
         schema.arguments().at(i).alias_info(), stack.at(i));
   }
@@ -247,7 +256,7 @@ void checkAliasAnnotation(
   const auto outputs = std::move(stack);
 
   std::vector<AliasAndIValue> outputsToCheck;
-  for (size_t i = 0; i < schema.returns().size(); i++) {
+  for (const auto i : c10::irange(schema.returns().size())) {
     outputsToCheck.emplace_back(
         schema.returns().at(i).alias_info(), outputs.at(i));
   }

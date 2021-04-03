@@ -13,225 +13,6 @@ ptrdiff_t THTensor_(numel)(THTensor *t)
   return THTensor_(nElement)(t);
 }
 
-#if !defined(TH_REAL_IS_BFLOAT16) && !defined(TH_REAL_IS_BOOL)
-/* I cut and pasted (slightly adapted) the quicksort code from
-   Sedgewick's 1978 "Implementing Quicksort Programs" article
-   http://www.csie.ntu.edu.tw/~b93076/p847-sedgewick.pdf
-
-   It is the state of the art existing implementation. The macros
-   are here to make as close a match as possible to the pseudocode of
-   Program 2 p.851
-
-   Note that other partition schemes exist, and are typically presented
-   in textbook, but those are less efficient. See e.g.
-   http://cs.stackexchange.com/questions/11458/quicksort-partitioning-hoare-vs-lomuto
-
-   Julien, November 12th 2013
-*/
-#define MAX_LEVELS  300
-#define M_SMALL 10 /* Limit for small subfiles */
-
-#define ARR(III) arr[(III)*stride]
-#define IDX(III) idx[(III)*stride]
-
-#define LONG_SWAP(AAA, BBB) swap = AAA; AAA = BBB; BBB = swap
-#define REAL_SWAP(AAA, BBB) rswap = AAA; AAA = BBB; BBB = rswap
-
-#define ARR_SWAP(III, JJJ) \
-  REAL_SWAP(ARR(III), ARR(JJJ));
-
-#define BOTH_SWAP(III, JJJ) \
-  REAL_SWAP(ARR(III), ARR(JJJ)); \
-  LONG_SWAP(IDX(III), IDX(JJJ))
-
-/* Emulate NumPy behavior of putting NaNs
- * at the end of an ascending list. */
-#define GT_OR_NAN(x, y) \
-  ((th_isnan(x) && !(th_isnan(y))) || (x > y))
-
-static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elements, int64_t stride)
-{
-  int64_t beg[MAX_LEVELS], end[MAX_LEVELS], i, j, L, R, P, swap, pid, stack = 0, sz_right, sz_left;
-  scalar_t rswap, piv;
-  unsigned char done = 0;
-
-  /* beg[0]=0; end[0]=elements; */
-  stack = 0;
-  L = 0; R = elements-1;
-  done = elements-1 <= M_SMALL;
-
-  while(!done) {
-      /* Use median of three for pivot choice */
-    P=(L+R)>>1;
-    BOTH_SWAP(P, L+1);
-    if (GT_OR_NAN(ARR(L+1), ARR(R))) { BOTH_SWAP(L+1, R); }
-    if (GT_OR_NAN(ARR(L), ARR(R))) { BOTH_SWAP(L, R); }
-    if (GT_OR_NAN(ARR(L+1), ARR(L))) { BOTH_SWAP(L+1, L); }
-
-    i = L+1; j = R; piv = ARR(L); pid = IDX(L);
-
-    do {
-      do { i = i+1; } while(GT_OR_NAN(piv, ARR(i)));
-      do { j = j-1; } while(GT_OR_NAN(ARR(j), piv));
-      if (j < i)
-          break;
-      BOTH_SWAP(i, j);
-    } while(1);
-    BOTH_SWAP(L, j);
-    /* Left subfile is (L, j-1) */
-    /* Right subfile is (i, R) */
-    sz_left = j-L;
-    sz_right = R-i+1;
-    if (sz_left <= M_SMALL && sz_right <= M_SMALL) {
-      /* both subfiles are small */
-      /* if stack empty */
-      if (stack == 0) {
-        done = 1;
-      } else {
-        stack--;
-        L = beg[stack];
-        R = end[stack];
-      }
-    } else if (sz_left <= M_SMALL || sz_right <= M_SMALL) {
-      /* exactly one of the subfiles is small */
-      /* (L,R) = large subfile */
-      if (sz_left > sz_right) {
-        /* Implicit: L = L; */
-        R = j-1;
-      } else {
-        L = i;
-        /* Implicit: R = R; */
-      }
-    } else {
-      /* none of the subfiles is small */
-      /* push large subfile */
-      /* (L,R) = small subfile */
-      if (sz_left > sz_right) {
-        beg[stack] = L;
-        end[stack] = j-1;
-        stack++;
-        L = i;
-        /* Implicit: R = R */
-      } else {
-        beg[stack] = i;
-        end[stack] = R;
-        stack++;
-        /* Implicit: L = L; */
-        R = j-1;
-      }
-    }
-  } /* while not done */
-  /* Now insertion sort on the concatenation of subfiles */
-  for(i=elements-2; i>=0; i--) {
-    if (GT_OR_NAN(ARR(i),ARR(i+1))) {
-      piv = ARR(i);
-      pid = IDX(i);
-      j = i+1;
-      do {
-        ARR(j-1) = ARR(j);
-        IDX(j-1) = IDX(j);
-        j = j+1;
-      } while(j < elements && GT_OR_NAN(piv, ARR(j)));
-      ARR(j-1) = piv;
-      IDX(j-1) = pid;
-     }
-  }
-}
-
-static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t elements, int64_t stride)
-{
-  int64_t beg[MAX_LEVELS], end[MAX_LEVELS], i, j, L, R, P, swap, pid, stack = 0, sz_right, sz_left;
-  scalar_t rswap, piv;
-  unsigned char done = 0;
-
-  /* beg[0]=0; end[0]=elements; */
-  stack = 0;
-  L = 0; R = elements-1;
-  done = elements-1 <= M_SMALL;
-
-  while(!done) {
-      /* Use median of three for pivot choice */
-    P=(L+R)>>1;
-    BOTH_SWAP(P, L+1);
-    if (GT_OR_NAN(ARR(R), ARR(L+1))) { BOTH_SWAP(L+1, R); }
-    if (GT_OR_NAN(ARR(R), ARR(L))) { BOTH_SWAP(L, R); }
-    if (GT_OR_NAN(ARR(L), ARR(L+1))) { BOTH_SWAP(L+1, L); }
-
-    i = L+1; j = R; piv = ARR(L); pid = IDX(L);
-
-    do {
-      do { i = i+1; } while(GT_OR_NAN(ARR(i), piv));
-      do { j = j-1; } while(GT_OR_NAN(piv, ARR(j)));
-      if (j < i)
-          break;
-      BOTH_SWAP(i, j);
-    } while(1);
-    BOTH_SWAP(L, j);
-    /* Left subfile is (L, j-1) */
-    /* Right subfile is (i, R) */
-    sz_left = j-L;
-    sz_right = R-i+1;
-    if (sz_left <= M_SMALL && sz_right <= M_SMALL) {
-      /* both subfiles are small */
-      /* if stack empty */
-      if (stack == 0) {
-        done = 1;
-      } else {
-        stack--;
-        L = beg[stack];
-        R = end[stack];
-      }
-    } else if (sz_left <= M_SMALL || sz_right <= M_SMALL) {
-      /* exactly one of the subfiles is small */
-      /* (L,R) = large subfile */
-      if (sz_left > sz_right) {
-        /* Implicit: L = L; */
-        R = j-1;
-      } else {
-        L = i;
-        /* Implicit: R = R; */
-      }
-    } else {
-      /* none of the subfiles is small */
-      /* push large subfile */
-      /* (L,R) = small subfile */
-      if (sz_left > sz_right) {
-        beg[stack] = L;
-        end[stack] = j-1;
-        stack++;
-        L = i;
-        /* Implicit: R = R */
-      } else {
-        beg[stack] = i;
-        end[stack] = R;
-        stack++;
-        /* Implicit: L = L; */
-        R = j-1;
-      }
-    }
-  } /* while not done */
-  /* Now insertion sort on the concatenation of subfiles */
-  for(i=elements-2; i>=0; i--) {
-    if (GT_OR_NAN(ARR(i+1), ARR(i))) {
-      piv = ARR(i);
-      pid = IDX(i);
-      j = i+1;
-      do {
-        ARR(j-1) = ARR(j);
-        IDX(j-1) = IDX(j);
-        j = j+1;
-      } while(j < elements && GT_OR_NAN(ARR(j), piv));
-      ARR(j-1) = piv;
-      IDX(j-1) = pid;
-     }
-  }
-}
-
-#undef MAX_LEVELS
-#undef M_SMALL
-
-#endif
-
 #if !defined(TH_REAL_IS_BFLOAT16) && !defined(TH_REAL_IS_HALF)
 
 // Helper function to be used in a reduction operation.
@@ -251,6 +32,24 @@ void THTensor_(preserveReduceDimSemantics)(
 }
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+
+#define ARR(III) arr[(III)*stride]
+#define IDX(III) idx[(III)*stride]
+
+#define LONG_SWAP(AAA, BBB) swap = AAA; AAA = BBB; BBB = swap
+#define REAL_SWAP(AAA, BBB) rswap = AAA; AAA = BBB; BBB = rswap
+
+#define ARR_SWAP(III, JJJ) \
+  REAL_SWAP(ARR(III), ARR(JJJ));
+
+#define BOTH_SWAP(III, JJJ) \
+  REAL_SWAP(ARR(III), ARR(JJJ)); \
+  LONG_SWAP(IDX(III), IDX(JJJ))
+
+/* Emulate NumPy behavior of putting NaNs
+ * at the end of an ascending list. */
+#define GT_OR_NAN(x, y) \
+  ((th_isnan(x) && !(th_isnan(y))) || (x > y))
 
 /* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
 public domain implementation at http://ndevilla.free.fr/median/median/
@@ -303,72 +102,6 @@ static void THTensor_(quickselect)(scalar_t *arr, int64_t *idx, int64_t k, int64
 #undef LONG_SWAP
 #undef REAL_SWAP
 #undef BOTH_SWAP
-
-void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
-{
-  THTensor *temp_;
-  THLongTensor *tempi_;
-  scalar_t *temp__data;
-  int64_t *tempi__data;
-  int64_t t_size_dim;
-
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "dimension out of range");
-
-  int in_dims = THTensor_(nDimensionLegacyAll)(t);
-  THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
-  THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
-  dim[dimension] = 1;
-  THTensor_(resize)(values_, dim, {});
-  THLongTensor_resize(indices_, dim, {});
-
-  t_size_dim = THTensor_sizeLegacyNoScalars(t, dimension);
-
-  temp_ = THTensor_(new)();
-  THTensor_(resize1d)(temp_, t_size_dim);
-  temp__data = temp_->data<scalar_t>();
-
-  tempi_ = THLongTensor_new();
-  THLongTensor_resize1d(tempi_, t_size_dim);
-  tempi__data = THLongTensor_data(tempi_);
-
-  TH_TENSOR_DIM_APPLY3(scalar_t, t, scalar_t, values_, int64_t, indices_, dimension,
-                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
-                       int64_t i;
-                       scalar_t mode = 0;
-                       int64_t modei = 0;
-                       int64_t temp_freq = 0;
-                       int64_t max_freq = 0;
-                       for(i = 0; i < t_size_dim; i++)
-                          temp__data[i] = t_data[i*t_stride];
-                       for(i = 0; i < t_size_dim; i++)
-                          tempi__data[i] = i;
-                       THTensor_(quicksortascend)(temp__data, tempi__data, t_size_dim, 1);
-
-                       for(i = 0; i < t_size_dim; i++)
-                       {
-                          temp_freq++;
-                          if ((i == t_size_dim - 1) || (temp__data[i] != temp__data[i+1]))
-                          {
-                              if (temp_freq > max_freq)
-                              {
-                                 mode = temp__data[i];
-                                 modei = tempi__data[i];
-                                 max_freq = temp_freq;
-                              }
-                              temp_freq = 0;
-                          }
-                       }
-                       *values__data = mode;
-                       *indices__data = modei;);
-
-  c10::raw::intrusive_ptr::decref(temp_);
-  THLongTensor_free(tempi_);
-  if (!keepdim) {
-    THTensor_(squeeze1d)(values_, values_, dimension);
-    THLongTensor_squeeze1d(indices_, indices_, dimension);
-  }
-}
 
 void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, int64_t k, int dimension, int keepdim)
 {

@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
@@ -61,7 +62,7 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
         dom.size(),
         " dimensions but expected ",
         out_domain.size());
-    for (size_t i = 0; i < dom.size(); i++) {
+    for (const auto i : c10::irange(dom.size())) {
       if (out_domain[i] != nullptr)
         continue;
       if (dom[i]->isBroadcast())
@@ -69,7 +70,7 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
       out_domain[i] = new IterDomain(dom[i]->start(), dom[i]->extent());
     }
   }
-  for (size_t dim_i = 0; dim_i < out_domain.size(); dim_i++) {
+  for (const auto dim_i : c10::irange(out_domain.size())) {
     if (out_domain[dim_i] == nullptr) {
       IterType itype = IterType::BroadcastWithoutStride;
       for (const auto tv : tvs) {
@@ -103,7 +104,7 @@ std::vector<Val*> maybeBroadcast(const std::vector<Val*>& vals) {
     }
   }
 
-  for (size_t i = 0; i < vals.size(); i++) {
+  for (const auto i : c10::irange(vals.size())) {
     if (vals[i]->getValType().value() == ValType::TensorView) {
       auto tv = vals[i]->as<TensorView>();
       size_t tv_dims = TensorDomain::noReductions(tv->getRootDomain()).size();
@@ -413,7 +414,7 @@ static TensorView* newForReduction(
       "Error setting up reduction, reduction axis is outside nDims. Keep in mind reductions are relative to root domains, not modified views.");
 
   auto axis_iter = axes_set.begin();
-  for (size_t dim = 0; dim < orig_domain.size(); dim++) {
+  for (const auto dim : c10::irange(orig_domain.size())) {
     bool isReduction = false;
     if (axis_iter != axes_set.end() && *axis_iter == dim) {
       isReduction = true;
