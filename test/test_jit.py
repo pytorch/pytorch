@@ -9296,7 +9296,7 @@ dedent """
 
         a = torch.arange(120.).reshape(2, 3, 4, 5)
         b = torch.arange(840.).reshape(4, 5, 6, 7)
-        dims = torch.Tensor([2])
+        dims = torch.tensor([2])
         self.checkScript(tensordot_dims_tensor, (a, b, dims))
 
         a = torch.arange(60.).reshape(3, 4, 5)
