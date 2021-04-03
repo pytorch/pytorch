@@ -129,6 +129,7 @@
   variants: method
 
 - func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
+  device_guard: False
   dispatch:
     CUDA: _use_cudnn_ctc_loss
 
@@ -4346,6 +4347,7 @@
     SparseCUDA: hspmm_sparse_cuda
 
 - func: copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
+  device_guard: False
   variants: function
   dispatch:
     SparseCPU, SparseCUDA: copy_sparse_
