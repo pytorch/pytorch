@@ -2,7 +2,6 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/core/overloaded_function.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/stack.h>
 #include <pybind11/complex.h>

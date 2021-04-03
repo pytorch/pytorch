@@ -1268,7 +1268,6 @@ void initJitScriptBindings(PyObject* module) {
           "get_interface",
           [](const std::shared_ptr<CompilationUnit>& self,
              const std::string& name) { return self->get_interface(name); });
-  // TODO change so it does stuff for overload
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
           "__call__",

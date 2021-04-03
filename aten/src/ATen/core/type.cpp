@@ -1072,14 +1072,10 @@ void ClassType::addMethod(torch::jit::Function* method) {
 }
 
 void ClassType::addOverloadedMethod(torch::jit::Function* method) {
-  if (overloaded_methods_.find(method->name()) == overloaded_methods_.end()) {
-    overloaded_methods_[method->name()] = std::vector<torch::jit::Function*>();
-  }
-
+  auto it = overloaded_methods_.insert(std::pair<std::string, std::vector<torch::jit::Function*>>(method->name(), std::vector<torch::jit::Function*>()));
   const std::string& mangled_name = method->name() + "__" +
-      std::to_string(overloaded_methods_[method->name()].size());
-
-  overloaded_methods_[method->name()].push_back(method);
+      std::to_string(it.first->second.size());
+  it.first->second.push_back(method);
   mangled_to_function_[mangled_name] = method;
   methods_.push_back(method);
 }
@@ -1419,20 +1415,6 @@ torch::jit::Function* ClassType::getMangledOverloadedMethod(
   }
   return nullptr;
 }
-
-// std::vector<torch::jit::Function*> ClassType::getOverloadedMethod(const
-// std::string& name) const {
-//   auto methods = findOverloadedMethod(name);
-//   TORCH_CHECK(
-//       methods.size() != 0,
-//       "Couldn't find overloaded method: '",
-//       name,
-//       "' on class: '",
-//       repr_str(),
-//       "'");
-
-//   return methods;
-// }
 
 torch::jit::Function* ClassType::findHook(const std::string& name) const {
   auto hook = findForwardHook(name);

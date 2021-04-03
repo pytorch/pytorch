@@ -2180,8 +2180,6 @@ struct TORCH_API ClassType : public NamedType {
   void addOverloadedMethod(torch::jit::Function* method);
   std::vector<torch::jit::Function*> findOverloadedMethod(
       const std::string& name) const;
-  // std::vector<torch::jit::Function*> getOverloadedMethod(const std::string&
-  // name) const;
   torch::jit::Function* getMangledOverloadedMethod(
       const std::string& name) const;
 

@@ -71,12 +71,7 @@ struct OverloadedFunction : public Function {
 
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
-      TaskLauncher /* not used */) override {
-    run(stack);
-    auto res = c10::make_intrusive<c10::ivalue::Future>(stack.front().type());
-    res->markCompleted(std::move(stack.front()));
-    return res;
-  }
+      TaskLauncher /* not used */) override;
 
   at::IValue operator()(std::vector<at::IValue> stack, const Kwargs& kwargs)
       override {

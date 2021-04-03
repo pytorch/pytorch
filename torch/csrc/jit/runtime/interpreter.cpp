@@ -2,7 +2,6 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/overloaded_function.h>
 #include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
