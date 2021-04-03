@@ -80,8 +80,8 @@ void get_autograd_operator_from_registry_and_execute() {
   TORCH_INTERNAL_ASSERT(torch::allclose(z.grad(), torch::ones({5,5})));
 }
 
-void get_autograd_operator_from_registry_and_execute_in_nograd_mode() {
-  at::AutoNonVariableTypeMode _var_guard(true);
+void get_autograd_operator_from_registry_and_execute_in_inference_mode() {
+  c10::InferenceMode guard;
 
   torch::Tensor x = torch::randn({5,5}, torch::requires_grad());
   torch::Tensor y = torch::randn({5,5}, torch::requires_grad());
@@ -185,7 +185,7 @@ int main(int argc, const char* argv[]) {
 
   get_operator_from_registry_and_execute();
   get_autograd_operator_from_registry_and_execute();
-  get_autograd_operator_from_registry_and_execute_in_nograd_mode();
+  get_autograd_operator_from_registry_and_execute_in_inference_mode();
   load_serialized_module_with_custom_op_and_execute(
       path_to_exported_script_module);
   test_argument_checking_for_serialized_modules(path_to_exported_script_module);
