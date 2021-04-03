@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/core/List.h>
 #include <c10/core/TensorOptions.h>
 
@@ -60,13 +61,15 @@ check_tensor_options_and_extract_memory_format(
   }
 }
 
-inline void check_or_update_common_device(optional<Device>& common_device, const at::Tensor& tensor) {
+inline void check_or_update_common_device(optional<Device>& common_device, const at::Tensor& tensor, at::CheckedFrom c) {
   if (!tensor.defined()) {
     return;
   }
 
   if (tensor.is_cpu()) {
-    TORCH_CHECK(tensor.dim() == 0, "CPU tensor has to be 0-dimension tensor (wrapped scalar).");
+    TORCH_CHECK(
+      tensor.dim() == 0, "CPU tensor has to be 0-dimension tensor (wrapped scalar). ",
+      "(when checking arugment for ", c, ")");
     return;
   }
 
@@ -76,26 +79,27 @@ inline void check_or_update_common_device(optional<Device>& common_device, const
   }
 
   TORCH_CHECK(
-      common_device == tensor.device(),
-      "Expected all tensors to be on the same device, but "
-      "found at least two devices, ", common_device.value(), " and ", tensor.device(), "!");
+    common_device == tensor.device(),
+    "Expected all tensors to be on the same device, but "
+    "found at least two devices, ", common_device.value(), " and ", tensor.device(), "! "
+    "(when checking arugment for ", c, ")");
 }
 
-inline void check_or_update_common_device(optional<Device>& common_device, const optional<at::Tensor>& tensor) {
+inline void check_or_update_common_device(optional<Device>& common_device, const optional<at::Tensor>& tensor, at::CheckedFrom c) {
   if (tensor.has_value()) {
-    check_or_update_common_device(common_device, tensor.value());
+    check_or_update_common_device(common_device, tensor.value(), c);
   }
 }
 
-inline void check_or_update_common_device(optional<Device>& common_device, at::TensorList tensors) {
+inline void check_or_update_common_device(optional<Device>& common_device, at::TensorList tensors, at::CheckedFrom c) {
   for (const auto& tensor : tensors) {
-    check_or_update_common_device(common_device, tensor);
+    check_or_update_common_device(common_device, tensor, c);
   }
 }
 
-inline void check_or_update_common_device(optional<Device>& common_device, const List<optional<at::Tensor>>&  tensors) {
+inline void check_or_update_common_device(optional<Device>& common_device, const List<optional<at::Tensor>>& tensors, at::CheckedFrom c) {
   for (const auto& tensor : tensors) {
-    check_or_update_common_device(common_device, tensor);
+    check_or_update_common_device(common_device, tensor, c);
   }
 }
 } // namespace impl

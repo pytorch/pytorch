@@ -172,8 +172,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     device_guard = 'c10::optional<Device> common_device = nullopt;'
                     for arg in candidate_args:
                         if arg.type.is_tensor_like():
-                            device_guard += f"\n  c10::impl::check_or_update_common_device(common_device, {arg.name});"
-                    device_guard += "\n  const OptionalDeviceGuard device_guard(common_device);"
+                            device_guard += f'\n  c10::impl::check_or_update_common_device(common_device, {arg.name}, "{name}");'
+                    device_guard += "\n  const OptionalDeviceGuard device_guard(common_device);\n"
 
             return f"""\
 namespace {{
