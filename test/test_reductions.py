@@ -1863,14 +1863,17 @@ class TestReductions(TestCase):
             numpy_op = getattr(np, op)
 
             # Compute quantile along every dimension and flattened tensor
-            for dim in [None] + list(range(a.ndim)):
-                result = torch_op(a, q, dim, keepdim)
-                expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim, keepdims=keepdim)
+            interpolations = ('linear', 'lower', 'higher', 'midpoint', 'nearest')
+            for interpolation, dim in product(interpolations,
+                                              [None] + list(range(a.ndim))):
+                result = torch_op(a, q, dim=dim, keepdim=keepdim, interpolation=interpolation)
+                expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim,
+                                    interpolation=interpolation, keepdims=keepdim)
                 self.assertEqual(result.cpu(), torch.from_numpy(np.array(expected)).type(result.type()))
 
                 # Test out variation
                 out = torch.empty_like(result)
-                torch_op(a, q, dim, keepdim, out=out)
+                torch_op(a, q, dim=dim, keepdim=keepdim, interpolation=interpolation, out=out)
                 self.assertEqual(out.cpu(), result.cpu())
 
     def test_quantile_backward(self, device):
@@ -1902,8 +1905,10 @@ class TestReductions(TestCase):
         check([1.], [1], [], {}, r'q tensor must be same dtype as the input tensor')
         check([1.], -1., [], {}, r'q must be in the range \[0, 1\] but got -1')
         check([1.], 1.1, [], {}, r'q must be in the range \[0, 1\] but got 1.1')
-        check([1.], 0.5, [], {'out': torch.empty([], dtype=torch.float64, device=device)},
+        check([1.], 0.5, [], {'out': torch.empty([], dtype=torch.int32, device=device)},
               r'out tensor must be same dtype as the input tensor')
+        check([1.], [1.], [None, False], {'interpolation': 'random_mode'},
+              r"interpolation must be one of linear, lower, higher, midpoint or nearest, but got random_mode")
 
         if self.device_type == "cpu":
             check([1.], [0.5, 1.1, -1], [], {}, r'q values must be in the range \[0, 1\]')
