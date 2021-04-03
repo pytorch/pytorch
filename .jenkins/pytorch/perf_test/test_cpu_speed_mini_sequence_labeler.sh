@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 . ./common.sh
 
@@ -28,12 +29,12 @@ test_cpu_speed_mini_sequence_labeler () {
 
   stats=$(python ../get_stats.py "${SAMPLE_ARRAY[@]}")
   echo "Runtime stats in seconds:"
-  echo $stats
+  echo "$stats"
 
   if [ "$2" == "compare_with_baseline" ]; then
-    python ../compare_with_baseline.py --test-name ${FUNCNAME[0]} --sample-stats "${stats}"
+    python ../compare_with_baseline.py --test-name "${FUNCNAME[0]}" --sample-stats "${stats}"
   elif [ "$2" == "compare_and_update" ]; then
-    python ../compare_with_baseline.py --test-name ${FUNCNAME[0]} --sample-stats "${stats}" --update
+    python ../compare_with_baseline.py --test-name "${FUNCNAME[0]}" --sample-stats "${stats}" --update
   fi
 }
 
