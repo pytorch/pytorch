@@ -4504,29 +4504,6 @@ class DistributedTest:
                     loss = out.sum()
                     loss.backward()
 
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
-        @skip_if_lt_x_gpu(4)
-        def test_ddp_uneven_inputs_replicated_error(self):
-            # Tests that the context manager errors out in SPMD mode.
-            group = dist.new_group([0, 1])
-            if self.rank < 2:
-                model = nn.Linear(1, 1, bias=False)
-                rank_to_device = {0: [0, 1], 1: [2, 3]}
-
-                devices = rank_to_device[self.rank]
-                net = torch.nn.parallel.DistributedDataParallel(
-                    model.cuda(devices[0]), device_ids=devices, process_group=group
-                )
-                with self.assertRaisesRegex(
-                    ValueError, r"DDP join\(\) API does not support Single-Process Multi-GPU"
-                ):
-                    with net.join():
-                        pass
-            # We need a barrier since otherwise non-participating processes exit too early
-            # and cause a timeout.
-            self._barrier(timeout=60)
-
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
         def test_broadcast_object_list(self):
