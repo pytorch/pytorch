@@ -52,7 +52,7 @@ c10::IValue preprocess(
 }
 
 constexpr auto backend_name = "backend_with_compiler_demo";
-static auto pre_reg = backend_preprocess_register(backend_name, preprocess);
+static auto pre_reg = preprocess_register(backend_name, preprocess);
 } // namespace
 
 } // namespace jit

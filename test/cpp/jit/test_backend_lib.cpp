@@ -77,13 +77,13 @@ c10::IValue preprocess(
 constexpr auto backend_name = "test_backend";
 static auto cls_available =
     torch::jit::backend<TestBackend<true>>(backend_name);
-static auto pre_reg = backend_preprocess_register(backend_name, preprocess);
+static auto pre_reg = preprocess_register(backend_name, preprocess);
 
 constexpr auto backend_unavailable_name = "test_backend_unavailable";
 static auto cls_unavailable =
     torch::jit::backend<TestBackend<false>>(backend_unavailable_name);
 static auto pre_reg_unavailable =
-    backend_preprocess_register(backend_unavailable_name, preprocess);
+    preprocess_register(backend_unavailable_name, preprocess);
 
 } // namespace
 } // namespace jit

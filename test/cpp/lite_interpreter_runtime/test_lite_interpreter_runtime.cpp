@@ -52,6 +52,9 @@ TEST(RunTimeTest, LoadAndForward) {
 TEST(RunTimeTest, Delegate) {
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  // "delegate_test.ptl" is generated from test/cpp/jit/test_backend.cpp,
+  // BackendTest.TestCompiler. This test is on target runtime. It has
+  // model running capability, but no compilation and serialization.
   // The mobile model delegated to the "backend_with_compiler_demo" backend
   // The model is from the jit code:
   //  Module m("m");

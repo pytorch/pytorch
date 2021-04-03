@@ -407,20 +407,20 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
 
 bool GraphCache::requiresPermutation() {
   const size_t input_rank = input_permutation_.size();
-  for (size_t i = 0; i < input_rank; i++) {
+  for (const auto i : c10::irange(input_rank)) {
     if (input_permutation_[i] != (long)i) {
       return true;
     }
   }
   // Check if output agrees
   const size_t pw_output_rank = pw_output_permutation_.size();
-  for (size_t i = 0; i < pw_output_rank; i++) {
+  for (const auto i : c10::irange(pw_output_rank)) {
     TORCH_INTERNAL_ASSERT(
         pw_output_permutation_[i] == (long)i,
         "permutation of output and input is not consistent");
   }
   const size_t reduction_output_rank = reduction_output_permutation_.size();
-  for (size_t i = 0; i < reduction_output_rank; i++) {
+  for (const auto i : c10::irange(reduction_output_rank)) {
     TORCH_INTERNAL_ASSERT(
         reduction_output_permutation_[i] == (long)i,
         "permutation of output and input is not consistent");
@@ -504,7 +504,7 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
           std::vector<int64_t> adjusted_reduction_axes;
           for (const auto dim : dims_list->vec()) {
             // adjust reduction axis to be the permuted axis;
-            for (size_t j = 0; j < input_permutation_.size(); j++) {
+            for (const auto j : c10::irange(input_permutation_.size())) {
               // follow the permutation to resolve the new reduction axes;
               if (input_permutation_[j] == dim) {
                 adjusted_reduction_axes.emplace_back(j);
