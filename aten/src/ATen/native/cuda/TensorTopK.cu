@@ -37,7 +37,6 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 #else
   __shared__ int smem[32]; // one per each warp, up to warp limit
 #endif
-
   IndexType slice = getLinearBlockId<IndexType>();
   if (slice >= numInputSlices) {
     return;
@@ -222,7 +221,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   }
 
 #define RUN_T(INDEX_T)                                                  \
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "topk_cuda", [&] {\
+  AT_DISPATCH_ALL_TYPES(input.scalar_type(), "topk_out_cuda", [&] {\
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> inputInfo =           \
       at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(input);          \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> topKInfo =            \
@@ -310,7 +309,8 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     //auto sortedIndices_tensor = THTensor_wrap(sortedIndices);
     Tensor sortedTopK;
     Tensor sortedIndices;
-    std::tie(sortedTopK, sortedIndices) = at::sort(values, dim, largest);
+    at::native::sort_out_cuda(THTensor_wrap(topK), dim, dir, sortedTopK, sortedIndices);
+
     // sort already has maxSliceSize threshold logic
     //sortedTopK = at::sort(topK, indices, dim, dir);
     /*
@@ -346,13 +346,15 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
 
   // is this necessary?
   //THCudaLongTensor_free(state, input);
-
+  
   AT_CUDA_CHECK(cudaGetLastError());
   return std::forward_as_tuple(values, indices);
 }
 
 std::tuple<Tensor, Tensor> topk_cuda(const Tensor& self,
-          int64_t k, int dim, bool largest, bool sorted) {
+          int64_t k, int64_t dim, bool largest, bool sorted) {
+  //TORCH_CHECK(false);
+  //TORCH_WARN("????TOPK_CUDA???");
   Tensor values, indices;
   ::topk_out_cuda(self, k, dim, largest, sorted, values, indices);
   return std::make_tuple(values, indices);
