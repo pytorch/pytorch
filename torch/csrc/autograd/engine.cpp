@@ -15,6 +15,7 @@
 #include <c10/core/Stream.h>
 #include <c10/core/Event.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 #include <c10/core/StreamGuard.h>
 
@@ -582,7 +583,7 @@ void set_device(int device) {
   // Don't use DeviceGuard here because its destructor may be called before the
   // device is reset. This is fine because the device is thread local.
   if (device != CPU_DEVICE) {
-    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+    for(const auto i : c10::irange(static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES))) {
       auto* impl = c10::impl::device_guard_impl_registry[i].load();
       if (impl && device < impl->deviceCount()) {
         impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
@@ -602,7 +603,7 @@ void validate_outputs(
     ss << edges.size() << ", but got " << grads.size();
     AT_ERROR(format_error(ss.str()));
   }
-  for (size_t i = 0; i < grads.size(); i++) {
+  for(const auto i : c10::irange(grads.size())) {
     const auto& edge = edges[i];
     if (!edge.is_valid()) continue;
 
@@ -1072,7 +1073,7 @@ size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at
 
 // CPU ready queue is per GraphTask, but CUDA device ready queues are shared across all graph tasks
 auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device device) -> std::shared_ptr<ReadyQueue>{
-  if (device.type() == at::kCPU) {
+  if (device.type() == at::kCPU || device.type() == at::DeviceType::Meta) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;

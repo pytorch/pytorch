@@ -31,3 +31,4 @@
 #include <ATen/core/UnsafeFromTH.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
+#include <c10/core/InferenceMode.h>

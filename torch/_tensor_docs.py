@@ -2487,9 +2487,9 @@ narrow_copy(dimension, start, length) -> Tensor
 
 Same as :meth:`Tensor.narrow` except returning a copy rather
 than shared storage.  This is primarily for sparse tensors, which
-do not have a shared-storage narrow method.  Calling ```narrow_copy``
-with ```dimemsion > self.sparse_dim()``` will return a copy with the
-relevant dense dimension narrowed, and ```self.shape``` updated accordingly.
+do not have a shared-storage narrow method.  Calling ``narrow_copy``
+with ``dimemsion > self.sparse_dim()`` will return a copy with the
+relevant dense dimension narrowed, and ``self.shape`` updated accordingly.
 """)
 
 add_docstr_all('ndimension',
@@ -2740,15 +2740,13 @@ qscheme() -> torch.qscheme
 Returns the quantization scheme of a given QTensor.
 """)
 
-add_docstr_all('quantile',
-               r"""
+add_docstr_all('quantile', r"""
 quantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.quantile`
 """)
 
-add_docstr_all('nanquantile',
-               r"""
+add_docstr_all('nanquantile', r"""
 nanquantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.nanquantile`

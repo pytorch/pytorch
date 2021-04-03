@@ -66,5 +66,3 @@ TEST(GradModeTest, TestRequiresGradViewOpExiting) {
     assert_tensor_creation_meta(tmp, torch::autograd::CreationMeta::NO_GRAD_MODE);
   }
 }
-
-
