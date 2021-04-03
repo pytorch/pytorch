@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
+
+#include <c10/util/irange.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/script.h>
 #include <torch/torch.h>
+
 #include <future>
 #include <iostream>
 #include <string>
@@ -73,7 +76,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
 
-  for (size_t i = 0; i < ninterp; i++) {
+  for(const auto i : c10::irange(ninterp)) {
     outputs.push_back(model({input}).toTensor());
   }
 
@@ -81,7 +84,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   auto ref_output = ref_model.forward({input}).toTensor();
 
   // Compare all to reference
-  for (size_t i = 0; i < ninterp; i++) {
+  for(const auto i : c10::irange(ninterp)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
@@ -99,7 +102,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   std::vector<at::Tensor> outputs;
 
   std::vector<std::future<at::Tensor>> futures;
-  for (size_t i = 0; i < nthreads; i++) {
+  for(const auto i : c10::irange(nthreads)) {
     futures.push_back(std::async(std::launch::async, [&model]() {
       auto input = torch::ones({10, 20});
       for (int i = 0; i < 100; ++i) {
@@ -109,7 +112,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
       return result;
     }));
   }
-  for (size_t i = 0; i < nthreads; i++) {
+  for(const auto i : c10::irange(nthreads)) {
     outputs.push_back(futures[i].get());
   }
 
@@ -117,7 +120,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   auto ref_output = ref_model.forward({input}).toTensor();
 
   // Compare all to reference
-  for (size_t i = 0; i < nthreads; i++) {
+  for(const auto i : c10::irange(nthreads)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
