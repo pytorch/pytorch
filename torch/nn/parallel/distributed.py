@@ -314,7 +314,8 @@ class DistributedDataParallel(Module):
                    ``device_ids`` must be ``None``.
 
                    When ``device_ids`` is ``None`` for both cases,
-                   input data for the forward pass must be placed on the correct device.
+                   both the input data for the forward pass and the actual module
+                   must be placed on the correct device.
                    (default: ``None``)
         output_device (int or torch.device): Device location of output for
                       single-device CUDA modules. For multi-device modules and
@@ -418,7 +419,7 @@ class DistributedDataParallel(Module):
                     "but got device_ids {}, output_device {}, and module parameters {}.".format(
                         device_ids,
                         output_device,
-                        {p.device for p in module.parameters()}
+                        {p.device for p in module.parameters()},
                     )
                 )
 
