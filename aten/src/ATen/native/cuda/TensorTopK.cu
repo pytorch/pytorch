@@ -310,7 +310,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     Tensor sortedTopK;
     Tensor sortedIndices;
     at::native::sort_out_cuda(THTensor_wrap(topK), dim, dir, sortedTopK, sortedIndices);
-
+    values = values.gather(-1, sortedIndices);
     // sort already has maxSliceSize threshold logic
     //sortedTopK = at::sort(topK, indices, dim, dir);
     /*
@@ -343,7 +343,6 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     }
     */
   }
-
   // is this necessary?
   //THCudaLongTensor_free(state, input);
   
@@ -355,7 +354,8 @@ std::tuple<Tensor, Tensor> topk_cuda(const Tensor& self,
           int64_t k, int64_t dim, bool largest, bool sorted) {
   //TORCH_CHECK(false);
   //TORCH_WARN("????TOPK_CUDA???");
-  Tensor values, indices;
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
   ::topk_out_cuda(self, k, dim, largest, sorted, values, indices);
   return std::make_tuple(values, indices);
 }
