@@ -1,9 +1,6 @@
 #pragma once
 
-#include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/Tensor.h>
-#include <ATen/TensorUtils.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
 
@@ -42,18 +39,10 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       const Tensor& col_indices,
       const Tensor& values);
 
-  const Tensor& crow_indices() const {
-    return crow_indices_;
-  }
-  const Tensor& col_indices() const {
-    return col_indices_;
-  }
-  const Tensor& values() const {
-    return values_;
-  }
-  int nnz() {
-    return values_.size(0);
-  }
+  const Tensor& crow_indices() const { return crow_indices_; }
+  const Tensor& col_indices() const { return col_indices_; }
+  const Tensor& values() const { return values_; }
+  int nnz() { return values_.size(0); }
 
  private:
   explicit SparseCsrTensorImpl(
