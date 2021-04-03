@@ -7777,6 +7777,22 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (x,), input_names=['input_ids'],
                       dynamic_axes={'input_ids': {0: 'batch', 1: 'sequence'}})
 
+    @disableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_tensordot_dim_1(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                # output = torch.tensordot(x, y, ([-1, 2], [1, 0]))
+                output = torch.tensordot(x, y, 2)
+                return output
+
+        x = torch.randint(6, (2, 3, 3, 3))
+        y = torch.randint(6, (3, 3, 5, 6))
+        z = torch.tensordot(x, y, 1)
+
+        output = M()(x, y)
+        self.run_test(M(), (x, y))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
               **extra_kwargs):
