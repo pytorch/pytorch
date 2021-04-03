@@ -3123,7 +3123,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         def allreduce_hook(
             process_group: object, bucket: dist.GradBucket
         ) -> torch._C.Future:
-            tensors = [bucket.get_tensor() / self.world_size]
+            tensors = [t / self.world_size for t in bucket.get_tensors()]
             return process_group.allreduce(tensors).get_future()
 
         self._test_accumulate_gradients_no_sync(
@@ -3143,7 +3143,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         def allreduce_with_then_hook(
             process_group: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
-            fut = process_group.allreduce([bucket.get_tensor()]).get_future()
+            fut = process_group.allreduce(bucket.get_tensors()).get_future()
 
             def mult(fut):
                 # Multiply the result by 2.
@@ -3789,7 +3789,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self, state: object, bucket: dist.GradBucket
     ) -> torch.futures.Future:
         fut = torch.futures.Future()
-        fut.set_result([torch.ones_like(bucket.get_tensor())])
+        fut.set_result([torch.ones_like(t) for t in bucket.get_tensors()])
 
         def fut_then(fut):
             # Add ones to fut's result.
@@ -3842,7 +3842,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce_hook(state: object, bucket: dist.GradBucket) -> torch._C.Future:
-            tensors = [bucket.get_tensor() / self.world_size]
+            tensors = [t / self.world_size for t in bucket.get_tensors()]
             return process_group.allreduce(tensors).get_future()
 
         # Get GPU model with allreduce_hook registered.
@@ -4023,7 +4023,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         def allreduce_with_then_hook(
             state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
-            tensors = [bucket.get_tensor() / self.world_size]
+            tensors = [t / self.world_size for t in bucket.get_tensors()]
             fut = process_group.allreduce(tensors).get_future()
 
             def mult(fut):
@@ -4126,7 +4126,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         def dummy_hook(state, bucket):
             fut = torch.futures.Future()
-            fut.set_result([bucket.get_tensor()])
+            fut.set_result(bucket.get_tensors())
             return fut
 
         model.register_comm_hook(None, dummy_hook)
@@ -4161,11 +4161,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
             # Prepare allreduced grad bucket tensors by running an async work.
-            work = process_group.allreduce([bucket.get_tensor()])
+            work = process_group.allreduce(bucket.get_tensors())
             work.wait()
 
             fut = torch.futures.Future()
-            fut.set_result([bucket.get_tensor() / self.world_size])
+            fut.set_result([t / self.world_size for t in bucket.get_tensors()])
             return fut
 
         ddp_model.register_comm_hook(None, allreduce_hook_gloo)
@@ -4403,16 +4403,7 @@ class ReducerTest(TestCase):
             find_unused_parameters=find_unused_parameters,
         )
 
-    def test_reducer_no_multi_replicas(self):
-        num_replicas = 2
-        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected exactly one model replica.",
-        ):
-            reducer = self._create_reducer_for_models(models)
-
-    def test_forward_backward(self):
+    def test_forward_backward_single_replica(self):
         batch_size = 10
         model = self._create_mixed_precision_model()
         reducer = self._create_reducer_for_models([model])
@@ -4423,6 +4414,26 @@ class ReducerTest(TestCase):
         output = loss(model(input), target)
         reducer.prepare_for_backward(output)
         output.backward()
+
+    def test_forward_backward_multi_replica(self):
+        batch_size = 10
+        num_replicas = 2
+        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
+        reducer = self._create_reducer_for_models(models)
+        reducer.prepare_for_forward()
+        loss = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.double).chunk(num_replicas)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
+        outputs = [models[i](input[i]) for i in range(num_replicas)]
+        output = loss(torch.cat(outputs), target)
+        reducer.prepare_for_backward(output)
+        output.backward()
+
+        # The reducer will have reduced the gradients for all model replicas.
+        # Verify that they are equal across model replicas.
+        for parameters in zip(*[model.parameters() for model in models]):
+            for parameter in parameters:
+                self.assertEqual(parameters[0].grad, parameter.grad)
 
     def test_forward_backward_unused_parameters(self):
         batch_size = 10
@@ -4467,6 +4478,27 @@ class ReducerTest(TestCase):
             reducer.prepare_for_backward(output)
             output.backward()
             optimizer.step()
+
+    def test_ddp_comm_hook_multiple_replica_check(self):
+        """
+        DDP communication hook does not support single process multiple device mode.
+        This unit test validates this condition is properly checked by reducer.
+        Related to GH Issue #42542.
+        """
+        num_replicas = 2
+        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
+        reducer = self._create_reducer_for_models(models)
+
+        def dummy_hook(state, bucket):
+            fut = torch.futures.Future()
+            fut.set_result(bucket.get_tensors())
+            return fut
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Communication hook does not support single-process multiple-device mode.",
+        ):
+            dist._register_comm_hook(reducer, None, dummy_hook)
 
 
 class ComputeBucketAssignmentTest(TestCase):
