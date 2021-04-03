@@ -66,10 +66,8 @@ inline void check_or_update_common_device(optional<Device>& common_device, const
     return;
   }
 
-  if (tensor.is_cpu()) {
-    TORCH_CHECK(
-      tensor.dim() == 0, "CPU tensor has to be 0-dimension tensor (wrapped scalar). ",
-      "(when checking arugment for ", c, ")");
+  if (tensor.is_cpu() && tensor.dim() == 0) {
+    // CPU 0-dimenstion tensor is not considered as common device
     return;
   }
 
