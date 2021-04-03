@@ -9,7 +9,7 @@ import tempfile
 import torch.utils.show_pickle
 import shutil
 
-class TestForwardCompatibility(TestCase):
+class testVariousModelVersions(TestCase):
     def test_save_load_model_v5(self):
         class TestModule(torch.nn.Module):
             def __init__(self, v):
