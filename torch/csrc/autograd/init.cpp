@@ -188,6 +188,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   // Metadata
   py::class_<Metadata>(m, "Metadata")
+    .def(py::init<>())
     .def_readwrite("gpus", &Metadata::gpus_)
     .def_readwrite("distributed", &Metadata::distributed_);
 
