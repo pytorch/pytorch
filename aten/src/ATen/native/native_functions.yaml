@@ -6015,6 +6015,7 @@
 - func: min.other(Tensor self, Tensor other) -> Tensor
   variants: method, function
 
+# The following quantile signatures are DEPRECATED in favor of the new ones with the interpolation kwarg.
 - func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
@@ -6033,6 +6034,28 @@
 - func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+  variants: method, function
+
+# To keep backward and forward compatibility, and to avoid ambiguity with the original signatures, dim, keepdim and interpolation
+# parameters are required for now. Once the deprecated signatures are removed they will be made optional.
+- func: quantile.new_scalar_out(Tensor self, float q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
+
+- func: quantile.new_scalar(Tensor self, float q, int? dim, bool keepdim, *, str interpolation) -> Tensor
+  variants: method, function
+
+- func: quantile.new_out(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
+
+- func: quantile.new(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation) -> Tensor
+  variants: method, function
+
+- func: nanquantile.new_scalar_out(Tensor self, float q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
+
+- func: nanquantile.new_scalar(Tensor self, float q, int? dim, bool keepdim, *, str interpolation) -> Tensor
+  variants: method, function
+
+- func: nanquantile.new_out(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation, Tensor(a!) out) -> Tensor(a!)
+
+- func: nanquantile.new(Tensor self, Tensor q, int? dim, bool keepdim, *, str interpolation) -> Tensor
   variants: method, function
 
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
@@ -6830,16 +6853,6 @@
   dispatch:
     CPU: foreach_tensor_minimum_slow
     CUDA: foreach_tensor_minimum_cuda
-
-- func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
-  dispatch:
-    CPU: legacy::cpu::_th_mode
-    CUDA: legacy::cuda::_th_mode
-
-- func: _mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
-  dispatch:
-    CPU: legacy::cpu::_th_mode_out
-    CUDA: legacy::cuda::_th_mode_out
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
@@ -8548,7 +8561,7 @@
   dispatch:
     CompositeExplicitAutograd: linalg_lstsq
 
-- func: _lstsq_helper_(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor a, float cond, str driver_name) -> Tensor(a!)
+- func: _lstsq_helper_(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float cond, str driver_name) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _lstsq_helper_cpu
