@@ -14,7 +14,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "Clang version:"
 clang --version
 
-export LLVM_DIR="$(llvm-config-5.0 --prefix)"
+LLVM_DIR="$(llvm-config-5.0 --prefix)"
+export LLVM_DIR
 echo "LLVM_DIR: ${LLVM_DIR}"
 
 time ANALYZE_TEST=1 CHECK_RESULT=1 tools/code_analyzer/build.sh
