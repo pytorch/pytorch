@@ -150,25 +150,27 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
 };
 
-void topk(Tensor& topK,
-	  Tensor& indices, // does this need to be enforced as Long?
-          Tensor& input_,
-          int64_t k, int dim, int dir, int sorted) {
-  TensorArg topK_arg{topK, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{input_, "input_", 3};
-  checkAllSameGPU("topk", {topK_arg, indices_arg, input_arg});
-  dim = at::maybe_wrap_dim(dim, input_);
+} // namespace
+
+std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
+              int64_t k, int64_t dim, bool largest, bool sorted,
+	      Tensor& values,
+	      Tensor& indices) {
+  TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
+  checkAllSameGPU("topk_out_cuda", {topK_arg, indices_arg, input_arg});
+  dim = at::maybe_wrap_dim(dim, self);
   // are scalars possible here?
-  TORCH_CHECK(topK.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
+  TORCH_CHECK(values.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   TORCH_CHECK(indices.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
-  int numDims = input_.dim();
+  int numDims = self.dim();
   numDims = numDims == 0 ? 1 : numDims;
   TORCH_CHECK(numDims <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   TORCH_CHECK(dim >= 0 && dim < numDims, "dim not in range");
 
-  int64_t sliceSize = input_.size(dim);
+  int64_t sliceSize = self.size(dim);
   sliceSize = sliceSize == 0 ? 1: sliceSize;
   TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
-  Tensor input = Tensor(input_);
+  Tensor input = Tensor(self);
 
   // Build the output size, which is the dim being selected set to
   // size k
@@ -178,7 +180,7 @@ void topk(Tensor& topK,
   }
   //THCTensor_(resize)(state, topK, topKSize, {});
   //THCudaLongTensor_resize(state, indices, topKSize, {});
-  topK.resize_(topKSize);
+  values.resize_(topKSize);
   indices.resize_(topKSize);
 
   // static_cast is required to ensure that the correct type (INDEX_T)
@@ -202,7 +204,7 @@ void topk(Tensor& topK,
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define RUN_DIR(INDEX_T, DIM)                   \
-  if (dir) {                                    \
+  if (largest) {                                \
     RUN_K(INDEX_T, DIM, true);                  \
   } else {                                      \
     RUN_K(INDEX_T, DIM, false);                 \
@@ -224,7 +226,7 @@ void topk(Tensor& topK,
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> inputInfo =           \
       at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(input);          \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> topKInfo =            \
-      at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(topK);           \
+      at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(values);           \
     at::cuda::detail::TensorInfo<int64_t, INDEX_T> indicesInfo =          \
       at::cuda::detail::getTensorInfo<int64_t, INDEX_T>(indices);         \
                                                                           \
@@ -273,7 +275,7 @@ void topk(Tensor& topK,
     // Based on required index size, run the algorithm with the
     // appropriate index type
     if (at::cuda::detail::canUse32BitIndexMath(input) &&
-        at::cuda::detail::canUse32BitIndexMath(topK) &&
+        at::cuda::detail::canUse32BitIndexMath(values) &&
         at::cuda::detail::canUse32BitIndexMath(indices)) {
       RUN_T(uint32_t);
     } else {
@@ -287,7 +289,7 @@ void topk(Tensor& topK,
 
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting
-  if (sorted && topK.(numel) > 1) {
+  if (sorted && values.numel() > 1) {
     // FIXME: the k/v inplace sort along slice only works for size <=
     // 2048 at the moment
     // Workaround:
@@ -303,10 +305,20 @@ void topk(Tensor& topK,
 #else
     int maxSliceSize = 2048;
 #endif
+
+    //auto sortedTopK_tensor = THTensor_wrap(sortedTopK);
+    //auto sortedIndices_tensor = THTensor_wrap(sortedIndices);
+    Tensor sortedTopK;
+    Tensor sortedIndices;
+    std::tie(sortedTopK, sortedIndices) = at::sort(values, dim, largest);
+    // sort already has maxSliceSize threshold logic
+    //sortedTopK = at::sort(topK, indices, dim, dir);
+    /*
     if (sliceSize <= maxSliceSize) {
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
-      THCTensor_(sortKeyValueInplace)(state, topK, indices, dim, dir);
+      //THCTensor_(sortKeyValueInplace)(state, topK, indices, dim, dir);
+      at::sortKeyValueInplace(topK, indices, dim, dir);
     } else {
       // Depend upon the backup sort that returns indices, which we
       // can use in conjunction with gather to produce the original
@@ -329,14 +341,22 @@ void topk(Tensor& topK,
       THCudaLongTensor_freeCopyTo(state, sortedTopKIndices, indices);
       THCudaLongTensor_free(state, sortedIndices);
     }
+    */
   }
 
-  THCudaLongTensor_free(state, input);
+  // is this necessary?
+  //THCudaLongTensor_free(state, input);
 
-  THCudaCheck(cudaGetLastError());
-
+  AT_CUDA_CHECK(cudaGetLastError());
+  return std::forward_as_tuple(values, indices);
 }
 
+std::tuple<Tensor, Tensor> topk_cuda(const Tensor& self,
+          int64_t k, int dim, bool largest, bool sorted) {
+  Tensor values, indices;
+  ::topk_out_cuda(self, k, dim, largest, sorted, values, indices);
+  return std::make_tuple(values, indices);
 }
+
 } // at::native
 } // at

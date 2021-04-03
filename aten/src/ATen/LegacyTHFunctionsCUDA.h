@@ -24,8 +24,6 @@ std::tuple<Tensor &,Tensor &> _th_sort_out(const Tensor & self, int64_t dim, boo
 std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending);
 std::tuple<Tensor &,Tensor &> _th_sort_out_stable(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices);
 std::tuple<Tensor,Tensor> _th_sort_stable(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending);
-std::tuple<Tensor &,Tensor &> _th_topk_out(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted, Tensor & values, Tensor & indices);
-std::tuple<Tensor,Tensor> _th_topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted);
 Tensor & _th_renorm_out(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm, Tensor & result);
 Tensor _th_renorm(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm);
 Tensor & _th_renorm_(Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm);
