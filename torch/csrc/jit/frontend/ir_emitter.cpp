@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
@@ -3942,7 +3943,7 @@ struct to_ir {
       rdim =
           handle_indexing(subscript_expr, rev_idx, rdim, /*is_reverse=*/true);
     }
-    for (size_t i = 0; i < exprs.size(); i++) {
+    for (const auto i : c10::irange(exprs.size())) {
       if (!exprs[i].has_value()) {
         if (subscript_exprs[i].kind() == TK_SLICE_EXPR) {
           sliceable = emitSlice(
@@ -4399,7 +4400,7 @@ std::vector<Function*> CompilationUnit::define(
     this->register_function(std::move(fn));
   };
 
-  for (size_t i = 0; i < properties.size(); i++) {
+  for (const auto i : c10::irange(properties.size())) {
     PropertyPair property_fns = define_property(
         prefix,
         properties[i],
@@ -4418,7 +4419,7 @@ std::vector<Function*> CompilationUnit::define(
     }
   }
 
-  for (size_t i = 0; i < definitions.size(); i++) {
+  for (const auto i : c10::irange(definitions.size())) {
     auto fn = define(
         prefix,
         definitions[i],
@@ -4497,7 +4498,7 @@ void CompilationUnit::define_hooks(
   };
 
   // define hooks
-  for (size_t i = 0; i < hookDefs.size(); i++) {
+  for (const auto i : c10::irange(hookDefs.size())) {
     // check to see if already defined this hook
     auto existing_fn = check_collisions(hookDefs[i]);
     if (existing_fn != nullptr) {
@@ -4524,7 +4525,7 @@ void CompilationUnit::define_hooks(
   }
 
   // define pre_hooks
-  for (size_t i = 0; i < preHookDefs.size(); i++) {
+  for (const auto i : c10::irange(preHookDefs.size())) {
     // check to see if already defined this hook
     auto existing_fn = check_collisions(preHookDefs[i]);
     if (existing_fn != nullptr) {
