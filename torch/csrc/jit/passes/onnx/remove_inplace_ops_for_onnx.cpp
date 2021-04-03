@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 
+#include <c10/util/irange.h>
+
 #include <limits>
 
 namespace torch {
@@ -662,7 +664,7 @@ void trackAndRegisterAttributesInBlocks(
         allAttrValues.insert({fullName, paramConst});
       }
     } else if (auto attrVal = tryInsertConstant(*graph, attr)) {
-      for (size_t i = 0; i < type->getAttributes().size(); i++) {
+      for (const auto i : c10::irange(type->getAttributes().size())) {
         if (type->getAttributeName(i) == name) {
           paramConst = *attrVal;
           allAttrValues.insert({fullName, paramConst});

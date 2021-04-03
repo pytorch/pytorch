@@ -887,6 +887,7 @@ static std::ostream& operator<<(
 
 #ifdef USE_ROCM
 static const char* device_resource_string = R"(
+#include <hip/hip_runtime.h>
 #define POS_INFINITY INFINITY
 #define NEG_INFINITY -INFINITY
 
@@ -929,26 +930,17 @@ void CudaCodeGen::Initialize() {
   metavar_rewriter_ =
       std::make_unique<GPUMetaVarRewriter>(cuda_analysis_.get());
 
-  // Check whether the statement uses the Half type, if so add the
-  // half_support_literal.
-  Stmt* stmt_v = stmt();
-  HalfChecker halfChecker(buffer_args());
-  stmt_v->accept(&halfChecker);
-
-#if __HIP_PLATFORM_HCC__
-#if ROCM_VERSION < 40200
-  os() << "#include <hip/hip_runtime.h>" << std::endl;
-  if (halfChecker.hasHalf()) {
-    os() << "#include <hip/hip_fp16.h>" << std::endl;
-  }
-#endif
-#endif
   os() << device_resource_string << shared_resource_string;
 
   if (has_random_) {
     os() << philox_random_string << std::endl;
   }
 
+  // Check whether the statement uses the Half type, if so add the
+  // half_support_literal.
+  Stmt* stmt_v = stmt();
+  HalfChecker halfChecker(buffer_args());
+  stmt_v->accept(&halfChecker);
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
@@ -968,7 +960,7 @@ void CudaCodeGen::Initialize() {
 #endif
   os() << "void " << func_name << "(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
-  for (size_t i = 0; i < buffer_args.size(); i++) {
+  for (const auto i : c10::irange(buffer_args.size())) {
     if (i > 0) {
       os() << ", ";
     }
@@ -1029,7 +1021,7 @@ void CudaCodeGen::Initialize() {
   // Check that all block extents had been set.
   const std::vector<const Expr*>& gpu_block_extents =
       metavar_rewriter_->gpu_block_extents();
-  for (size_t i = 0; i < gpu_block_extents.size(); i++) {
+  for (const auto i : c10::irange(gpu_block_extents.size())) {
     if (!gpu_block_extents[i]) {
       throw std::runtime_error("Missing gpu_block_index: " + std::to_string(i));
     }
@@ -1071,7 +1063,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   // evaluate all the block/thread extents into values
   // TODO: eventually, codegen these calculations and make them part of the
   // module.
-  for (size_t i = 0; i < gpu_block_extents.size(); i++) {
+  for (const auto i : c10::irange(gpu_block_extents.size())) {
     if (gpu_block_extents[i]->isConstant()) {
       gpu_block_extents_v[i] = immediateAs<int>(gpu_block_extents[i]);
       continue;
@@ -1080,7 +1072,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
         ExprHandle(gpu_block_extents[i]), buffer_args());
     gpu_block_extents_v[i] = eval.value<int>(args);
   }
-  for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
+  for (const auto i : c10::irange(gpu_thread_extents.size())) {
     if (gpu_thread_extents[i]->isConstant()) {
       gpu_thread_extents_v[i] = immediateAs<int>(gpu_thread_extents[i]);
       continue;
@@ -1107,7 +1099,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   std::vector<void*> ptr_to_args(ptr_count);
   uint64_t rand_seed = uint64_t(-1);
   uint64_t rand_offset = uint64_t(-1);
-  for (size_t i = 0; i < buffer_args.size(); i++) {
+  for (const auto i : c10::irange(buffer_args.size())) {
     auto const& bufferArg = buffer_args[i];
     if (bufferArg.isVar()) {
       auto stype = bufferArg.dtype().scalar_type();
@@ -1211,10 +1203,7 @@ void CudaCodeGen::CompileToNVRTC(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
 #ifdef __HIP_PLATFORM_HCC__
-  std::vector<const char*> args = {"--std=c++14"};
-#if ROCM_VERSION >= 40200
-  args.push_back("-hip-pch");
-#endif
+  std::vector<const char*> args = {};
 #else
   const std::string compute = std::string("--gpu-architecture=") +
 #if CUDA_VERSION >= 11010
