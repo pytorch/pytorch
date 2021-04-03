@@ -84,7 +84,7 @@ IValue readArchiveAndTensors(
     return len;
   };
 
-  const std::string slash = "/";
+  static const std::string slash = "/";
   std::string archive_name_plus_slash = archive_name + slash;
   auto read_record = [&](const std::string& name) {
     std::size_t found = name.find(slash);
