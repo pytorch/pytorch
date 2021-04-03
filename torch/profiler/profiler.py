@@ -361,9 +361,7 @@ class profile(object):
             with_stack=self.with_stack,
             use_kineto=True,
         )
-        # self.profiler._prepare_kineto_trace(self._collect_metadata())
-        # TODO: try the test firstly
-        self.profiler._prepare_kineto_trace(None)
+        self.profiler._prepare_kineto_trace(self._collect_metadata())
 
     def _start_trace(self):
         assert self.profiler is not None

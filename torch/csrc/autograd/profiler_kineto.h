@@ -215,8 +215,8 @@ struct TORCH_API ProfilerResult {
   std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
 };
 
-struct DistributedMetadata{
-  DistributedMetadata(std::string backend, int rank, int worldSize): 
+struct TORCH_API DistributedMetadata{
+  DistributedMetadata(std::string backend, int rank, int worldSize):
     backend_(std::move(backend)), rank_(rank), worldSize_(worldSize){
   }
 
@@ -225,7 +225,7 @@ struct DistributedMetadata{
   int worldSize_;
 };
 
-struct GpuInfo{
+struct TORCH_API GpuInfo{
   GpuInfo(int id, std::string name, uint64_t totalMemory):
     id_(id), name_(std::move(name)), totalMemory_(totalMemory){
     }
@@ -235,7 +235,7 @@ struct GpuInfo{
   uint64_t totalMemory_;
 };
 
-struct Metadata {
+struct TORCH_API Metadata {
   std::vector<GpuInfo> gpus_;
   c10::optional<DistributedMetadata> distributed_;
 };
