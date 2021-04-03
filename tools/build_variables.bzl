@@ -671,6 +671,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/ScalarOps.cpp",
     "aten/src/ATen/SequenceNumber.cpp",
     "aten/src/ATen/SparseTensorImpl.cpp",
+    "aten/src/ATen/SparseCsrTensorImpl.cpp",
     "aten/src/ATen/SparseTensorUtils.cpp",
     "aten/src/ATen/TensorGeometry.cpp",
     "aten/src/ATen/TensorIndexing.cpp",
