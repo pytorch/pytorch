@@ -29,7 +29,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIfNoMagma, skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
-    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipMeta,
+    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
     expectedAlertNondeterministic)
 from typing import Dict, List
@@ -130,7 +130,7 @@ class AbstractTestCases:
             from torch._torch_docs import __file__ as doc_file
             from torch._torch_docs import multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args
 
-            with open(doc_file, "r", encoding="utf-8") as f:
+            with open(doc_file, "r") as f:
                 doc_strs = f.read()
 
             for doc_str in re.findall(r'add_docstr\((.*?),.*?("""|\'\'\')(.*?)("""|\'\'\')\)', doc_strs, re.MULTILINE | re.DOTALL):
@@ -3272,12 +3272,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.gather(one_d, 0, torch.zeros((1,), dtype=torch.int64, device=device)).shape)
 
         # normal
-        # std must be >= 0
-        zero_d_ge_0 = torch.rand((), device=device)
         # documentation says out shape matches shape of mean
-        self.assertEqual((), torch.normal(zero_d, zero_d_ge_0).shape)
-        self.assertEqual((1,), torch.normal(one_d, zero_d_ge_0).shape)
-        self.assertEqual((), torch.normal(1, zero_d_ge_0).shape)
+        self.assertEqual((), torch.normal(zero_d, zero_d).shape)
+        self.assertEqual((1,), torch.normal(one_d, zero_d).shape)
+        self.assertEqual((), torch.normal(1, zero_d).shape)
         self.assertEqual((), torch.normal(zero_d, 1).shape)
         self.assertEqual((1,), torch.normal(one_d, 1).shape)
         # TODO: this behavior differs on CPU and GPU, see https://github.com/pytorch/pytorch/issues/30480.
@@ -5958,7 +5956,6 @@ class TestTorchDeviceType(TestCase):
             for x in xs:
                 _test_helper(x, op, unary=True)
 
-    @skipMeta
     def test_dlpack_conversion(self, device):
         x = torch.randn(1, 2, 3, 4, device=device, dtype=torch.float)
         z = from_dlpack(to_dlpack(x))
@@ -6916,15 +6913,6 @@ tensor_op_tests = [
     ('true_divide', 'tensor_with_inplace', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
         1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '3', _small_3d, lambda t, d: [_number(3., 3, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '-1', _small_3d, lambda t, d: [_number(-1., -1, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '-2', _small_3d, lambda t, d: [_number(-2., -2, t)],
-        1e-1, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
-    ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
-        1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types,
         _cpu_types, True, [tf32_on_and_off(0.01)]),
@@ -7234,22 +7222,10 @@ def generate_test_function(cls,
         # Special case for binary float ops (binary ops that promote int to float)
         if op_str in binary_float_ops_inplace and \
                 'inplace' in subtest_str and dtype in _integer_types:
-            # see https://github.com/pytorch/pytorch/issues/54897
-            try:
-                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
-                    cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
-                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
-                    device_result = getattr(device_tensor, op_str)(*device_args)
-            except Exception:
-                if self.device_type == 'meta':
-                    return
-                else:
-                    raise
-            else:
-                if self.device_type == 'meta':
-                    self.fail('expected test to fail on meta tensors, but it passed')
-                else:
-                    pass
+            with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
+                cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
+            with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
+                device_result = getattr(device_tensor, op_str)(*device_args)
             return  # Nothing more to check
 
         # Runs the tensor op on CPU and device
