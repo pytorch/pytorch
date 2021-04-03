@@ -2,6 +2,7 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorGeometry.h>
+#include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -211,7 +212,7 @@ ExprHandle TensorExprKernel::tensorOrConstant(
 std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
     const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
-  for (size_t i = 0; i < *shape.size(); i++) {
+  for (const auto i : c10::irange(*shape.size())) {
     dims.push_back(IntImm::make(*shape[i]));
   }
   return dims;
@@ -220,7 +221,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
 std::vector<DimArg> TensorExprKernel::dimsFromSizes(
     const std::vector<ExprHandle>& sizes) {
   std::vector<DimArg> dimArgs;
-  for (size_t idx = 0; idx < sizes.size(); idx++) {
+  for (const auto idx : c10::irange(sizes.size())) {
     dimArgs.emplace_back(DimArg(sizes[idx], "i" + c10::to_string(idx)));
   }
   return dimArgs;
@@ -318,7 +319,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::remainder:
     case aten::atan2: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (size_t idx = 0; idx < 2; idx++) {
+      for (const auto idx : c10::irange(2)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -329,7 +330,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::threshold:
     case aten::where: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (size_t idx = 0; idx < 3; idx++) {
+      for (const auto idx : c10::irange(3)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -338,7 +339,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
 
     case aten::addcmul: {
       std::vector<std::vector<ExprHandle>> shapes;
-      for (size_t idx = 0; idx < 4; idx++) {
+      for (const auto idx : c10::irange(4)) {
         torch::jit::Value* inp = v->node()->input(idx);
         shapes.push_back(sizesForValue(inp));
       }
@@ -699,7 +700,7 @@ Tensor* TensorExprKernel::computeConditionWithTwoOperand(
         innerExpr) {
   auto const& n = v->node();
   std::vector<std::vector<ExprHandle>> shapes;
-  for (size_t idx = 0; idx < 2; idx++) {
+  for (const auto idx : c10::irange(2)) {
     torch::jit::Value* inp = n->input(idx);
     shapes.push_back(sizesForValue(inp));
   }
@@ -732,7 +733,7 @@ Tensor* TensorExprKernel::computeThreeOperand(
     bool promote_inputs) {
   auto const& n = v->node();
   std::vector<std::vector<ExprHandle>> shapes;
-  for (size_t idx = 0; idx < 3; idx++) {
+  for (const auto idx : c10::irange(3)) {
     torch::jit::Value* inp = n->input(idx);
     shapes.push_back(sizesForValue(inp));
   }
@@ -767,7 +768,7 @@ Tensor* TensorExprKernel::computeFourOperand(
         const ExprHandle&)>& innerExpr) {
   auto const& n = v->node();
   std::vector<std::vector<ExprHandle>> shapes;
-  for (size_t idx = 0; idx < 4; idx++) {
+  for (const auto idx : c10::irange(4)) {
     torch::jit::Value* inp = n->input(idx);
     shapes.push_back(sizesForValue(inp));
   }
@@ -1800,7 +1801,7 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
           ToDtype(static_cast<ScalarType>(*tt->scalarType())),
           {0});
       std::vector<DimArg> inputTensorDims;
-      for (size_t i = 0; i < *tt->sizes().size(); i++) {
+      for (const auto i : c10::irange(*tt->sizes().size())) {
         auto const size = *tt->sizes()[i];
         inputTensorDims.emplace_back(
             DimArg(IntImm::make(size), "i" + c10::to_string(i)));
@@ -1813,7 +1814,7 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
               inputTensorDims,
               [&](const std::vector<VarHandle>& axes) {
                 ExprHandle idx = 0;
-                for (size_t i = 0; i < axes.size(); i++) {
+                for (const auto i : c10::irange(axes.size())) {
                   idx = idx + axes[i] * IntImm::make(*strides[i]);
                 }
                 return inBuffer.load(idx);
