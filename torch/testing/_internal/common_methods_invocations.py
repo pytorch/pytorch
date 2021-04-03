@@ -3865,7 +3865,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
-                   safe_casts_outputs=True)
+                   safe_casts_outputs=True),
     UnaryUfuncInfo('erfc',
                    ref=scipy.special.erfc if TEST_SCIPY else _NOTHING,
                    aliases=('special.erfc', ),
@@ -3875,7 +3875,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    assert_autodiffed=True,
-                   safe_casts_outputs=True)
+                   safe_casts_outputs=True),
     UnaryUfuncInfo('erfinv',
                    ref=scipy.special.erfinv if TEST_SCIPY else _NOTHING,
                    aliases=('special.erfinv', ),
