@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
+
+#include <csignal>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorGeometry.h>
 #include <c10/util/string_utils.h>
@@ -9,6 +11,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <iostream>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -198,6 +201,43 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   return e;
 }
 
+ExprHandle TensorExprKernel::tensorOrConstant(
+    const TValue* v,
+    const std::vector<ExprHandle>& axes) {
+    if (v->hasTensor()) {
+      return broadcast(v->getTensor(), axes);
+    }
+    return constant(v);
+}
+TValue* TensorExprKernel::jitToTValue(const torch::jit::Value* v) {
+  auto ti = tensors_.find(v);
+  if (ti != tensors_.end()) {
+    return new TValue(ti->second);
+  }
+  if (v->node()->kind() == prim::Constant) {
+    const auto val = toIValue(v).value();
+    if (val.isDouble()) {
+      return new TValue(val.toDouble());
+    } else if (val.isInt()) {
+      return new TValue(val.toInt());
+    } else if (val.isBool()) {
+      return new TValue(val.toBool());
+    } else if (val.isNone()) {
+      // This is just a placeholder so we don't throw.  None-handling
+      // is operator-specific and should be handled properly in
+      // the operator-specific lowering code.
+      return new TValue();
+    } else {
+      throw unsupported_dtype();
+    }
+  }
+
+  if (!scalars_.count(v)) {
+    throw malformed_input("no scalar in Constant");
+  }
+
+  return new TValue(scalars_.at(v));
+}
 ExprHandle TensorExprKernel::tensorOrConstant(
     const torch::jit::Value* v,
     const std::vector<ExprHandle>& axes) {
@@ -422,6 +462,26 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
   }
 }
 
+ExprHandle TensorExprKernel::constant(const TValue* v) {
+  if (v->hasScalar()) {
+    return v->getScalar();
+  } else if (v->hasDouble()) {
+    return DoubleImm::make(v->getDouble());
+  } else if (v->hasInt()) {
+    return LongImm::make(v->getInt());
+  // } else if (val.isBool()) {
+  //   return BoolImm::make(val.toBool());
+  // } else if (val->hasNone()) {
+  //   // This is just a placeholder so we don't throw.  None-handling
+  //   // is operator-specific and should be handled properly in
+  //   // the operator-specific lowering code.
+  //   return IntImm::make(0);
+  } else {
+    throw unsupported_dtype();
+  }
+  assert(false);
+  return v->getScalar();
+}
 ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   if (v->node()->kind() == prim::Constant) {
     const auto val = toIValue(v).value();
@@ -522,6 +582,43 @@ void TensorExprKernel::promoteInputs(
 
 ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
+    const c10::optional<at::ScalarType> type) {
+  if (!type.has_value()) {
+    return e;
+  }
+
+  switch (*type) {
+// NOLINTNEXTLINE
+#define TYPE_CASE(Type, Name) \
+  case at::ScalarType::Name:  \
+    return cast<Type>(e);
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    case at::ScalarType::Bool:
+      return cast<bool>(e);
+    default:
+      throw unsupported_dtype();
+  }
+
+  return e;
+}
+
+c10::optional<at::ScalarType> getOutputType(const torch::jit::Value* v) {
+  if (v->type()->kind() != TypeKind::TensorType) {
+    return c10::optional<at::ScalarType>();
+  }
+
+  if (!v->isCompleteTensor()) {
+    return c10::optional<at::ScalarType>();
+  }
+
+  auto tt = v->type()->castRaw<TensorType>()->scalarType();
+
+  return tt;
+}
+
+ExprHandle TensorExprKernel::demoteOutput(
+    const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
     return e;
@@ -617,6 +714,14 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(
   }
   return ExprVectorToExprHandleVector(it->second->buf()->dims());
 }
+std::vector<ExprHandle> TensorExprKernel::valueShape(
+    const TValue* v) {
+  if (v->getTensor()) {
+    return ExprVectorToExprHandleVector(v->getTensor()->buf()->dims());
+  } else {
+    return {};
+  }
+}
 
 Tensor* TensorExprKernel::computeOneOperand(
     const std::string& name,
@@ -662,6 +767,32 @@ Tensor* TensorExprKernel::computeTwoOperand(
         promoteInputs(inputs);
         ExprHandle compute = innerExpr(inputs[0], inputs[1]);
         return demoteOutput(compute, n->output());
+      });
+}
+
+Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
+    const std::string& name,
+    const std::vector<tensorexpr::TValue*> inputValues,
+    const c10::optional<at::ScalarType> outputTensorType,
+    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+        innerExpr) {
+  auto const& shape =
+      broadcastShapes(valueShape(inputValues[0]), valueShape(inputValues[1]));
+  return Compute(
+      name,
+      c10::fmap<DimArg>(shape),
+      [this, inputValues, outputTensorType, innerExpr](const std::vector<VarHandle>& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        std::vector<ExprHandle> inputs = {
+            tensorOrConstant(inputValues[0], indices),
+            tensorOrConstant(inputValues[1], indices),
+            tensorOrConstant(inputValues[2], indices),
+        };
+
+
+        promoteInputs(inputs);
+        ExprHandle compute = innerExpr(inputs[0], inputs[2] * inputs[1]);
+        return demoteOutput(compute, outputTensorType);
       });
 }
 
@@ -812,15 +943,21 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
 }
 
 Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
+  auto inputs = v->node()->inputs();
   switch (v->node()->kind()) {
     case aten::add: {
       auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
         return boolToInteger(lhs) + boolToInteger(rhs);
       };
       TORCH_INTERNAL_ASSERT(
-          v->node()->inputs().size() == 2 || v->node()->inputs().size() == 3);
-      return (v->node()->inputs().size() > 2)
-          ? computeTwoOperandWithAlpha("aten_add", v, add_lambda)
+          inputs.size() == 2 || inputs.size() == 3);
+      std::vector<TValue*> tinputs;
+      for (auto inp: inputs) {
+        tinputs.push_back(jitToTValue(inp));
+      }
+      auto outputType = getOutputType(v->node()->output());
+      return (tinputs.size() > 2)
+          ? computeTwoOperandWithAlpha("aten_add", tinputs, outputType, add_lambda)
           : computeTwoOperand("aten_add", v, add_lambda);
     } break;
 
