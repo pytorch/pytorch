@@ -6,6 +6,7 @@
 #include <torch/optim/serialize.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 
@@ -136,7 +137,7 @@ void Adagrad::load(serialize::InputArchive& archive) {
     torch::optim::serialize(archive, "step_buffers", step_buffers);
     // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for (size_t idx = 0; idx < params.size(); idx++) {
+    for(const auto idx : c10::irange(params.size())) {
       auto state = std::make_unique<AdagradParamState>();
       state->step(step_buffers[idx]);
       state->sum(sum_buffers[idx]);
