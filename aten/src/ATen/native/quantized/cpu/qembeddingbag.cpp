@@ -427,7 +427,7 @@ at::Tensor& embedding_bag_byte_helper(
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
     bool is_embedding_op) {
-  at::Tensor offsets;
+  c10::MaybeOwned<at::Tensor> offsets;
   TORCH_CHECK(
       indices.dim() == 1 || indices.dim() == 2,
       "qembedding/qembedding_bag operator supports 1 or 2d indices, got ",
@@ -439,13 +439,13 @@ at::Tensor& embedding_bag_byte_helper(
         !offsets_in.has_value(),
         "embedding_bag_byte operator: input is 2D, then offsets has to be None, as input is treated is a mini-batch of fixed length sequences.");
 
-    offsets = at::arange(
-        0, indices.numel(), indices.sizes()[1], indices.scalar_type());
+    offsets = c10::MaybeOwned<at::Tensor>::owned(at::arange(0, indices.numel(), indices.sizes()[1], indices.scalar_type()));
+
   } else {
     TORCH_CHECK(
         offsets_in.has_value(),
         "embedding_bag_byte expects offsets to be set for 1D indices.");
-    offsets = offsets_in.value();
+    offsets = c10::MaybeOwned<at::Tensor>::borrowed(offsets_in.value());
   }
 
   TORCH_CHECK(
@@ -454,47 +454,47 @@ at::Tensor& embedding_bag_byte_helper(
       indices.scalar_type(),
       " instead.");
   TORCH_CHECK(
-      offsets.scalar_type() == at::kInt || offsets.scalar_type() == at::kLong,
+      offsets->scalar_type() == at::kInt || offsets->scalar_type() == at::kLong,
       "Expect 32 or 64 bit offsets, but found ",
-      offsets.scalar_type(),
+      offsets->scalar_type(),
       " instead.");
   TORCH_CHECK(
       weight.is_contiguous() && indices.is_contiguous() &&
-          offsets.is_contiguous(),
+          offsets->is_contiguous(),
       "Expect weight, indices, and offsets to be contiguous.");
 
   // Using helper function to support different type combination without the
   // need to cast, which can be additional performance overhead
-  if (indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kInt) {
+  if (indices.scalar_type() == at::kInt && offsets->scalar_type() == at::kInt) {
     return embedding_bag_byte_impl<int, int>(
         output,
         weight,
         indices,
-        offsets,
+        *offsets,
         pruned_weights,
         per_sample_weights_,
         compressed_indices_mapping,
         include_last_offset,
         is_embedding_op);
   } else if (
-      indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
+      indices.scalar_type() == at::kInt && offsets->scalar_type() == at::kLong) {
     return embedding_bag_byte_impl<int, int64_t>(
         output,
         weight,
         indices,
-        offsets,
+        *offsets,
         pruned_weights,
         per_sample_weights_,
         compressed_indices_mapping,
         include_last_offset,
         is_embedding_op);
   } else if (
-      indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
+      indices.scalar_type() == at::kLong && offsets->scalar_type() == at::kInt) {
     return embedding_bag_byte_impl<int64_t, int>(
         output,
         weight,
         indices,
-        offsets,
+        *offsets,
         pruned_weights,
         per_sample_weights_,
         compressed_indices_mapping,
@@ -507,7 +507,7 @@ at::Tensor& embedding_bag_byte_helper(
       output,
       weight,
       indices,
-      offsets,
+      *offsets,
       pruned_weights,
       per_sample_weights_,
       compressed_indices_mapping,
@@ -524,7 +524,7 @@ at::Tensor& embedding_bag_4bit_helper(
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
-  at::Tensor offsets;
+  c10::MaybeOwned<at::Tensor> offsets;
   TORCH_CHECK(
       indices.dim() == 1 || indices.dim() == 2,
       "qembedding/qembedding_bag operator supports 1 or 2d indices, got ",
@@ -537,13 +537,13 @@ at::Tensor& embedding_bag_4bit_helper(
         !offsets_in.has_value(),
         "embedding_bag_4bit operator: input is 2D, then offsets has to be None, as input is treated is a mini-batch of fixed length sequences.");
 
-    offsets = at::arange(
-        0, indices.numel(), indices.sizes()[1], indices.scalar_type());
+    offsets = c10::MaybeOwned<at::Tensor>::owned(at::arange(
+        0, indices.numel(), indices.sizes()[1], indices.scalar_type()));
   } else {
     TORCH_CHECK(
         offsets_in.has_value(),
         "embedding_bag_4bit operator expects offsets to be set for 1D indices.");
-    offsets = offsets_in.value();
+    offsets = c10::MaybeOwned<at::Tensor>::borrowed(offsets_in.value());
   }
 
   TORCH_CHECK(
@@ -552,45 +552,45 @@ at::Tensor& embedding_bag_4bit_helper(
       indices.scalar_type(),
       " instead.");
   TORCH_CHECK(
-      offsets.scalar_type() == at::kInt || offsets.scalar_type() == at::kLong,
+      offsets->scalar_type() == at::kInt || offsets->scalar_type() == at::kLong,
       "Expect 32 or 64 bit offsets, but found ",
-      offsets.scalar_type(),
+      offsets->scalar_type(),
       " instead.");
   TORCH_CHECK(
       weight.is_contiguous() && indices.is_contiguous() &&
-          offsets.is_contiguous(),
+          offsets->is_contiguous(),
       "Expect weight, indices, and offsets to be contiguous.");
 
   // Using helper function to support different type combination without the
   // need to cast, which can be additional performance overhead
-  if (indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kInt) {
+  if (indices.scalar_type() == at::kInt && offsets->scalar_type() == at::kInt) {
     return embedding_bag_4bit_impl<int, int>(
         output,
         weight,
         indices,
-        offsets,
+        *offsets,
         pruned_weights,
         per_sample_weights_,
         compressed_indices_mapping,
         include_last_offset);
   } else if (
-      indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
+      indices.scalar_type() == at::kInt && offsets->scalar_type() == at::kLong) {
     return embedding_bag_4bit_impl<int, int64_t>(
         output,
         weight,
         indices,
-        offsets,
+        *offsets,
         pruned_weights,
         per_sample_weights_,
         compressed_indices_mapping,
         include_last_offset);
   } else if (
-      indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
+      indices.scalar_type() == at::kLong && offsets->scalar_type() == at::kInt) {
     return embedding_bag_4bit_impl<int64_t, int>(
         output,
         weight,
         indices,
-        offsets,
+        *offsets,
         pruned_weights,
         per_sample_weights_,
         compressed_indices_mapping,
@@ -600,7 +600,7 @@ at::Tensor& embedding_bag_4bit_helper(
       output,
       weight,
       indices,
-      offsets,
+      *offsets,
       pruned_weights,
       per_sample_weights_,
       compressed_indices_mapping,
