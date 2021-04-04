@@ -1,8 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-// #include <THC/THCThrustAllocator.cuh>
-// #include <thrust/execution_policy.h>
-// #include <thrust/transform.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh> //for MAX_DIMS
