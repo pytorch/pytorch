@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/backend_detail.h>
 
 namespace torch {
 namespace custom_backend {
