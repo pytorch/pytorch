@@ -207,7 +207,7 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   auto graph = spec.graph()->copy();
 
-  for (const auto i : c10::irange(input_desc.size())) {
+  for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
 
     // TODO: can't get rid of this use of TensorType
