@@ -15051,7 +15051,7 @@ class TestNNDeviceType(NNTestCase):
                 grads_before = [p.grad.clone() for p in parameters]
 
                 with self.assertRaisesRegex(RuntimeError, error_msg, msg=msg):
-                    clip_grad_norm_(parameters, 1, norm_type=norm_type)
+                    clip_grad_norm_(parameters, 1, norm_type=norm_type, error_if_nonfinite=True)
 
                 # Grad should not change if error is thrown
                 grads_after = [p.grad for p in parameters]

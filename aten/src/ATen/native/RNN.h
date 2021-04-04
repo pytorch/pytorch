@@ -33,10 +33,9 @@ inline void check_attributes(const Tensor& input, const TensorList& params, cons
 
   auto check_tensors = [&](const std::string& name, const Tensor& t) {
     if (!t.defined()) return;
-
-    if (!(t.is_cpu() && t.dim() == 0)) {
-      auto t_device = t.device();
-      TORCH_CHECK(input_device == t_device,
+    auto t_device = t.device();
+    if (input_device != t_device) {
+      TORCH_CHECK(false,
               "Input and ", name, " tensors are not at the same device, found input tensor at ",
               input_device, " and ", name, " tensor at ", t_device);
     }
