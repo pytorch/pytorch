@@ -10,11 +10,7 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
 
-#include <thrust/device_ptr.h>
-#include <thrust/execution_policy.h>
-#include <thrust/sequence.h>
-#include <thrust/sort.h>
-#include <cub/cub.cuh>
+#include <ATen/cuda/CubUtils.cuh>
 
 #include <algorithm>
 #include <cmath>
@@ -124,7 +120,6 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
       }
 
       // Use the sorted order of keys to rearrange the result array
-      void *d_temp_storage = nullptr;
       size_t temp_storage_bytes = 0;
 
       cub::DeviceRadixSort::SortPairs(
