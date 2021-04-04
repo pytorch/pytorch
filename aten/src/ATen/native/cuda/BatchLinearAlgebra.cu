@@ -2519,13 +2519,13 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   TORCH_CHECK(info == 0, "MAGMA lu_solve : invalid argument: ", -info);
   return self_working_copy;
 }
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cuda(
-    const Tensor& a, const Tensor& b, double cond, c10::optional<std::string> driver_name) {
+
+Tensor& _lstsq_helper_cuda(
+  Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, const Tensor& a, double cond, std::string driver_name) {
 #ifndef USE_MAGMA
-AT_ERROR("torch.linalg.lstsq: MAGMA library not found in "
+TORCH_CHECK(false, "torch.linalg.lstsq: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "torch.linalg.lstsq_cuda", [&] {
@@ -2539,24 +2539,24 @@ AT_ERROR("torch.linalg.lstsq: MAGMA library not found in "
     auto lwork = (m - n + nb) * (nrhs + nb) + nrhs * nb;
     Tensor hwork = at::empty({static_cast<int64_t>(lwork)}, a.scalar_type());
     auto* hwork_ptr = hwork.data_ptr<scalar_t>();
-    magma_int_t info;
+
+    // MAGMA requires infos tensor to live on CPU
+    infos = infos.to(at::kCPU);
+    auto infos_data = infos.data_ptr<magma_int_t>();
 
     batch_iterator_with_broadcasting<scalar_t>(a, b,
       [&](scalar_t* a_working_ptr, scalar_t* b_working_ptr,
         int64_t a_linear_batch_idx) {
+        magma_int_t* infos_working_ptr = &infos_data[a_linear_batch_idx];
         magmaGels<scalar_t>(trans, m, n, nrhs,
           a_working_ptr, ldda, b_working_ptr, lddb,
-          hwork_ptr, lwork, &info);
-        singleCheckErrors(static_cast<int64_t>(info), "torch.linalg.lstsq_cuda");
+          hwork_ptr, lwork, infos_working_ptr);
       }
     );
   });
-
-  Tensor rank, singular_values;
-  return std::make_tuple(b, rank, singular_values);
+  return b;
 #endif
 }
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 }}  // namespace at::native
 

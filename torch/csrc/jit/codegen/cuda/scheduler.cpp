@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -23,7 +24,7 @@ namespace {
 std::vector<int> reductionAxes(TensorView* tv) {
   size_t n_dims = tv->nDims();
   std::vector<int> reduction_axes;
-  for (size_t i = 0; i < n_dims; i++) {
+  for (const auto i : c10::irange(n_dims)) {
     if (tv->axis(i)->isReduction()) {
       reduction_axes.emplace_back(i);
     }
