@@ -1406,3 +1406,67 @@ class TestClassType(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Could not cast attribute 'val' to type Tensor"):
             torch.jit.script(Mod())
+
+    def test_recursive_scripting(self):
+        """
+        Test that class types are recursively scripted when an Python instance of one
+        is encountered as a module attribute.
+        """
+        class Class(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            def get_a(self) -> int:
+                return self.a
+
+        class M(torch.nn.Module):
+            def __init__(self, obj):
+                super().__init__()
+                self.obj = obj
+
+            def forward(self) -> int:
+                return self.obj.get_a()
+
+        self.checkModule(M(Class(4)), ())
+
+    def test_recursive_scripting_failed(self):
+        """
+        Test that class types module attributes that fail to script
+        are added as failed attributes and do not cause compilation itself
+        to fail unless they are used in scripted code.
+        """
+        class UnscriptableClass(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            def get_a(self) -> bool:
+                return issubclass(self.a, int)
+
+        # This Module has an attribute of type UnscriptableClass
+        # and tries to use it in scripted code. This should fail.
+        class ShouldNotCompile(torch.nn.Module):
+            def __init__(self, obj):
+                super().__init__()
+                self.obj = obj
+
+            def forward(self) -> bool:
+                return self.obj.get_a()
+
+        with self.assertRaisesRegex(RuntimeError, "failed to convert Python type"):
+            torch.jit.script(ShouldNotCompile(UnscriptableClass(4)))
+
+        # This Module has an attribute of type UnscriptableClass
+        # and does not try to use it in scripted code. This should not fail.
+        class ShouldCompile(torch.nn.Module):
+            def __init__(self, obj):
+                super().__init__()
+                self.obj = obj
+
+            @torch.jit.ignore
+            def ignored_method(self) -> bool:
+                return self.obj.get_a()
+
+            def forward(self, x: int) -> int:
+                return x + x
+
+        self.checkModule(ShouldCompile(UnscriptableClass(4)), (4,))

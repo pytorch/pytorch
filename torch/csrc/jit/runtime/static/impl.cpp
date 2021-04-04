@@ -667,7 +667,7 @@ std::vector<at::Tensor> StaticRuntime::operator()(
     const std::vector<at::Tensor>& inps) {
   std::vector<c10::IValue> stack;
   stack.resize(inps.size());
-  for (size_t i = 0; i < inps.size(); i++) {
+  for (const auto i : c10::irange(inps.size())) {
     stack[i] = inps[i];
   }
 
@@ -708,11 +708,11 @@ c10::IValue StaticRuntime::operator()(
         "with StaticModule(const torch::jit::Module& m) instead.");
     std::vector<c10::IValue> s = args;
     static_module_.schema()->checkAndNormalizeInputs(s, kwargs);
-    for (size_t i = 0; i < s.size(); i++) {
+    for (const auto i : c10::irange(s.size())) {
       Input(i) = std::move(s[i]);
     }
   } else {
-    for (size_t i = 0; i < args.size(); i++) {
+    for (const auto i : c10::irange(args.size())) {
       Input(i) = args[i];
     }
   }
@@ -770,7 +770,7 @@ void StaticRuntime::benchmark(
   IndividualMetrics results =
       benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
 
-  for (size_t i = 0; i < nodes_.size(); i++) {
+  for (const auto i : c10::irange(nodes_.size())) {
     const Node* node = nodes_[i].node();
     std::cout << "Node #" << i << ": " << results.time_per_node[i]
               << " ms/iter, ";
@@ -857,7 +857,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         "with StaticModule(const torch::jit::Module& m) instead.");
     static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
   }
-  for (size_t i = 0; i < stack.size(); i++) {
+  for (const auto i : c10::irange(stack.size())) {
     Input(i) = stack[i];
   }
   results.setup_time = timer.MilliSeconds();
@@ -868,8 +868,8 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // main runs
-  for (int k = 0; k < main_runs; k++) {
-    for (size_t i = 0; i < stack.size(); i++) {
+  for (const auto k : c10::irange(main_runs)) {
+    for (const auto i : c10::irange(stack.size())) {
       Input(i) = stack[i];
     }
     timer.Start();
@@ -879,7 +879,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     float millis = timer.MilliSeconds();
     results.memory_alloc_time += millis;
 
-    for (size_t i = 0; i < nodes_.size(); i++) {
+    for (const auto i : c10::irange(nodes_.size())) {
       timer.Start();
       nodes_[i].run();
       millis = timer.MilliSeconds();
@@ -929,7 +929,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // post processing
-  for (size_t i = 0; i < nodes_.size(); i++) {
+  for (const auto i : c10::irange(nodes_.size())) {
     const Node* node = nodes_[i].node();
     std::string kind = std::string(node->kind().toQualString());
     results.time_per_node[i] /= static_cast<float>(main_runs);
@@ -953,15 +953,15 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   }
 
   // check for inputs
-  for (size_t i = 0; i < inputs_.size(); i++) {
+  for (const auto i : c10::irange(inputs_.size())) {
     TORCH_CHECK(inputs_[i].isNone(), "Input ", i, " was not cleaned up");
   }
 
   std::unordered_set<const IValue*> output_ivalues(
       outputs_.begin(), outputs_.end());
-  for (size_t n = 0; n < nodes_.size(); n++) {
+  for (const auto n : c10::irange(nodes_.size())) {
     auto& pnode = nodes_[n];
-    for (size_t i = 0; i < pnode.outputs().size(); i++) {
+    for (const auto i : c10::irange(pnode.outputs().size())) {
       const IValue* ival = &pnode.Output(i);
       const std::string error_msg = "Output " + c10::to_string(i) +
           " of node " + c10::to_string(n) + " was not cleaned up";
@@ -1183,7 +1183,7 @@ void ProcessedNode::run() {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
     stack.reserve(size);
-    for (size_t i = 0; i < size; i++) {
+    for (const auto i : c10::irange(size)) {
       stack.emplace_back(Input(i));
     }
 
