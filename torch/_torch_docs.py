@@ -5510,42 +5510,27 @@ Example::
     torch.return_types.nanmedian(values=tensor([2., 1., 1.]), indices=tensor([0, 1, 0]))
 """.format(**single_dim_common))
 
-add_docstr(torch.quantile,
-           r"""
-quantile(input, q) -> Tensor
+add_docstr(torch.quantile, r"""
+quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 
-Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear
-interpolation when the q-th quantile lies between two data points.
+Computes the q-th quantiles of each row of the :attr:`input` tensor
+along the dimension :attr:`dim`.
 
-Args:
-    {input}
-    q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
+To compute the quantile, we map q in [0, 1] to the range of indices [0, n] to find the location
+of the quantile in the sorted input. If the quantile lies between two data points ``a < b`` with
+indices ``i`` and ``j`` in the sorted order, result is computed using linear interpolation as follows:
 
-Example::
+``a + (b - a) * fraction``, where ``fraction`` is the fractional part of the computed quantile index.
 
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[ 0.0700, -0.5446,  0.9214]])
-    >>> q = torch.tensor([0, 0.5, 1])
-    >>> torch.quantile(a, q)
-    tensor([-0.5446,  0.0700,  0.9214])
+If :attr:`q` is a 1D tensor, the first dimension of the output represents the quantiles and has size
+equal to the size of :attr:`q`, the remaining dimensions are what remains from the reduction.
 
-.. function:: quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
-
-Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
-:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two
-data points. By default, :attr:`dim` is ``None`` resulting in the :attr:`input` tensor
-being flattened before computation.
-
-If :attr:`keepdim` is ``True``, the output dimensions are of the same size as :attr:`input`
-except in the dimensions being reduced (:attr:`dim` or all if :attr:`dim` is ``None``) where they
-have size 1. Otherwise, the dimensions being reduced are squeezed (see :func:`torch.squeeze`).
-If :attr:`q` is a 1D tensor, an extra dimension is prepended to the output tensor with the same
-size as :attr:`q` which represents the quantiles.
+.. note::
+    By default :attr:`dim` is ``None`` resulting in the :attr:`input` tensor being flattened before computation.
 
 Args:
     {input}
-    q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
+    q (float or Tensor): a scalar or 1D tensor of values in the range [0, 1].
     {dim}
     {keepdim}
 
@@ -5570,10 +5555,12 @@ Example::
             [ 0.9206]]])
     >>> torch.quantile(a, q, dim=1, keepdim=True).shape
     torch.Size([3, 2, 1])
+    >>> a = torch.arange(4.)
+    >>> a
+    tensor([0., 1., 2., 3.])
 """.format(**single_dim_common))
 
-add_docstr(torch.nanquantile,
-           r"""
+add_docstr(torch.nanquantile, r"""
 nanquantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 
 This is a variant of :func:`torch.quantile` that "ignores" ``NaN`` values,
@@ -5597,7 +5584,6 @@ Example::
     tensor(nan)
     >>> t.nanquantile(0.5)
     tensor(1.5000)
-
     >>> t = torch.tensor([[float('nan'), float('nan')], [1, 2]])
     >>> t
     tensor([[nan, nan],

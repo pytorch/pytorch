@@ -2423,7 +2423,8 @@ struct LapackLstsqHelper {
   scalar_t work_opt; // used to decide the opt `work` size with lwork=-1
   scalar_t* work_ptr = &work_opt;
   int lwork = -1; // default value to decide the opt size for workspace arrays
-  int info = 0;
+  int* infos_data = nullptr;
+  int* infos_working_ptr = nullptr;
   Tensor jpvt;
   int* jpvt_ptr = nullptr;
   value_t rcond;
@@ -2533,13 +2534,18 @@ struct LapackLstsqHelper {
     }
     return *this;
   }
+  self_type& set_infos(Tensor& infos) {
+    infos_data = infos.data_ptr<int>();
+    infos_working_ptr = infos_data;
+    return *this;
+  }
 
   self_type& call_driver() {
     driver(trans, m, n, nrhs,
       a_working_ptr, lda,
       b_working_ptr, ldb,
       work_ptr, lwork,
-      &info,
+      infos_working_ptr,
       jpvt_ptr,
       rcond,
       &rank_opt,
@@ -2574,6 +2580,7 @@ struct LapackLstsqHelper {
     this->b_working_ptr = b_working_ptr;
     rank_working_ptr = rank_working_ptr ? &rank_data[a_linear_batch_idx] : nullptr;
     s_working_ptr = s_working_ptr ? &s_data[a_linear_batch_idx * s_stride] : nullptr;
+    infos_working_ptr = &infos_data[a_linear_batch_idx];
     return *this;
   }
 };
@@ -2589,7 +2596,7 @@ struct LapackLstsqDriverTypeHash {
 #endif
 
 Tensor& _lstsq_helper_cpu(
-    Tensor& b, Tensor& rank, Tensor& singular_values, const Tensor& a, double cond, std::string driver_name) {
+    Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, const Tensor& a, double cond, std::string driver_name) {
 #ifndef USE_LAPACK
   TORCH_CHECK(false, "torch.linalg.lstsq: LAPACK library not found in compilation");
 #else
@@ -2631,6 +2638,7 @@ Tensor& _lstsq_helper_cpu(
       .set_rcond(cond)
       .set_rank(rank)
       .set_s(singular_values)
+      .set_infos(infos)
       .call_driver() // initial call to deduce optimal sizes for workspace arrays
       .set_work()
       .set_rwork()
@@ -2652,7 +2660,6 @@ Tensor& _lstsq_helper_cpu(
         int64_t a_linear_batch_idx) {
         driver_helper.next(a_working_ptr, b_working_ptr, a_linear_batch_idx)
           .call_driver();
-        singleCheckErrors(driver_helper.info, "torch.linalg.lstsq_cpu");
       }
     );
   });
@@ -2777,11 +2784,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     singular_values.resize_(singular_values_shape, MemoryFormat::Contiguous);
   }
 
+  Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt).device(kCPU));
+
   Tensor x, residuals;
 
   // path if neither `self` nor `b` is empty
   if (self.numel() && b.numel()) {
-    x = at::_lstsq_helper_(b_working_copy, rank, singular_values, self_working_copy, rcond, driver_opt.value());
+    x = at::_lstsq_helper_(b_working_copy, rank, singular_values, infos, self_working_copy, rcond, driver_opt.value());
     if (m > n && driver_opt.value() != "gelsy") {
       residuals = x.narrow(-2, n, std::max(m, n) - n).abs().pow_(2).sum(-2);
     }
@@ -2847,6 +2856,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     singular_values = return_empty_if_undefined(
       singular_values,
       at::toValueType(self.scalar_type()));
+  }
+
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "torch.linalg.lstsq");
+  } else {
+    singleCheckErrors(infos.item().toInt(), "torch.linalg.lstsq");
   }
 
   return std::make_tuple(x, residuals, rank, singular_values);
