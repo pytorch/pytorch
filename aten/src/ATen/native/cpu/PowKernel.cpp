@@ -43,7 +43,7 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
 // or complex128 inputs, but not both. So, in order to provide a common path for
 // float, double & complex types, template parameter cast_scalar_t is being used
 // to resolve the aforementioned distinction. This approach also allows BFloat16
-// to use this common-path. Half can't currently use it, as AVX2 support for
+// to use this common-path. Half cannot currently use it, as AVX2 support for
 // sqrt & rsqrt doesn't currently exist for it.
 template <typename scalar_t, typename cast_scalar_t, typename exp_scalar_t>
 void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scalar_t exp) {
