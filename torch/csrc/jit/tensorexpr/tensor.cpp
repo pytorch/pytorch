@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 #include <c10/util/Logging.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
@@ -29,7 +28,7 @@ Stmt* Tensor::constructStmt(
   const Expr* init_expr = buf()->initializer();
 
   if (reduce_ndim > 0) {
-    for (const auto i : c10::irange(reduce_ndim)) {
+    for (size_t i = 0; i < reduce_ndim; i++) {
       // Going in reverse order: from innermost loop to the outermost
       size_t dim_index = reduce_ndim - i - 1;
       s = new For(
@@ -41,7 +40,7 @@ Stmt* Tensor::constructStmt(
     }
   }
 
-  for (const auto i : c10::irange(ndim)) {
+  for (size_t i = 0; i < ndim; i++) {
     // Going in reverse order: from innermost loop to the outermost
     size_t dim_index = ndim - i - 1;
     s = new For(args[dim_index], new IntImm(0), buf()->dim(dim_index), s);
