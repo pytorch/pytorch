@@ -342,8 +342,7 @@ def try_ann_to_type(ann, loc):
         maybe_script_class = _get_script_class(ann)
         if maybe_script_class is not None:
             return maybe_script_class
-        ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
-        if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
+        if torch._jit_internal.can_compile_class(ann):
             return torch.jit._script._recursive_compile_class(ann, loc)
 
     # Maybe resolve a NamedTuple to a Tuple Type
