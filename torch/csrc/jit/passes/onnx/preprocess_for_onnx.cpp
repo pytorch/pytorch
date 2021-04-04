@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
@@ -192,7 +193,7 @@ static void fuseListAndListUnpack(Block* b) {
       fuseListAndListUnpack(child_block);
     }
     if (it->kind() == prim::ListUnpack) {
-      for (size_t i = 0; i < it->outputs().size(); i++) {
+      for (const auto i : c10::irange(it->outputs().size())) {
         auto output = it->outputs().at(i);
         if (it->inputs().size() == 1 &&
             it->input()->node()->kind() != prim::ListConstruct &&
