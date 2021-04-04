@@ -79,7 +79,7 @@ void KernelArgumentHolder::push(const uint64_t& val) {
 void** KernelArgumentHolder::getBuffer() {
   if (changed_) {
     void_ptrs_ = std::vector<void*>(arguments_.size(), nullptr);
-    for (const auto i : c10::irange(arguments_.size())) {
+    for (size_t i = 0; i < arguments_.size(); i++) {
       void_ptrs_[i] = static_cast<void*>(arguments_[i]->arg());
     }
     changed_ = false;
