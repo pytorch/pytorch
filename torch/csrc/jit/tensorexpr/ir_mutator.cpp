@@ -196,7 +196,7 @@ const Expr* IRMutator::mutate(const Buf* v) {
 
   std::vector<const Expr*> dims_old = v->dims();
   std::vector<const Expr*> dims_new(dims_old.size());
-  for (size_t i = 0; i < dims_old.size(); i++) {
+  for (const auto i : c10::irange(dims_old.size())) {
     dims_new[i] = dims_old[i]->accept_mutator(this);
     any_change |= (dims_new[i] != dims_old[i]);
   }
