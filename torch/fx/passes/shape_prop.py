@@ -51,8 +51,9 @@ class ShapeProp(torch.fx.Interpreter):
         result = super().run_node(n)
 
         if isinstance(result, torch.Tensor):
-            n.meta['shape'] = result.shape  # type: ignore
-            n.meta['dtype'] = result.dtype  # type: ignore
+            n.meta['shape'] = result.shape
+            n.meta['dtype'] = result.dtype
+            n.meta['stride'] = result.stride()
 
         return result
 
