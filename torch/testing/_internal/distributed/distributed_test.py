@@ -396,11 +396,10 @@ class TestDistBackend(MultiProcessTestCase):
         return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe, faulthandler_file_name):
+    def _run(cls, rank, test_name, file_name, pipe):
         if BACKEND == 'nccl' and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS['no_cuda'].exit_code)
         self = cls(test_name)
-        self._register_fault_handler(faulthandler_file_name)
         self.rank = rank
         self.file_name = file_name
 
@@ -5046,6 +5045,7 @@ class DistributedTest:
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
         def test_ddp_model_diff_across_ranks(self):
             torch.cuda.set_device(self.rank)
             # Creates network with different sized embedding table on different
