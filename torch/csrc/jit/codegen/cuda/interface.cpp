@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 
 #include <ATen/core/dispatch/OperatorOptions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
@@ -103,7 +104,7 @@ bool complyWith(
   const auto& t_sizes = tensor.sizes();
   const auto& t_strides = tensor.strides();
   int inner_dim = -1;
-  for (size_t j = 0; j < *guard_tensor_type->dim(); j++) {
+  for (const auto j : c10::irange(*guard_tensor_type->dim())) {
     // check b. for stride check, we go along dimensions from fastest stride to
     // slowest stride
     int sorted_index = stride_properties[j]->stride_index_
@@ -210,7 +211,7 @@ RegisterOperators reg_guard({
               return;
             }
 
-            for (size_t i = 0; i < num_inputs; i++) {
+            for (const auto i : c10::irange(num_inputs)) {
               const c10::TensorTypePtr& guard_tensor_type =
                   types[i]->cast<TensorType>();
 
