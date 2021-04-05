@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/hash.h>
 
 #include <atomic>
 #include <climits>
@@ -446,6 +447,10 @@ struct Environment {
            makeMagic(
                "__float__",
                std::make_shared<CastValue>(FloatType::get(), aten::Float))},
+          {"complex",
+           makeMagic(
+               "__complex__",
+               std::make_shared<CastValue>(ComplexType::get(), aten::Complex))},
           {"int",
            makeMagic(
                "__int__",
@@ -573,12 +578,12 @@ struct Environment {
   ValueTable value_table;
 };
 
-template <class T>
+template <class T, class Hash>
 static Value* materializeConstant(
     T val,
     Graph& graph,
     const SourceRange& r,
-    std::unordered_map<T, Value*>& map) {
+    std::unordered_map<T, Value*, Hash>& map) {
   auto existing_constant = map.find(val);
   if (existing_constant != map.end()) {
     return existing_constant->second;
@@ -665,8 +670,13 @@ struct to_ir {
   Function& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
-  std::unordered_map<int64_t, Value*> integral_constants;
-  std::unordered_map<double, Value*> fp_constants;
+  std::unordered_map<int64_t, Value*, std::hash<int64_t>> integral_constants;
+  std::unordered_map<double, Value*, std::hash<double>> fp_constants;
+  std::unordered_map<
+      c10::complex<double>,
+      Value*,
+      c10::hash<c10::complex<double>>>
+      complex_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
   LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;
@@ -1015,16 +1025,10 @@ struct to_ir {
             /*allow_conversions=*/true);
       }
       if (!actual_return_type->isSubtypeOf(declared_return_type)) {
-        // Throw if 1) we don't have a Union, or 2) the Union does not
-        // hold the actual return type.
-        if (declared_return_type->kind() != UnionType::Kind ||
-            !declared_return_type->expect<UnionType>()->can_hold_type(
-                actual_return_type)) {
-          throw ErrorReport(stmt.range())
-              << "Return value was annotated as having type "
-              << declared_return_type->repr_str() << " but is actually of type "
-              << actual_return_type->repr_str();
-        }
+        throw ErrorReport(stmt.range())
+            << "Return value was annotated as having type "
+            << declared_return_type->repr_str() << " but is actually of type "
+            << actual_return_type->repr_str();
       }
     } else {
       declared_return_type = def_stack_.back().merged_return_type_;
@@ -1142,8 +1146,8 @@ struct to_ir {
       return {};
     }
     // statement must be var {is, is not} None
-    auto name = Var(lhs).name().name();
-    // XXX - while it should in theory be possible to specialize
+    const std::string& name = Var(lhs).name().name();
+    // While it should in theory be possible to specialize
     // the `x is None` to know x has type NoneType, we have previously not
     // done this. Unfortunately, doing this will make the type None
     // propagate further in all loaded models. The handling of
@@ -1162,11 +1166,11 @@ struct to_ir {
         return RefinementSet({present}, {});
       }
     }
-    if (auto union_type = lhs_value->type()->cast<UnionType>()) {
+    if (const auto& union_type = lhs_value->type()->cast<UnionType>()) {
       std::vector<Refinement> present;
-      for (auto type : union_type->types()) {
+      for (const auto& type : union_type->types()) {
         if (type != NoneType::get()) {
-          present.push_back({name, type});
+          present.emplace_back<Refinement>({name, type});
         }
       }
       if (tok == TK_IS) {
@@ -1648,7 +1652,8 @@ struct to_ir {
         graph->createStore(x, fv)->insertBefore(false_block->return_node());
       }
 
-      auto unified = unifyTypes(tv->type(), fv->type(), true);
+      auto unified =
+          unifyTypes(tv->type(), fv->type(), /*default_to_union=*/true);
 
       // attempt to unify the types. we allow variables to be set to different
       // types in each branch as long as that variable is not already in scope,
@@ -1719,15 +1724,15 @@ struct to_ir {
         if (actual_type->kind() == AnyType::Kind) {
           return true;
         }
-        if (auto op = actual_type->cast<UnionType>()) {
+        if (const auto& op = actual_type->cast<UnionType>()) {
           return std::any_of(
               op->types().begin(),
               op->types().end(),
-              [&](TypePtr union_contained_type) {
+              [&](const TypePtr union_contained_type) {
                 return union_contained_type->kind() == kind;
               });
         }
-        if (auto op = actual_type->cast<OptionalType>()) {
+        if (const auto& op = actual_type->cast<OptionalType>()) {
           return op->getElementType()->kind() == kind;
         }
         return false;
@@ -1783,7 +1788,6 @@ struct to_ir {
         refinement = RefinementSet({isinstance}, {});
       }
     }
-
     if (gathered.staticallyTrue(val->type())) {
       return CondValue(*graph, obj.range(), true, std::move(refinement));
     }
@@ -2348,13 +2352,14 @@ struct to_ir {
   NamedValue emitValueToTensor(
       const NamedValue& value,
       const NamedValue& matchTypeOf) {
-    // Add implicit conversion of int/float/bool/number types to tensors
+    // Add implicit conversion of int/float/complex/bool/number types to tensors
     // Used in emitSubscriptAssign to convert:
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
     if (kind == c10::TypeKind::NumberType || kind == c10::TypeKind::IntType ||
-        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType) {
+        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType ||
+        kind == c10::TypeKind::ComplexType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
@@ -2396,7 +2401,7 @@ struct to_ir {
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
 
-      // rhs must be a tensor, implicitly convert int/float/bool
+      // rhs must be a tensor, implicitly convert int/float/complex/bool
       const auto convertedRhs = emitValueToTensor(rhs, slicedArg);
 
       if (tensorIndices.size() == 0) {
@@ -3738,6 +3743,9 @@ struct to_ir {
     if (c.isFloatingPoint())
       return materializeConstant(
           c.asFloatingPoint(), *graph, c.range(), fp_constants);
+    else if (c.isComplex())
+      return materializeConstant(
+          c.asComplex(), *graph, c.range(), complex_constants);
     else
       return materializeConstant(
           c.asIntegral(), *graph, c.range(), integral_constants);

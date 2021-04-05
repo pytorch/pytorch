@@ -94,9 +94,6 @@ struct ControlFlowLoadStores {
       auto true_type = true_vars->findInAnyFrame(x);
       auto false_type = false_vars->findInAnyFrame(x);
       auto unified = unifyTypes(true_type, false_type, true);
-      if (!unified) {
-        continue;
-      }
 
       addBlockOutput(true_block, true_type, x);
       addBlockOutput(false_block, false_type, x);

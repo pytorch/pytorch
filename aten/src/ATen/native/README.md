@@ -1,6 +1,5 @@
 ATen "native" functions are the modern mechanism for adding operators and
-functions to ATen (they are "native" in contrast to legacy functions, which are bound
-via TH/THC cwrap metadata).  Native functions
+functions to ATen.  Native functions
 are declared in `native_functions.yaml` and have implementations defined
 in one of the `cpp` files in this directory.
 
@@ -10,10 +9,7 @@ either as methods on `Tensor` (`t.mymeth()`) and functions in the ATen
 namespace (`at::myfunc()`).  In PyTorch, they are made available as
 methods on `Variable` or as functions on `torch._C._FunctionBase`
 (it is the user's responsibility to re-exporting these functions in
-a more user-facing module.)  At the moment, only
-functions which ingest `Variable` are made available; to use a function
-with non-differentiable tensors, wrap your tensors with `Variable` before
-passing them in.
+a more user-facing module.)
 
 The rest of this document describes how to implement an ATen function.
 
@@ -65,18 +61,16 @@ signature.
 - `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
 - `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
-- `str`
+- `str`.  It is translated into a C++ argument of type `std::string`
+  (but we should fix this, see https://github.com/pytorch/pytorch/issues/53546)
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
   floating point types, and zero dimensional tensors. `int` and `float` bind to the corresponding Python
-  numerical types. However, you probably don't want to use `Scalar`. It's really used for binding
-  to TH/THC code "real" types where the Python APIs you are binding to are actually different types.
-  `float` and `int` argument types should suffice for most algorithms.
+  numerical types. However, you probably don't want to use `Scalar`;
+  `float` and `int` argument types should suffice for most algorithms
+  (you should only use `Scalar` if the operator truly may accept either
+  type).
 - `Generator?`, the state for a random number generator,
 - `bool[N]` (where N is `1-4`).
-- `TensorOptions`.  Tensor options provide information about how a
-  tensor should be constructed; it is most useful when you are writing a
-  factory function, where you have no `Tensor` inputs and thus
-  cannot otherwise determine how to construct a `Tensor`.
 - `*` is a special sentinel argument, which doesn't translate into an actual
   argument, but indicates that in the Python bindings, any subsequent arguments
   must be specified as keyword arguments (and cannot be provided positionally).
@@ -100,21 +94,19 @@ Functions with no tensor inputs are called *factory functions*, and
 are handled specially by code generation.  If your function is behaving
 differently than another example, check first and see if one is a
 factory while another is not. In some rare cases, factory function might have a
-tensor argument. In this case mark it with 'category_override: factory'
+tensor argument. In this case mark it with `category_override: factory`
 explicitly.
 
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
-least). For more details please see the section on `variants`.
+least, and it may affect Python keyword arguments). For more details please see the section on `variants`.
 
 As a convention we use 'out' to indicate an output argument. This aligns with the
 Python bindings. Even if a function might not be used in the Python bindings, we
 still advise to follow this convention. Check the generated code when making a change
 to make sure you're not breaking the API when renaming an argument name of an
 existing function.
-
-TODO: Do argument names affect Python keyword arguments?
 
 **Defaults.** Any suffix of arguments can have a default value defined;
 these default values translate into C++/Python default values which
@@ -184,7 +176,10 @@ argument as an overload name.
 
 If you add a new overload to an existing function, please leave the existing
 overload names as they are (for backwards compatibility), but give the new
-overload a new, unique name.
+overload a new, unique name.  Although overload names are not directly
+used by the Python or C++ APIs, they are public API surface for external
+backends (who register to specific overload names) and deployed mobile
+models (which use overload names as part of the serialization format.)
 
 Not specifying an overload name is equivalent to specifying an empty overload
 name. If you add a new function with multiple overloads, give them unique
@@ -269,35 +264,56 @@ dispatch:
 
 This specifies the actual name of the function you want to dispatch to, so you
 can dispatch to different functions depending on which backend the passed tensors
-belong to.  Technically, it is also possible to write `dispatch: func_name`
-to unconditionally dispatch to a native function whose name is different than
-the name in the public ATen API, but this is generally frowned upon (just name
-them the same thing!)
+belong to.  If the dispatch table is omitted, we assume a default dispatch
+table:
+
+```
+# overload is ignored
+func: func.overload(...) -> ...
+dispatch:
+    CompositeImplicitAutograd: func
+
+# overload is ignored, but out functions get suffixed with _out in their name
+# (NB: no out functions in PyTorch today actually support autograd, but if they
+# did, you could call them here and autograd would be inferred)
+func: func.out_overload(...) -> ...
+dispatch:
+    CompositeImplicitAutograd: func_out
+```
 
 If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
 Available backend options can be found by searching `dispatch_keys` in
 [codegen](https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py).
-Among the supported backends, there're a few alias keys that maps to a set of backends:
-  - `DefaultBackend`: an alias that maps to all backends. Functions registered to
-    `DefaultBackend` should work for any backend inference.
-  - `Math`: an alias that maps to all backend and autograd backend keys. Functions
-    registered to `Math` key should be plain mathematical composition of other
-    `at::` functions and support training and inference for any backend.
+There are also two special "generic" backends:
 
-`DefaultBackend` and `Math` keys act as defaults: for example, you can specify a custom
-kernel for a particular backend using a backend-specific dispatch key, and use
-`DefaultBackend` or `Math` to specify a generic kernel for the others.
+  - `CompositeExplicitAutograd` (previously known as `DefaultBackend`):
+    implementations of kernels that work for all backends, but require an
+    explicit definition of backward function in `derivatives.yaml` to support autograd.
+    The most typical use of this key are for delegating functions; i.e.,
+    functions that do a very small amount of work and then delegate to another
+    operator to do the actual heavy lifting.  Under the hood, registering a
+    kernel to `CompositeExplicitAutograd` is equivalent to registering that
+    kernel to every backend (e.g., `CPU, CUDA`). Note: kernels which call
+    DispatchStub should NOT be registered as CompositeExplicitAutograd, as
+    DispatchStub only works for `CPU, CUDA`)
 
-Note that like those registered to `Math`, kernels registered to `DefaultBackend` are
-very often implemented as mathematical expressions built up from calls to other `at::`
-functions.  This is because in both cases, the kernel needs to delegate backend-specific
-computation to the functions it calls.  The difference between `DefaultBackend` and `Math`
-is that a `Math` kernel also implicitly defines a derivative formula: to do this, it must
-call only functions that themselves support autograd.
+  - `CompositeImplicitAutograd` (previously known as `Math`): implementations of
+    kernels that work for all backends, and also can implicitly support autograd,
+    because all of the operations it calls support autograd.  Direct use of
+    this key should be rare: if you provide no dispatch table, we default to
+    registering your kernel as `CompositeImplicitAutograd`.  Explicitly adding
+    this key to an existing dispatch table may be useful if you have specialized
+    CPU and CUDA implementations, but you might want to provide a fallback
+    lowering for external backends that may not have a specialized
+    implementation.
+
+Functions registered to composite backends should work for any backend, if the
+nested functions they call work for those backends.
 
 For example, suppose `my_op` can be implemented in the following way:
+
 ```
 at::Tensor my_op(const Tensor& self, const Tensor& other) {
   return self + 2 * other;
@@ -305,33 +321,30 @@ at::Tensor my_op(const Tensor& self, const Tensor& other) {
 ```
 
 If we already know inference kernels and derivative formulas for operators `+` and `*` in our system,
-you can just register `my_op` to `Math` and both inference & autograd will just work.
+you can just register `my_op` to `CompositeImplicitAutograd` and both inference & autograd will just work.
 Although it seems we only write down the inference formula here, PyTorch autograd system would correctly
 set up the backward for `my_op` using the chain formula and derivatives of `+` & `*` operators.
 In other words `d_out/d_self = 1; d_out/d_other = 2` can be derived automatically from
 the `my_op` inference kernel. Of course if we don't have derivative formula defined for either `+` or `*`,
 backward of `my_op` can no longer be derived automatically.
 
-Whether to use `Math` or `DefaultBackend` for your kernel can be decided by the following steps:
-1. If you can, always start with a `Math` kernel that's composable from existing operators.
-2. If you don't want to use the derived gradient formula from `Math` kernel for autograd, either to
-   get better performance or better numerical stability, you should put the kernel in `DefaultBackend`
+Whether to use implicit or explicit autograd for your kernel can be decided by the following steps:
+1. If you can, always start with a `CompositeImplicitAutograd` kernel that's composable from existing operators.
+2. If you don't want to use the derived gradient formula from `CompositeImplicitAutograd` kernel for autograd, either to
+   get better performance or better numerical stability, you should register the kernel with `CompositeExplicitAutograd`
    so that it's only used in inference.
    Later for autograd, depending on whether your autograd kernel works for all backends or not,
    you can put them in alias `Autograd` or specific keys like `AutogradCPU`.
 3. If you prefer to write backend-specific kernels, use reserved dispatch keys for your backend instead,
    e.g. `CPU/AutogradCPU`.
 
-**Important**: because a `Math` kernel is implicitly registered for ops with no `dispatch:` section,
+**Important**: because a `CompositeImplicitAutograd` kernel is implicitly registered for ops with no `dispatch:` section,
 when you add a backend-specific kernel (and hence a `dispatch:` section) to one of these, you **must** also
-add a `Math:` entry that names the old kernel implementation (it's named after the op, with _<overload name>
+add a `CompositeImplicitAutograd:` entry that names the old kernel implementation (it's named after the op, with _<overload name>
 added if applicable), so that it's still available for other backends to use.
 
 If you implemented a native function in C++ and want to find out which dispatch keyword
 should be used in native_functions.yaml, please [follow steps in dispatch keywords](#choosing-the-right-dispatch-keyword)
-
-This work is currently WIP and you can find the design proposal in
-https://github.com/pytorch/pytorch/issues/44680.
 
 ### `device_guard`
 
@@ -352,10 +365,6 @@ you're a function that simply does not interact with any devices. In
 that case, code generation of the device guard can be disabled by adding
 `device_guard: False` to your function definition.
 
-**Note.** We are considering eliminating automatic generation of DeviceGuard,
-in which case this field would go away. If you have an opinion on the
-matter, please write in at https://github.com/pytorch/pytorch/issues/14234
-
 ### `matches_jit_signature`
 
 ```
@@ -369,32 +378,6 @@ of tracking an ongoing schema unification with the goal of aligning func syntax
 with other components of PyTorch in order to reduce overall complexity.
 If you find yourself having to set this field to False add @gchanan to your PR's
 set of reviewers.
-
-### `use_c10_dispatcher`
-
-```
-use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
-```
-
-This will indicate that the operator implementation is still using a legacy operator signature.
-For any new ops, please don't set this.
-The new, non-legacy operator signature requires the operator function signature to be aligned with the
-function schema in native_functions.yaml, i.e.
-- out arguments have to be in the end of the argument list instead of in the beginning
-- TensorOptions are taken as separate arguments
-```
-  const c10::optional<ScalarType>& dtype,
-  const c10::optional<Layout>& layout,
-  const c10::optional<Device>& device,
-  const c10::optional<bool>& pin_memory
-```
-  instead of one `TensorOptions` argument
-- optional tensors are taken as `const c10::optional<Tensor>&` instead of `Tensor`
-Some of our kernels are still written in a legacy way, not doing those things,
-and need an adapter to work with the dispatcher calling convention. For those, we use
-`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` to codegenerate a corresponding
-adapter around them in the operator registration call. Over time, we will migrate all
-those kernels to the new calling convention and hacky_wrapper will die.
 
 ### `manual_kernel_registration`
 
@@ -470,19 +453,15 @@ Here're steps to follow to decide the right dispatch keyword:
     - Yes: you're likely calling other `at::` ops in the implemetation. Go to step 2.
 
 2. Think about training: does your kernel support autograd? [check autograd support](#will-your-function-be-automatically-differentiable)
-    - Yes: in other words, you're providing a `Math` kernel which supports both inference and autograd.
-      To use autograd support for training, simply skip adding a dispatch section or write
-      ```
-      dispatch:
-        Math: kernel
-      ```
-
-      You're done. This will allow this op to be correctly registered for both inference and training.
+    - Yes: in other words, you're providing a `CompositeImplicitAutograd` kernel which supports both inference and autograd.
+      To use autograd support for training, simply skip adding a dispatch
+      section and you're done. This will allow this op to be correctly
+      registered for both inference and training.
 
     - Yes, but you still want to provide a numerically stable gradient formula instead of using autograd, write
       ```
       dispatch:
-        DefaultBackend: kernel
+        CompositeExplicitAutograd: kernel
       ```
 
       You're done. This op will be called in inference for all backends.
@@ -502,7 +481,7 @@ Here're steps to follow to decide the right dispatch keyword:
       For `sign` and `sign_`, write
       ```
       dispatch:
-        DefaultBackend: kernel
+        CompositeExplicitAutograd: kernel
       ```
 
       You're done. This op will be called in inference for all backends.
@@ -518,7 +497,7 @@ It shows for a certain operator, what the computed dispatch table looks like aft
 
     ```
     dispatcher = PythonDispatcher()
-    dispatcher.register(["CPU", "XLA", "AutogradCPU", "Math"])
+    dispatcher.register(["CPU", "XLA", "AutogradCPU", "CompositeImplicitAutograd"])
     print(dispatcher.dispatchTable()) # Tells you exactly which kernel is used for certain backend.
     ```
 
@@ -526,8 +505,8 @@ It shows for a certain operator, what the computed dispatch table looks like aft
 
 Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
   - direct registration to backend always has higher precendence than alias
-  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `DefaultBackend > Math`,
-    e.g. adding both `Math` and `DefaultBackend` kernels for one op will completely ignore `Math` kernel for
+  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `CompositeExplicitAutograd > CompositeImplicitAutograd`,
+    e.g. adding both `CompositeImplicitAutograd` and `CompositeExplicitAutograd` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
     both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
 
 
@@ -541,38 +520,8 @@ name that we skip in python binding generation, e.g. `*_backward`. Check
 The generated bindings are either exposed as methods on python_variable or functions on
 the torch._C._nn (marked with `python_module: nn`),
 torch._C._fft (marked with `python_module: fft`),
-or torch._C._linalg (marked with `python_module: linalg`) objects.
-
-### Can it handle being passed Variables?
-
-The biggest subtlety of writing an ATen implementation is the fact that
-`Tensor` is not a "final" class: your implementation may be passed objects
-which inherit from `Tensor` (in particular, the `Variable` subclass
-implements automatic differentiation in PyTorch.)  This has some
-direct consequences on valid implementations:
-
-* Never create a `Tensor` directly (e.g., `at::CPU` or `at::CUDA`), as a
-  caller will be expecting to get `Variable`s out if it passes `Variable`.
-  Instead, create tensors using the `options()` of one of the input
-  tensors.  E.g., `at::empty(sizes, input.options())` or
-  `at::ones(input.options().dtype(kByte))`, if you need
-  a different scalar type.
-
-* If you need to call other ATen functions, be sure to qualify the call
-  with `at::`; don't call them unqualified (in the `at::native` namespace).
-  Using the qualified name ensures that your invocation gets dispatched to
-  the `Variable` (which may be overridden to behave differently than
-  simply dispatch to `at::native`).
-
-These are not hard and fast rules: in particular, if you explicitly define
-a derivative for a function, it will only ever be called with `Tensor`
-arguments.  However, it is considered good style to abide by these rules,
-since code written in this style is more robust.
-
-NB: There is one downside to following the `at::` qualification rule, which
-is that if you know that you will only ever be called with `Tensor`, a
-direct `at::native` call will be more efficient (as it avoids a dynamic
-dispatch).
+torch._C._linalg (marked with `python_module: linalg`) objects,
+or torch._C._special (marked with `python_module: special`) objects.
 
 ### Undefined tensor conventions
 

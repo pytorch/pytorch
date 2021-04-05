@@ -21,7 +21,8 @@ import builtins
 import torch.distributed.rpc
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
-from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
+import torch.package._mangling as package_mangling
+from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable, get_args  # noqa: F401
 
 if sys.version_info[:2] > (3, 7):
     from typing import Final
@@ -225,6 +226,12 @@ def can_compile_class(cls):
     # be compiled and is probably a builtin / bound from C
     if is_ignored_fn(cls):
         return False
+
+    # Ignore the following list of built-in classes.
+    ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
+    if issubclass(cls, ignored_builtin_classes):
+        return False
+
     names = cls.__dict__
     fns = [getattr(cls, name) for name in names if inspect.isroutine(getattr(cls, name, None))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
@@ -804,41 +811,16 @@ def is_union(ann):
             ann.__module__ == 'typing' and
             (getattr(ann, '__origin__', None) is Union))
 
-#def is_optional(ann):
-#    if ann is Optional:
-#        raise_error_container_parameter_missing("Optional")
-
-#    return (hasattr(ann, '__module__') and
-#            ann.__module__ == 'typing' and
-#            (getattr(ann, '__origin__', None) is Optional))
-
 def is_optional(ann):
     if ann is Optional:
         raise_error_container_parameter_missing("Optional")
 
-    # Optional[T] is just shorthand for Union[T, None], so check for both
-    def safe_is_subclass(the_type, super_type):
-        # Don't throw if `the_type` isn't a class type (e.g. if it is
-        # another type annotation instance)
-        if not inspect.isclass(the_type):
-            return False
-        return issubclass(the_type, super_type)
+    def _is_optional(ann):
+        return (hasattr(ann, '__module__') and
+            ann.__module__ == 'typing' and
+            (getattr(ann, '__origin__', None) is Optional))
 
-    if not hasattr(ann, '__module__'):
-        return False
-
-    union_optional = False
-    if ann.__module__ == 'typing' and \
-       (getattr(ann, '__origin__', None) is Union):
-        args = getattr(ann, '__args__', ())
-        if len(args) == 2:
-            union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
-                or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
-
-    optional = ann.__module__ == 'typing' and \
-        (getattr(ann, '__origin__', None) is Optional)
-
-    return optional or union_optional
+    return _is_optional(ann) or (is_union(ann) and None in get_args(ann))
 
 def is_future(ann):
     if ann is Future:
@@ -891,7 +873,7 @@ def is_scripting():
             return x
 
         def linear(x):
-           if not torch.jit.is_scripting():
+           if torch.jit.is_scripting():
               return torch.linear(x)
            else:
               return unsupported_linear_op(x)
@@ -941,6 +923,11 @@ def _qualified_name(obj):
     # if getattr(sys.modules[module_name], name) is not obj:
     #     raise RuntimeError(f"Could not get qualified name for class '{name}': "
     #                        f"the attr {name} on module {module_name} is not the the class")
+
+    # torch.package and TorchScript have separate mangling schemes to avoid
+    # name collisions from multiple packages. To avoid them interfering with
+    # each other, remove the package mangling here.
+    module_name = package_mangling.demangle(module_name)
 
     # __main__ is a builtin module, so rewrite it to "__torch__".
     if module_name == "__main__":

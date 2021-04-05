@@ -2413,11 +2413,16 @@ class TestQuantizedOps(TestCase):
 
         qengine = torch.backends.quantized.engine
 
+        min_power = 30
+        max_mse = 2
+
         num_heads = 16
         batch_size = 4
         target_seq_length = 128
         source_seq_length = 64
-        embed_dim = 512  # Must be divisible by the number of heads
+        qembed_dim = 512  # Must be divisible by the number of heads
+        kembed_dim = 128
+        vembed_dim = 256
 
         dropout = 0  # This is not supported
 
@@ -2437,68 +2442,67 @@ class TestQuantizedOps(TestCase):
             }
         }
 
-        fp_data = [
-            torch.randn(target_seq_length, batch_size, embed_dim),  # Q
-            torch.randn(source_seq_length, batch_size, embed_dim),  # K
-            torch.randn(source_seq_length, batch_size, embed_dim)   # V
-        ]
+        for kdim, vdim in ((kembed_dim, vembed_dim), (None, None)):
+            fp_data = [
+                torch.randn(target_seq_length, batch_size, qembed_dim),  # Q
+                torch.randn(source_seq_length, batch_size,
+                            qembed_dim if kdim is None else kembed_dim),  # K
+                torch.randn(source_seq_length, batch_size,
+                            qembed_dim if vdim is None else vembed_dim)   # V
+            ]
 
-        q_data = []
-        reduce_range = (qengine == 'fbgemm')
-        for idx, x in enumerate(fp_data):
-            scale, zero_point = _calculate_dynamic_qparams(x, dtype=dtype, reduce_range=reduce_range)
-            x = x.to(torch.float)
-            qx = torch.quantize_per_tensor(x, scale=scale,
-                                           zero_point=zero_point, dtype=qtype)
-            q_data.append(qx)
+            q_data = []
+            reduce_range = (qengine == 'fbgemm')
+            for idx, x in enumerate(fp_data):
+                scale, zero_point = _calculate_dynamic_qparams(
+                    x, dtype=dtype, reduce_range=reduce_range)
+                x = x.to(torch.float)
+                qx = torch.quantize_per_tensor(x, scale=scale,
+                                               zero_point=zero_point, dtype=qtype)
+                q_data.append(qx)
 
-            # Dequantize the data back for reference
-            fp_data[idx] = qx.dequantize()
+                # Dequantize the data back for reference
+                fp_data[idx] = qx.dequantize()
 
-        # TODO: need to investigate why resetting the bias reduces SNR
-        #       https://github.com/pytorch/pytorch/issues/51662
-        min_power = 30
-        max_mse = 2
+            with torch.no_grad():
+                for bias, add_bias_kv, add_zero_attn in itertools.product(
+                        Bias, Add_bias_kv, Add_zero_attn):
+                    mha = MultiheadAttentionModel(qembed_dim, num_heads, dropout,
+                                                  bias, add_bias_kv, add_zero_attn,
+                                                  kdim=kdim, vdim=vdim)
+                    mha.eval()
 
+                    # Prepare
+                    mha.qconfig = torch.quantization.get_default_qconfig(qengine)
+                    mha_prepared = torch.quantization.prepare(
+                        mha, prepare_custom_config_dict=custom_module_config)
 
-        with torch.no_grad():
-            for bias, add_bias_kv, add_zero_attn in itertools.product(
-                    Bias, Add_bias_kv, Add_zero_attn):
-                mha = MultiheadAttentionModel(embed_dim, num_heads, dropout,
-                                              bias, add_bias_kv, add_zero_attn)
-                mha.eval()
+                    # Calibrate
+                    y = mha_prepared(*fp_data)
+                    y_ref = mha(*fp_data)
+                    # Check the result of the prepare
+                    self.assertEqual(y_ref[0], y[0])  # Attention
+                    self.assertEqual(y_ref[1], y[1])  # Weight
 
-                # Prepare
-                mha.qconfig = torch.quantization.get_default_qconfig(qengine)
-                mha_prepared = torch.quantization.prepare(
-                    mha, prepare_custom_config_dict=custom_module_config)
+                    # Quantize
+                    mha_quantized = torch.quantization.convert(
+                        mha_prepared,
+                        convert_custom_config_dict=custom_module_config)
+                    qy = mha_quantized(*q_data)
 
-                # Calibrate
-                y = mha_prepared(*fp_data)
-                y_ref = mha(*fp_data)
-                # Check the result of the prepare
-                self.assertEqual(y_ref[0], y[0])  # Attention
-                self.assertEqual(y_ref[1], y[1])  # Weight
+                    # Reference result
+                    mha.layer = mha_quantized.layer.dequantize()
+                    y_ref = mha(*fp_data)
 
-                # Quantize
-                mha_quantized = torch.quantization.convert(
-                    mha_prepared,
-                    convert_custom_config_dict=custom_module_config)
-                qy = mha_quantized(*q_data)
-
-                # Reference result
-                mha.layer = mha_quantized.layer.dequantize()
-                y_ref = mha(*fp_data)
-
-                snr = _snr(y, qy)
-                for signal, mse, power in snr:
-                    self.assertTrue(
-                        power > min_power or mse < max_mse,
-                        msg=(f"Error is too high: SNR(dB): {power}, "
-                             f"Signal: {signal}, MSE: {mse}; "
-                             f"Run with bias={bias}, "
-                             f"add_bias_kv={add_bias_kv}, "
-                             f"add_zero_attn={add_zero_attn}"))
+                    snr = _snr(y, qy)
+                    for signal, mse, power in snr:
+                        self.assertTrue(
+                            power > min_power or mse < max_mse,
+                            msg=(f"Error is too high: SNR(dB): {power}, "
+                                 f"Signal: {signal}, MSE: {mse}; "
+                                 f"Run with bias={bias}, "
+                                 f"add_bias_kv={add_bias_kv}, "
+                                 f"add_zero_attn={add_zero_attn}"))
 
 
 class TestDynamicQuantizedLinear(TestCase):

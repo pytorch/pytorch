@@ -10,8 +10,8 @@ from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingLi
 from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
-    ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, StreamObjType, FutureType, EnumType, UnionType
+    ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
+    NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType
 
 
 from textwrap import dedent
@@ -327,7 +327,7 @@ def try_ann_to_type(ann, loc):
     if ann is type(None):
         return NoneType.get()
     if inspect.isclass(ann) and hasattr(ann, "__torch_script_interface__"):
-        return InterfaceType(_qualified_name(ann))
+        return InterfaceType(ann.__torch_script_interface__)
     if ann is torch.device:
         return DeviceObjType.get()
     if ann is torch.Stream:
@@ -335,18 +335,18 @@ def try_ann_to_type(ann, loc):
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
-        qualified_name = _qualified_name(ann)
-        if _get_script_class(qualified_name) is None:
-            torch.jit._script._recursive_compile_class(ann, loc)
-        return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc), list(ann))
+        if _get_script_class(ann) is None:
+            scripted_class = torch.jit._script._recursive_compile_class(ann, loc)
+            name = scripted_class.qualified_name()
+        else:
+            name = _qualified_name(ann)
+        return EnumType(name, get_enum_value_type(ann, loc), list(ann))
     if inspect.isclass(ann):
-        qualified_name = _qualified_name(ann)
-        if _get_script_class(qualified_name) is not None:
-            return ClassType(qualified_name)
-        ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
-        if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
-            torch.jit._script._recursive_compile_class(ann, loc)
-            return ClassType(qualified_name)
+        maybe_script_class = _get_script_class(ann)
+        if maybe_script_class is not None:
+            return maybe_script_class
+        if torch._jit_internal.can_compile_class(ann):
+            return torch.jit._script._recursive_compile_class(ann, loc)
 
     # Maybe resolve a NamedTuple to a Tuple Type
     def fake_rcb(key):
@@ -373,7 +373,7 @@ __all__ = [
     'Dict',
     'is_dict',
     'is_optional',
-    'is_union'
+    'is_union',
     'TensorType',
     'TupleType',
     'FloatType',

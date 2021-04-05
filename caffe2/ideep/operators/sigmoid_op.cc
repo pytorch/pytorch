@@ -25,7 +25,7 @@ class IDEEPSigmoidOp final : public IDEEPOperator {
   }
 
  private:
-  
+
   INPUT_TAGS(INPUT);
   OUTPUT_TAGS(OUTPUT);
 };

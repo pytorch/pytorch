@@ -3,6 +3,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/function.h>
 #include <iostream>
@@ -757,6 +758,16 @@ void flatten_union(TypePtr& type, std::vector<TypePtr>& res) {
       flatten_union(inner_type, res);
     }
   }
+  else if (type->kind() == OptionalType::Kind) {
+    auto inner_type = type->expect<OptionalType>()->getElementType();
+    if (inner_type->kind() == UnionType::Kind) {
+      flatten_union(inner_type, res);
+    }
+    else {
+      res.emplace_back(inner_type);
+    }
+    res.emplace_back(NoneType::get());
+  }
   else {
     res.emplace_back(type);
   }
@@ -783,6 +794,13 @@ UnionType::UnionType(std::vector<TypePtr> types) :
 
 bool UnionType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
   if (auto union_rhs = rhs_->cast<UnionType>()) {
+    // Fast path: The Union `types` vector is always sorted, so we can
+    // do an O(n) linear comparison of both vectors
+    if (this->types() == union_rhs->types()) {
+      return true;
+    }
+    // Final O(n^2) check since the vector comparison will falsely
+    // flag subtypes as not equal
     return std::all_of(this->types_.begin(), this->types_.end(),
       [&](TypePtr this_type) -> bool {
         return union_rhs->can_hold_type(this_type);
@@ -796,28 +814,41 @@ bool UnionType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
   }
-  if (rhs_->kind() == AnyTupleType::Kind) {
-    return true;
-  }
   return false;
 }
 
 std::string UnionType::str() const {
   std::stringstream ss;
-  ss << "Union(";
+  ss << "Union[";
   for (size_t i = 0; i < types().size(); ++i) {
-    if (i > 0)
+    if (i > 0) {
       ss << ", ";
-    if (types_[i] != NoneType::get()) {
-      ss << types()[i]->str();
     }
+    ss << types()[i]->str();
   }
-  ss << ")";
-  if (can_hold_none_) {
-    ss << "?";
-  }
+  ss << "]";
   return ss.str();
 }
+
+  // Check if a given TypePtr is an allowable member of this Union
+  bool UnionType::can_hold_type(TypePtr& type) const {
+    // Fast path for `NoneType`
+    if (type == NoneType::get()) {
+      return can_hold_none_;
+    }
+    return std::any_of(types_.begin(), types_.end(), [&](TypePtr union_contained_type){
+      return type->isSubtypeOf(union_contained_type);
+    });
+  }
+
+  bool UnionType::can_hold_type(const TypePtr& type) const {
+    if (type == NoneType::get()) {
+      return can_hold_none_;
+    }
+    return std::any_of(types_.begin(), types_.end(), [&](TypePtr union_contained_type){
+      return type->isSubtypeOf(union_contained_type);
+    });
+  }
 
 TupleType::TupleType(
     std::vector<TypePtr> elements,
@@ -1179,7 +1210,7 @@ torch::jit::Function* ClassType::findForwardHook(const std::string& name) const 
 std::string getSchemaInputTypesString(const FunctionSchema& schema) {
   std::stringstream input_types;
   const std::vector<Argument>& forward_args = schema.arguments();
-  for (int i = 1; i < forward_args.size(); ++i) {
+  for (const auto i : c10::irange(1, forward_args.size())) {
     input_types << forward_args[i].type()->annotation_str();
     if (forward_args.size() - 1 != i) {
       input_types << ", ";
@@ -1285,7 +1316,7 @@ void checkForwardHookInputArguments(
         hook_err_msg
     );
 
-    for (int i = 1; i < forward_args.size(); ++i) {
+    for (const auto i : c10::irange(1, forward_args.size())) {
       if (*forward_args[i].type() != *input_tuple_types[i - 1]) {
         TORCH_CHECK(
             false,
@@ -1385,7 +1416,7 @@ void ClassType::checkForwardPreHookSchema(
       pre_hook_err_msg
   );
   // check that contained types match forward types
-  for (int i = 1; i < forward_args.size(); ++i) {
+  for (const auto i : c10::irange(1, forward_args.size())) {
     if (*forward_args[i].type() != *return_tuple_types[i - 1]) {
       TORCH_CHECK(
           false,

@@ -5,4 +5,4 @@
 #   .jenkins/run-shellcheck.sh --color=always | less -R
 
 
-find .jenkins/pytorch -name *.sh | xargs shellcheck --external-sources "$@"
+find .jenkins/pytorch -name '*.sh' -print0 | xargs -0 -n1 shellcheck --external-sources

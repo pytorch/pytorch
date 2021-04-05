@@ -27,6 +27,7 @@ try:
         prepare_qat_fx,
         convert_fx,
     )
+    from torch.quantization.ns.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
     from torch.fx import GraphModule
     HAS_FX = True
@@ -610,7 +611,7 @@ class QuantizationTestCase(TestCase):
 
         def assert_types_for_matched_subgraph_pairs(
             self,
-            matched_subgraph_pairs: Dict[str, Tuple[Tuple[Node, Node], Tuple[Node, Node]]],
+            matched_subgraph_pairs: Dict[str, Tuple[NSSubgraph, NSSubgraph]],
             expected_types: Dict[str, Tuple[Tuple[Callable, Callable], Tuple[Callable, Callable]]],
             gm_a: GraphModule,
             gm_b: GraphModule,
@@ -645,14 +646,12 @@ class QuantizationTestCase(TestCase):
                 expected_types_a, expected_types_b = v
                 exp_type_start_a, exp_type_end_a = expected_types_a
                 exp_type_start_b, exp_type_end_b = expected_types_b
-                nodes_a, nodes_b = matched_subgraph_pairs[k]
-                node_start_a, node_end_a = nodes_a
-                node_start_b, node_end_b = nodes_b
+                subgraph_a, subgraph_b = matched_subgraph_pairs[k]
 
-                act_type_start_a = _get_underlying_op_type(node_start_a, gm_a)
-                act_type_start_b = _get_underlying_op_type(node_start_b, gm_b)
-                act_type_end_a = _get_underlying_op_type(node_end_a, gm_a)
-                act_type_end_b = _get_underlying_op_type(node_end_b, gm_b)
+                act_type_start_a = _get_underlying_op_type(subgraph_a.start_node, gm_a)
+                act_type_start_b = _get_underlying_op_type(subgraph_b.start_node, gm_b)
+                act_type_end_a = _get_underlying_op_type(subgraph_a.end_node, gm_a)
+                act_type_end_b = _get_underlying_op_type(subgraph_b.end_node, gm_b)
                 types_match = (exp_type_start_a is act_type_start_a) and \
                     (exp_type_end_a is act_type_end_a) and \
                     (exp_type_start_b is act_type_start_b) and \
@@ -674,23 +673,49 @@ class QuantizationTestCase(TestCase):
             2. number of seen tensors match
             3. shapes of each pair of seen tensors match
             """
-            for layer_name, layer_data in act_compare_dict.items():
-                self.assertTrue(
-                    len(layer_data) == 2,
-                    f"Layer {layer_name} does not have exactly two model results.")
-                model_name_0, model_name_1 = layer_data.keys()
-                self.assertTrue(
-                    layer_data[model_name_0]['type'] == layer_data[model_name_1]['type'],
-                    f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same type.")
-                self.assertTrue(
-                    len(layer_data[model_name_0]['values']) ==
-                    len(layer_data[model_name_1]['values']),
-                    f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same number of seen Tensors.")
-                for idx in range(len(layer_data[model_name_0]['values'])):
+            for layer_name, result_type_to_data in act_compare_dict.items():
+                for result_type, layer_data in result_type_to_data.items():
                     self.assertTrue(
-                        layer_data[model_name_0]['values'][idx].shape ==
-                        layer_data[model_name_1]['values'][idx].shape,
-                        f"Layer {layer_name}, {model_name_0} and {model_name_1} have a shape mismatch at idx {idx}.")
+                        len(layer_data) == 2,
+                        f"Layer {layer_name} does not have exactly two model results.")
+                    model_name_0, model_name_1 = layer_data.keys()
+                    for res_idx in range(len(layer_data[model_name_0])):
+                        layer_data_0 = layer_data[model_name_0][res_idx]
+                        layer_data_1 = layer_data[model_name_1][res_idx]
+                        self.assertTrue(
+                            layer_data_0['type'] == layer_data_0['type'],
+                            f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same type.")
+                        self.assertTrue(
+                            len(layer_data_0['values']) ==
+                            len(layer_data_1['values']),
+                            f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same number of seen Tensors.")
+                        for idx in range(len(layer_data_0['values'])):
+                            values_0 = layer_data_0['values'][idx]
+                            values_1 = layer_data_1['values'][idx]
+                            if isinstance(values_0, torch.Tensor):
+                                self.assertTrue(
+                                    values_0.shape == values_1.shape,
+                                    f"Layer {layer_name}, {model_name_0} and {model_name_1} have a shape mismatch at idx {idx}.")
+                            else:
+                                assert isinstance(values_0, tuple), \
+                                    f"unhandled type {type(values_0)}"
+                                assert len(values_0) == 2
+                                assert len(values_0[1]) == 2
+                                assert values_0[0].shape == values_1[0].shape
+                                assert values_0[1][0].shape == values_1[1][0].shape
+                                assert values_0[1][1].shape == values_1[1][1].shape
+
+                        # verify that ref_node_name is valid
+                        ref_node_name_0 = layer_data_0['ref_node_name']
+                        ref_node_name_1 = layer_data_1['ref_node_name']
+                        prev_node_name_0 = layer_data_0['prev_node_name']
+                        prev_node_name_1 = layer_data_1['prev_node_name']
+                        if layer_data_0['type'] == NSSingleResultValuesType.NODE_OUTPUT.value:
+                            self.assertTrue(ref_node_name_0 == prev_node_name_0)
+                            self.assertTrue(ref_node_name_1 == prev_node_name_1)
+                        elif layer_data_0['type'] == NSSingleResultValuesType.NODE_INPUT.value:
+                            self.assertTrue(ref_node_name_0 != prev_node_name_0)
+                            self.assertTrue(ref_node_name_1 != prev_node_name_1)
 
         def checkGraphModeFxOp(self, model, inputs, quant_type,
                                expected_node=None,
@@ -698,7 +723,7 @@ class QuantizationTestCase(TestCase):
                                expected_node_list=None,
                                is_reference=False,
                                print_debug_info=False,
-                               custom_qconfig=None,
+                               custom_qconfig_dict=None,
                                prepare_expected_node=None,
                                prepare_expected_node_occurrence=None,
                                prepare_expected_node_list=None,
@@ -723,7 +748,7 @@ class QuantizationTestCase(TestCase):
                                 NodeSpec.call_method('dequantize')]
                     is_reference: if True, enables reference mode
                     print_debug_info: if True, prints debug info
-                    custom_qconfig: overrides default qconfig
+                    custom_qconfig_dict: overrides default qconfig_dict
                     prepare_expected_node: same as expected_node, but for prepare
                     prepare_expected_node_occurrence: same as
                         expected_node_occurrence, but for prepare
@@ -744,16 +769,15 @@ class QuantizationTestCase(TestCase):
                 qconfig = default_dynamic_qconfig
                 model.eval()
 
-            # overwrite qconfig with custom_qconfig
-            if custom_qconfig is not None:
-                qconfig = custom_qconfig
-
             if quant_type == QuantType.QAT:
                 prepare = prepare_qat_fx
             else:
                 prepare = prepare_fx
 
-            qconfig_dict = {'': qconfig}
+            qconfig_dict = {"": qconfig}
+            # overwrite qconfig_dict with custom_qconfig_dict
+            if custom_qconfig_dict is not None:
+                qconfig_dict = custom_qconfig_dict
             prepared = prepare(
                 model, qconfig_dict,
                 prepare_custom_config_dict=prepare_custom_config_dict)

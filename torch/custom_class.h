@@ -220,7 +220,7 @@ class class_ {
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualMethodName,
+        std::move(qualMethodName),
         std::move(schema),
         std::move(wrapped_func),
         std::move(doc_string));
@@ -230,12 +230,77 @@ class class_ {
     return *this;
   }
 
+  /// Property registration API for properties with both getter and setter
+  /// functions.
+  template <typename GetterFunc, typename SetterFunc>
+  class_& def_property(
+      const std::string& name,
+      GetterFunc getter_func,
+      SetterFunc setter_func,
+      std::string doc_string = "") {
+    torch::jit::Function* getter;
+    torch::jit::Function* setter;
+
+    auto wrapped_getter =
+        detail::wrap_func<CurClass, GetterFunc>(std::move(getter_func));
+    getter = defineMethod(name + "_getter", wrapped_getter, doc_string);
+
+    auto wrapped_setter =
+        detail::wrap_func<CurClass, SetterFunc>(std::move(setter_func));
+    setter = defineMethod(name + "_setter", wrapped_setter, doc_string);
+
+    classTypePtr->addProperty(name, getter, setter);
+    return *this;
+  }
+
+  /// Property registration API for properties with only getter function.
+  template <typename GetterFunc>
+  class_& def_property(
+      const std::string& name,
+      GetterFunc getter_func,
+      std::string doc_string = "") {
+    torch::jit::Function* getter;
+
+    auto wrapped_getter =
+        detail::wrap_func<CurClass, GetterFunc>(std::move(getter_func));
+    getter = defineMethod(name + "_getter", wrapped_getter, doc_string);
+
+    classTypePtr->addProperty(name, getter, nullptr);
+    return *this;
+  }
+
+  /// Property registration API for properties with read-write access.
+  template <typename T>
+  class_& def_readwrite(const std::string& name, T CurClass::*field) {
+    auto getter_func =
+        [field = std::move(field)](const c10::intrusive_ptr<CurClass>& self) {
+          return self.get()->*field;
+        };
+
+    auto setter_func = [field = std::move(field)](
+                           const c10::intrusive_ptr<CurClass>& self, T value) {
+      self.get()->*field = value;
+    };
+
+    return def_property(name, getter_func, setter_func);
+  }
+
+  /// Property registration API for properties with read-only access.
+  template <typename T>
+  class_& def_readonly(const std::string& name, T CurClass::*field) {
+    auto getter_func =
+        [field = std::move(field)](const c10::intrusive_ptr<CurClass>& self) {
+          return self.get()->*field;
+        };
+
+    return def_property(name, getter_func);
+  }
+
   /// This is an unsafe method registration API added for adding custom JIT backend support via custom
   /// C++ classes. It is not for general purpose use.
   class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
-    auto qualMethodName = qualClassName + "." + name;
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualMethodName, std::move(schema), std::move(func), std::move(doc_string));
+        qualClassName + "." + name, std::move(schema), std::move(func), std::move(doc_string));
     classTypePtr->addMethod(method.get());
     registerCustomClassMethod(std::move(method));
     return *this;
@@ -340,7 +405,7 @@ class class_ {
 
  private:
   template <typename Func>
-  void defineMethod(
+  torch::jit::Function* defineMethod(
       std::string name,
       Func func,
       std::string doc_string = "",
@@ -397,8 +462,10 @@ class class_ {
     // ClassTypes do not hold ownership of their methods (normally it
     // those are held by the CompilationUnit), so we need a proxy for
     // that behavior here.
-    classTypePtr->addMethod(method.get());
+    auto method_val = method.get();
+    classTypePtr->addMethod(method_val);
     registerCustomClassMethod(std::move(method));
+    return method_val;
   }
 
   std::string qualClassName;

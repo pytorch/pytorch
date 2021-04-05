@@ -1,10 +1,10 @@
 import os
-import re
 import sys
 
 import torch
+from torch.testing import FileCheck
 from enum import Enum
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -75,8 +75,9 @@ class TestUnion(JitTestCase):
         scripted = torch.jit.script(fn)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a member of"
-                            r" Union\[str, __torch__.jit.test_union."
-                            r"Color\] but instead found type int"):
+                                    r" Union\[str, __torch__.jit.test"
+                                    r"_union.Color\] but instead found "
+                                    "type int"):
             scripted(1)
 
     def test_union_in_class_constructor(self):
@@ -95,8 +96,8 @@ class TestUnion(JitTestCase):
         scripted = torch.jit.script(fn)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a member of"
-                    r" Union\[str, int\] but instead found type "
-                    r"List\[str\]"):
+                                    r" Union\[str, int\] but instead "
+                                    r"found type List\[str\]"):
             scripted(["foo", "bar", "baz"])
 
     def test_union_return_type(self):
@@ -192,36 +193,33 @@ class TestUnion(JitTestCase):
 
     def test_unions_of_unions_are_flattened(self):
         @torch.jit.script
-        def fn_with_union(x: Union[int, str, float]) -> str:
+        def fn(x: Union[Union[int, str], float]) -> str:
             return "foo"
 
-        @torch.jit.script
-        def fn_with_nested_union(x: Union[Union[int, str], float]) -> str:
-            return "foo"
+        s = fn.graph
 
-        self.assertEqual(fn_with_union(1), fn_with_nested_union(1))
+        FileCheck().check("x : Union[str, int, float]")     \
+                   .run(s)
 
     def test_unions_of_a_single_argument_vanish(self):
         @torch.jit.script
-        def fn_with_int(x: int) -> str:
+        def fn(x: Union[int]) -> str:
             return "foo"
 
-        @torch.jit.script
-        def fn_with_union_of_int(x: Union[int]) -> str:
-            return "foo"
+        s = fn.graph
 
-        self.assertEqual(fn_with_int(1), fn_with_union_of_int(1))
+        FileCheck().check("x : int")     \
+                   .run(s)
 
     def test_union_redundant_arguments_are_skipped(self):
         @torch.jit.script
-        def fn(x: Union[int, str]) -> str:
+        def fn(x: Union[int, str, int]) -> str:
             return "foo"
 
-        @torch.jit.script
-        def redundant_fn(x: Union[int, str, int]) -> str:
-            return "foo"
+        s = fn.graph
 
-        self.assertEqual(fn(1), redundant_fn(1))
+        FileCheck().check("x : Union[str, int]")     \
+                   .run(s)
 
     def test_union_argument_order_is_ignored(self):
         @torch.jit.script
@@ -235,10 +233,47 @@ class TestUnion(JitTestCase):
         self.assertEqual(fn1(1), fn2(1))
 
     def test_union_T_None_is_equivalent_to_optional_T(self):
-        def fn(x: Union[int, None]) -> str:
-            return "foo"
+        @torch.jit.script
+        def inner(x: Union[int, None]) -> int:
+            if x is not None:
+                return x
+            else:
+                return 5
 
-        self.checkScript(fn, (1,))
+        @torch.jit.script
+        def fn1() -> int:
+            a: Optional[int] = 5
+            b: Optional[int] = None
+            a_ = inner(a)
+            b_ = inner(b)
+            return a_ + b_
+
+        self.assertEqual(fn1(), 10)
+
+        @torch.jit.script
+        def inner2(x: Optional[int]) -> int:
+            if x is not None:
+                return x
+            else:
+                return 5
+
+        @torch.jit.script
+        def fn2() -> int:
+            a: Union[int, None] = 5
+            b: Union[int, None] = None
+            a_ = inner(a)
+            b_ = inner(b)
+            return a_ + b_
+
+        self.assertEqual(fn2(), 10)
+
+    def test_optional_of_union_is_flattened(self):
+        def fn() -> Union[int, str, None]:
+            x: Optional[Union[int, str]] = "foo"
+            y: Union[int, str, None] = x
+            return y
+
+        self.checkScript(fn, ())
 
     def test_union_subclasses_larger_union(self):
         def fn() -> Union[int, str, torch.Tensor]:
@@ -247,7 +282,7 @@ class TestUnion(JitTestCase):
 
         self.checkScript(fn, ())
 
-    def test_union_with_type_coalescing(self):
+    def test_union_with_dynamic_type_refinement(self):
         def fn(x: Union[List[int], int]) -> int:
             lst = [1, 2, 3]
             if isinstance(x, int):
@@ -256,6 +291,15 @@ class TestUnion(JitTestCase):
 
         self.checkScript(fn, (1,))
         self.checkScript(fn, ([4, 5, 6],))
+
+    def test_union_with_static_type_refinement(self):
+        def fn():
+            x: List[torch.Tensor] = []
+            if torch.jit.isinstance(x, List[torch.Tensor]):
+                x.append(torch.tensor(3))
+            return x
+
+        self.checkScript(fn, ())
 
     def test_union_as_dict_key(self):
         def fn():
@@ -334,12 +378,32 @@ class TestUnion(JitTestCase):
 
         self.checkModule(M(1), ("foo",))
 
+    def test_union_subtractive_refinement(self):
+        def fn(x: Union[List[int], int]):
+            if not isinstance(x, int):
+                x.append(1)
+                return x[0]
+            else:
+                return x
+
+        self.checkScript(fn, (1,))
+        self.checkScript(fn, ([1, 2, 3],))
+
+    def test_union_subtractive_refinement_with_container(self):
+        def fn(x: Union[List[int], int]):
+            if not torch.jit.isinstance(x, List[int]):
+                return x
+            else:
+                x.append(1)
+                return x[0]
+
+        self.checkScript(fn, (1,))
+        self.checkScript(fn, ([1, 2, 3],))
+
     # TODO: The following tests cannot be implemented because they rely
     # on constructs that are not yet implemented in TorchScript:
     #   - Union accepts child classes in place of parent classes
     #     (relies on polymorphism)
     #   - Union accepts aliased types (relies on aliased types)
-    #   - IN-DEPTH Union subtyping (TorchScript has a fairly flat type
-    #     hierarchy so far)
     #   - hasattr behavior (doesn't work for any type in TorchScript
     #     right now; filed a bug report)

@@ -418,7 +418,8 @@ def prepare_qat_fx(
 def _convert_fx(
         graph_module: GraphModule, is_reference: bool,
         convert_custom_config_dict: Dict[str, Any] = None,
-        is_standalone_module: bool = False) -> QuantizedGraphModule:
+        is_standalone_module: bool = False,
+        _remove_qconfig: bool = True) -> QuantizedGraphModule:
     """ `is_standalone_module`: see docs in :func:`~torch.quantization.prepare_standalone_module_fx`
     """
     if convert_custom_config_dict is None:
@@ -427,7 +428,8 @@ def _convert_fx(
     _check_is_graph_module(graph_module)
 
     quantizer = Quantizer()
-    quantized = quantizer.convert(graph_module, is_reference, convert_custom_config_dict, is_standalone_module)
+    quantized = quantizer.convert(graph_module, is_reference, convert_custom_config_dict,
+                                  is_standalone_module, _remove_qconfig=_remove_qconfig)
 
     preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
     for attr_name in preserved_attributes:
@@ -436,7 +438,8 @@ def _convert_fx(
 
 def convert_fx(
         graph_module: GraphModule, is_reference: bool = False,
-        convert_custom_config_dict: Dict[str, Any] = None) -> QuantizedGraphModule:
+        convert_custom_config_dict: Dict[str, Any] = None,
+        _remove_qconfig: bool = True) -> QuantizedGraphModule:
     r""" Convert a calibrated or trained model to a quantized model
     Args:
         `graph_module`: A prepared and calibrated/trained model (GraphModule)
@@ -480,6 +483,7 @@ def convert_fx(
           # not used in the code
           "preserved_attributes": ["preserved_attr"],
         }
+        `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
 
     Return:
         A quantized model (GraphModule)
@@ -491,7 +495,7 @@ def convert_fx(
     ```
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_fx")
-    return _convert_fx(graph_module, is_reference, convert_custom_config_dict)
+    return _convert_fx(graph_module, is_reference, convert_custom_config_dict, _remove_qconfig=_remove_qconfig)
 
 def _convert_standalone_module_fx(
         graph_module: GraphModule, is_reference: bool = False,
