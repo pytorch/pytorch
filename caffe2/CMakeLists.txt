@@ -185,7 +185,7 @@ if(BUILD_SPLIT_CUDA)
   endforeach()
 
   foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
-    if("${tmp}" MATCHES ".*aten.*\\.cu")
+    if("${tmp}" MATCHES ".*aten.*\\.cu" AND NOT "${tmp}" MATCHES ".*TensorFactories.*")
       list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY_CU ${tmp})
     else()
       list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP ${tmp})
