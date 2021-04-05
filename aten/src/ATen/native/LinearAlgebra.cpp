@@ -960,7 +960,7 @@ static void addbmm_impl_(
   TORCH_CHECK(self.size(0) == dim1 && self.size(1) == dim2,
       "self tensor does not match matmul output shape");
 
-  at::native::resize_output(result, self.sizes());
+  result.resize_as_(self);
 
   if (beta.to<c10::complex<double>>() != 0.0 && !self.is_same(result)) {
     result.copy_(self);
@@ -1027,7 +1027,7 @@ Tensor &addmm_cpu_(Tensor& self, const Tensor& mat1, const Tensor& mat2, const S
 Tensor& mm_cpu_out(const Tensor & self, const Tensor & mat2, Tensor & result) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
-  at::native::resize_output(result, {self.sizes()[0], mat2.sizes()[1]});
+  native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
   return addmm_cpu_out(result, self, mat2, 0, 1, result);
 }
 
@@ -1122,7 +1122,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
 
   if (is_bmm_out) {
     // Here it is result
-    at::native::resize_output(self_or_result, {bs, res_rows, res_cols});
+    self_or_result.resize_({bs, res_rows, res_cols});
   } else {
     const auto self_sizes = self_or_result.sizes();
     TORCH_CHECK(self_sizes[0] == bs && self_sizes[1] == res_rows && self_sizes[2] == res_cols);
@@ -1189,7 +1189,7 @@ Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch
 Tensor& baddbmm_out_cpu(const Tensor& self_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
   Tensor self;
   std::tie(self) = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
-  at::native::resize_output(result, self.sizes());
+  result.resize_(self.sizes());
   result.copy_(self);
   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha);
 }

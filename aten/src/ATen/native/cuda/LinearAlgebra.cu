@@ -194,7 +194,7 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
   TORCH_CHECK(batch1_sizes[2] == batch2_sizes[1], "batch1 dim 2 must match batch2 dim 1");
 
   if (!result.is_same(self)) {
-    at::native::resize_output(result, self.sizes());
+    result.resize_as_(self);
     if (beta.to<c10::complex<double>>() != 0.0) {
       result.copy_(self);
     }
@@ -271,7 +271,7 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
 } // anonymous namespace
 
 Tensor& mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
-  at::native::resize_output(result, { self.size(0), mat2.size(1) });
+  result.resize_({ self.size(0), mat2.size(1) });
   return addmm_out_cuda_impl(result, result, self, mat2, 0, 1);
 }
 
@@ -331,7 +331,7 @@ Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, 
 }
 
 Tensor& bmm_out_cuda(const Tensor& batch1, const Tensor& batch2, Tensor &result) {
-  at::native::resize_output(result, { batch1.size(0), batch1.size(1), batch2.size(2) });
+  result.resize_({ batch1.size(0), batch1.size(1), batch2.size(2) });
   Scalar beta(0.0);
   Scalar alpha(1.0);
   {

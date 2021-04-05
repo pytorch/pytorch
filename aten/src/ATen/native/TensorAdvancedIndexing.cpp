@@ -1183,7 +1183,7 @@ void take_out_cpu_template(
             "But got different types: ", output.scalar_type(), " and ", input.scalar_type());
     TORCH_CHECK(index.scalar_type() == kLong, "index must be an int64 tensor");
 
-    at::native::resize_output(output, index.sizes());
+    output.resize_(index.sizes());
     auto output_contiguous = output.contiguous();
     auto index_continuous = index.contiguous();
     bool is_contiguous = input.is_contiguous();

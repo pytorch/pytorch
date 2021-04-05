@@ -544,7 +544,7 @@ void scan_dim(const Tensor& self, Tensor& result,
 }
 
 Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
-  at::native::resize_output(result, self.sizes());
+  result.resize_(self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
     return result;

@@ -87,7 +87,7 @@ Tensor& tril_cuda_(Tensor &self, int64_t k) {
 
 Tensor& tril_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
   if (result.sizes() != self.sizes()) {
-    at::native::resize_output(result, self.sizes());
+    result.resize_as_(self);
   }
   if (self.numel() == 0) {
     return result;
@@ -101,7 +101,7 @@ Tensor& triu_cuda_(Tensor &self, int64_t k) {
 
 Tensor& triu_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
   if (result.sizes() != self.sizes()) {
-    at::native::resize_output(result, self.sizes());
+    result.resize_as_(self);
   }
   if (self.numel() == 0) {
     return result;
