@@ -5392,7 +5392,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_det(self):
         class Det(torch.nn.Module):
             def forward(self, x):
-                return torch.det(x)
+                return torch.linalg.det(x)
 
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
