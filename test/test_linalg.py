@@ -5810,7 +5810,7 @@ else:
 
             b = torch.randn(3, 1, device=b_device)
             A = torch.randn(3, 3, device=A_device)
-            err_str = "Expected all tensors to be on the same device"
+            err_str = "Expected b and A to be on the same device"
             with self.assertRaisesRegex(RuntimeError, err_str):
                 torch.solve(b, A)
 
