@@ -6,7 +6,7 @@ import torch
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor)
+    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, method_tests)
 from torch.testing._internal.common_device_type import \
@@ -48,11 +48,16 @@ class TestOpInfo(TestCase):
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
     #   does NOT throw a runtime error
+    # In addition verifies that the generated sample_inputs have the requested device and dtype
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_supported_dtypes(self, device, dtype, op):
         for sample in op.sample_inputs(device, dtype):
             op(sample.input, *sample.args, **sample.kwargs)
+            # NOTE: only check the first tensor in the iterable of tensors
+            sample_input = sample.input[0] if is_iterable_of_tensors(sample.input) else sample.input
+            self.assertTrue(sample_input.dtype == dtype)
+            self.assertTrue(sample_input.device.type == self.device_type)
 
     # Verifies that backward for each supported floating or complex dtype
     #   does NOT throw a runtime error.
@@ -104,28 +109,35 @@ class TestGradients(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
-            if sample.output_process_fn_grad is not None:
-                out_fn = sample.output_process_fn_grad
-
-                def variant_out_fn(*args, **kwargs):
-                    return out_fn(variant(*args, **kwargs))
-            else:
-                variant_out_fn = variant
-
+            # Note on TensorList inputs
+            #
+            # gradcheck does not support TensorList inputs so here we pass TensorList
+            # inputs of size n as n single Tensor inputs to gradcheck and wrap the op
+            # in a function that puts the n Tensor inputs back into a TensorList
             def fn(*inputs):
-                output = variant_out_fn(*inputs, **sample.kwargs)
-                return op.output_func(output)
+                # Put tensors back into TensorList since we splat them when passing to gradcheck
+                if is_iterable_of_tensors(sample.input):
+                    n = len(sample.input)
+                    inputs = (inputs[:n], *inputs[n:])
+                output = op.gradcheck_wrapper(variant, *inputs, **sample.kwargs)
+                if sample.output_process_fn_grad is not None:
+                    return sample.output_process_fn_grad(output)
+                return output
+
+            # Splat TensorList inputs into single Tensor inputs
+            gradcheck_args = (sample.input,) if isinstance(sample.input, torch.Tensor) else tuple(sample.input)
+            gradcheck_args += sample.args
 
             if check == 'gradcheck':
-                self.assertTrue(gradcheck(fn, (sample.input,) + sample.args,
+                self.assertTrue(gradcheck(fn, gradcheck_args,
                                           check_batched_grad=op.check_batched_grad,
                                           check_grad_dtypes=True))
             elif check == 'gradgradcheck':
-                self.assertTrue(gradgradcheck(fn, (sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=False,
                                               check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True))
-                self.assertTrue(gradgradcheck(fn, (sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=True,
                                               check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True))
@@ -193,56 +205,75 @@ class TestGradients(TestCase):
 class TestCommon(JitCommonTestCase):
     exact_dtype = True
 
-    # variant testing is only done with torch.float to avoid excessive
-    #   test times and maximize signal to noise ratio
+    # variant testing is only done with torch.float and torch.cfloat to avoid
+    #   excessive test times and maximize signal to noise ratio
     _variant_ops = partial(ops, dtypes=OpDTypes.supported,
-                           allowed_dtypes=[torch.float])
+                           allowed_dtypes=(torch.float, torch.cfloat))
+
+    # alias testing is only done with troch.float for the same reason
+    _alias_ops = partial(ops, dtypes=OpDTypes.supported,
+                         allowed_dtypes=(torch.float,))
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
     #   against eager's gold standard op function variant
     @_variant_ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
+        # Acquires variants (method variant, inplace variant, aliases)
+        method = op.get_method()
+        inplace = op.get_inplace()
 
+        # list of all inplace ops: inplace variant + alias inplace variants if exist
+        inplace_ops = [inplace, ]
+
+        aliases = []
+        for a_op in op.aliases:
+            aliases.append(a_op.op)
+            aliases.append(a_op.method_variant)
+            aliases.append(a_op.inplace_variant)
+            inplace_ops.append(a_op.inplace_variant)
+        aliases = tuple(aliases)
+
+        inplace_ops = tuple(v for v in inplace_ops if v is not None)
+        variants = (v for v in (method, inplace) + aliases if v is not None)
+
+        _requires_grad = (op.supports_autograd and
+                          (dtype.is_floating_point or op.supports_complex_autograd))
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
         for sample in samples:
-            # Acquires variants (method variant, inplace variant, aliases)
-            method = op.get_method()
-            inplace = op.get_inplace()
-
-            # list of all inplace ops: inplace variant + alias inplace variants if exist
-            inplace_ops = [inplace, ]
-
-            aliases = []
-            for a_op in op.aliases:
-                aliases.append(a_op.op)
-                aliases.append(a_op.method_variant)
-                aliases.append(a_op.inplace_variant)
-                inplace_ops.append(a_op.inplace_variant)
-            aliases = tuple(aliases)
-
-            inplace_ops = tuple(v for v in inplace_ops if v is not None)
-            variants = (v for v in (method, inplace) + aliases if v is not None)
+            # TODO: Check grad for all Tensors requiring grad if sample.input is TensorList
+            tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
 
             # Computes function forward and backward values
-            sample.input.grad = None
+            tensor.grad = None
             expected_forward = op(sample.input, *sample.args, **sample.kwargs)
             expected_grad = None
 
+            # Skips inplace variants if the output dtype is not the same as
+            #   the input dtype
+            skip_inplace = False
+            if (isinstance(expected_forward, torch.Tensor) and
+                    expected_forward.dtype is not tensor.dtype):
+                skip_inplace = True
+
             # TODO: backward consistency only supported for single tensor outputs
-            # TODO: backward consistency only checked on sample.input, not all
-            #   tensor inputs
+            # TODO: backward consistency only checked on first input Tensor
             # TODO: update to handle checking grads of all tensor inputs as
             #   derived from each tensor output
-            if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)):
+            if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
+                    and (dtype.is_floating_point or op.supports_complex_autograd)):
                 expected_forward.sum().backward()
-                expected_grad = sample.input.grad
+                expected_grad = tensor.grad
 
             # Test eager consistency
             for variant in variants:
+                # Skips inplace ops
+                if variant in inplace_ops and skip_inplace:
+                    continue
+
                 # Compares variant's forward
                 # Note: copies the to-be-modified input when testing the inplace variant
-                sample.input.grad = None
+                tensor.grad = None
                 cloned = clone_input_helper(sample.input) if variant in inplace_ops else sample.input
                 variant_forward = variant(cloned,
                                           *sample.args,
@@ -252,7 +283,7 @@ class TestCommon(JitCommonTestCase):
                 # Compares variant's backward
                 if expected_grad is not None and (variant not in inplace_ops or op.supports_inplace_autograd):
                     variant_forward.sum().backward()
-                    self.assertEqual(expected_grad, sample.input.grad)
+                    self.assertEqual(expected_grad, tensor.grad)
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (function, method, inplace)
@@ -260,20 +291,16 @@ class TestCommon(JitCommonTestCase):
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @_variant_ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
+        _requires_grad = op.supports_autograd and (dtype.is_floating_point or op.supports_complex_autograd)
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
 
         for sample in samples:
-
             # Acquires variants to test
             func = op.get_op()
             method = op.get_method()
-            inplace = op.get_inplace()
             variants = {
+                # TODO: inplace tests currently fail, fix and add inplace variant
                 'function': func, 'method': method,
-                # TODO: inplace tests currently fail
-                # 'inplace': inplace,
             }
 
             # Test traced and scripted consistency
@@ -291,23 +318,29 @@ class TestCommon(JitCommonTestCase):
                     # Check scripted forward, grad, and grad grad
                     script_fn = create_script_fn(self, name, func_type)
 
+                    def out_fn(output):
+                        # Processes the output for autograd
+                        if sample.output_process_fn_grad is not None:
+                            return sample.output_process_fn_grad(output)
+                        return output
+
                     check_against_reference(self,
                                             script_fn,
                                             func,
-                                            op.output_func,
+                                            out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not op.supports_autograd)
+                                            no_grad=not _requires_grad)
 
                     # Check traced forward, grad, and grad grad
                     traced_fn = create_traced_fn(self, variant)
                     check_against_reference(self,
                                             traced_fn,
                                             func,
-                                            op.output_func,
+                                            out_fn,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not op.supports_autograd)
+                                            no_grad=not _requires_grad)
 
                     # Check alias annotation schema for correctness (make
                     #   sure inputs that aren't supposed to be modified aren't)
@@ -331,7 +364,7 @@ class TestCommon(JitCommonTestCase):
                         self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
                         self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
 
-    @_variant_ops([op for op in op_db if op.aliases])
+    @_alias_ops((op for op in op_db if op.aliases))
     def test_jit_alias_remapping(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         if len(samples) == 0:
@@ -340,6 +373,7 @@ class TestCommon(JitCommonTestCase):
         # NOTE: only tests on first sample
         sample = samples[0]
 
+        # [Scripting Data Preparation]
         # Prepare data for test scripting
         # Below we prepare strings of args/kwargs with and without type annotations.
         # These strings are inserted into function template strings which is then torch scripted.
@@ -453,19 +487,7 @@ class TestCommon(JitCommonTestCase):
         # Short-circuits if output is not a single tensor or an
         #   iterable of tensors
 
-        # Returns True if iterable is an iterable of tensors (includes empty iterables)
-        #   and False o.w.
-        def _is_iterable_of_tensors(iterable):
-            try:
-                for t in iter(iterable):
-                    if not isinstance(t, torch.Tensor):
-                        return False
-            except TypeError as te:
-                return False
-
-            return True
-
-        if not isinstance(expected, torch.Tensor) and not _is_iterable_of_tensors(expected):
+        if not isinstance(expected, torch.Tensor) and not is_iterable_of_tensors(expected, include_empty=True):
             self.skipTest("Skipped! Only supports single tensor or iterable of tensor outputs.")
 
         # A wrapper around map that works with single tensors and always
