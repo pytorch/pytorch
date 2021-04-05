@@ -864,7 +864,7 @@ def repeat_interleave(g, self, repeats, dim=None):
                            'input size.')
     # Handle cases where dim is negative
     if dim < 0:
-        dim += len(input_sizes)            
+        dim += len(input_sizes)
 
     output_sizes = input_sizes.copy()
     perm_i = [0]
@@ -881,9 +881,12 @@ def repeat_interleave(g, self, repeats, dim=None):
         reps = sym_help._size_helper(g, input, dim)
         reps = unsqueeze(g, reps, 0)
         repeats = g.op("Expand", repeats, reps)
-    elif repeats_dim == 1 and output_sizes[dim] == 0:
-        raise RuntimeError('Unsupported: ONNX export of repeat_interleave for multi-repeats tensor '
-                           'when dim is one of the dynamic axes provided.')
+    # There are cases when the repeats are 1-d tensor with multiple repeats, but dim 
+    # provided along one of the dynamic axes provided. A simple example would be
+    # input.shape -> [1, 1, *] where * represents the dynamic axes, and dim = 2
+    # Now, repeat interleaving can be performed in pytorch when the value of * matches
+    # with the number of elements in repeat, for example if * -> 2, number of repeats
+    # should be 2 as well. 
     else:
         return torch.onnx.symbolic_opset9.repeat_interleave(g, self, repeats, final_dim)
 
