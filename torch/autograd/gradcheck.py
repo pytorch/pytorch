@@ -486,6 +486,8 @@ def check_no_differentiable_outputs_fast(fail_test, func, func_out, all_inputs, 
         numerical_jacobians = get_fast_numerical_jacobian_wrt_specific_input(func, inp_idx, inp, all_inputs,
                                                                              _as_tuple(func_out), u, eps, 1.0)
         for jacobian in numerical_jacobians:
+            if jacobian.numel() == 0:
+                continue
             if (jacobian - torch.zeros_like(jacobian)).abs().max() > nondet_tol:
                 return fail_test('Numerical gradient for function expected to be zero')
     return True
