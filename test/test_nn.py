@@ -15204,7 +15204,7 @@ class TestNNDeviceType(NNTestCase):
                 a, p, n), (anchor, positive, negative)))
             traced_loss_op = torch.jit.trace(loss_op, (anchor, positive, negative))
             self.assertTrue(gradcheck(lambda a, p, n: traced_loss_op(
-                a, p, n), (anchor, positive, negative)))
+                a, p, n), (anchor, positive, negative), check_batched_grad=False))
 
             # Test forward parity
             functional = F.triplet_margin_with_distance_loss(anchor, positive, negative,
