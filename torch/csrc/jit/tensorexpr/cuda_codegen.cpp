@@ -960,7 +960,7 @@ void CudaCodeGen::Initialize() {
 #endif
   os() << "void " << func_name << "(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
-  for (size_t i = 0; i < buffer_args.size(); i++) {
+  for (const auto i : c10::irange(buffer_args.size())) {
     if (i > 0) {
       os() << ", ";
     }
@@ -1021,7 +1021,7 @@ void CudaCodeGen::Initialize() {
   // Check that all block extents had been set.
   const std::vector<const Expr*>& gpu_block_extents =
       metavar_rewriter_->gpu_block_extents();
-  for (size_t i = 0; i < gpu_block_extents.size(); i++) {
+  for (const auto i : c10::irange(gpu_block_extents.size())) {
     if (!gpu_block_extents[i]) {
       throw std::runtime_error("Missing gpu_block_index: " + std::to_string(i));
     }
@@ -1063,7 +1063,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   // evaluate all the block/thread extents into values
   // TODO: eventually, codegen these calculations and make them part of the
   // module.
-  for (size_t i = 0; i < gpu_block_extents.size(); i++) {
+  for (const auto i : c10::irange(gpu_block_extents.size())) {
     if (gpu_block_extents[i]->isConstant()) {
       gpu_block_extents_v[i] = immediateAs<int>(gpu_block_extents[i]);
       continue;
@@ -1072,7 +1072,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
         ExprHandle(gpu_block_extents[i]), buffer_args());
     gpu_block_extents_v[i] = eval.value<int>(args);
   }
-  for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
+  for (const auto i : c10::irange(gpu_thread_extents.size())) {
     if (gpu_thread_extents[i]->isConstant()) {
       gpu_thread_extents_v[i] = immediateAs<int>(gpu_thread_extents[i]);
       continue;
@@ -1099,7 +1099,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   std::vector<void*> ptr_to_args(ptr_count);
   uint64_t rand_seed = uint64_t(-1);
   uint64_t rand_offset = uint64_t(-1);
-  for (size_t i = 0; i < buffer_args.size(); i++) {
+  for (const auto i : c10::irange(buffer_args.size())) {
     auto const& bufferArg = buffer_args[i];
     if (bufferArg.isVar()) {
       auto stype = bufferArg.dtype().scalar_type();

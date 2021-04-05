@@ -1,6 +1,11 @@
+#include <c10/util/irange.h>
 #include <c10d/ProcessGroupGloo.hpp>
 
 #include <c10d/GlooDeviceFactory.hpp>
+#include <chrono>
+#include <exception>
+#include <ratio>
+#include <tuple>
 
 #ifdef _WIN32
 #include <gloo/common/win.h>
@@ -106,6 +111,58 @@ namespace c10d {
 
 namespace {
 
+using steady_clock_time_point =
+    std::chrono::time_point<std::chrono::steady_clock>;
+
+std::chrono::milliseconds getRemainingTime(
+    steady_clock_time_point startTime,
+    const std::chrono::milliseconds& timeout) {
+  auto elapsedTime = std::chrono::steady_clock::now() - startTime;
+  auto remainingMillis = timeout -
+      std::chrono::duration_cast<std::chrono::milliseconds>(elapsedTime);
+
+  // If no more remaining time, return -1 to indicate to caller.
+  if (remainingMillis.count() <= 0) {
+    return std::chrono::milliseconds(-1);
+  }
+
+  return remainingMillis;
+}
+
+// Emit a LOG(ERROR) and throws runtime_error with the given messages.
+void logAndThrow(
+    const std::string& logMessage,
+    const std::string& errorMessage) {
+  LOG(ERROR) << logMessage;
+  throw std::runtime_error(errorMessage);
+}
+
+// For monitoredBarrier, checks remaining time left to finish processing ranks
+// and throws error if timeout.
+void checkRemainingTime(
+    const std::chrono::milliseconds& monitoredBarrierTimeout,
+    const std::chrono::milliseconds& remainingTime,
+    const std::vector<int>& processedRanks,
+    int currentRank) {
+  const std::string kNoRemainingTimeError = c10::str(
+      "Rank ",
+      currentRank,
+      " timed out in monitoredBarrier after ",
+      monitoredBarrierTimeout.count(),
+      " ms.");
+  if (remainingTime.count() < 0) {
+    std::string rankInfo;
+    if (processedRanks.size() > 0) {
+      rankInfo = c10::str(
+          "Successfully processed ranks: ", c10::Join(", ", processedRanks));
+    } else {
+      rankInfo = "No ranks successfully processed in monitoredBarrier.";
+    }
+    auto error = c10::str(kNoRemainingTimeError, "\n", rankInfo);
+    logAndThrow(error, error);
+  }
+}
+
 // Wrap c10d store as Gloo store
 class GlooStore : public ::gloo::rendezvous::Store {
  public:
@@ -177,7 +234,7 @@ void band(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
   auto tb = static_cast<const T*>(b);
-  for (size_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     tc[i] = ta[i] & tb[i];
   }
 }
@@ -190,7 +247,7 @@ void bor(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
   auto tb = static_cast<const T*>(b);
-  for (size_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     tc[i] = ta[i] | tb[i];
   }
 }
@@ -203,7 +260,7 @@ void bxor(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
   auto tb = static_cast<const T*>(b);
-  for (size_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     tc[i] = ta[i] ^ tb[i];
   }
 }
@@ -300,7 +357,7 @@ void initializeStreamsEvents(
   at::cuda::OptionalCUDAGuard guard;
   streams.reserve(tensors.size());
   events.resize(tensors.size());
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for(const auto i : c10::irange(tensors.size())) {
     guard.set_index(tensors[i].device().index());
     // Record event on current stream
     events[i].record(at::cuda::getCurrentCUDAStream());
@@ -356,7 +413,7 @@ void initializeStreamsEvents(
   at::cuda::OptionalCUDAGuard guard;
   streams.reserve(tensors.size());
   events.resize(tensors.size());
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for(const auto i : c10::irange(tensors.size())) {
     guard.set_index(tensors[i][0].device().index());
     // Record event on current stream
     events[i].record(at::cuda::getCurrentCUDAStream());
@@ -604,7 +661,7 @@ ProcessGroupGloo::ProcessGroupGloo(
   // by a single I/O thread.
   //
   contexts_.reserve(options->devices.size());
-  for (size_t i = 0; i < options->devices.size(); i++) {
+  for(const auto i : c10::irange(options->devices.size())) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
     auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
     context->setTimeout(options->timeout);
@@ -619,7 +676,7 @@ ProcessGroupGloo::ProcessGroupGloo(
   workInProgress_.resize(options->threads);
 
   threads_.resize(options->threads);
-  for (size_t i = 0; i < threads_.size(); i++) {
+  for(const auto i : c10::irange(threads_.size())) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
 }
@@ -720,7 +777,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
     broadcast(inputs[rootTensor]);
 
     // Copy to non-root tensors
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       if (i == static_cast<size_t>(rootTensor)) {
         continue;
       }
@@ -764,7 +821,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
     broadcast(tmp);
 
     // Kick off copy back to the CUDA tensors.
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp, /* non_blocking */ true);
       events[i].record(streams[i]);
@@ -775,7 +832,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
     at::cuda::OptionalCUDAGuard guard;
 
     // Synchronize with the copy back to CUDA tensors.
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
@@ -1118,7 +1175,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     std::vector<size_t> counts(context->size);
     int64_t totalSize = 0;
-    for (size_t i = 0; i < metadata.size(); i++) {
+    for(const auto i : c10::irange(metadata.size())) {
       counts[i] = metadata[i].nnz() * sparseDim;
       totalSize += counts[i];
     }
@@ -1163,7 +1220,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     std::vector<size_t> counts(context->size);
     int64_t totalSize = 0;
-    for (size_t i = 0; i < metadata.size(); i++) {
+    for(const auto i : c10::irange(metadata.size())) {
       counts[i] = metadata[i].nnz() * denseNumel;
       totalSize += counts[i];
     }
@@ -1216,7 +1273,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
     at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
@@ -1225,7 +1282,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
   void run() override {
     // Synchronize with copy operations.
     at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       device_guard.set_index(inputs[i].device().index());
       AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
     }
@@ -1234,7 +1291,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     allreduce(tmp);
 
     at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       stream_guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
@@ -1246,7 +1303,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
@@ -1271,7 +1328,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     // memory must be performed asynchronously, or we block the caller.
     tmp.reserve(inputs.size());
     at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(
           inputs[i].coalesce().to(at::DeviceType::CPU, /*non_blocking=*/true));
@@ -1281,7 +1338,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
   void run() override {
     // Synchronize with copy operations.
     at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       device_guard.set_index(inputs[i].device().index());
       AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
     }
@@ -1291,7 +1348,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 
     // Kick off copy back to the CUDA tensors.
     at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       stream_guard.reset_stream(streams[i]);
       outputs.push_back(output.to(inputs[i].device(), /*non_blocking=*/true));
       events[i].record(streams[i]);
@@ -1301,14 +1358,14 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
 
     // Copy outputs back to inputs after synchronization, so that users can
     // access all reduce results from input tensors
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       inputs[i].copy_(outputs[i]);
     }
   }
@@ -1516,7 +1573,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
     at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
@@ -1525,7 +1582,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
   void run() override {
     // Synchronize with copy operations.
     at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       device_guard.set_index(inputs[i].device().index());
       AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
     }
@@ -1535,7 +1592,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
     // Kick off copy back to the CUDA tensors.
     at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       stream_guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
@@ -1545,7 +1602,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
@@ -1680,15 +1737,15 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.reserve(inputs.size());
     at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
 
     tmpOutputs.resize(outputs.size());
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       tmpOutputs[i].reserve(outputs[i].size());
-      for (size_t j = 0; j < outputs[i].size(); j++) {
+      for(const auto j : c10::irange(outputs[i].size())) {
         tmpOutputs[i].push_back(pinnedLike(outputs[i][j]));
       }
     }
@@ -1697,12 +1754,12 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
   void run() override {
     // Synchronize with copy operations.
     at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       device_guard.set_index(inputs[i].device().index());
       AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams[i]));
     }
 
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       device_guard.set_index(outputs[i][0].device().index());
       AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams[i]));
     }
@@ -1712,9 +1769,9 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
     // Kick off copy back to the CUDA tensors.
     at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       stream_guard.reset_stream(outputStreams[i]);
-      for (size_t j = 0; j < outputs[i].size(); j++) {
+      for(const auto j : c10::irange(outputs[i].size())) {
         outputs[i][j].copy_(tmpOutputs[i][j], /* non_blocking */ true);
       }
       outputEvents[i].record(outputStreams[i]);
@@ -1724,7 +1781,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       guard.set_index(outputs[i][0].device().index());
       outputEvents[i].block(at::cuda::getCurrentCUDAStream());
     }
@@ -1762,7 +1819,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
         "requires input/output tensor lists to have the same length");
   }
 
-  for (size_t i = 0; i < outputs.size(); i++) {
+  for(const auto i : c10::irange(outputs.size())) {
     const auto expected = inputs.size() * getSize();
     const auto actual = outputs[i].size();
     if (actual != expected) {
@@ -1986,7 +2043,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
 
     // Unflatten into output tensors on root process.
     if (context->rank == root) {
-      for (size_t i = 0; i < outputs[0].size(); i++) {
+      for(const auto i : c10::irange(outputs[0].size())) {
         outputs[0][i].copy_(flatOutputTensor[i]);
       }
     }
@@ -2019,15 +2076,15 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.reserve(inputs.size());
     at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
 
     tmpOutputs.resize(outputs.size());
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       tmpOutputs[i].reserve(outputs[i].size());
-      for (size_t j = 0; j < outputs[i].size(); j++) {
+      for(const auto j : c10::irange(outputs[i].size())) {
         tmpOutputs[i].push_back(pinnedLike(outputs[i][j]));
       }
     }
@@ -2036,12 +2093,12 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
   void run() override {
     // Synchronize with copy operations.
     at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       device_guard.set_index(inputs[i].get_device());
       AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams[i]));
     }
 
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       device_guard.set_index(outputs[i][0].get_device());
       AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams[i]));
     }
@@ -2051,9 +2108,9 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
     // Kick off copy back to the CUDA tensors.
     at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       stream_guard.reset_stream(outputStreams[i]);
-      for (size_t j = 0; j < outputs[i].size(); j++) {
+      for(const auto j : c10::irange(outputs[i].size())) {
         outputs[i][j].copy_(tmpOutputs[i][j], /* non_blocking */ true);
       }
       outputEvents[i].record(outputStreams[i]);
@@ -2063,7 +2120,7 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       guard.set_index(static_cast<at::DeviceIndex>(outputs[i][0].get_device()));
       outputEvents[i].block(at::cuda::getCurrentCUDAStream());
     }
@@ -2213,10 +2270,10 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.resize(inputs.size());
     at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs[i].reserve(inputs[i].size());
-      for (size_t j = 0; j < inputs[i].size(); j++) {
+      for(const auto j : c10::irange(inputs[i].size())) {
         tmpInputs[i].push_back(
             pinnedLike(inputs[i][j]).copy_(inputs[i][j], true));
       }
@@ -2231,11 +2288,11 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
   void run() override {
     // Synchronize with copy operations.
     at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       device_guard.set_index(inputs[i][0].get_device());
       AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams[i]));
     }
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       device_guard.set_index(outputs[i].get_device());
       AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams[i]));
     }
@@ -2245,7 +2302,7 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
     // Kick off copy back to the CUDA tensors.
     at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       stream_guard.reset_stream(outputStreams[i]);
       outputs[i].copy_(tmpOutputs[i], /* non_blocking */ true);
       outputEvents[i].record(outputStreams[i]);
@@ -2255,7 +2312,7 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       guard.set_index(static_cast<at::DeviceIndex>(outputs[i].get_device()));
       outputEvents[i].block(at::cuda::getCurrentCUDAStream());
     }
@@ -2660,6 +2717,77 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
       std::move(context), std::move(priorWork), tag);
   enqueue(work);
   return work;
+}
+
+void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
+  // Use default timeout if no timeout was specified.
+  auto monitoredBarrierTimeout =
+      (opts.timeout == kUnsetTimeout) ? this->options_->timeout : opts.timeout;
+  auto rank = this->getRank();
+  auto t1 = nextTag();
+  auto t2 = nextTag();
+  std::vector<at::Tensor> commTensor = {at::tensor({rank})};
+  // only enforce timeout on rank 0. This is so that other ranks aren't timed
+  // out first, bringing down the job without reporting which rank timed out.
+  if (rank != 0) {
+    auto sendWork = send(commTensor, 0, t1);
+    auto recvWork = recv(commTensor, 0, t2);
+    sendWork->wait();
+    recvWork->wait();
+    return;
+  }
+  auto startTime = std::chrono::steady_clock::now();
+  auto worldSize = this->getSize();
+  // Holds mapping of rank to pair of recv/send work.
+  std::unordered_map<
+      int,
+      std::tuple<
+          c10::intrusive_ptr<ProcessGroup::Work>,
+          c10::intrusive_ptr<ProcessGroup::Work>>>
+      works;
+  // Kick off all work
+  for (int dstRank = 1; dstRank < worldSize; ++dstRank) {
+    auto recvWork = recv(commTensor, dstRank, t1);
+    auto sendWork = send(commTensor, dstRank, t2);
+    works.insert(
+        {dstRank, std::make_tuple(std::move(recvWork), std::move(sendWork))});
+  }
+
+  std::vector<int> processedRanks;
+
+  // Wait for send/recv from all ranks
+  for (auto& work : works) {
+    // Compute the remaining time for every call to wait() instead of using
+    // the whole timeout every call. Error out if no time remains.
+    try {
+      auto remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
+      checkRemainingTime(
+          monitoredBarrierTimeout, remainingTime, processedRanks, rank);
+      std::get<0>(work.second)->wait(remainingTime);
+      remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
+      checkRemainingTime(
+          monitoredBarrierTimeout, remainingTime, processedRanks, rank);
+      std::get<1>(work.second)->wait(remainingTime);
+    } catch (const std::exception& e) {
+      const std::string error = c10::str(
+          "Rank ",
+          work.first,
+          " failed to pass monitoredBarrier in ",
+          monitoredBarrierTimeout.count(),
+          " ms");
+      logAndThrow(
+          error, c10::str(error, "\n Original exception: \n", e.what()));
+    }
+    processedRanks.push_back(work.first);
+  }
+
+  auto remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
+  LOG(INFO) << "All ranks passed monitoredBarrier in "
+            << (remainingTime.count() > 0
+                    ? (monitoredBarrierTimeout - remainingTime)
+                    : monitoredBarrierTimeout)
+                   .count()
+            << " ms.";
 }
 
 } // namespace c10d

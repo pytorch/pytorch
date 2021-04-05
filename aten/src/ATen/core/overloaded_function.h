@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <ATen/core/function.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
@@ -18,6 +19,8 @@ namespace torch {
 namespace jit {
 
 struct SourceRange;
+struct MatchedSchema;
+struct Graph;
 
 struct OverloadedFunction : public Function {
   OverloadedFunction(
@@ -48,9 +51,10 @@ struct OverloadedFunction : public Function {
     callable_(stack);
   }
 
-  std::vector<const at::FunctionSchema*> loadPossibleSchemas(
-      const at::ClassTypePtr& owner_class,
-      const SourceRange& loc) {
+  std::pair<size_t, MatchedSchema> matchOverloadedSchemas(const SourceRange& loc, const at::ClassTypePtr& owner_class,
+    Graph& graph,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs) {
     // Even though overloaded methods are inserted into graph with
     // a mangled name, the original name can still be found with
     // name(). Therefore, we don't need to check for mangled names here.
@@ -66,12 +70,17 @@ struct OverloadedFunction : public Function {
       }
       schemas.push_back(&(method->getSchema()));
     }
-    return schemas;
+    return matchSchemas(schemas, loc, graph, args, kwargs);
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
-      TaskLauncher /* not used */) override;
+      TaskLauncher /* not used */) override {
+    run(stack);
+    auto res = c10::make_intrusive<c10::ivalue::Future>(stack.front().type());
+    res->markCompleted(std::move(stack.front()));
+    return res;
+  }
 
   at::IValue operator()(std::vector<at::IValue> stack, const Kwargs& kwargs)
       override {

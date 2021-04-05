@@ -224,9 +224,6 @@ template<class scalar_t, class value_t=scalar_t>
 void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, value_t *w, scalar_t *work, int lwork, value_t *rwork, int *info);
 
 template<class scalar_t, class value_t=scalar_t>
-void lapackSyevd(char jobz, char uplo, int n, scalar_t *a, int lda, value_t *w, scalar_t *work, int lwork, value_t *rwork, int lrwork, int *iwork, int liwork, int *info);
-
-template<class scalar_t, class value_t=scalar_t>
 void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
                value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, value_t *rwork, int *iwork, int *info);
 
@@ -1017,7 +1014,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
 }
 
 // Solves a system of linear equations matmul(input, x) = other in-place
-Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+Tensor& linalg_solve_out(const Tensor& input, const Tensor& other, Tensor& result) {
   auto infos = at::empty({0}, input.options().dtype(kInt));
   result = linalg_solve_out_info(result, infos, input, other);
 
@@ -1189,7 +1186,7 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
 }
 
 // Computes the inverse matrix of 'input', it is is saved to 'result' in-place
-Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
+Tensor& linalg_inv_out(const Tensor &input, Tensor &result) {
   auto infos_lu = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
   auto infos_getri = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
   result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
@@ -1350,7 +1347,7 @@ Tensor linalg_cholesky(const Tensor &self) {
   return at::_cholesky_helper(self, /*upper=*/false).tril_();
 }
 
-Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
+Tensor& linalg_cholesky_out(const Tensor &self, Tensor &result) {
   checkSameDevice("linalg_cholesky", result, self);
   checkLinalgCompatibleDtype("linalg_cholesky", result, self);
   Tensor result_tmp = at::linalg_cholesky(self);
@@ -1719,7 +1716,7 @@ std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, std::string mode) {
   return at::_linalg_qr_helper(self, mode);
 }
 
-std::tuple<Tensor&,Tensor&> linalg_qr_out(Tensor& Q, Tensor& R, const Tensor& self, std::string mode) {
+std::tuple<Tensor&,Tensor&> linalg_qr_out(const Tensor& self, std::string mode, Tensor& Q, Tensor& R) {
   TORCH_CHECK(self.dim() >= 2,
               "torch.linalg.qr: input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   checkSameDevice("torch.linalg.qr", Q, self, "Q");
@@ -1904,127 +1901,116 @@ Tensor orgqr(const Tensor& input, const Tensor& tau) {
   return at::linalg_householder_product(input, tau);
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// This function computes eigenvalues 'w' and eigenvectors 'v' of the input that is stored initially in 'v'
-// The computation is done in-place: 'v' stores the input and will be overwritten, 'w' should be an allocated empty array
-// compute_v controls whether eigenvectors should be computed
-// uplo_str controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
-// infos is used to store information for possible checks for error
-// This function doesn't do any error checks and it's assumed that every argument is valid
-template <typename scalar_t>
-static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, const std::string& uplo_str, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
-  AT_ERROR("syevd: LAPACK library not found in compilation");
-#else
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+DEFINE_DISPATCH(linalg_eigh_stub);
 
-  auto v_data = v.data_ptr<scalar_t>();
-  auto w_data = w.data_ptr<value_t>();
-  auto v_matrix_stride = matrixStride(v);
-  auto w_stride = w.size(-1);
-  auto batch_size = batchCount(v);
-  auto n = v.size(-1);
-  auto lda = std::max(int64_t{1}, n);
+/*
+  Computes eigenvalues and eigenvectors of the tensor 'input'.
 
-  // NumPy allows lowercase input for UPLO argument
-  // It is assumed that uplo_str is either "U" or "L"
+  Args:
+  * 'input' - input Tensor for eigendecomposition
+  * 'values' - Tensor to store computed eigenvalues
+  * 'vectors' - Tensor to store computed eigenvectors
+  * 'infos' - Tensor to store LAPACK/MAGMA/cuSOLVER error codes
+  * 'compute_eigenvectors' - controls whether eigenvectors should be computed
+  * 'uplo_str' - controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
+    "u", "U" - upper triangular portion of the input matrix is used in computations; "l", "L" - lower.
+*/
+std::tuple<Tensor&, Tensor&> linalg_eigh_out_info(
+    const Tensor& input,
+    Tensor& values,
+    Tensor& vectors,
+    Tensor& infos,
+    bool compute_eigenvectors,
+    const std::string& uplo_str) {
+  // These internal asserts make explicit the assumptions in the implementation
+  // Error check with the actual error messages are done on the higher level of
+  // the hierarchy of calls
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.size(-2) == input.size(-1));
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == vectors.device());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == values.device());
+
+  // eigenvalues are always real-valued
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.scalar_type() == real_dtype);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == vectors.scalar_type());
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == input.device());
+
+  // infos can have the shape equal to input.shape[:-2] or (batchCount(input), ), both would work with the current implementation.
+  // infos.shape == input.shape[:-2] might be useful in the future for easier checking the error code for the specific matrix
+  // in batched input when we would have a user-exposed way to get infos tensor.
+  // 1-dimensional tensor of shape (batchCount(input), ) is currently used for the internal implementation everywhere.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.numel() == std::max<int64_t>(1, batchCount(input)));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_contiguous());
+
+  // if 'vectors' has no elements we can modify it
+  if (vectors.numel() == 0) {
+    vectors.resize_(input.sizes(), MemoryFormat::Contiguous);
+    vectors.transpose_(-2, -1);  // make 'vectors' to have Fortran contiguous memory layout
+  }
+
+  // if 'values' has no elements we can modify it
+  auto values_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // input.shape[:-1]
+  if (values.numel() == 0) {
+    values.resize_(values_shape, MemoryFormat::Contiguous);
+  }
+
+  // 'vectors' must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.sizes().equals(input.sizes()));
+
+  // 'values' must be contiguous
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.sizes().equals(values_shape));
+
+  // linalg_eigh_stub performs calculations in-place and 'vectors' must be a copy of 'input'
+  vectors.copy_(input);
+
   char uplo = std::toupper(uplo_str[0]);
-  char jobz = compute_v ? 'V' : 'N';
+  bool upper = (uplo == 'U');
 
-  // Using 'int' instead of int32_t or int64_t is consistent with the current LAPACK interface
-  // It really should be changed in the future to something like lapack_int that depends on the specific LAPACK library that is linked
-  // or switch to supporting only 64-bit indexing by default.
-  int info;
-  int lwork = -1;
-  int lrwork = -1;
-  int liwork = -1;
-  scalar_t work_query;
-  value_t rwork_query;
-  int iwork_query;
+  linalg_eigh_stub(input.device().type(), values, vectors, infos, upper, compute_eigenvectors);
 
-  // Run lapackSyevd once, first to get the optimum work size.
-  // Since we deal with batches of matrices with the same dimensions, doing this outside
-  // the main loop saves (batch_size - 1) workspace queries which would provide the same result
-  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
-  lapackSyevd<scalar_t, value_t>(jobz, uplo, n, v_data, lda, w_data, &work_query, lwork, &rwork_query, lrwork, &iwork_query, liwork, &info);
-
-  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(work_query));
-  Tensor work = at::empty({lwork}, v.options());
-  liwork = std::max<int>(1, iwork_query);
-  Tensor iwork = at::empty({liwork}, at::kInt);
-
-  Tensor rwork;
-  value_t* rwork_data = nullptr;
-  if (isComplexType(at::typeMetaToScalarType(v.dtype()))) {
-    lrwork = std::max<int>(1, rwork_query);
-    rwork = at::empty({lrwork}, w.options());
-    rwork_data = rwork.data_ptr<value_t>();
-  }
-
-  // Now call lapackSyevd for each matrix in the batched input
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* v_working_ptr = &v_data[i * v_matrix_stride];
-    value_t* w_working_ptr = &w_data[i * w_stride];
-    lapackSyevd<scalar_t, value_t>(jobz, uplo, n, v_working_ptr, lda, w_working_ptr, work.data_ptr<scalar_t>(), lwork, rwork_data, lrwork, iwork.data_ptr<int>(), liwork, &info);
-    infos[i] = info;
-    // The current behaviour for Linear Algebra functions to raise an error if something goes wrong or input doesn't satisfy some requirement
-    // therefore return early since further computations will be wasted anyway
-    if (info != 0) {
-      return;
-    }
-  }
-#endif
+  return std::tuple<Tensor&, Tensor&>(values, vectors);
 }
 
-// This function computes eigenvalues 'w' and eigenvectors 'v' of the tensor 'self'
-// compute_eigenvectors controls whether eigenvectors should be computed
-// uplo controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
-// This function prepares correct input for 'apply_syevd' and checks for possible errors using 'infos'
-std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_eigenvectors, std::string uplo) {
-  std::vector<int64_t> infos(batchCount(self), 0);
-
-  auto self_sizes = self.sizes().vec();
-  self_sizes.pop_back();
-  ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  auto eigvals = at::empty(self_sizes, self.options().dtype(dtype));
-
-  auto eigvecs = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "syevd_cpu", [&]{
-    apply_syevd<scalar_t>(eigvals, eigvecs, compute_eigenvectors, uplo, infos);
-  });
-
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "syevd_cpu");
-  } else {
-    singleCheckErrors(infos[0], "syevd_cpu");
-  }
-  if (compute_eigenvectors) {
-    return std::tuple<Tensor, Tensor>(eigvals, eigvecs);
-  } else {
-    return std::tuple<Tensor, Tensor>(eigvals, at::empty({0}, self.options()));
-  }
-}
-
-std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, std::string uplo) {
-  squareCheckInputs(self);
+std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& input, std::string uplo) {
+  squareCheckInputs(input);
   checkUplo(uplo);
-  return at::_syevd_helper(self, /*compute_eigenvectors=*/true, uplo);
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  Tensor values = at::empty({0}, input.options().dtype(real_dtype));
+  Tensor vectors = at::empty({0}, input.options());
+  Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+
+  std::tie(values, vectors) = linalg_eigh_out_info(input, values, vectors, infos, true, uplo);
+
+  if (input.dim() > 2) {
+    batchCheckErrors(infos, "torch.linalg.eigh");
+  } else {
+    singleCheckErrors(infos.item().toInt(), "torch.linalg.eigh");
+  }
+
+  return std::tuple<Tensor, Tensor>(values, vectors);
 }
 
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-std::tuple<Tensor&, Tensor&> linalg_eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
-  checkSameDevice("linalg_eigh", eigvecs, self, "eigenvectors");
-  checkSameDevice("linalg_eigh", eigvals, self, "eigenvalues");
-  checkLinalgCompatibleDtype("linalg_eigh", eigvecs, self, "eigenvectors");
+std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& input, std::string uplo, Tensor& eigvals, Tensor& eigvecs) {
+  checkSameDevice("torch.linalg.eigh", eigvecs, input, "eigenvectors");
+  checkSameDevice("torch.linalg.eigh", eigvals, input, "eigenvalues");
+  checkLinalgCompatibleDtype("torch.linalg.eigh", eigvecs, input, "eigenvectors");
 
   // eigenvalues are always real-valued here
-  ScalarType real_dtype = toValueType(self.scalar_type());
-  checkLinalgCompatibleDtype("linalg_eigh", eigvals.scalar_type(), real_dtype, "eigenvalues");
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  checkLinalgCompatibleDtype("torch.linalg.eigh", eigvals.scalar_type(), real_dtype, "eigenvalues");
 
   Tensor eigvals_tmp, eigvecs_tmp;
-  std::tie(eigvals_tmp, eigvecs_tmp) = at::linalg_eigh(self, uplo);
+  std::tie(eigvals_tmp, eigvecs_tmp) = at::linalg_eigh(input, uplo);
 
   at::native::resize_output(eigvals, eigvals_tmp.sizes());
   eigvals.copy_(eigvals_tmp);
@@ -2034,22 +2020,33 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out(Tensor& eigvals, Tensor& eigvecs, c
   return std::tuple<Tensor&, Tensor&>(eigvals, eigvecs);
 }
 
-Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
-  squareCheckInputs(self);
+Tensor linalg_eigvalsh(const Tensor& input, std::string uplo) {
+  squareCheckInputs(input);
   checkUplo(uplo);
-  Tensor eigvals, eigvecs;
-  std::tie(eigvals, eigvecs) = at::_syevd_helper(self, /*compute_eigenvectors=*/false, uplo);
-  return eigvals;
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  Tensor values = at::empty({0}, input.options().dtype(real_dtype));
+  Tensor vectors = at::empty({0}, input.options());
+  Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+
+  std::tie(values, vectors) = linalg_eigh_out_info(input, values, vectors, infos, false, uplo);
+
+  if (input.dim() > 2) {
+    batchCheckErrors(infos, "torch.linalg.eigvalsh");
+  } else {
+    singleCheckErrors(infos.item().toInt(), "torch.linalg.eigvalsh");
+  }
+
+  return values;
 }
 
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigvalsh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
-  checkSameDevice("linalg_eigvalsh", result, self);
-  ScalarType real_dtype = toValueType(self.scalar_type());
-  checkLinalgCompatibleDtype("linalg_eigvalsh", result.scalar_type(), real_dtype);
+Tensor& linalg_eigvalsh_out(const Tensor& input, std::string uplo, Tensor& result) {
+  checkSameDevice("torch.linalg.eigvalsh", result, input);
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  checkLinalgCompatibleDtype("torch.linalg.eigvalsh", result.scalar_type(), real_dtype);
 
-  Tensor result_tmp = at::linalg_eigvalsh(self, uplo);
+  Tensor result_tmp = at::linalg_eigvalsh(input, uplo);
 
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
@@ -2374,8 +2371,7 @@ static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst
   dst.copy_(src);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
-                                                     const Tensor& self, bool full_matrices, bool compute_uv) {
+std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(const Tensor& self, bool full_matrices, bool compute_uv, Tensor& U, Tensor& S, Tensor& VT) {
   checkSameDevice("svd", U, self, "U");
   checkSameDevice("svd", S, self, "S");
   checkSameDevice("svd", VT, self, "VT");
@@ -2393,8 +2389,9 @@ std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tenso
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 #ifdef USE_LAPACK
-template<class scalar_t, class value_t, class func_t>
+template <class scalar_t, class value_t, class func_t>
 struct LapackLstsqHelper {
   using self_type = LapackLstsqHelper;
 
@@ -2426,17 +2423,18 @@ struct LapackLstsqHelper {
   scalar_t work_opt; // used to decide the opt `work` size with lwork=-1
   scalar_t* work_ptr = &work_opt;
   int lwork = -1; // default value to decide the opt size for workspace arrays
-  int info = 0;
+  int* infos_data = nullptr;
+  int* infos_working_ptr = nullptr;
   Tensor jpvt;
   int* jpvt_ptr = nullptr;
   value_t rcond;
-  Tensor rank, rank_1d;
   int rank_opt;
+  int64_t* rank_data = nullptr;
   int64_t* rank_working_ptr = nullptr;
   Tensor rwork;
   value_t rwork_opt; // used to decide the opt `rwork` size with lwork=-1
   value_t* rwork_ptr = &rwork_opt;
-  Tensor s, s_2d;
+  value_t* s_data = nullptr;
   value_t* s_working_ptr = nullptr;
   Tensor iwork;
   int iwork_opt; // used to decide the opt `iwork` size with lwork=-1
@@ -2467,7 +2465,7 @@ struct LapackLstsqHelper {
   }
   self_type& set_ldb(int ldb) { this->ldb = ldb; return *this; }
   self_type& set_work() {
-    lwork = static_cast<int>(real_impl<scalar_t, value_t>(work_opt));
+    lwork = std::max<int>(1, real_impl<scalar_t, value_t>(work_opt));
     work = at::empty({lwork}, scalar_type);
     work_ptr = work.data_ptr<scalar_t>();
     return *this;
@@ -2482,17 +2480,12 @@ struct LapackLstsqHelper {
     return *this;
   }
   self_type& set_rcond(double cond) { this->rcond = static_cast<value_t>(cond); return *this; }
-  self_type& set_rank() {
+  self_type& set_rank(Tensor& rank) {
     // only `?gels` is not rank-revealing
     if (LapackLstsqDriverType::Gels != driver_type) {
-      if (!batch_shape.size()) {
-        rank = at::empty({}, at::kLong);
-      }
-      else {
-        rank = at::empty(batch_shape, at::kLong);
-      }
-      rank_1d = rank.view({-1});
-      rank_working_ptr = rank.data_ptr<int64_t>();
+      TORCH_INTERNAL_ASSERT(rank.sizes().equals(batch_shape));
+      rank_data = rank.data_ptr<int64_t>();
+      rank_working_ptr = rank_data;
     }
     return *this;
   }
@@ -2513,32 +2506,37 @@ struct LapackLstsqHelper {
         break;
       // case LapackLstsqDriverType::Gelsd:
       default:
-        rwork_len = static_cast<int64_t>(rwork_opt);
+        rwork_len = std::max<int64_t>(1, rwork_opt);
     }
     rwork = at::empty({rwork_len}, c10::toValueType(scalar_type));
     rwork_ptr = rwork.data_ptr<value_t>();
     return *this;
   }
-  self_type& set_s() {
+  self_type& set_s(Tensor& singular_values) {
     // `?gelsd` and `?gelss` are SVD-based
     // so we can extract singular values from them.
     if (LapackLstsqDriverType::Gelsd == driver_type
       || LapackLstsqDriverType::Gelss == driver_type) {
       auto s_shape = batch_shape.vec();
       s_shape.push_back(std::min(m, n));
-      s = at::empty(s_shape, c10::toValueType(scalar_type));
-      s_working_ptr = s.data_ptr<value_t>();
-      s_stride = s.size(-1);
-      s_2d = s.view({-1, std::min(m, n)});
+      TORCH_INTERNAL_ASSERT(singular_values.sizes().equals(s_shape));
+      s_data = singular_values.data_ptr<value_t>();
+      s_working_ptr = s_data;
+      s_stride = singular_values.size(-1);
     }
     return *this;
   }
   self_type& set_iwork() {
     // handle `iwork` workspace array (relevant only for `?gelsd`)
     if (LapackLstsqDriverType::Gelsd == driver_type) {
-      iwork = at::empty({iwork_opt}, at::kInt);
+      iwork = at::empty({std::max<int>(1, iwork_opt)}, at::kInt);
       iwork_ptr = iwork.data_ptr<int>();
     }
+    return *this;
+  }
+  self_type& set_infos(Tensor& infos) {
+    infos_data = infos.data_ptr<int>();
+    infos_working_ptr = infos_data;
     return *this;
   }
 
@@ -2547,7 +2545,7 @@ struct LapackLstsqHelper {
       a_working_ptr, lda,
       b_working_ptr, ldb,
       work_ptr, lwork,
-      &info,
+      infos_working_ptr,
       jpvt_ptr,
       rcond,
       &rank_opt,
@@ -2580,12 +2578,9 @@ struct LapackLstsqHelper {
     // Designed to be used with the `batch_iterator_with_broadcasting` method.
     this->a_working_ptr = a_working_ptr;
     this->b_working_ptr = b_working_ptr;
-    rank_working_ptr = rank_working_ptr
-      ? rank_1d.select(0, a_linear_batch_idx).template data_ptr<int64_t>()
-      : nullptr;
-    s_working_ptr = s_working_ptr
-      ? s_2d.select(0, a_linear_batch_idx).template data_ptr<value_t>()
-      : nullptr;
+    rank_working_ptr = rank_working_ptr ? &rank_data[a_linear_batch_idx] : nullptr;
+    s_working_ptr = s_working_ptr ? &s_data[a_linear_batch_idx * s_stride] : nullptr;
+    infos_working_ptr = &infos_data[a_linear_batch_idx];
     return *this;
   }
 };
@@ -2600,10 +2595,10 @@ struct LapackLstsqDriverTypeHash {
 };
 #endif
 
-std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cpu(
-    const Tensor& a, const Tensor& b, double cond, c10::optional<std::string> driver_name) {
+Tensor& _lstsq_helper_cpu(
+    Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, const Tensor& a, double cond, std::string driver_name) {
 #ifndef USE_LAPACK
-  AT_ERROR("torch.linalg.lstsq: LAPACK library not found in compilation");
+  TORCH_CHECK(false, "torch.linalg.lstsq: LAPACK library not found in compilation");
 #else
 
   static auto driver_string_to_type = std::unordered_map<std::string, LapackLstsqDriverType>({
@@ -2612,12 +2607,7 @@ std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cpu(
     {"gelsd", LapackLstsqDriverType::Gelsd},
     {"gelss", LapackLstsqDriverType::Gelss}
   });
-  // driver_name is never nullopt for CPU
-  auto driver_str = driver_name.value();
-  auto driver_type = driver_string_to_type[driver_str];
-
-  Tensor rank;
-  Tensor singular_values;
+  auto driver_type = driver_string_to_type[driver_name];
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "torch.linalg.lstsq_cpu", [&] {
     using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -2646,8 +2636,9 @@ std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cpu(
       .set_ldb(std::max<int64_t>(1, std::max(m, n)))
       .set_jpvt()
       .set_rcond(cond)
-      .set_rank()
-      .set_s()
+      .set_rank(rank)
+      .set_s(singular_values)
+      .set_infos(infos)
       .call_driver() // initial call to deduce optimal sizes for workspace arrays
       .set_work()
       .set_rwork()
@@ -2669,15 +2660,10 @@ std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cpu(
         int64_t a_linear_batch_idx) {
         driver_helper.next(a_working_ptr, b_working_ptr, a_linear_batch_idx)
           .call_driver();
-        singleCheckErrors(driver_helper.info, "torch.linalg.lstsq_cpu");
       }
     );
-
-    rank = driver_helper.rank;
-    singular_values = driver_helper.s;
   });
-
-  return std::make_tuple(b, rank, singular_values);
+  return b;
 #endif
 }
 
@@ -2784,11 +2770,27 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     ? cond.value()
     : _get_epsilon(c10::toValueType(self.scalar_type()));
 
-  Tensor x, residuals, rank, singular_values;
+  auto batch_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend() - 2);
+  Tensor rank = at::empty({0}, self.options().dtype(at::kLong));
+  if (driver_opt.value() != "gels") {
+    rank.resize_(batch_shape, MemoryFormat::Contiguous);
+  }
+
+  auto singular_values_shape = batch_shape.vec();
+  singular_values_shape.push_back(std::min(m, n));
+  auto real_dtype = c10::toValueType(self.scalar_type());
+  Tensor singular_values = at::empty({0}, self.options().dtype(real_dtype));
+  if (driver_opt.value() == "gelsd" || driver_opt.value() == "gelss") {
+    singular_values.resize_(singular_values_shape, MemoryFormat::Contiguous);
+  }
+
+  Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt).device(kCPU));
+
+  Tensor x, residuals;
+
   // path if neither `self` nor `b` is empty
   if (self.numel() && b.numel()) {
-    std::tie(x, rank, singular_values) =
-      at::_lstsq_helper(self_working_copy, b_working_copy, rcond, driver_opt);
+    x = at::_lstsq_helper_(b_working_copy, rank, singular_values, infos, self_working_copy, rcond, driver_opt.value());
     if (m > n && driver_opt.value() != "gelsy") {
       residuals = x.narrow(-2, n, std::max(m, n) - n).abs().pow_(2).sum(-2);
     }
@@ -2828,12 +2830,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
 
   // Numpy and Scipy always return ranks for empty matrices,
   // even for drivers which are not rank-revealing.
-  auto batch_sizes = IntArrayRef(self.sizes().data(), self.dim() - 2);
   if (self.numel()) {
     rank = return_empty_if_undefined(rank, at::kLong);
   }
   else {
-    rank = at::zeros(batch_sizes, self.options().dtype(at::kLong));
+    rank = at::zeros(batch_shape, self.options().dtype(at::kLong));
   }
 
   // undefined residuals could only be an empty Tensor of shape (0)
@@ -2843,7 +2844,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     && (driver_opt.value() == "gelss" || driver_opt.value() == "gelsd")) {
     // when `self` is empty, return singular_values of shape
     // (*self.shape[:-2], 0) only if driver is in ('gelss', 'gelsd')
-    auto singular_values_empty_shape = batch_sizes.vec();
+    auto singular_values_empty_shape = batch_shape.vec();
     singular_values_empty_shape.push_back(0);
     singular_values = return_empty_if_undefined(
       singular_values,
@@ -2855,6 +2856,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     singular_values = return_empty_if_undefined(
       singular_values,
       at::toValueType(self.scalar_type()));
+  }
+
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "torch.linalg.lstsq");
+  } else {
+    singleCheckErrors(infos.item().toInt(), "torch.linalg.lstsq");
   }
 
   return std::make_tuple(x, residuals, rank, singular_values);

@@ -461,11 +461,7 @@ struct MethodValue : public SugaredValue {
         Function* method = class_type->findMethod(method_name);
         if (auto overloaded_method =
                 dynamic_cast<OverloadedFunction*>(method)) {
-          auto overloaded_schemas =
-              overloaded_method->loadPossibleSchemas(class_type, loc);
-          auto matched = matchSchemas(
-              overloaded_schemas, loc, *f.graph(), argsWithSelf, kwargs);
-
+          auto matched = overloaded_method->matchOverloadedSchemas(loc, class_type, *f.graph(), argsWithSelf, kwargs);
           // When we import the graph back (serialization), we will sometimes
           // receive mangled names. Therefore we need to make sure we don't add
           // extra __[number] tag again.
