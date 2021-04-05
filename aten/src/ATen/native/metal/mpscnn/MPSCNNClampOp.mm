@@ -1,4 +1,4 @@
-#import <ATen/native/metal/mpscnn/MPSCNN.h>
+#import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNClampOp.h>
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>

@@ -171,6 +171,10 @@ struct TORCH_API LegacyEvent {
     throw std::runtime_error("unknown event kind");
   }
 
+  EventKind kind() const {
+    return kind_;
+  }
+
   const char* name() const {
     return name_.str();
   }
@@ -206,10 +210,10 @@ struct TORCH_API LegacyEvent {
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
-    if (device.type() == c10::DeviceType::CUDA ||
+    if (device.is_cuda() ||
         device.type() == c10::DeviceType::HIP) {
       cuda_memory_usage_ = alloc_size;
-    } else if (device.type() == c10::DeviceType::CPU ||
+    } else if (device.is_cpu() ||
         device.type() == c10::DeviceType::MKLDNN ||
         device.type() == c10::DeviceType::IDEEP) {
       cpu_memory_usage_ = alloc_size;

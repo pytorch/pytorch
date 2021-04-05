@@ -122,6 +122,26 @@ class TestTEFuser(JitTestCase):
         scripted = self.checkScript(func, (a,))
         self.assertLastGraphAllFused()
 
+    def test_typecheck(self):
+        a = torch.ones(1)
+
+        def fused_kernel(a, b):
+            return (a + b) * 2.
+
+        scripted = self.checkScript(fused_kernel, (a, a))
+        graph = scripted.graph_for(a, a)
+        # double check we fused
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        # we use a bigger tensor now (size 2)
+        # if we won't trigger a recompilation
+        # we will still create a tensor up to (size 1)
+        # if the type check fails
+        a = torch.ones(2)
+        # shape changed if we don't trigger recompilation
+        # we would compute the wrong result silently
+        self.assertEqual(scripted(a, a), fused_kernel(a, a))
+
     def test_sum_simple(self):
         def func(x):
             x2 = x * x
@@ -1640,6 +1660,36 @@ class TestTEFuser(JitTestCase):
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
+
+    def test_ternary_norm_ops(self):
+        def apply(fn):
+            return lambda x, y, z: fn(x, y, z)
+
+        ternary_ops = [
+            F.batch_norm,
+        ]
+        devices = self.devices
+        for dtype, op, device in product(self.dtypes, ternary_ops, devices):
+            try:
+                x = self.data_for(dtype, device, size=[5, 3, 128, 128])
+                y = self.data_for(dtype, device, size=[3])
+                z = self.data_for(dtype, device, size=[3])
+                fn = apply(op)
+                ref = fn(x, y, z)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y, z))
+                self.assertEqual(ref, t(x, y, z))
+                self.assertAllFused(t.graph_for(x, y, z))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
 
     @unittest.skip("FIXME: fuser doesn't include ListConstruct nodes to the group causing a failure")
     def test_list_ops(self):

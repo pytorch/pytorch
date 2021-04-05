@@ -301,6 +301,11 @@ Normalization functions
 
 .. autofunction:: batch_norm
 
+:hidden:`group_norm`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: group_norm
+
 :hidden:`instance_norm`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -476,6 +481,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: nll_loss
+
+:hidden:`huber_loss`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: huber_loss
 
 :hidden:`smooth_l1_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~

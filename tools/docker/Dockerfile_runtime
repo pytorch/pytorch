@@ -1,8 +1,8 @@
-FROM ubuntu:16.04 
+FROM ubuntu:16.04
 
 LABEL com.nvidia.volumes.needed="nvidia_driver"
 RUN apt-get update && apt-get install -y --no-install-recommends \
-         build-essential \ 
+         build-essential \
          git \
          curl \
          ca-certificates \
@@ -12,11 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN curl -o ~/miniconda.sh -O  https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh  && \
      chmod +x ~/miniconda.sh && \
-     ~/miniconda.sh -b -p /opt/conda && \     
+     ~/miniconda.sh -b -p /opt/conda && \
      rm ~/miniconda.sh && \
      /opt/conda/bin/conda install conda-build && \
      /opt/conda/bin/conda install numpy pyyaml scipy ipython&& \
-     /opt/conda/bin/conda clean -ya 
+     /opt/conda/bin/conda clean -ya
 ENV PATH /opt/conda/bin:$PATH
 RUN conda install pytorch torchvision cuda90 -c pytorch && /opt/conda/bin/conda clean -ya
 
