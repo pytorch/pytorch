@@ -2674,7 +2674,7 @@ op_db: List[OpInfo] = [
     OpInfo('div',
            variant_test_name='true_rounding',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_div, rounding_mode='true'),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode=None),
            skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            assert_autodiffed=True),
     OpInfo('div',
