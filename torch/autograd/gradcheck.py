@@ -145,11 +145,9 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
     return jacobians
 
 
-def compute_numerical_gradient(fn, entry, v, nbhd_checks_fn):
+def compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
     # Performs finite differencing by perturbing `entry` in-place by `v` and
     # returns the gradient of each of the outputs wrt to x at idx.
-    norm_v = -1j * v if isinstance(v, complex) else v
-
     orig = entry.clone()
     entry.copy_(orig - v)
     outa = fn()
@@ -271,7 +269,7 @@ def get_numerical_jacobian_wrt_specific_input(fn, input, input_idx, inputs, outp
         nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, idx=idx, eps=eps)
 
         def jvp_fn(delta):
-            return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, nbhd_checks_fn)
+            return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, eps, nbhd_checks_fn)
 
         jacobian_cols[d_idx] = compute_numerical_jacobian_cols(jvp_fn, eps, x.is_complex(), grad_out)
 
