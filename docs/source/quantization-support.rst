@@ -177,10 +177,10 @@ Layers for the quantization-aware training
     used by the :func:`torch.quantization.quantize`
   * :func:`~torch.quantization.fuse_modules`
 
-* Functions for fx graph mode quantization:
-  * :func:`~torch.quantization.quantize_fx.prepare_fx` - Function for preparing the model for post training quantization with fx graph mode quantization
-  * :func:`~torch.quantization.quantize_fx.prepare_qat_fx` - Function for preparing the model for quantization aware training with fx graph mode quantization
-  * :func:`~torch.quantization.quantize_fx.convert_fx` - Function for converting a prepared model to a quantized model with fx graph mode quantization
+* Functions for FX graph mode quantization:
+  * :func:`~torch.quantization.quantize_fx.prepare_fx` - Function for preparing the model for post training quantization with FX graph mode quantization
+  * :func:`~torch.quantization.quantize_fx.prepare_qat_fx` - Function for preparing the model for quantization aware training with FX graph mode quantization
+  * :func:`~torch.quantization.quantize_fx.convert_fx` - Function for converting a prepared model to a quantized model with FX graph mode quantization
 
 * Quantization configurations
     * :class:`~torch.quantization.QConfig` — Quantization configuration class
