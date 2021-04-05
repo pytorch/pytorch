@@ -3242,6 +3242,7 @@ class DistributedTest:
                 powersgd_state = powerSGD.PowerSGDState(
                     process_group=None,
                     matrix_approximation_rank=1,
+                    start_powerSGD_iter=2,
                     warm_start=warm_start,
                 )
                 self._test_ddp_hook_parity(state=powersgd_state, hook=powerSGD.powerSGD_hook)
