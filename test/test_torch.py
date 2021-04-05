@@ -6778,6 +6778,10 @@ _unsigned_types = [torch.uint8]
 # These Ops promote integer inputs to Float.
 binary_float_ops_inplace = ['atan2_', 'div_']
 
+# Operators which are implemented using
+# structured kernels and use `build_binary_float_op`
+structured_inplace_ops = ['atan2_']
+
 # Helper values and functions for producing tensors and scalars to use in tensor op tests.
 # Tensor dimension sizes (Small, Medium, Large, Giant)
 _S = 5
@@ -7246,7 +7250,7 @@ def generate_test_function(cls,
                 else:
                     raise
             else:
-                if self.device_type == 'meta':
+                if self.device_type == 'meta' and op_str not in structured_inplace_ops:
                     self.fail('expected test to fail on meta tensors, but it passed')
                 else:
                     pass
