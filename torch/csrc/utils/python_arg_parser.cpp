@@ -171,7 +171,7 @@ auto combine_self_args(PyObject *self, PyObject *args) -> py::tuple {
   size_t n = py_args.size();
   auto args_ = py::tuple(n + 1);
   args_[0] = py::handle(self);
-  for (size_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     args_[i+1] = py_args[i];
   }
   return args_;
@@ -378,7 +378,7 @@ bool is_scalar_list(PyObject* obj) {
     return false;
   }
   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
-  for (size_t idx = 0; idx < size; idx++) {
+  for(const auto idx : c10::irange(size)) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!THPUtils_checkScalar(iobj)) {
       return false;
