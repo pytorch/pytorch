@@ -1080,24 +1080,6 @@ inline py::object invokeScriptMethodFromPython(
       });
 }
 
-inline c10::optional<Method> Method::matchOverloadedMethods(
-    const struct PythonArguments& args) {
-  auto methods = owner().get_overloaded_methods(name());
-  for (auto method : methods) {
-    try {
-      createStackForSchema(
-          method.function().getSchema(),
-          args.args,
-          args.kwargs,
-          owner()._ivalue());
-      return method;
-    } catch (schema_match_error& error) {
-      continue;
-    }
-  }
-  return c10::nullopt;
-}
-
 inline std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,

@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
+#include <torch/csrc/jit/python/pybind_utils.h>
+
 #include <fmt/format.h>
 
 namespace torch {
