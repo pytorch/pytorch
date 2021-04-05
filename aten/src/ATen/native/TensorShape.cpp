@@ -1294,7 +1294,7 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   TORCH_CHECK(split_size >= 0,  "split expects split_size be non-negative, but got split_size=", split_size);
   int64_t dim_size = self.size(dim);
-  TORCH_CHECK(split_size > 0 || self.size(dim) == 0,
+  TORCH_CHECK(split_size > 0 || dim_size == 0,
            "split_size can only be 0 if dimension size is 0, "
            "but got dimension size of ", dim_size);
   // if split_size is 0 and dimension size is 0, there is 1 split.
