@@ -147,7 +147,7 @@ Examples::
 """)
 
 det = _add_docstr(_linalg.linalg_det, r"""
-linalg.det(input) -> Tensor
+linalg.det(input, *, out=None) -> Tensor
 
 Computes the determinant of a square matrix :attr:`input`, or of each square matrix
 in a batched :attr:`input`.
@@ -167,6 +167,9 @@ Args:
     input (Tensor): the input matrix of size `(n, n)` or the batch of matrices of size
                     `(*, n, n)` where `*` is one or more batch dimensions.
 
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default is ``None``.
+
 Example::
 
     >>> a = torch.randn(3, 3)
@@ -175,6 +178,12 @@ Example::
             [ 0.9701,  0.7346, -1.8044],
             [-0.2337,  0.0557,  0.6929]])
     >>> torch.linalg.det(a)
+    tensor(0.0934)
+
+    >>> out = torch.empty(0)
+    >>> torch.linalg.det(a, out=out)
+    tensor(0.0934)
+    >>> out
     tensor(0.0934)
 
     >>> a = torch.randn(3, 2, 2)
