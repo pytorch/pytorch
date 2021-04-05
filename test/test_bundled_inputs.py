@@ -59,7 +59,7 @@ class TestBundledInputs(TestCase):
         inflated = loaded.get_all_bundled_inputs()
         self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
         self.assertEqual(len(inflated), len(samples))
-        self.assertTrue(loaded.run_on_bundled_input(0) is inflated[0][0])
+        self.assertTrue(loaded(inflated[0]) is inflated[0][0])
 
         for idx, inp in enumerate(inflated):
             self.assertIsInstance(inp, tuple)
@@ -133,7 +133,7 @@ class TestBundledInputs(TestCase):
         loaded = save_and_load(sm)
         inflated = loaded.get_all_bundled_inputs()
         self.assertEqual(inflated, samples)
-        self.assertTrue(loaded.run_on_bundled_input(0) == "first 1")
+        self.assertTrue(loaded(inflated[0]) == "first 1")
 
     def test_multiple_methods_with_inputs(self):
         class MultipleMethodModel(torch.nn.Module):
@@ -185,7 +185,7 @@ class TestBundledInputs(TestCase):
         self.assertEqual(inflated, loaded.get_all_bundled_inputs_for_foo())
 
         # Check running and size helpers
-        self.assertTrue(loaded.run_on_bundled_input(0) is inflated[0][0])
+        self.assertTrue(loaded(inflated[0]) is inflated[0][0])
         self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
 
         # Check helper that work on all functions
