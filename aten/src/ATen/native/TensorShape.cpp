@@ -564,9 +564,10 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
+  const auto dim_size = self.size(dim_);
   std::vector<Tensor> splits(sections);
-  int64_t min_split_size = self.size(dim_) / sections;
-  int64_t num_splits_one_extra = self.size(dim_) % sections;
+  int64_t min_split_size = dim_size / sections;
+  int64_t num_splits_one_extra = dim_size % sections;
   int64_t start_idx = 0;
   for (const auto split_idx : c10::irange(sections)) {
     int64_t split_size = (split_idx < num_splits_one_extra) ? (min_split_size + 1) : min_split_size;
@@ -620,12 +621,13 @@ std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
   std::vector<Tensor> result;
-  int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
+  const auto dim_size = self.size(dim);
+  int64_t split_size = (dim_size + chunks - 1) / chunks;
 
   // See the comment above in chunk(...)
-  if (split_size == 0 && self.size(dim) == 0) {
+  if (split_size == 0 && dim_size == 0) {
     std::vector<int64_t> split_sizes(chunks, split_size);
-    split_sizes[chunks - 1] = split_size - (split_size * chunks - self.size(dim));
+    split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
     return self.unsafe_split_with_sizes(split_sizes, dim);
   } else {
     return self.unsafe_split(split_size, dim);
