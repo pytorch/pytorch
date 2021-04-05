@@ -52,7 +52,7 @@ void sigmoid_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void sinc_kernel_cuda(TensorIterator& iter) {
+void sinc_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "sinc_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       if (a == scalar_t(0)) {
@@ -131,6 +131,26 @@ void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, doub
   });
 }
 
+void entr_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      iter.common_dtype(),
+      "entr_cuda",
+      [&]() {
+        gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t x) -> scalar_t {
+          if (at::_isnan(x)) {
+            return x;
+          } else if (x > 0) {
+            return -x * std::log(x);
+          } else if (x == 0) {
+            return 0;
+          }
+          return static_cast<scalar_t>(-INFINITY);
+        });
+      });
+}
+
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
 REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
 REGISTER_DISPATCH(i0e_stub, &i0e_kernel_cuda);
@@ -141,6 +161,7 @@ REGISTER_DISPATCH(erf_stub, &erf_kernel_cuda);
 REGISTER_DISPATCH(erfc_stub, &erfc_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
+REGISTER_DISPATCH(entr_stub, &entr_kernel_cuda);
 
 } // namespace native
 } // namespace at

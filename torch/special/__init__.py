@@ -6,6 +6,33 @@ from torch._torch_docs import common_args  # type: ignore
 
 Tensor = torch.Tensor
 
+entr = _add_docstr(_special.special_entr,
+                   r"""
+entr(input, *, out=None) -> Tensor
+Computes the entropy on :attr:`input` (as defined below), elementwise.
+
+.. math::
+    \text{entr(x)} = \begin{cases}
+        -x * \ln(x)  & x > 0 \\
+        0 &  x = 0.0 \\
+        -\infty & x < 0
+    \end{cases}
+""" + """
+
+Args:
+   input (Tensor): the input tensor.
+
+Keyword args:
+    out (Tensor, optional): the output tensor.
+
+Example::
+    >>> a = torch.arange(-0.5, 1, 0.5)
+    >>> a
+    tensor([-0.5000,  0.0000,  0.5000])
+    >>> torch.special.entr(a)
+    tensor([  -inf, 0.0000, 0.3466])
+""")
+
 gammaln = _add_docstr(_special.special_gammaln,
                       r"""
 gammaln(input, *, out=None) -> Tensor
@@ -95,15 +122,14 @@ Example::
     tensor([ 0.0000,  0.4769,    -inf])
 """.format(**common_args))
 
-i0e = _add_docstr(_special.special_i0e,
-                  r"""
-i0e(input, *, out=None) -> Tensor
+exp2 = _add_docstr(_special.special_exp2,
+                   r"""
+exp2(input, *, out=None) -> Tensor
 
-Computes the exponentially scaled zeroth order modified Bessel function of the first kind (as defined below)
-for each element of :attr:`input`.
+Computes the base two exponential function of :attr:`input`.
 
 .. math::
-    \text{out}_{i} = \exp(-|x|) * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+    y_{i} = 2^{x_{i}}
 
 """ + r"""
 Args:
@@ -114,7 +140,50 @@ Keyword args:
 
 Example::
 
+    >>> torch.special.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
+    tensor([ 1.,  2.,  8., 16.])
+""".format(**common_args))
+
+expm1 = _add_docstr(_special.special_expm1,
+                    r"""
+expm1(input, *, out=None) -> Tensor
+
+Computes the exponential of the elements minus 1
+of :attr:`input`.
+
+..
+
+.. math::
+    y_{i} = e^{x_{i}} - 1
+
+.. note:: This function provides greater precision than exp(x) - 1 for small values of x.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.expm1(torch.tensor([0, math.log(2.)]))
+    tensor([ 0.,  1.])
+""".format(**common_args))
+
+i0e = _add_docstr(_special.special_i0e,
+                  r"""
+i0e(input, *, out=None) -> Tensor
+Computes the exponentially scaled zeroth order modified Bessel function of the first kind (as defined below)
+for each element of :attr:`input`.
+.. math::
+    \text{out}_{i} = \exp(-|x|) * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+""" + r"""
+Args:
+    {input}
+Keyword args:
+    {out}
+Example::
     >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
     tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
-
 """.format(**common_args))
