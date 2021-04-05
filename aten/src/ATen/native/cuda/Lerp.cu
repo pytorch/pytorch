@@ -84,7 +84,7 @@ Tensor& lerp_cuda_tensor_(Tensor& self, const Tensor& end, const Tensor& weight)
 }
 
 Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, const Scalar& weight) {
-  c10::MaybeOwnedM<Tensor> b_self, b_end;
+  c10::MaybeOwned<Tensor> b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp__cuda");
   TORCH_CHECK(b_self->sizes() == self.sizes(),
            "output with shape ", self.sizes(),
