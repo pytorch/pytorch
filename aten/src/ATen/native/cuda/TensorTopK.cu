@@ -169,7 +169,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   int64_t sliceSize = self.size(dim);
   sliceSize = sliceSize == 0 ? 1: sliceSize;
   TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
-  Tensor input = Tensor(self);
+  Tensor input = self.contiguous();
 
   // Build the output size, which is the dim being selected set to
   // size k

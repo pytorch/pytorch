@@ -163,6 +163,12 @@ std::tuple<Tensor,Tensor> _th_sort_stable(const Tensor & self, c10::optional<boo
             THCudaHalfTensor_sort(globalContext().getTHCState(), values_, indices_, self_, dim, descending);
             break;
         }
+	case ScalarType::BFloat16: {
+            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_sort", false, DeviceType::CUDA, dispatch_scalar_type);
+            THCudaBFloat16Tensor_sort(globalContext().getTHCState(), values_, indices_, self_, dim, descending);
+            break;
+
+	}
         default:
             AT_ERROR("_th_sort not supported on CUDAType for ", dispatch_scalar_type);
     }
