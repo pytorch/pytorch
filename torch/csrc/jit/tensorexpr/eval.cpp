@@ -731,10 +731,6 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         extra_args.data());
   }
 
-  TORCH_API void visit(const BaseCallNode* v) override {
-    throw unimplemented_lowering(v);
-  }
-
   template <typename TReturn, typename TInput>
   void visit_intrinsics_helper(const Intrinsics* v) {
     std::vector<Value> values(v->nparams());
