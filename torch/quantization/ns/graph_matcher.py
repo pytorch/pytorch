@@ -50,6 +50,10 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
             nni.ConvReLU3d,
         ]),
         # conv functionals
+        'torch.nn.functional.conv1d': set([
+            F.conv1d,
+            toq.conv1d,
+        ]),
         'torch.nn.functional.conv2d': set([
             F.conv2d,
             toq.conv2d,
