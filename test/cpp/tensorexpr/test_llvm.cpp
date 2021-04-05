@@ -1528,8 +1528,8 @@ TEST(LLVM, RFactorReduction) {
   loops = loop.getLoopStmtsFor(b);
   loop_m = loops.at(2);
   loop_n = loops.at(1);
-  auto b_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
-  loop.rfactor(b_body, loop_n->var(), loop_n->body());
+  auto b_body = const_cast<Stmt*>(loop.getAllWritesToBuf(b->buf())[1]);
+  ASSERT_TRUE(loop.rfactor(b_body, loop_n));
 
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
@@ -1570,8 +1570,8 @@ TEST(LLVM, RFactorVectorizedReduction) {
   For* loop_k = loops.at(0);
   For* loop_m = loops.at(1);
   For* loop_n = loops.at(2);
-  auto b_body = NodeFinder<ReduceOp>::find(loopnest.root_stmt())[0];
-  loopnest.rfactor(b_body, loop_n->var());
+  auto b_body = const_cast<Stmt*>(loopnest.getAllWritesToBuf(b->buf())[1]);
+  ASSERT_TRUE(loopnest.rfactor(b_body, loop_n));
 
   loops = NodeFinder<For>::find(loopnest.root_stmt());
   loop_k = loops.at(0);

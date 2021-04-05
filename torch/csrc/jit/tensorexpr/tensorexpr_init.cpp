@@ -364,27 +364,8 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "rfactor",
-          [](LoopNest& self, const Stmt& s, const VarHandle& v) {
-            auto st = dynamic_cast<const Store*>(&s);
-            if (!st) {
-              return;
-            }
-            auto r = st->value();
-            self.rfactor(r, v.node());
-          },
-          py::return_value_policy::reference)
-      .def(
-          "rfactor",
-          [](LoopNest& self,
-             const Stmt& s,
-             const VarHandle& v,
-             tensorexpr::Block& ins_point) {
-            auto st = dynamic_cast<const Store*>(&s);
-            if (!st) {
-              return;
-            }
-            auto r = st->value();
-            self.rfactor(r, v.node(), &ins_point);
+          [](LoopNest& self, Stmt* s, For* target_for) {
+            self.rfactor(s, target_for);
           },
           py::return_value_policy::reference)
       .def(

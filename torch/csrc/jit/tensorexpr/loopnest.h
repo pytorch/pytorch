@@ -233,10 +233,8 @@ class TORCH_API LoopNest {
   // the temporary buffer used in the computation.
   void computeAt(Stmt* s, For* at);
 
-  void rfactor(
-      const Expr* f,
-      const Var* reduction_var,
-      Block* insertion_point = nullptr /* optional */);
+  bool rfactor(Stmt* s, For* target_for);
+  bool rfactor(Stmt* s, For* target_for, Buf** tmp_buf_ptr);
 
   void setBufferMap(
       For* f,

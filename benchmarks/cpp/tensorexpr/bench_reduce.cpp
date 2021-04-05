@@ -367,8 +367,8 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
     te::For* mi = loops[1];
     // TODO: rfactor works on the untransformed var set. This is a problem since we need to
     // look for the loop after Split to rfactor.
-    auto bt_body = te::NodeFinder<te::ReduceOp>::find(loop.root_stmt())[0];
-    loop.rfactor(bt_body, mi->var());
+    auto bt_body = const_cast<te::Stmt*>(loop.getAllWritesToBuf(BT->buf())[0]);
+    loop.rfactor(bt_body, mi);
   }
 
   loop.prepareForCodegen();
@@ -414,8 +414,8 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV2)(benchmark::State& state) {
     TORCH_CHECK(loops.size() == 2);
     te::For* mo = loops[0];
     te::For* mi = loops[1];
-    auto bt_body = te::NodeFinder<te::ReduceOp>::find(loop.root_stmt())[0];
-    loop.rfactor(bt_body, mi->var());
+    auto bt_body = const_cast<te::Stmt*>(loop.getAllWritesToBuf(BT->buf())[0]);
+    loop.rfactor(bt_body, mi);
   }
 
   {

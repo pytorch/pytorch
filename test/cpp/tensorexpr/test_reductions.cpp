@@ -698,9 +698,8 @@ TEST(Reductions, ReduceRfactor) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}});
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  auto v = loops.at(1)->var();
-  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
-  loop.rfactor(c_body, v);
+  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  ASSERT_TRUE(loop.rfactor(c_body, loops.at(1)));
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -734,9 +733,8 @@ TEST(Reductions, Reduce3DRfactorInternal) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  auto v = loops.at(1)->var();
-  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
-  loop.rfactor(c_body, v);
+  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  ASSERT_TRUE(loop.rfactor(c_body, loops.at(1)));
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -770,9 +768,8 @@ TEST(Reductions, Reduce3DRfactorInner) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  auto v = loops.at(2)->var();
-  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
-  loop.rfactor(c_body, v);
+  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  ASSERT_TRUE(loop.rfactor(c_body, loops.at(2)));
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -806,9 +803,8 @@ TEST(Reductions, Reduce3DRfactorOuter) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  auto v = loops.at(0)->var();
-  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
-  loop.rfactor(c_body, v);
+  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  ASSERT_TRUE(loop.rfactor(c_body, loops.at(0)));
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -844,9 +840,8 @@ TEST(Reductions, Reduce3DRfactorWithOuter) {
       Reduce("sum", {{l, "l"}}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  auto v = loops.at(3)->var();
-  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
-  loop.rfactor(c_body, v);
+  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  ASSERT_TRUE(loop.rfactor(c_body, loops.at(3)));
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -879,21 +874,24 @@ TEST(Reductions, Reduce3DRfactorRepeated) {
 
   for (int rVar1 = 0; rVar1 < 3; ++rVar1) {
     for (int rVar2 = 0; rVar2 < 2; ++rVar2) {
+      if (rVar1 == rVar2) {
+        continue;
+      }
       std::vector<float> out(1, -1.f);
 
       LoopNest loop(orig_loopnest);
-      auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
-      ASSERT_EQ(reduces.size(), 1);
-      auto v1 = reduces[0]->reduce_args()[rVar1];
-      loop.rfactor(reduces[0], v1);
+      ASSERT_EQ(NodeFinder<ReduceOp>::find(loop.root_stmt()).size(), 1);
 
-      reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
-      ASSERT_EQ(reduces.size(), 2);
-      auto v2 = reduces[0]->reduce_args()[rVar2];
-      loop.rfactor(reduces[0], v2);
+      Buf* tmp_buf;
+      auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+      ASSERT_TRUE(
+          loop.rfactor(c_body, loop.getLoopStmtsFor(c).at(rVar1), &tmp_buf));
 
-      reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
-      ASSERT_EQ(reduces.size(), 3);
+      auto tmp_body = const_cast<Stmt*>(loop.getAllWritesToBuf(tmp_buf)[1]);
+      ASSERT_TRUE(
+          loop.rfactor(tmp_body, loop.getLoopStmtsFor(tmp_buf).at(rVar2)));
+
+      ASSERT_EQ(NodeFinder<ReduceOp>::find(loop.root_stmt()).size(), 3);
 
       loop.prepareForCodegen();
       Stmt* s = loop.root_stmt();
@@ -907,74 +905,6 @@ TEST(Reductions, Reduce3DRfactorRepeated) {
   }
 }
 
-TEST(Reductions, ReduceRfactorInsertionPoint) {
-  KernelScope kernel_scope;
-
-  const int M = 10;
-  const int N = 10;
-  VarHandle m("m", kInt);
-  VarHandle n("n", kInt);
-
-  Placeholder b(BufHandle("b", {m, n}, kFloat));
-  std::vector<float> in(M * N);
-  for (int j = 0; j < M * N; ++j) {
-    in[j] = j;
-  }
-
-  std::vector<float> out(1, -1.f);
-
-  Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}});
-  LoopNest loop({c});
-  std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  auto v = loops.at(0)->var();
-  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
-  loop.rfactor(c_body, v, loops.at(0)->body());
-  auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
-  ASSERT_EQ(rc.size(), 2);
-  loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
-  s = IRSimplifier::simplify(s);
-
-  SimpleIREvaluator cg(s, {b, c, m, n});
-
-  cg.call({in, out, M, N});
-  ASSERT_EQ(out[0], 4950);
-}
-
-TEST(Reductions, Reduce3DRfactorInsertionPoint) {
-  KernelScope kernel_scope;
-
-  const int M = 10;
-  const int N = 10;
-  const int K = 10;
-  VarHandle m("m", kInt);
-  VarHandle n("n", kInt);
-  VarHandle k("k", kInt);
-
-  Placeholder b(BufHandle("b", {m, n, k}, kFloat));
-  std::vector<float> in(M * N * K);
-  for (int j = 0; j < M * N * K; ++j) {
-    in[j] = j;
-  }
-
-  std::vector<float> out(M, -1.f);
-
-  Tensor* c = Reduce("sum", {{m, "m"}}, Sum(), b, {{n, "n"}, {k, "k"}});
-  LoopNest loop({c});
-  std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  auto v = loops.at(1)->var();
-  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
-  loop.rfactor(c_body, v, loops.at(1)->body());
-  auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
-  ASSERT_EQ(rc.size(), 2);
-  loop.prepareForCodegen();
-  Stmt* s = loop.root_stmt();
-  s = IRSimplifier::simplify(s);
-
-  SimpleIREvaluator cg(s, {b, c, m, n, k});
-  cg.call({in, out, M, N, K});
-  ASSERT_EQ(out[0], 4950);
-}
 
 TEST(Reductions, ReduceRepeatedInternalRfactor) {
   KernelScope kernel_scope;
@@ -999,17 +929,21 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
       IRSimplifier::simplify(refloop.root_stmt()), {in_, c});
   ref_cg.call({in, ref});
 
+  Buf* tmp_buf;
+
   // rfactor out "c".
-  auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
-  loop.rfactor(reduces[0], reduces[0]->reduce_args()[3]);
+  auto reduce = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  ASSERT_TRUE(loop.rfactor(reduce, loop.getLoopStmtsFor(c).at(2), &tmp_buf));
 
   // rfactor out "b".
-  reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
-  loop.rfactor(reduces[0], reduces[0]->reduce_args()[1]);
+  reduce = const_cast<Stmt*>(loop.getAllWritesToBuf(tmp_buf)[1]);
+  ASSERT_TRUE(
+      loop.rfactor(reduce, loop.getLoopStmtsFor(tmp_buf).at(1), &tmp_buf));
 
   // rfactor out "d".
-  reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
-  loop.rfactor(reduces[0], reduces[0]->reduce_args()[1]);
+  reduce = const_cast<Stmt*>(loop.getAllWritesToBuf(tmp_buf)[1]);
+  ASSERT_TRUE(
+      loop.rfactor(reduce, loop.getLoopStmtsFor(tmp_buf).at(3), &tmp_buf));
 
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
@@ -1250,8 +1184,8 @@ TEST(Reductions, ReduceSplitRfactor) {
   For *o, *i, *t;
   loop.splitWithTail(loops[2], SPLIT_FACTOR, &o, &i, &t);
 
-  auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
-  loop.rfactor(reduces[0], reduces[0]->reduce_args().back());
+  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[2]);
+  ASSERT_TRUE(loop.rfactor(c_body, t));
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1285,13 +1219,22 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   For *o, *i, *t;
+//   std::cerr << "****\n" << *loop.root_stmt();
   loop.splitWithTail(loops[1], SPLIT_FACTOR, &o, &i, &t);
+//   std::cerr << "****\n" << *loop.root_stmt();
 
-  auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
-  loop.rfactor(reduces[0], reduces[0]->reduce_args().back());
+  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  ASSERT_TRUE(loop.rfactor(c_body, i));
+  // BUG-BUG-BUG!
+//   std::cerr << "****\n" << *loop.root_stmt();
+  loop.simplify();
+//   std::cerr << "****\n" << *loop.root_stmt();
+  loop.eliminateDeadStores();
+//   std::cerr << "****\n" << *loop.root_stmt();
   loop.prepareForCodegen();
+//   std::cerr << "****\n" << *loop.root_stmt();
+  // BUG-BUG-BUG!
   Stmt* s = loop.root_stmt();
-  s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg(s, {b, c});
 
@@ -1762,12 +1705,14 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "a"}, {n, "b"}, {k, "c"}});
   LoopNest loop({c});
 
-  auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
-  loop.rfactor(reduces[0], reduces[0]->reduce_args()[1]);
+  std::vector<For*> loops = loop.getLoopStmtsFor(c);
+  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  ASSERT_TRUE(loop.rfactor(c_body, loops.at(1)));
 
+  // TODO: replace NodeFinder with getAllWrites and getAllLoops.. API
   auto stores = NodeFinder<Store>::find(loop.root_stmt());
-  std::vector<For*> loops = NodeFinder<For>::find(loop.root_stmt());
-  loop.cacheAccesses(stores[1]->buf(), "tmp2", loops[2]);
+  std::vector<For*> all_loops = NodeFinder<For>::find(loop.root_stmt());
+  loop.cacheAccesses(stores[1]->buf(), "tmp2", all_loops[2]);
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1821,12 +1766,13 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
 
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "a"}, {n, "b"}, {k, "c"}});
   LoopNest loop({c});
-  auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
-  loop.rfactor(reduces[0], reduces[0]->reduce_args()[1]);
+  std::vector<For*> loops = loop.getLoopStmtsFor(c);
+  auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
+  ASSERT_TRUE(loop.rfactor(c_body, loops.at(1)));
 
   auto stores = NodeFinder<Store>::find(loop.root_stmt());
-  std::vector<For*> loops = NodeFinder<For>::find(loop.root_stmt());
-  loop.cacheAccesses(stores[1]->buf(), "tmp2", loops[3]);
+  std::vector<For*> all_loops = NodeFinder<For>::find(loop.root_stmt());
+  loop.cacheAccesses(stores[1]->buf(), "tmp2", all_loops[3]);
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1942,9 +1888,8 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   // But if we rfactor this so it's not a reduce axis we can vectorize that
   // loop.
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  auto v = loops.at(1)->var();
-  auto tensor_body = NodeFinder<ReduceOp>::find(l.root_stmt())[0];
-  l.rfactor(tensor_body, v);
+  auto tensor_body = const_cast<Stmt*>(l.getAllWritesToBuf(tensor->buf())[1]);
+  ASSERT_TRUE(l.rfactor(tensor_body, loops.at(1)));
 
   loops = NodeFinder<For>::find(l.root_stmt());
   l.vectorize(loops[2]);
