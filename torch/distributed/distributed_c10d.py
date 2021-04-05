@@ -2476,7 +2476,7 @@ def barrier(group=GroupMember.WORLD,
     else:
         work.wait()
 
-def monitored_barrier(group=GroupMember.WORLD, timeout=None):
+def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=False):
     """
     Synchronizes all processes similar to torch.distributed.barrier, but takes
     a configurable timeout and is able to report ranks that did not pass this
@@ -2496,10 +2496,16 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None):
     .. note:: Note that this collective is only supported with the GLOO backend.
 
     Args:
-        group (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
+        group (ProcessGroup, optional): The process group to work on. If
+            ``None``, the default process group will be used.
         timeout (datetime.timedelta, optional): Timeout for monitored_barrier.
-            If None, the default process group timeout will be used.
+            If ``None``, the default process group timeout will be used.
+        wait_all_ranks (bool, optional): Whether to collect all failed ranks or
+            not. By default, this is ``False`` and ``monitored_barrier`` on rank 0
+            will throw on the first failed rank it encounters in order to fail
+            fast. By setting ``wait_all_ranks=True`` ``monitored_barrier`` will
+            collect all failed ranks and throw an error containing information
+            about all failed ranks.
 
     Returns:
         ``None``.
@@ -2509,7 +2515,12 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None):
         >>> import torch.distributed as dist
         >>> if dist.get_rank() != 1:
         >>>     dist.monitored_barrier() # Raises exception indicating that
-        >>> # rank 1 did not call into barrier.
+        >>> # rank 1 did not call into monitored_barrier.
+        >>> # Example with wait_all_ranks=True
+        >>> if dist.get_rank() == 0:
+        >>>     dist.monitored_barrier(wait_all_ranks=True) # Raises exception
+        >>> # indicating that ranks 1, 2, ... world_size - 1 did not call into
+        >>> # monitored_barrier.
     """
 
     # Need to call rank not in group before using the group, otherwise
@@ -2526,7 +2537,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None):
         timeout = default_pg_timeout
 
     group_to_use = _get_default_group() if group is None else group
-    return group_to_use.monitored_barrier(timeout)
+    return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
 
 
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
