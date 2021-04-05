@@ -229,6 +229,7 @@ struct C10_API VariableVersion {
   c10::intrusive_ptr<VersionCounter> version_counter_;
 
  public:
+  enum Disabled { DISABLED };
   // It's okay to return true even for inference tensor which
   // doesn't have version counter enabled.
   bool unique() const {
@@ -239,11 +240,7 @@ struct C10_API VariableVersion {
   // https://cplusplus.github.io/LWG/issue2334.
   VariableVersion(uint32_t version = 0)
       : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
-  explicit VariableVersion(bool enabled, uint32_t version = 0) {
-    if (enabled) {
-      version_counter_ = c10::make_intrusive<VersionCounter>(version);
-    }
-  }
+  VariableVersion(Disabled) {}
 
   bool enabled() const {
     return version_counter_;

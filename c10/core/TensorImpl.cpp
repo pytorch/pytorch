@@ -70,6 +70,7 @@ TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta data_type,
 TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::TypeMeta data_type,
                        c10::optional<c10::Device> device_opt, bool is_view)
     : storage_(std::move(storage)),
+      version_counter_(VariableVersion(VariableVersion::DISABLED)),
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
@@ -98,8 +99,8 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   }
 
   // Inference tensor doesn't have version counter.
-  if (this->is_inference_tensor()) {
-    version_counter_ = VariableVersion(/*enabled=*/false);
+  if (!is_inference_tensor()) {
+    version_counter_ = VariableVersion();
   }
 
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
@@ -314,6 +315,10 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
+// Setting requires_grad to true on inference tensor outside InferenceMode
+// is forbidden.  Ideally it would also be illegal inside InferenceMode but
+// there's no way that we can directly allocate a tensor to have
+// requires_grad = true in C++ constructor.
 void TensorImpl::set_requires_grad(bool requires_grad) {
   TORCH_CHECK(!requires_grad || !is_inference_tensor() || c10::InferenceMode::is_enabled(),
     "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.");
