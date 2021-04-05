@@ -72,6 +72,8 @@ void PThreadPool::run(
 size_t getDefaultNumThreads();
 
 PThreadPool* pthreadpool() {
+  // mutex to prevent a race-condition
+  mutable std::mutex mutex_;
   std::lock_guard<std::mutex> lock{mutex_};
   static auto threadpool =
     std::make_unique<PThreadPool>(getDefaultNumThreads());
