@@ -355,12 +355,12 @@ if (resized) {{
             f"struct {class_name} final : public {parent_class} {{",
             f"{textwrap.indent(class_ctor_str, indent)}",
             f"{textwrap.indent(self.gen_class_set_output(k, parent_class, generate_super), indent)}",
-            f"    const Tensor& maybe_get_output(int64_t output_idx) override {{",
-            f"        return outputs_[output_idx];",
-            f"    }}",
+            "    const Tensor& maybe_get_output(int64_t output_idx) override {",
+            "        return outputs_[output_idx];",
+            "    }",
             f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
             f"{textwrap.indent(guard_field, indent)}",
-            f"}};"
+            "};"
         )
         return '\n'.join(line for line in lines if line)
 
