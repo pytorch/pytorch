@@ -195,10 +195,10 @@ class Task(nn.Module):
 
 class BatchNormNet(nn.Module):
 
-    def __init__(self):
+    def __init__(self, affine=True):
         super(BatchNormNet, self).__init__()
         self.fc1 = nn.Linear(2, 40, bias=False)
-        self.bn = nn.BatchNorm1d(4)
+        self.bn = nn.BatchNorm1d(4, affine=affine)
         self.fc2 = nn.Linear(40, 4, bias=False)
 
     def forward(self, x):
@@ -238,6 +238,7 @@ class EmbeddingNet(nn.Module):
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
+BN_NET_NO_AFFINE = BatchNormNet(affine=False)
 ONLY_SBN_NET = nn.SyncBatchNorm(2, momentum=0.99)
 
 def get_timeout(test_id):
@@ -398,11 +399,10 @@ class TestDistBackend(MultiProcessTestCase):
         return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe, faulthandler_file_name):
+    def _run(cls, rank, test_name, file_name, pipe):
         if BACKEND == 'nccl' and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS['no_cuda'].exit_code)
         self = cls(test_name)
-        self._register_fault_handler(faulthandler_file_name)
         self.rank = rank
         self.file_name = file_name
 
@@ -2910,11 +2910,11 @@ class DistributedTest:
             for p_gpu, p_DDP in zip(param_gpu, param_DDP):
                 self.assertEqual(p_gpu, p_DDP)
 
-        def _test_DDP_5iter(
+        def _test_DDP_niter(
             self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save,
-            offset=None, world_size=0, zero_grad=False, memory_format=None
+            offset=None, world_size=0, zero_grad=False, memory_format=None, n_iter=5,
         ):
-            for idx in range(5):
+            for idx in range(n_iter):
                 # single cpu/gpu training
                 self._test_DDP_helper(model_base, input, target, loss, memory_format=memory_format)
 
@@ -2996,7 +2996,7 @@ class DistributedTest:
             global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
             # check two model parameters over 5 iterations
-            self._test_DDP_5iter(
+            self._test_DDP_niter(
                 model_gpu,
                 model_DDP,
                 input_cpu.cuda(gpu_subset[0]),
@@ -3027,7 +3027,7 @@ class DistributedTest:
             global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
             # check two model parameters over 5 iterations
-            self._test_DDP_5iter(
+            self._test_DDP_niter(
                 model_base,
                 model_DDP,
                 input_cpu,
@@ -3283,12 +3283,13 @@ class DistributedTest:
             self._test_DistributedDataParallel(
                 gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
 
-        def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset, output_device=None):
+        def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, local_bs, global_bs, offset,
+                                                        output_device=None, affine=True):
             # Run a simple end to end DDP model, use result of single node model
             # as baseline
 
             # cpu training setup
-            model = BN_NET
+            model = BN_NET if affine else BN_NET_NO_AFFINE
 
             # single gpu training setup
             model_gpu = copy.deepcopy(model)
@@ -3317,7 +3318,7 @@ class DistributedTest:
             loss = nn.MSELoss()
 
             # check two model parameters over 5 iterations
-            self._test_DDP_5iter(
+            self._test_DDP_niter(
                 model_gpu,
                 model_DDP,
                 input_cpu.cuda(gpu_subset[0]),
@@ -3328,7 +3329,8 @@ class DistributedTest:
                 global_bs,
                 True,
                 offset,
-                dist.get_world_size()
+                dist.get_world_size(),
+                5 if affine else 2,
             )
             self._barrier()
 
@@ -3354,7 +3356,7 @@ class DistributedTest:
             loss = nn.MSELoss()
 
             # check two model parameters over 5 iterations
-            self._test_DDP_5iter(
+            self._test_DDP_niter(
                 model_gpu,
                 model_DDP,
                 input_gpu,
@@ -3411,6 +3413,31 @@ class DistributedTest:
                 offset=bs_offset,
                 output_device=torch.device('cuda'))
 
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        def test_DistributedDataParallel_SyncBatchNorm_No_Affine(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            # DDP does not support replicating BN layers within a process, hence
+            # testing with one module replica per process
+            gpus = [rank]
+
+            num_processes = dist.get_world_size()
+            local_bs = 2
+            bs_offset = int(rank * 2)
+            global_bs = int(num_processes * 2)
+
+            self._test_DistributedDataParallel_SyncBatchNorm(
+                gpu_subset=gpus,
+                rank=rank,
+                local_bs=local_bs,
+                global_bs=global_bs,
+                offset=bs_offset,
+                affine=False)
+
+
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_no_gpu
@@ -3445,7 +3472,7 @@ class DistributedTest:
             # numerical issue created by the divergent code path.
             with torch.backends.cudnn.flags(False):
                 # check two model parameters over 5 iterations
-                self._test_DDP_5iter(
+                self._test_DDP_niter(
                     model_gpu,
                     model_DDP,
                     input_cpu.cuda(gpus[0]),
@@ -3493,7 +3520,7 @@ class DistributedTest:
             # numerical issue created by the divergent code path.
             with torch.backends.cudnn.flags(False):
                 # check two model parameters over 5 iterations
-                self._test_DDP_5iter(
+                self._test_DDP_niter(
                     model_gpu,
                     model_DDP,
                     input_cpu.cuda(gpus[0]),
@@ -3534,6 +3561,7 @@ class DistributedTest:
             running_mean, running_var = model.module.running_mean, model.module.running_var
             torch.testing.assert_allclose(running_mean, all_input_var.mean(1))
             torch.testing.assert_allclose(running_var, all_input_var.var(1))
+
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -4261,6 +4289,9 @@ class DistributedTest:
             self.assertSetEqual({max_rank}, set(tensor.item() for tensor in tensor_list))
             # Ensure that all models are the same across ranks after all have joined.
             self.validate_net_equivalence(net)
+            # Ensure that running with DDP uneven inputs was logged.
+            ddp_logging_data = net.get_ddp_logging_data()
+            self.assertTrue(ddp_logging_data.join_uneven_inputs)
             dist.barrier()
 
         @require_backend({"gloo", "nccl"})
@@ -4474,29 +4505,6 @@ class DistributedTest:
                     out = net(inp)
                     loss = out.sum()
                     loss.backward()
-
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
-        @skip_if_lt_x_gpu(4)
-        def test_ddp_uneven_inputs_replicated_error(self):
-            # Tests that the context manager errors out in SPMD mode.
-            group = dist.new_group([0, 1])
-            if self.rank < 2:
-                model = nn.Linear(1, 1, bias=False)
-                rank_to_device = {0: [0, 1], 1: [2, 3]}
-
-                devices = rank_to_device[self.rank]
-                net = torch.nn.parallel.DistributedDataParallel(
-                    model.cuda(devices[0]), device_ids=devices, process_group=group
-                )
-                with self.assertRaisesRegex(
-                    ValueError, r"DDP join\(\) API does not support Single-Process Multi-GPU"
-                ):
-                    with net.join():
-                        pass
-            # We need a barrier since otherwise non-participating processes exit too early
-            # and cause a timeout.
-            self._barrier(timeout=60)
 
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
@@ -5076,6 +5084,7 @@ class DistributedTest:
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
         def test_ddp_model_diff_across_ranks(self):
             torch.cuda.set_device(self.rank)
             # Creates network with different sized embedding table on different

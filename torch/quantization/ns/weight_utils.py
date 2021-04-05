@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.quantized.dynamic as nnqd
+import torch.nn.intrinsic as nni
 toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
@@ -11,9 +12,19 @@ from .utils import getattr_from_fqn
 from typing import List
 
 def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
-    # TODO(future PR): make more generic, handle everything
-    if isinstance(mod, nn.Conv2d):
+    # TODO(future PR): handle QAT variants
+    if (
+        isinstance(mod, nn.Conv1d) or
+        isinstance(mod, nn.Conv2d) or
+        isinstance(mod, nn.Conv3d)
+    ):
         return mod.weight.detach()
+    elif (
+        isinstance(mod, nni.ConvReLU1d) or
+        isinstance(mod, nni.ConvReLU2d) or
+        isinstance(mod, nni.ConvReLU3d)
+    ):
+        return mod[0].weight.detach()
     else:
         return mod._weight_bias()[0]  # type: ignore
 

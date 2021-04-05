@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/python/python_ivalue.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 
@@ -165,7 +167,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           c10::StrongTypePtr(cu, classType), numAttrs);
 
       // 2. copy all the contained types
-      for (size_t slot = 0; slot < numAttrs; slot++) {
+      for (const auto slot : c10::irange(numAttrs)) {
         const auto& attrType = classType->getAttribute(slot);
         const auto& attrName = classType->getAttributeName(slot);
 

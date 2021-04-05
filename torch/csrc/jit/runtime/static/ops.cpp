@@ -187,7 +187,7 @@ REGISTER_OPERATOR_FUNCTOR(
         const size_t size = p_node->inputs().size();
         c10::List<IValue> vals(type.getElementType());
         vals.reserve(size);
-        for (size_t i = 0; i < size; i++) {
+        for (const auto i : c10::irange(size)) {
           vals.push_back(p_node->Input(i));
         }
         p_node->Output(0) = std::move(vals);
@@ -208,7 +208,7 @@ REGISTER_OPERATOR_FUNCTOR(
         const size_t size = p_node->inputs().size();
         std::vector<IValue> vals;
         vals.reserve(size);
-        for (size_t i = 0; i < size; i++) {
+        for (const auto i : c10::irange(size)) {
           vals.push_back(p_node->Input(i));
         }
         p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
@@ -512,7 +512,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       at::native::threshold_out(in0_t, 0, 0, out_t);
     } else {
-      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
@@ -530,7 +530,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       at::native::tanh_out(in0_t, out_t);
     } else {
-      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
@@ -551,7 +551,7 @@ REGISTER_OPERATOR_FUNCTOR(
           fastResizeToZero(out_t);
           at::native::sigmoid_out(in0_t, out_t);
         } else {
-          at::native::resize_as_(out_t, in0_t, c10::nullopt);
+          at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
           (*te)(
               out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
         }
@@ -578,7 +578,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       at::native::logit_out(in0_t, in1_d, out_t);
     } else {
-      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
@@ -591,7 +591,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    at::native::resize_as_(out_t, in0_t, c10::nullopt);
+    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
     at::native::copy_(out_t, in0_t, false);
   };
 });
@@ -646,7 +646,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
-        return at::native::embedding_bag_byte_rowwise_offsets_out(
+        return at::native::embedding_bag_4bit_rowwise_offsets_out(
             out_t,
             weight,
             indices,
@@ -872,7 +872,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
@@ -892,7 +892,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
@@ -910,7 +910,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
@@ -927,7 +927,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       std::vector<IValue> stack;
       const size_t size = p_node->inputs().size();
       stack.reserve(size);
-      for (size_t i = 0; i < size; i++) {
+      for (const auto i : c10::irange(size)) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
