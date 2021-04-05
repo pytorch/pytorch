@@ -377,6 +377,19 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # pack weight
                 weight = load_arg(quantized=True)(self.conv_node.args[1])
                 other_args = load_arg(quantized=False)(self.conv_node.args[2:])
+                if self.conv == torch.nn.functional.conv1d:
+                    # Dor conv1d only, the stride, padding, dilation arguments
+                    # are specified as int in the original function but as `int[]`
+                    # in the prepack op.  Convert them.  Note: for the 2d and 3d
+                    # variants, conversion is not needed as the type is `int[]`
+                    # throughout.
+                    other_args = (
+                        other_args[0],
+                        [other_args[1]],  # stride
+                        [other_args[2]],  # padding
+                        [other_args[3]],  # dilation
+                        *other_args[4:],
+                    )
                 prepack_args = tuple([weight] + list(other_args))
                 prepack_op = get_qconv_prepack_op(self.conv)
                 packed_weight = quantizer.quantized_graph.create_node(
