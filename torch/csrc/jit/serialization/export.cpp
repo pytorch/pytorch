@@ -6,7 +6,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -28,7 +27,6 @@
 #include <set>
 #include <string>
 #include <vector>
-
 namespace torch {
 namespace jit {
 
@@ -340,7 +338,7 @@ void EncoderBase::EncodeValueInfo(
     if (t->dim()) {
       onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
       auto sizes = t->symbolic_sizes().sizes().value();
-      for (const auto i : c10::irange(sizes.size())) {
+      for (size_t i = 0; i < sizes.size(); i++) {
         shape->add_dim();
         if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
             (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {

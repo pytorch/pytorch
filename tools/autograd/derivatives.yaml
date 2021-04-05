@@ -377,8 +377,8 @@
 - name: deg2rad(Tensor self) -> Tensor
   self: deg2rad_backward(grad)
 
-- name: det(Tensor self) -> Tensor
-  self: det_backward(grad, self, result)
+- name: linalg_det(Tensor self) -> Tensor
+  self: linalg_det_backward(grad, self, result)
 
 - name: diag(Tensor self, int diagonal=0) -> Tensor
   self: diag_backward(grad, self.sizes(), diagonal)
