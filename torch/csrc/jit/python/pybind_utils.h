@@ -57,7 +57,12 @@
 namespace torch {
 namespace jit {
 
-struct __attribute__((visibility("hidden"))) python_args {
+// NB: Need VISIBILITY_HIDDEN for silencing compiler error
+struct VISIBILITY_HIDDEN PythonArguments {
+  PythonArguments(
+      const struct tuple_slice& args_,
+      const pybind11::kwargs& kwargs_)
+      : args(args_), kwargs(kwargs_) {}
   const struct tuple_slice& args;
   const pybind11::kwargs& kwargs;
 };
@@ -1076,7 +1081,7 @@ inline py::object invokeScriptMethodFromPython(
 }
 
 inline c10::optional<Method> Method::matchOverloadedMethods(
-    const struct python_args& args) {
+    const struct PythonArguments& args) {
   auto methods = owner().get_overloaded_methods(name());
   for (auto method : methods) {
     try {

@@ -8,7 +8,7 @@
 namespace torch {
 namespace jit {
 
-struct python_args;
+struct PythonArguments;
 
 using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 
@@ -56,7 +56,8 @@ struct TORCH_API Method {
   }
 
   // this method is implemented inside libtorch
-  c10::optional<Method> matchOverloadedMethods(const struct python_args& args);
+  c10::optional<Method> matchOverloadedMethods(
+      const struct PythonArguments& args);
 
   GraphExecutor& get_executor() {
     return function_->get_executor();
