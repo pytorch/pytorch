@@ -249,7 +249,7 @@ std::string _formattedArgDesc(
 
   auto num_args = arguments.size() + kwargs.size();
   std::string result = "(";
-  for(const auto i : c10::irange(num_args)) {
+  for (size_t i = 0; i < num_args; i++) {
     bool is_kwarg = i >= arguments.size();
     PyObject *arg = is_kwarg ? kwargs.at(option.arguments[i].name) : arguments[i];
 
