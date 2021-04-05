@@ -272,7 +272,8 @@ class GroupedBenchmark:
             ]
 
             for i, (py_stmt, cpp_stmt) in enumerate(lines):
-                variants[(label, f"Case: {i:>2}")] = GroupedBenchmark.init_from_stmts(
+                case = (f"Case: {i:>2}",) if len(lines) > 1 else ()
+                variants[(label,) + case] = GroupedBenchmark.init_from_stmts(
                     py_stmt=py_stmt or None,
                     cpp_stmt=cpp_stmt or None,
                     setup=setup,
