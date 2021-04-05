@@ -9471,8 +9471,8 @@ class TestNN(NNTestCase):
             self.assertEqual(
                 F.interpolate(in_t, (out_size,) * dim, **kwargs),
                 F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
-            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
-            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
+            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=1e-12)
+            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=1e-12)
 
         def _make_input(dim, device):
             size = [1, 1]
@@ -11924,15 +11924,15 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float64, torch.complex128)
     def test_pad(self, device, dtype):
         inputs = torch.randn(1, 3, 4, 4, device=device, dtype=dtype, requires_grad=True)
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='circular'), (inputs,)))
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,), nondet_tol=1e-12)
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,), nondet_tol=1e-12)
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,), nondet_tol=1e-12)
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,), nondet_tol=1e-12))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,), nondet_tol=1e-12))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='circular'), (inputs,), nondet_tol=1e-12))
 
         inputs = torch.randn(1, 2, 3, 4, 4, device=device, dtype=dtype, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,), nondet_tol=1e-12))
 
         # Assert assertion errors are raised for invalid circular padding values
         inputs = torch.randn(1, 1, 4, device=device, dtype=dtype, requires_grad=True)

@@ -149,19 +149,11 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
     return jacobians
 
 
-def compute_numerical_gradient(fn, entry, v, nbhd_checks_fn):
+def compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
     # Performs finite differencing by perturbing `entry` in-place by `v` and
     # returns the gradient of each of the outputs wrt to x at idx.
     if isinstance(v, torch.Tensor) and v.layout != torch.sparse_coo:
         v = v.reshape(entry.shape)
-
-    if isinstance(v, torch.Tensor):
-        # It doesn't matter what the norm (denom) is when v.numel() = 0, because
-        # the numerator `b - a` would always be 0, but we don't want it being 0
-        # as to avoid nans
-        norm_v = v.norm() if not v.numel() == 0 else 1
-    else:
-        norm_v = -1j * v if isinstance(v, complex) else v
 
     orig = entry.clone()
     entry.copy_(orig - v)
@@ -291,14 +283,14 @@ def get_numerical_jacobian_wrt_specific_input(fn, input, input_idx, inputs, outp
         nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, idx=idx, eps=eps)
 
         def jvp_fn(delta):
-            return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, nbhd_checks_fn)
+            return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, eps, nbhd_checks_fn)
 
         jacobian_cols[d_idx] = compute_numerical_jacobian_cols(jvp_fn, eps, x.is_complex(), grad_out)
 
     return combine_jacobian_cols(jacobian_cols, outputs, input, input.numel())
 
 
-def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, input, inputs, outputs, scaled_u,
+def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, input, inputs, outputs, u, eps,
                                                    grad_out) -> Tuple[torch.Tensor, ...]:
     # If fast_mode=False, iter_tensor handles the below cases:
     # basically we want to prepare the input so that it can be modified in-place and do certain
@@ -317,12 +309,12 @@ def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, input, inputs,
                     for i, a in enumerate(_as_tuple(inputs)))
         return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
-    nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, eps=scaled_u)
+    nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, eps=eps)
 
     def jvp_fn(delta):
-        return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, nbhd_checks_fn)
+        return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, eps, nbhd_checks_fn)
 
-    jacobian_cols = compute_numerical_jacobian_cols(jvp_fn, scaled_u, input.is_complex(), grad_out)
+    jacobian_cols = compute_numerical_jacobian_cols(jvp_fn, u * eps, input.is_complex(), grad_out)
     jacobians = allocate_jacobians_with_outputs(outputs, dtype=input.dtype, device=input.device)
 
     for i, jacobian in enumerate(jacobians):
@@ -491,7 +483,7 @@ def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> b
 def check_no_differentiable_outputs_fast(fail_test, func, func_out, all_inputs, input_tensors, inputs_indices, all_u, eps):
     for inp_idx, inp, u in zip(inputs_indices, input_tensors, all_u):
         numerical_jacobians = get_fast_numerical_jacobian_wrt_specific_input(func, inp_idx, inp, all_inputs,
-                                                                             _as_tuple(func_out), eps * u, 1.0)
+                                                                             _as_tuple(func_out), u, eps, 1.0)
         for jacobian in numerical_jacobians:
             if torch.ne(jacobian, 0).sum() > 0:
                 return fail_test('Numerical gradient for function expected to be zero')
@@ -771,6 +763,18 @@ def vec_from_tensor(x):
     return vec
 
 
+def adjusted_atol(atol, u, v):
+    # In slow gradcheck, we compare A and B element-wise, i.e., for some a, b we allow |a - b| < atol + rtol * b
+    # but since we now compare q1 = v^T A u and q2 = v^T B u, we must allow |q1 - q2| < v^T E u + rtol * v^T B u
+    # where E is the correctly sized matrix where each entry is atol
+    #
+    # We see that atol needs to be scaled by v^T M u (where M is an all-ones M x N matrix):
+    # v^T M u = \sum_{i} \sum_{j} u_i * v_j = (\sum_{i} u_i)(\sum_{i} v_i)
+    sum_u = torch.sparse.sum(u) if u.layout == torch.sparse_coo else u.sum()
+    sum_v = torch.sparse.sum(v) if v.layout == torch.sparse_coo else v.sum()
+    return atol * sum_u * sum_v
+
+
 def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
                    atol, raise_exception, check_grad_dtypes, nondet_tol):
     # Perform the fast version of gradcheck
@@ -799,14 +803,14 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
     # Numerically approximate v^T (J u)
     for i, (inp, input_idx, u) in enumerate(zip(inp_tensors, inp_tensor_indices, all_u)):
         numerical = get_fast_numerical_jacobian_wrt_specific_input(func, input_idx, inp, tupled_inputs,
-                                                                   outputs, eps * u, 1.0)
+                                                                   outputs, u, eps, 1.0)
         for j, (a, v) in enumerate(zip(numerical, all_v)):
             out = dot(a, v.to(device=a.device))
             all_numerical[i].append(dot(a, v.to(device=a.device)))
 
         if any_complex:
             numerical_from_imag_grad_out = get_fast_numerical_jacobian_wrt_specific_input(
-                func, input_idx, inp, tupled_inputs, outputs, eps * u, 1j)
+                func, input_idx, inp, tupled_inputs, outputs, u, eps, 1j)
             for j in complex_output_indices:
                 a, v = numerical_from_imag_grad_out[j], all_v[j]
                 all_numerical_from_imag_grad_out[i].append(dot(a, v.to(device=a.device)))
@@ -835,7 +839,7 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
     for i, all_numerical_for_input_i in enumerate(all_numerical_from_imag_grad_out):
         for j, n in enumerate(all_numerical_for_input_i):
             a = all_analytical_from_imag_grad_out[j][i]
-            if not all_close(a, n, rtol, atol):
+            if not all_close(a, n, rtol, adjusted_atol(atol, all_u[i], all_v[j])):
                 return fail_test(get_notallclose_msg(a, n, i, j, prefix))
 
     # Make sure analytical and numerical is the same
@@ -844,7 +848,7 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
             "Gradients failed to compare equal for grad output = 1. "
         for j, n in enumerate(all_numerical_for_input_i):
             a = all_analytical[j][i]
-            if not all_close(a, n, rtol, atol):
+            if not all_close(a, n, rtol, adjusted_atol(atol, all_u[i], all_v[j])):
                 return fail_test(get_notallclose_msg(a, n, i, j, prefix))
 
     return True
@@ -934,12 +938,16 @@ def gradcheck(
             raise RuntimeError(msg)
         return False
 
+    def seeded_func(*inputs):
+        torch.manual_seed(0)
+        return func(*inputs)
+
     tupled_inputs = _as_tuple(inputs)
 
     if not check_inputs(fail_test, tupled_inputs, check_sparse_nnz):
         return False
 
-    func_out = func(*tupled_inputs)
+    func_out = seeded_func(*tupled_inputs)
 
     if fast_mode and has_complex_inputs_or_outputs(tupled_inputs, func_out):
         raise NotImplementedError("Fast mode for gradcheck and gradgradcheck is currently only implemented"
@@ -950,11 +958,11 @@ def gradcheck(
     check_outputs(outputs)
 
     if fast_mode:
-        if not fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
+        if not fast_gradcheck(fail_test, seeded_func, func_out, tupled_inputs, outputs, eps, rtol,
                               atol, raise_exception, check_grad_dtypes, nondet_tol):
             return False
     else:
-        if not slow_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
+        if not slow_gradcheck(fail_test, seeded_func, func_out, tupled_inputs, outputs, eps, rtol,
                               atol, raise_exception, check_grad_dtypes, nondet_tol):
             return False
 
@@ -967,7 +975,7 @@ def gradcheck(
         return False
 
     if check_undefined_grad:
-        if not test_undefined_grad(fail_test, func, outputs, tupled_inputs):
+        if not test_undefined_grad(fail_test, seeded_func, outputs, tupled_inputs):
             return False
 
     return True
