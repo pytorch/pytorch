@@ -52,19 +52,22 @@ public:
   }
   bool hasTensor() const { return type_ == TENSOR; }
   Tensor* getTensor() const {
-    assert(as_tensor != nullptr);
+    assert(hasTensor());
     return as_tensor;
   }
   bool hasScalar() const { return type_ == SCALAR; }
   VarHandle getScalar() const {
+    assert(hasScalar());
     return as_scalar;
   }
   bool hasDouble() const { return type_ == DOUBLE; }
   double getDouble() const {
+    assert(hasDouble());
     return as_double;
   }
   bool hasInt() const { return type_ == INT; }
   double getInt() const {
+    assert(hasInt());
     return as_int;
   }
 };

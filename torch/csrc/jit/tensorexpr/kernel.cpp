@@ -719,7 +719,7 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(
 }
 std::vector<ExprHandle> TensorExprKernel::valueShape(
     const TValue* v) {
-  if (v->getTensor()) {
+  if (v->hasTensor()) {
     return ExprVectorToExprHandleVector(v->getTensor()->buf()->dims());
   } else {
     return {};
