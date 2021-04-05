@@ -20,9 +20,9 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
-            return ConstRefCType(BaseCType('Tensor', binds))
+            return ConstRefCType(BaseCType(tensorT, binds))
         elif t.name == BaseTy.Scalar:
-            return ConstRefCType(BaseCType('Scalar', binds))
+            return ConstRefCType(BaseCType(scalarT, binds))
         else:
             raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
@@ -48,11 +48,11 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
         # must be changed in tandem, but there are problems; see
         # https://github.com/pytorch/pytorch/pull/51485
         elif str(t.elem) == 'int':
-            return BaseCType("IntArrayRef", binds)
+            return BaseCType(intArrayRefT, binds)
         elif str(t.elem) == 'Dimname':
-            return BaseCType("DimnameList", binds)
+            return BaseCType(dimnameListT, binds)
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
-        return ArrayRefCType(BaseCType(elem.cpp_type(), binds))
+        return ArrayRefCType(elem)
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 

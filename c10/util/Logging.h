@@ -332,8 +332,12 @@ struct DDPLoggingData {
   bool find_unused_parameters = false;
   bool gradient_as_bucket_view = false;
 
-  // Communication hook, if set, otherwise, will be builtin_allreduce.
+  // Communication hook. Empty string if not set, in which case it will not be
+  // logged.
   std::string comm_hook = "";
+  // Whether we are running under model.join() context manager for DDP uneven
+  // inputs.
+  bool join_uneven_inputs = false;
 
   // The following runtime stats are collected for the first 10 iterations
   // and then are collected every kDDPRuntimeLoggingSampleRate=100 iterations.
@@ -414,13 +418,18 @@ struct DDPLoggingData {
     }
     ddpLoggingDataInfo += backendInfo;
 
-    std::string commHookInfo = "";
     if (ddp_logging_data.comm_hook != "") {
-      commHookInfo += c10::str(
+      auto commHookInfo = c10::str(
         "comm_hook: ", ddp_logging_data.comm_hook
       );
+      ddpLoggingDataInfo += commHookInfo;
     }
-    ddpLoggingDataInfo += commHookInfo;
+
+    if (ddp_logging_data.join_uneven_inputs) {
+      auto joinInfo = c10::str("join_uneven_inputs: ", ddp_logging_data.join_uneven_inputs);
+      ddpLoggingDataInfo += joinInfo;
+    }
+
     return output << ddpLoggingDataInfo;
   }
 };
