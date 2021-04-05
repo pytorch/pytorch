@@ -489,7 +489,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * `is_contiguous_custom` for the encouraged customization point.
    */
   TENSORIMPL_MAYBE_VIRTUAL bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
-    if (C10_UNLIKELY(has_contiguity_ != static_cast<unsigned int>(HasContiguityPolicy::Default))) {
+    if (C10_UNLIKELY(has_contiguity_ != static_cast<uint8_t>(HasContiguityPolicy::Default))) {
       return is_contiguous_nondefault_policy_impl(memory_format);
     }
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
@@ -1768,7 +1768,7 @@ protected:
   };
 
   void set_has_contiguity_policy(HasContiguityPolicy p) {
-    has_contiguity_ = static_cast<unsigned int>(p);
+    has_contiguity_ = static_cast<uint8_t>(p);
   }
 
   Storage storage_;
@@ -1850,7 +1850,7 @@ protected:
   bool is_contiguous_ : 1;
   // gcc doesn't like enum class bitfields; see
   // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61414
-  /* HasContiguityPolicy */ unsigned int has_contiguity_ : 2;
+  /* HasContiguityPolicy */ uint8_t has_contiguity_ : 2;
 
   // Tensor is a subclass that does not permit storage access.
   bool storage_access_should_throw_ = false;
@@ -1858,7 +1858,7 @@ protected:
   // default member initializers for bit-fields only available with -std=c++2a or -std=gnu++2a
   inline void init_bitfields() {
     is_contiguous_ = true;
-    has_contiguity_ = static_cast<unsigned int>(HasContiguityPolicy::Default);
+    has_contiguity_ = static_cast<uint8_t>(HasContiguityPolicy::Default);
 
     is_channels_last_ = false;
     is_channels_last_contiguous_ = false;

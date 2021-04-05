@@ -277,12 +277,12 @@ void TensorImpl::throw_storage_access_error() const {
 }
 
 bool TensorImpl::is_contiguous_nondefault_policy_impl(at::MemoryFormat memory_format) const {
-  if (has_contiguity_ == static_cast<unsigned int>(HasContiguityPolicy::ContiguityNotSupported)) {
+  if (has_contiguity_ == static_cast<uint8_t>(HasContiguityPolicy::ContiguityNotSupported)) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false, "Tensors of type ", tensorimpl_type_name(),
         " do not have is_contiguous");
   } else {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(has_contiguity_ == static_cast<unsigned int>(HasContiguityPolicy::CustomBehavior));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(has_contiguity_ == static_cast<uint8_t>(HasContiguityPolicy::CustomBehavior));
     return is_contiguous_custom(memory_format);
   }
 }
