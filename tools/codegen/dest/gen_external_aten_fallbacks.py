@@ -125,7 +125,7 @@ class GenExternalAtenFallback:
             # TODO: keep this in sync with gen_unstructured_external
             tensor_args = [a for a in dispatcher_sig.arguments() if (
                            (isinstance(a.ctype, ConstRefCType) or isinstance(a.ctype, MutRefCType)) and
-                           isinstance(a.ctype.elem, BaseCType) and a.ctype.elem.type == 'Tensor')]
+                           isinstance(a.ctype.elem, BaseCType) and str(a.ctype.elem.type) == 'at::Tensor')]
             print_args_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensor_args])
 
             func_name = f'AtenXlaTypeDefault::{name}'
@@ -294,9 +294,7 @@ class GenExternalAtenFallback:
                             import pdb; pdb.set_trace()
                     else:
                         return_args = ", ".join([xla_tensor_creation_api("x_result", f.native_function.func.returns[i].type, get_device_param(args), tuple_idx=i) for i in range(len(return_names))])
-                    returns = f'\n  return {dispatcher_sig.returns_type()}({return_args});'
-            if '_amp_update_scale' in str(f.native_function.func.name):
-                import pdb; pdb.set_trace()
+                    returns = f'\n  return {dispatcher_sig.returns_type().cpp_type()}({return_args});'
 
             # TODO: if I don't do a translate from dispatcher -> cpp, will I be shooting myself in the foot somewhere?
             # sig_group = CppSignatureGroup.from_native_function(f.native_function, method=Variant.method in f.native_function.variants)

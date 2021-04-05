@@ -17,10 +17,6 @@ from typing import Sequence, List, Union
 #
 # Prominent characteristics of the dispatcher API:
 #
-#   - 'use_c10_dispatcher: full' controls whether or not we actually
-#     use the modern calling convention or not.  When use_c10_dispatcher
-#     is not enabled, we don't use the template machinery.
-#
 #   - dtype, layout, device and pin_memory are represented as separate
 #     arguments.
 #
@@ -28,14 +24,14 @@ from typing import Sequence, List, Union
 def name(func: FunctionSchema) -> str:
     return cpp.name(func)
 
-def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     # This is a faux amis.  If it makes sense in the future to add
     # more special cases here, or invert things so cpp.argument_type
     # calls this, or just completely inline the function, please do
     # it.
     return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
-def argument_type(a: Argument, *, binds: ArgName) -> CType:
+def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
     return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
 def returns_type(rs: Sequence[Return]) -> CType:
@@ -47,7 +43,7 @@ def argument(
 ) -> List[Binding]:
     if isinstance(a, Argument):
         return [Binding(
-            ctype=argument_type(a, binds=a.name),
+            nctype=argument_type(a, binds=a.name),
             name=a.name,
             argument=a,
         )]

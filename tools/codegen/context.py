@@ -32,9 +32,7 @@ def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunction, Exter
     else:
         f = g
     with context(f'in {external_loc} {f.loc}:\n  {f.func}'):
-        with local.parametrize(
-            use_c10_dispatcher=f.use_c10_dispatcher,
-        ):
+        with local.parametrize():
             yield
 
 # Given a function that operates on NativeFunction, wrap it into a new function
