@@ -80,6 +80,8 @@ allow_list = [
     ("aten::_mode*", datetime.date(2021, 5, 2)),
     ("aten::linalg_multi_dot", datetime.date(2021, 3, 25)),
     ("aten::empty_meta", datetime.date(2021, 4, 1)),
+    ("aten::div", datetime.date(2021, 4, 28)),
+    ("aten::divide", datetime.date(2021, 4, 28)),
     ("aten::batch_norm_backward_elemt", datetime.date(2021, 5, 1)),
     ("aten::assert_async", datetime.date(2021, 5, 1)),
     ("aten::cumprod_backward", datetime.date(2021, 5, 1)),
