@@ -405,6 +405,29 @@ def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad):
 
     return inputs
 
+def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
+    # Each test case consists of the sizes in the chain of multiplications
+    # e.g. [2, 3, 4, 5] generates matrices (2, 3) @ (3, 4) @ (4, 5)
+    test_cases = [
+        [1, 2, 1],
+        [2, 0, 2],
+        [0, 2, 2],
+        [2, 2, 2, 2],
+        [2, 3, 4, 5],
+        [5, 4, 0, 2],
+        [2, 4, 3, 5, 3, 2]
+    ]
+
+    result = []
+    for sizes in test_cases:
+        tensors = []
+        for size in zip(sizes[:-1], sizes[1:]):
+            t = make_tensor(size, device, dtype, requires_grad=requires_grad)
+            tensors.append(t)
+        result.append(SampleInput(tensors))
+
+    return result
+
 def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
     test_sizes = [
         (S,),
@@ -1033,6 +1056,23 @@ def sample_inputs_index_copy(op_info, device, dtype, requires_grad):
     samples.extend(SampleInput(t, args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
     return samples
 
+def sample_inputs_mode(op_info, device, dtype, requires_grad):
+    inputs = []
+    args = (
+        ((S, S, S), (),),
+        ((S, S, S), (1, ),),
+        ((S, S, S), (1, True, ),),
+        ((), (),),
+        ((), (0,),),
+        ((), (0, True,),),
+    )
+    inputs = list((SampleInput(make_tensor(input_tensor, device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                               args=args,))
+                  for input_tensor, args in args)
+    return inputs
+
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
     return (
         SampleInput(
@@ -1645,6 +1685,30 @@ def sample_inputs_cumprod(op_info, device, dtype, requires_grad):
         yield SampleInput(prod_zeros([1, 2]), args=(1,), kwargs={'dtype': dtype})
 
     return list(sample_generator())
+
+def sample_inputs_copysign(op_info, device, dtype, requires_grad):
+    def _make_tensor(*shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    cases = (
+        # no broadcast
+        (_make_tensor(S, S, S), _make_tensor(S, S, S)),
+        # broadcast rhs
+        (_make_tensor(S, S, S), _make_tensor(S, S)),
+        # broadcast lhs
+        (_make_tensor(S, S), _make_tensor(S, S, S)),
+        # broadcast all
+        (_make_tensor(S, 1, S), _make_tensor(M, S)),
+
+        # scalar
+        (_make_tensor(S, S), 3.14),
+        # scalar positive zero
+        (_make_tensor(S, S), 0.0),
+        # scalar negative zero
+        (_make_tensor(S, S), -0.0),
+    )
+
+    return [SampleInput(input, args=(args,)) for input, args in cases]
 
 def sample_inputs_prod(op_info, device, dtype, requires_grad):
     def make_arg(shape):
@@ -2496,6 +2560,11 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.int],
                                 active_if=IS_WINDOWS),
                    )),
+    OpInfo('copysign',
+           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_copysign,
+           supports_inplace_autograd=False,
+           ),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -2847,6 +2916,17 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
            sample_inputs_func=sample_inputs_linalg_matrix_power,),
+    OpInfo('linalg.multi_dot',
+           # Need this lambda because gradcheck does not work with TensorList inputs
+           aten_name='linalg_multi_dot',
+           dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
+           supports_inplace_autograd=False,
+           # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_linalg_multi_dot,),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -3064,6 +3144,12 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
+    OpInfo('mode',
+           op=torch.mode,
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           sample_inputs_func=sample_inputs_mode,),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
@@ -3594,29 +3680,26 @@ op_db: List[OpInfo] = [
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
+           assert_autodiffed=True,
            skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # stack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # hstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('vstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # vstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('dstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # dstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('unfold',
@@ -4071,15 +4154,6 @@ def method_tests():
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
-        ('copysign', (S, S, S), ((S, S, S),), '', (False,)),
-        ('copysign', (S, S, S), ((S, S),), 'broadcast_rhs', (False,)),
-        ('copysign', (S, S), ((S, S, S),), 'broadcast_lhs', (False,)),
-        ('copysign', (S, 1, S), ((M, S),), 'broadcast_all', (False,)),
-        ('copysign', (S, S), (3.14,), 'scalar', (False,)),
-        ('copysign', (S, S), (0.0,), 'scalar_pos_zero', (False,)),
-        # TorchScript does not recognize -0.0: Issue #46848
-        # https://github.com/pytorch/pytorch/issues/46848
-        # ('copysign', (S, S), (-0.0,), 'scalar_neg_zero', (False,)),
         ('real', (S, S, S), NO_ARGS, 'complex'),
         ('imag', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
@@ -4126,12 +4200,20 @@ def method_tests():
         ('quantile', (S, S, S), (0.5,)),
         ('quantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
         ('quantile', (S, S, S), (0.5, None, True), 'keepdim'),
-        ('quantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
+        ('quantile', (S, S, S), (0.5, 0, False), 'linear', (), [1], NO_ARGS, ident, {'interpolation': 'linear'}),
+        ('quantile', (S, S, S), (0.5, 0, False), 'lower', (), [1], NO_ARGS, ident, {'interpolation': 'lower'}),
+        ('quantile', (S, S, S), (0.5, 0, False), 'higher', (), [1], NO_ARGS, ident, {'interpolation': 'higher'}),
+        ('quantile', (S, S, S), (0.5, 0, False), 'midpoint', (), [1], NO_ARGS, ident, {'interpolation': 'midpoint'}),
+        ('quantile', (S, S, S), (0.5, 0, False), 'nearest', (), [1], NO_ARGS, ident, {'interpolation': 'nearest'}),
         ('quantile', (), (0.5,), 'scalar'),
         ('nanquantile', (S, S, S), (0.5,)),
         ('nanquantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
         ('nanquantile', (S, S, S), (0.5, None, True), 'keepdim'),
-        ('nanquantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
+        ('nanquantile', (S, S, S), (0.5, 0, False), 'linear', (), [1], NO_ARGS, ident, {'interpolation': 'linear'}),
+        ('nanquantile', (S, S, S), (0.5, 0, False), 'lower', (), [1], NO_ARGS, ident, {'interpolation': 'lower'}),
+        ('nanquantile', (S, S, S), (0.5, 0, False), 'higher', (), [1], NO_ARGS, ident, {'interpolation': 'higher'}),
+        ('nanquantile', (S, S, S), (0.5, 0, False), 'midpoint', (), [1], NO_ARGS, ident, {'interpolation': 'midpoint'}),
+        ('nanquantile', (S, S, S), (0.5, 0, False), 'nearest', (), [1], NO_ARGS, ident, {'interpolation': 'nearest'}),
         ('nanquantile', (), (0.5,), 'scalar'),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
@@ -4147,12 +4229,6 @@ def method_tests():
         ('nanmedian', (), NO_ARGS, 'scalar'),
         ('nanmedian', (), (0,), 'scalar_dim', (), [0]),
         ('nanmedian', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('mode', (S, S, S), NO_ARGS),
-        ('mode', (S, S, S), (1,), 'dim', (), [0]),
-        ('mode', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
-        ('mode', (), NO_ARGS, 'scalar'),
-        ('mode', (), (0,), 'scalar_dim', (), [0]),
-        ('mode', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
         ('sum', (S, S, S), NO_ARGS),
         ('sum', (S, S, S), (1,), 'dim', (), [0]),
         ('sum', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
