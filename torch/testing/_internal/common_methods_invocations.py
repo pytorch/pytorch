@@ -2396,7 +2396,7 @@ op_db: List[OpInfo] = [
                                 active_if=IS_WINDOWS),
                    )),
     OpInfo('atan2',
-           dtypes=all_types_and_complex_and(torch.bool),
+           dtypes=all_types_and(torch.bool),
            dtypesIfCPU=all_types_and(torch.bool),
            dtypesIfCUDA=all_types_and(torch.bool, torch.half),
            sample_inputs_func=sample_inputs_atan2,
