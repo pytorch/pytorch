@@ -1696,9 +1696,11 @@ def sample_inputs_copysign(op_info, device, dtype, requires_grad):
         # broadcast rhs
         (_make_tensor(S, S, S), _make_tensor(S, S)),
         # broadcast lhs
-        (_make_tensor(S, S), _make_tensor(S, S, S)),
+        # Uncomment once gh-50747 is fixed
+        # (_make_tensor(S, S), _make_tensor(S, S, S)),
         # broadcast all
-        (_make_tensor(S, 1, S), _make_tensor(M, S)),
+        # Uncomment once gh-50747 is fixed
+        # (_make_tensor(S, 1, S), _make_tensor(M, S)),
 
         # scalar
         (_make_tensor(S, S), 3.14),

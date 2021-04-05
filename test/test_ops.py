@@ -235,7 +235,7 @@ class TestCommon(JitCommonTestCase):
         aliases = tuple(aliases)
 
         inplace_ops = tuple(v for v in inplace_ops if v is not None)
-        variants = (v for v in (method, inplace) + aliases if v is not None)
+        variants = tuple(v for v in (method, inplace) + aliases if v is not None)
 
         _requires_grad = (op.supports_autograd and
                           (dtype.is_floating_point or op.supports_complex_autograd))
