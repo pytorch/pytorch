@@ -457,14 +457,13 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # After running meta, op.outputs_ is guaranteed to be valid;
             # add it to the context
             # TODO: handle multi-return
-            assert ConstRefCType(BaseCType(tensorT, structured.out_arguments(self.g)[0].ctype.name)) == \
-                structured.out_arguments(self.g)[0].ctype
+            assert ConstRefCType(BaseCType(tensorT)) == structured.out_arguments(self.g)[0].nctype.type
             context.append(Expr(
                 expr="op.outputs_[0]",
                 # TODO: Stop hardcoding that the output type is a Tensor.  Note
                 # that for the codegen here this is fine because outputs_ is
                 # hardcoded to be tensor already
-                type=MutRefCType(BaseCType(tensorT, structured.out_arguments(self.g)[0].ctype.name)),
+                type=NamedCType(structured.out_arguments(self.g)[0].nctype.name, MutRefCType(BaseCType(tensorT))),
             ))
 
             # With the expanded context, do the impl call (if not a meta

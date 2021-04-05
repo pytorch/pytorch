@@ -12,7 +12,7 @@ from typing import Union, List
 # Translation of types occuring in JIT arguments to a C++ argument type.
 # NB: For now, mutable doesn't do anything; but it could if we make
 # some more nominal types
-def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     # If it's a value type, do the value type translation
     r = cpp.valuetype_type(t, binds=binds)
     if r is not None:
@@ -20,9 +20,9 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
-            return ConstRefCType(BaseCType(tensorT, binds))
+            return NamedCType(binds, ConstRefCType(BaseCType(tensorT)))
         elif t.name == BaseTy.Scalar:
-            return ConstRefCType(BaseCType(scalarT, binds))
+            return NamedCType(binds, ConstRefCType(BaseCType(scalarT)))
         else:
             raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
@@ -36,7 +36,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
                 "optional scalar not supported by structured yet"
             )
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
-        return OptionalCType(elem)
+        return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         if t.elem == BaseType(BaseTy.Tensor):
             raise AssertionError(
@@ -48,15 +48,15 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
         # must be changed in tandem, but there are problems; see
         # https://github.com/pytorch/pytorch/pull/51485
         elif str(t.elem) == 'int':
-            return BaseCType(intArrayRefT, binds)
+            return NamedCType(binds, BaseCType(intArrayRefT))
         elif str(t.elem) == 'Dimname':
-            return BaseCType(dimnameListT, binds)
+            return NamedCType(binds, BaseCType(dimnameListT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
-        return ArrayRefCType(elem)
+        return NamedCType(binds, ArrayRefCType(elem.type))
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
-def argument_type(a: Argument, *, binds: ArgName) -> CType:
+def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
     return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
 # returns_type intentionally omitted, because structured kernels never "return";
@@ -68,7 +68,7 @@ def argument_type(a: Argument, *, binds: ArgName) -> CType:
 def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[Binding]:
     if isinstance(a, Argument):
         return [Binding(
-            ctype=argument_type(a, binds=a.name),
+            nctype=argument_type(a, binds=a.name),
             name=a.name,
             default=None,
             argument=a,

@@ -4,15 +4,15 @@ from tools.codegen.api.types import *
 # This file implements a small program synthesis engine that implements
 # conversions between one API to another.
 #
-# The key data type in this file in CType, short for C++ semantic type.  A CType
+# The key data type in this file in NamedCType, short for Named C++ semantic type.  A NamedCType
 # represents a C++ type, plus semantic information about what it represents.
 # For example, consider the argument "bool pin_memory"; its normal C++ type is
 # "bool", but its C++ semantic type also keeps track that this represents a
 # "pin_memory"; you can't just use a random other boolean in a context where you
 # need a "pin_memory"!
 #
-# The translator takes a list of needed CTypes, and then figures out how
-# to construct expressions with these CTypes from the given bindings.  Many
+# The translator takes a list of needed NamedCTypes, and then figures out how
+# to construct expressions with these NamedCTypes from the given bindings.  Many
 # of these expressions are trivial (I need a Tensor other; there's a Tensor
 # other scope); others are more nontrivial and may require packing/unpacking.
 # Some examples of non-trivial action:
@@ -29,7 +29,7 @@ from tools.codegen.api.types import *
 #     from both "memory_format" and "options", so you had better make sure
 #     they are consistent.  (Join)
 
-options_ctype = ConstRefCType(BaseCType(tensorOptionsT, "options"))
+options_ctype = NamedCType("options", ConstRefCType(BaseCType(tensorOptionsT)))
 
 class UnsatError(RuntimeError):
     pass
@@ -48,12 +48,12 @@ class UnsatError(RuntimeError):
 # Typically, a list of Bindings is convenient to get (you usually call something
 # like arguments() to get them); but technically you only need less information:
 # for 'bindings' an (un-ordered) list of Exprs is sufficient; similarly, for
-# 'goals', an (ordered) list of CType goals is sufficient.  If you are doing
+# 'goals', an (ordered) list of NamedCType goals is sufficient.  If you are doing
 # something more complicated, e.g., tracking the set of bindings in a context,
 # you may find using these smaller types more convenient.
 def translate(
     bindings: Sequence[Union[Expr, Binding]],
-    goals: Sequence[Union[CType, Binding]],
+    goals: Sequence[Union[NamedCType, Binding]],
     *, method: bool = False
 ) -> List[Expr]:
 
@@ -62,20 +62,20 @@ def translate(
         if isinstance(b, Binding):
             binding_exprs.append(Expr(
                 expr=b.name,
-                type=b.ctype,
+                type=b.nctype,
             ))
         else:
             binding_exprs.append(b)
 
-    goal_ctypes: List[CType] = []
+    goal_ctypes: List[NamedCType] = []
     for g in goals:
         if isinstance(g, Binding):
-            goal_ctypes.append(g.ctype)
+            goal_ctypes.append(g.nctype)
         else:
             goal_ctypes.append(g)
 
     # Add all the bindings to the context
-    ctx: Dict[CType, str] = {}
+    ctx: Dict[NamedCType, str] = {}
     for b in binding_exprs:
         ctx[b.type] = b.expr
 
@@ -87,17 +87,17 @@ def translate(
         t = b.type
         if isinstance(t, ConstRefCType) and isinstance(t.elem, OptionalCType) and \
                 isinstance(t.elem.elem, BaseCType) and str(t.elem.elem.type) == 'at::Tensor':
-            ctx[ConstRefCType(BaseCType(tensorT, t.elem.elem.name))] = \
+            ctx[NamedCType(t.elem.elem.name, ConstRefCType(BaseCType(tensorT)))] = \
                 f'({b.expr}.has_value() ? *{b.expr} : at::Tensor())'
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
-        ctx[MutRefCType(BaseCType(tensorT, "self"))] = "const_cast<Tensor&>(*this)"
-        ctx[ConstRefCType(BaseCType(tensorT, "self"))] = "const_cast<Tensor&>(*this)"
+        ctx[NamedCType("self", MutRefCType(BaseCType(tensorT)))] = "const_cast<Tensor&>(*this)"
+        ctx[NamedCType("self", ConstRefCType(BaseCType(tensorT)))] = "const_cast<Tensor&>(*this)"
         # This is better!  Byte-for-byte compat
-        # ctx[ConstRefCType(BaseCType(tensorT, "self"))] = "*this"
+        # ctx[NamedCType("self", ConstRefCType(BaseCType(tensorT)))] = "*this"
 
-    def unsat(goal: CType) -> NoReturn:
+    def unsat(goal: NamedCType) -> NoReturn:
         ctx_desc = '\n'.join(f"  {t.cpp_type()} {t.name}; // {e}" for t, e in ctx.items())
         raise UnsatError(f'''
 Failed to synthesize the expression "{goal.cpp_type()} {goal.name}".
@@ -115,8 +115,8 @@ Check this module for more information.
     # conversions (e.g., "T a" is OK for "const T& a").  So all of the
     # existing rules in this function simply try to solve immediately,
     # and bail if things don't work out.
-    def solve(goal: CType, *, direct: bool) -> str:
-        def direct_solve(goal: CType) -> str:
+    def solve(goal: NamedCType, *, direct: bool) -> str:
+        def direct_solve(goal: NamedCType) -> str:
             return solve(goal, direct=True)
 
         if goal in ctx:
@@ -124,19 +124,19 @@ Check this module for more information.
             return ctx[goal]
 
         # const & is satisfied with mutable &
-        if isinstance(goal, ConstRefCType):
+        if isinstance(goal.type, ConstRefCType):
             try:
                 # WARNING: not strictly decreasing; be careful not
                 # to add a direct conversion that goes satisfies
                 # mutable& with const&
-                return solve(MutRefCType(goal.elem), direct=direct)
+                return solve(NamedCType(goal.name, MutRefCType(goal.type.elem)), direct=direct)
             except UnsatError:
                 pass
 
         # mutable & is satisfied with value
-        if isinstance(goal, MutRefCType):
+        if isinstance(goal.type, MutRefCType):
             try:
-                return solve(goal.elem, direct=direct)
+                return solve(NamedCType(goal.name, goal.type.elem), direct=direct)
             except UnsatError:
                 pass
 
@@ -144,9 +144,9 @@ Check this module for more information.
             unsat(goal)
 
         # For now, all of these rules are mutually exclusive.
-        if goal == OptionalCType(BaseCType(memoryFormatT, "memory_format")):
+        if goal == NamedCType("memory_format", OptionalCType(BaseCType(memoryFormatT))):
             memory_format = direct_solve(
-                OptionalCType(BaseCType(memoryFormatT, SpecialArgName.possibly_redundant_memory_format))
+                NamedCType(SpecialArgName.possibly_redundant_memory_format, OptionalCType(BaseCType(memoryFormatT)))
             )
             # No need to join "memory_format" and "options" if the target API takes "options" directly.
             # Otherwise it will cause the redundant memory_format error.
@@ -158,26 +158,26 @@ Check this module for more information.
             except UnsatError:
                 return memory_format
 
-        elif goal == BaseCType(tensorOptionsT, "options"):
-            dtype = direct_solve(OptionalCType(BaseCType(scalarTypeT, "dtype")))
-            pin_memory = direct_solve(OptionalCType(BaseCType(boolT, "pin_memory")))
-            device = direct_solve(OptionalCType(BaseCType(deviceT, "device")))
-            layout = direct_solve(OptionalCType(BaseCType(layoutT, "layout")))
+        elif goal == NamedCType("options", BaseCType(tensorOptionsT)):
+            dtype = direct_solve(NamedCType("dtype", OptionalCType(BaseCType(scalarTypeT))))
+            pin_memory = direct_solve(NamedCType("pin_memory", OptionalCType(BaseCType(boolT))))
+            device = direct_solve(NamedCType("device", OptionalCType(BaseCType(deviceT))))
+            layout = direct_solve(NamedCType("layout", OptionalCType(BaseCType(layoutT))))
             return f'TensorOptions().dtype({dtype}).layout({layout}).device({device}).pinned_memory({pin_memory})'
 
-        elif goal == OptionalCType(BaseCType(scalarTypeT, "dtype")):
+        elif goal == NamedCType("dtype", OptionalCType(BaseCType(scalarTypeT))):
             options = direct_solve(options_ctype)
             return f'optTypeMetaToScalarType({options}.dtype_opt())'
 
-        elif goal == OptionalCType(BaseCType(layoutT, "layout")):
+        elif goal == NamedCType("layout", OptionalCType(BaseCType(layoutT))):
             options = direct_solve(options_ctype)
             return f'{options}.layout_opt()'
 
-        elif goal == OptionalCType(BaseCType(deviceT, "device")):
+        elif goal == NamedCType("device", OptionalCType(BaseCType(deviceT))):
             options = direct_solve(options_ctype)
             return f'{options}.device_opt()'
 
-        elif goal == OptionalCType(BaseCType(boolT, "pin_memory")):
+        elif goal == NamedCType("pin_memory", OptionalCType(BaseCType(boolT))):
             options = direct_solve(options_ctype)
             return f'{options}.pinned_memory_opt()'
 

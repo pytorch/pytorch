@@ -211,13 +211,13 @@ if (prop.isComplex()) {
 """
 
 MISC_GETTER_DEFS = {
-    'c10::optional<int64_t>': (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
-    'double': (GETTER_DEFINITION, GETTER_BODY_DOUBLE),
-    'c10::optional<double>': (GETTER_DEFINITION_OPT, GETTER_BODY_DOUBLE),
-    'bool': (GETTER_DEFINITION, GETTER_BODY_BOOL),
-    'std::string': (GETTER_DEFINITION, GETTER_BODY_STRING),
-    'at::Scalar': (GETTER_DEFINITION, GETTER_BODY_SCALAR),
-    'c10::optional<at::Scalar>': (GETTER_DEFINITION_OPT, GETTER_BODY_SCALAR),
+    OptionalCType(BaseCType(intT)): (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
+    BaseCType(doubleT): (GETTER_DEFINITION, GETTER_BODY_DOUBLE),
+    OptionalCType(BaseCType(doubleT)): (GETTER_DEFINITION_OPT, GETTER_BODY_DOUBLE),
+    BaseCType(boolT): (GETTER_DEFINITION, GETTER_BODY_BOOL),
+    BaseCType(stringT): (GETTER_DEFINITION, GETTER_BODY_STRING),
+    BaseCType(scalarT): (GETTER_DEFINITION, GETTER_BODY_SCALAR),
+    OptionalCType(BaseCType(scalarT)): (GETTER_DEFINITION_OPT, GETTER_BODY_SCALAR),
 }
 
 # These functions have backwards which cannot be traced, and so must have
@@ -291,11 +291,13 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         compute_index_ranges.append(f'auto {arg.name}_ix = gen.range({size});')
 
     def save_var(var: SavedAttribute, is_output: bool) -> None:
-        name = var.name
+        name = var.nctype.name
+        type = var.nctype.type
         should_append_getsetdef = True
 
-        if var.type == 'at::Tensor' or var.type == 'c10::optional<at::Tensor>' or var.type == 'c10::optional<at::Tensor>&' or \
-                (var.type == 'at::Scalar' and is_output):
+        if type == BaseCType(tensorT) or type == OptionalCType(BaseCType(tensorT)) or \
+                type == MutRefCType(OptionalCType(BaseCType(tensorT))) or \
+                (type == BaseCType(scalarT) and is_output):
             saved_variables.append(f'SavedVariable {name}_;')
             release_variables.append(f'{name}_.reset_data();')
             release_variables.append(f'{name}_.reset_grad_function();')
@@ -303,7 +305,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             unpack.append(f'auto {name} = {name}_.unpack({ptr});')
             getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_SAVEDVAR))
-        elif var.type == 'at::TensorList':
+        elif type == BaseCType(tensorListT):
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -314,7 +316,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
             getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
-        elif var.type == 'c10::List<c10::optional<at::Tensor>>':
+        elif type == ListCType(OptionalCType(BaseCType(tensorT))):
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -325,27 +327,27 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
             getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
-        elif var.type == 'at::IntArrayRef':
+        elif type == BaseCType(intArrayRefT):
             saved_variables.append(f'std::vector<int64_t> {name};')
             getter_definitions.append(GETTER_DEFINITION.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
-        elif var.type == 'c10::optional<at::IntArrayRef>':
+        elif type == OptionalCType(BaseCType(intArrayRefT)):
             saved_variables.append(f'c10::OptionalArray<int64_t> {name};')
             getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
-        elif var.type == 'c10::optional<at::ArrayRef<double>>':
+        elif type == OptionalCType(ArrayRefCType(BaseCType(doubleT))):
             saved_variables.append(f'c10::OptionalArray<double> {name};')
             getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_DOUBLE))
-        elif var.type == 'int64_t':
-            saved_variables.append(f'{var.type} {name} = 0;')
+        elif type == BaseCType(intT):
+            saved_variables.append(f'{type.cpp_type()} {name} = 0;')
             getter_definitions.append(GETTER_DEFINITION.substitute(
                 op=info.op, name=name, body=GETTER_BODY_INT64_T))
         else:
-            saved_variables.append(f'{var.type} {name};')
+            saved_variables.append(f'{type.cpp_type()} {name};')
 
-            if var.type in MISC_GETTER_DEFS:
-                getter_def, body = MISC_GETTER_DEFS[var.type]
+            if type in MISC_GETTER_DEFS:
+                getter_def, body = MISC_GETTER_DEFS[type]
                 getter_definitions.append(getter_def.substitute(op=info.op, name=name, body=body))
             else:
                 # Types we don't expose python bindings to yet:
