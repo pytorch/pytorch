@@ -664,7 +664,7 @@ static TensorIterator build_addr_iter(Tensor& result,
     "2D tensor expected, got ", self_->dim(), "D tensor for input"
   );
   TORCH_CHECK(
-    self_->sizes()[0] == vec1_size0)&& self_->sizes()[1] == vec2_size0,
+    self_->sizes()[0] == vec1_size0 && self_->sizes()[1] == vec2_size0,
     "size mismatch, input: ", self_->sizes(),
     ", v1: ", vec1.sizes(),
     ", v2: ", vec2.sizes()
