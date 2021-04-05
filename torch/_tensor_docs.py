@@ -2740,15 +2740,13 @@ qscheme() -> torch.qscheme
 Returns the quantization scheme of a given QTensor.
 """)
 
-add_docstr_all('quantile',
-               r"""
+add_docstr_all('quantile', r"""
 quantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.quantile`
 """)
 
-add_docstr_all('nanquantile',
-               r"""
+add_docstr_all('nanquantile', r"""
 nanquantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.nanquantile`
