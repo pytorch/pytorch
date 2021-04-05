@@ -256,7 +256,6 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   // Node visitors.
   void visit(const Store* v) override;
   void visit(const Load* v) override;
-  void visit(const FunctionCall* v) override;
   void visit(const For* v) override;
   void visit(const Cond* v) override;
   void visit(const IfThenElse* v) override;
@@ -314,7 +313,6 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
     // Look for and insert accesses belonging to all nodes that act like
     // reads.
     insertAllReads(NodeFinder<Load>::find(v));
-    insertAllReads(NodeFinder<FunctionCall>::find(v));
     insertAllReads(NodeFinder<ReduceOp>::find(v));
 
     return reads;

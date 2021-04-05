@@ -173,6 +173,8 @@ void BoundShapeInferencer::InferOps(
     InferSoftmax(op);
   } else if (op.type() == "LpNorm") {
     InferLpNorm(op);
+  } else if (op.type() == "Transpose") {
+    InferTranspose(op);
   } else {
     InferCommonOp(op);
   }
@@ -931,6 +933,52 @@ void BoundShapeInferencer::InferLpNorm(const OperatorDef& op) {
     it->second.setDimType(std::vector<TensorBoundShape::DimType>(
         it->second.shape.dims_size(), TensorBoundShape_DimType_CONSTANT));
   }
+}
+
+void BoundShapeInferencer::InferTranspose(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.input_size(), 1, op.type(), " must have 1 input");
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+
+  auto it = shape_info_.find(op.input(0));
+  if (it == shape_info_.end()) {
+    LOG(WARNING) << "Didn't find shape info for the input of Softmax";
+    return;
+  }
+
+  ArgumentHelper helper(op);
+  std::vector<int> axes = helper.GetRepeatedArgument<int>("axes");
+  if (axes.empty()) {
+    // In this case it should be existing dims in reverse order
+    for (int i = it->second.shape.dims().size() - 1; i >= 0; --i) {
+      axes.push_back(i);
+    }
+  } else {
+    CAFFE_ENFORCE_EQ(
+        axes.size(),
+        it->second.shape.dims().size(),
+        op.type(),
+        " must specify all axes in Transpose."
+    );
+    auto valid_axes =
+        std::all_of(axes.begin(), axes.end(), [numDims = it->second.shape.dims().size()](int& axis) {
+          return axis >= 0 && axis < numDims;
+        });
+    CAFFE_ENFORCE(valid_axes, "Invalid axes were provided.");
+  }
+
+  std::vector<TensorBoundShape::DimType> dimTypes;
+  std::vector<int64_t> dims;
+  for (auto axis : axes) {
+    dimTypes.push_back(it->second.getDimType(axis));
+    dims.push_back(it->second.shape.dims()[axis]);
+  }
+
+  CheckAndSetTensorBoundShape(
+      op.output(0),
+      dimTypes,
+      dims,
+      it->second.shape.data_type(),
+      false);
 }
 
 void BoundShapeInferencer::InferCommonOp(

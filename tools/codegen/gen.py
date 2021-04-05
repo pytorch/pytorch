@@ -640,9 +640,9 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 @with_native_function
 def compute_registration_declarations(f: NativeFunction) -> str:
     name = dispatcher.name(f.func)
-    returns_type = dispatcher.returns_type(f.func.returns).cpp_type_remove_namespaces()
+    returns_type = dispatcher.returns_type(f.func.returns).cpp_type_registration_declarations()
     args = dispatcher.arguments(f.func)
-    args_str = ', '.join(a.no_default().decl_remove_namespaces() for a in args)
+    args_str = ', '.join(a.no_default().decl_registration_declarations() for a in args)
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         # TODO: What exactly is the semantics of the 'dispatch' field?

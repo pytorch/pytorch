@@ -12,13 +12,9 @@ from tools.codegen.utils import IDENT_REGEX
 # we could save `other.scalar_type()` instead of the entire `other` tensor.
 @dataclass(frozen=True)
 class SavedAttribute:
-    # Name of the saved attribute.
-    # Suffix is appended if it's derived property, e.g.: `other_scalar_type`
-    name: str
-
-    # The cpp type string.
-    # TODO: change from raw string to model.Type
-    type: str
+    # The NamedCType holds the updated name and cpp type of the attribute
+    # for the name, Suffix is appended if it's derived property, e.g.: `other_scalar_type`
+    nctype: NamedCType
 
     # The expression to read the derived property at save time, e.g.:
     # `other.scalar_type()`.
