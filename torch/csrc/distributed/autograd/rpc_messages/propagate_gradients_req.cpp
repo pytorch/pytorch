@@ -2,6 +2,8 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace distributed {
 namespace autograd {
@@ -73,7 +75,7 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
 
   // Retrieve the gradient tensors.
   std::vector<Variable> grads(tupleElements.size());
-  for (size_t i = 0; i < tupleElements.size(); i++) {
+  for(const auto i : c10::irange(tupleElements.size())) {
     grads[i] = tupleElements[i].toTensor();
   }
 
