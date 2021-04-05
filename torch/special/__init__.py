@@ -124,27 +124,35 @@ Example::
 
 logit = _add_docstr(_special.special_logit,
                     r"""
-logit(input, *, out=None) -> Tensor
+logit(input, eps=None, *, out=None) -> Tensor
 
-Computes the logit (defined below) of the elements of :attr:`input`.
+Returns a new tensor with the logit of the elements of :attr:`input`.
+:attr:`input` is clamped to [eps, 1 - eps] when eps is not None.
+When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
 
 .. math::
-    y_{i} = \ln(\frac{x_{i}}{1 - x_{i}})
-
+    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
+    z_{i} = \begin{cases}
+        x_{i} & \text{if eps is None} \\
+        \text{eps} & \text{if } x_{i} < \text{eps} \\
+        x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
+        1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
+    \end{cases}
 """ + r"""
 Args:
     {input}
+    eps (float, optional): the epsilon for input clamp bound. Default: ``None``
 
 Keyword args:
     {out}
 
 Example::
 
-    >>> t = torch.rand(5)
-    >>> t
-    tensor([0.7411, 0.8805, 0.4773, 0.8986, 0.0326])
-    >>> torch.special.logit(t)
-    tensor([ 1.0519,  1.9973, -0.0907,  2.1813, -3.3914])
+    >>> a = torch.rand(5)
+    >>> a
+    tensor([0.2796, 0.9331, 0.6486, 0.1523, 0.6516])
+    >>> torch.special.logit(a, eps=1e-6)
+    tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
 """.format(**common_args))
 
 expit = _add_docstr(_special.special_expit,
