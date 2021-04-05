@@ -571,8 +571,8 @@ OpSchema::Cost PointwiseCostInference(
   const TensorShape X = inputs[0];
   uint64_t nElemX = nElemFromDim(X);
   uint64_t nElemRead = 0;
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    nElemRead += nElemFromDim(inputs[i]);
+  for (const auto & input : inputs) {
+    nElemRead += nElemFromDim(input);
   }
 
   c.flops = nElemX * OpsPerPoint;
