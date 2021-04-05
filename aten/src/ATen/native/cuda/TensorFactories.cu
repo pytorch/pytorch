@@ -8,14 +8,10 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 #include <THC/THCGeneral.h>
-#include <THC/THCThrustAllocator.cuh>
-
-#include <ATen/cuda/CubUtils.cuh>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <limits>
 
 namespace at {
 namespace native {
