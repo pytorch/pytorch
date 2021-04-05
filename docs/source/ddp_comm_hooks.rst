@@ -81,7 +81,9 @@ PowerSGD Hooks
     compressed communication and improve accuracy.
 
 .. warning ::
-    The current implementation may cause gradient overflow for FP16 input.
+    PowerSGD hooks may conflict with `Apex automatic mixed precision package <https://github.com/NVIDIA/apex>`_.
+    Please use PyTorch `native automatic mixed precision package <https://pytorch.org/docs/stable/amp.html>`_
+    instead.
 
 .. autofunction:: powerSGD_hook
 .. autofunction:: batched_powerSGD_hook

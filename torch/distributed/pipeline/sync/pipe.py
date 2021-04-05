@@ -182,6 +182,12 @@ class Pipe(Module):
     Example::
         Pipeline of two FC layers across GPUs 0 and 1.
 
+        >>> # Need to initialize RPC framework first.
+        >>> os.environ['MASTER_ADDR'] = 'localhost'
+        >>> os.environ['MASTER_PORT'] = '29500'
+        >>> torch.distributed.rpc.init_rpc('worker', rank=0, world_size=1)
+        >>>
+        >>> # Build pipe.
         >>> fc1 = nn.Linear(16, 8).cuda(0)
         >>> fc2 = nn.Linear(8, 4).cuda(1)
         >>> model = nn.Sequential(fc1, fc2)
@@ -215,6 +221,12 @@ class Pipe(Module):
         deferred_batch_norm: bool = False,
     ) -> None:
         super().__init__()
+
+        # Check if RPC framework is initialized.
+        if not torch.distributed.rpc._is_current_rpc_agent_set():
+            raise RuntimeError(
+                'Please initialize RPC framework for Pipe using '
+                'torch.distributed.rpc.init_rpc')
 
         chunks = int(chunks)
         checkpoint = str(checkpoint)
