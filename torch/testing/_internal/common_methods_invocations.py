@@ -1693,29 +1693,43 @@ def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(sample_generator())
 
-def sample_inputs_copysign(op_info, device, dtype, requires_grad):
+def sample_inputs_copysign(op_info, device, dtype, requires_grad, **kwargs):
     def _make_tensor(*shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
-    cases = (
+    for_inplace_variant = kwargs.get('for_inplace_variant', False)
+
+    cases = [
         # no broadcast
-        (_make_tensor(S, S, S), _make_tensor(S, S, S)),
+        ((S, S, S), (S, S, S)),
         # broadcast rhs
-        (_make_tensor(S, S, S), _make_tensor(S, S)),
-        # broadcast lhs
-        (_make_tensor(S, S), _make_tensor(S, S, S)),
-        # broadcast all
-        (_make_tensor(S, 1, S), _make_tensor(M, S)),
+        ((S, S, S), (S, S)),
 
         # scalar
-        (_make_tensor(S, S), 3.14),
+        ((S, S), 3.14),
         # scalar positive zero
-        (_make_tensor(S, S), 0.0),
+        ((S, S), 0.0),
         # scalar negative zero
-        (_make_tensor(S, S), -0.0),
-    )
+        ((S, S), -0.0),
+    ]
 
-    return [SampleInput(input, args=(args,)) for input, args in cases]
+    if for_inplace_variant:
+        # broadcast lhs
+        cases.append(((S, S), (S, S, S)))
+        # broadcast all
+        cases.append(((S, 1, S), (M, S)))
+
+    def generator():
+        for input_shape, arg_val in cases:
+            if isinstance(arg_val, tuple):
+                arg = _make_tensor(*arg_val)
+            else:
+                # arg_val is scalar
+                arg = arg_val
+
+            yield SampleInput(_make_tensor(*input_shape), args=(arg, ))
+
+    return list(generator())
 
 def sample_inputs_prod(op_info, device, dtype, requires_grad):
     def make_arg(shape):
