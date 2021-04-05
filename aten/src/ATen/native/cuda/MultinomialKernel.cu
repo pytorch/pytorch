@@ -177,8 +177,8 @@ __global__ void sampleMultinomialOnce(
 
   // Shared Memory hold blockdim.x T for holding the cumulative sum,
   // blockDim.x AccT for normalizing the probabilities,
-  scalar_t *smem = reinterpret_cast<scalar_t *>(my_smem);
-  accscalar_t *asmem = reinterpret_cast<accscalar_t *>(&my_smem[blockDim.x * sizeof(scalar_t)]);
+  accscalar_t *asmem = reinterpret_cast<accscalar_t *>(my_smem);
+  scalar_t *smem = reinterpret_cast<scalar_t *>(&my_smem[blockDim.x * sizeof(accscalar_t)]);
 
   accscalar_t accZero = static_cast<accscalar_t>(0);
   scalar_t zero = static_cast<scalar_t>(0);
