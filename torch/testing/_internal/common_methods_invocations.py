@@ -1053,6 +1053,17 @@ def sample_inputs_outer(op_info, device, dtype, requires_grad):
     inputs.append(SampleInput(arg_a, args=(arg_b,)))
     return inputs
 
+def sample_inputs_dist(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    sizes = ((S, S, S), (S,), (S, 1, S), (), (S, S))
+    ps = (2, 4)
+
+    def generate_samples():
+        for size_x, size_y, p in product(sizes, sizes, ps):
+            yield SampleInput(make_arg(size_x), args=(make_arg(size_y), p))
+
+    return list(generate_samples())
+
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
 def sample_inputs_index_copy(op_info, device, dtype, requires_grad):
@@ -3183,6 +3194,17 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,),
+    OpInfo('dist',
+           op=torch.dist,
+           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_dist,
+           skips=(
+               # "pow" not implemented for 'BFloat16' or 'half'
+               SkipInfo('TestOpInfo', 'test_supported_backward',
+                        dtypes=(torch.bfloat16, torch.float16)),
+               # dist does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('outer',
            op=torch.outer,
            aliases=('ger', ),
@@ -4413,20 +4435,6 @@ def method_tests():
         ('clone', (), NO_ARGS, 'scalar'),
         ('contiguous', (S, S), NO_ARGS, '', (True,)),
         ('contiguous', torch.randn(S, S).transpose(0, 1), NO_ARGS, 'not_contiguous', (True,)),
-        ('dist', (S, S, S), ((S, S, S),)),
-        ('dist', (S, S, S), ((S,),), 'broadcast_rhs'),
-        ('dist', (S,), ((S, S, S),), 'broadcast_lhs'),
-        ('dist', (S, 1, S), ((S, S),), 'broadcast_all'),
-        ('dist', (), ((),), 'scalar'),
-        ('dist', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-        ('dist', (), ((S, S, S),), 'scalar_broadcast_lhs'),
-        ('dist', (S, S, S), ((S, S, S), 4), '4'),
-        ('dist', (S, S, S), ((S,), 4), '4_broadcast_rhs'),
-        ('dist', (S,), ((S, S, S), 4), '4_broadcast_lhs'),
-        ('dist', (S, 1, S), ((S, S), 4), '4_broadcast_all'),
-        ('dist', (), ((), 4), 'scalar_4'),
-        ('dist', (S, S, S), ((), 4), 'scalar_4_broadcast_rhs'),
-        ('dist', (), ((S, S, S), 4), 'scalar_4_broadcast_lhs'),
         ('diag_embed', (S, S), NO_ARGS),
         ('diagonal', (M, M), NO_ARGS, '2d'),
         ('diagonal', (3, 5), NO_ARGS, '2d_wide'),
