@@ -480,7 +480,8 @@ def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> b
     return True
 
 
-def check_no_differentiable_outputs_fast(fail_test, func, func_out, all_inputs, input_tensors, inputs_indices, all_u, eps, nondet_tol):
+def check_no_differentiable_outputs_fast(fail_test, func, func_out, all_inputs, input_tensors, inputs_indices,
+                                         all_u, eps, nondet_tol):
     for inp_idx, inp, u in zip(inputs_indices, input_tensors, all_u):
         numerical_jacobians = get_fast_numerical_jacobian_wrt_specific_input(func, inp_idx, inp, all_inputs,
                                                                              _as_tuple(func_out), u, eps, 1.0)
