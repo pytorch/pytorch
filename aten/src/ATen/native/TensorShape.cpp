@@ -544,15 +544,16 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   TORCH_CHECK(chunks > 0,
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
-  int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
+  const auto dim_size = self.size(dim);
+  int64_t split_size = (dim_size + chunks - 1) / chunks;
 
   // We need to call split_with_sizes in the case where split_size and dimension size are 0, because
   // a call to split would discard the number of chunks (because we can have an arbitrary number of
   // 0-sized chunks adding up to 0).  So, call split_with_sizes with the correct number of chunks,
   // eventually we will do this for all cases.
-  if (split_size == 0 && self.size(dim) == 0) {
+  if (split_size == 0 && dim_size == 0) {
     std::vector<int64_t> split_sizes(chunks, split_size);
-    split_sizes[chunks - 1] = split_size - (split_size * chunks - self.size(dim));
+    split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
     return self.split_with_sizes(split_sizes, dim);
   } else {
     return self.split(split_size, dim);
