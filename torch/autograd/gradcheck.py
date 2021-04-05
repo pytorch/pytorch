@@ -480,12 +480,12 @@ def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> b
     return True
 
 
-def check_no_differentiable_outputs_fast(fail_test, func, func_out, all_inputs, input_tensors, inputs_indices, all_u, eps):
+def check_no_differentiable_outputs_fast(fail_test, func, func_out, all_inputs, input_tensors, inputs_indices, all_u, eps, nondet_tol):
     for inp_idx, inp, u in zip(inputs_indices, input_tensors, all_u):
         numerical_jacobians = get_fast_numerical_jacobian_wrt_specific_input(func, inp_idx, inp, all_inputs,
                                                                              _as_tuple(func_out), u, eps, 1.0)
         for jacobian in numerical_jacobians:
-            if torch.ne(jacobian, 0).sum() > 0:
+            if (jacobian - torch.zeros_like(jacobian)).abs().max() > nondet_tol:
                 return fail_test('Numerical gradient for function expected to be zero')
     return True
 
@@ -788,7 +788,7 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
 
     if not outputs:
         if not check_no_differentiable_outputs_fast(fail_test, func, func_out, tupled_inputs, inp_tensors,
-                                                    inp_tensor_indices, all_u, eps):
+                                                    inp_tensor_indices, all_u, eps, nondet_tol):
             return False
 
     any_complex = any(o.is_complex() for o in outputs)
