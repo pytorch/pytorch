@@ -129,7 +129,7 @@ class PackageExporter:
         self.matched_patterns: Set[int] = set()
         self.debug_deps: List[Tuple[str, str]] = []
         self._unique_id = 0
-        self.files_used: Set[str] = set()
+        self.modules_used: Set[types.ModuleType] = set()
 
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
@@ -336,7 +336,6 @@ node [shape=box];
         and call `save_module` otherwise. Clients can subclass this object
         and override this method to provide other behavior, such as automatically mocking out a whole class
         of modules"""
-
         root_name = module_name.split(".", maxsplit=1)[0]
         if self._can_implicitly_extern(root_name):
             if self.verbose:
@@ -445,16 +444,58 @@ node [shape=box];
         filename = self._filename(package, resource)
         self._write(filename, binary)
 
-    def mock_trace(self, callable, inp):
-        files_used = set()
+    def mock_trace(self, callable: Callable[[Any], Any], inputs: List[Tuple[Any, ...]]):
+        """Trace the execution of a callable in order to determine which modules are truly used and needed. The modules
+        that are not used during execution will be implicitly mocked during export.
 
-        def prof_fn(frame, event, arg):
-            files_used.add(frame.f_code.co_filename)
+        Args:
+            callable: The callable to execute and trace.
+            inputs: The input to use during tracing. The modules used by 'callable' when invoked by each set of inputs
+                are union-ed to determine all modules used by the callable for the purpooses of packaging.
+        """
+        modules_used = set()
 
-        sys.setprofile(prof_fn)
-        callable(*inp)
+        def record_used_modules(frame, event, arg):
+            # If the event being profiled is not a Python function
+            # call, there is nothing to do.
+            if event != "call":
+                return
+
+            # This is the name of the function that was called.
+            name = frame.f_code.co_name
+            module = None
+
+            # Try to determine the name of the module that the function
+            # is in:
+            #   1) Check the global namespace of the frame.
+            #   2) Check the local namespace of the frame.
+            #   3) To handle class instance method calls, check
+            #       the attribute named 'name' of the object
+            #       in the local namespace corresponding to "self".
+            if name in frame.f_globals:
+                module = frame.f_globals[name].__module__
+            elif name in frame.f_locals:
+                module = frame.f_locals[name].__module__
+            elif "self" in frame.f_locals:
+                method = getattr(frame.f_locals["self"], name, None)
+                module = method.__module__ if method else None
+
+            # If a module was found, add it to the set of used modules.
+            if module:
+                modules_used.add(module)
+
+        # Attach record_used_modules as the profiler function.
+        sys.setprofile(record_used_modules)
+
+        # Execute the callable with all inputs.
+        for inp in inputs:
+            callable(*inp)
+
+        # Detach the profiler function.
         sys.setprofile(None)
-        self.files_used.update(files_used)
+
+        # Add all modules discovered during tracing to self.modules_used.
+        self.modules_used.update(modules_used)
 
     def mock(
         self,
@@ -638,16 +679,12 @@ node [shape=box];
         return f"{package_path}/{resource}"
 
     def _can_implicitly_mock(self, module_name: str):
-        if not self.files_used:
+        # If self.modules_used is empty, mock_trace probably was not called, so
+        # do not assume that every module can be implicitly mocked.
+        if not self.modules_used or module_name in self.modules_used:
             return False
 
-        module = self._import_module(module_name)
-        filename = getattr(module, "__file__", None)
-
-        if filename and filename not in self.files_used:
-            return True
-
-        return False
+        return True
 
     def _can_implicitly_extern(self, module_name: str):
         return module_name == "torch" or (

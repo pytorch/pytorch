@@ -59,6 +59,22 @@ def _should_compress(
     )
 
 
+def _report_compression_stats(bucket, state):
+    """
+    Report compression stats at the frequency of `compression_stats_logging_frequency` specified in PowerSGD state.
+    """
+    if (
+        bucket.is_the_last_bucket_to_allreduce()
+        and state.iter >= state.next_stats_report
+    ):
+        stats = state.compression_stats()
+        logging.info(
+            "Compression stats: iter {}, total before compression {}, total after compression {}, "
+            "rate {}".format(state.iter, stats[1], stats[2], stats[0])
+        )
+        state.next_stats_report = state.iter + state.compression_stats_logging_frequency
+
+
 class PowerSGDState(object):
     r"""
     Stores both the algorithm's hyperparameters and the internal state for all the gradients during the training.
@@ -346,17 +362,7 @@ def powerSGD_hook(
             uncompressed_tensors.append(tensor)
             state.total_numel_after_compression += compress_test[1]
 
-    # Accumulate and report stats
-    if (
-        bucket.is_the_last_bucket_to_allreduce()
-        and state.iter >= state.next_stats_report
-    ):
-        stats = state.compression_stats()
-        logging.info(
-            "Compression stats: iter {}, total before compression {}, total after compression {}, "
-            "rate {}".format(state.iter, stats[1], stats[2], stats[0])
-        )
-        state.next_stats_report = state.iter + state.compression_stats_logging_frequency
+    _report_compression_stats(bucket, state)
 
     # Step II: Handle uncompressed tensors.
     # Allocate contiguous memory for these tensors to allreduce efficiently.
@@ -582,12 +588,18 @@ def batched_powerSGD_hook(
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
     total_length = input_tensor.shape[0]
+    state.total_numel_before_compression += total_length
 
     # View the input tensor as a 2D square-shape tensor, and pad 0s if necessary.
     square_side_length = math.ceil(math.sqrt(total_length))
+    state.total_numel_after_compression += (
+        square_side_length * state.matrix_approximation_rank * 2
+    )
     padded_total_length = square_side_length ** 2
     input_tensor.resize_(padded_total_length)
     input_tensor[total_length:padded_total_length].fill_(0)
+
+    _report_compression_stats(bucket, state)
 
     # Incorporate the error from the previous state into the gradients.
     bucket_index = bucket.get_index()

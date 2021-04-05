@@ -127,8 +127,9 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             he.extern("sys")
-            he.mock_trace(obj, (torch.randn(4),))
+            he.mock_trace(obj, [(torch.randn(4),)])
             he.save_pickle("obj", "obj.pkl", obj)
+
         buffer.seek(0)
         hi = PackageImporter(buffer)
         mod = hi.import_module("yaml")
