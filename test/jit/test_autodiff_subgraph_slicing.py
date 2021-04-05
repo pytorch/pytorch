@@ -49,12 +49,12 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    #@unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_differentiable_graph_ops_requires_grad(self):
-        x = torch.randn(8, 2, dtype=torch.float, device="cuda").requires_grad_()
-        y = torch.randn(8, 2, dtype=torch.float, device="cuda")
+        x = torch.randn(8, 2, dtype=torch.float).requires_grad_()
+        y = torch.randn(8, 2, dtype=torch.float)
 
         def t(x : torch.Tensor, y : torch.Tensor):
             o = x + 1.0
@@ -64,22 +64,23 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             o3 = o1 + o2
             return o1, o2, o3
 
-        t_jit = torch.jit.script(t)
-        jit_o = t_jit(x, y)
-        jit_o = t_jit(x, y)
-        o = t(x, y)
+        with enable_profiling_mode_for_profiling_tests():
 
-        # validate the differentiableGraphOps are marking proper requires_grad
-        for oo, jit_oo in zip(o, jit_o):
-            self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
-            self.assertEqual(oo, jit_oo)
-        # one more runs to trigger fusion
-        jit_o = t_jit(x, y)
-        for oo, jit_oo in zip(o, jit_o):
-            self.assertEqual(oo.dtype, jit_oo.dtype)
-            self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
-            self.assertEqual(oo, jit_oo)
-        self.assertGraphContainsExactly(t_jit.graph_for(x, y), FUSION_GUARD, 1, True)
+            t_jit = torch.jit.script(t)
+            jit_o = t_jit(x, y)
+            jit_o = t_jit(x, y)
+            o = t(x, y)
+
+            # validate the differentiableGraphOps are marking proper requires_grad
+            for oo, jit_oo in zip(o, jit_o):
+                self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
+                self.assertEqual(oo, jit_oo)
+            # one more runs to trigger fusion
+            jit_o = t_jit(x, y)
+            for oo, jit_oo in zip(o, jit_o):
+                self.assertEqual(oo.dtype, jit_oo.dtype)
+                self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
+                self.assertEqual(oo, jit_oo)
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Simple Executor doesn't support gradients")
     def test_prune_grad(self):
