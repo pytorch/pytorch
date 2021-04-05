@@ -505,6 +505,10 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
   }
 
   std::vector<Tensor*> toutputs;
+  std::vector<Tensor*> t_all;
+  for (auto& vtensor : graph.vtensors) {
+    t_all.emplace_back(bindings.at(&vtensor));
+  }
   if (outputs.size() == 0) {
     for (auto& vtensor : graph.vtensors) {
       if (vtensor.consumers.size() == 0) {
@@ -517,7 +521,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
     }
   }
 
-  LoopNest l(toutputs);
+  LoopNest l(toutputs, t_all);
   l.prepareForCodegen();
   Stmt* s = l.root_stmt();
   return std::make_tuple(s, inputs, bindings, vbindings);
