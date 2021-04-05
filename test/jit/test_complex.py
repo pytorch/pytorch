@@ -155,7 +155,6 @@ class TestComplex(JitTestCase):
         for x in (float_consts + complex_consts):
             checkCmath(x, funcs_template=func_constants_template)
 
-
     def test_infj_nanj_pickle(self):
         class ComplexModule(torch.jit.ScriptModule):
             def __init__(self):

@@ -2648,6 +2648,22 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
 
+            # Complain if out dtype mismatch
+            x = torch.empty(4, 3, 8, 8, device='meta', dtype=torch.float)
+            out = torch.empty(4, 3, 16, 16, device='meta', dtype=torch.double)
+            self.assertExpectedRaisesInline(
+                RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
+                """Expected out tensor to have dtype float, but got double instead"""
+            )
+
+            # Complain if out device mismatch
+            x = torch.empty(0, 3, 8, 8, device='meta')
+            out = torch.empty(0, 3, 16, 16, device='cpu')
+            self.assertExpectedRaisesInline(
+                RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
+                """Expected out tensor to have device meta, but got cpu instead"""
+            )
+
         @noarchTest
         def test_detach_meta(self):
             x = torch.empty(2, device='meta')
@@ -6778,6 +6794,10 @@ _unsigned_types = [torch.uint8]
 # These Ops promote integer inputs to Float.
 binary_float_ops_inplace = ['atan2_', 'div_']
 
+# Operators which are implemented using
+# structured kernels and use `build_binary_float_op`
+structured_inplace_ops = ['atan2_']
+
 # Helper values and functions for producing tensors and scalars to use in tensor op tests.
 # Tensor dimension sizes (Small, Medium, Large, Giant)
 _S = 5
@@ -7246,7 +7266,7 @@ def generate_test_function(cls,
                 else:
                     raise
             else:
-                if self.device_type == 'meta':
+                if self.device_type == 'meta' and op_str not in structured_inplace_ops:
                     self.fail('expected test to fail on meta tensors, but it passed')
                 else:
                     pass
