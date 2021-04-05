@@ -230,7 +230,7 @@ class TestCase(unittest.TestCase):
                     lineno = EDIT_HISTORY.adjust_lineno(fn, lineno)
                     new, delta = replace_string_literal(old, lineno, actual)
 
-                    assert old != new, "Failed to substitute string at {}:{}".format(fn, lineno)
+                    assert old != new, f"Failed to substitute string at {fn}:{lineno}; did you use triple quotes?"
 
                     # Only write the backup file the first time we hit the
                     # file
@@ -258,7 +258,7 @@ class TestCase(unittest.TestCase):
         try:
             callable(*args, **kwargs)
         except exc_type as e:
-            self.assertExpectedInline(str(e), expect)
+            self.assertExpectedInline(str(e), expect, skip=1)
             return
         # Don't put this in the try block; the AssertionError will catch it
         self.fail(msg="Did not raise when expected to")
