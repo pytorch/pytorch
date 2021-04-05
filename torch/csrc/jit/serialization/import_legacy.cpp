@@ -16,6 +16,7 @@
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -373,7 +374,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
     }
   }
 
-  for (size_t i = 0; i < numPushed; i++) {
+  for (const auto i : c10::irange(numPushed)) {
     LEGACY_moduleStack_.pop_back();
   }
   return module;
