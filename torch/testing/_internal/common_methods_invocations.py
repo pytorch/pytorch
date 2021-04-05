@@ -2851,7 +2851,7 @@ op_db: List[OpInfo] = [
                # "pow" not implemented for 'BFloat16' or 'half'
                SkipInfo('TestOpInfo', 'test_supported_backward',
                         dtypes=(torch.bfloat16, torch.float16)),
-               # linalg.norm does not correctly warn when resizing out= inputs
+               # linalg.norm does not fail when out= has a different dtype to input
                SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('linalg.qr',
