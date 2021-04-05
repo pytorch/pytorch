@@ -1713,7 +1713,7 @@ def sample_inputs_copysign(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S), -0.0),
     ]
 
-    if for_inplace_variant:
+    if not for_inplace_variant:
         # broadcast lhs
         cases.append(((S, S), (S, S, S)))
         # broadcast all
