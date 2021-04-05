@@ -24,7 +24,8 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
   auto input_args = std::move(args);
   auto input_kwargs = std::move(kwargs);
 
-  auto resolved_init_method = init_method.matchOverloadedMethods({input_args, input_kwargs});
+  auto resolved_init_method =
+      init_method.matchOverloadedMethods({input_args, input_kwargs});
 
   if (resolved_init_method.has_value()) {
     invokeScriptMethodFromPython(

@@ -1072,9 +1072,11 @@ void ClassType::addMethod(torch::jit::Function* method) {
 }
 
 void ClassType::addOverloadedMethod(torch::jit::Function* method) {
-  auto it = overloaded_methods_.insert(std::pair<std::string, std::vector<torch::jit::Function*>>(method->name(), std::vector<torch::jit::Function*>()));
-  const std::string& mangled_name = method->name() + "__" +
-      std::to_string(it.first->second.size());
+  auto it = overloaded_methods_.insert(
+      std::pair<std::string, std::vector<torch::jit::Function*>>(
+          method->name(), std::vector<torch::jit::Function*>()));
+  const std::string& mangled_name =
+      method->name() + "__" + std::to_string(it.first->second.size());
   it.first->second.push_back(method);
   mangled_to_function_[mangled_name] = method;
   methods_.push_back(method);

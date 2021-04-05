@@ -57,7 +57,7 @@
 namespace torch {
 namespace jit {
 
-struct python_args {
+struct __attribute__((visibility("hidden"))) python_args {
   const struct tuple_slice& args;
   const pybind11::kwargs& kwargs;
 };

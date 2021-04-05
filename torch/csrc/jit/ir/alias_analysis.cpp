@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -610,7 +609,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::TypeCheck:
     case prim::RequiresGradCheck: {
       auto num_inputs = node->inputs().size();
-      for (const auto i : c10::irange(num_inputs)) {
+      for (size_t i = 0; i < num_inputs; i++) {
         makePointerTo(node->outputs().at(i), node->inputs().at(i));
       }
       return;
@@ -693,7 +692,7 @@ void AliasDb::analyzeImpl(Node* node) {
   // Bind the schema's "formal" alias annotation to the actual values those
   // schema arguments represent
   std::unordered_map<Symbol, Value*> formalToActual;
-  for (const auto i : c10::irange(schema.arguments().size())) {
+  for (size_t i = 0; i < schema.arguments().size(); i++) {
     const auto& formal = schema.arguments()[i].alias_info();
     const auto& actualValue = node->inputs().at(i);
     // Skip if there's no alias annotation
@@ -744,7 +743,7 @@ void AliasDb::analyzeImpl(Node* node) {
   }
 
   // Use the formal-actual mapping to give aliases to the outputs
-  for (const auto i : c10::irange(schema.returns().size())) {
+  for (size_t i = 0; i < schema.returns().size(); i++) {
     const auto actual = node->outputs().at(i);
     const auto& formal = schema.returns()[i].alias_info();
     if (!formal) {
@@ -821,7 +820,7 @@ void AliasDb::analyzeIf(Node* node) {
   analyze(trueBlock);
   analyze(falseBlock);
 
-  for (const auto i : c10::irange(node->outputs().size())) {
+  for (size_t i = 0; i < node->outputs().size(); i++) {
     const auto nodeOutput = node->outputs()[i];
 
     const auto trueOutput = trueBlock->outputs().at(i);
@@ -870,7 +869,7 @@ void AliasDb::analyzeSubgraph(Node* node) {
   // subgraph block.
   TORCH_INTERNAL_ASSERT(
       subgraphBlock->outputs().size() >= node->outputs().size());
-  for (const auto i : c10::irange(node->outputs().size())) {
+  for (size_t i = 0; i < node->outputs().size(); i++) {
     makePointerTo(node->outputs()[i], subgraphBlock->outputs()[i]);
   }
 }
@@ -1187,7 +1186,7 @@ bool AliasDb::mayContainAlias(
 // Make each value in the `from` list point to its partner in the `to` list
 void AliasDb::mapAliases(at::ArrayRef<Value*> from, at::ArrayRef<Value*> to) {
   TORCH_INTERNAL_ASSERT(to.size() == from.size());
-  for (const auto i : c10::irange(to.size())) {
+  for (size_t i = 0; i < to.size(); i++) {
     makePointerTo(from[i], to[i]);
   }
 }

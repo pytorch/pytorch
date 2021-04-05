@@ -44,15 +44,17 @@ method_map& customClassMethods() {
 
 void registerCustomClassMethod(std::unique_ptr<jit::Function> fn) {
   auto& custom_class_methods = customClassMethods();
-  auto it = custom_class_methods.insert(std::pair<std::string, method_overloads_list>(fn->name(), method_overloads_list()));
+  auto it =
+      custom_class_methods.insert(std::pair<std::string, method_overloads_list>(
+          fn->name(), method_overloads_list()));
   it.first->second.push_back(std::move(fn));
 }
 
 std::vector<c10::FunctionSchema> customClassSchemasForBCCheck() {
   auto& method_map = customClassMethods();
   std::vector<c10::FunctionSchema> schemas;
-  for(auto & methods : method_map) {
-    for (auto & method_it : methods.second) {
+  for (auto& methods : method_map) {
+    for (auto& method_it : methods.second) {
       schemas.push_back(method_it.get()->getSchema());
     }
   }

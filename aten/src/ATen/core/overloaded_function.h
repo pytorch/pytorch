@@ -1,12 +1,12 @@
 #pragma once
 
-#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <ATen/core/function.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <functional>
 #include <utility>
 
@@ -51,10 +51,12 @@ struct OverloadedFunction : public Function {
     callable_(stack);
   }
 
-  std::pair<size_t, MatchedSchema> matchOverloadedSchemas(const SourceRange& loc, const at::ClassTypePtr& owner_class,
-    Graph& graph,
-    at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwargs) {
+  std::pair<size_t, MatchedSchema> matchOverloadedSchemas(
+      const SourceRange& loc,
+      const at::ClassTypePtr& owner_class,
+      Graph& graph,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs) {
     // Even though overloaded methods are inserted into graph with
     // a mangled name, the original name can still be found with
     // name(). Therefore, we don't need to check for mangled names here.
