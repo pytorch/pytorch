@@ -464,6 +464,22 @@ void testMonitoredBarrier(const std::string& path) {
   }
 }
 
+void testSequenceNumInit(const std::string& path) {
+  const auto size = 4;
+  auto tests = CollectiveTest::initialize(path, size);
+  // Get numbers
+  std::unordered_set<uint64_t> nums;
+  for (int i = 0; i < size; ++i) {
+    auto seqNum = tests[i].getProcessGroup().getSequenceNum();
+    // Verify sequence number is set appropriately.
+    EXPECT_NO_THROW(*seqNum);
+    EXPECT_TRUE(seqNum->isSet());
+    auto num = seqNum->get();
+    nums.insert(num);
+  }
+  EXPECT_EQ(nums.size(), 1);
+}
+
 void testWaitDelay(const std::string& path) {
   const auto size = 2;
   auto tests = CollectiveTest::initialize(path, size, /* delay */ true);
@@ -644,6 +660,11 @@ TEST(ProcessGroupGlooTest, testBarrier) {
 TEST(ProcessGroupGlooTest, testMonitoredBarrier) {
   TemporaryFile file;
   testMonitoredBarrier(file.path);
+}
+
+TEST(ProcessGroupGlooTest, testSequenceNumInit) {
+  TemporaryFile file;
+  testSequenceNumInit(file.path);
 }
 
 TEST(ProcessGroupGlooTest, testSend) {

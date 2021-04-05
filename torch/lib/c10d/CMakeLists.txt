@@ -47,6 +47,7 @@ set(C10D_SRCS
   FileStore.cpp
   PrefixStore.cpp
   ProcessGroup.cpp
+  sequence_num.cpp
   Store.cpp
   TCPStore.cpp
   Utils.cpp

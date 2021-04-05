@@ -10,6 +10,7 @@
 #include <ATen/ATen.h>
 
 #include <c10d/Types.hpp>
+#include <c10d/sequence_num.h>
 
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
@@ -23,6 +24,8 @@ constexpr auto kProcessGroupDefaultTimeout =
     std::chrono::milliseconds(10 * 1000);
 
 namespace c10d {
+
+constexpr const char * const kSeqNumStoreKey = "SEQ_NUM_STORE_KEY";
 
 enum class OpType : std::uint8_t {
   BROADCAST = 0,
@@ -294,9 +297,15 @@ class ProcessGroup : public torch::CustomClassHolder {
   virtual c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) = 0;
 
+  c10::optional<c10d::SequenceNum> getSequenceNum() const {
+      return sequenceNum_;
+  }
+
  protected:
   const int rank_;
   const int size_;
+  // Optional sequence number structure for matching collectives.
+  c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
 };
 
 } // namespace c10d
