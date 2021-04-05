@@ -58,9 +58,6 @@
 #include <THC/generic/THCTensorSort.h>
 #include <THC/THCGenerateBFloat16Type.h>
 
-#include <THC/generic/THCTensorMode.h>
-#include <THC/THCGenerateAllTypes.h>
-
 #include <THC/generic/THCTensorTopK.h>
 #include <THC/THCGenerateAllTypes.h>
 
