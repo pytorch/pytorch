@@ -2,7 +2,6 @@
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -278,7 +277,7 @@ void NodeToONNX(
   auto cloneNode = [&](Node* node) {
     auto n_ = new_block->appendNode(
         new_block->owningGraph()->createClone(node, envFn));
-    for (const auto i : c10::irange(node->outputs().size())) {
+    for (size_t i = 0; i < node->outputs().size(); i++) {
       // n_->outputs()[i]->setType(node->outputs()[i]->type());
       env[node->output(i)] = n_->output(i);
     }

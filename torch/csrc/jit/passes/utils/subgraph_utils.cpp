@@ -2,8 +2,6 @@
 
 #include <torch/csrc/jit/passes/canonicalize.h>
 
-#include <c10/util/irange.h>
-
 namespace torch {
 namespace jit {
 namespace SubgraphUtils {
@@ -302,7 +300,7 @@ void mergeNodeIntoSubgraph(
   }
 
   // Add n's outputs to the group node and inner subgraph outputs.
-  for (const auto i : c10::irange(toMerge->outputs().size())) {
+  for (size_t i = 0; i < toMerge->outputs().size(); i++) {
     auto oldOutput = toMerge->outputs()[i];
     auto newOutput = mergedNode->outputs()[i];
     subgraph->registerOutput(newOutput);

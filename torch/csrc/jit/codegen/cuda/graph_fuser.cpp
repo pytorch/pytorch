@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/partition.h>
@@ -510,7 +509,7 @@ struct CudaGraphFuser {
     WithInsertPoint guard(bchunk->next());
 
     std::vector<Value*> producer_chunk_outputs;
-    for (const auto i : c10::irange(nchunks)) {
+    for (size_t i = 0; i < nchunks; i++) {
       producer_chunk_outputs.push_back(
           bchunk->output(nchunks * producer_index + i));
     }
@@ -579,7 +578,7 @@ struct CudaGraphFuser {
     }
 
     bchunk->removeInput(producer_index);
-    for (const auto i : c10::irange(nchunks)) {
+    for (size_t i = 0; i < nchunks; i++) {
       bchunk->eraseOutput(nchunks * producer_index);
     }
 

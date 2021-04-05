@@ -6,7 +6,6 @@
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
-#include <c10/util/irange.h>
 
 #include <cmath>
 #include <functional>
@@ -163,7 +162,7 @@ void AdamW::load(serialize::InputArchive& archive) {
     torch::optim::serialize(archive, "max_exp_average_sq_buffers", max_exp_average_sq_buffers);
     // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for(const auto idx : c10::irange(step_buffers.size())) {
+    for (size_t idx = 0; idx < step_buffers.size(); idx++) {
       auto state = std::make_unique<AdamWParamState>();
       state->step(step_buffers.at(idx));
       state->exp_avg(exp_average_buffers.at(idx));
