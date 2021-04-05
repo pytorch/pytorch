@@ -27,7 +27,7 @@ constexpr int kUnsetDivFactor = -1;
 } // namespace
 
 Reducer::Reducer(
-    std::vector<std::vector<torch::autograd::Variable>> replicas,
+    std::vector<std::vector<at::Tensor>> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<std::vector<bool>> expect_sparse_gradients,
@@ -52,7 +52,7 @@ Reducer::Reducer(
       comm_hook_(nullptr),
       thread_local_state_(at::ThreadLocalState()) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
-  TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
+  TORCH_CHECK(replicas_.size() == 1, "Expected exactly one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
 
   // Check whether the module is multi_device_module
@@ -579,8 +579,13 @@ void Reducer::mark_variable_ready(VariableIndex index) {
           // blocking work between now and the re-zeroing, so the danger is real.
           //
           // Defensively ensures local_used_maps_tmp is distinct from local_used_maps_[i]
-          auto local_used_maps_tmp = at::native::empty_like(local_used_maps_[i],
-                                                            local_used_maps_[i].options().pinned_memory(true));
+          auto local_used_maps_tmp = at::native::empty_like(
+              local_used_maps_[i],
+              optTypeMetaToScalarType(
+                  local_used_maps_[i].options().dtype_opt()),
+              local_used_maps_[i].options().layout_opt(),
+              local_used_maps_[i].options().device_opt(),
+              true /* pinned_memory */);
           // Paranoid asserts here because in some workloads, the pinned allocator behaves in a way we
           // don't understand, and may be bugged. See https://github.com/pytorch/pytorch/pull/54474
           TORCH_INTERNAL_ASSERT(local_used_maps_tmp.is_pinned());
@@ -922,7 +927,7 @@ void Reducer::prepare_for_forward() {
 // done immediately because the model output may be ignored, and we only
 // want to start performing reductions on `torch.autograd.backward()`.
 void Reducer::prepare_for_backward(
-    const std::vector<torch::autograd::Variable>& outputs) {
+    const std::vector<at::Tensor>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
@@ -1005,7 +1010,7 @@ void Reducer::prepare_for_backward(
 }
 
 void Reducer::copy_bucket_to_grad(
-    torch::autograd::Variable& variable,
+    at::Tensor& variable,
     Reducer::BucketReplica& replica,
     size_t intra_bucket_index,
     bool global_unused) {
@@ -1213,7 +1218,7 @@ void Reducer::finalize_backward() {
 }
 
 void Reducer::runGradCallbackForVariable(
-    torch::autograd::Variable& variable,
+    at::Tensor& variable,
     GradCallback&& cb) {
   auto context_ptr = rpc_context_.context_ptr.load();
   if (context_ptr == nullptr) {
@@ -1675,7 +1680,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
 // all params require grad, and corresponding params across replicas
 // have the same dtype/size/layout.
 void verify_replicas_within_process(
-    std::vector<std::vector<torch::autograd::Variable>> model_replicas,
+    std::vector<std::vector<at::Tensor>> model_replicas,
     std::vector<std::vector<bool>> expect_sparse_gradients) {
   const auto replica_count = model_replicas.size();
   if (replica_count == 1) {
@@ -1723,7 +1728,7 @@ void verify_replicas_within_process(
 // across processes.
 void verify_replica0_across_processes(
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
-    std::vector<std::vector<torch::autograd::Variable>> model_replicas) {
+    std::vector<std::vector<at::Tensor>> model_replicas) {
   size_t i = 0;
   for (const auto& t : model_replicas[0]) {
     i += 2 * t.dim();
