@@ -9,10 +9,10 @@ namespace {
 // process' thread-pool, but since those threads don't exist, the thread-pool
 // is corrupt. It's leaked in order to prevent segfaults.
 // Ref: https://github.com/pytorch/pytorch/issues/54752#issuecomment-810315302
-std::bool leak_corrupted_threadpool = false;
+bool leak_corrupted_threadpool = false;
 
 // mutex to prevent a race-condition
-mutable std::mutex pthreadpool_mutex;  
+std::mutex pthreadpool_mutex;
 
 void child_atfork() {
   leak_corrupted_threadpool = true;
@@ -84,7 +84,7 @@ PThreadPool* pthreadpool() {
     pthread_atfork(nullptr, nullptr, child_atfork);
   });
 #endif
-  if (leak_corrupted_threadpool) {
+  if C10_LIKELY(leak_corrupted_threadpool) {
     leak_corrupted_threadpool = false;
     if (auto leaked = threadpool.release()) {
       auto num_threads = leaked->get_thread_count();
