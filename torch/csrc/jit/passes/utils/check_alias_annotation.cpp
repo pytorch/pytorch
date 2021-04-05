@@ -4,8 +4,6 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <c10/util/irange.h>
-
 namespace torch {
 namespace jit {
 namespace {
@@ -91,8 +89,8 @@ struct AliasAndIValue {
 
 // No inputs should alias each other
 void checkInputPreconditions(const Stack& inputs) {
-  for (const auto i : c10::irange(inputs.size())) {
-    for (const auto j : c10::irange(inputs.size())) {
+  for (size_t i = 0; i < inputs.size(); i++) {
+    for (size_t j = 0; j < inputs.size(); j++) {
       if (i == j) {
         continue;
       }
@@ -133,7 +131,7 @@ void checkWrites(
     const std::vector<AliasAndIValue>& inputs,
     const std::vector<IValue>& deepCopiedInputs) {
   AT_ASSERT(inputs.size() == deepCopiedInputs.size());
-  for (const auto i : c10::irange(inputs.size())) {
+  for (size_t i = 0; i < inputs.size(); i++) {
     const auto& input = inputs[i];
     const auto& deepCopiedInput = deepCopiedInputs[i];
     if (!input.aliasInfo || !input.aliasInfo->isWrite()) {
@@ -241,7 +239,7 @@ void checkAliasAnnotation(
   const auto schema = node->schema();
 
   std::vector<AliasAndIValue> inputsToCheck;
-  for (const auto i : c10::irange(schema.arguments().size())) {
+  for (size_t i = 0; i < schema.arguments().size(); i++) {
     inputsToCheck.emplace_back(
         schema.arguments().at(i).alias_info(), stack.at(i));
   }
@@ -256,7 +254,7 @@ void checkAliasAnnotation(
   const auto outputs = std::move(stack);
 
   std::vector<AliasAndIValue> outputsToCheck;
-  for (const auto i : c10::irange(schema.returns().size())) {
+  for (size_t i = 0; i < schema.returns().size(); i++) {
     outputsToCheck.emplace_back(
         schema.returns().at(i).alias_info(), outputs.at(i));
   }
