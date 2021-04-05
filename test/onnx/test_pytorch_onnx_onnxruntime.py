@@ -3759,6 +3759,16 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SingleDynamicModel(), x, test_with_inputs=[another_x],
                       input_names=['input_1'], dynamic_axes={'input_1' : {1 : 'w'}})
 
+        class NegDynamicModel(torch.nn.Module):
+            def forward(self, x):
+                repeats = torch.tensor(4)
+                return torch.repeat_interleave(x, repeats, dim=-1)
+
+        x = torch.tensor([[1, 2, 4], [3, 4, 7]])
+        another_x = torch.tensor([[7, 8], [5, 6]])
+        self.run_test(NegDynamicModel(), x, test_with_inputs=[another_x],
+                      input_names=['input_1'], dynamic_axes={'input_1' : {1 : 'w'}})
+
         class SingleDynamicModel2(torch.nn.Module):
             def forward(self, x):
                 repeats = torch.tensor([4])

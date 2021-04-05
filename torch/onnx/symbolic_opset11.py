@@ -862,25 +862,28 @@ def repeat_interleave(g, self, repeats, dim=None):
     if input_sizes is None:
         raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
                            'input size.')
+    # Handle cases where dim is negative
+    if dim < 0:
+        dim += len(input_sizes)            
 
-    input_sizes_temp = input_sizes.copy()
+    output_sizes = input_sizes.copy()
     perm_i = [0]
     for idx, input_size in enumerate(input_sizes):
         perm_i.append(idx + 1)
         if input_size is None:
-            input_sizes[idx], input_sizes_temp[idx] = 0, -1
+            output_sizes[idx], input_sizes[idx] = 0, -1
     perm_i[0], perm_i[dim] = perm_i[dim], perm_i[0]
 
     # Cases when repeats is a single value tensor and dim has unknown input size
-    if (repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1)) and input_sizes[dim] == 0:
+    if (repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1)) and output_sizes[dim] == 0:
         if not sym_help._is_tensor(repeats):
             repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
         reps = sym_help._size_helper(g, input, dim)
         reps = unsqueeze(g, reps, 0)
         repeats = g.op("Expand", repeats, reps)
-    elif repeats_dim == 1 and input_sizes[dim] == 0:
-        reps = sym_help._size_helper(g, input, dim)
-        reps = unsqueeze(g, reps, 0)
+    elif repeats_dim == 1 and output_sizes[dim] == 0:
+        raise RuntimeError('Unsupported: ONNX export of repeat_interleave for multi-repeats tensor '
+                           'when dim is one of the dynamic axes provided.')
     else:
         return torch.onnx.symbolic_opset9.repeat_interleave(g, self, repeats, final_dim)
 
@@ -889,7 +892,7 @@ def repeat_interleave(g, self, repeats, dim=None):
     r_splits = split(g, repeats, reps_like, 0)
     i_splits = split(g, input, reps_like, dim)
 
-    input_sizes[dim], input_sizes_temp[dim] = -1, 1
+    output_sizes[dim], input_sizes[dim] = -1, 1
 
     # Create a loop to iterate over each value along the dimension
     # and perform individual interleaving using the repeats tensor
@@ -916,12 +919,12 @@ def repeat_interleave(g, self, repeats, dim=None):
     i_split = loop_block.op("SequenceAt", i_splits, block_input_iter)
 
     i_split = unsqueeze(loop_block, i_split, dim + 1)
-    r_concat = [loop_block.op("Constant", value_t=torch.LongTensor(input_sizes_temp[:dim + 1])),
+    r_concat = [loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[:dim + 1])),
                 r_split,
-                loop_block.op("Constant", value_t=torch.LongTensor(input_sizes_temp[dim + 1:]))]
+                loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[dim + 1:]))]
     r_concat = loop_block.op("Concat", *r_concat, axis_i=0)
     i_split = expand(loop_block, i_split, r_concat, None)
-    i_split = reshape(loop_block, i_split, g.op("Constant", value_t=torch.LongTensor(input_sizes)))
+    i_split = reshape(loop_block, i_split, g.op("Constant", value_t=torch.LongTensor(output_sizes)))
 
     # Loop outputs
     cond_out = loop_block.op("Cast", loop_condition, to_i=9)
@@ -933,4 +936,4 @@ def repeat_interleave(g, self, repeats, dim=None):
     # the zero'th dimension (by default). In order to avoid this and concatenate
     # along the dimension provided, some post-processing is required
     loop_out = g.op("Transpose", loop_out, perm_i=perm_i)
-    return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(input_sizes)))
+    return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(output_sizes)))
