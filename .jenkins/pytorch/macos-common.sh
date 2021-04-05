@@ -11,7 +11,7 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 export PATH="/usr/local/bin:$PATH"
 export WORKSPACE_DIR="${HOME}/workspace"
-mkdir -p ${WORKSPACE_DIR}
+mkdir -p "${WORKSPACE_DIR}"
 
 if [[ "${COMPACT_JOB_NAME}" == *arm64* ]]; then
   MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-py38_4.9.2-MacOSX-x86_64.sh"
@@ -21,13 +21,13 @@ fi
 
 # If a local installation of conda doesn't exist, we download and install conda
 if [ ! -d "${WORKSPACE_DIR}/miniconda3" ]; then
-  mkdir -p ${WORKSPACE_DIR}
-  curl --retry 3 ${MINICONDA_URL} -o ${WORKSPACE_DIR}/miniconda3.sh
-  retry bash ${WORKSPACE_DIR}/miniconda3.sh -b -p ${WORKSPACE_DIR}/miniconda3
+  mkdir -p "${WORKSPACE_DIR}"
+  curl --retry 3 ${MINICONDA_URL} -o "${WORKSPACE_DIR}"/miniconda3.sh
+  retry bash "${WORKSPACE_DIR}"/miniconda3.sh -b -p "${WORKSPACE_DIR}"/miniconda3
 fi
 export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
 # shellcheck disable=SC1090
-source ${WORKSPACE_DIR}/miniconda3/bin/activate
+source "${WORKSPACE_DIR}"/miniconda3/bin/activate
 retry conda install -y mkl mkl-include numpy=1.18.5 pyyaml=5.3 setuptools=46.0.0 cmake cffi ninja typing_extensions dataclasses pip
 # The torch.hub tests make requests to GitHub.
 #
