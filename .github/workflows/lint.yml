@@ -136,8 +136,6 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-        with:
-          fetch-depth: 0 # deep clone, to allow us to use git merge-base
       - name: Prepare output dir with HEAD commit SHA
         run: |
           mkdir clang-tidy-output
