@@ -1503,31 +1503,48 @@ Example::
 
 add_docstr(torch.cov,
            r"""
-cov(input1, input2=None, rowvar=True, bias=None, ddof=None, fweights=None, aweights=None) -> Tensor
+cov(input, other=None, rowvar=True, bias=None, ddof=None, fweights=None, aweights=None) -> Tensor
 
-Estimates a covariance matrix, given input tensor data and weights (optional).
+Estimates a covariance matrix, given input tensor data and weights (optional). The unbiased sample covariance 
+of the variables :math:`x` and :math:`y` is given by
+
+.. math::
+    \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}(x_{i} - \bar{x})(y_{i} - \bar{y})}{N~-~1}
+
+where, :math:`\bar{x}` and :math:`\bar{y}` are the simple means of the variables respectively. 
+If :attr:`fweights` and/or :attr:`aweights` are provided, the unbaised weighted covariance 
+is calculated, which is given by
+
+.. math::
+    \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}w_i(x_{i} - \mu_x^*)(y_{i} - \mu_y^*)}{\sum^{N}_{i = 1}w_i~-~1}
+
+where :math:`\mu_x^* = = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}` 
+is the weighted mean of the variable. 
+
 
 Args:
-    input1 (Tensor): A 1-D or 2-D tensor containing multiple variables and observations. 
-        Each row of :attr:`input1` represents a variable, and each column a 
+    input (Tensor): A 1-D or 2-D tensor containing multiple variables and observations.
+        Each row of :attr:`input` represents a variable, and each column a
         single observation of all those variables. Also see :attr:`rowvar` below.
-    input2 (Tensor, optional): An additional set of variables and observations. 
-        :attr:`input2` has the same form as that of :attr:`input1`.
-    rowvar (bool, optional): If :attr:`rowvar` is `True` (default), then each row represents a variable, 
-        with observations in the columns. 
-        Otherwise, the relationship is transposed: each column represents a variable, 
+    other (Tensor, optional): An additional set of variables and observations.
+        :attr:`other` has the same form as that of :attr:`input` and can be used to provide
+        additional variables for each of the observations which would be considered along with those provided in
+        :attr:`input`. 
+    rowvar (bool, optional): If :attr:`rowvar` is `True` (default), then each row represents a variable,
+        with observations in the columns.
+        Otherwise, the relationship is transposed: each column represents a variable,
         while the rows contain observations.
-    bias (bool, optional): Default normalization (`False`) is by :math:`(N - 1)`, 
-        where :math:`N` is the number of observations given (unbiased estimate). 
-        If :attr:`bias` is `True`, then normalization is by :math:`N`. 
+    bias (bool, optional): Default normalization (`False`) is by :math:`(N - 1)` which produces the unbiased covariance estimate,
+        where :math:`N` is the number of observations given.
+        If :attr:`bias` is `True`, then normalization is by :math:`N`.
         These values can be overridden by using the keyword :attr:`ddof`.
     ddof (int, optional): If not `None` the default value implied by :attr:`bias` is overridden.
-        Note that :attr:`ddof`:math:`=1` will return the unbiased estimate, 
-        even if both :attr:`fweights` and :attr:`aweights` are specified, 
+        Note that :attr:`ddof`:math:`=1` will return the unbiased estimate,
+        even if both :attr:`fweights` and :attr:`aweights` are specified,
         and :math:`ddof`:math:`=0` will return the simple average.
-    fweights (tensor, optional): 1-D tensor of integer frequency weights; 
+    fweights (tensor, optional): 1-D tensor of integer frequency weights;
         the number of times each observation vector should be repeated.
-    aweights (tensor, optional): 1-D array of observation vector weights. 
+    aweights (tensor, optional): 1-D array of observation vector weights.
         These relative weights are typically large for observations considered “important” and smaller for 
         observations considered less “important”. If :attr:`ddof`:math:`=0` the tensor of weights can be used to
         assign probabilities to observation vectors.
@@ -1551,6 +1568,15 @@ Example::
             [-4.2860,  2.1441]])
     >>> torch.cov(x)
     tensor(11.7100)
+    >>> x = torch.rand(3,10)
+    >>> f = torch.arange(10) * 2
+    >>> a = torch.arange(10) ** 2
+    >>> ddof = 1
+    >>> torch.cov(x, fweights = f, aweights = a, ddof = ddof)
+    tensor([[ 0.1070, -0.0098,  0.0382],
+            [-0.0098,  0.0770,  0.0005],
+            [ 0.0382,  0.0005,  0.0416]])
+
 """)
 
 add_docstr(torch.cat,

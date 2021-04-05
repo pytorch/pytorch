@@ -467,6 +467,7 @@ Other Operations
     cdist
     clone
     combinations
+    cov
     cross
     cummax
     cummin

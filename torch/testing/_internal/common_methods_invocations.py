@@ -2054,6 +2054,31 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=False, keepdim=False)),
     ]
 
+def sample_inputs_cov(op_info, device, dtype, requires_grad=False):
+    inp_dims = [(1,), (S,),
+                (1, S), (S, 1), (S, S)]
+    biases = [True, False]
+    rowvars = [True, False]
+    ddofs = [None, 0, 1]
+    inputs = []
+    for inp, bias, rowvar, ddof in product(inp_dims, biases, rowvars, ddofs):
+        if np.size(inp) == 1:
+            t_size = inp[0]
+        elif rowvar or inp[0] == 1:
+            t_size = inp[1]
+        else:
+            t_size = inp[0]
+        fwt = torch.randint(1, 10, (t_size,), device=device) * 2 + 1  # '+1' to avoid zero sum weights
+        awt = torch.randint(1, 10, (t_size,), device=device)**2 + 1
+        tens = make_tensor(inp, device=device, dtype=dtype,
+                            low=None, high=None, requires_grad=requires_grad)
+        tens2 = make_tensor(inp, device=device, dtype=dtype,
+                            low=None, high=None, requires_grad=requires_grad)
+      
+        inputs.append(SampleInput(tens))
+        inputs.append(SampleInput(tens, args=(tens2, rowvar, bias, ddof, fwt, awt)))
+    return inputs
+
 
 def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_svd=False):
     """
@@ -3539,6 +3564,14 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', device_type='cpu',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
                    )),
+    OpInfo('cov',
+           dtypes=all_types_and_complex(),
+           sample_inputs_func=sample_inputs_cov,
+           skips=(
+           # "cov" not implemented for 'BFloat16'
+              SkipInfo('TestOpInfo', 'test_supported_dtypes',
+                        dtypes=(torch.bfloat16,)),
+           )),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),

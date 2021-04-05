@@ -1401,14 +1401,13 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ covariations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor cov(const Tensor& self, 
+Tensor cov(const Tensor& self,
            const c10::optional<Tensor>& otherOpt,
-           c10::optional<bool> rowvarOpt, 
-           c10::optional<bool> biasOpt, 
+           c10::optional<bool> rowvarOpt,
+           c10::optional<bool> biasOpt,
            c10::optional<int64_t> ddofOpt,
-           const c10::optional<Tensor>& fweightsOpt, 
+           const c10::optional<Tensor>& fweightsOpt,
            const c10::optional<Tensor>& aweightsOpt) {
-  
   // vars and optional args init
   const char* fn_name = "cov";
   const Tensor& other = otherOpt.value_or(Tensor());
@@ -1420,7 +1419,7 @@ Tensor cov(const Tensor& self,
   Tensor w = at::empty(0, self.options());
   
   if(self.size(0) == 0) {
-    return at::empty_like(self);  
+    return at::empty_like(self);
   }
 
   // tensors dim and device check
@@ -1454,23 +1453,23 @@ Tensor cov(const Tensor& self,
   X = (self.dim() == 1) ? self.unsqueeze(0) : self;
   X = (!rowvar && X.size(0) != 1) ? X.t() : X;
   
-  if(other.defined()) {    
-    y = (other.dim() == 1) ? other.unsqueeze(0) : other; 
+  if(other.defined()) {
+    y = (other.dim() == 1) ? other.unsqueeze(0) : other;
     y = (!rowvar && y.size(0) != 1) ? y.t() : y;
     X = at::cat({X, y}, 0);
   }
   X = at::isIntegralType(X.scalar_type(), /*include_bool=*/false) ? X.to(at::kDouble) : X;
   
-  // weights (w) copmutation
+  // weights (w) computation
   if(fweights.defined()) {
-    TORCH_CHECK( at::isIntegralType(fweights.scalar_type(), /*include_bool=*/false),            
+    TORCH_CHECK( at::isIntegralType(fweights.scalar_type(), /*include_bool=*/false),
                 "fweights must be integer.");
     TORCH_CHECK(fweights.dim() <= 1,
                 fn_name,
-                ": expected fweights to have one or fewer dimensions, but got ", fweights.dim(), "!");  
+                ": expected fweights to have one or fewer dimensions, but got ", fweights.dim(), "!");
     TORCH_CHECK(fweights.size(0) == X.size(1),
                 "incompatible numbers of samples and fweights. Sizes X.size(1) = ", X.size(1),", fweights.size(0) = ", fweights.size(0));
-    TORCH_CHECK(fweights.min().item<float>() >= 0, 
+    TORCH_CHECK(fweights.min().item<float>() >= 0,
                 "fweights cannot be negative.");
     w = fweights;
   }
@@ -1480,20 +1479,20 @@ Tensor cov(const Tensor& self,
                 ": expected aweights to have two or fewer dimensions, but got ", aweights.dim(), "!");
     TORCH_CHECK(aweights.size(0) == X.size(1),
                 "incompatible numbers of samples and aweights. Sizes X.size(1) = ", X.size(1),", aweights.size(0) = ", aweights.size(0));
-    TORCH_CHECK(aweights.min().item<float>() >= 0,  
+    TORCH_CHECK(aweights.min().item<float>() >= 0,
                 "aweights cannot be negative.");
 
-    w = (w.size(0) == 0) ? aweights : w*aweights; 
+    w = (w.size(0) == 0) ? aweights : w*aweights;
   }
   w = w.to(self.dtype());
 
-  // w_sum and fact copmutation
+  // w_sum and fact computation
   Tensor avg, w_sum, fact;
   if(w.size(0) != 0) {
     w_sum = at::sum(w);
     TORCH_CHECK(w_sum.item<double>() != 0.0,
                 "weights sum to zero, can't be normalized.");
-    avg = at::sum(X.mul(w), 1) / (w_sum);    
+    avg = at::sum(X.mul(w), 1) / (w_sum);
   }
   else {
     avg = at::mean(X,1);
@@ -1510,12 +1509,12 @@ Tensor cov(const Tensor& self,
     fact = w_sum - ddof;
   }
   else {
-    fact = w_sum - ddof*at::sum(w*aweights)/w_sum; 
+    fact = w_sum - ddof*at::sum(w*aweights)/w_sum;
   }
   
   fact = (fact.item<int>() <= 0) ? at::zeros({1}, self.options()) : fact;
   
-  // Final covariance (c) copmutation
+  // Final covariance (c) computation
   X = X - avg.unsqueeze(1);
   Tensor X_t = (w.size(0) == 0) ? X.t() : (X*w).t();
   Tensor c = at::mm(X,X_t.conj());
