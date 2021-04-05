@@ -29,7 +29,7 @@ std::vector<at::Tensor> constructTensors(
   }
 
   std::vector<at::Tensor> tensors;
-  for (const auto i : c10::irange(buf_data_vec.size())) {
+  for (size_t i = 0; i < buf_data_vec.size(); i++) {
     auto options = at::TensorOptions()
                        .dtype(buf_dtypes_vec[i])
                        .layout(at::kStrided)
