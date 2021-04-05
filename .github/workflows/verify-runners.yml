@@ -1,0 +1,24 @@
+name: Tests Runners Availability
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-linux-cpu:
+    runs-on: "linux.2xlarge"
+    steps:
+      - name: Print runner information
+        run: cat /etc/os-release
+  test-linux-gpu:
+    runs-on: "linux.8xlarge.nvidia.gpu"
+    steps:
+      - name: Print runner information
+        run: cat /etc/os-release
+      - name: Install nvidia-smi
+        run: |
+            sudo yum groupinstall -y "Development Tools"
+            DRIVER_FN="NVIDIA-Linux-x86_64-460.39.run"
+            wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
+            sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
+            nvidia-smi
