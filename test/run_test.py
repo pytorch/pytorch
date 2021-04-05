@@ -1018,7 +1018,6 @@ def export_S3_test_times(test_times_filename: str, test_times: Dict[str, float])
     with open(test_times_filename, 'w+') as file:
         job_times_json = get_job_times_json(test_times)
         json.dump(job_times_json, file, indent='    ', separators=(',', ': '))
-    with open(test_times_filename, 'a') as file:
         file.write('\n')
 
 def main():

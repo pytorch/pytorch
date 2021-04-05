@@ -43,7 +43,6 @@ def export_slow_tests(filename: str) -> None:
     with open(filename, 'w+') as file:
         slow_test_times: Dict[str, float] = filter_slow_tests(get_test_case_times())
         json.dump(slow_test_times, file, indent='    ', separators=(',', ': '))
-    with open(filename, 'a') as file:
         file.write('\n')
 
 
