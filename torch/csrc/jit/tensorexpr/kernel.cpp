@@ -209,7 +209,7 @@ ExprHandle TensorExprKernel::tensorOrConstant(
     }
     return constant(v);
 }
-TValue* TensorExprKernel::jitToTValue(const torch::jit::Value* v) {
+TValue* TensorExprKernel::jitToTValue(const torch::jit::Value* v) const {
   auto ti = tensors_.find(v);
   if (ti != tensors_.end()) {
     return new TValue(ti->second);
@@ -586,6 +586,9 @@ ExprHandle TensorExprKernel::demoteOutput(
   if (!type.has_value()) {
     return e;
   }
+  if (*type == static_cast<at::ScalarType>(e.dtype().scalar_type())) {
+    return e;
+  }
 
   switch (*type) {
 // NOLINTNEXTLINE
@@ -769,6 +772,30 @@ Tensor* TensorExprKernel::computeTwoOperand(
         return demoteOutput(compute, n->output());
       });
 }
+Tensor* TensorExprKernel::computeTwoOperand(
+    const std::string& name,
+    const std::vector<tensorexpr::TValue*> inputValues,
+    const c10::optional<at::ScalarType> outputTensorType,
+    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+        innerExpr) {
+  auto const& shape =
+      broadcastShapes(valueShape(inputValues[0]), valueShape(inputValues[1]));
+  return Compute(
+      name,
+      c10::fmap<DimArg>(shape),
+      [this, inputValues, outputTensorType, innerExpr](const std::vector<VarHandle>& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        std::vector<ExprHandle> inputs = {
+            tensorOrConstant(inputValues[0], indices),
+            tensorOrConstant(inputValues[1], indices),
+        };
+
+
+        promoteInputs(inputs);
+        ExprHandle compute = innerExpr(inputs[0], inputs[1]);
+        return demoteOutput(compute, outputTensorType);
+      });
+}
 
 Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
     const std::string& name,
@@ -789,36 +816,9 @@ Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
             tensorOrConstant(inputValues[2], indices),
         };
 
-
         promoteInputs(inputs);
         ExprHandle compute = innerExpr(inputs[0], inputs[2] * inputs[1]);
         return demoteOutput(compute, outputTensorType);
-      });
-}
-
-Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
-    const std::string& name,
-    const torch::jit::Value* v,
-    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
-        innerExpr) {
-  auto const& n = v->node();
-  auto const& shape =
-      broadcastShapes(valueShape(n->input(0)), valueShape(n->input(1)));
-  return Compute(
-      name,
-      c10::fmap<DimArg>(shape),
-      [this, v, innerExpr](const std::vector<VarHandle>& axes) {
-        auto const& n = v->node();
-        std::vector<ExprHandle> indices(axes.begin(), axes.end());
-        std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->input(0), indices),
-            tensorOrConstant(n->input(1), indices),
-            tensorOrConstant(n->input(2), indices),
-        };
-
-        promoteInputs(inputs);
-        ExprHandle compute = innerExpr(inputs[0], inputs[2] * inputs[1]);
-        return demoteOutput(compute, n->output());
       });
 }
 
@@ -942,25 +942,147 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   return c10::nullopt;
 }
 
-Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
-  auto inputs = v->node()->inputs();
-  switch (v->node()->kind()) {
+Tensor* TensorExprKernel::computeValueNoJIT(c10::Symbol op, std::vector<TValue*> inputs, c10::optional<c10::ScalarType> outputType) {
+  switch (op) {
     case aten::add: {
       auto add_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
         return boolToInteger(lhs) + boolToInteger(rhs);
       };
       TORCH_INTERNAL_ASSERT(
           inputs.size() == 2 || inputs.size() == 3);
-      std::vector<TValue*> tinputs;
-      for (auto inp: inputs) {
-        tinputs.push_back(jitToTValue(inp));
-      }
-      auto outputType = getOutputType(v->node()->output());
-      return (tinputs.size() > 2)
-          ? computeTwoOperandWithAlpha("aten_add", tinputs, outputType, add_lambda)
-          : computeTwoOperand("aten_add", v, add_lambda);
+      return (inputs.size() > 2)
+          ? computeTwoOperandWithAlpha("aten_add", inputs, outputType, add_lambda)
+          : computeTwoOperand("aten_add", inputs, outputType, add_lambda);
+    } break;
+    case aten::sub: {
+      auto sub_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        // NB: sub isn't supported on boolean, no need to promote to integer.
+        return lhs - rhs;
+      };
+      TORCH_INTERNAL_ASSERT(
+          inputs.size() == 2 || inputs.size() == 3);
+      return (inputs.size() > 2)
+          ? computeTwoOperandWithAlpha("aten_sub", inputs, outputType, sub_lambda)
+          : computeTwoOperand("aten_sub", inputs, outputType, sub_lambda);
+    } break;
+    case aten::mul: {
+      return computeTwoOperand(
+          "aten_mul", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return boolToInteger(lhs) * boolToInteger(rhs);
+          });
+    } break;
+    case aten::div: {
+      return computeTwoOperand(
+          "aten_div", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return promoteIntegerToDefaultType(lhs) /
+                promoteIntegerToDefaultType(rhs);
+          });
     } break;
 
+    case aten::__and__: {
+      return computeTwoOperand(
+          "aten_and", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return boolToInteger(lhs) & boolToInteger(rhs);
+          });
+    } break;
+
+    case aten::__or__: {
+      return computeTwoOperand(
+          "aten_or", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return boolToInteger(lhs) | boolToInteger(rhs);
+          });
+    } break;
+
+    case aten::__xor__: {
+      return computeTwoOperand(
+          "aten_xor", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return boolToInteger(lhs) ^ boolToInteger(rhs);
+          });
+    } break;
+
+    case aten::__lshift__: {
+      return computeTwoOperand(
+          "aten_lshift", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs << rhs;
+          });
+    } break;
+
+    case aten::__rshift__: {
+      return computeTwoOperand(
+          "aten_rshift", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs >> rhs;
+          });
+    } break;
+    case aten::eq: {
+      return computeTwoOperand(
+          "aten_eq", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return cast<bool>(lhs == rhs);
+          });
+    } break;
+
+    case aten::ne: {
+      return computeTwoOperand(
+          "aten_ne", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return cast<bool>(lhs != rhs);
+          });
+    } break;
+    case aten::ge: {
+      return computeTwoOperand(
+          "aten_ge", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return cast<bool>(lhs >= rhs);
+          });
+    } break;
+
+    case aten::gt: {
+      return computeTwoOperand(
+          "aten_gt", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return cast<bool>(lhs > rhs);
+          });
+    } break;
+
+    case aten::le: {
+      return computeTwoOperand(
+          "aten_le", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return cast<bool>(lhs <= rhs);
+          });
+    } break;
+
+    case aten::lt: {
+      return computeTwoOperand(
+          "aten_lt", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return cast<bool>(lhs < rhs);
+          });
+    } break;
+
+    case aten::min: {
+      return computeTwoOperand(
+          "aten_min", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return Min::make(boolToInteger(lhs), boolToInteger(rhs), false);
+          });
+    } break;
+
+    case aten::max: {
+      return computeTwoOperand(
+          "aten_max", inputs, outputType, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
+          });
+    } break;
+    default:
+      return nullptr;
+  }
+}
+Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
+  auto inputs = v->node()->inputs();
+  std::vector<TValue*> tinputs;
+  for (auto inp: inputs) {
+    tinputs.push_back(jitToTValue(inp));
+  }
+  auto outputType = getOutputType(v->node()->output());
+  Tensor* tryRefactored = computeValueNoJIT(v->node()->kind(), tinputs, outputType);
+  if (tryRefactored != nullptr) {
+    return tryRefactored;
+  }
+  switch (v->node()->kind()) {
     case aten::_cast_Float: {
       return computeOneOperand("aten_cast_float", v, [](const ExprHandle& a) {
         return cast<float>(a);
@@ -978,67 +1100,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       });
     } break;
 
-    case aten::sub: {
-      auto sub_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
-        // NB: sub isn't supported on boolean, no need to promote to integer.
-        return lhs - rhs;
-      };
-      TORCH_INTERNAL_ASSERT(
-          v->node()->inputs().size() == 2 || v->node()->inputs().size() == 3);
-      return (v->node()->inputs().size() > 2)
-          ? computeTwoOperandWithAlpha("aten_sub", v, sub_lambda)
-          : computeTwoOperand("aten_sub", v, sub_lambda);
-    } break;
-
-    case aten::mul: {
-      return computeTwoOperand(
-          "aten_mul", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return boolToInteger(lhs) * boolToInteger(rhs);
-          });
-    } break;
-
-    case aten::div: {
-      return computeTwoOperand(
-          "aten_div", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return promoteIntegerToDefaultType(lhs) /
-                promoteIntegerToDefaultType(rhs);
-          });
-    } break;
-
-    case aten::__and__: {
-      return computeTwoOperand(
-          "aten_and", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return boolToInteger(lhs) & boolToInteger(rhs);
-          });
-    } break;
-
-    case aten::__or__: {
-      return computeTwoOperand(
-          "aten_or", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return boolToInteger(lhs) | boolToInteger(rhs);
-          });
-    } break;
-
-    case aten::__xor__: {
-      return computeTwoOperand(
-          "aten_xor", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return boolToInteger(lhs) ^ boolToInteger(rhs);
-          });
-    } break;
-
-    case aten::__lshift__: {
-      return computeTwoOperand(
-          "aten_lshift", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs << rhs;
-          });
-    } break;
-
-    case aten::__rshift__: {
-      return computeTwoOperand(
-          "aten_rshift", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs >> rhs;
-          });
-    } break;
 
     case aten::addcmul: {
       return computeFourOperand(
@@ -1050,60 +1111,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
              const ExprHandle& a3) { return a0 + a3 * a1 * a2; });
     } break;
 
-    case aten::eq: {
-      return computeTwoOperand(
-          "aten_eq", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return cast<bool>(lhs == rhs);
-          });
-    } break;
-
-    case aten::ne: {
-      return computeTwoOperand(
-          "aten_ne", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return cast<bool>(lhs != rhs);
-          });
-    } break;
-    case aten::ge: {
-      return computeTwoOperand(
-          "aten_ge", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return cast<bool>(lhs >= rhs);
-          });
-    } break;
-
-    case aten::gt: {
-      return computeTwoOperand(
-          "aten_gt", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return cast<bool>(lhs > rhs);
-          });
-    } break;
-
-    case aten::le: {
-      return computeTwoOperand(
-          "aten_le", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return cast<bool>(lhs <= rhs);
-          });
-    } break;
-
-    case aten::lt: {
-      return computeTwoOperand(
-          "aten_lt", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return cast<bool>(lhs < rhs);
-          });
-    } break;
-
-    case aten::min: {
-      return computeTwoOperand(
-          "aten_min", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Min::make(boolToInteger(lhs), boolToInteger(rhs), false);
-          });
-    } break;
-
-    case aten::max: {
-      return computeTwoOperand(
-          "aten_max", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
-          });
-    } break;
 
     case aten::masked_fill: {
       return computeThreeOperand(
@@ -1741,6 +1748,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       throw std::runtime_error("Unhandled node kind");
     }
   }
+  throw std::runtime_error("???");
+  return nullptr;
 }
 
 Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {

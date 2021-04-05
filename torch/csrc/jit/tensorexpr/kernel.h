@@ -149,7 +149,7 @@ ExprHandle demoteOutput(
     const c10::optional<at::ScalarType> type);
   ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
 
-  TValue* jitToTValue(const torch::jit::Value* v);
+  TValue* jitToTValue(const torch::jit::Value* v) const;
   ExprHandle tensorOrConstant(
     const TValue* v,
     const std::vector<ExprHandle>& axes);
@@ -162,6 +162,13 @@ ExprHandle demoteOutput(
       const torch::jit::Value* v,
       const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
       const int checkParamTypes = kAllTypes);
+
+  Tensor* computeTwoOperand(
+    const std::string& name,
+    const std::vector<tensorexpr::TValue*> inputValues,
+    const c10::optional<at::ScalarType> outputTensorType,
+    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+        innerExpr);
 
   Tensor* computeTwoOperand(
       const std::string& name,
@@ -213,8 +220,9 @@ ExprHandle demoteOutput(
 
   Tensor* computeConv2d(const torch::jit::Value* v);
 
-  Tensor* computeValue(const torch::jit::Value* v);
+  Tensor* computeValueNoJIT(c10::Symbol op, std::vector<TValue*> inputs, c10::optional<c10::ScalarType> outputType);
 
+  Tensor* computeValue(const torch::jit::Value* v);
   Stmt* transformLoops(BackendType backendType, Stmt* st);
 
   std::string getCodeGenName(BackendType backendType);
