@@ -24,7 +24,7 @@ from torch.testing._internal.common_device_type import \
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
-    (is_iterable_of_tensors, random_square_matrix_of_rank,
+    (is_iterable_of_tensors,
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed, SEED,
@@ -383,6 +383,36 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                                     requires_grad=requires_grad),
                         args=(torch.tensor([1, 2, 3]),),
                         kwargs=dict(dim=1)),)
+
+def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
+    kw = dict(device=device, dtype=dtype)
+    inputs = [
+        make_tensor((S, S), **kw),
+        make_tensor((1, 1), **kw),  # 1x1
+        random_symmetric_matrix(S, **kw),  # symmetric
+        random_symmetric_psd_matrix(S, **kw),  # symmetric_psd
+        random_symmetric_pd_matrix(S, **kw),  # symmetric_pd
+
+        # dim2_null, rank1 and rank2 are disabled because of
+        # https://github.com/pytorch/pytorch/issues/53364
+        # we should re-enable them once the issue is solved
+        # random_square_matrix_of_rank(S, S - 2, **kw),  # dim2_null
+        # random_square_matrix_of_rank(S, 1, **kw),  # rank1
+        # random_square_matrix_of_rank(S, 2, **kw),  # rank2
+
+        random_fullrank_matrix_distinct_singular_value(S, **kw),  # distinct_singular_value
+        make_tensor((3, 3, S, S), **kw),  # batched
+        make_tensor((3, 3, 1, 1), **kw),  # batched_1x1
+        random_symmetric_matrix(S, 3, **kw),  # batched_symmetric
+        random_symmetric_psd_matrix(S, 3, **kw),  # batched_symmetric_psd
+        random_symmetric_pd_matrix(S, 3, **kw),  # batched_symmetric_pd
+        random_fullrank_matrix_distinct_singular_value(S, 3, 3, **kw),  # batched_distinct_singular_values
+        make_tensor((0, 0), **kw),
+        make_tensor((0, S, S), **kw),
+    ]
+    for t in inputs:
+        t.requires_grad = requires_grad
+    return [SampleInput(t) for t in inputs]
 
 def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad):
     # (<matrix_size>, (<batch_sizes, ...>))
@@ -2843,6 +2873,27 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+    OpInfo('linalg.det',
+           op=torch.linalg.det,
+           aliases=('det', ),
+           dtypes=floating_and_complex_types(),
+           aten_name='linalg_det',
+           sample_inputs_func=sample_inputs_linalg_det,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           supports_complex_autograd=False,
+           supports_inplace_autograd=False,
+           skips=(
+               # The following tests fail only on ROCm. This is probably
+               # related to the fact that the current linalg.det backward is
+               # unstable if the matrix has repeated singular values, see
+               # https://github.com/pytorch/pytorch/issues/53364
+               SkipInfo('TestGradients', 'test_fn_grad', device_type='cuda',
+                        dtypes=(torch.float64,), active_if=TEST_WITH_ROCM),
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda',
+                        dtypes=(torch.float64,), active_if=TEST_WITH_ROCM),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda',
+                        dtypes=(torch.float64, torch.float32), active_if=TEST_WITH_ROCM),
+           )),
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
            dtypes=floating_and_complex_types(),
@@ -4406,32 +4457,6 @@ def method_tests():
         ('index_fill', (S, S), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_index_dim', (), [0]),
         ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', (), [0]),
         ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', (), [0]),
-        ('det', (S, S), NO_ARGS, '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('det', (1, 1), NO_ARGS, '1x1', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('det', lambda dtype, device: random_symmetric_matrix(S), NO_ARGS, 'symmetric', (),
-            NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('det', lambda dtype, device: random_symmetric_psd_matrix(S),
-            NO_ARGS, 'symmetric_psd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('det', lambda dtype, device: random_symmetric_pd_matrix(S),
-            NO_ARGS, 'symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('det', lambda dtype, device: random_square_matrix_of_rank(S, S - 2),
-            NO_ARGS, 'dim2_null', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('det', lambda dtype, device: random_square_matrix_of_rank(S, 1), NO_ARGS, 'rank1', (),
-            NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('det', lambda dtype, device: random_square_matrix_of_rank(S, 2), NO_ARGS, 'rank2', (),
-            NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('det', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
-         'distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('det', (3, 3, S, S), NO_ARGS, 'batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('det', (3, 3, 1, 1), NO_ARGS, 'batched_1x1', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('det', lambda dtype, device: random_symmetric_matrix(S, 3),
-            NO_ARGS, 'batched_symmetric', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('det', lambda dtype, device: random_symmetric_psd_matrix(S, 3),
-            NO_ARGS, 'batched_symmetric_psd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('det', lambda dtype, device: random_symmetric_pd_matrix(S, 3),
-            NO_ARGS, 'batched_symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('det', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, 3, 3), NO_ARGS,
-         'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
         # For `logdet` the function at det=0 is not smooth.
         # We need to exclude tests with det=0 (e.g. dim2_null, rank1, rank2) and use
         # `make_nonzero_det` to make the random matrices have nonzero det. For
