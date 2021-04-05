@@ -622,8 +622,8 @@ class TestCommon(JitCommonTestCase):
 
             out = _apply_out_transform(_case_five_transform, expected)
             msg_fail = "" if not isinstance(expected, torch.Tensor) else \
-                       ("Expected RuntimeError when doing an unsafe cast from a result of type {expected.dtype}"
-                        f"into an out with dtype torch.long")
+                       ("Expected RuntimeError when doing an unsafe cast from a result of dtype "
+                        f"{expected.dtype} into an out= with dtype torch.long")
             with self.assertRaises(RuntimeError, msg=msg_fail):
                 op_out(out=out)
 
