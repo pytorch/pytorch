@@ -259,6 +259,9 @@ class OpInfo(object):
         These samples should be sufficient to test the function works correctly
         with autograd, TorchScript, etc.
         """
+
+        # TODO: Remove the try/except once all operators have sample_inputs_func with
+        #       **kwargs in their signature.
         try:
             samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
         except TypeError:
