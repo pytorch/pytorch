@@ -367,7 +367,7 @@ bool IsBlockReturnTypeSame(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == ::c10::onnx::If);
   auto then_block = n->blocks()[0];
   auto else_block = n->blocks()[1];
-  for (const auto i : c10::irange(n->outputs().size())) {
+  for (size_t i = 0; i < n->outputs().size(); i++) {
     // check the type
     auto then_block_type = then_block->outputs()[i]->type();
     auto else_block_type = else_block->outputs()[i]->type();
@@ -593,7 +593,7 @@ c10::optional<std::vector<int64_t>> GetValueFromListConstructNode(
     Node* lc_node) {
   auto rank = lc_node->inputs().size();
   std::vector<int64_t> shape_size;
-  for (const auto i : c10::irange(rank)) {
+  for (size_t i = 0; i < rank; i++) {
     if (TensorTypePtr shape_type =
             lc_node->input(i)->type()->cast<TensorType>()) {
       if (ConstantValueMap::HasValue(lc_node->input(i)->debugName())) {
@@ -1134,7 +1134,7 @@ void SpecialPostProcess(Node* n) {
       if (!IsBlockReturnTypeSame(n) && IsStaticConditionONNX(n)) {
         auto cond = ConditionValueONNX(n);
         auto block_idx = cond ? 0 : 1;
-        for (const auto i : c10::irange(n->outputs().size())) {
+        for (size_t i = 0; i < n->outputs().size(); i++) {
           n->outputs()[i]->setType(
               n->blocks()[block_idx]->outputs()[i]->type());
         }
