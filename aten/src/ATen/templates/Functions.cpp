@@ -136,17 +136,18 @@ inline DataPtr TensorMaker::makeDataPtrFromContext() noexcept {
   return DataPtr{data_, ctx_.release(), ctx_.get_deleter(), *device_};
 }
 
-SmallVector<std::int64_t, 5> TensorMaker::makeTempSizes() const noexcept {
+IntArrayRef TensorMaker::makeTempSizes() const noexcept {
+  static int64_t zeros[5] = {0, 0, 0, 0, 0};
   if (opts_.has_memory_format()) {
     MemoryFormat format = *opts_.memory_format_opt();
     if (format == MemoryFormat::ChannelsLast) {
-      return {0, 0, 0, 0};
+      return IntArrayRef(zeros, 4);
     }
     if (format == MemoryFormat::ChannelsLast3d) {
-      return {0, 0, 0, 0, 0};
+      return IntArrayRef(zeros, 5);
     }
   }
-  return {0};
+  return IntArrayRef(zeros, 1);
 }
 
 inline Tensor TensorMaker::makeEmptyTensor() const {
