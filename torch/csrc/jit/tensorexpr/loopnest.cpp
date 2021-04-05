@@ -1772,10 +1772,6 @@ Stmt* LoopNest::getLoopBodyFor(const Buf* buf) const {
   return (Stmt*)res; // NOLINT
 }
 
-bool LoopNest::hasLoopBodyFor(Tensor* t) const {
-  return getLoopBodyFor(t) != nullptr;
-}
-
 For* LoopNest::getParentLoop(const Stmt* st) {
   if (st == nullptr) {
     return nullptr;
