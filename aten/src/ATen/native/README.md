@@ -274,6 +274,8 @@ dispatch:
     CompositeImplicitAutograd: func
 
 # overload is ignored, but out functions get suffixed with _out in their name
+# (NB: no out functions in PyTorch today actually support autograd, but if they
+# did, you could call them here and autograd would be inferred)
 func: func.out_overload(...) -> ...
 dispatch:
     CompositeImplicitAutograd: func_out
@@ -377,32 +379,6 @@ with other components of PyTorch in order to reduce overall complexity.
 If you find yourself having to set this field to False add @gchanan to your PR's
 set of reviewers.
 
-### `use_c10_dispatcher`
-
-```
-use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
-```
-
-This will indicate that the operator implementation is still using a legacy operator signature.
-For any new ops, please don't set this.
-The new, non-legacy operator signature requires the operator function signature to be aligned with the
-function schema in native_functions.yaml, i.e.
-- out arguments have to be in the end of the argument list instead of in the beginning
-- TensorOptions are taken as separate arguments
-```
-  const c10::optional<ScalarType>& dtype,
-  const c10::optional<Layout>& layout,
-  const c10::optional<Device>& device,
-  const c10::optional<bool>& pin_memory
-```
-  instead of one `TensorOptions` argument
-- optional tensors are taken as `const c10::optional<Tensor>&` instead of `Tensor`
-Some of our kernels are still written in a legacy way, not doing those things,
-and need an adapter to work with the dispatcher calling convention. For those, we use
-`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` to codegenerate a corresponding
-adapter around them in the operator registration call. Over time, we will migrate all
-those kernels to the new calling convention and hacky_wrapper will die.
-
 ### `manual_kernel_registration`
 
 ```
@@ -485,7 +461,7 @@ Here're steps to follow to decide the right dispatch keyword:
     - Yes, but you still want to provide a numerically stable gradient formula instead of using autograd, write
       ```
       dispatch:
-        DefaultBackend: kernel
+        CompositeExplicitAutograd: kernel
       ```
 
       You're done. This op will be called in inference for all backends.
@@ -505,7 +481,7 @@ Here're steps to follow to decide the right dispatch keyword:
       For `sign` and `sign_`, write
       ```
       dispatch:
-        DefaultBackend: kernel
+        CompositeExplicitAutograd: kernel
       ```
 
       You're done. This op will be called in inference for all backends.
@@ -529,8 +505,8 @@ It shows for a certain operator, what the computed dispatch table looks like aft
 
 Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
   - direct registration to backend always has higher precendence than alias
-  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `DefaultBackend > CompositeImplicitAutograd`,
-    e.g. adding both `CompositeImplicitAutograd` and `DefaultBackend` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
+  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `CompositeExplicitAutograd > CompositeImplicitAutograd`,
+    e.g. adding both `CompositeImplicitAutograd` and `CompositeExplicitAutograd` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
     both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
 
 
