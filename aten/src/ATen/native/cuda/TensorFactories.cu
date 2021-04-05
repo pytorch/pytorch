@@ -21,6 +21,10 @@
 #include <cstddef>
 #include <limits>
 
+#ifndef TORCH_TARGET_NAME
+#error "TORCH_TARGET_NAME not defined"
+#endif
+
 namespace at {
 namespace native {
 
