@@ -707,7 +707,8 @@ class QuantizationTestCase(TestCase):
                                 if isinstance(values_0, torch.Tensor):
                                     self.assertTrue(
                                         values_0.shape == values_1.shape,
-                                        f"Layer {layer_name}, {model_name_0} and {model_name_1} have a shape mismatch at idx {idx}.")
+                                        f"Layer {layer_name}, {model_name_0} and {model_name_1} " +
+                                        f"have a shape mismatch at idx {idx}.")
                                 else:
                                     assert isinstance(values_0, tuple), \
                                         f"unhandled type {type(values_0)}"
