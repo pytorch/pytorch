@@ -190,8 +190,6 @@ class CreateBufferMap : public IRVisitor {
   std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
 
-std::vector<Tensor*> findAllNeededTensors(const std::vector<Tensor*>& tensors);
-
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
