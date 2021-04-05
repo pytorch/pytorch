@@ -479,27 +479,20 @@ Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source);
 }
 
-Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source_, const Scalar &alpha) {
+
+Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   auto numel = index.numel();
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
           "index_add_(): Expected dtype int32/int64 for index");
-  TORCH_CHECK(dim == 0 || dim < source_.dim(),
+  TORCH_CHECK(self.scalar_type() == source.scalar_type(),
+              "index_add_(): self and source must have the same scalar type");
+  TORCH_CHECK(dim == 0 || dim < source.dim(),
               "index_add_(): Indexing dim ", dim, " is out of bounds of tensor");
-  TORCH_CHECK(numel == (source_.dim() == 0 ? 1 : source_.size(dim)),
+  TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
               "index_add_(): Number of indices should be equal to self.size(dim)");
-
-  Tensor source = source_;
-  const auto selfType = self.scalar_type();
-  const auto commonType = promoteTypes(selfType, source.scalar_type());
-  auto promoteToType = [&](Tensor& tensor, ScalarType type) {
-    if (tensor.scalar_type() != type) {
-      tensor = tensor.toType(type);
-    }
-  };
-  promoteToType(source, commonType);
 
   at::assert_no_internal_overlap(self);
   at::assert_no_overlap(self, index);
@@ -518,8 +511,6 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     if (numel == 0) {
       return self;
     }
-
-    promoteToType(self, commonType);
     auto selfSlice = self.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
     auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
@@ -544,7 +535,6 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
   else {
     TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
 
-    promoteToType(self, commonType);
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
@@ -567,7 +557,6 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
       });
     });
   }
-  promoteToType(self, selfType);
   return self;
 }
 
