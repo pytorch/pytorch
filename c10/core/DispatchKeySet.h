@@ -82,6 +82,10 @@ public:
   DispatchKeySet operator-(DispatchKeySet other) const {
     return DispatchKeySet(repr_ & ~other.repr_);
   }
+  // Compute self ^ other
+  DispatchKeySet operator^(DispatchKeySet other) const {
+    return DispatchKeySet(repr_ ^ other.repr_);
+  }
   // Perform set equality
   bool operator==(DispatchKeySet other) const {
     return repr_ == other.repr_;
@@ -189,7 +193,7 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
 // autograd_dispatch_keyset should include all runtime autograd keys.
 // Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
-// NB: keys in this set also get associated with Math
+// NB: keys in this set also get associated with CompositeImplicitAutograd
 constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradCPU,
     DispatchKey::AutogradCUDA,
@@ -203,11 +207,17 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradOther,
 });
 
+// See Note [TLS Initialization]
+constexpr DispatchKeySet default_included_set = DispatchKeySet({
+    DispatchKey::BackendSelect,
+    DispatchKey::InplaceOrView,
+});
+
 constexpr DispatchKeySet autograd_dispatch_keyset_with_InplaceOrView =
   autograd_dispatch_keyset | DispatchKeySet(DispatchKey::InplaceOrView);
 
 // backend dispatch keys that map to DispatchKey::AutogradOther
-// NB: keys in this set also get associated with Math
+// NB: keys in this set also get associated with CompositeImplicitAutograd
 constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::HIP,
   DispatchKey::FPGA,
