@@ -4291,18 +4291,11 @@
     SparseCPU, SparseCUDA: _nnz_sparse
   device_guard: False
 
-# NOTE: [ coalesce autograd ]
-# coalesce returns self directly for already coalesced sparse tensors.
-# This means coalesce cannot have a derivative registered, otherwise it creates
-# circular references in the autograd graph (see gh-52874).
-# Instead, the derivative is registered on the slow-path "_coalesce"
-- func: coalesce(Tensor(a) self) -> Tensor(a)
+- func: coalesce(Tensor self) -> Tensor
   variants: method
-
-- func: _coalesce(Tensor self) -> Tensor
   dispatch:
-    SparseCPU: _coalesce_sparse_cpu
-    SparseCUDA: _coalesce_sparse_cuda
+    SparseCPU: coalesce_sparse_cpu
+    SparseCUDA: coalesce_sparse_cuda
 
 - func: is_coalesced(Tensor self) -> bool
   variants: method
