@@ -670,7 +670,7 @@ class TORCH_API Tensor {
   ///
   /// Enables .grad() for non-leaf Tensors.
 
-  Tensor& set_requires_grad(bool requires_grad) {
+  const Tensor& set_requires_grad(bool requires_grad) const {
     impl_->set_requires_grad(requires_grad);
     return *this;
   }
