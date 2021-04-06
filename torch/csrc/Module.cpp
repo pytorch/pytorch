@@ -62,6 +62,8 @@
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
+#include <torch/csrc/distributed/spmd/spmd.h>
+
 #endif
 #endif
 
@@ -803,6 +805,7 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::autograd::python_functions());
   THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::testing::python_functions());
+  THPUtils_addPyMethodDefs(methods, torch::distributed::spmd::python_functions());
 #endif
 #endif
 

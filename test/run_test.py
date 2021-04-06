@@ -206,6 +206,7 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
     'distributed/optim/test_zero_redundancy_optimizer',
+    'test_spmd',
 ]
 
 ROCM_BLOCKLIST = [
@@ -218,6 +219,7 @@ ROCM_BLOCKLIST = [
     'test_jit_legacy',
     'test_type_hints',
     'test_openmp',
+    'test_spmd',
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
@@ -279,6 +281,7 @@ TARGET_DET_LIST = [
     'distributed/test_c10d',
     'distributed/test_jit_c10d',
     'distributed/test_c10d_spawn',
+    'distributed/test_spmd',
     'test_quantization',
     'test_pruning_op',
     'test_determination',
