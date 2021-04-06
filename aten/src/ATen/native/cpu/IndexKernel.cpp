@@ -105,6 +105,126 @@ void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef inde
   });
 }
 
+// Given a linear index, returns the offset of the tensor.
+// Implements the same algorithm as its (legacy) GPU version cuda::detail::IndexToOffset
+// OffsetCalculator implements yet again the same algorithm but in a column-major order
+struct IndexToOffset {
+  const IntArrayRef sizes;
+  const IntArrayRef strides;
+  const int ndim;
+  IndexToOffset(const Tensor & tensor) : sizes(tensor.sizes()),
+                                         strides(tensor.strides()),
+                                         ndim(tensor.dim()) {}
+
+  int64_t get(int64_t linear_index) const {
+    int64_t offset = 0;
+    for (int i = ndim - 1; i > 0; i--) {
+      offset += (linear_index % sizes[i]) * strides[i];
+      linear_index /= sizes[i];
+    }
+    return offset + linear_index * strides[0];
+  }
+};
+
+template <typename scalar_t, typename func_t>
+void cpu_take_put_kernel(
+    TensorIterator& iter,
+    const Tensor& indexed,
+    const func_t& f,
+    bool serial_execution=false) {
+  // This kernel follows the same strategy as `cpu_index_kernel`
+  // Even though the indexed_tensor is const, we modify it through the data_ptr
+  // This is a bit dirty, but otherwise it would be necessary to innecessarily add tensor
+  // with zero strides to `iter` which would not be much better
+
+  // When launch the parallel version, set a relative small grain size less than the INTERNAL::GRAIN_SIZE
+  // to make the whole available thread numbers get more balanced work load and a better cache location.
+  // The grain size here is chosen by the op benchmark to overcome the thread launch overhead
+  // Perhaps tweak this number for `put_`? This number was tweaked for `index_put`
+  constexpr int parallel_grain_size = 3000;
+  const bool is_contiguous = indexed.is_contiguous();
+  const auto numel = indexed.numel();
+  const auto offset_indexed = IndexToOffset(indexed);
+
+  auto* indexed_data = indexed.data_ptr<scalar_t>();
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+    auto* iterated_data_bytes = data[0];
+    auto* index_data_bytes = data[1];
+    for (int64_t elem = 0; elem < n; ++elem) {
+      auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
+      auto& iterated = *reinterpret_cast<scalar_t*>(iterated_data_bytes);
+
+      TORCH_CHECK_INDEX(idx >= -numel && idx < numel,
+                        "out of range: tried to access index ",
+                        idx, " on a tensor of ", numel, " elements.");
+      if (idx < 0) {
+        idx += numel;
+      }
+      if (!is_contiguous) {
+        idx = offset_indexed.get(idx);
+      }
+      f(iterated, indexed_data, idx);
+      iterated_data_bytes += strides[0];
+      index_data_bytes += strides[1];
+    }
+  };
+  if (serial_execution) {
+    iter.serial_for_each(loop, {0, iter.numel()});
+  } else {
+    iter.for_each(loop, parallel_grain_size);
+  }
+}
+
+void put_kernel(
+  TensorIterator& iter,
+  const Tensor & self,
+  const bool accumulate) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+    iter.dtype(), "take_put_cpu", [&] {
+  // iter could be const, but for_each does not have a const version
+    if (accumulate) {
+      // nb. This deterministic issue the same as that of `index_put_kernel`
+      // See Note [Enabling Deterministic Operations]
+      // Parallel cpu_put_kernel with accumulation is nondeterministic, so we
+      // must enable serial execution if deterministic algorithms are enabled.
+      bool is_deterministic = at::globalContext().deterministicAlgorithms();
+      bool use_parallel_for = (!is_deterministic) && (
+        (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
+      if (use_parallel_for && iter.dtype() == ScalarType::Float) {
+        cpu_take_put_kernel<float>(iter, self,
+            [](float& iterated, float* indexed, const int64_t idx) {
+                cpu_atomic_add_float(indexed+idx, iterated);
+              });
+      } else {
+        // TODO: investigate parallelization of the accumulate kernel.
+        // Unlike the non-accumulate case, this needs to be thread-safe.
+        cpu_take_put_kernel<scalar_t>(iter, self,
+            [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
+                indexed[idx] += iterated;
+              },
+            /*serial_execution=*/true);
+      }
+    } else {
+      cpu_take_put_kernel<scalar_t>(iter, self,
+          [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
+              indexed[idx] = iterated;
+            });
+    }
+  });
+}
+
+void take_kernel(
+  TensorIterator& iter,
+  const Tensor & input) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+    iter.dtype(), "take_cpu", [&] {
+      cpu_take_put_kernel<scalar_t>(iter, input,
+          [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
+              iterated = indexed[idx];
+            });
+    });
+}
+
 void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   // NOTE: duplicate indices are only supported if accumulate is true.
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
@@ -414,6 +534,8 @@ REGISTER_DISPATCH(index_stub, &index_kernel);
 REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
 REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
+REGISTER_DISPATCH(put_stub, &put_kernel);
+REGISTER_DISPATCH(take_stub, &take_kernel);
 REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
 REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
 REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
