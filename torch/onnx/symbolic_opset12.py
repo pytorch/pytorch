@@ -212,31 +212,45 @@ def unfold(g, input, dimension, size, step):
 
 @parse_args('v', 'v', 'is', 'is', 'v')
 def tensordot(g, input_a, input_b, dims_a, dims_b, out=None):
-    from torch.onnx.symbolic_opset9 import view
+    if out is not None:
+        _unimplemented("Tensordot", "Out parameter is not supported for tensordot.")
 
+    from torch.onnx.symbolic_opset9 import view, permute
     for i in range(len(dims_a)):
         if sym_help._get_tensor_dim_size(input_a, dims_a[i]) != sym_help._get_tensor_dim_size(input_b, dims_b[i]):
-            raise RuntimeError(f'Dimensions are not matched.')
+            raise RuntimeError("Dimensions are not matched for operator tensordot: a - {}, b - {}.".format(dims_a, dims_b))
 
-    a_dim_count = input_a.type().dim()
-    b_dim_count = input_b.type().dim()
+    dim_count_a = input_a.type().dim()
+    dim_count_b = input_b.type().dim()
+    for i in range(len(dims_a)):
+        if (dims_a[i] < 0):
+            dims_a[i] += dim_count_a
+    for i in range(len(dims_b)):
+        if (dims_b[i] < 0):
+            dims_b[i] += dim_count_b
 
-    left_dims_sizes_a = [sym_help._get_tensor_dim_size(input_a, i) 
-                         for i in range(a_dim_count) 
-                         if ((i not in dims_a) and (i-a_dim_count) not in dims_a)]
-    left_dims_sizes_b = [sym_help._get_tensor_dim_size(input_b, i) 
-                         for i in range(b_dim_count) 
-                         if ((i not in dims_b) and (i-b_dim_count) not in dims_b)]
+    left_dims_a = [i
+                   for i in range(dim_count_a)
+                   if (i not in dims_a)]
+    left_dims_b = [i
+                   for i in range(dim_count_b)
+                   if (i not in dims_b)]
 
-    output_a = view(g, input_a, tuple(left_dims_sizes_a + [-1]))
-    output_a = view(g, output_a, tuple([-1] + [sym_help._get_tensor_dim_size(output_a, len(left_dims_sizes_a))]))
+    left_dims_sizes_a = [sym_help._get_tensor_dim_size(input_a, left_dims_a[i])
+                         for i in range(len(left_dims_a))]
+    left_dims_sizes_b = [sym_help._get_tensor_dim_size(input_b, left_dims_b[i])
+                         for i in range(len(left_dims_b))]
 
-    output_b = view(g, input_b, tuple([-1] + left_dims_sizes_b))
-    output_b = view(g, output_b, tuple([sym_help._get_tensor_dim_size(output_b, 0)] + [-1]))
+    new_input_a = permute(g, input_a, left_dims_a + dims_a)
+    new_input_b = permute(g, input_b, dims_b + left_dims_b)
+
+    output_a = view(g, new_input_a, left_dims_sizes_a + [-1])
+    output_a = view(g, output_a, [-1] + [sym_help._get_tensor_dim_size(output_a, len(left_dims_sizes_a))])
+
+    output_b = view(g, new_input_b, [-1] + left_dims_sizes_b)
+    output_b = view(g, output_b, [sym_help._get_tensor_dim_size(output_b, 0)] + [-1])
 
     output_list = g.op("prim::ListConstruct", *[output_a, output_b])
-
     output = einsum(g, 'ij,jk->ik', output_list)
-    output = view(g, output, (left_dims_sizes_a + left_dims_sizes_b))
 
-    return output
+    return view(g, output, (left_dims_sizes_a + left_dims_sizes_b))
