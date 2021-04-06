@@ -330,6 +330,9 @@
 - name: conj(Tensor(a) self) -> Tensor(a)
   self: grad.conj()
 
+- name: conj_(Tensor(a!) self) -> Tensor(a!)
+  self: grad.conj()
+
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
   other: zeros_like(other)

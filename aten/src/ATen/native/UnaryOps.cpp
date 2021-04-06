@@ -284,12 +284,12 @@ Tensor conj(const Tensor& self) {
   return self_;
 }
 
-Tensor& conj_physical_out(Tensor& result, const Tensor& self) {
+Tensor& conj_out(Tensor& result, const Tensor& self) {
   return unary_op_impl_out(result, self, conj_stub);
 }
 
-Tensor& conj_physical_(Tensor& self) {
-  return unary_op_impl_(self, conj_physical_out);
+Tensor& conj_(Tensor& self) {
+  return unary_op_impl_(self, conj_out);
 }
 
 Tensor& bitwise_not_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, bitwise_not_stub); }

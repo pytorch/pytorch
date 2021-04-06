@@ -293,8 +293,10 @@
   dispatch:
     CompositeExplicitAutograd: view_as_real_physical
 
-- func: conj_physical_(Tensor(a!) self) -> Tensor(a!)
+- func: conj_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: conj_
 
 - func: resolve_conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
