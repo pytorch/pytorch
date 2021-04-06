@@ -2590,6 +2590,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     # fmod was added in version 10
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedMaxOpsetVersion(13)
     def test_mod_with_low_precision(self):
         class ModModule(torch.nn.Module):
             def forward(self, x, y):
@@ -2616,6 +2617,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ModModule(), (x, y))
 
     @unittest.skip("Gemm operator only support float/double in ONNX")
+    @skipIfUnsupportedMaxOpsetVersion(13)
     def test_gemm_with_low_precision(self):
         class GemmModule(torch.nn.Module):
             def forward(self, x, y):
