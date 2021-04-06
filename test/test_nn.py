@@ -12695,8 +12695,7 @@ class TestNNDeviceType(NNTestCase):
         helper(1, 100000, 32, 32, ks=4)
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.float, torch.double)
+    @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_max_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None):
@@ -15052,7 +15051,7 @@ class TestNNDeviceType(NNTestCase):
                 grads_before = [p.grad.clone() for p in parameters]
 
                 with self.assertRaisesRegex(RuntimeError, error_msg, msg=msg):
-                    clip_grad_norm_(parameters, 1, norm_type=norm_type)
+                    clip_grad_norm_(parameters, 1, norm_type=norm_type, error_if_nonfinite=True)
 
                 # Grad should not change if error is thrown
                 grads_after = [p.grad for p in parameters]

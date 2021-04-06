@@ -2165,7 +2165,7 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     auto self_stride = self.stride(0);
     int64_t sz = self_size + std::abs(dimension);
 
-    result.resize_({sz, sz});
+    at::native::resize_output(result, {sz, sz});
     result.zero_();
     auto r_data = result.data_ptr<scalar_t>();
     auto r_stride_0 = result.stride(0);
@@ -2186,7 +2186,7 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
       sz = std::min(self.size(0) + dimension, self.size(1));
     }
 
-    result.resize_({sz});
+    at::native::resize_output(result, {sz});
     result.zero_();
     auto r_data = result.data_ptr<scalar_t>();
     auto r_stride_0 = result.stride(0);
