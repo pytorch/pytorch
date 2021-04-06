@@ -564,7 +564,7 @@ This simple implementation won't necessarily work with every function in the
 
   >>> metadata = {'owner': 'Ministry of Silly Walks'}
   >>> m = MetadataTensor([[1, 2], [3, 4]], metadata=metadata)
-  >>> t = torch.tensor([[1, 2], [1, 2]]])
+  >>> t = torch.tensor([[1, 2], [1, 2]])
   >>> torch.add(t, m)
   Metadata:
   {'owner': 'Ministry of Silly Walks'}
