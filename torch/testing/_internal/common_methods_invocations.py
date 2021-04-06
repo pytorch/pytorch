@@ -2619,6 +2619,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=None,
                    dtypesIfCUDA=None,
                    dtypesIfROCM=None,
+                   supports_out=False,
                    skips=(
                        # File "test_unary_ufuncs.py", line 289, in test_reference_numerics
                        #  if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):

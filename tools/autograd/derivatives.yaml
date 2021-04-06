@@ -328,10 +328,10 @@
   abs, angle: polar_backward(grad, result)
 
 - name: conj(Tensor(a) self) -> Tensor(a)
-  self: grad.conj()
+  self: grad.clone().conj_()
 
 - name: conj_(Tensor(a!) self) -> Tensor(a!)
-  self: grad.conj()
+  self: grad.clone().conj_()
 
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
