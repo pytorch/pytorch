@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import abc
-from typing import Any, Callable, Dict, Optional, Tuple, final
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from torch.distributed import Store
 
@@ -219,7 +219,6 @@ class RendezvousParameters:
 RendezvousHandlerCreator = Callable[[RendezvousParameters], RendezvousHandler]
 
 
-@final
 class RendezvousHandlerRegistry:
     """Represents a registry of `RendezvousHandler` backends."""
 
