@@ -980,7 +980,7 @@ class TestCase(expecttest.TestCase):
         assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
 
         v_size = [nnz] + list(size[sparse_dim:])
-        v = make_tensor(v_size, device, dtype)
+        v = make_tensor(v_size, device=device, dtype=dtype, low=-1, high=1)
         i = torch.rand(sparse_dim, nnz, device=device)
         i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
         i = i.to(torch.long)
