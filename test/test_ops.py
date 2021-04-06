@@ -1,4 +1,4 @@
-from functools import partial, wraps, reduce
+from functools import partial, wraps
 import warnings
 
 import torch
@@ -48,11 +48,16 @@ class TestOpInfo(TestCase):
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
     #   does NOT throw a runtime error
+    # In addition verifies that the generated sample_inputs have the requested device and dtype
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_supported_dtypes(self, device, dtype, op):
         for sample in op.sample_inputs(device, dtype):
             op(sample.input, *sample.args, **sample.kwargs)
+            # NOTE: only check the first tensor in the iterable of tensors
+            sample_input = sample.input[0] if is_iterable_of_tensors(sample.input) else sample.input
+            self.assertTrue(sample_input.dtype == dtype)
+            self.assertTrue(sample_input.device.type == self.device_type)
 
     # Verifies that backward for each supported floating or complex dtype
     #   does NOT throw a runtime error.
@@ -104,8 +109,13 @@ class TestGradients(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
+            # Note on TensorList inputs
+            #
+            # gradcheck does not support TensorList inputs so here we pass TensorList
+            # inputs of size n as n single Tensor inputs to gradcheck and wrap the op
+            # in a function that puts the n Tensor inputs back into a TensorList
             def fn(*inputs):
-                # Pack input back into TensorList since we splat it when passing to gradcheck
+                # Put tensors back into TensorList since we splat them when passing to gradcheck
                 if is_iterable_of_tensors(sample.input):
                     n = len(sample.input)
                     inputs = (inputs[:n], *inputs[n:])
@@ -114,7 +124,7 @@ class TestGradients(TestCase):
                     return sample.output_process_fn_grad(output)
                 return output
 
-            # Gradcheck does not support TensorList so we splat it with the remaining args
+            # Splat TensorList inputs into single Tensor inputs
             gradcheck_args = (sample.input,) if isinstance(sample.input, torch.Tensor) else tuple(sample.input)
             gradcheck_args += sample.args
 
@@ -288,11 +298,9 @@ class TestCommon(JitCommonTestCase):
             # Acquires variants to test
             func = op.get_op()
             method = op.get_method()
-            inplace = op.get_inplace()
             variants = {
+                # TODO: inplace tests currently fail, fix and add inplace variant
                 'function': func, 'method': method,
-                # TODO: inplace tests currently fail
-                # 'inplace': inplace,
             }
 
             # Test traced and scripted consistency
@@ -557,7 +565,8 @@ class TestCommon(JitCommonTestCase):
             return make_tensor(wrong_shape, dtype=t.dtype, device=t.device)
 
         out = _apply_out_transform(_case_two_transform, expected)
-        with self.assertWarnsRegex(UserWarning, "An output with one or more elements"):
+        msg_fail = "Resized a non-empty tensor but did not warn about it."
+        with self.assertWarnsRegex(UserWarning, "An output with one or more elements", msg=msg_fail):
             op_out(out=out)
         self.assertEqual(expected, out)
 
@@ -593,7 +602,8 @@ class TestCommon(JitCommonTestCase):
                 return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
 
             out = _apply_out_transform(_case_four_transform, expected)
-            with self.assertRaises(RuntimeError):
+            msg_fail = f"Expected RuntimeError when calling with input.device={device} and out.device={wrong_device}"
+            with self.assertRaises(RuntimeError, msg=msg_fail):
                 op_out(out=out)
 
         # Case 5: out= with correct shape and device, but a dtype
@@ -606,13 +616,15 @@ class TestCommon(JitCommonTestCase):
         #   tensor is a floating point or complex dtype.
         _dtypes = floating_and_complex_types_and(torch.float16, torch.bfloat16)
         if (isinstance(expected, torch.Tensor) and expected.dtype in _dtypes or
-                (not isinstance(expected, torch.Tensor) and
-                 reduce(lambda cur, t: cur or t.dtype in _dtypes, expected, False))):
+                (not isinstance(expected, torch.Tensor) and any(t.dtype in _dtypes for t in expected))):
             def _case_five_transform(t):
                 return make_tensor(t.shape, dtype=torch.long, device=t.device)
 
-            out = out = _apply_out_transform(_case_five_transform, expected)
-            with self.assertRaises(RuntimeError):
+            out = _apply_out_transform(_case_five_transform, expected)
+            msg_fail = "" if not isinstance(expected, torch.Tensor) else \
+                       ("Expected RuntimeError when doing an unsafe cast from a result of dtype "
+                        f"{expected.dtype} into an out= with dtype torch.long")
+            with self.assertRaises(RuntimeError, msg=msg_fail):
                 op_out(out=out)
 
 

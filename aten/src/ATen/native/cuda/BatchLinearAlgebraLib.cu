@@ -588,7 +588,6 @@ Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A,
 }
 
 
-
 void _cholesky_inverse_cusolver_potrs_based(Tensor& result, Tensor& infos, bool upper) {
   at::Tensor input_working_copy = cloneBatchedColumnMajor(result);
   at::Tensor infos_gpu = at::zeros({1}, result.options().dtype(at::kInt));
