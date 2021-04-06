@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <ATen/ATen.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/WrapDimUtilsMulti.h>
 
@@ -149,7 +150,7 @@ static void allocate_reduction_result(
     }
   }
   if (result.defined()) {
-    result.resize_(shape);
+    at::native::resize_output(result, shape);
   } else {
     result = at::empty(shape, self.options().dtype(dtype));
   }

@@ -3,6 +3,7 @@ import sys
 import ast
 import astunparse
 import inspect
+import hashlib
 import string
 from textwrap import dedent
 from typing import List
@@ -525,10 +526,8 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_With(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
-        # HACK to recognize ignore context
         if isinstance(stmt.items[0].context_expr, ast.Call):
             exp = stmt.items[0].context_expr
-
             def process_ins_outs(args):
                 inputs = []
                 outputs = []
@@ -542,10 +541,22 @@ class StmtBuilder(Builder):
                         outputs.append((var_name, var_ann))
                 return inputs, outputs
 
+            def create_hash_name(inputs, outputs):
+                name = ""
+                for i in inputs:
+                    var_name, var_ann = i
+                    name += var_name + var_ann
+                for i in outputs:
+                    var_name, var_ann = i
+                    name += var_name + var_ann
+                return hashlib.sha256(name.encode('utf-8')).hexdigest()
+
             inputs, outputs = process_ins_outs(exp.keywords)
 
             # build the replacement function str with given inputs and outputs
-            dummy_function_str = "\ndef func_ignore("
+            # underscore for the name because it is not exposed to outside
+            dummy_function_name = "_func_ignore_" + create_hash_name(inputs, outputs)
+            dummy_function_str = "\ndef " + dummy_function_name + "("
             for var in inputs:
                 var_name, var_ann = var
                 dummy_function_str += var_name + " :" + var_ann + ", "
@@ -576,9 +587,9 @@ class StmtBuilder(Builder):
 
             # registers the custom function in the global context
             ignore_func_str = astunparse.unparse(dummy_function)
-            ignore_func_str += "\nglobals()[\"func_ignore\"] = func_ignore"
+            ignore_func_str += "\nglobals()[\"{}\"] = {}".format(dummy_function_name, dummy_function_name)
+            ignore_func_str += "\nglobals()[\"{}\"]._torchscript_modifier = FunctionModifiers.IGNORE".format(dummy_function_name)
             exec(ignore_func_str)
-            globals()["func_ignore"]._torchscript_modifier = FunctionModifiers.IGNORE
 
             # build the statements as:
             # <out_1>, <out_2>, ... = torch.jit.frontend.<func>(<in_1>, <in_2>)
@@ -588,7 +599,7 @@ class StmtBuilder(Builder):
                 assign_str_lhs += var_name + ", "
             assign_str_lhs = assign_str_lhs[:-2]
 
-            assign_str_rhs = "torch.jit.frontend.func_ignore("
+            assign_str_rhs = "torch.jit.frontend.{}(".format(dummy_function_name)
             for var in inputs:
                 var_name, _ = var
                 assign_str_rhs += var_name + ", "
