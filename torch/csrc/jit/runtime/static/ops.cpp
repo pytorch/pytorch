@@ -107,6 +107,11 @@ namespace jit {
 
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
+bool opIsRegistered(const c10::Symbol& op_name) {
+  const std::string name(op_name.toQualString());
+  return SROperatorRegistry()->Has(name);
+}
+
 bool canRunOutOfPlace(Node* n) {
   auto op_name = std::string(n->kind().toQualString());
   return SROperatorRegistry()->Has(op_name);

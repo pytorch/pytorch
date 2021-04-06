@@ -1321,8 +1321,8 @@ bool Reducer::rebuild_buckets() {
   // has unused parameters for example, this will raise an error recommending to
   // run with find_unused_parameters=True, instead of the size mismatch
   // exception below.
-  ensure_prior_reduction_finished();
   std::lock_guard<std::mutex> lock(mutex_);
+  ensure_prior_reduction_finished();
   if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
     return false;
   }
