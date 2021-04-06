@@ -4724,8 +4724,10 @@
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_put_
-    CUDA: legacy::cuda::_th_put_
+    CPU, CUDA: put_
+
+- func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
+  variants: function, method
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   variants: method
@@ -5424,18 +5426,12 @@
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: take_out_cpu
-    CUDA: take_out_cuda
+    CPU, CUDA: take_out
 
 - func: take(Tensor self, Tensor index) -> Tensor
   variants: method, function
   dispatch:
-    CPU: take_cpu
-    CUDA: take_cuda
-
-- func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
-  variants: function
-  device_guard: False
+    CPU, CUDA: take
 
 - func: take_along_dim.out(Tensor self, Tensor indices, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 

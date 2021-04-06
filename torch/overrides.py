@@ -740,6 +740,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.ones_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.pow: lambda input, exponent, out=None: -1,
         torch.prod: lambda input, dtype=None: -1,
+        torch.put: lambda input, index, source, accumulate=False: -1,
         torch.q_per_channel_axis: lambda input: -1,
         torch.q_per_channel_scales: lambda input: -1,
         torch.q_per_channel_zero_points: lambda input: -1,
