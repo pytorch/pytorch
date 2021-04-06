@@ -230,17 +230,6 @@ void HashProvider::visit(const IfThenElse* v) {
           hashOf(v->false_value())));
 }
 
-void HashProvider::visit(const BaseCallNode* v) {
-  CACHE_GUARD();
-  SimplifierHashType hash(te_hash(v->func_name()));
-  for (int i = 0; i < v->nparams(); i++) {
-    v->param(i)->accept(this);
-    hash = hash_combine(hash, hashOf(v->param(i)));
-  }
-
-  putHash(v, hash);
-}
-
 void HashProvider::visit(const Intrinsics* v) {
   CACHE_GUARD();
   // calls to rand are not symbolic and have a different value each time, they
