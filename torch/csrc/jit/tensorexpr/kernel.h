@@ -35,10 +35,6 @@ class TORCH_API TensorExprKernel {
     return codegen_->getCodeText(attr);
   }
 
-  const std::shared_ptr<Graph> graph() {
-    return graph_;
-  }
-
  private:
   enum ElementType {
     kAllTypes = 0,
@@ -146,8 +142,6 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeCatWoConditionals(const torch::jit::Value* v);
 
-  Tensor* computeConv2d(const torch::jit::Value* v);
-
   Tensor* computeValue(const torch::jit::Value* v);
 
   Stmt* transformLoops(BackendType backendType, Stmt* st);
@@ -198,8 +192,8 @@ class TORCH_API TensorExprKernel {
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
   std::unordered_set<const Buf*> bufOutputs_;
-  std::unordered_map<const torch::jit::Value*, Tensor*> tensors_;
-  std::unordered_map<const torch::jit::Value*, VarHandle> scalars_;
+  std::unordered_map<int64_t, Tensor*> tensors_;
+  std::unordered_map<int64_t, VarHandle> scalars_;
   std::unordered_map<const torch::jit::Value*, std::string> input_name_map_;
   std::unique_ptr<CodeGen> codegen_;
   at::Device device_ = at::kCPU;

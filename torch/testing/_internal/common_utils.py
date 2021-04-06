@@ -690,30 +690,6 @@ def is_iterable(obj):
     except TypeError:
         return False
 
-
-def is_iterable_of_tensors(iterable, include_empty=False):
-    """ Returns True if iterable is an iterable of tensors and False o.w.
-
-        If the iterable is empty, the return value is :attr:`include_empty`
-    """
-    # Tensor itself is iterable so we check this first
-    if isinstance(iterable, torch.Tensor):
-        return False
-
-    try:
-        if len(iterable) == 0:
-            return include_empty
-
-        for t in iter(iterable):
-            if not isinstance(t, torch.Tensor):
-                return False
-
-    except TypeError as te:
-        return False
-
-    return True
-
-
 class CudaNonDefaultStream():
     def __enter__(self):
         # Before starting CUDA test save currently active streams on all
@@ -883,7 +859,7 @@ def get_comparison_dtype(a, b):
 class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
     def __exit__(self, exc_type, exc_value, tb):
         if exc_type is not None and issubclass(exc_type, NotImplementedError):
-            self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
+            self.test_case.skipTest("not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
 
 class TestCase(expecttest.TestCase):

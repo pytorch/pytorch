@@ -319,12 +319,13 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
 } // namespace
 
 std::tuple<Tensor&, Tensor&> fractional_max_pool2d_out_cpu(
-    const at::Tensor& input,
-    IntArrayRef pool_size,
-    IntArrayRef output_size,
-    const at::Tensor& randomSamples,
-    at::Tensor& output,
-    at::Tensor& indices) {
+  at::Tensor& output,
+  at::Tensor& indices,
+  const at::Tensor& input,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
+  const at::Tensor& randomSamples)
+{
   fractional_max_pool2d_out_cpu_template(
     input,
     output,
@@ -353,12 +354,13 @@ std::tuple<Tensor, Tensor> fractional_max_pool2d_cpu(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& fractional_max_pool2d_backward_out_cpu(const at::Tensor& gradOutput_,
+Tensor& fractional_max_pool2d_backward_out_cpu(
+  at::Tensor& gradInput,
+  const at::Tensor& gradOutput_,
   const at::Tensor& input,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const at::Tensor& indices,
-  at::Tensor& gradInput)
+  const at::Tensor& indices)
 {
   gradInput.resize_as_(input);
   fractional_max_pool2d_backward_out_cpu_template(

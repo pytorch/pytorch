@@ -42,7 +42,7 @@ bool available(
 // TODO: Decouple and improve error handling and messages.
 bool usable(const Tensor& input) {
          // Input
-  return (1 <= input.ndimension()) &&
+  return (2 <= input.ndimension()) &&
          (input.device().is_cpu()) &&
          (kFloat == input.scalar_type()) &&
          !input.requires_grad() &&
@@ -114,14 +114,8 @@ Tensor run(
     const Tensor& input) {
   using namespace internal;
 
-  // For compatibility with aten::linear
-  auto ip = input;
-  if (input.ndimension() == 1) {
-    ip = input.unsqueeze(0);
-  }
-
   const Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
-      ip, ip.suggest_memory_format());
+      input, input.suggest_memory_format());
 
   TORCH_CHECK(
       usable(padded_input),
@@ -156,11 +150,6 @@ Tensor run(
   TORCH_INTERNAL_ASSERT(
       xnn_status_success == run_status,
       "xnn_run_operator failed!");
-
-  // For compatibility with aten::linear
-  if (input.ndimension() == 1) {
-      output.squeeze_(0);
-  }
 
   return output;
 }

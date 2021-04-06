@@ -3,7 +3,7 @@ from torch.utils.data.datasets.common import get_file_pathnames_from_root
 
 from typing import List, Union, Iterator
 
-class ListDirFilesIterableDataset(IterableDataset[str]):
+class ListDirFilesIterableDataset(IterableDataset):
     r""" :class:`ListDirFilesIterableDataset`
 
     IterableDataset to load file pathname(s) (path + filename), yield pathname from given disk root dir.

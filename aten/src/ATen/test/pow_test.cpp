@@ -364,3 +364,4 @@ TEST(PowTest, TestIntegralPow) {
   test_inverse(longs);
   test_inverse(ints);
 }
+

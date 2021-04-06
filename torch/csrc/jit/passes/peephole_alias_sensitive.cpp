@@ -20,10 +20,8 @@ namespace jit {
 struct PeepholeOptimizeAliasSensitiveImpl {
   PeepholeOptimizeAliasSensitiveImpl(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)),
-        aliasDb_(torch::make_unique<AliasDb>(graph_)) {}
-
-  bool run() {
-    return runBlock(graph_->block());
+        aliasDb_(torch::make_unique<AliasDb>(graph_)) {
+    run(graph_->block());
   }
 
  private:
@@ -32,11 +30,10 @@ struct PeepholeOptimizeAliasSensitiveImpl {
     v->replaceAllUsesWith(v->owningGraph()->insertConstant(val));
   }
 
-  bool runBlock(Block* block) {
-    bool changed = false;
+  void run(Block* block) {
     for (Node* node : block->nodes()) {
       for (Block* b : node->blocks()) {
-        changed |= runBlock(b);
+        run(b);
       }
 
       // dim(conv(x)) extremely common and prevents Conv->BN fusion
@@ -58,28 +55,24 @@ struct PeepholeOptimizeAliasSensitiveImpl {
           for (const Use& dim_use : dim_uses) {
             replaceWithIValue(dim_use.user->output(), output_size);
           }
-          changed = true;
         } else {
           for (const Use& dim_use : dim_uses) {
             if (aliasDb_->moveAfterTopologicallyValid(node, dim_use.user)) {
               replaceWithIValue(dim_use.user->output(), output_size);
-              changed = true;
             }
           }
         }
         continue;
       }
     }
-    return changed;
   }
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
 };
 
-bool PeepholeOptimizeAliasSensitive(const std::shared_ptr<Graph>& graph) {
+void PeepholeOptimizeAliasSensitive(const std::shared_ptr<Graph>& graph) {
   PeepholeOptimizeAliasSensitiveImpl opt(graph);
-  return opt.run();
 }
 
 } // namespace jit

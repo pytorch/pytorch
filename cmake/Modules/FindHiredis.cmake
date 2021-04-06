@@ -21,3 +21,4 @@ if(HIREDIS_FOUND)
   message(STATUS "Found Hiredis  (include: ${Hiredis_INCLUDE_DIR}, library: ${Hiredis_LIBRARIES})")
   mark_as_advanced(Hiredis_INCLUDE_DIR Hiredis_LIBRARIES)
 endif()
+

@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 run_test () {
   rm -rf test_tmp/ && mkdir test_tmp/ && cd test_tmp/
@@ -18,5 +17,5 @@ get_runtime_of_command () {
   runtime=${runtime#+++ $@}
   runtime=$(python -c "print($runtime)")
 
-  echo "$runtime"
+  echo $runtime
 }

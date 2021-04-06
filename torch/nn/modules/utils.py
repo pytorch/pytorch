@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 def _ntuple(n):
     def parse(x):
         if isinstance(x, collections.abc.Iterable):
-            return tuple(x)
+            return x
         return tuple(repeat(x, n))
     return parse
 

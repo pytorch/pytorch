@@ -618,14 +618,15 @@ void max_pool2d_with_indices_backward_out_cuda_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> max_pool2d_with_indices_out_cuda(const Tensor& input,
+std::tuple<Tensor&, Tensor&> max_pool2d_with_indices_out_cuda(
+  Tensor& output,
+  Tensor& indices,
+  const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
-  bool ceil_mode,
-  Tensor& output,
-  Tensor& indices)
+  bool ceil_mode)
 {
   max_pool2d_with_indices_out_cuda_template(
     output,
@@ -668,15 +669,16 @@ std::tuple<Tensor, Tensor> max_pool2d_with_indices_cuda(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& max_pool2d_with_indices_backward_out_cuda(const Tensor& gradOutput_,
+Tensor& max_pool2d_with_indices_backward_out_cuda(
+  Tensor& gradInput,
+  const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
   bool ceil_mode,
-  const Tensor& indices,
-  Tensor& gradInput)
+  const Tensor& indices)
 {
   max_pool2d_with_indices_backward_out_cuda_template(
     gradInput,

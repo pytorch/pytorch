@@ -45,7 +45,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest, expectedFailureMeta
+    deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -3735,13 +3735,6 @@ class TestNN(NNTestCase):
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
         self.assertEqual(F.threshold(x, 0, 99), expected)
 
-    def test_threshold_bfloat16(self):
-        x = torch.randn(100)
-        for threshold in [0, -0.5, 0.5, float('inf'), float('-inf'), float('nan')]:
-            expected = F.threshold(x, threshold, 0).bfloat16().float()
-            res_bf16 = F.threshold(x.bfloat16(), threshold, 0).float()
-            self.assertEqual(res_bf16, expected)
-
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_embedding_max_norm_unsorted_repeating_indices(self):
         def create_embedding(device):
@@ -4714,35 +4707,6 @@ class TestNN(NNTestCase):
         self.assertIn('buf', l.state_dict())
         self.assertEqual(l.state_dict()['buf'], buf)
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_thnn_conv_strided_padded_dilated(self):
-        for convfn, dims, transposed in (
-                (torch.nn.functional.conv2d, 2, False),
-                (torch.nn.functional.conv_transpose2d, 2, True),
-                (torch.nn.functional.conv3d, 3, False),
-                (torch.nn.functional.conv_transpose3d, 3, True)):
-            for stride, padding, dilation in (
-                    (2, 0, 1), (1, 1, 1), (2, 1, 1), (1, 0, 2)):
-                kwargs = {"stride": stride, "padding": padding, "dilation": dilation}
-                inp_shape = (1, 2) + dims * (4,)
-                weight_shape = (2, 2) + dims * (1,)
-                inputs = torch.randn(inp_shape, dtype=torch.double, device="cuda", requires_grad=True)
-                weight = torch.randn(weight_shape, dtype=torch.double, device="cuda", requires_grad=True)
-                bias = torch.randn(2, dtype=torch.double, device="cuda", requires_grad=True)
-                with torch.backends.cudnn.flags(enabled=False):
-                    res = convfn(inputs, weight, bias, **kwargs)
-                res_cpu = convfn(inputs.cpu(), weight.cpu(), bias.cpu(), **kwargs)
-                self.assertEqual(res, res_cpu)
-                with torch.backends.cudnn.flags(enabled=False):
-                    torch.autograd.gradcheck(
-                        lambda x, w, b: convfn(x, w, b, **kwargs),
-                        (inputs, weight, bias)
-                    )
-                    torch.autograd.gradcheck(
-                        lambda x, w, b: convfn(x, w, b, **kwargs),
-                        (inputs.cpu(), weight.cpu(), bias.cpu())
-                    )
-
     def test_Conv2d_inconsistent_types(self):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float)
         weights = torch.randn(1, 1, 3, 3, dtype=torch.double)
@@ -5144,7 +5108,6 @@ class TestNN(NNTestCase):
     # the number of groups == number of input channels
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @tf32_on_and_off(0.01)
     def test_Conv2d_depthwise_naive_groups_cuda(self, dtype=torch.float):
         for depth_multiplier in [1, 2]:
             m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
@@ -5185,7 +5148,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @tf32_on_and_off(0.001)
     def test_Conv3d_depthwise_naive_groups_cuda(self, dtype=torch.float):
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
@@ -7394,11 +7356,18 @@ class TestNN(NNTestCase):
                               bidirectional=bidirectional,
                               batch_first=batch_first,
                               proj_size=proj_size).to(dtype)
-
-            outputs_gpu = forward_backward(
-                True, rnn_gpu, input_val, grad_output, rnn.all_weights,
-                hx_val, grad_hy, cx_val, grad_cy)
-            compare_cpu_gpu(outputs_cpu, outputs_gpu)
+            # LSTM with projections is not supported with MIOpen
+            if TEST_WITH_ROCM and dtype == torch.float:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "LSTM with projections is not supported with MIOpen"):
+                    outputs_gpu = forward_backward(
+                        True, rnn_gpu, input_val, grad_output, rnn.all_weights,
+                        hx_val, grad_hy, cx_val, grad_cy)
+            else:
+                outputs_gpu = forward_backward(
+                    True, rnn_gpu, input_val, grad_output, rnn.all_weights,
+                    hx_val, grad_hy, cx_val, grad_cy)
+                compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
@@ -8514,7 +8483,6 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(NotImplementedError, "affine_grid only supports 4D and 5D sizes"):
             F.affine_grid(theta, torch.Size([1, 1, 2, 2, 2, 2]), align_corners=False)
 
-    @skipIfRocm
     def test_grid_sample(self):
         def test(N, C, H, W, mode, padding_mode, align_corners):
             def test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners):
@@ -9241,23 +9209,6 @@ class TestNN(NNTestCase):
             gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
             gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
-            # Assert that cpu and cuda handle channels_last memory format in the same way
-            # https://github.com/pytorch/pytorch/issues/54590
-            if torch.cuda.is_available():
-                a = torch.ones(2, 2, 3, 4, requires_grad=True).contiguous(memory_format=torch.channels_last)
-                # make the data asymmetric; ensure that cuda/cpu handle channels_last appropriately.
-                a[1][1][2][2] = a[1][1][2][3] = 0
-
-                out_cpu = torch.nn.functional.interpolate(a, scale_factor=2, mode='nearest')
-                out_cuda = torch.nn.functional.interpolate(a.to('cuda'), scale_factor=2, mode='nearest')
-                self.assertEqual(out_cpu, out_cuda.to('cpu'))
-
-                gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a])
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a])
-
-                gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
-
     def test_upsamplingBilinear2d(self):
         for align_corners in [True, False]:
             kwargs = dict(mode='bilinear', align_corners=align_corners)
@@ -9386,23 +9337,6 @@ class TestNN(NNTestCase):
 
             input = torch.randn(1, 2, 2, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
             gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
-
-            # Assert that cpu and cuda handle channels_last memory format in the same way
-            # https://github.com/pytorch/pytorch/issues/54590
-            if torch.cuda.is_available():
-                a = torch.ones(2, 2, 2, 3, 4, requires_grad=True).contiguous(memory_format=torch.channels_last_3d)
-                # make the data asymmetric; ensure that cuda/cpu handle channels_last appropriately.
-                a[1][1][1][2][2] = a[1][1][1][2][3] = 0
-
-                out_cpu = torch.nn.functional.interpolate(a, scale_factor=2, mode='nearest')
-                out_cuda = torch.nn.functional.interpolate(a.to('cuda'), scale_factor=2, mode='nearest')
-                self.assertEqual(out_cpu, out_cuda.to('cpu'))
-
-                gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a])
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a])
-
-                gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
 
     def test_upsamplingTrilinear3d(self):
         for align_corners in [True, False]:
@@ -10179,15 +10113,6 @@ class TestNN(NNTestCase):
             grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
 
             self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
-
-    def test_padding_list(self):
-        # Padding can be a list, or tuple (regression test for gh-54452)
-        x = torch.randn(4, 8, 32, 32)
-        net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=[3, 3])
-        y = net(x)
-
-        net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=(3, 3))
-        y = net(x)
 
 
 class TestNNInit(TestCase):
@@ -14630,10 +14555,16 @@ class TestNNDeviceType(NNTestCase):
             [False, [2, 1, 3, 2, 10, 5, 3]],
         ]
 
+        rocm_error_msg = "LSTM with projections is not supported with MIOpen"
         for enforce_sorted, seq_lens, in tests:
             for use_default_hiddens in (True, False):
                 for proj_size in [0, 2]:
-                    check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
+                    # LSTM with projections is not supported with MIOpen
+                    if device != 'cpu' and dtype == torch.float32 and TEST_WITH_ROCM and proj_size > 0:
+                        with self.assertRaisesRegex(RuntimeError, rocm_error_msg):
+                            check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
+                    else:
+                        check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
 
     def _test_batchnorm_update_stats(self, device, dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
@@ -14965,108 +14896,6 @@ class TestNNDeviceType(NNTestCase):
             F.max_pool3d(x, kernel_size=(1, 1, 1)).sum().backward()
             self.assertTrue(torch.allclose(x.grad, torch.ones_like(x.grad)))
 
-    # Check that clip_grad_norm_ raises an error if the total norm of the
-    # parameters' gradients is non-finite
-    def test_clip_grad_norm_error_if_nonfinite(self, device):
-        norms_pos = [0.1, 1, 2, 3.5, inf]
-        norms_neg = [-0.1, -1, -2, -3.5]
-        norms_except_0 = norms_pos + norms_neg
-        norms_all = norms_except_0 + [0]
-
-        # Each entry in test_cases has the following values, in this order:
-        #
-        # grad_only_one_elem    If True, only one element of the parameter's
-        #                       gradient is set to the scalar grad, and the
-        #                       rest of the elements are 0. If False, all grad
-        #                       elements are equal to the scalar.
-        #
-        # prefix_finite_grad_param  If True, prefix a parameter that has a grad
-        #                           of 1.
-        #
-        # scalars           Scalars to use as the parameter's grad, through
-        #                   multiplication
-        #
-        # norms_nonfinite   Norm types that should produce nonfinite total norm
-        #
-        # norms_finite      Norm types that should produce finite total norm
-        test_cases = [
-            # Test errors from an infinite grad
-            (False, False, [inf, -inf], norms_except_0, [0]),
-            (False, True, [inf, -inf], norms_pos, norms_neg + [0]),
-            (True, False, [inf, -inf], norms_pos, norms_neg + [0]),
-            (True, True, [inf, -inf], norms_pos, norms_neg + [0]),
-
-            # Test errors from a NaN grad
-            (False, False, [nan], norms_except_0, [0]),
-            (False, True, [nan], norms_except_0, [0]),
-            (True, False, [nan], norms_except_0, [0]),
-            (True, True, [nan], norms_except_0, [0]),
-
-            # Test a grad that should never error
-            (False, False, [2e22, -2e22], [], norms_all),
-            (False, True, [2e22, -2e22], [], norms_all),
-            (True, False, [2e22, -2e22], [], norms_all),
-            (True, True, [2e22, -2e22], [], norms_all),
-
-            # Test a grad that will overflow to inf for only some norm orders
-            (False, False, [2e200, -2e200], [3.5, 2, -2, -3.5], [inf, 1, 0.1, 0, -1, -0.1]),
-            (False, True, [2e200, -2e200], [3.5, 2], norms_neg + [inf, 1, 0.1, 0]),
-            (True, False, [2e200, -2e200], [3.5, 2], norms_neg + [inf, 1, 0.1, 0]),
-            (True, True, [2e200, -2e200], [3.5, 2], norms_neg + [inf, 1, 0.1, 0]),
-        ]
-
-        def gen_parameters(scalar, grad_only_one_elem, prefix_finite_grad_param):
-            param = torch.ones(10, dtype=torch.float64, device=device, requires_grad=True)
-
-            if grad_only_one_elem:
-                param[1].mul(scalar).sum().backward()
-            else:
-                param.mul(scalar).sum().backward()
-
-            if prefix_finite_grad_param:
-                prefix_param = torch.ones(1, dtype=torch.float64, device=device, requires_grad=True)
-                prefix_param.mul(1).sum().backward()
-                parameters = [prefix_param, param]
-            else:
-                parameters = [param]
-
-            return parameters
-
-        def run_test_case(norm_type, error_if_nonfinite, scalar, grad_only_one_elem, prefix_finite_grad_param, is_norm_nonfinite):
-            msg = (
-                f'norm_type: {norm_type}, ',
-                f'error_if_nonfinite: {error_if_nonfinite}, '
-                f'scalar: {scalar}, '
-                f'grad_only_one_elem: {grad_only_one_elem}, '
-                f'prefix_finite_grad_param: {prefix_finite_grad_param}, '
-                f'is_norm_nonfinite: {is_norm_nonfinite}')
-
-            parameters = gen_parameters(scalar, grad_only_one_elem, prefix_finite_grad_param)
-
-            # Should only throw an error if the total norm is expected to be
-            # nonfinite and `error_if_nonfinite=True`
-            if is_norm_nonfinite and error_if_nonfinite:
-                error_msg = f'The total norm of order {float(norm_type)} for gradients'
-
-                grads_before = [p.grad.clone() for p in parameters]
-
-                with self.assertRaisesRegex(RuntimeError, error_msg, msg=msg):
-                    clip_grad_norm_(parameters, 1, norm_type=norm_type, error_if_nonfinite=True)
-
-                # Grad should not change if error is thrown
-                grads_after = [p.grad for p in parameters]
-                self.assertEqual(grads_before, grads_after, msg=msg)
-            else:
-                clip_grad_norm_(parameters, 1, norm_type=norm_type, error_if_nonfinite=error_if_nonfinite)
-
-        for grad_only_one_elem, prefix_finite_grad_param, scalars, norms_nonfinite, norms_finite in test_cases:
-            for error_if_nonfinite in [False, True]:
-                for norm_type, scalar in product(norms_nonfinite, scalars):
-                    run_test_case(norm_type, error_if_nonfinite, scalar, grad_only_one_elem, prefix_finite_grad_param, True)
-
-                for norm_type, scalar in product(norms_finite, scalars):
-                    run_test_case(norm_type, error_if_nonfinite, scalar, grad_only_one_elem, prefix_finite_grad_param, False)
-
     @onlyCUDA
     @deviceCountAtLeast(2)
     def test_clip_grad_norm_multi_device(self, devices):
@@ -15091,7 +14920,6 @@ class TestNNDeviceType(NNTestCase):
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
-    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_elu_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -15099,31 +14927,26 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.elu_(x)
 
-    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_hardswish_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.hardswish(x, inplace=True)
 
-    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_silu_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.silu(x, inplace=True)
 
-    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_softplus_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.softplus(x, out=x)
 
-    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_softshrink_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.softshrink(x, out=x)
 
-    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_leaky_relu_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):

@@ -11,7 +11,7 @@ import torch.nn as nn
 
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_gloo, \
-    create_device, MultiProcessTestCase, skip_if_lt_x_gpu
+    create_device, MultiProcessTestCase, skip_if_not_multigpu
 from torch.testing._internal.common_utils import TestCase, load_tests, \
     run_tests
 from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_WITH_TSAN
@@ -241,7 +241,11 @@ class DistributedDataParallelSingleProcessTest(TestCase):
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
         if inp[0].is_cuda:
-            device_ids = [torch.cuda.current_device()]
+            num_gpus = torch.cuda.device_count()
+            batch_size = inp[0].size(0)
+            # batch_size must be evenly divisible by num_gpus_used, take the largest one
+            num_gpus_used = [i for i in range(1, num_gpus + 1) if batch_size % i == 0][-1]
+            device_ids = list(range(num_gpus_used))
         else:
             device_ids = None
 
@@ -344,7 +348,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         return 2
 
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
+    @skip_if_not_multigpu
     def test_broadcast(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
@@ -364,7 +368,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
             self.assertEqual(x.grad, torch.zeros(5, 5, device=device))
 
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
+    @skip_if_not_multigpu
     def test_gather(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
@@ -390,7 +394,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         self.assertEqual(x.grad, x_s.cos())
 
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
+    @skip_if_not_multigpu
     def test_scatter(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
@@ -420,7 +424,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
             self.assertEqual(x0.grad, torch.zeros(5, 5, device=device))
 
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
+    @skip_if_not_multigpu
     def test_reduce(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
@@ -441,7 +445,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         self.assertEqual(x.grad, x_g)
 
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
+    @skip_if_not_multigpu
     def test_allreduce(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
@@ -460,7 +464,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         self.assertEqual(x.grad, x_g)
 
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
+    @skip_if_not_multigpu
     def test_all_gather(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
@@ -480,7 +484,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         self.assertEqual(x.grad, x_s)
 
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
+    @skip_if_not_multigpu
     def test_all_to_all(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs

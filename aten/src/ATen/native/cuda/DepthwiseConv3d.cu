@@ -616,16 +616,17 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
 }
 
 
-std::tuple<Tensor&, Tensor&, Tensor&> conv_depthwise3d_backward_cuda_out(const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> conv_depthwise3d_backward_cuda_out(
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias,
+    const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
-    IntArrayRef dilation,
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias) {
+    IntArrayRef dilation) {
   if (grad_weight.defined()) {
     grad_weight.resize_(weight.sizes());
     grad_weight.zero_();

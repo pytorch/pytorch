@@ -110,5 +110,5 @@ class ModelTrainerLog():
             try:
                 logger.log(logdict)
             except Exception as e:
-                logging.warning(
+                logging.warn(
                     "Failed to call ExternalLogger: {}".format(e), e)

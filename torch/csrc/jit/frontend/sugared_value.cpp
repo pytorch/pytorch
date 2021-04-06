@@ -37,8 +37,6 @@ builtin_cast_method_to_scalar_type() {
       {"char", at::kChar},
       {"double", at::kDouble},
       {"float", at::kFloat},
-      {"cfloat", at::kComplexFloat},
-      {"cdouble", at::kComplexDouble},
       {"int", at::kInt},
       {"long", at::kLong},
       {"short", at::kShort},

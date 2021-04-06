@@ -515,8 +515,8 @@ void reflection_pad2d_backward_out_template(
 
 } // namespace
 
-Tensor& reflection_pad1d_out_cpu(const Tensor& input, IntArrayRef padding,
-    Tensor& output) {
+Tensor& reflection_pad1d_out_cpu(
+    Tensor& output, const Tensor& input, IntArrayRef padding) {
   reflection_pad1d_out_template(output, input, padding);
   return output;
 }
@@ -538,10 +538,11 @@ Tensor reflection_pad1d_cpu(const Tensor& input, IntArrayRef padding) {
   return output;
 }
 
-Tensor& reflection_pad1d_backward_out_cpu(const Tensor& grad_output,
+Tensor& reflection_pad1d_backward_out_cpu(
+    Tensor& grad_input,
+    const Tensor& grad_output,
     const Tensor& input,
-    IntArrayRef padding,
-    Tensor& grad_input) {
+    IntArrayRef padding) {
   grad_input.resize_as_(input);
   grad_input.zero_();
   reflection_pad1d_backward_out_template(
@@ -559,8 +560,8 @@ Tensor reflection_pad1d_backward_cpu(
   return grad_input;
 }
 
-Tensor& reflection_pad2d_out_cpu(const Tensor& input, IntArrayRef padding,
-    Tensor& output) {
+Tensor& reflection_pad2d_out_cpu(
+    Tensor& output, const Tensor& input, IntArrayRef padding) {
   reflection_pad2d_out_template(output, input, padding);
   return output;
 }
@@ -582,10 +583,11 @@ Tensor reflection_pad2d_cpu(const Tensor& input, IntArrayRef padding) {
   return output;
 }
 
-Tensor& reflection_pad2d_backward_out_cpu(const Tensor& grad_output,
+Tensor& reflection_pad2d_backward_out_cpu(
+    Tensor& grad_input,
+    const Tensor& grad_output,
     const Tensor& input,
-    IntArrayRef padding,
-    Tensor& grad_input) {
+    IntArrayRef padding) {
   grad_input.resize_as_(input);
   grad_input.zero_();
   reflection_pad2d_backward_out_template(

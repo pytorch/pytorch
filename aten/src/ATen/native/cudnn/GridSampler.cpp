@@ -66,10 +66,8 @@ void checkGridSize(CheckedFrom c, TensorArg grid, TensorArg input)
 Tensor cudnn_grid_sampler_forward(
     const Tensor& input_t, const Tensor& grid_t)
 {
-  auto input_contig = contiguousIfZeroInStrides(input_t);
-  auto grid_contig = grid_t.contiguous();
-  TensorArg input{ input_contig, "input", 1 },
-            grid{ grid_contig, "grid", 2 };
+  TensorArg input{ contiguousIfZeroInStrides(input_t), "input", 1 },
+            grid{ grid_t.contiguous(), "grid", 2 };
   CheckedFrom c = "cudnn_grid_sampler_forward";
   checkAllSameGPU(c, {input, grid});
   checkAllSameType(c, {input, grid});
@@ -105,12 +103,9 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
     const Tensor& input_t, const Tensor& grid_t,
     const Tensor& grad_output_t)
 {
-  auto input_contig = contiguousIfZeroInStrides(input_t);
-  auto grid_contig = grid_t.contiguous();
-  auto grad_output_contig = contiguousIfZeroInStrides(grad_output_t);
-  TensorArg input{ input_contig, "input", 1 },
-            grid{ grid_contig, "grid", 2 },
-            grad_output{ grad_output_contig, "grad_output", 3 };
+  TensorArg input{ contiguousIfZeroInStrides(input_t), "input", 1 },
+            grid{ grid_t.contiguous(), "grid", 2 },
+            grad_output{ contiguousIfZeroInStrides(grad_output_t), "grad_output", 3 };
   CheckedFrom c = "cudnn_grid_sampler_backward";
   checkAllSameGPU(c, {input, grad_output, grid});
   checkGridSize(c, grid, input);

@@ -5,7 +5,7 @@ import os
 from enum import Enum
 
 
-def is_available() -> bool:
+def is_available():
     """
     Returns ``True`` if the distributed package is available. Otherwise,
     ``torch.distributed`` does not expose any other APIs. Currently,

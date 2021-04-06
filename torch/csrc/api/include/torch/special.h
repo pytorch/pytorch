@@ -17,18 +17,6 @@ inline Tensor gammaln(const Tensor& self) {
   return torch::special_gammaln(self);
 }
 
-/// Computes entropy of input, elementwise
-/// See https://pytorch.org/docs/master/special.html#torch.special.entr.
-///
-/// Example:
-/// ```
-/// auto t = torch::randn(128, dtype=kDouble);
-/// torch::special::entr(t);
-/// ```
-inline Tensor entr(const Tensor& self) {
-  return torch::special_entr(self);
-}
-
 /// Computes the error function
 /// See https://pytorch.org/docs/master/special.html#torch.special.erf.
 ///
@@ -63,30 +51,6 @@ inline Tensor erfc(const Tensor& self) {
 /// ```
 inline Tensor erfinv(const Tensor& self) {
   return torch::special_erfinv(self);
-}
-
-/// Computes the base two exponential function of :attr:`input`, elementwise
-/// See https://pytorch.org/docs/master/special.html#torch.special.exp2.
-///
-/// Example:
-/// ```
-/// auto t = torch::randn(128, dtype=kDouble);
-/// torch::special::exp2(t);
-/// ```
-inline Tensor exp2(const Tensor& self) {
-  return torch::special_exp2(self);
-}
-
-/// Computes the exponential of the elements minus 1, elementwise
-/// See https://pytorch.org/docs/master/special.html#torch.special.expm1.
-///
-/// Example:
-/// ```
-/// auto t = torch::randn(128, dtype=kDouble);
-/// torch::special::expm1(t);
-/// ```
-inline Tensor expm1(const Tensor& self) {
-  return torch::special_expm1(self);
 }
 
 }} // torch::special

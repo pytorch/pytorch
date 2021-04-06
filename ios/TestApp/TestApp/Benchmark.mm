@@ -65,10 +65,11 @@ static int iter = 10;
     }
   }
 
-  c10::InferenceMode mode;
+  torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard opguard(false);
   auto module = torch::jit::load(model);
 
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
   module.eval();
   if (print_output) {
     std::cout << module.forward(inputs) << std::endl;

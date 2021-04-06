@@ -6,9 +6,9 @@
 namespace c10 {
 
 /* static */
-std::unordered_set<std::string>& ObservedOperators::getUnobservedOperatorList() {
+bool ObservedOperators::isObserved(const OperatorName& name) {
   // names of the operators that should not be observed
-  static std::unordered_set<std::string> not_observed_ops = {
+  std::unordered_set<std::string> not_observed_ops = {
     "aten::size",
     "aten::is_leaf",
     "aten::output_nr",
@@ -17,12 +17,7 @@ std::unordered_set<std::string>& ObservedOperators::getUnobservedOperatorList() 
     "profiler::_record_function_enter",
     "profiler::_record_function_exit",
   };
-  return not_observed_ops;
-}
-
-/* static */
-bool ObservedOperators::isObserved(const OperatorName& name) {
-  return !ObservedOperators::getUnobservedOperatorList().count(name.name);
+  return !not_observed_ops.count(name.name);
 }
 
 } // namespace c10

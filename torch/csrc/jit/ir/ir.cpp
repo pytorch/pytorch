@@ -108,8 +108,6 @@ static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
     out << "{";
     if (scalar_tensor.isFloatingPoint()) {
       out << scalar_tensor.toDouble();
-    } else if (scalar_tensor.isComplex()) {
-      out << scalar_tensor.toComplexDouble();
     } else {
       out << scalar_tensor.toLong();
     }
@@ -159,13 +157,6 @@ static void printTypeList(
 
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   switch (kindOf(name)) {
-    case AttributeKind::c:
-      printAttribute(out, c(name));
-      break;
-    case AttributeKind::cs:
-      // TODO(@anjali411): fix this
-      AT_ASSERT(false);
-      break;
     case AttributeKind::f:
       printAttribute(out, f(name));
       break;
@@ -1808,13 +1799,11 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
     elem_ty = 1;
   } else if (ptr == BoolType::get()) {
     elem_ty = 2;
-  } else if (ptr == ComplexType::get()) {
-    elem_ty = 3;
   } else {
     TORCH_CHECK(
         false,
         ptr->repr_str(),
-        " is not one of the supported element types for tolist: int, float, complex, bool");
+        " is not one of the supported element types for tolist: int, float, bool");
   }
 
   // Pass in the number of dimensions and base element type as arguments

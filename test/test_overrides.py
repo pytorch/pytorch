@@ -556,7 +556,6 @@ def generate_tensor_like_override_tests(cls):
                 return TensorLike()
 
         func_args = []
-        is_method = is_tensor_method_or_property(func)
         if func in annotated_args:
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
@@ -564,7 +563,7 @@ def generate_tensor_like_override_tests(cls):
                 if t.endswith('?'):
                     t = t[:-1]
                 if t == 'Tensor':
-                    if is_method and arg['name'] == 'self':
+                    if arg['name'] == 'self' and is_tensor_method_or_property(func):
                         # See "Note: properties and __get__"
                         func = func.__get__(instance_gen())
                         continue
@@ -622,7 +621,7 @@ def generate_tensor_like_override_tests(cls):
             # This is currently the best check but doesn't work for, for example,
             # Tensor.__add__ because it redirects to Tensor.add.
             # See note "_triggered wrapper"
-            if not is_method or ret is None:
+            if ret is None:
                 self.assertTrue(WRAPPED_TRIGGERED_IMPLS[func]._triggered)
                 return
 
@@ -805,6 +804,7 @@ class TestGradCheckOverride(TestCase):
         # Tensor-likes.
         self.assertEqual(total_used_attrs, {
             'data',
+            'device',
             'dtype',
             'is_complex',
             'is_floating_point',
@@ -960,16 +960,6 @@ class TestIndexing(TestCase):
         t[5, A()] = 1
         self.assertIn(Tensor.__setitem__, triggered)
         self.assertEqual(t, torch.tensor([5]))
-
-
-class TestIterator(TestCase):
-    # Regression test for gh-54457
-    def test_iterator(self):
-        t = torch.tensor([5, 6, 7]).as_subclass(SubTensor2)
-        it = iter(t)
-        self.assertIs(type(next(it)), SubTensor2)
-        self.assertIs(type(next(it)), SubTensor2)
-        self.assertIs(type(next(it)), SubTensor2)
 
 if __name__ == '__main__':
     run_tests()

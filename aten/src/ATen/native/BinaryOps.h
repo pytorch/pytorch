@@ -50,8 +50,8 @@ DECLARE_DISPATCH(structured_binary_fn, mul_stub);
 DECLARE_DISPATCH(structured_binary_fn, div_true_stub);
 DECLARE_DISPATCH(structured_binary_fn, div_floor_stub);
 DECLARE_DISPATCH(structured_binary_fn, div_trunc_stub);
-DECLARE_DISPATCH(structured_binary_fn, atan2_stub);
 DECLARE_DISPATCH(binary_fn, remainder_stub);
+DECLARE_DISPATCH(binary_fn, atan2_stub);
 DECLARE_DISPATCH(binary_fn, bitwise_and_stub);
 DECLARE_DISPATCH(binary_fn, bitwise_or_stub);
 DECLARE_DISPATCH(binary_fn, bitwise_xor_stub);
@@ -88,7 +88,7 @@ DECLARE_DISPATCH(binary_fn, igamma_stub);
 DECLARE_DISPATCH(binary_fn, igammac_stub);
 DECLARE_DISPATCH(binary_fn, nextafter_stub);
 DECLARE_DISPATCH(binary_fn, heaviside_stub);
-DECLARE_DISPATCH(structured_binary_fn, copysign_stub);
+DECLARE_DISPATCH(binary_fn, copysign_stub);
 DECLARE_DISPATCH(binary_fn, xlogy_stub);
 
 }} // namespace at::native

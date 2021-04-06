@@ -5,7 +5,6 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/stack.h>
 #include <c10/util/Optional.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
@@ -338,7 +337,7 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   std::vector<at::Tensor> inputs;
   inputs.reserve(spec.nTensorInputs());
   // we know that tensor inputs are first
-  for (const auto i : c10::irange(spec.nTensorInputs())) {
+  for (int64_t i = 0; i < spec.nTensorInputs(); i++) {
     inputs.emplace_back(all_inputs[i].toTensor());
   }
 

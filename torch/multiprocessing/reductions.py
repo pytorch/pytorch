@@ -52,24 +52,22 @@ class SharedCache(dict):
     def _after_fork(self):
         self.lock = threading.Lock()
 
-    def get(self, key):
-        with self.lock:
-            return dict.get(self, key)
-
     def __setitem__(self, key, storage_ref):
-        with self.lock:
-            dict.__setitem__(self, key, storage_ref)
-            if len(self) > self.limit:
-                self.free_dead_references()
+        dict.__setitem__(self, key, storage_ref)
+        if len(self) > self.limit:
+            self.free_dead_references()
 
     def free_dead_references(self):
-        live = 0
-        for key, storage_ref in list(self.items()):
-            if storage_ref.expired():
-                del self[key]
-            else:
-                live += 1
-        self.limit = max(128, live * 2)
+        # Multiple Python threads may call free_dead_references() concurrently.
+        # Without a lock, they may try deleting the same entry multiple times.
+        with self.lock:
+            live = 0
+            for key, storage_ref in list(self.items()):
+                if storage_ref.expired():
+                    del self[key]
+                else:
+                    live += 1
+            self.limit = max(128, live * 2)
 
 
 # mapping from handles to StorageWeakRef objects

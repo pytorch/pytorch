@@ -71,3 +71,4 @@ def my_method(x, y):"""!
 ```
 
 Note that the bang (!) is added after the opening comment """! - this seems to do the trick and the remaining comments will be nicely parsed by Doxygen.
+

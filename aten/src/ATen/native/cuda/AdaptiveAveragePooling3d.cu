@@ -478,9 +478,10 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
 
 } // namespace
 
-Tensor& adaptive_avg_pool3d_out_cuda(const Tensor& input,
-    IntArrayRef output_size,
-    Tensor& output) {
+Tensor& adaptive_avg_pool3d_out_cuda(
+    Tensor& output,
+    const Tensor& input,
+    IntArrayRef output_size) {
   adaptive_avg_pool3d_out_cuda_template(output, input, output_size);
   return output;
 }
@@ -493,9 +494,10 @@ Tensor adaptive_avg_pool3d_cuda(
   return output;
 }
 
-Tensor& adaptive_avg_pool3d_backward_out_cuda(const Tensor& gradOutput_,
-    const Tensor& input,
-    Tensor& gradInput) {
+Tensor& adaptive_avg_pool3d_backward_out_cuda(
+    Tensor& gradInput,
+    const Tensor& gradOutput_,
+    const Tensor& input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("adaptive_avg_pool3d_backward_out_cuda");

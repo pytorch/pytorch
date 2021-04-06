@@ -108,7 +108,7 @@ else:
 
     # create a fake progress bar that does not display anything
     class ProgressbarStub:
-        def update(self, *args):
+        def update(*args):
             return
     progressbar = ProgressbarStub()
 

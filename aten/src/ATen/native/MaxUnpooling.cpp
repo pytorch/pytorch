@@ -76,10 +76,11 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
   return output;
 }
 
-Tensor& max_unpooling2d_forward_out_cpu(const Tensor& self_,
+Tensor& max_unpooling2d_forward_out_cpu(
+    Tensor& output,
+    const Tensor& self_,
     const Tensor& indices_,
-    IntArrayRef output_size,
-    Tensor& output) {
+    IntArrayRef output_size) {
   auto oheight = output_size[0];
   auto owidth = output_size[1];
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
@@ -124,7 +125,7 @@ Tensor max_unpooling2d_forward_cpu(
     const Tensor& indices,
     IntArrayRef output_size) {
   auto output = at::empty({0}, self.options());
-  at::native::max_unpooling2d_forward_out_cpu(self, indices, output_size, output);
+  max_unpooling2d_forward_out_cpu(output, self, indices, output_size);
   return output;
 }
 
@@ -282,12 +283,13 @@ static void max_unpooling3d_shape_check(
   }
 }
 
-Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
+Tensor& max_unpooling3d_forward_out_cpu(
+    Tensor& output,
+    const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
     IntArrayRef stride,
-    IntArrayRef padding,
-    Tensor& output) {
+    IntArrayRef padding) {
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
   int64_t oT = output_size[0];
   int64_t oH = output_size[1];
@@ -326,8 +328,8 @@ Tensor max_unpooling3d_forward_cpu(
     IntArrayRef stride,
     IntArrayRef padding) {
   auto output = at::empty({0}, self.options());
-  at::native::max_unpooling3d_forward_out_cpu(
-      self, indices, output_size, stride, padding, output);
+  max_unpooling3d_forward_out_cpu(
+      output, self, indices, output_size, stride, padding);
   return output;
 }
 
@@ -343,7 +345,7 @@ static void max_unpooling2d_backward_out_cpu_frame(
     int64_t owidth) {
   bool has_error = false;
   int64_t error_index = 0;
-  int64_t k = 0;
+  int k = 0;
 
   at::internal::lazy_init_num_threads();
 #pragma omp parallel for private(k)
@@ -381,11 +383,12 @@ static void max_unpooling2d_backward_out_cpu_frame(
   }
 }
 
-Tensor& max_unpooling2d_backward_out_cpu(const Tensor& grad_output_,
+Tensor& max_unpooling2d_backward_out_cpu(
+    Tensor& grad_input,
+    const Tensor& grad_output_,
     const Tensor& self,
     const Tensor& indices_,
-    IntArrayRef output_size,
-    Tensor& grad_input) {
+    IntArrayRef output_size) {
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   int64_t oheight = output_size[0];
   int64_t owidth = output_size[1];
@@ -459,8 +462,8 @@ Tensor max_unpooling2d_backward_cpu(
     const Tensor& indices,
     IntArrayRef output_size) {
   auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  at::native::max_unpooling2d_backward_out_cpu(
-      grad_output, self, indices, output_size, grad_input);
+  max_unpooling2d_backward_out_cpu(
+      grad_input, grad_output, self, indices, output_size);
   return grad_input;
 }
 
@@ -476,7 +479,7 @@ static void max_unpooling3d_backward_out_cpu_frame(
     int64_t oT,
     int64_t oH,
     int64_t oW) {
-  int64_t k = 0;
+  int k = 0;
   bool has_error = false;
   int error_index = 0;
 
@@ -488,7 +491,7 @@ static void max_unpooling3d_backward_out_cpu_frame(
     scalar_t* gradOutput_p_k = gradOutput_p + k * oT * oH * oW;
     int64_t* ind_p_k = ind_p + k * iT * iH * iW;
 
-    int64_t t, i, j, index;
+    int t, i, j, index;
     int64_t maxp;
     for (t = 0; t < iT; t++) {
       for (i = 0; i < iH; i++) {
@@ -520,13 +523,14 @@ static void max_unpooling3d_backward_out_cpu_frame(
   }
 }
 
-Tensor& max_unpooling3d_backward_out_cpu(const Tensor& grad_output_,
+Tensor& max_unpooling3d_backward_out_cpu(
+    Tensor& grad_input,
+    const Tensor& grad_output_,
     const Tensor& self,
     const Tensor& indices_,
     IntArrayRef output_size,
     IntArrayRef stride,
-    IntArrayRef padding,
-    Tensor& grad_input) {
+    IntArrayRef padding) {
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   auto oT = output_size[0];
   auto oH = output_size[1];
@@ -595,8 +599,8 @@ Tensor max_unpooling3d_backward_cpu(
     IntArrayRef stride,
     IntArrayRef padding) {
   auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  at::native::max_unpooling3d_backward_out_cpu(
-      grad_output, self, indices, output_size, stride, padding, grad_input);
+  max_unpooling3d_backward_out_cpu(
+      grad_input, grad_output, self, indices, output_size, stride, padding);
   return grad_input;
 }
 } // namespace native

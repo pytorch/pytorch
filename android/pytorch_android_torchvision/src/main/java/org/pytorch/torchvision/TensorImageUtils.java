@@ -9,7 +9,6 @@ import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.util.Locale;
-import org.pytorch.MemoryFormat;
 import org.pytorch.Tensor;
 
 /**
@@ -30,28 +29,12 @@ public final class TensorImageUtils {
    *     order
    */
   public static Tensor bitmapToFloat32Tensor(
-      final Bitmap bitmap,
-      final float[] normMeanRGB,
-      final float normStdRGB[],
-      final MemoryFormat memoryFormat) {
+      final Bitmap bitmap, final float[] normMeanRGB, final float normStdRGB[]) {
     checkNormMeanArg(normMeanRGB);
     checkNormStdArg(normStdRGB);
 
     return bitmapToFloat32Tensor(
-        bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), normMeanRGB, normStdRGB, memoryFormat);
-  }
-
-  public static Tensor bitmapToFloat32Tensor(
-      final Bitmap bitmap, final float[] normMeanRGB, final float normStdRGB[]) {
-    return bitmapToFloat32Tensor(
-        bitmap,
-        0,
-        0,
-        bitmap.getWidth(),
-        bitmap.getHeight(),
-        normMeanRGB,
-        normStdRGB,
-        MemoryFormat.CONTIGUOUS);
+        bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), normMeanRGB, normStdRGB);
   }
 
   /**
@@ -76,64 +59,28 @@ public final class TensorImageUtils {
       final float[] normMeanRGB,
       final float[] normStdRGB,
       final FloatBuffer outBuffer,
-      final int outBufferOffset,
-      final MemoryFormat memoryFormat) {
+      final int outBufferOffset) {
     checkOutBufferCapacity(outBuffer, outBufferOffset, width, height);
     checkNormMeanArg(normMeanRGB);
     checkNormStdArg(normStdRGB);
-    if (memoryFormat != MemoryFormat.CONTIGUOUS && memoryFormat != MemoryFormat.CHANNELS_LAST) {
-      throw new IllegalArgumentException("Unsupported memory format " + memoryFormat);
-    }
 
     final int pixelsCount = height * width;
     final int[] pixels = new int[pixelsCount];
     bitmap.getPixels(pixels, 0, width, x, y, width, height);
-    if (MemoryFormat.CONTIGUOUS == memoryFormat) {
-      final int offset_g = pixelsCount;
-      final int offset_b = 2 * pixelsCount;
-      for (int i = 0; i < pixelsCount; i++) {
-        final int c = pixels[i];
-        float r = ((c >> 16) & 0xff) / 255.0f;
-        float g = ((c >> 8) & 0xff) / 255.0f;
-        float b = ((c) & 0xff) / 255.0f;
-        outBuffer.put(outBufferOffset + i, (r - normMeanRGB[0]) / normStdRGB[0]);
-        outBuffer.put(outBufferOffset + offset_g + i, (g - normMeanRGB[1]) / normStdRGB[1]);
-        outBuffer.put(outBufferOffset + offset_b + i, (b - normMeanRGB[2]) / normStdRGB[2]);
-      }
-    } else {
-      for (int i = 0; i < pixelsCount; i++) {
-        final int c = pixels[i];
-        float r = ((c >> 16) & 0xff) / 255.0f;
-        float g = ((c >> 8) & 0xff) / 255.0f;
-        float b = ((c) & 0xff) / 255.0f;
-        outBuffer.put(outBufferOffset + 3 * i + 0, (r - normMeanRGB[0]) / normStdRGB[0]);
-        outBuffer.put(outBufferOffset + 3 * i + 1, (g - normMeanRGB[1]) / normStdRGB[1]);
-        outBuffer.put(outBufferOffset + 3 * i + 2, (b - normMeanRGB[2]) / normStdRGB[2]);
-      }
+    final int offset_g = pixelsCount;
+    final int offset_b = 2 * pixelsCount;
+    for (int i = 0; i < pixelsCount; i++) {
+      final int c = pixels[i];
+      float r = ((c >> 16) & 0xff) / 255.0f;
+      float g = ((c >> 8) & 0xff) / 255.0f;
+      float b = ((c) & 0xff) / 255.0f;
+      float rF = (r - normMeanRGB[0]) / normStdRGB[0];
+      float gF = (g - normMeanRGB[1]) / normStdRGB[1];
+      float bF = (b - normMeanRGB[2]) / normStdRGB[2];
+      outBuffer.put(outBufferOffset + i, rF);
+      outBuffer.put(outBufferOffset + offset_g + i, gF);
+      outBuffer.put(outBufferOffset + offset_b + i, bF);
     }
-  }
-
-  public static void bitmapToFloatBuffer(
-      final Bitmap bitmap,
-      final int x,
-      final int y,
-      final int width,
-      final int height,
-      final float[] normMeanRGB,
-      final float[] normStdRGB,
-      final FloatBuffer outBuffer,
-      final int outBufferOffset) {
-    bitmapToFloatBuffer(
-        bitmap,
-        x,
-        y,
-        width,
-        height,
-        normMeanRGB,
-        normStdRGB,
-        outBuffer,
-        outBufferOffset,
-        MemoryFormat.CONTIGUOUS);
   }
 
   /**
@@ -156,27 +103,13 @@ public final class TensorImageUtils {
       int width,
       int height,
       float[] normMeanRGB,
-      float[] normStdRGB,
-      MemoryFormat memoryFormat) {
+      float[] normStdRGB) {
     checkNormMeanArg(normMeanRGB);
     checkNormStdArg(normStdRGB);
 
     final FloatBuffer floatBuffer = Tensor.allocateFloatBuffer(3 * width * height);
-    bitmapToFloatBuffer(
-        bitmap, x, y, width, height, normMeanRGB, normStdRGB, floatBuffer, 0, memoryFormat);
-    return Tensor.fromBlob(floatBuffer, new long[] {1, 3, height, width}, memoryFormat);
-  }
-
-  public static Tensor bitmapToFloat32Tensor(
-      final Bitmap bitmap,
-      int x,
-      int y,
-      int width,
-      int height,
-      float[] normMeanRGB,
-      float[] normStdRGB) {
-    return bitmapToFloat32Tensor(
-        bitmap, x, y, width, height, normMeanRGB, normStdRGB, MemoryFormat.CONTIGUOUS);
+    bitmapToFloatBuffer(bitmap, x, y, width, height, normMeanRGB, normStdRGB, floatBuffer, 0);
+    return Tensor.fromBlob(floatBuffer, new long[] {1, 3, height, width});
   }
 
   /**
@@ -198,8 +131,7 @@ public final class TensorImageUtils {
       final int tensorWidth,
       final int tensorHeight,
       float[] normMeanRGB,
-      float[] normStdRGB,
-      MemoryFormat memoryFormat) {
+      float[] normStdRGB) {
     if (image.getFormat() != ImageFormat.YUV_420_888) {
       throw new IllegalArgumentException(
           String.format(
@@ -213,33 +145,8 @@ public final class TensorImageUtils {
 
     final FloatBuffer floatBuffer = Tensor.allocateFloatBuffer(3 * tensorWidth * tensorHeight);
     imageYUV420CenterCropToFloatBuffer(
-        image,
-        rotateCWDegrees,
-        tensorWidth,
-        tensorHeight,
-        normMeanRGB,
-        normStdRGB,
-        floatBuffer,
-        0,
-        memoryFormat);
-    return Tensor.fromBlob(floatBuffer, new long[] {1, 3, tensorHeight, tensorWidth}, memoryFormat);
-  }
-
-  public static Tensor imageYUV420CenterCropToFloat32Tensor(
-      final Image image,
-      int rotateCWDegrees,
-      final int tensorWidth,
-      final int tensorHeight,
-      float[] normMeanRGB,
-      float[] normStdRGB) {
-    return imageYUV420CenterCropToFloat32Tensor(
-        image,
-        rotateCWDegrees,
-        tensorWidth,
-        tensorHeight,
-        normMeanRGB,
-        normStdRGB,
-        MemoryFormat.CONTIGUOUS);
+        image, rotateCWDegrees, tensorWidth, tensorHeight, normMeanRGB, normStdRGB, floatBuffer, 0);
+    return Tensor.fromBlob(floatBuffer, new long[] {1, 3, tensorHeight, tensorWidth});
   }
 
   /**
@@ -266,8 +173,7 @@ public final class TensorImageUtils {
       float[] normMeanRGB,
       float[] normStdRGB,
       final FloatBuffer outBuffer,
-      final int outBufferOffset,
-      final MemoryFormat memoryFormat) {
+      final int outBufferOffset) {
     checkOutBufferCapacity(outBuffer, outBufferOffset, tensorWidth, tensorHeight);
 
     if (image.getFormat() != ImageFormat.YUV_420_888) {
@@ -286,13 +192,6 @@ public final class TensorImageUtils {
     Image.Plane U = planes[1];
     Image.Plane V = planes[2];
 
-    int memoryFormatJniCode = 0;
-    if (MemoryFormat.CONTIGUOUS == memoryFormat) {
-      memoryFormatJniCode = 1;
-    } else if (MemoryFormat.CHANNELS_LAST == memoryFormat) {
-      memoryFormatJniCode = 2;
-    }
-
     NativePeer.imageYUV420CenterCropToFloatBuffer(
         Y.getBuffer(),
         Y.getRowStride(),
@@ -309,29 +208,7 @@ public final class TensorImageUtils {
         normMeanRGB,
         normStdRGB,
         outBuffer,
-        outBufferOffset,
-        memoryFormatJniCode);
-  }
-
-  public static void imageYUV420CenterCropToFloatBuffer(
-      final Image image,
-      int rotateCWDegrees,
-      final int tensorWidth,
-      final int tensorHeight,
-      float[] normMeanRGB,
-      float[] normStdRGB,
-      final FloatBuffer outBuffer,
-      final int outBufferOffset) {
-    imageYUV420CenterCropToFloatBuffer(
-        image,
-        rotateCWDegrees,
-        tensorWidth,
-        tensorHeight,
-        normMeanRGB,
-        normStdRGB,
-        outBuffer,
-        outBufferOffset,
-        MemoryFormat.CONTIGUOUS);
+        outBufferOffset);
   }
 
   private static class NativePeer {
@@ -358,8 +235,7 @@ public final class TensorImageUtils {
         float[] normMeanRgb,
         float[] normStdRgb,
         Buffer outBuffer,
-        int outBufferOffset,
-        int memoryFormatJniCode);
+        int outBufferOffset);
   }
 
   private static void checkOutBufferCapacity(

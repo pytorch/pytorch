@@ -30,3 +30,4 @@ endif()
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   set(Caffe2_MODULES ${Caffe2_MODULES} caffe2_observers_library PARENT_SCOPE)
 endif()
+

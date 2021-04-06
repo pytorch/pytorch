@@ -401,14 +401,15 @@ void max_pool3d_with_indices_backward_out_cuda_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cuda(const Tensor& input,
+std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cuda(
+  Tensor& output,
+  Tensor& indices,
+  const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
-  bool ceil_mode,
-  Tensor& output,
-  Tensor& indices)
+  bool ceil_mode)
 {
   max_pool3d_with_indices_out_cuda_template(
     output,
@@ -451,15 +452,16 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cuda(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& max_pool3d_with_indices_backward_out_cuda(const Tensor& gradOutput,
+Tensor& max_pool3d_with_indices_backward_out_cuda(
+  Tensor& gradInput,
+  const Tensor& gradOutput,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
   bool ceil_mode,
-  const Tensor& indices,
-  Tensor& gradInput)
+  const Tensor& indices)
 {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

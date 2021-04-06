@@ -7,7 +7,7 @@ from torch.utils.data.datapipes.utils.decoder import (
 from typing import Iterable, Iterator, Union, List, Tuple, Any, Callable
 from io import BufferedIOBase
 
-class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
+class RoutedDecoderIterDataPipe(IterDataPipe):
     r""" :class:`RoutedDecoderIterDataPipe`.
 
     Iterable datapipe to decode binary streams from input iterables,

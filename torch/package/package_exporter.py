@@ -108,7 +108,7 @@ class PackageExporter:
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
         self.serialized_storages: Dict[str, Any] = {}
-        self.extern_modules: List[str] = []
+        self.external: List[str] = []
         self.provided: Dict[str, bool] = {}
         self.verbose = verbose
 
@@ -523,8 +523,8 @@ node [shape=box];
 
         Prefer using `extern` to only mark modules extern if they are actually required by the packaged code.
         """
-        if module_name not in self.extern_modules:
-            self.extern_modules.append(module_name)
+        if module_name not in self.external:
+            self.external.append(module_name)
 
     def save_mock_module(self, module_name: str):
         """Add `module_name` to the package, implemented it with a mocked out version that
@@ -548,7 +548,7 @@ node [shape=box];
         )
 
     def _module_is_already_provided(self, qualified_name: str) -> bool:
-        for mod in self.extern_modules:
+        for mod in self.external:
             if qualified_name == mod or qualified_name.startswith(mod + "."):
                 return True
         return qualified_name in self.provided
@@ -609,7 +609,7 @@ node [shape=box];
                 storage = storage.cpu()
             num_bytes = storage.size() * storage.element_size()
             self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
-        contents = "\n".join(self.extern_modules) + "\n"
+        contents = "\n".join(self.external) + "\n"
         self._write(".data/extern_modules", contents)
         del self.zip_file
         if self.buffer:

@@ -282,7 +282,7 @@ class Polynomial : public ExprNode<Polynomial> {
 class RoundOff : public BinaryOpNode<RoundOff> {
  public:
   RoundOff(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kOther) {}
+      : BinaryOpNode(lhs, rhs, IRNodeType::kRoundOff) {}
 };
 
 class MaxTerm : public ExprNode<MaxTerm> {

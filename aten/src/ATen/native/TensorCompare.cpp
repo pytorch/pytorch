@@ -10,13 +10,12 @@
 
 namespace at { namespace native {
 
-DEFINE_DISPATCH(where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(min_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(_aminmax_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(isposinf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(isneginf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(mode_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(where_kernel);
+DEFINE_DISPATCH(max_stub);
+DEFINE_DISPATCH(min_stub);
+DEFINE_DISPATCH(_aminmax_stub);
+DEFINE_DISPATCH(isposinf_stub);
+DEFINE_DISPATCH(isneginf_stub);
 
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
@@ -67,7 +66,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
   // Computes allowed and actual error
   Tensor cast_other;
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     cast_other = other.to(at::get_default_dtype());
   } else {
     cast_other = other;
@@ -87,7 +86,7 @@ Tensor isnan(const Tensor& self) {
 
 Tensor isreal(const Tensor& self) {
   // Note: Integral and Floating tensor values are always real
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true) ||
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true) ||
       c10::isFloatingType(self.scalar_type())) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
@@ -97,7 +96,7 @@ Tensor isreal(const Tensor& self) {
 
 Tensor isinf(const Tensor &self) {
   // Note: Integral tensor values are never infinite
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
 
@@ -118,12 +117,12 @@ Tensor isposinf(const Tensor &self) {
   return result;
 }
 
-Tensor& isposinf_out(const Tensor& self, Tensor& result) {
+Tensor& isposinf_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
   TORCH_CHECK(result.scalar_type() == at::kBool, "isposinf does not support non-boolean outputs.");
   result.resize_(self.sizes());
 
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     result.fill_(false);
   } else {
     auto iter = TensorIteratorConfig()
@@ -142,12 +141,12 @@ Tensor isneginf(const Tensor &self) {
   return result;
 }
 
-Tensor& isneginf_out(const Tensor& self, Tensor& result) {
+Tensor& isneginf_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
   TORCH_CHECK(result.scalar_type() == at::kBool, "isneginf does not support non-boolean outputs.");
   result.resize_(self.sizes());
 
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     result.fill_(false);
   } else {
     auto iter = TensorIteratorConfig()
@@ -162,7 +161,7 @@ Tensor& isneginf_out(const Tensor& self, Tensor& result) {
 
 Tensor isfinite(const Tensor& self) {
   // Note: Integral tensor values are always finite
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
 
@@ -296,24 +295,11 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
   return at::native::mode_out(self, dim, keepdim, values, indices);
 }
 
-std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool keepdim,
-                                       Tensor& values, Tensor& indices) {
+std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool keepdim, Tensor& values, Tensor& indices) {
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "mode only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "mode only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(self.device() == values.device(),
-              "expected device '", self.device(), "' but got '",
-              values.device(), "' for values output");
-  TORCH_CHECK(self.device() == indices.device(),
-              "expected device '", self.device(), "' but got '",
-              indices.device(), "' for indices output");
-  TORCH_CHECK(self.scalar_type() == values.scalar_type(),
-              "expected scalar type '", self.scalar_type(), "' but got '",
-              values.scalar_type(), "' for values output");
-  TORCH_CHECK(indices.scalar_type() == ScalarType::Long,
-              "expected scalar type '", ScalarType::Long, "' but got '",
-              indices.scalar_type(), "' for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
     AT_ASSERT(values.dim() == 0);
@@ -322,8 +308,7 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
   } else {
     auto result = [&]() {
       NoNamesGuard guard;
-      mode_stub(self.device().type(), values, indices, self, dim, keepdim);
-      return std::tuple<Tensor &,Tensor &>{values, indices};
+      return at::_mode_out(values, indices, self, dim, keepdim);
     }();
     namedinference::propagate_names_for_reduction(std::get<0>(result), self, dim, keepdim);
     namedinference::propagate_names_for_reduction(std::get<1>(result), self, dim, keepdim);
@@ -335,7 +320,7 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
   if (self.is_quantized()) {
     Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
-    at::native::max_out(self.int_repr() , dim, keepdim, max, max_indices);
+    at::native::max_out(self.int_repr(), dim, keepdim, max, max_indices);
     // TODO: qscheme
     return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point()), max_indices);
   } else {

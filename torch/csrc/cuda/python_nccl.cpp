@@ -10,7 +10,6 @@
 #include <ATen/core/functional.h>
 
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/irange.h>
 
 #include <sstream>
 #include <unordered_map>
@@ -80,7 +79,7 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
       throw python_error();
     auto size = PySequence_Fast_GET_SIZE(seq.get());
     comms = std::vector<ncclComm_t>(size);
-    for(const auto i : c10::irange(size)) {
+    for (int64_t i = 0; i < size; i++) {
       comms[i] = unpack_nccl_comm(PySequence_Fast_GET_ITEM(seq.get(), i));
     }
   }

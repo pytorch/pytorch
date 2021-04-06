@@ -638,14 +638,15 @@ void avg_pool3d_backward_out_cuda_template(
 
 } // namespace
 
-Tensor& avg_pool3d_out_cuda(const Tensor& input,
+Tensor& avg_pool3d_out_cuda(
+  Tensor& output,
+  const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
-  Tensor& output)
+  c10::optional<int64_t> divisor_override)
 {
   avg_pool3d_out_cuda_template(
     output,
@@ -681,15 +682,16 @@ Tensor avg_pool3d_cuda(
   return output;
 }
 
-Tensor& avg_pool3d_backward_out_cuda(const Tensor& gradOutput_,
+Tensor& avg_pool3d_backward_out_cuda(
+  Tensor& gradInput,
+  const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
-  Tensor& gradInput)
+  c10::optional<int64_t> divisor_override)
 {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

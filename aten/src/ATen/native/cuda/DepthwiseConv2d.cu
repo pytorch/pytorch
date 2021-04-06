@@ -4,15 +4,16 @@
 namespace at {
 namespace native {
 
-std::tuple<Tensor &,Tensor &> thnn_conv_depthwise2d_backward_out(const Tensor & grad_output,
+std::tuple<Tensor &,Tensor &> thnn_conv_depthwise2d_backward_out(
+    Tensor & grad_input,
+    Tensor & grad_weight,
+    const Tensor & grad_output,
     const Tensor & self,
     const Tensor & weight,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
-    IntArrayRef dilation,
-    Tensor & grad_input,
-    Tensor & grad_weight) {
+    IntArrayRef dilation) {
   if (grad_weight.defined()) {
     grad_weight.resize_(weight.sizes());
     grad_weight.zero_();
@@ -43,16 +44,10 @@ std::tuple<Tensor, Tensor> thnn_conv_depthwise2d_backward(
     grad_weight = at::empty({0}, grad_output.options());
   }
 
-  return native::thnn_conv_depthwise2d_backward_out(
-      grad_output,
-      self,
-      weight,
-      kernel_size,
-      stride,
-      padding,
-      dilation,
-      grad_input,
-      grad_weight);
+  return native::thnn_conv_depthwise2d_backward_out(grad_input, grad_weight,
+                                                    grad_output, self, weight,
+                                                    kernel_size, stride, padding,
+                                                    dilation);
 }
 
 } // namespace native
