@@ -821,16 +821,14 @@ slow_tests_dict: Optional[Dict[str, float]] = None
 def check_slow_test_from_stats(test):
     global slow_tests_dict
     if slow_tests_dict is None:
-        url = 'https://raw.githubusercontent.com/janeyx99/test-infra/main/stats/.pytorch-slow-tests'
+        url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/.pytorch-slow-tests'
         contents = urlopen(url, timeout=1).read().decode('utf-8')
         slow_tests_dict = json.loads(contents)
-    slow_tests_dict = cast(Dict[str, float], slow_tests_dict)
     test_suite = str(test.__class__).split('\'')[1]
     test_name = f'{test._testMethodName} ({test_suite})'
 
     if test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
-        print(f'{test_name} is slowwwwwww')  # to see if anything shows up in normal PRs
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
 
