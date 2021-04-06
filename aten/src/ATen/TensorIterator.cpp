@@ -771,16 +771,28 @@ void TensorIteratorBase::build_binary_float_op(const Tensor& out, const Tensor& 
      .promote_integer_inputs_to_float(true));
 }
 
+// This cannot be a function because TensorIteratorConfig is not
+// copyable or movable, so it can't be returned from the function.
+#define BINARY_OP_CONFIG()                              \
+  TensorIteratorConfig()                                \
+    .set_check_mem_overlap(true)                        \
+    .allow_cpu_scalars(true)                            \
+    .promote_inputs_to_common_dtype(true)               \
+    .cast_common_dtype_to_outputs(true)                 \
+    .enforce_safe_casting_to_output(true)               \
+
 void TensorIteratorBase::build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b) {
-  build(TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .add_output(out)
-    .add_input(a)
-    .add_input(b)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true));
+  build(BINARY_OP_CONFIG()
+      .add_output(out)
+      .add_input(a)
+      .add_input(b));
+}
+
+void TensorIteratorBase::build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b) {
+  build(BINARY_OP_CONFIG()
+      .add_borrowed_output(out)
+      .add_borrowed_input(a)
+      .add_borrowed_input(b));
 }
 
 void TensorIteratorBase::build_unary_float_op(const Tensor& out, const Tensor& a) {
