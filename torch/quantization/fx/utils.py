@@ -356,6 +356,7 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
     if cache and node in cache:
         return cache[node]
 
+    result = False  # will be overwritten
     if not isinstance(node, Node):
         result = True
     elif node.op == 'placeholder':
@@ -374,31 +375,30 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
     elif node.op == 'call_method' and node.target == 'size':
         # x1 = x0.size(0)
         result = True
-
-    found_one_tensor = False
-    for arg in node.args:
-        if isinstance(arg, list):
-            for list_el in arg:
-                if isinstance(list_el, Node):
-                    this_list_el_args_have_no_tensors = \
-                        all_node_args_have_no_tensors(list_el, modules)
-                    found_one_tensor = found_one_tensor or \
-                        (not this_list_el_args_have_no_tensors)
-        elif isinstance(arg, int):
-            pass
-        else:
-            if isinstance(arg, Node):
-                this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg, modules, cache)
-                found_one_tensor = found_one_tensor or \
-                    (not this_arg_args_have_no_tensors)
+    else:
+        found_one_tensor = False
+        for arg in node.args:
+            if isinstance(arg, list):
+                for list_el in arg:
+                    if isinstance(list_el, Node):
+                        this_list_el_args_have_no_tensors = \
+                            all_node_args_have_no_tensors(list_el, modules, cache)
+                        found_one_tensor = found_one_tensor or \
+                            (not this_list_el_args_have_no_tensors)
+            elif isinstance(arg, int):
+                pass
             else:
-                found_one_tensor = True
-    result = not found_one_tensor
+                if isinstance(arg, Node):
+                    this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg, modules)
+                    found_one_tensor = found_one_tensor or \
+                        (not this_arg_args_have_no_tensors)
+                else:
+                    found_one_tensor = True
+        result = not found_one_tensor
+
     if cache:
         cache[node] = result
-
     return result
-
 
 def node_return_type_is_int(node: Node) -> bool:
     """
