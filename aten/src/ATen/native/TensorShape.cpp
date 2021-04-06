@@ -2136,7 +2136,7 @@ Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step)
 
   const auto sizes = self.sizes();
   const auto strides = self.strides();
-  int64_t max_size = self.dim() == 0 ? 1 : sizes[0];
+  int64_t max_size = self.dim() == 0 ? 1 : sizes[dimension];
   TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
