@@ -1,13 +1,3 @@
-#include <torch/csrc/python_headers.h>
-#include <sys/types.h>
-
-#ifndef _MSC_VER
-#include <sys/socket.h>
-#endif
-
-#include <unordered_map>
-#include <cstdlib>
-#include <libshm.h>
 #include <TH/TH.h>
 #include <c10/util/Logging.h>
 #include <ATen/ATen.h>
