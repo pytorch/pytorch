@@ -53,6 +53,7 @@ void foreach_tensor_##NAME##_scalar_kernel_cuda_(TensorList tensors, const Scala
         return at::native::foreach_tensor_##NAME##_scalar_kernel_slow_(tensors, scalar);            \
     }                                                                                               \
                                                                                                     \
+    OptionalDeviceGuard guard(device_of(tensors[0]));                      \
     foreach_binary_op_<OP>(tensors, scalar);                                                        \
 }                                                                                                   \
                                                                                                     \
@@ -62,6 +63,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(TensorList tensor
         return at::native::foreach_tensor_##NAME##_scalar_kernel_slow(tensors, scalar);             \
     }                                                                                               \
                                                                                                     \
+    OptionalDeviceGuard guard(device_of(tensors[0]));                      \
     return foreach_binary_op<OP>(tensors, scalar);                                                  \
 }
 
@@ -81,6 +83,7 @@ void foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, const Scalar& sc
         return at::native::foreach_tensor_sub_scalar_kernel_slow_(tensors, scalar);
     }
 
+    OptionalDeviceGuard guard(device_of(tensors[0]));
     foreach_binary_op_<std::minus>(tensors, scalar);
 }
 
@@ -92,6 +95,7 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, co
         return at::native::foreach_tensor_sub_scalar_kernel_slow(tensors, scalar);
     }
 
+    OptionalDeviceGuard guard(device_of(tensors[0]));
     return foreach_binary_op<std::minus>(tensors, scalar);
 }
 

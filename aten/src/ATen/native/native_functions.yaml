@@ -6389,12 +6389,14 @@
     CUDA: foreach_tensor_sub_list_kernel_cuda_
 
 - func: _foreach_mul.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_list_kernel_slow
     CUDA: foreach_tensor_mul_list_kernel_cuda
 
 - func: _foreach_mul_.List(Tensor(a!)[] self, Tensor[] other) -> ()
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_list_kernel_slow_
@@ -6449,12 +6451,14 @@
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda_
 
 - func: _foreach_mul.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalarlist_kernel_slow
     CUDA: foreach_tensor_mul_scalarlist_kernel_cuda
 
 - func: _foreach_mul_.ScalarList(Tensor(a!)[] self, Scalar[] scalars) -> ()
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalarlist_kernel_slow_
@@ -6479,12 +6483,14 @@
     CUDA: foreach_tensor_exp_cuda_
 
 - func: _foreach_sqrt(Tensor[] tensors) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sqrt_slow
     CUDA: foreach_tensor_sqrt_cuda
 
 - func: _foreach_sqrt_(Tensor(a!)[] self) -> ()
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sqrt_slow_
@@ -6803,6 +6809,7 @@
     CUDA: foreach_tensor_trunc_cuda_
 
 - func: _foreach_addcdiv_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalar_slow_
@@ -6816,6 +6823,7 @@
     CUDA: foreach_tensor_addcmul_scalar_cuda_
 
 - func: _foreach_addcdiv_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> ()
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow_
@@ -6828,6 +6836,7 @@
     CUDA: foreach_tensor_addcmul_scalarlist_cuda_
 
 - func: _foreach_addcdiv.Scalar(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalar_slow
@@ -6841,6 +6850,7 @@
     CUDA: foreach_tensor_addcmul_scalar_cuda
 
 - func: _foreach_addcdiv.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow
@@ -8594,6 +8604,28 @@
   python_module: linalg
   dispatch:
     CPU, CUDA: linalg_slogdet_out
+
+- func: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_eig
+
+- func: linalg_eig.out(Tensor self, *, Tensor(a!) eigenvalues, Tensor(b!) eigenvectors) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_eig_out
+
+- func: linalg_eigvals(Tensor self) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_eigvals
+
+- func: linalg_eigvals.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_eigvals_out
 
 - func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg

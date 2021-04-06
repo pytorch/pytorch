@@ -7106,8 +7106,9 @@ class TestNN(NNTestCase):
             hidden = torch.randn(correct_hidden_shape)
 
             # input and weights are not at the same device
+            # TODO: ROCm will generate the old error message
             with self.assertRaisesRegex(RuntimeError,
-                                        "Expected all tensors to be on the same device"):
+                                        "Input and parameter tensors are not at the same device|Expected all tensors to be on the same device"):
                 model(input.to('cuda:0'))
 
             # input and hiddens are not at the same device
@@ -7145,8 +7146,9 @@ class TestNN(NNTestCase):
         hidden_c = torch.randn(correct_hidden_c_shape)
 
         # input and weights are not at the same device
+        # TODO: ROCm will generate the old error message
         with self.assertRaisesRegex(RuntimeError,
-                                    "Expected all tensors to be on the same device"):
+                                    "Input and parameter tensors are not at the same device|Expected all tensors to be on the same device"):
             model(input.to('cuda:0'))
 
         # input and hiddens are not at the same device

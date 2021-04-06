@@ -55,6 +55,7 @@ void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, at::Arr
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow_(tensors, scalars);                            \
     }                                                                                                                    \
                                                                                                                          \
+    OptionalDeviceGuard guard(device_of(tensors[0]));                      \
     foreach_binary_op_<OP>(tensors, scalars);                                                                            \
 }                                                                                                                        \
                                                                                                                          \
@@ -64,6 +65,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList te
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow(tensors, scalars);                             \
     }                                                                                                                    \
                                                                                                                          \
+    OptionalDeviceGuard guard(device_of(tensors[0]));                      \
     return foreach_binary_op<OP>(tensors, scalars);                                                                      \
 }
 
@@ -83,6 +85,7 @@ void foreach_tensor_sub_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef
         return at::native::foreach_tensor_sub_scalarlist_kernel_slow_(tensors, scalars);
     }
 
+    OptionalDeviceGuard guard(device_of(tensors[0]));
     foreach_binary_op_<std::minus>(tensors, scalars);
 }
 
@@ -96,6 +99,7 @@ std::vector<Tensor> foreach_tensor_sub_scalarlist_kernel_cuda(TensorList tensors
         return at::native::foreach_tensor_sub_scalarlist_kernel_slow(tensors, scalars);
     }
 
+    OptionalDeviceGuard guard(device_of(tensors[0]));
     return foreach_binary_op<std::minus>(tensors, scalars);
 }
 
