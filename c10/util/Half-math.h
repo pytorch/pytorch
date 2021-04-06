@@ -34,7 +34,7 @@ inline c10::Half max(c10::Half a, c10::Half b) { return std::max(float(a), float
 inline c10::Half pow(c10::Half a, c10::Half b) { return std::pow(float(a), float(b));}
 inline c10::Half fmod(c10::Half a, c10::Half b) { return std::fmod(float(a), float(b));}
 inline c10::Half copysign(c10::Half a, c10::Half b) {
-	return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
+  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
 }
 
 }
