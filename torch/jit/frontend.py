@@ -16,6 +16,13 @@ from torch._C._jit_tree_views import (
     SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
     DictComp,
 )
+
+_IS_MONKEYTYPE_INSTALLED = True
+try:
+    from torch.jit._monkey_config_jit import type_trace_db  # type: ignore[mport]
+except ImportError:
+    _IS_MONKEYTYPE_INSTALLED = False
+
 from torch._utils_internal import get_source_lines_and_file
 
 from torch._jit_internal import SourceContext, should_drop, is_static_fn
@@ -290,10 +297,22 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None):
     r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
                        py_def.col_offset,
                        py_def.col_offset + len("def"))
+
+    # If MonkeyType is installed, get all the consolidated traces for the arguments
+    # and the return types
+    if _IS_MONKEYTYPE_INSTALLED:
+        _args_and_types = type_trace_db.get_args_types(def_name)
+
     param_list = build_param_list(ctx, py_def.args, self_name)
     return_type = None
     if getattr(py_def, 'returns', None) is not None:
         return_type = build_expr(ctx, py_def.returns)
+    else:
+        if _IS_MONKEYTYPE_INSTALLED and bool(_args_and_types):
+            # Get the return type annotation from the _args_and_types
+            # dictionary
+            return_type = Var(Ident(r, _args_and_types["return_type"].pop()))
+
     decl = Decl(r, param_list, return_type)
     is_method = self_name is not None
     if type_line is not None:
@@ -336,6 +355,9 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
+    elif getattr(py_arg, 'annotation', None) is None and _IS_MONKEYTYPE_INSTALLED \
+            and bool(_args_and_types):  # type: ignore[name-defined]
+        annotation_expr = Var(Ident(r, _args_and_types[name].pop()))  # type: ignore[name-defined]
     elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
     else:
