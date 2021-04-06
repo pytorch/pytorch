@@ -1046,58 +1046,50 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           requires_grad=requires_grad),))
     return inputs
 
-# Generates tensors for testing reduction ops
+# Generates input tensors for testing reduction ops
 def _generate_reduction_inputs(device, dtype, requires_grad):
     yield make_tensor((), device, dtype, requires_grad=requires_grad)
     yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
-    yield make_tensor((2, 2), device, dtype, requires_grad=requires_grad, discontiguous=True)
+    yield make_tensor((2, 3), device, dtype, requires_grad=requires_grad, discontiguous=True)
     yield make_tensor((3, 2, 1, 2, 2), device, dtype, requires_grad=requires_grad)
 
-# Generates a subset of possible kwargs dim and keepdim for a tensor
+# Generates a subset of possible dim and keepdim kwargs for a tensor
 # with ndim dims appropriate for testing. If supports_multiple_dims
 # is True (default) then dim kwarg can be a list of dims.
 def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
-    all_dims: Tuple[int, ...] = tuple(range(ndim))
-    dims_to_reduce: List[int] = []
-
-    if ndim <= 4:
-        dims_to_reduce.extend(all_dims)
-    else:
-        # Always reduce first and last dimension
-        dims_to_reduce.append(all_dims[0])
-        dims_to_reduce.append(all_dims[-1])
-
-        # Pick two more from the middle ones
-        dims_to_reduce.append(all_dims[1])
-        dims_to_reduce.append(all_dims[int(ndim / 2)])
-
     for keepdim in [True, False]:
-        for dim in dims_to_reduce:
-            yield {'dim': dim, 'keepdim': keepdim}
+        # Always test reducing inner and outer most dimensions
+        yield {'dim': 0, 'keepdim': keepdim}
+        yield {'dim': -1, 'keepdim': keepdim}
 
-        if ndim > 1 and supports_multiple_dims:
-            if ndim <= 4:
-                yield {'dim': dims_to_reduce, 'keepdim': keepdim}
-            else:
-                yield {'dim': dims_to_reduce[::2], 'keepdim': keepdim}
-            yield {'dim': all_dims, 'keepdim': keepdim}
+        # Also reduce middle dimension
+        if ndim > 2:
+            yield {'dim': ndim // 2, 'keepdim': keepdim}
+
+        if supports_multiple_dims:
+            # Always test reducing all dims
+            yield {'dim': tuple(range(ndim)), 'keepdim': keepdim}
+
+            # Test reducing both first and last dimensions
+            if ndim > 1:
+                yield {'dim': (0, ndim - 1), 'keepdim': keepdim}
+
+            # Test reducing every other dimension starting with the second
+            if ndim > 2:
+                yield {'dim': tuple(range(1, ndim, 2)), 'keepdim': keepdim}
 
 # Generates sample inputs for reduction ops that contain the input tensor
 # and dim and keepdim kwargs. If a reduction op needs to test additional
 # args/kwargs then create a separate sample_inputs function
 def sample_inputs_reduction(op_info, device, dtype, requires_grad):
-    inputs: List[SampleInput] = []
+    inputs = []
 
     for t in _generate_reduction_inputs(device, dtype, requires_grad):
+        # Add case without dim and keepdim kwargs
         inputs.append(SampleInput(t))
         for kwargs in _generate_reduction_kwargs(t.ndim):
             inputs.append(SampleInput(t, kwargs=kwargs))
 
-    return inputs
-
-def sample_inputs_reduction_sum(op_info, device, dtype, requires_grad):
-    inputs = sample_inputs_reduction(op_info, device, dtype, requires_grad)
-    inputs[-1].kwargs['dtype'] = torch.double
     return inputs
 
 def sample_inputs_outer(op_info, device, dtype, requires_grad):
@@ -3285,7 +3277,7 @@ op_db: List[OpInfo] = [
     OpInfo('sum',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
-           sample_inputs_func=sample_inputs_reduction_sum),
+           sample_inputs_func=sample_inputs_reduction),
     OpInfo('mode',
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
