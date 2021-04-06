@@ -3,6 +3,7 @@ import torch.autograd.profiler as prof
 import torch.utils.hooks as hooks
 from torch.autograd import ProfilerActivity
 
+import threading
 from enum import Enum
 from typing import Any, Callable, Iterable, Optional
 from warnings import warn
@@ -79,31 +80,36 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None):
     return handler_fn
 
 
-module_level=0
-module_record_functions = {}
+_thread_local_var = threading.local()
 
-def profiler_module_forward_pre_hook(module, input):
-    global module_level
+def profiler_module_forward_pre_hook(module, _):
+    global _thread_local_var
+    
     # TODO: trace the top level module when the module_level is 0
     # DO we need add lock here?
-    module_level = module_level + 1
+    if not hasattr(_thread_local_var, "module_level"):
+        _thread_local_var.module_level = 0
+        _thread_local_var.module_record_functions = {}
 
-    if (module_level == 1 or # top level module
-        isinstance(module, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel))):
+    _thread_local_var.module_level = _thread_local_var.module_level + 1
+
+    if (_thread_local_var.module_level == 1 or
+            isinstance(module, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel))):
         # TODO: trace the module children names when record_function add support of the extra arguments for children.
-        record_func = prof.record_function(module.__class__.__name__)
+        record_func = prof.record_function(module.__class__.__name__ + ".forward")
         record_func.__enter__()
-        module_record_functions[module] = record_func
+        _thread_local_var.module_record_functions[id(module)] = record_func
     else:
         # TODO: start the record_function in case of the module view is enabled
         pass
 
 
-def profiler_module_forward_hook(module, input, output):
-    global module_level
+def profiler_module_forward_hook(module, _, _):
+    global _thread_local_var
+
     # DO we need add lock here?
-    module_level = module_level - 1
-    record_func = module_record_functions.pop(module, None)
+    _thread_local_var.module_level = _thread_local_var.module_level - 1
+    record_func = _thread_local_var.module_record_functions.pop(id(module), None)
     if record_func:
         record_func.__exit__(None, None, None)
 
