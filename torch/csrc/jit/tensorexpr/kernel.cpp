@@ -209,7 +209,7 @@ ExprHandle TensorExprKernel::tensorOrConstant(
     }
     return constant(v);
 }
-ArgValue TensorExprKernel::jitToTValue(const torch::jit::Value* v) const {
+ArgValue TensorExprKernel::jitToArgValue(const torch::jit::Value* v) const {
   auto ti = tensors_.find(v);
   if (ti != tensors_.end()) {
     return ti->second;
@@ -226,7 +226,7 @@ ArgValue TensorExprKernel::jitToTValue(const torch::jit::Value* v) const {
       // This is just a placeholder so we don't throw.  None-handling
       // is operator-specific and should be handled properly in
       // the operator-specific lowering code.
-      return ArgValue();
+      return ArgNone();
     } else {
       throw unsupported_dtype();
     }
@@ -236,7 +236,7 @@ ArgValue TensorExprKernel::jitToTValue(const torch::jit::Value* v) const {
     throw malformed_input("no scalar in Constant");
   }
 
-  return ArgValue(scalars_.at(v));
+  return scalars_.at(v);
 }
 ExprHandle TensorExprKernel::tensorOrConstant(
     const torch::jit::Value* v,
@@ -467,15 +467,15 @@ ExprHandle TensorExprKernel::constant(const ArgValue v) {
     return *s;
   } else if (auto d = c10::get_if<double>(&v)) {
     return DoubleImm::make(*d);
-  } else if (auto i = c10::get_if<long int>(&v)) {
+  } else if (auto i = c10::get_if<int64_t>(&v)) {
     return LongImm::make(*i);
-  // } else if (val.isBool()) {
-  //   return BoolImm::make(val.toBool());
-  // } else if (val->hasNone()) {
-  //   // This is just a placeholder so we don't throw.  None-handling
-  //   // is operator-specific and should be handled properly in
-  //   // the operator-specific lowering code.
-  //   return IntImm::make(0);
+  } else if (auto b = c10::get_if<bool>(&v)) {
+    return BoolImm::make(*b);
+  } else if (c10::get_if<ArgNone>(&v)) {
+    // This is just a placeholder so we don't throw.  None-handling
+    // is operator-specific and should be handled properly in
+    // the operator-specific lowering code.
+    return IntImm::make(0);
   } else {
     throw unsupported_dtype();
   }
@@ -717,18 +717,11 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(
   }
   return ExprVectorToExprHandleVector(it->second->buf()->dims());
 }
-// std::vector<ExprHandle> TensorExprKernel::valueShape(
-//     const TValue* v) {
-//   if (v->hasTensor()) {
-//     return ExprVectorToExprHandleVector(v->getTensor()->buf()->dims());
-//   } else {
-//     return {};
-//   }
-// }
+
 std::vector<ExprHandle> TensorExprKernel::valueShape(
     const ArgValue v) {
-  if (c10::get_if<tensorexpr::Tensor*>(&v) != nullptr) {
-    return ExprVectorToExprHandleVector(c10::get<tensorexpr::Tensor*>(v)->buf()->dims());
+  if (auto t = c10::get_if<tensorexpr::Tensor*>(&v)) {
+    return ExprVectorToExprHandleVector((*t)->buf()->dims());
   } else {
     return {};
   }
@@ -1494,6 +1487,46 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, std::vector<ArgValu
           },
           /*promote_inputs*/ false);
     }
+    case aten::clamp: {
+      bool noMin = false;
+      bool noMax = false;
+      if (c10::get_if<ArgNone>(&inputs[1])) {
+        noMin = true;
+      }
+
+      if (c10::get_if<ArgNone>(&inputs[2])) {
+        noMax = true;
+      }
+
+      return computeThreeOperand(
+          "aten_clamp",
+          inputs,
+          outputType,
+          [noMin, noMax](
+              const ExprHandle& in,
+              const ExprHandle& min,
+              const ExprHandle& max) {
+            auto cast = [&](const ExprHandle& e) {
+              return Cast::make(in.dtype(), e);
+            };
+
+            if (noMin && noMax) {
+              return in;
+            } else if (noMin) {
+              auto cmax = cast(max);
+              return CompareSelect::make(in, cmax, cmax, in, kGT);
+            } else if (noMax) {
+              auto cmin = cast(min);
+              return CompareSelect::make(in, cmin, cmin, in, kLT);
+            } else {
+              auto cmax = cast(max);
+              auto cmin = cast(min);
+              auto mm = CompareSelect::make(in, cmin, cmin, in, kLT);
+              return CompareSelect::make(mm, cmax, cmax, mm, kGT);
+            }
+          },
+          false /* promote_inputs */);
+    } break;
     default: {
       throw std::runtime_error("Unhandled node kind");
       return nullptr;
@@ -1558,10 +1591,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::threshold:
     case aten::where:
     case aten::frac:
-    case aten::lgamma: {
+    case aten::lgamma:
+    case aten::clamp: {
       std::vector<ArgValue> tinputs;
       for (auto inp: inputs) {
-        tinputs.push_back(jitToTValue(inp));
+        tinputs.push_back(jitToArgValue(inp));
       }
       auto outputType = getOutputType(v->node()->output());
       return computeBinaryValue(v->node()->kind(), tinputs, outputType);
@@ -1584,51 +1618,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       });
     } break;
 
-    case aten::clamp: {
-      bool noMin = false;
-      bool noMax = false;
-      if (v->node()->input(1)->node()->kind() == prim::Constant) {
-        const auto val = toIValue(v->node()->input(1)).value();
-        if (val.isNone()) {
-          noMin = true;
-        }
-      }
-
-      if (v->node()->input(2)->node()->kind() == prim::Constant) {
-        const auto val = toIValue(v->node()->input(2)).value();
-        if (val.isNone()) {
-          noMax = true;
-        }
-      }
-
-      return computeThreeOperand(
-          "aten_clamp",
-          v,
-          [noMin, noMax](
-              const ExprHandle& in,
-              const ExprHandle& min,
-              const ExprHandle& max) {
-            auto cast = [&](const ExprHandle& e) {
-              return Cast::make(in.dtype(), e);
-            };
-
-            if (noMin && noMax) {
-              return in;
-            } else if (noMin) {
-              auto cmax = cast(max);
-              return CompareSelect::make(in, cmax, cmax, in, kGT);
-            } else if (noMax) {
-              auto cmin = cast(min);
-              return CompareSelect::make(in, cmin, cmin, in, kLT);
-            } else {
-              auto cmax = cast(max);
-              auto cmin = cast(min);
-              auto mm = CompareSelect::make(in, cmin, cmin, in, kLT);
-              return CompareSelect::make(mm, cmax, cmax, mm, kGT);
-            }
-          },
-          false /* promote_inputs */);
-    } break;
 
     case aten::batch_norm: {
       bool hasWeight = true;

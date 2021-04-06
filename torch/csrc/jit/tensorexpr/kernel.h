@@ -19,7 +19,9 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   }
   return sizes;
 }
-using ArgValue = c10::variant<tensorexpr::Tensor*, tensorexpr::VarHandle, double, long int, bool>;
+
+using ArgNone = c10::monostate;
+using ArgValue = c10::variant<tensorexpr::Tensor*, tensorexpr::VarHandle, double, int64_t, bool, ArgNone>;
 
 class TORCH_API TensorExprKernel {
  public:
@@ -101,7 +103,7 @@ ExprHandle demoteOutput(
     const c10::optional<at::ScalarType> type);
   ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
 
-  ArgValue jitToTValue(const torch::jit::Value* v) const;
+  ArgValue jitToArgValue(const torch::jit::Value* v) const;
   ExprHandle tensorOrConstant(
     const ArgValue v,
     const std::vector<ExprHandle>& axes);
