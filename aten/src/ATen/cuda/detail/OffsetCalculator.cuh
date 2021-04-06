@@ -7,8 +7,10 @@
 #include <ATen/native/TensorIterator.h>
 #include <THC/THCIntegerDivider.cuh>
 
-/// OffsetCalculator calculates the offset in bytes of a linear index for NARGS
-/// operands that share the same shape, but may have different strides.
+// If element_sizes is nullptr, then the strides will be in bytes, otherwise
+// the strides will be in # of elements.
+// Operands that share the same shape, but may have different strides.
+// OffsetCalculator iterates the tensor in a column-major order
 
 #ifdef __HIP_PLATFORM_HCC__
 constexpr int MAX_DIMS = 16;
