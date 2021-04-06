@@ -11,6 +11,8 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/BFloat16-math.h>
+#include <c10/util/Half-math.h>
 
 namespace at {
 namespace native {
@@ -18,27 +20,6 @@ namespace native {
 namespace {
 
 using namespace vec256;
-
-// Note: Explicit implementation of copysign for Half and BFloat16
-// is needed to workaround g++-7/8 crash on aarch64, but also makes
-// copysign faster for the half-precision types
-template<typename T>
-T copysign(T a, T b) {
-  return std::copysign(a, b);
-}
-
-// Implement copysign for half precision floats using bit ops
-// Sign is the most significant bit for both half and bfloat16 types
-template<>
-c10::Half copysign(c10::Half a, c10::Half b) {
-  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
-}
-
-template<>
-c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
-   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
-}
-
 
 // Note: Undefined behavior when performing addition is intentionally
 // ignored.
@@ -71,7 +52,8 @@ void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Sc
     auto max_vec = Vec256<scalar_t>(max_scalar);
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t {
-        return std::min(max_scalar, std::max(min_scalar, a + alpha * b));
+				scalar_t x = a + alpha * b;
+        return std::min(max_scalar, std::max(min_scalar, x));
       },
       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
         auto add_clamp_res = vec256::fmadd(b, alpha_vec, a);
@@ -186,8 +168,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
   } else {
     // See NOTE: [Floor Division in Python]
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
-      using vec_t = Vec256<scalar_t>;
-      cpu_kernel_vec(iter,
+      cpu_kernel(iter,
           [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
             auto mod = std::fmod(a, b);
             auto div = (a - mod) / b;
@@ -202,22 +183,9 @@ void div_floor_kernel(TensorIteratorBase& iter) {
                 floordiv += scalar_t(1.0);
               }
             } else {
-              floordiv = copysign(scalar_t(0), a / b);
+              floordiv = std::copysign(scalar_t(0), a / b);
             }
             return floordiv;
-          },
-          [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t>{
-            using vec_t = Vec256<scalar_t>;
-            auto mod = a.fmod(b);
-            auto div = (a - mod) / b;
-            const auto zero = vec_t(0);
-            auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
-            const auto one = vec_t(1);
-            div = vec_t::blendv(div, div - one, mask);
-            auto floordiv = div.floor();
-            mask = (div - floordiv) > vec_t(0.5);
-            floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
-            return vec_t::blendv(floordiv, zero.copysign(a / b), div == zero);
           });
     });
   }
@@ -948,9 +916,13 @@ void heaviside_kernel(TensorIterator& iter) {
 
 void copysign_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "copysign_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-        return copysign(a, b);
-    });
+    cpu_kernel_vec(iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return std::copysign(a, b);
+      },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        return a.copysign(b);
+      });
   });
 }
 
