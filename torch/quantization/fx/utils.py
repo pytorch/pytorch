@@ -1,6 +1,7 @@
 import re
 import torch
 from ..utils import is_per_tensor, is_per_channel
+from ..quantize import is_activation_post_process
 
 from torch.fx import GraphModule, map_arg
 
@@ -119,7 +120,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Opti
         qparams = {"_dtype_": dtype}
     return node_type, quantize_op, qparams
 
-def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
+def quantize_node(quantizer: QuantizerCls, in_node: Node, obs_module: torch.nn.Module, obs_node: Node, is_input: bool) -> Node:
     ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
     with the qparams calculated from activation_post_process (obs_module).
     The observer node (obs_node) is used to find the FQN of the user of act_post_process.
@@ -148,7 +149,7 @@ def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
         first_linear_use_or_first_use = in_node
         prefix = "_output"
 
-    if first_linear_use_or_first_use:
+    if first_linear_use_or_first_use and first_linear_use_or_first_use.name in quantizer.node_name_to_scope:
         module_path, _ = quantizer.node_name_to_scope[first_linear_use_or_first_use.name]
     else:
         # TODO: it's not used, so actually we can skip quantization
@@ -345,7 +346,7 @@ def create_qparam_nodes(quantizer: QuantizerCls, node_name: str, scale: Any, zer
     return (scale_node, zero_point_node)
 
 
-def all_node_args_have_no_tensors(node: Node) -> bool:
+def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     """
     If we know for sure that all of this node's args have no
     tensors (are primitives), return True.  If we either
@@ -356,6 +357,10 @@ def all_node_args_have_no_tensors(node: Node) -> bool:
         return True
     elif node.op == 'placeholder':
         return False
+    elif node.op == 'call_module':
+        assert isinstance(node.target, str)
+        if is_activation_post_process(modules[node.target]):
+            return all_node_args_have_no_tensors(node.args[0], modules)  # type: ignore
     elif node.op == 'call_module':
         return False
     elif node.op == 'get_attr':
@@ -373,14 +378,14 @@ def all_node_args_have_no_tensors(node: Node) -> bool:
             for list_el in arg:
                 if isinstance(list_el, Node):
                     this_list_el_args_have_no_tensors = \
-                        all_node_args_have_no_tensors(list_el)
+                        all_node_args_have_no_tensors(list_el, modules)
                     found_one_tensor = found_one_tensor or \
                         (not this_list_el_args_have_no_tensors)
         elif isinstance(arg, int):
             pass
         else:
             if isinstance(arg, Node):
-                this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg)
+                this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg, modules)
                 found_one_tensor = found_one_tensor or \
                     (not this_arg_args_have_no_tensors)
             else:
