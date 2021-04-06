@@ -4,8 +4,7 @@
 #include "simple_ops.h"
 
 int main() {
-  torch::autograd::AutoGradMode guard(false);
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  c10::InferenceMode guard;
   auto input = torch::empty({1, 3, 224, 224});
   at::call_AA_op(input);
   at::call_BB_op(input);
