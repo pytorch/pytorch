@@ -175,10 +175,7 @@ __global__ void sampleMultinomialOnce(
   extern __shared__  unsigned char my_smem[];
   __shared__ bool found;
 
-  // Shared Memory hold blockdim.x T for holding the cumulative sum,
-  // blockDim.x AccT for normalizing the probabilities,
-  accscalar_t *asmem = reinterpret_cast<accscalar_t *>(my_smem);
-  scalar_t *smem = reinterpret_cast<scalar_t *>(&my_smem[blockDim.x * sizeof(accscalar_t)]);
+  accscalar_t *smem = reinterpret_cast<accscalar_t *>(my_smem);
 
   accscalar_t accZero = static_cast<accscalar_t>(0);
   scalar_t zero = static_cast<scalar_t>(0);
@@ -198,7 +195,7 @@ __global__ void sampleMultinomialOnce(
     }
 
     // threadIdx.x == 0 has the sum value from this
-    sum = reduceBlock(asmem, blockDim.x, sum, ReduceAdd<accscalar_t>(), accZero);
+    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<accscalar_t>(), accZero);
 
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
@@ -206,13 +203,13 @@ __global__ void sampleMultinomialOnce(
       CUDA_KERNEL_ASSERT(!THCNumerics<accscalar_t>::isinf(sum));
       CUDA_KERNEL_ASSERT(sum > accZero);
 
-      asmem[0] = sum;
-      smem[0] = sampled[curDist];
+      smem[0] = sum;
+      smem[1] = sampled[curDist];
     }
     __syncthreads();
 
-    sum = asmem[0];
-    scalar_t sample = smem[0];
+    sum = smem[0];
+    scalar_t sample = static_cast<scalar_t>(smem[1]);
     __syncthreads();
 
     if (sum == accZero) {
@@ -225,24 +222,23 @@ __global__ void sampleMultinomialOnce(
     }
 
     int chunks = (categories + (int)blockDim.x - 1) / blockDim.x;
-    scalar_t prevHighProb = zero;
+    accscalar_t prevHighProb = accZero;
     found = false;
 
     for (int chunk = 0; chunk < chunks && !found; ++chunk) {
       // All threads in bounds load a value
       int cat = chunk * blockDim.x + threadIdx.x;
 
-      accscalar_t a_dist_val = cat < categories ?
-                               static_cast<accscalar_t>(dist[curDist * stride_dist + cat * stride_categories]) / sum :
-                               accZero;
-      scalar_t dist_val = static_cast<scalar_t>(a_dist_val);
+      accscalar_t dist_val = cat < categories ?
+                             static_cast<accscalar_t>(dist[curDist * stride_dist + cat * stride_categories]) / sum :
+                             accZero;
 
       smem[threadIdx.x] = dist_val;
       __syncthreads();
 
       // Perform an inclusive prefix sum of the shared memory contents
-      for (int offset = 1; offset < blockDim.x; offset *= 2) {
-        scalar_t val = zero;
+      for (unsigned offset = 1; offset < blockDim.x; offset *= 2) {
+        accscalar_t val = accZero;
 
         if (threadIdx.x >= offset) {
           val = smem[threadIdx.x - offset] + smem[threadIdx.x];
@@ -257,10 +253,11 @@ __global__ void sampleMultinomialOnce(
 
       // Each thread will check to see if the sample falls in its
       // bucket
-      scalar_t curBucket = smem[threadIdx.x] + prevHighProb;
-      scalar_t prevBucket =
-          threadIdx.x == 0 ? prevHighProb :
-          smem[threadIdx.x - 1] + prevHighProb;
+      scalar_t curBucket =
+          static_cast<scalar_t>(smem[threadIdx.x] + prevHighProb);
+      scalar_t prevBucket = static_cast<scalar_t>(
+          threadIdx.x == 0 ? prevHighProb
+                           : smem[threadIdx.x - 1] + prevHighProb);
       bool inBucket =
           (cat < categories) &&
           (!(sample >= curBucket) &&
@@ -323,7 +320,7 @@ void multinomial_with_replacement_kernel_impl(
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
     int requiredShared = (numCategories < maxThreads ? numCategories : maxThreads)
-                         * (sizeof(scalar_t) + sizeof(accscalar_t));
+                         * (sizeof(accscalar_t) + 1);
 
     if (n_sample == 1 && maxShared >= requiredShared) {
       // Optimized allocation-free implementation
