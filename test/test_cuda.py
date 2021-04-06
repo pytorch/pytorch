@@ -1674,22 +1674,23 @@ class TestCuda(TestCase):
 
         class MultiplyInStream(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, x):
-                return x * 2
+            def forward(ctx, x, val):
+                ctx.val = val
+                return x * val
 
             @staticmethod
             def backward(ctx, grad):
                 self.assertEqual(torch.cuda.current_stream(), stream)
                 # delays the operation in the the background stream
                 torch.cuda._sleep(1000 * 1000)
-                return grad * 2
+                return grad * ctx.val, None
 
         # Tests using grads outside the backward() stream context
         # See "Stream semantics of backward passes" on https://pytorch.org/docs/stable/notes/cuda.html
         x = torch.randn(5, 5, device='cuda', requires_grad=True)
         with torch.cuda.stream(stream):
             stream.wait_stream(default_stream)
-            output = MultiplyInStream.apply(x)
+            output = MultiplyInStream.apply(x, 2)
             output.sum().backward()
         # sync needed
         default_stream.wait_stream(stream)
@@ -1702,15 +1703,15 @@ class TestCuda(TestCase):
         x = torch.randn(5, 5, device='cuda', requires_grad=True)
         with torch.cuda.stream(stream):
             stream.wait_stream(default_stream)
-            output = MultiplyInStream.apply(x)
+            output = MultiplyInStream.apply(x, 3)
         with torch.cuda.stream(bwd_ambient_stream):
             bwd_ambient_stream.wait_stream(stream)
             output.sum().backward()
             # x was first used on "stream" so its AccumulateGrad leaf should run on "stream".
             # The end of backward() should have synced "bwd_ambient_stream" with "stream"
             # so it should be safe to use x.grad here without any syncs.
-            self.assertEqual(x.grad, torch.ones_like(x) * 2)
-            self.assertEqual(torch.cuda.current_stream(), default_stream)
+            self.assertEqual(x.grad, torch.ones_like(x) * 3)
+            self.assertEqual(torch.cuda.current_stream(), bwd_ambient_stream)
 
     # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
     @skipIfRocm
