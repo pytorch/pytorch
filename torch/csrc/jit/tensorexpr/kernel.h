@@ -19,8 +19,8 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   }
   return sizes;
 }
-
-using ArgValue = c10::variant<tensorexpr::Tensor*, tensorexpr::VarHandle, double, int64_t, bool>;
+using ArgNone = c10::monostate;
+using ArgValue = c10::variant<tensorexpr::BufHandle, tensorexpr::VarHandle, double, int64_t, bool, ArgNone>;
 
 class TORCH_API TensorExprKernel {
  public:
@@ -78,8 +78,11 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> broadcastShapes(
       std::vector<std::vector<ExprHandle>> shapes);
 
-  ExprHandle constant(const ArgValue v);
+  ExprHandle constant(const ArgValue& v);
   ExprHandle constant(const torch::jit::Value* v);
+  ExprHandle broadcastBufTemp(  // TODO(chilli): remove
+      BufHandle b,
+      const std::vector<ExprHandle>& axes);
   ExprHandle broadcast(Tensor* t, const std::vector<ExprHandle>& axes);
   ExprHandle chunk(
       Tensor* t,
@@ -88,7 +91,7 @@ class TORCH_API TensorExprKernel {
       int64_t chunks,
       const std::vector<ExprHandle>& axes);
 
-  std::vector<ExprHandle> valueShape(const ArgValue v);
+  std::vector<ExprHandle> valueShape(const ArgValue& v);
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
 
   bool checkTypes(const ScalarType highType, const int typeConstraints);
@@ -103,7 +106,7 @@ class TORCH_API TensorExprKernel {
 
 
   ExprHandle tensorOrConstant(
-    const ArgValue v,
+    const ArgValue& v,
     const std::vector<ExprHandle>& axes);
 
   ExprHandle tensorOrConstant(
@@ -120,6 +123,7 @@ class TORCH_API TensorExprKernel {
     const std::string& name,
     const std::vector<ArgValue> inputValues,
     const c10::optional<at::ScalarType> outputTensorType,
+    const std::vector<ExprHandle> outputShape,
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         innerExpr);
 
