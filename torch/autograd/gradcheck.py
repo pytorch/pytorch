@@ -840,8 +840,7 @@ Fast gradcheck failed but element-wise differences are small. This means that th
 test might've passed in slow_mode!
 
 If you are adding a new operator, please file an issue and then use one of the
-workarounds. The workaround depends on how your test invokes gradcheck/gradgradcheck
-and whether your test is deterministic:
+workarounds. The workaround depends on how your test invokes gradcheck/gradgradcheck:
 
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
