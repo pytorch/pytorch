@@ -27,7 +27,7 @@ from torch.distributed.elastic.rendezvous import (
     RendezvousTimeoutError,
 )
 
-from .utils import _parse_hostname_and_port
+from .utils import _parse_rendezvous_endpoint
 
 
 _log_fmt = logging.Formatter("%(levelname)s %(asctime)s %(message)s")
@@ -1160,7 +1160,7 @@ def _create_etcd_client(params: RendezvousParameters) -> etcd.Client:
     """
     Creates a new ``etcd.Client`` from the specified ``RendezvousParameters``.
     """
-    hostname, port = _parse_hostname_and_port(params.endpoint, 2379)
+    hostname, port = _parse_rendezvous_endpoint(params.endpoint, 2379)
 
     # The communication protocol
     protocol = params.config.get("protocol")
