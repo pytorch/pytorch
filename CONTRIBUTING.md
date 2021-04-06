@@ -139,7 +139,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
 with `brew install cmake` if you are developing on MacOS or Linux system.
 * Our `setup.py` requires Python >= 3.6
 * If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
-  that is used in tests), you can add `[Skip CI]` to your commit message to skip all build / test steps.
+  that is used in tests), you can add `[skip ci]` to your commit message to skip all build / test steps.
 * If you run into errors when running `python setup.py develop`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
