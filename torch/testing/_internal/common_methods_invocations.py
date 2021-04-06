@@ -3859,8 +3859,6 @@ op_db: List[OpInfo] = [
     OpInfo('real',
            op=torch.real,
            dtypes=complex_types(),
-           dtypesIfCPU=complex_types(),
-           dtypesIfCUDA=complex_types(),
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
