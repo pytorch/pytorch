@@ -26,6 +26,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
+#include <c10/util/Half-math.h>
 #include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/TypeCast.h>
@@ -319,7 +320,7 @@ public:
   }
   Vec256<T> copysign(const Vec256<T> &sign) const {
     Vec256<T> ret;
-    for (int64_t i = 0; i < size(); i++) {
+    for (int i = 0; i < size(); i++) {
       ret[i] = std::copysign(values[i], sign[i]);
     }
     return ret;
