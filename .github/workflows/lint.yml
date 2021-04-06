@@ -67,6 +67,9 @@ jobs:
         run: |
           set -eux
           python torch/testing/check_kernel_launches.py |& tee ${GITHUB_WORKSPACE}/cuda_kernel_launch_checks.txt
+      - name: Ensure no direct cub include
+        run: |
+          (! git grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/CubUtils.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/CubUtils.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
 
   toc:
     runs-on: ubuntu-18.04
