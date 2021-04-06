@@ -4,9 +4,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
 
-#include <thrust/sort.h>
 #include <ATen/cuda/cub.cuh>
-
 
 namespace at { namespace native {
 
@@ -22,6 +20,8 @@ bool should_use_th_sort(const Tensor &self, int64_t dim) {
   }
   return nsort <= threshold;
 }
+
+std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim);
 
 // We perform a vectorized segmented sort in cub.
 // Say we are sorting a (2, 3) tensor. We have in flattened form:
@@ -48,9 +48,9 @@ bool should_use_th_sort(const Tensor &self, int64_t dim) {
 // smaller sort `numSlices` times), but the cub sort
 // implementation here is a catch-all, so we're not looking for
 // efficiency, but instead correctness.
-std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & indices, const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
+std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
   if (should_use_th_sort(self, dim)) {
-    return legacy::cuda::_th_sort_out_stable(values, indices, self, stable, dim, descending);
+    return legacy::cuda::_th_sort_out_stable(self, stable, dim, descending, values, indices);
   }
   // this algorithm is always stable
   TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
@@ -83,30 +83,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
   if (is_non_overlapping_and_dense && self.stride(dim) == 1) {
     self_ = self;
   } else {
-    // sort the strides in descending order according to its value,
-    // keeping dim the last.
-    std::vector<int64_t> strides = self.strides().vec();
-    strides[dim] = -1;
-    std::vector<int64_t> original_dim(ndim);
-    for (int64_t i = 0; i < ndim; i++) {
-      original_dim[i] = i;
-    }
-    thrust::stable_sort_by_key(
-      thrust::host, strides.data(), strides.data() + ndim, original_dim.data(),
-      thrust::greater<int64_t>()
-    );
-    // generate contiguous strides on permuted dims
-    std::vector<int64_t> new_strides(ndim);
-    std::vector<int64_t> new_strides_unsort(ndim);
-    int64_t cumprod = 1;
-    for (int64_t i = 0; i < ndim; i++) {
-      new_strides[ndim - 1 - i] = cumprod;
-      cumprod *= self.sizes()[original_dim[ndim - 1 - i]];
-    }
-    // unsort new strides
-    for (int64_t i = 0; i < ndim; i++) {
-      new_strides_unsort[original_dim[i]] = new_strides[i];
-    }
+    auto new_strides_unsort = infer_dense_strides_dim_last(self, dim);
     self_ = at::empty_strided(self.sizes(), new_strides_unsort, self.options());
     self_.copy_(self);
   }
@@ -211,11 +188,11 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
   return {values, indices};
 }
 
-std::tuple<Tensor &,Tensor &> sort_out_cuda(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
+std::tuple<Tensor &,Tensor &> sort_out_cuda(const Tensor & self, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
   if (should_use_th_sort(self, dim)) {
-    return legacy::cuda::_th_sort_out(values, indices, self, dim, descending);
+    return legacy::cuda::_th_sort_out(self, dim, descending, values, indices);
   }
-  return sort_out_stable_cuda(values, indices, self, /*stable=*/false, dim, descending);
+  return sort_out_stable_cuda(self, /*stable=*/false, dim, descending, values, indices);
 }
 
 std::tuple<Tensor,Tensor> sort_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
@@ -223,7 +200,7 @@ std::tuple<Tensor,Tensor> sort_stable_cuda(const Tensor & self, c10::optional<bo
     return legacy::cuda::_th_sort_stable(self, stable, dim, descending);
   }
   Tensor values, indices;
-  return sort_out_stable_cuda(values, indices, self, stable, dim, descending);
+  return sort_out_stable_cuda(self, stable, dim, descending, values, indices);
 }
 
 std::tuple<Tensor,Tensor> sort_cuda(const Tensor & self, int64_t dim, bool descending) {  int64_t threshold;

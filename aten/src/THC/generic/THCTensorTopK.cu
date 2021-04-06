@@ -172,7 +172,7 @@ void THCTensor_(topk)(THCState* state,
 
       auto sortedTopK_tensor = THTensor_wrap(sortedTopK);
       auto sortedIndices_tensor = THTensor_wrap(sortedIndices);
-      at::native::sort_out_cuda(sortedTopK_tensor, sortedIndices_tensor, THTensor_wrap(topK), dim, dir);
+      at::native::sort_out_cuda(THTensor_wrap(topK), dim, dir, sortedTopK_tensor, sortedIndices_tensor);
 
       THCudaLongTensor* sortedTopKIndices = THCudaLongTensor_new(state);
 

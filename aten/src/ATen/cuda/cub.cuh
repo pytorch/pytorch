@@ -1,5 +1,35 @@
+#pragma once
+
+#include <cstddef>
+
+// include cub in a safe manner, see:
+// https://github.com/pytorch/pytorch/pull/55292
+#undef CUB_NS_POSTFIX //undef to avoid redefinition warnings
+#undef CUB_NS_PREFIX
+#define CUB_NS_PREFIX namespace at { namespace cuda { namespace detail {
+#define CUB_NS_POSTFIX }}}
 #include <cub/cub.cuh>
+#undef CUB_NS_POSTFIX
+#undef CUB_NS_PREFIX
+
+namespace at { namespace native {
+
+namespace cub = at::cuda::detail::cub;
+
+}}
+
+#include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+
+// handle the temporary storage and 'twice' calls for cub API
+#define CUB_WRAPPER(func, ...) do {                                        \
+  size_t temp_storage_bytes = 0;                                           \
+  func(nullptr, temp_storage_bytes, __VA_ARGS__);                          \
+  auto allocator = c10::cuda::CUDACachingAllocator::get();                 \
+  auto temp_storage = allocator->allocate(temp_storage_bytes);             \                       \
+  func(temp_storage.get(), temp_storage_bytes, __VA_ARGS__);               \
+  AT_CUDA_CHECK(cudaGetLastError());                                       \
+} while (false)
 
 namespace at {
 namespace cuda {
@@ -27,30 +57,15 @@ static inline void sort_pairs(
   const value_t_ *values_in_ = reinterpret_cast<const value_t_*>(values_in);
   value_t_ *values_out_ = reinterpret_cast<value_t_*>(values_out);
 
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  // Use the sorted order of keys to rearrange the result array
-  size_t temp_storage_bytes = 0;
-  if (descending) {
-    ::cub::DeviceRadixSort::SortPairsDescending(
-      nullptr, temp_storage_bytes,
-      keys_in_, keys_out_, values_in_, values_out_, n,
-      start_bit, end_bit, at::cuda::getCurrentCUDAStream());
-    auto tmpDataPtr = allocator.allocate(temp_storage_bytes);
-    ::cub::DeviceRadixSort::SortPairsDescending(
-      tmpDataPtr.get(), temp_storage_bytes,
-      keys_in_, keys_out_, values_in_, values_out_, n,
-      start_bit, end_bit, at::cuda::getCurrentCUDAStream());
-  } else {
-    ::cub::DeviceRadixSort::SortPairs(
-        nullptr, temp_storage_bytes,
-        keys_in_, keys_out_, values_in_, values_out_, n,
-        start_bit, end_bit, at::cuda::getCurrentCUDAStream());
-    auto tmpDataPtr = allocator.allocate(temp_storage_bytes);
-    ::cub::DeviceRadixSort::SortPairs(
-        tmpDataPtr.get(), temp_storage_bytes,
-        keys_in_, keys_out_, values_in_, values_out_, n,
-        start_bit, end_bit, at::cuda::getCurrentCUDAStream());
-  }
+  // if (descending) {
+  //   CUB_WRAPPER(at::native::cub::DeviceRadixSort::SortPairsDescending,
+  //     keys_in_, keys_out_, values_in_, values_out_, n,
+  //     start_bit, end_bit, at::cuda::getCurrentCUDAStream());
+  // } else {
+  //   CUB_WRAPPER(at::native::cub::DeviceRadixSort::SortPairs,
+  //     keys_in_, keys_out_, values_in_, values_out_, n,
+  //     start_bit, end_bit, at::cuda::getCurrentCUDAStream());
+  // }
 }
 
 }}}
