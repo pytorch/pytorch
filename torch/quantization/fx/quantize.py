@@ -349,7 +349,7 @@ def handle_copy_nodes(
         return False
 
     result_graph = Graph()
-    cache = dict()
+    cache: Dict[Node, bool] = dict()
     for node in observed_graph.nodes:
         root_node, matched_nodes, pattern, quantize_handler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
@@ -1239,7 +1239,7 @@ class Quantizer:
             else:
                 matched.append(node)
 
-        cache = dict()
+        cache: Dict[Node, bool] = dict()
         for node in reversed(graph.nodes):
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
@@ -1327,8 +1327,7 @@ class Quantizer:
          int8 and then float16
         """
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]] = defaultdict(list)
-
-        cache = dict()
+        cache: Dict[Node, bool] = dict()
         def visit(node, matched_pattern, qconfig):
             def visit_arg(arg):
                 is_weight = node_arg_is_weight(node, arg)
