@@ -5,7 +5,6 @@
 
 #include <memory>
 
-
 namespace torch {
 namespace distributed {
 namespace spmd {
@@ -25,6 +24,6 @@ class Event : public torch::CustomClassHolder {
   const EventSchema schema_;
 };
 
-} // spmd
-} // distributed
-} // torch
+} // namespace spmd
+} // namespace distributed
+} // namespace torch

@@ -79,8 +79,7 @@ class BucketReadyEvent : public Event {
 class CommDoneEvent : public Event {
  public:
   explicit CommDoneEvent(std::shared_ptr<Bucket> bucket)
-      : Event(EventSchema(EventType::COMM_DONE)),
-        bucket_(std::move(bucket)) {}
+      : Event(EventSchema(EventType::COMM_DONE)), bucket_(std::move(bucket)) {}
 
   inline const std::shared_ptr<Bucket>& bucket() const {
     return bucket_;
@@ -93,8 +92,7 @@ class CommDoneEvent : public Event {
 class GlobalGradReadyEvent : public Event {
  public:
   explicit GlobalGradReadyEvent(size_t index)
-      : Event(EventSchema(EventType::LOCAL_GRAD_READY)),
-        index_(index) {}
+      : Event(EventSchema(EventType::LOCAL_GRAD_READY)), index_(index) {}
 
   inline size_t index() const {
     return index_;
@@ -104,6 +102,6 @@ class GlobalGradReadyEvent : public Event {
   const size_t index_;
 };
 
-} // spmd
-} // distributed
-} // torch
+} // namespace spmd
+} // namespace distributed
+} // namespace torch

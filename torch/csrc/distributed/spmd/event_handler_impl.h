@@ -58,7 +58,6 @@ class TORCH_API DefaultBucketer : public EventHandler {
       const c10::intrusive_ptr<Event>& event) override;
 
  private:
-
   std::vector<std::shared_ptr<Future>> handlePrepareModule(
       c10::intrusive_ptr<PrepareModuleEvent> event);
 
@@ -91,7 +90,6 @@ class TORCH_API AllReduceComm : public EventHandler {
 
   const c10::intrusive_ptr<c10d::ProcessGroup> pg_;
 };
-
 
 } // namespace spmd
 } // namespace distributed

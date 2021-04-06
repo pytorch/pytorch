@@ -6,9 +6,9 @@ namespace spmd {
 
 // TODO: add PRE_BACKWARD and POST_BACKWARD
 enum EventType {
-  PREPARE_MODULE = 0,     // Type I event
-  PRE_FORWARD = 1,        // Type I event
-  POST_FORWARD = 2,       // Type I event
+  PREPARE_MODULE = 0, // Type I event
+  PRE_FORWARD = 1, // Type I event
+  POST_FORWARD = 2, // Type I event
   LOCAL_GRAD_READY = 3,
   BUCKET_READY = 4,
   COMM_DONE = 5,

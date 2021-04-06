@@ -4,7 +4,6 @@
 #include <torch/csrc/distributed/spmd/event_handler_impl.h>
 #include <torch/csrc/utils/pybind.h>
 
-
 namespace torch {
 namespace distributed {
 namespace spmd {
@@ -32,18 +31,15 @@ PyObject* spmd_init(PyObject* _unused, PyObject* noargs) {
 
   auto module = py::handle(m).cast<py::module>();
 
-
   auto eventHandler = shared_ptr_class_<EventHandler>(module, "EventHandler");
 
   shared_ptr_class_<DefaultTrigger>(module, "DefaultTrigger", eventHandler)
       .def(py::init<>());
 
-  shared_ptr_class_<DefaultBucketer>(
-      module, "DefaultBucketer", eventHandler)
+  shared_ptr_class_<DefaultBucketer>(module, "DefaultBucketer", eventHandler)
       .def(py::init<>());
 
-  shared_ptr_class_<AllReduceComm>(
-      module, "AllReduceComm", eventHandler)
+  shared_ptr_class_<AllReduceComm>(module, "AllReduceComm", eventHandler)
       .def(
           py::init<c10::intrusive_ptr<::c10d::ProcessGroup>>(),
           py::arg("process_group"));
@@ -74,9 +70,10 @@ PyObject* spmd_init(PyObject* _unused, PyObject* noargs) {
               >>> model(inputs).sum().backward()
       )")
       .def(
-          py::init([](const std::vector<std::shared_ptr<EventHandler>>& handlers) {
-            return std::make_shared<Engine>(handlers);
-          }),
+          py::init(
+              [](const std::vector<std::shared_ptr<EventHandler>>& handlers) {
+                return std::make_shared<Engine>(handlers);
+              }),
           py::arg("handlers"))
       .def(
           "prepare_module",
@@ -113,6 +110,6 @@ PyMethodDef* python_functions() {
   return methods;
 }
 
-} // spmd
-} // distributed
-} // torch
+} // namespace spmd
+} // namespace distributed
+} // namespace torch

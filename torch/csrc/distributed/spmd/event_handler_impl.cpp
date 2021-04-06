@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/spmd/event_handler_impl.h>
 
-
 namespace torch {
 namespace distributed {
 namespace spmd {
@@ -10,9 +9,11 @@ using c10::IValue;
 namespace {
 
 template <class T>
-std::vector<std::shared_ptr<Future>> createOneFutureEvent(c10::intrusive_ptr<T> event) {
+std::vector<std::shared_ptr<Future>> createOneFutureEvent(
+    c10::intrusive_ptr<T> event) {
   auto future = std::make_shared<Future>(at::AnyClassType::get());
-  future->markCompleted(IValue(c10::static_intrusive_pointer_cast<Event>(event)));
+  future->markCompleted(
+      IValue(c10::static_intrusive_pointer_cast<Event>(event)));
   std::vector<std::shared_ptr<Future>> futures;
   futures.reserve(1);
   futures.emplace_back(std::move(future));
@@ -39,8 +40,7 @@ std::vector<EventSchema> RootHandler::egressEvents() const {
 std::vector<std::shared_ptr<Future>> RootHandler::handleEvent(
     const c10::intrusive_ptr<Event>& /* unused */) {
   TORCH_INTERNAL_ASSERT(
-      false,
-      "RootHandler should not handle any ingress Events.");
+      false, "RootHandler should not handle any ingress Events.");
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -77,8 +77,7 @@ std::vector<std::shared_ptr<Future>> DefaultTrigger::handlePrepareModule(
   params_ = event->parameters();
   for (size_t index = 0; index < params_.size(); ++index) {
     auto& param = params_[index];
-    auto gradAccumulator =
-        torch::autograd::impl::grad_accumulator(param);
+    auto gradAccumulator = torch::autograd::impl::grad_accumulator(param);
     // Hook to execute after the gradient accumulator has executed.
     gradAccumulator->add_post_hook(
         torch::make_unique<torch::autograd::utils::LambdaPostHook>(
@@ -171,20 +170,18 @@ std::vector<std::shared_ptr<Future>> DefaultBucketer::handleLocalGradReady(
       c10::make_intrusive<BucketReadyEvent>(std::move(bucket)));
 }
 
-
 std::vector<std::shared_ptr<Future>> DefaultBucketer::handleCommDone(
     c10::intrusive_ptr<CommDoneEvent> event) {
   const auto& bucket = event->bucket();
   auto& grad = params_[bucket->index_].mutable_grad();
   if (bucket->tensor_.data_ptr() != grad.data_ptr()) {
-    grad.copy_(bucket->tensor_, /*non_blocking=*/ true);
+    grad.copy_(bucket->tensor_, /*non_blocking=*/true);
   }
 
   // FIXME
   TORCH_INTERNAL_ASSERT(bucket->paramIndices_.size() == 1);
   return createOneFutureEvent<GlobalGradReadyEvent>(
-      c10::make_intrusive<GlobalGradReadyEvent>(
-          bucket->paramIndices_[0]));
+      c10::make_intrusive<GlobalGradReadyEvent>(bucket->paramIndices_[0]));
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -208,9 +205,7 @@ std::vector<std::shared_ptr<Future>> AllReduceComm::handleEvent(
     }
     default:
       TORCH_INTERNAL_ASSERT(
-          false,
-          "AllReduceComm unexcepted event type ",
-          event->schema().type_);
+          false, "AllReduceComm unexcepted event type ", event->schema().type_);
   }
 }
 
@@ -224,7 +219,6 @@ std::vector<std::shared_ptr<Future>> AllReduceComm::handleBucketReady(
   return createOneFutureEvent<CommDoneEvent>(
       c10::make_intrusive<CommDoneEvent>(bucket));
 }
-
 
 } // namespace spmd
 } // namespace distributed

@@ -6,11 +6,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
-
 namespace torch {
 namespace distributed {
 namespace spmd {
-
 
 // The event-based engine that maintains the event-handling graph and routes
 // events to corresponding handlers properly.
@@ -45,7 +43,6 @@ namespace spmd {
 // is considered invalid, and Engine ctor will throw.
 class TORCH_API Engine {
  public:
-
   // Construct and verifies the event-handling graph using the given handlers.
   explicit Engine(std::vector<std::shared_ptr<EventHandler>> handlers);
 
@@ -56,7 +53,6 @@ class TORCH_API Engine {
   void preForward();
 
  private:
-
   // Node base class for the event-handling graph
   struct Node {
     std::vector<std::shared_ptr<Node>> nextEdges_;
@@ -71,8 +67,7 @@ class TORCH_API Engine {
 
   // Node derived class of an Event
   struct EventNode : Node {
-    explicit EventNode(EventSchema schema)
-        : schema_(std::move(schema)) {}
+    explicit EventNode(EventSchema schema) : schema_(std::move(schema)) {}
     const EventSchema schema_;
   };
 
@@ -88,13 +83,11 @@ class TORCH_API Engine {
   // engine uses this map to find the EventNode and from EventNode the engine
   // can then find the HandlerNode. I.e., this is how we store the bipartite
   // event-handling graph.
-  std::unordered_map<EventSchema,
-                     std::shared_ptr<EventNode>,
-                     EventSchema::Hash> eventNodes_;
+  std::unordered_map<EventSchema, std::shared_ptr<EventNode>, EventSchema::Hash>
+      eventNodes_;
   // All EventHandlers
   std::vector<std::shared_ptr<EventHandler>> handlers_;
 };
-
 
 } // namespace spmd
 } // namespace distributed

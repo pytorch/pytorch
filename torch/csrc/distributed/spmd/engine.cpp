@@ -9,11 +9,16 @@ namespace spmd {
 Engine::Engine(std::vector<std::shared_ptr<EventHandler>> handlers)
     : handlers_(std::move(handlers)) {
   // temporary helper data structure
-  std::unordered_map<EventSchema, std::vector<std::shared_ptr<HandlerNode>>, EventSchema::Hash> ingressMap;
+  std::unordered_map<
+      EventSchema,
+      std::vector<std::shared_ptr<HandlerNode>>,
+      EventSchema::Hash>
+      ingressMap;
 
   std::vector<std::shared_ptr<HandlerNode>> handlerNodes;
   // RootHandler generates Type I events
-  auto rootHandler = std::make_shared<HandlerNode>(std::make_shared<RootHandler>());
+  auto rootHandler =
+      std::make_shared<HandlerNode>(std::make_shared<RootHandler>());
   handlerNodes.push_back(rootHandler);
 
   {
@@ -22,12 +27,12 @@ Engine::Engine(std::vector<std::shared_ptr<EventHandler>> handlers)
     // check ingress events, and build ingressMap that points from each event
     // to it's corresponding handlers.
     for (auto& handler : handlers_) {
-    auto handlerNode = std::make_shared<HandlerNode>(handler);
-    handlerNodes.push_back(handlerNode);
-    for (auto& eventSchema: handler->ingressEvents()) {
-      // TODO: check no duplicated events
-      ingressMap[eventSchema].push_back(handlerNode);
-    }
+      auto handlerNode = std::make_shared<HandlerNode>(handler);
+      handlerNodes.push_back(handlerNode);
+      for (auto& eventSchema : handler->ingressEvents()) {
+        // TODO: check no duplicated events
+        ingressMap[eventSchema].push_back(handlerNode);
+      }
     }
 
     // check egress events to build the bipartite graph
@@ -75,8 +80,7 @@ Engine::Engine(std::vector<std::shared_ptr<EventHandler>> handlers)
 }
 
 void Engine::prepareModule(std::vector<at::Tensor> parameters) {
-  processEvent(
-      c10::make_intrusive<PrepareModuleEvent>(std::move(parameters)));
+  processEvent(c10::make_intrusive<PrepareModuleEvent>(std::move(parameters)));
 }
 
 void Engine::preForward() {
@@ -91,9 +95,9 @@ void Engine::processEvent(const c10::intrusive_ptr<Event>& event) {
   if (iter != eventNodes_.end()) {
     for (auto& node : iter->second->nextEdges_) {
       auto handlerNode = std::static_pointer_cast<HandlerNode>(node);
-      for (auto& futureEvent: handlerNode->handler_->handleEvent(event)) {
+      for (auto& futureEvent : handlerNode->handler_->handleEvent(event)) {
         std::weak_ptr<Future> wp = futureEvent;
-        futureEvent->addCallback([this, wp](){
+        futureEvent->addCallback([this, wp]() {
           auto fut = wp.lock();
           processEvent(fut->value().toCustomClass<Event>());
         });
