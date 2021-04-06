@@ -1977,13 +1977,15 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
 
 
 def sample_inputs_polygamma(op_info, device, dtype, requires_grad):
-    tensors = [make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-               make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad), ]
-
+    make_arg = partial(make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad))
+    tensor_shapes = [(S, S), ()]
     ns = [1, 2, 3, 4, 5]
-    samples = [SampleInput(t, args=(n,)) for t, n in product(tensors, ns)]
 
-    return samples
+    def generator():
+        for shape, n in product(tensor_shapes, ns):
+            yield SampleInput(make_arg(shape, args=(n,)))
+
+    return list(generator())
 
 
 def sample_inputs_entr(op_info, device, dtype, requires_grad):
