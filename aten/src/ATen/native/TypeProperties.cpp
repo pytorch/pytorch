@@ -79,12 +79,11 @@ ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeS
   ResultTypeState new_state = in_state;
   ScalarType current = tensor.scalar_type();
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-    auto current_default = typeMetaToScalarType(at::get_default_dtype());
     if(isComplexType(current)) {
       current = typeMetaToScalarType(at::get_default_complex_dtype());
     }
     else if(isFloatingType(current)) {
-      current = current_default;
+      current = typeMetaToScalarType(at::get_default_dtype());
     }
   }
   if ( tensor.dim() > 0 ) {
@@ -94,6 +93,18 @@ ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeS
   } else {
     new_state.zeroResult = promote_skip_undefined(in_state.zeroResult, current);
   }
+  return new_state;
+}
+
+ResultTypeState update_result_type_state(const Scalar& scalar, const ResultTypeState& in_state) {
+  ResultTypeState new_state = in_state;
+  ScalarType current = scalar.type();
+  if (isComplexType(current)) {
+    current = typeMetaToScalarType(at::get_default_complex_dtype());
+  } else if (isFloatingType(current)) {
+    current = typeMetaToScalarType(at::get_default_dtype());
+  }
+  new_state.wrappedResult = promote_skip_undefined(in_state.wrappedResult, current);
   return new_state;
 }
 
@@ -115,10 +126,10 @@ ScalarType result_type(const Tensor &tensor, const Tensor &other) {
 }
 
 ScalarType result_type(const Tensor &tensor, const Scalar& other) {
-  auto tensor2 = scalar_to_tensor(other);
-  tensor2.unsafeGetTensorImpl()->set_wrapped_number(true);
-  std::vector<Tensor> tensors{std::move(tensor), std::move(tensor2)};
-  return native::result_type(tensors);
+  ResultTypeState state = {};
+  state = update_result_type_state(tensor, state);
+  state = update_result_type_state(other, state);
+  return result_type(state);
 }
 
 ScalarType result_type(const Scalar& scalar, const Tensor &tensor) {
@@ -126,9 +137,10 @@ ScalarType result_type(const Scalar& scalar, const Tensor &tensor) {
 }
 
 ScalarType result_type(const Scalar& scalar1, const Scalar& scalar2) {
-  auto tensor1 = scalar_to_tensor(scalar1);
-  tensor1.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return at::result_type(tensor1, scalar2);
+  ResultTypeState state = {};
+  state = update_result_type_state(scalar1, state);
+  state = update_result_type_state(scalar2, state);
+  return result_type(state);
 }
 
 bool can_cast(const at::ScalarType from, const at::ScalarType to) {
