@@ -1262,10 +1262,10 @@ class TestONNXRuntime(unittest.TestCase):
 
             def forward(self, input):
                 output, indices = self.pool(input)
-                return self.unpool(output, indices)
+                return self.unpool(output, indices)#, output_size=torch.Size([1, 1, 5, 5]))
         
         model = MaxUnpoolModel()
-        x = torch.rand(1, 1, 4, 4)
+        x = torch.ones(1, 1, 4, 4)
         print(model(x))
         self.run_test(model, x)
 

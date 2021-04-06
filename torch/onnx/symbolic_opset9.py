@@ -910,23 +910,32 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 
 def _max_unpool(name, tuple_fn, ndims):
     def symbolic_fn(g, input, indices, output_size, *args):
-        maxpool_node = input.node().inputs()
-        print(maxpool_node)
-        '''if not stride:
-            stride = kernel_size
-        padding = tuple(tuple_fn(padding))
-        if ceil_mode:
-            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-            padding = padding + tuple(numpy.add(padding_ceil, padding))
-        else:
-            padding = padding * 2
+        # Set appropriately for check
+        kernel_size = 2
         kwargs = {
-            'kernel_shape_i': tuple_fn(kernel_size),
-            'pads_i': padding,
-            'strides_i': tuple_fn(stride),
-        }'''
-        kwargs = {}
-        r = g.op("MaxUnpool", input, indices, output_size, **kwargs)
+            'kernel_shape_i': tuple_fn(kernel_size)
+        }
+        # Check if pads and strides are provided
+        if len(args) == 2:
+            kwargs['pads_i'] = tuple_fn(args[0])
+            kwargs['strides_i'] = tuple_fn(args[1])
+
+        # Calculate output size
+        input_rank = sym_help._get_tensor_rank(input)
+        if input_rank is None:
+            raise RuntimeError('Unsupported: ONNX export of max_unpool for unknown '
+                               'input rank.')
+        
+        dim_n = sym_help._unsqueeze_helper(g, sym_help._size_helper(g, input, g.op("Constant", value_t=torch.tensor(0))), [0])
+        output_shape = [dim_n]
+        if input_rank == ndims + 2:
+            dim_c = sym_help._unsqueeze_helper(g, sym_help._size_helper(g, input, g.op("Constant", value_t=torch.tensor(1))), [0])
+            output_shape.append(dim_c)
+        for shape in sym_help._unpack_list(output_size):
+            output_shape.append(sym_help._unsqueeze_helper(g, shape, [0]))
+        output_shape = g.op("Concat", *output_shape, axis_i=0)
+
+        r = g.op("MaxUnpool", input, indices, output_shape, **kwargs)
         return r
 
     return symbolic_fn
