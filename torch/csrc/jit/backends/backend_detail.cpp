@@ -50,7 +50,7 @@ Module codegen_backend_module(
     const c10::Dict<IValue, IValue>& method_compile_spec,
     const c10::DictTypePtr& any_dict_ty) {
   const c10::QualifiedName qual_backend_name(
-        {"__torch__",
+      {"__torch__",
        "torch",
        "classes",
        kBackendsNamespace,
