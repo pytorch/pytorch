@@ -12,6 +12,7 @@ class NnapiModule(torch.nn.Module):
     """
 
     comp: Optional[torch.classes._nnapi.Compilation]
+    weights: List[torch.Tensor]
 
     def __init__(
             self,
