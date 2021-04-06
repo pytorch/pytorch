@@ -2431,9 +2431,7 @@ op_db: List[OpInfo] = [
                #   doesn't work on all platforms
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes', dtypes=(torch.bfloat16,)),
                # TODO: remove redundant method_tests() entries
-               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
-               # addmm does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out')),
+               SkipInfo('TestOpInfo', 'test_duplicate_method_tests')),
            sample_inputs_func=sample_inputs_addmm),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -2449,30 +2447,18 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addr),
     OpInfo('amax',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_amax_amin,
-           skips=(
-               # amax does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           sample_inputs_func=sample_inputs_amax_amin,),
     OpInfo('amin',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_amax_amin,
-           skips=(
-               # amin does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           sample_inputs_func=sample_inputs_amax_amin),
     OpInfo('argmax',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_argmax_argmin,
-           skips=(
-               # argmax does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           sample_inputs_func=sample_inputs_argmax_argmin,),
     OpInfo('argmin',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_argmax_argmin,
-           skips=(
-               # argmin does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           sample_inputs_func=sample_inputs_argmax_argmin,),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
                    ref=np.arcsin,
@@ -2693,7 +2679,7 @@ op_db: List[OpInfo] = [
                # "cumsum_out_{cpu,cuda}" not implemented for 'Bool'
                SkipInfo('TestOpInfo', 'test_supported_dtypes',
                         dtypes=(torch.bool,)),
-               # cumsum does not correctly warn when resizing out= inputs
+               # cumsum does not handle correctly out= dtypes
                SkipInfo('TestCommon', 'test_out'),
            ),
            sample_inputs_func=sample_inputs_cumulative_ops),
@@ -2704,7 +2690,7 @@ op_db: List[OpInfo] = [
                # "cumprod_out_{cpu, cuda}" not implemented for 'Bool'
                SkipInfo('TestOpInfo', 'test_supported_dtypes',
                         dtypes=(torch.bool,)),
-               # cumprod does not correctly warn when resizing out= inputs
+               # cumprod does not handle correctly out= dtypes
                SkipInfo('TestCommon', 'test_out',
                         dtypes=[torch.float32]),
            ),
@@ -2780,10 +2766,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-           sample_inputs_func=sample_inputs_diag,
-           skips=(
-               # diag does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           sample_inputs_func=sample_inputs_diag),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -3043,7 +3026,7 @@ op_db: List[OpInfo] = [
                # "pow" not implemented for 'BFloat16' or 'half'
                SkipInfo('TestOpInfo', 'test_supported_backward',
                         dtypes=(torch.bfloat16, torch.float16)),
-               # linalg.norm does not correctly warn when resizing out= inputs
+               # linalg.norm does not fail when out= has a different dtype to input
                SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('linalg.qr',
@@ -3191,12 +3174,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_masked_select,
-           supports_out=True,
-           skips=(
-               # masked_select does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           sample_inputs_func=sample_inputs_masked_select),
     OpInfo('max',
            op=torch.max,
            variant_test_name='binary',
@@ -3285,7 +3263,7 @@ op_db: List[OpInfo] = [
            skips=(
                # "cumprod_cuda" not implemented for 'BFloat16'
                SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
-               # prod does not correctly warn when resizing out= inputs
+               # prod does not support the (Tensor, *, out) overload
                SkipInfo('TestCommon', 'test_out',
                         dtypes=[torch.float32]),
            ),
@@ -3422,11 +3400,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bfloat16, torch.half),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16, torch.half),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
-                   supports_autograd=False,
-                   skips=(
-                       # signbit does not correctly warn when resizing out= inputs
-                       SkipInfo('TestCommon', 'test_out'),
-                   )),
+                   supports_autograd=False,),
     OpInfo('solve',
            op=torch.solve,
            dtypes=floating_and_complex_types(),
@@ -3760,10 +3734,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index_copy),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           skips=(
-               # index_select does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
-           ),
            sample_inputs_func=sample_inputs_index_select),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
