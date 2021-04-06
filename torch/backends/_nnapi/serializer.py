@@ -317,6 +317,9 @@ class _NnapiSerializer(object):
         if config is None:
             config = {}
 
+    def get_next_operand_id(self):
+        return len(self.operands)
+
     # Add a tensor operand corresponding to a JIT Value.
     # Returns the NNAPI operand ID.  Can be looked up later with
     # get_tensor_operand_by_jitval.
@@ -325,7 +328,7 @@ class _NnapiSerializer(object):
         if jitval in self.jitval_operand_map:
             raise Exception("Duplicate tensor: %r" % jitval)
 
-        operand_id = len(self.operands)
+        operand_id = self.get_next_operand_id()
         self.operands.append(oper)
         self.jitval_operand_map[jitval] = operand_id
         return operand_id
@@ -335,7 +338,7 @@ class _NnapiSerializer(object):
     # to implement one JIT IR node.  Returns the NNAPI operand ID.
     def add_anonymous_tensor_operand(self, oper):
         assert isinstance(oper, Operand)
-        operand_id = len(self.operands)
+        operand_id = self.get_next_operand_id()
         self.operands.append(oper)
         return operand_id
 
