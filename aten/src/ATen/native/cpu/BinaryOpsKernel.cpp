@@ -52,7 +52,7 @@ void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Sc
     auto max_vec = Vec256<scalar_t>(max_scalar);
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t {
-				scalar_t x = a + alpha * b;
+        scalar_t x = a + alpha * b;
         return std::min(max_scalar, std::max(min_scalar, x));
       },
       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
