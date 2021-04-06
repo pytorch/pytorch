@@ -14013,6 +14013,110 @@ TEST(NVFuserTest, FusionPredicatedBlockBroadcast_CUDA) {
   testValidate(&fusion, outputs, inputs, {t4}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionSegmentVerticalMerge_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(3);
+
+  fusion->addInput(tv0);
+  // {first kernel}
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = add(tv1, tv0);
+  auto tv3 = sum(tv2, {0});
+  auto tv4 = add(tv3, tv0);
+  auto tv5 = sum(tv4, {0});
+  auto tv6 = sum(tv5, {0});
+  // {second kernel}
+  auto tv7 = add(tv6, tv5);
+  auto tv8 = add(tv7, tv5);
+  auto tv9 = sum(tv8, {0});
+
+  fusion->addOutput(tv9);
+
+  SegmentCandidateFinderOptions segment_options;
+  segment_options.run_herrmann_merge = false;
+  segment_options.run_final_merge = false;
+
+  auto segmented_fusion =
+      SegmentCandidateFinder::segment(fusion.get(), segment_options);
+
+  TORCH_CHECK(segmented_fusion->groups().size() == 2);
+}
+
+TEST(NVFuserTest, FusionSegmentHorizontalMerge_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(3);
+  auto i0 = new Double();
+
+  fusion->addInput(tv0);
+  fusion->addInput(i0);
+
+  // Branch 0 {first kernel}
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = add(tv0, i0);
+  auto tv3 = unaryOp(UnaryOpType::Rsqrt, tv2);
+  auto tv4 = sum(tv3, {0});
+
+  // Branch 1 {first kernel}
+  auto tv5 = unaryOp(UnaryOpType::Rsqrt, tv3);
+  auto tv6 = sum(tv5, {0});
+
+  // Incompatible {second kernel}
+  auto tv7 = sum(tv6, {0});
+
+  fusion->addOutput(tv1);
+  fusion->addOutput(tv4);
+  fusion->addOutput(tv7);
+
+  SegmentCandidateFinderOptions segment_options;
+  segment_options.run_herrmann_merge = false;
+  segment_options.run_final_merge = false;
+
+  auto segmented_fusion =
+      SegmentCandidateFinder::segment(fusion.get(), segment_options);
+
+  TORCH_CHECK(segmented_fusion->groups().size() == 2);
+}
+
+TEST(NVFuserTest, FusionSegmentMixReduction_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(3);
+
+  fusion->addInput(tv0);
+
+  // def of tv1 in kernel 1 through horizontal
+  auto tv1 = sum(tv0, {0, 1});
+  // kernel 2
+  auto tv2 = sum(tv0, {2});
+  auto tv3 = broadcast(tv2, {false, false, true});
+  auto tv4 = add(tv0, tv3);
+  auto tv5 = sum(tv4, {2});
+  // end of kernel 2
+  // kernel 1
+  auto tv6 = unaryOp(UnaryOpType::Rsqrt, tv0);
+  auto tv7 = sum(tv6, {0, 1});
+  auto tv8 = sum(tv6, {0, 1});
+
+  fusion->addOutput(tv1);
+  fusion->addOutput(tv5);
+  fusion->addOutput(tv7);
+  fusion->addOutput(tv8);
+
+  SegmentCandidateFinderOptions segment_options;
+  segment_options.run_herrmann_merge = false;
+  segment_options.run_final_merge = false;
+
+  auto segmented_fusion =
+      SegmentCandidateFinder::segment(fusion.get(), segment_options);
+
+  TORCH_CHECK(segmented_fusion->groups().size() <= 2);
+}
+
 TEST(NVFuserTest, FusionSingleElement_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

@@ -21,7 +21,8 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::CudaKernel, false},
       {DebugDumpOption::CudaFull, false},
       {DebugDumpOption::LaunchParam, false},
-      {DebugDumpOption::FusionSegments, false}};
+      {DebugDumpOption::FusionSegments, false},
+      {DebugDumpOption::FusionSegmentsDrawing, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -42,13 +43,15 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::LaunchParam] = true;
       } else if (token == "segmented_fusion") {
         options_map[DebugDumpOption::FusionSegments] = true;
+      } else if (token == "draw_segmented_fusion") {
+        options_map[DebugDumpOption::FusionSegmentsDrawing] = true;
       } else {
         TORCH_CHECK(
             false,
             "Invalid debug dump option: '",
             token,
             "'\n  Available options: ",
-            "fusion_ir, fusion_ir_math, kernel_ir, cuda_kernel, cuda_full, launch_param, segmented_fusion\n");
+            "fusion_ir, fusion_ir_math, kernel_ir, cuda_kernel, cuda_full, launch_param, segmented_fusion, draw_segmented_fusion\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)

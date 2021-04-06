@@ -243,6 +243,9 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! Inline Debug print for segmented fusion
   std::string toString(int verbosity) const;
 
+  //! Debug drawing for graphviz
+  void draw();
+
   //! Debug print for segmented fusions
   void print() const;
 
@@ -256,11 +259,11 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   SegmentedEdge* newEdge(SegmentedGroup* from, SegmentedGroup* to, Val* val);
 
  protected:
-  //! original full fusion
+  //! Original full fusion
   Fusion fusion_;
 
-  //! Count total tensorview exprs
-  size_t total_tv_expr_count_ = 0;
+  //! Unique name for segmented fusion
+  int segmented_fusion_name_;
 
   //! States representing segmentation
   std::vector<SegmentedEdge*> edges_;
@@ -295,6 +298,32 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! Cleanup function to be call at the end of fusion
   //!  segment pass
   void finalize();
+
+  //! Utility to give unique name for each segmented fusion
+  static size_t segmentedFusionName() {
+    static size_t counter = 0;
+    return counter++;
+  }
+};
+
+//! This is a base class for segmenter analysis
+//!  provides the minimal implementation on header so that
+//!  a unique_ptr can use this base class
+//!  actual implementations of analyses are in the .cpp files
+//! TODO: In the next refactor PR, should put segment candidate
+//!  finder in .cpp file completely since API doesn't require these
+//!  details
+class SegmenterAnalysis : public PolymorphicBase {};
+class GroupDependencyAnalysis;
+
+// Manual node merging passes
+class CombineReductions;
+
+//! Options to configure/debug candidate finder
+struct TORCH_CUDA_CU_API SegmentCandidateFinderOptions {
+  bool run_combine_reductions = true;
+  bool run_herrmann_merge = true;
+  bool run_final_merge = true;
 };
 
 //!  SegmentCandidateFinder
@@ -323,10 +352,14 @@ class TORCH_CUDA_CU_API SegmentedFusion {
 class TORCH_CUDA_CU_API SegmentCandidateFinder {
  public:
   // Take a copy of fusion to own
-  SegmentCandidateFinder(const Fusion* fusion);
+  SegmentCandidateFinder(
+      const Fusion* fusion,
+      SegmentCandidateFinderOptions options);
 
-  static std::unique_ptr<SegmentedFusion> segment(const Fusion* fusion) {
-    SegmentCandidateFinder scf(fusion);
+  static std::unique_ptr<SegmentedFusion> segment(
+      const Fusion* fusion,
+      SegmentCandidateFinderOptions options = SegmentCandidateFinderOptions()) {
+    SegmentCandidateFinder scf(fusion, options);
     return std::move(scf.segmented_fusion_);
   }
 
@@ -381,13 +414,32 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   //!  scalar values in group
   void resolveScalarsInGroup(SegmentedGroup* group);
 
+  //! Utility function to merge a vector of groups in one step,
+  //!  need to check for DAG condition before using this method
+  SegmentedGroup* mergeAllGivenGroups(
+      const std::vector<SegmentedGroup*>& groups);
+
+  //! Utility to remove a group and corresponding edges
+  //!  TODO: remove inline versions of this as much as possible
+  void eraseGroups(std::unordered_set<SegmentedGroup*>& groups_to_erase);
+
   void finalize();
 
-  // Return the resulting heuristic corresponding to the merged
-  //  group built by merging the two groups connected by edge
+  //! Return the resulting heuristic corresponding to the merged
+  //!  group built by merging the two groups connected by edge
   ScheduleHeuristic deriveHeuristic(SegmentedGroup* edge);
 
+  GroupDependencyAnalysis* getGroupDependency();
+
  protected:
+  //! These are the merge node heuristic passes, should
+  //!  eventually should have a dedicated interface
+  //!  instead of keeping adding friends
+  friend class CombineReductions;
+
+  //! options to configure and debug the segment process
+  SegmentCandidateFinderOptions options_;
+
   std::deque<SegmentedGroup*> to_visit_;
   std::vector<SegmentedGroup*> next_to_visit_;
 
@@ -397,11 +449,15 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   std::vector<SegmentedGroup*> to_merge_;
 
   std::unique_ptr<SegmentedFusion> segmented_fusion_;
+
+  std::unique_ptr<SegmenterAnalysis> group_dependency_;
 };
 
 TORCH_CUDA_CU_API std::string toString(const SegmentedGroup* group);
 TORCH_CUDA_CU_API std::string toString(const SegmentedEdge* edge);
 TORCH_CUDA_CU_API std::string toString(const SegmentedFusion* segmented_fusion);
+TORCH_CUDA_CU_API std::string toString(
+    const SegmentCandidateFinderOptions& segment_options);
 
 } // namespace cuda
 } // namespace fuser
