@@ -236,7 +236,7 @@ class TestONNXOpset(TestCase):
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=torch.onnx.TrainingMode.TRAINING)
 
         # test eval mode
-        ops = []
+        ops = [{"op_name" : "Identity"}]
         ops = {9 : ops, 10 : ops}
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=torch.onnx.TrainingMode.EVAL)
 

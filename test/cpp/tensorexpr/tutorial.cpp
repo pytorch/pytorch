@@ -257,10 +257,9 @@ int main(int argc, char* argv[]) {
     //   }
     // }
 
-    // Creating a loop nest is as quite simple, we just need to specify what are
-    // the output tensors in our computation and LoopNest object will
-    // automatically pull all tensor dependencies:
-    LoopNest loopnest({Y});
+    // Creating a loop nest is as quite simple, we just need to specify a list
+    // of all and a list of output tensors:
+    LoopNest loopnest(/*outputs=*/{Y}, /*all=*/{X, Y});
 
     // An IR used in LoopNest is based on tensor statements, represented by
     // `Stmt` class. Statements are used to specify the loop nest structure, and
