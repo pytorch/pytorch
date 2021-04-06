@@ -82,9 +82,9 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None):
 
 _thread_local_var = threading.local()
 
-def profiler_module_forward_pre_hook(module, _):
+def profiler_module_forward_pre_hook(module, input):
     global _thread_local_var
-    
+
     # TODO: trace the top level module when the module_level is 0
     # DO we need add lock here?
     if not hasattr(_thread_local_var, "module_level"):
@@ -104,7 +104,7 @@ def profiler_module_forward_pre_hook(module, _):
         pass
 
 
-def profiler_module_forward_hook(module, _, _):
+def profiler_module_forward_hook(module, input, output):
     global _thread_local_var
 
     # DO we need add lock here?
