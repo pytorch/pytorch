@@ -12,6 +12,7 @@ from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple
+from torch.testing._internal.common_utils import IS_MACOS
 
 import torch
 import torch.cuda
@@ -5133,6 +5134,10 @@ class DistributedTest:
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
+        @unittest.skipIf(
+            IS_MACOS,
+            "MacOS uses uv transport which does not have as robust error handling as tcp transport"
+        )
         def test_monitored_barrier_gloo(self):
             tensors = [torch.ones(10) * self.rank]
             # Kick off some allreduce work on all ranks
@@ -5271,6 +5276,10 @@ class DistributedTest:
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
         @skip_if_small_worldsize
+        @unittest.skipIf(
+            IS_MACOS,
+            "MacOS uses uv transport which does not have as robust error handling as tcp transport"
+        )
         def test_monitored_barrier_failure_order(self):
             # Ensure that the first (in sorted order) rank is reported when
             # multiple ranks fail to pass the monitored_barrier.

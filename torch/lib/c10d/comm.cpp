@@ -90,10 +90,9 @@ std::vector<at::Tensor> GradBucket::getPerParameterTensors() const {
   std::vector<at::Tensor> per_parameter_tensors;
   size_t num_parameters = offsets_.size();
   per_parameter_tensors.reserve(num_parameters);
-  for (int i = 0; i < num_parameters; ++i) {
+  for (size_t i = 0; i < num_parameters; ++i) {
     per_parameter_tensors.push_back(
-        tensors_[0]
-            .slice(0, offsets_[i], offsets_[i] + lengths_[i])
+        tensor_.slice(0, offsets_[i], offsets_[i] + lengths_[i])
             .view(sizes_vec_[i]));
   }
   return per_parameter_tensors;
