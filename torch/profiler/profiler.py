@@ -1,5 +1,6 @@
 import torch
 import torch.autograd.profiler as prof
+import torch.utils.hooks as hooks
 from torch.autograd import ProfilerActivity
 
 from enum import Enum
@@ -52,6 +53,7 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
     """
     return ProfilerAction.RECORD
 
+
 def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -75,6 +77,35 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None):
         file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
     return handler_fn
+
+
+module_level=0
+module_record_functions = {}
+
+def profiler_module_forward_pre_hook(module, input):
+    global module_level
+    # TODO: trace the top level module when the module_level is 0
+    # DO we need add lock here?
+    module_level = module_level + 1
+
+    if (module_level == 1 or # top level module
+        isinstance(module, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel))):
+        # TODO: trace the module children names when record_function add support of the extra arguments for children.
+        record_func = prof.record_function(module.__class__.__name__)
+        record_func.__enter__()
+        module_record_functions[module] = record_func
+    else:
+        # TODO: start the record_function in case of the module view is enabled
+        pass
+
+
+def profiler_module_forward_hook(module, input, output):
+    global module_level
+    # DO we need add lock here?
+    module_level = module_level - 1
+    record_func = module_record_functions.pop(module, None)
+    if record_func:
+        record_func.__exit__(None, None, None)
 
 
 class profile(object):
@@ -216,15 +247,27 @@ class profile(object):
         self.current_action = self.schedule(self.step_num)
         self.profiler: Optional[prof.profile] = None
         self.step_rec_fn: Optional[prof.record_function] = None
+        self.pre_forward_hook: Optional[hooks.RemovableHandle] = None
+        self.forward_hook: Optional[hooks.RemovableHandle] = None
 
     def __enter__(self):
         self._enter_actions()
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
+
+        self.pre_forward_hook = torch.nn.modules.module.register_module_forward_pre_hook(profiler_module_forward_pre_hook)
+        self.forward_hook = torch.nn.modules.module.register_module_forward_hook(profiler_module_forward_hook)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.forward_hook:
+            self.forward_hook.remove()
+            self.forward_hook = None
+        if self.pre_forward_hook:
+            self.pre_forward_hook.remove()
+            self.pre_forward_hook = None
+
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
         self._exit_actions()
