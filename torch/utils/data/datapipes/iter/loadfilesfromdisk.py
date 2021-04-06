@@ -3,7 +3,7 @@ from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathn
 from typing import Iterable, Iterator, Tuple
 from io import BufferedIOBase
 
-class LoadFilesFromDiskIterDataPipe(IterDataPipe):
+class LoadFilesFromDiskIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     r""" :class:`LoadFilesFromDiskIterDataPipe`.
 
     Iterable Datapipe to load file binary streams from given pathnames,
