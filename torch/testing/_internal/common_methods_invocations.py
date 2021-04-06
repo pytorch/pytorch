@@ -1087,12 +1087,12 @@ def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
 # args/kwargs then create a separate sample_inputs function
 def sample_inputs_reduction(op_info, device, dtype, requires_grad):
     inputs = []
-    
+
     for t in _generate_reduction_inputs(device, dtype, requires_grad):
         inputs.append(SampleInput(t))
         for kwargs in _generate_reduction_kwargs(t.ndim):
             inputs.append(SampleInput(t, kwargs=kwargs))
-    
+
     return inputs
 
 def sample_inputs_reduction_sum(op_info, device, dtype, requires_grad):
