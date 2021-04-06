@@ -12,4 +12,3 @@ void cross_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const
 REGISTER_DISPATCH(cross_stub, &cross_kernel_impl);
 
 }}
-
