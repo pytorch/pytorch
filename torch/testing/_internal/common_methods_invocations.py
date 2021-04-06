@@ -389,17 +389,17 @@ def sample_inputs_binary(op_info, device, dtype, requires_grad):
         # scalar x scalar, scalar x 3d, flippped
         ((), ()), ((), (S, S, S)), ((S, S, S), ()),
         # 3d x 2d, 2d x3d, 3d x 3d
-        ((S, S), (S, S, S)), ((S, S, S), (S, S)), ((S, S, S), (S, S, S)), 
+        ((S, S), (S, S, S)), ((S, S, S), (S, S)), ((S, S, S), (S, S, S)),
         # 3d x 2d broadcasting
         ((S, 1, S), (M, S)),
     )
-    return (
-        SampleInput((make_tensor(s1, device, dtype,
+    return list(
+        SampleInput(make_tensor(s1, device, dtype,
                                  low=low, high=high,
                                  requires_grad=requires_grad),
-                     make_tensor(s2, device, dtype,
+                     args=(make_tensor(s2, device, dtype,
                                  low=low, high=high,
-                                 requires_grad=requires_grad)))
+                                 requires_grad=requires_grad),))
         for s1, s2 in test_cases)
 
 
@@ -4516,7 +4516,6 @@ op_db += [
                      ref=np.add,
                      dtypes=all_types_and_complex(),
                      dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-                     test_inplace_grad=True,
                      supports_out=True,
                      sample_inputs_func=sample_inputs_binary,
                      decorators=(precisionOverride({torch.bfloat16: 5e-1,
@@ -4527,7 +4526,6 @@ op_db += [
                      ref=np.multiply,
                      dtypes=all_types_and_complex(),
                      dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-                     test_inplace_grad=True,
                      supports_out=True,
                      sample_inputs_func=sample_inputs_binary,
                      decorators=(precisionOverride({torch.bfloat16: 5e-1,
@@ -4539,7 +4537,6 @@ op_db += [
                      # skip subtraction of bool types
                      dtypes=all_types_and_complex(),
                      dtypesIfCUDA=all_types_and_complex_and(torch.half),
-                     test_inplace_grad=True,
                      supports_out=True,
                      sample_inputs_func=sample_inputs_binary,
                      decorators=(precisionOverride({torch.bfloat16: 5e-1,
@@ -4551,7 +4548,6 @@ op_db += [
                      # skip subtraction of bool types
                      dtypes=all_types_and_complex(),
                      dtypesIfCUDA=all_types_and_complex_and(torch.half),
-                     test_inplace_grad=True,
                      supports_out=True,
                      sample_inputs_func=sample_inputs_binary,
                      decorators=(precisionOverride({torch.bfloat16: 5e-1,

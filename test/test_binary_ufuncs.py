@@ -1188,9 +1188,9 @@ class TestBinaryUfuncs(TestCase):
                 return np.array(t.cpu(), dtype=np_dtype)
         # TODO: turn these into separate tests
         for sample in op.sample_inputs(device, dtype):
-            tensors = sample.input
-            torch_res = getattr(torch, op.name)(*tensors).cpu()
-            numpy_res = op.ref(*[to_numpy(t) for t in tensors])
+            _input = (sample.input,) + sample.args
+            torch_res = getattr(torch, op.name)(*_input).cpu()
+            numpy_res = op.ref(*[to_numpy(t) for t in _input])
             assert_allclose(torch_res, numpy_res, rtol=precision, atol=precision)
 
 
