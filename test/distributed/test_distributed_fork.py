@@ -46,6 +46,10 @@ def skip_if_no_ninja(func):
 
 if BACKEND == "gloo" or BACKEND == "nccl":
 
+    @unittest.skipIf(
+        TEST_WITH_TSAN,
+        "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+    )
     class TestDistBackendWithFork(TestDistBackend, DistributedTest._DistTestBase):
 
         def setUp(self):
