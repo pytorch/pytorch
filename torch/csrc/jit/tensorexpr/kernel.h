@@ -19,9 +19,14 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   }
   return sizes;
 }
+<<<<<<< HEAD
+using ArgNone = c10::monostate;
+using ArgValue = c10::variant<tensorexpr::BufHandle, tensorexpr::VarHandle, double, int64_t, bool, ArgNone>;
+=======
 
 using ArgNone = c10::monostate;
 using ArgValue = c10::variant<tensorexpr::Tensor*, tensorexpr::VarHandle, double, int64_t, bool, ArgNone>;
+>>>>>>> 14a2ab8de6 (moved more lowerings over)
 
 class TORCH_API TensorExprKernel {
  public:
@@ -79,8 +84,11 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> broadcastShapes(
       std::vector<std::vector<ExprHandle>> shapes);
 
-  ExprHandle constant(const ArgValue v);
+  ExprHandle constant(const ArgValue& v);
   ExprHandle constant(const torch::jit::Value* v);
+  ExprHandle broadcastBufTemp(  // TODO(chilli): remove
+      BufHandle b,
+      const std::vector<ExprHandle>& axes);
   ExprHandle broadcast(Tensor* t, const std::vector<ExprHandle>& axes);
   ExprHandle chunk(
       Tensor* t,
@@ -89,7 +97,7 @@ class TORCH_API TensorExprKernel {
       int64_t chunks,
       const std::vector<ExprHandle>& axes);
 
-  std::vector<ExprHandle> valueShape(const ArgValue v);
+  std::vector<ExprHandle> valueShape(const ArgValue& v);
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
 
   bool checkTypes(const ScalarType highType, const int typeConstraints);
@@ -105,7 +113,7 @@ ExprHandle demoteOutput(
 
   ArgValue jitToArgValue(const torch::jit::Value* v) const;
   ExprHandle tensorOrConstant(
-    const ArgValue v,
+    const ArgValue& v,
     const std::vector<ExprHandle>& axes);
   ExprHandle tensorOrConstant(
       const torch::jit::Value* v,
@@ -128,6 +136,7 @@ ExprHandle demoteOutput(
     const std::string& name,
     const std::vector<ArgValue> inputValues,
     const c10::optional<at::ScalarType> outputTensorType,
+    const std::vector<ExprHandle> outputShape,
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         innerExpr);
 

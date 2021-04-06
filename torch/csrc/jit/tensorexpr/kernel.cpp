@@ -153,6 +153,12 @@ static std::vector<ExprHandle> computeIndicesToBroadcast(
   return bcast;
 }
 
+ExprHandle TensorExprKernel::broadcastBufTemp(
+    BufHandle b,
+    const std::vector<ExprHandle>& axes) {
+  return b.load(computeIndicesToBroadcast(
+      axes, ExprVectorToExprHandleVector(b.node()->dims())));
+}
 ExprHandle TensorExprKernel::broadcast(
     Tensor* t,
     const std::vector<ExprHandle>& axes) {
@@ -237,6 +243,15 @@ ArgValue TensorExprKernel::jitToArgValue(const torch::jit::Value* v) const {
   }
 
   return scalars_.at(v);
+}
+
+ExprHandle TensorExprKernel::tensorOrConstant(
+    const ArgValue& v,
+    const std::vector<ExprHandle>& axes) {
+    if (auto b = c10::get_if<BufHandle>(&v)) {
+      return broadcastBufTemp(*b, axes);
+    }
+    return constant(v);
 }
 ExprHandle TensorExprKernel::tensorOrConstant(
     const torch::jit::Value* v,
@@ -462,7 +477,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
   }
 }
 
-ExprHandle TensorExprKernel::constant(const ArgValue v) {
+ExprHandle TensorExprKernel::constant(const ArgValue& v) {
   if (auto s = c10::get_if<tensorexpr::VarHandle>(&v)) {
     return *s;
   } else if (auto d = c10::get_if<double>(&v)) {
@@ -719,9 +734,9 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(
 }
 
 std::vector<ExprHandle> TensorExprKernel::valueShape(
-    const ArgValue v) {
-  if (auto t = c10::get_if<tensorexpr::Tensor*>(&v)) {
-    return ExprVectorToExprHandleVector((*t)->buf()->dims());
+    const ArgValue& v) {
+  if (auto b = c10::get_if<tensorexpr::BufHandle>(&v)) {
+    return ExprVectorToExprHandleVector(b->node()->dims());
   } else {
     return {};
   }
@@ -798,13 +813,12 @@ Tensor* TensorExprKernel::computeTwoOperand(
     const std::string& name,
     const std::vector<ArgValue> inputValues,
     const c10::optional<at::ScalarType> outputTensorType,
+    const std::vector<ExprHandle> outputShape,
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
-  auto const& shape =
-      broadcastShapes(valueShape(inputValues[0]), valueShape(inputValues[1]));
   return Compute(
       name,
-      c10::fmap<DimArg>(shape),
+      c10::fmap<DimArg>(outputShape),
       [this, inputValues, outputTensorType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -1527,6 +1541,47 @@ Tensor* TensorExprKernel::computeBinaryValue(c10::Symbol op, std::vector<ArgValu
           },
           false /* promote_inputs */);
     } break;
+    case aten::remainder: {
+      auto imodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return Mod::make(lhs, rhs);
+      };
+      auto fmodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        auto lhs_t = promoteHalfToFloat(lhs);
+        auto rhs_t = promoteHalfToFloat(rhs);
+        return fmod((rhs_t + fmod(lhs_t, rhs_t)), rhs_t);
+      };
+      {
+        auto const& shape =
+            broadcastShapes(valueShape(inputs[0]), valueShape(inputs[1]));
+        return Compute(
+            "aten_remainder",
+            c10::fmap<DimArg>(shape),
+            [&](const std::vector<VarHandle>& axes) {
+              std::vector<ExprHandle> indices(axes.begin(), axes.end());
+              std::vector<ExprHandle> exprInputs = {
+                  tensorOrConstant(inputs[0], indices),
+                  tensorOrConstant(inputs[1], indices),
+              };
+
+              promoteInputs(exprInputs);
+              bool allInt = true;
+              for (auto& e : exprInputs) {
+                if (e.dtype().is_floating_point()) {
+                  allInt = false;
+                  break;
+                }
+              }
+              if (allInt) {
+                return demoteOutput(
+                    imodImpl(exprInputs[0], exprInputs[1]), outputType);
+              } else {
+                return demoteOutput(
+                    fmodImpl(exprInputs[0], exprInputs[1]), outputType);
+              }
+            });
+      }
+
+    } break;
     default: {
       throw std::runtime_error("Unhandled node kind");
       return nullptr;
@@ -1592,7 +1647,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::where:
     case aten::frac:
     case aten::lgamma:
-    case aten::clamp: {
+    case aten::clamp:
+    case aten::remainder: {
       std::vector<ArgValue> tinputs;
       for (auto inp: inputs) {
         tinputs.push_back(jitToArgValue(inp));
@@ -1705,49 +1761,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       });
     } break;
 
-    case aten::remainder: {
-      auto imodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
-        return Mod::make(lhs, rhs);
-      };
-      auto fmodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
-        auto lhs_t = promoteHalfToFloat(lhs);
-        auto rhs_t = promoteHalfToFloat(rhs);
-        return fmod((rhs_t + fmod(lhs_t, rhs_t)), rhs_t);
-      };
-      {
-        auto const& n = v->node();
-        auto const& shape =
-            broadcastShapes(valueShape(n->input(0)), valueShape(n->input(1)));
-        return Compute(
-            "aten_remainder",
-            c10::fmap<DimArg>(shape),
-            [&](const std::vector<VarHandle>& axes) {
-              auto const& n = v->node();
-              std::vector<ExprHandle> indices(axes.begin(), axes.end());
-              std::vector<ExprHandle> inputs = {
-                  tensorOrConstant(n->input(0), indices),
-                  tensorOrConstant(n->input(1), indices),
-              };
-
-              promoteInputs(inputs);
-              bool allInt = true;
-              for (auto& e : inputs) {
-                if (e.dtype().is_floating_point()) {
-                  allInt = false;
-                  break;
-                }
-              }
-              if (allInt) {
-                return demoteOutput(
-                    imodImpl(inputs[0], inputs[1]), n->output());
-              } else {
-                return demoteOutput(
-                    fmodImpl(inputs[0], inputs[1]), n->output());
-              }
-            });
-      }
-
-    } break;
 
     case prim::ConstantChunk: {
       return Compute(
