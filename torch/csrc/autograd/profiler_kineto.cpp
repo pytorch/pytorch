@@ -261,7 +261,7 @@ std::string dtypesToStr(const std::vector<std::string>& types) {
       oss << ", ";
     }
 
-    oss << types[t_idx];
+    oss << "\"" << types[t_idx] << "\"";
   }
   oss << "]";
   return oss.str();
