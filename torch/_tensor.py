@@ -410,14 +410,6 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.norm, (self,), self, p=p, dim=dim, keepdim=keepdim, dtype=dtype)
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
-    # rename this to conj
-    def conj_out_of_place(self):
-        if torch.__future__.get_conj_view():
-            return self.conj()
-        else:
-            result = torch.empty_like(self)
-            return result.copy_(self.conj())
-
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
@@ -597,8 +589,8 @@ class Tensor(torch._C._TensorBase):
         # (e.g., if you zip(*hiddens), the eager map will force all the
         # indexes of hiddens[0] before hiddens[1], while the generator
         # map will interleave them.)
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__iter__, (self,), self)
+        # NB: We have intentionally skipped __torch_function__ dispatch here.
+        # See gh-54457
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
         if torch._C._get_tracing_state():
