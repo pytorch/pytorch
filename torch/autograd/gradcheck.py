@@ -361,6 +361,24 @@ def combine_jacobian_rows(jacobians_rows, inputs, numel_outputs) -> Tuple[Tuple[
     return out_jacobians, correct_grad_sizes, correct_grad_types
 
 
+FAILED_NONDET_MSG = """
+
+NOTE: If your op relies on non-deterministic operations i.e., it is listed here:
+https://pytorch.org/docs/stable/generated/torch.use_deterministic_algorithms.html
+this failure might be expected.
+
+If you are adding a new operator, please file an issue and then use one of the
+workarounds. The workaround depends on how your test invokes gradcheck/gradgradcheck.
+If the test
+- manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
+  with `nondet_tol=<tol>` as a keyword argument.
+- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+  to have `gradcheck_nondet_tol=<tol>`.
+- is a Module test (e.g., in common_nn.py), then modify the corresponding
+  module_test entry to have `gradcheck_nondet_tol=<tol>`
+"""
+
+
 def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_scale, check_grad_dtypes,
                                          raise_exception, custom_vjp_fn=None, fast_mode=False,
                                          v=None) -> Tuple[Tuple[torch.Tensor, ...], bool]:
@@ -398,8 +416,8 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_sc
     if not reentrant:
         fail_test(f'Backward{complex_str} is not reentrant, i.e., running backward with '
                   'same input and grad_output multiple times gives different values, '
-                  'although analytical gradient matches numerical gradient. '
-                  f'The tolerance for nondeterminism was {nondet_tol}.')
+                  'although analytical gradient matches numerical gradient.'
+                  f'The tolerance for nondeterminism was {nondet_tol}.' + FAILED_NONDET_MSG)
     failed = not (reentrant and correct_grad_sizes and correct_grad_types)
     return jacobians, failed
 
@@ -793,8 +811,9 @@ def vec_from_tensor(x, generator):
         # For sparse, create a random sparse vec with random values in the same
         # indices. Make sure size is set so that it isn't inferred to be smaller.
         x_values = x._values()
-        values = torch.rand(x_values.numel()).to(dtype=x.dtype, device=x.device,
-                                                 genedrator=generator).reshape(x_values.shape)
+        values = torch.rand(x_values.numel(), generator=generator) \
+            .to(dtype=x.dtype, device=x.device) \
+            .reshape(x_values.shape)
         values /= values.norm()
         vec = torch.sparse_coo_tensor(x._indices(), values, x.size())
     else:
@@ -828,11 +847,8 @@ If the test
   with `fast_mode=False` as a keyword argument.
 - is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
   to have `gradcheck_fast_mode=False`
-- is a Module test in common_nn, then modify the module_test entry to have `fast_mode
-
-If your op relies on non-deterministic operations, i.e., it is listed here:
-https://pytorch.org/docs/stable/generated/torch.use_deterministic_algorithms.html
-fast_mode may still work, but you'll need to pass a small value to nondet_tol.
+- is a Module test (e.g., in common_nn.py), then modify the corresponding
+  module_test entry to have `gradcheck_fast_mode=False`
 """.strip()
 
 

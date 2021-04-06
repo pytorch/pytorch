@@ -132,18 +132,21 @@ class TestGradients(TestCase):
                 self.assertTrue(gradcheck(fn, gradcheck_args,
                                           check_batched_grad=op.check_batched_grad,
                                           check_grad_dtypes=True,
-                                          nondet_tol=op.gradcheck_nondet_tol))
+                                          nondet_tol=op.gradcheck_nondet_tol,
+                                          fast_mode=op.gradcheck_fast_mode))
             elif check == 'gradgradcheck':
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=False,
                                               check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True,
-                                              nondet_tol=op.gradcheck_nondet_tol))
+                                              nondet_tol=op.gradcheck_nondet_tol,
+                                              fast_mode=op.gradcheck_fast_mode))
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
                                               gen_non_contig_grad_outputs=True,
                                               check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True,
-                                              nondet_tol=op.gradcheck_nondet_tol))
+                                              nondet_tol=op.gradcheck_nondet_tol,
+                                              fast_mode=op.gradcheck_fast_mode))
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 
