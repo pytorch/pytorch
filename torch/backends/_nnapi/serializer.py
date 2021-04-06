@@ -430,6 +430,15 @@ class _NnapiSerializer(object):
         operand_id = self.jitval_operand_map[jitval]
         return (operand_id, self.operands[operand_id])
 
+    def get_tensor_operand_by_jitval_fixed_size(self, jitval):
+        op_id, oper = self.get_tensor_operand_by_jitval(jitval)
+        for s in oper.shape:
+            if s <= 0:
+                # TODO: Improve this error message, possibly after converting
+                # many callsites to support flexible size.
+                raise Exception("Flexible size is not supported for this operand.")
+        return op_id, oper
+
     def get_tensor_operand_or_constant(self, jitval):
         operand_id = self.jitval_operand_map.get(jitval)
         if operand_id is None:
@@ -754,7 +763,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 2
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
 
         _, dim = self.get_constant_value(node.inputsAt(1), "IntType")
         assert in_oper.dim_order == DimOrder.PRESUMED_CONTIGUOUS
@@ -778,7 +787,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 2
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
 
         shape_ctype, shape = self.get_constant_value(node.inputsAt(1))
         assert shape_ctype.kind() == "ListType"
@@ -806,7 +815,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 2
         assert node.outputsSize() == 1
 
-        _, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        _, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         _, value = self.constants[node.inputsAt(1)]
         res = in_oper.shape[value]
         output = node.outputsAt(0)
@@ -824,7 +833,7 @@ class _NnapiSerializer(object):
         out_oper = None
         out_dim_size = 0
         for inp in tensors:
-            in_id, in_oper = self.get_tensor_operand_by_jitval(inp)
+            in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(inp)
             if out_oper is None:
                 out_shape = change_element(in_oper.shape, dim, -1)
                 out_oper = in_oper._replace(shape=out_shape)
@@ -855,7 +864,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 4
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         dim_ctype, dim = self.get_constant_value(node.inputsAt(1))
         assert dim_ctype.kind() == "ListType"
         assert dim_ctype.getElementType().kind() == "IntType"
@@ -904,7 +913,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 4
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         if in_oper.dim_order != DimOrder.CHANNELS_LAST:
             raise Exception(
                 "Most hardware backends prefer NHWC quantized tensors.  "
@@ -936,7 +945,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 1
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         out_oper = in_oper._replace(
             op_type=NNAPI_OperandCode.TENSOR_FLOAT32,
             scale=0.0,
@@ -955,7 +964,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 1
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
 
         inputs = [None] * 1
         inputs[0] = in_id
@@ -973,8 +982,8 @@ class _NnapiSerializer(object):
         assert node.inputsAt(1).type().kind() == "TensorType"
 
         # TODO: Should support constant as either operand.
-        in0_id, in0_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
-        in1_id, in1_oper = self.get_tensor_operand_by_jitval(node.inputsAt(1))
+        in0_id, in0_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+        in1_id, in1_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(1))
 
         assert in0_oper.op_type == in1_oper.op_type
         in0_id, in0_oper, in1_id, in1_oper = self.transpose_for_broadcast(
@@ -1021,7 +1030,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 3
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         _, min_val = self.get_constant_value(node.inputsAt(1), "FloatType")
         _, max_val = self.get_constant_value(node.inputsAt(2), "FloatType")
 
@@ -1049,7 +1058,7 @@ class _NnapiSerializer(object):
         assert node.inputsAt(0).type().kind() == "TensorType"
         assert node.inputsAt(1).type().kind() == "TensorType"
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         w_id, w_oper = self.get_tensor_operand_for_weight(node.inputsAt(1))
         assert len(w_oper.shape) == 1
         assert w_oper.shape[0] > 0
@@ -1080,7 +1089,7 @@ class _NnapiSerializer(object):
         if args.dilation_h != 1 or args.dilation_w != 1:
             raise Exception("NNAPI does not support dilated pooling.")
 
-        image_id, image_oper = self.get_tensor_operand_by_jitval(image)
+        image_id, image_oper = self.get_tensor_operand_by_jitval_fixed_size(image)
         assert len(image_oper.shape) == 4
 
         out_shape = get_conv_pool_shape(image_oper.shape, args, image_oper.shape[1], False)
@@ -1108,7 +1117,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 2
         assert node.outputsSize() == 1
 
-        image_id, image_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        image_id, image_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         assert len(image_oper.shape) == 4
 
         size_ctype, size_arg = self.get_constant_value(node.inputsAt(1))
@@ -1145,7 +1154,7 @@ class _NnapiSerializer(object):
         size_ctype, size_arg = self.get_constant_value(size_jit)
         scale_ctype, scale_arg = self.get_constant_value(scale_jit)
 
-        image_id, image_oper = self.get_tensor_operand_by_jitval(image)
+        image_id, image_oper = self.get_tensor_operand_by_jitval_fixed_size(image)
         assert len(image_oper.shape) == 4
 
         if size_ctype.kind() != "NoneType" and scale_ctype.kind() != "NoneType":
@@ -1218,7 +1227,7 @@ class _NnapiSerializer(object):
         self.add_addmm_or_linear(node, False, jit_input, jit_weight, jit_bias)
 
     def add_addmm_or_linear(self, node, transpose_weight, jit_input, jit_weight, jit_bias):
-        input_id, input_oper = self.get_tensor_operand_by_jitval(jit_input)
+        input_id, input_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_input)
         bias_id, bias_oper = self.get_tensor_operand_for_weight(jit_bias)
 
         assert len(input_oper.shape) == 2
@@ -1257,7 +1266,7 @@ class _NnapiSerializer(object):
             jit_zero_point,
         ) = node.inputs()
 
-        input_id, input_oper = self.get_tensor_operand_by_jitval(jit_input)
+        input_id, input_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_input)
         # TODO: Support automatic reshape
         assert len(input_oper.shape) == 2
 
@@ -1434,7 +1443,7 @@ class _NnapiSerializer(object):
                 scale=raw_weight.q_scale(),
                 zero_point=raw_weight.q_zero_point() + 128)
         weight_scale = unsigned_weight.q_scale()
-        _, image_oper = self.get_tensor_operand_by_jitval(jit_image)
+        _, image_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_image)
         bias_scale = image_oper.scale * weight_scale
         int_bias = torch.quantize_per_tensor(raw_bias, bias_scale, 0, torch.qint32)
         bias_id = self.add_tensor_operand_for_weight(int_bias)
@@ -1470,7 +1479,7 @@ class _NnapiSerializer(object):
             args,
             transpose,
             fuse_code):
-        image_id, image_oper = self.get_tensor_operand_by_jitval(jit_image)
+        image_id, image_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_image)
         in_c = image_oper.shape[1]
 
         if args.group == 1:
