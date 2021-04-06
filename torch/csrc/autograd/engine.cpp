@@ -538,16 +538,31 @@ void GraphTask::exec_post_processing() {
       // any new devices, so the stashed streams should be enough.
       // If leaf_stream.device_index() happens to be for a new device,
       // operator* on the c10::nullopt will throw an error.
-      const auto current_stream = *caller_current_streams_[leaf_stream.device_index()];
-      const auto default_stream = *caller_default_streams_[leaf_stream.device_index()];
-      if (leaf_stream != current_stream || leaf_stream != default_stream) {
+      const auto caller_current_stream = *caller_current_streams_[leaf_stream.device_index()];
+      const auto caller_default_stream = *caller_default_streams_[leaf_stream.device_index()];
+
+      // final_callbacks are about to run in this thread. But this thread is not the thread that
+      // called execute, so this thread's current streams might not be the same as caller_current_streams.
+      // To ensure final_callbacks can access any grad safely on its device's current stream,
+      // we should also sync this thread's current streams with the leaf streams.
+      const auto current_stream = guard.getStream({c10::DeviceType::CUDA, leaf_stream.device_index()});
+
+      if (leaf_stream != caller_current_stream ||
+          leaf_stream != caller_default_stream ||
+          leaf_stream != current_stream) {
         auto event = c10::Event{c10::DeviceType::CUDA};
         event.record(leaf_stream);
-        if (leaf_stream != current_stream) {
-          current_stream.wait(event);
+        if (caller_current_stream != leaf_stream) {
+          caller_current_stream.wait(event);
         }
-        if (leaf_stream != default_stream && default_stream != current_stream) {
-          default_stream.wait(event);
+        if (caller_default_stream != leaf_stream &&
+            caller_default_stream != caller_current_stream) {
+          caller_default_stream.wait(event);
+        }
+        if (current_stream != leaf_stream &&
+            current_stream != caller_current_stream &&
+            current_stream != default_stream) {
+          current_stream.wait(event);
         }
       }
     }
