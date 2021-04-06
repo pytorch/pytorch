@@ -2,6 +2,7 @@ import torch
 from torch.fx import GraphModule  # type: ignore
 from torch.fx.symbolic_trace import Tracer  # type: ignore
 from torch.fx.node import Target, Node, Argument  # type: ignore
+from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
@@ -171,6 +172,8 @@ forward graph of the parent module,
         skipped_module_names, skipped_module_classes)
     graph_module = GraphModule(model, tracer.trace(model))
     graph_module = _fuse_fx(graph_module, prepare_custom_config_dict)
+    # annotate types
+    graph_module = AnnotateTypesWithSchema(graph_module).transform()
     quantizer = Quantizer()
     prepared = quantizer.prepare(
         graph_module,
