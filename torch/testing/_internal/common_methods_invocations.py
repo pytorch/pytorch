@@ -1050,15 +1050,15 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
 def _generate_reduction_inputs(device, dtype, requires_grad):
     yield make_tensor((), device, dtype, requires_grad=requires_grad)
     yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
-    yield make_tensor((2, 2), device, dtype, requires_grad=requires_grad)
-    yield make_tensor((2, 2, 2), device, dtype, requires_grad=requires_grad, discontiguous=True)
+    yield make_tensor((2, 2), device, dtype, requires_grad=requires_grad, discontiguous=True)
+    yield make_tensor((3, 2, 1, 2, 2), device, dtype, requires_grad=requires_grad)
 
 # Generates a subset of possible kwargs dim and keepdim for a tensor
 # with ndim dims appropriate for testing. If supports_multiple_dims
 # is True (default) then dim kwarg can be a list of dims.
 def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
-    all_dims = tuple(range(ndim))
-    dims_to_reduce = []
+    all_dims: Tuple[int] = tuple(range(ndim))
+    dims_to_reduce: List[int] = []
 
     if ndim <= 4:
         dims_to_reduce = all_dims
@@ -1086,7 +1086,7 @@ def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
 # and dim and keepdim kwargs. If a reduction op needs to test additional
 # args/kwargs then create a separate sample_inputs function
 def sample_inputs_reduction(op_info, device, dtype, requires_grad):
-    inputs = []
+    inputs: List[SampleInput] = []
 
     for t in _generate_reduction_inputs(device, dtype, requires_grad):
         inputs.append(SampleInput(t))
