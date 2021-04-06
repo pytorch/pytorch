@@ -1046,6 +1046,60 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           requires_grad=requires_grad),))
     return inputs
 
+# Generates tensors for testing reduction ops
+def _generate_reduction_inputs(device, dtype, requires_grad):
+    yield make_tensor((), device, dtype, requires_grad=requires_grad)
+    yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
+    yield make_tensor((2, 2), device, dtype, requires_grad=requires_grad)
+    yield make_tensor((2, 2, 2), device, dtype, requires_grad=requires_grad, discontiguous=True)
+
+# Generates a subset of possible kwargs dim and keepdim for a tensor
+# with ndim dims appropriate for testing. If supports_multiple_dims
+# is True (default) then dim kwarg can be a list of dims.
+def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
+    all_dims = tuple(range(ndim))
+    dims_to_reduce = []
+
+    if ndim <= 4:
+        dims_to_reduce = all_dims
+    else:
+        # Always reduce first and last dimension
+        dims_to_reduce.append(all_dims[0])
+        dims_to_reduce.append(all_dims[-1])
+
+        # Pick two more from the middle ones
+        dims_to_reduce.append(all_dims[1])
+        dims_to_reduce.append(all_dims[int(ndim / 2)])
+
+    for keepdim in [True, False]:
+        for dim in dims_to_reduce:
+            yield {'dim': dim, 'keepdim': keepdim}
+
+        if ndim > 1 and supports_multiple_dims:
+            if ndim <= 4:
+                yield {'dim': dims_to_reduce, 'keepdim': keepdim}
+            else:
+                yield {'dim': dims_to_reduce[::2], 'keepdim': keepdim}
+            yield {'dim': all_dims, 'keepdim': keepdim}
+
+# Generates sample inputs for reduction ops that contain the input tensor
+# and dim and keepdim kwargs. If a reduction op needs to test additional
+# args/kwargs then create a separate sample_inputs function
+def sample_inputs_reduction(op_info, device, dtype, requires_grad):
+    inputs = []
+    
+    for t in _generate_reduction_inputs(device, dtype, requires_grad):
+        inputs.append(SampleInput(t))
+        for kwargs in _generate_reduction_kwargs(t.ndim):
+            inputs.append(SampleInput(t, kwargs=kwargs))
+    
+    return inputs
+
+def sample_inputs_reduction_sum(op_info, device, dtype, requires_grad):
+    inputs = sample_inputs_reduction(op_info, device, dtype, requires_grad)
+    inputs[-1].kwargs['dtype'] = torch.double
+    return inputs
+
 def sample_inputs_outer(op_info, device, dtype, requires_grad):
     inputs = []
     arg_a = make_tensor((S,), device, dtype, requires_grad=requires_grad)
@@ -3228,6 +3282,10 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
+    OpInfo('sum',
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_reduction_sum),
     OpInfo('mode',
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -4330,14 +4388,6 @@ def method_tests():
         ('nanmedian', (), NO_ARGS, 'scalar'),
         ('nanmedian', (), (0,), 'scalar_dim', (), [0]),
         ('nanmedian', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('sum', (S, S, S), NO_ARGS),
-        ('sum', (S, S, S), (1,), 'dim', (), [0]),
-        ('sum', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
-        ('sum', (), NO_ARGS, 'scalar'),
-        ('sum', (), (0,), 'scalar_dim', (), [0]),
-        ('sum', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('sum', (S, S, S), ([1, 2],), 'multi_dim'),
-        ('sum', (S, S, S), ([1, 2], True,), 'multi_dim_keepdim'),
         ('nansum', (S, S, S), NO_ARGS),
         ('nansum', (S, S, S), (1,), 'dim', (), [0]),
         ('nansum', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
