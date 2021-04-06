@@ -163,6 +163,7 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Complex autograd not supported.")
 
     # Tests that gradients are computed correctly
+    @onlyOnCPUAndCUDA
     @_gradcheck_ops(op_db)
     def test_fn_grad(self, device, dtype, op):
         self._skip_helper(op, dtype)

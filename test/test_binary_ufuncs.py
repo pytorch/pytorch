@@ -91,6 +91,7 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
 # TODO: update to use opinfos consistently
 class TestBinaryUfuncs(TestCase):
 
+    @onlyOnCPUAndCUDA
     def test_add_broadcast_empty(self, device):
         # empty + empty
         self.assertRaises(RuntimeError, lambda: torch.randn(5, 0, device=device) + torch.randn(0, 5, device=device))
@@ -842,6 +843,7 @@ class TestBinaryUfuncs(TestCase):
                     for x, y, z in zip(a_.tolist(), b_.tolist(), c_.tolist()):
                         self.assertEqual(x ^ y, z)
 
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float)
     def test_add_with_tail(self, device, dtype):
         # test tensor where there is a tail which is not a multiple
@@ -1171,6 +1173,7 @@ class TestBinaryUfuncs(TestCase):
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on a range of tensors, including empty tensors, scalar tensors,
     #   1D tensors and a large 2D tensor
+    @onlyOnCPUAndCUDA
     @ops(binary_ufuncs)
     def test_reference_numerics(self, device, dtype, op):
         precision = self.precision
@@ -2206,6 +2209,7 @@ class TestBinaryUfuncs(TestCase):
     def test_logaddexp2(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=True)
 
+    @onlyOnCPUAndCUDA
     def test_add(self, device):
         dtypes = [torch.float, torch.double] + torch.testing.get_all_complex_dtypes()
         for dtype in dtypes:
