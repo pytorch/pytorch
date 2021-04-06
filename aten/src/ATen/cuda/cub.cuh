@@ -20,13 +20,14 @@ namespace cub = at::cuda::detail::cub;
 
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAStream.h>
 
 // handle the temporary storage and 'twice' calls for cub API
 #define CUB_WRAPPER(func, ...) do {                                        \
   size_t temp_storage_bytes = 0;                                           \
   func(nullptr, temp_storage_bytes, __VA_ARGS__);                          \
   auto allocator = c10::cuda::CUDACachingAllocator::get();                 \
-  auto temp_storage = allocator->allocate(temp_storage_bytes);             \                       \
+  auto temp_storage = allocator->allocate(temp_storage_bytes);             \
   func(temp_storage.get(), temp_storage_bytes, __VA_ARGS__);               \
   AT_CUDA_CHECK(cudaGetLastError());                                       \
 } while (false)
@@ -57,15 +58,15 @@ static inline void sort_pairs(
   const value_t_ *values_in_ = reinterpret_cast<const value_t_*>(values_in);
   value_t_ *values_out_ = reinterpret_cast<value_t_*>(values_out);
 
-  // if (descending) {
-  //   CUB_WRAPPER(at::native::cub::DeviceRadixSort::SortPairsDescending,
-  //     keys_in_, keys_out_, values_in_, values_out_, n,
-  //     start_bit, end_bit, at::cuda::getCurrentCUDAStream());
-  // } else {
-  //   CUB_WRAPPER(at::native::cub::DeviceRadixSort::SortPairs,
-  //     keys_in_, keys_out_, values_in_, values_out_, n,
-  //     start_bit, end_bit, at::cuda::getCurrentCUDAStream());
-  // }
+  if (descending) {
+    CUB_WRAPPER(detail::cub::DeviceRadixSort::SortPairsDescending,
+      keys_in_, keys_out_, values_in_, values_out_, n,
+      start_bit, end_bit, c10::cuda::getCurrentCUDAStream());
+  } else {
+    CUB_WRAPPER(detail::cub::DeviceRadixSort::SortPairs,
+      keys_in_, keys_out_, values_in_, values_out_, n,
+      start_bit, end_bit, c10::cuda::getCurrentCUDAStream());
+  }
 }
 
 }}}
