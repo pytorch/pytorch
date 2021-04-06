@@ -457,7 +457,14 @@ class TORCH_API Tensor {
   QuantizerPtr quantizer() const;
 
   /// Returns if a `Tensor` has any dimension names
-  bool has_names() const;
+  bool has_names() const {
+    // If a user is using unnamed tensors, then we can short-circuit right here.
+    // Otherwise, impl::has_names attempts to retrieve names.
+    if (!impl_->has_named_tensor_meta()) {
+      return false;
+    }
+    return impl::has_names(unsafeGetTensorImpl());
+  }
 
   /// Returns a `Tensor`'s dimension names data structure
   const NamedTensorMeta* get_named_tensor_meta() const;
@@ -881,8 +888,9 @@ template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Tensor return type
-  std::function<void(Tensor)> fn(hook);
-  return _register_hook([fn](const Tensor& grad) {
+  static_assert(std::is_same<decltype(hook(Tensor())), void>::value,
+                "Expected hook to return void");
+  return _register_hook([fn=std::forward<T>(hook)](const Tensor& grad) {
     fn(grad);
     return Tensor();
   });
@@ -890,7 +898,7 @@ auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
 
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
-  return _register_hook(hook);
+  return _register_hook(std::forward<T>(hook));
 }
 
 namespace detail {

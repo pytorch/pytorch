@@ -70,7 +70,7 @@ TEST(VulkanAPITest, adaptive_avg_pool2d) {
   if (!at::is_vulkan_available()) {
     return;
   }
-  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
+  c10::InferenceMode mode;
 
   const auto in_cpu = at::rand({5, 7, 47, 31}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::adaptive_avg_pool2d(in_cpu, {3, 3});
@@ -432,9 +432,9 @@ TEST(VulkanAPITest, conv2d) {
     }
   } weights {1, input.channels, 3, 3};
 
-  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat))*5;
-  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat))*5;
-  const auto bias_cpu = at::randn({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat))*5;
+  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
   const auto output_cpu = at::conv2d(
       input_cpu,
@@ -649,7 +649,7 @@ TEST(VulkanAPITest, conv2d_winograd) {
   } weights {13, input.channels, 3, 3};
 
   const auto input_cpu = at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto weights_cpu = at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat))*2;
+  const auto weights_cpu = at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
   const auto bias_cpu = at::rand({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
   const auto output_cpu = at::conv2d(
@@ -1243,7 +1243,7 @@ TEST(VulkanAPITest, reshape) {
   if (!at::is_vulkan_available()) {
     return;
   }
-  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
+  c10::InferenceMode mode;
 
   const auto in_cpu = at::rand({47, 11, 83, 97}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -1265,7 +1265,7 @@ TEST(VulkanAPITest, reshape_) {
   if (!at::is_vulkan_available()) {
     return;
   }
-  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
+  c10::InferenceMode mode;
 
   const auto cpu = at::rand({59, 41, 19, 67}, at::device(at::kCPU).dtype(at::kFloat));
   const auto vulkan = cpu.vulkan();
@@ -1698,7 +1698,7 @@ TEST(VulkanAPITest, mobilenetv2) {
   if (!at::is_vulkan_available()) {
     return;
   }
-  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
+  c10::InferenceMode mode;
 
   MobileNetV2 mn2;
 
