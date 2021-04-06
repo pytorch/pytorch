@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 
@@ -395,7 +397,7 @@ void listMulIntLeftInPlace(Stack* stack) {
   } else if (n > 1) {
     size_t list_size = list.size();
     for (int64_t i = 1; i < n; i++) {
-      for (const auto j : c10::irange(list_size)) {
+      for (size_t j = 0; j < list_size; j++) {
         list.push_back(list.get(j));
       }
     }
@@ -412,7 +414,8 @@ void listMulIntLeft(Stack* stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
+    (void)i; // Suppress unused variable warning
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }
@@ -429,7 +432,8 @@ void listMulIntRight(Stack* stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
+    (void)i; // Suppress unused variable warning
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }
