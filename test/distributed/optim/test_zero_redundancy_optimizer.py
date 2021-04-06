@@ -14,6 +14,7 @@ from typing import List, Any, Type, cast
 import numpy as np
 import torch
 import torch.distributed as dist
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -206,7 +207,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
 class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     @property
     def world_size(self):
-        return max(2, torch.cuda.device_count())
+        return min(4, max(2, torch.cuda.device_count()))
 
     @common_distributed.skip_if_rocm
     def test_step(self):
@@ -346,7 +347,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         all_trainable()
         some_trainable()
 
-    @common_distributed.skip_if_not_multigpu
+    @common_distributed.skip_if_lt_x_gpu(2)
     def test_collect_shards(self):
         """ Check the state consolidation mechanism, and the state dict exposed by ZeroRedundancyOptimizer"""
         self.dist_init(self.rank)
@@ -494,7 +495,9 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 model.register_buffer("test_buffer", torch.ones((1)) * self.rank)
                 model.to(self.device)
 
-                sharded_optimizer = ZeroRedundancyOptimizer(params=model.parameters(), optimizer_class=optimizer, lr=1e-3)
+                sharded_optimizer = ZeroRedundancyOptimizer(
+                    params=model.parameters(), optimizer_class=optimizer, lr=1e-3
+                )
                 sharded_ddp_model = DDP(
                     module=model, device_ids=[self.rank], broadcast_buffers=True, find_unused_parameters=True
                 )

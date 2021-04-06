@@ -38,18 +38,28 @@ TORCH_META_FUNC2(div, Tensor) (const Tensor& self, const Tensor& other) {
   build_binary_float_op(maybe_get_output(), self, other);
 }
 
-TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, std::string rounding_mode) {
-  if (rounding_mode == "true") {
+TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
+  if (!rounding_mode.has_value()) {
     build_binary_float_op(maybe_get_output(), self, other);
-  } else if (rounding_mode == "trunc") {
+  } else if (*rounding_mode == "trunc") {
     build_binary_op(maybe_get_output(), self, other);
-  } else if (rounding_mode == "floor") {
+  } else if (*rounding_mode == "floor") {
     build_binary_op(maybe_get_output(), self, other);
   } else {
     TORCH_CHECK(false,
-        "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
-        "but found '", rounding_mode, "'");
+        "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
+        "but found '", *rounding_mode, "'");
   }
+}
+
+TORCH_META_FUNC2(copysign, Tensor) (
+  const Tensor& self, const Tensor& other
+) {
+  build_binary_float_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
+  build_binary_float_op(maybe_get_output(), self, other);
 }
 
 } // namespace meta
@@ -131,15 +141,19 @@ TORCH_IMPL_FUNC(div_out) (const Tensor& self, const Tensor& other, const Tensor&
 }
 
 TORCH_IMPL_FUNC(div_out_mode) (
-  const Tensor& self, const Tensor& other, std::string rounding_mode, const Tensor& result
+  const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode, const Tensor& result
 ) {
-  if (rounding_mode == "true") {
+  if (!rounding_mode.has_value()) {
     div_true_stub(device_type(), *this);
-  } else if (rounding_mode == "trunc") {
+  } else if (*rounding_mode == "trunc") {
     div_trunc_stub(device_type(), *this);
-  } else if (rounding_mode == "floor") {
+  } else if (*rounding_mode == "floor") {
     div_floor_stub(device_type(), *this);
   }
+}
+
+TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
+  atan2_stub(device_type(), *this);
 }
 
 Tensor& add_relu_impl(
@@ -188,29 +202,25 @@ Tensor& add_relu_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   return add_relu_impl(self, self, other, alpha);
 }
 
-Tensor& copysign_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  copysign_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor copysign(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  copysign_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& copysign_(Tensor& self, const Tensor& other) {
-  return native::copysign_out(self, other, self);
+TORCH_IMPL_FUNC(copysign_out) (
+  const Tensor& self, const Tensor& other, const Tensor& result
+) {
+  copysign_stub(device_type(), *this);
 }
 
 Tensor copysign(const Tensor& self, const Scalar& other) {
-  return native::copysign(self, wrapped_scalar_tensor(other));
+  // redispatch!
+  return at::copysign(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& copysign_(Tensor& self, const Scalar& other) {
-  return native::copysign_(self, wrapped_scalar_tensor(other));
+  // redispatch!
+  return self.copysign_(wrapped_scalar_tensor(other));
+}
+
+Tensor& copysign_out(const Tensor& self, const Scalar& other, Tensor& result) {
+  // redispatch!
+  return at::copysign_out(result, self, wrapped_scalar_tensor(other));
 }
 
 // WARNING: There doesn't appear to be any testing for this function
@@ -227,11 +237,11 @@ Tensor& div_(Tensor& self, const Scalar& other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
 }
 
-Tensor div(const Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor div(const Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
-Tensor& div_(Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor& div_(Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div_(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
@@ -256,23 +266,23 @@ Tensor& divide_(Tensor& self, const Scalar& other) {
   return self.div_(other);
 }
 
-Tensor& divide_out(const Tensor& self, const Tensor& other, std::string rounding_mode, Tensor& result) {
+Tensor& divide_out(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode, Tensor& result) {
   return at::div_out(result, self, other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Tensor& other, std::string rounding_mode) {
+Tensor divide(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Tensor& other, std::string rounding_mode) {
+Tensor& divide_(Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor divide(const Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor& divide_(Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
@@ -297,7 +307,7 @@ Tensor& true_divide_(Tensor& self, const Scalar& divisor) {
   return self.div_(divisor);
 }
 
-Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& remainder_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   remainder_stub(iter.device_type(), iter);
   return result;
@@ -311,7 +321,7 @@ Tensor remainder(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& remainder_(Tensor& self, const Tensor& other) {
-  return native::remainder_out(self, self, other);
+  return native::remainder_out(self, other, self);
 }
 
 Tensor& floor_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
@@ -357,11 +367,11 @@ Tensor mul(const Tensor& self, const Scalar& other) {
 }
 
 Tensor& mul_(Tensor& self, const Scalar& other) {
-  return at::mul_out(self, self, wrapped_scalar_tensor(other)); // redispatch!
+  return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
 }
 
 // multiply, alias for mul
-Tensor& multiply_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& multiply_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::mul_out(result, self, other);
 }
 
@@ -390,7 +400,7 @@ Tensor& sub_(Tensor& self, const Scalar& other, const Scalar& alpha) {
 }
 
 // subtract, alias for sub
-Tensor& subtract_out(Tensor& result, const Tensor& self, const Tensor& other, const Scalar& alpha) {
+Tensor& subtract_out(const Tensor& self, const Tensor& other, const Scalar& alpha, Tensor& result) {
   return at::sub_out(result, self, other, alpha);
 }
 
@@ -410,7 +420,7 @@ Tensor& subtract_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return self.sub_(other, alpha);
 }
 
-Tensor& sigmoid_backward_out(Tensor& result, const Tensor& grad_output, const Tensor& output) {
+Tensor& sigmoid_backward_out(const Tensor& grad_output, const Tensor& output, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   sigmoid_backward_stub(iter.device_type(), iter);
   return result;
@@ -423,11 +433,10 @@ Tensor sigmoid_backward(const Tensor& grad_output, const Tensor& output) {
   return iter.output();
 }
 
-Tensor& logit_backward_out(
-    Tensor& result,
-    const Tensor& grad_output,
+Tensor& logit_backward_out(const Tensor& grad_output,
     const Tensor& input,
-    c10::optional<double> eps) {
+    c10::optional<double> eps,
+    Tensor& result) {
   auto iter = TensorIterator::binary_op(result, grad_output, input);
   logit_backward_stub(
       iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
@@ -445,7 +454,7 @@ Tensor logit_backward(
   return iter.output();
 }
 
-Tensor& tanh_backward_out(Tensor& result, const Tensor& grad_output, const Tensor& output) {
+Tensor& tanh_backward_out(const Tensor& grad_output, const Tensor& output, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   tanh_backward_stub(iter.device_type(), iter);
   return result;
@@ -460,23 +469,6 @@ Tensor tanh_backward(const Tensor& grad_output, const Tensor& output) {
 
 Tensor rsub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return at::sub(other, self, alpha); // redispatch!
-}
-
-Tensor& atan2_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  atan2_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor atan2(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  atan2_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& atan2_(Tensor& self, const Tensor& other) {
-  return native::atan2_out(self, self, other);
 }
 
 // These are still needed because we don't have C++ conversions from number
@@ -514,15 +506,15 @@ Tensor& remainder_(Tensor& self, const Scalar& other) {
   return native::remainder_(self, wrapped_scalar_tensor(other));
 }
 
-Tensor& remainder_out(Tensor& result, const Tensor& self, const Scalar& other) {
-  return native::remainder_out(result, self, wrapped_scalar_tensor(other));
+Tensor& remainder_out(const Tensor& self, const Scalar& other, Tensor& result) {
+  return native::remainder_out(self, wrapped_scalar_tensor(other), result);
 }
 
 Tensor rsub(const Tensor& self, const Scalar& other, const Scalar& alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
 }
 
-Tensor& bitwise_and_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& bitwise_and_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   bitwise_and_stub(iter.device_type(), iter);
   return result;
@@ -538,7 +530,7 @@ Tensor& bitwise_and_(Tensor& self, const Tensor& other) {
   return at::bitwise_and_out(self, self, other);
 }
 
-Tensor& bitwise_and_out(Tensor& result, const Tensor& self, const Scalar& other) {
+Tensor& bitwise_and_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::bitwise_and_out(result, self, wrapped_scalar_tensor(other));
 }
 
@@ -568,7 +560,7 @@ Tensor& __iand__(Tensor& self, const Scalar& other) {
   return self.bitwise_and_(other);
 }
 
-Tensor& bitwise_or_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& bitwise_or_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   bitwise_or_stub(iter.device_type(), iter);
   return result;
@@ -584,7 +576,7 @@ Tensor& bitwise_or_(Tensor& self, const Tensor& other) {
   return at::bitwise_or_out(self, self, other);
 }
 
-Tensor& bitwise_or_out(Tensor& result, const Tensor& self, const Scalar& other) {
+Tensor& bitwise_or_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::bitwise_or_out(result, self, wrapped_scalar_tensor(other));
 }
 
@@ -614,7 +606,7 @@ Tensor& __ior__(Tensor& self, const Scalar& other) {
   return self.bitwise_or_(other);
 }
 
-Tensor& bitwise_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& bitwise_xor_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   bitwise_xor_stub(iter.device_type(), iter);
   return result;
@@ -630,7 +622,7 @@ Tensor& bitwise_xor_(Tensor& self, const Tensor& other) {
   return at::bitwise_xor_out(self, self, other);
 }
 
-Tensor& bitwise_xor_out(Tensor& result, const Tensor& self, const Scalar& other) {
+Tensor& bitwise_xor_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::bitwise_xor_out(result, self, wrapped_scalar_tensor(other));
 }
 
@@ -768,85 +760,85 @@ Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
 // referring to *_out function is ambiguious.
 using OutFunc = std::add_const<Tensor&(&)(Tensor&, const Tensor&, const Tensor&)>::type;
 
-Tensor& lt_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, lt_stub); }
+Tensor& lt_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, lt_stub); }
 Tensor lt(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::lt_out)); }
 Tensor& lt_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::lt_out)); }
-Tensor& lt_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::lt_out)); }
+Tensor& lt_out(const Tensor& self, const Scalar& other, Tensor& result) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::lt_out)); }
 Tensor lt(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::lt_out)); }
 Tensor& lt_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::lt_out)); }
 
 // less, alias for torch.lt
-Tensor& less_out(Tensor& result, const Tensor& self, const Tensor& other) { return at::lt_out(result, self, other); }
+Tensor& less_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::lt_out(result, self, other); }
 Tensor less(const Tensor& self, const Tensor& other) { return self.lt(other); }
 Tensor& less_(Tensor& self, const Tensor& other) { return self.lt_(other); }
-Tensor& less_out(Tensor& result, const Tensor& self, const Scalar& other) { return at::lt_out(result, self, other); }
+Tensor& less_out(const Tensor& self, const Scalar& other, Tensor& result) { return at::lt_out(result, self, other); }
 Tensor less(const Tensor& self, const Scalar& other) { return self.lt(other); }
 Tensor& less_(Tensor& self, const Scalar& other) { return self.lt_(other); }
 
-Tensor& le_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, le_stub); }
+Tensor& le_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, le_stub); }
 Tensor le(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::le_out)); }
 Tensor& le_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::le_out)); }
-Tensor& le_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::le_out)); }
+Tensor& le_out(const Tensor& self, const Scalar& other, Tensor& result) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::le_out)); }
 Tensor le(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::le_out)); }
 Tensor& le_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::le_out)); }
 
 // less_equal, alias for torch.le
-Tensor& less_equal_out(Tensor& result, const Tensor& self, const Tensor& other) { return at::le_out(result, self, other); }
+Tensor& less_equal_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::le_out(result, self, other); }
 Tensor less_equal(const Tensor& self, const Tensor& other) { return self.le(other); }
 Tensor& less_equal_(Tensor& self, const Tensor& other) { return self.le_(other); }
-Tensor& less_equal_out(Tensor& result, const Tensor& self, const Scalar& other) { return at::le_out(result, self, other); }
+Tensor& less_equal_out(const Tensor& self, const Scalar& other, Tensor& result) { return at::le_out(result, self, other); }
 Tensor less_equal(const Tensor& self, const Scalar& other) { return self.le(other); }
 Tensor& less_equal_(Tensor& self, const Scalar& other) { return self.le_(other); }
 
-Tensor& gt_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, gt_stub); }
+Tensor& gt_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, gt_stub); }
 Tensor gt(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::gt_out)); }
 Tensor& gt_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::gt_out)); }
-Tensor& gt_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::gt_out)); }
+Tensor& gt_out(const Tensor& self, const Scalar& other, Tensor& result) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::gt_out)); }
 Tensor gt(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::gt_out)); }
 Tensor& gt_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::gt_out)); }
 
 // greater, alias for torch.gt
-Tensor& greater_out(Tensor& result, const Tensor& self, const Tensor& other) { return at::gt_out(result, self, other); }
+Tensor& greater_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::gt_out(result, self, other); }
 Tensor greater(const Tensor& self, const Tensor& other) { return self.gt(other); }
 Tensor& greater_(Tensor& self, const Tensor& other) { return self.gt_(other); }
-Tensor& greater_out(Tensor& result, const Tensor& self, const Scalar& other) { return at::gt_out(result, self, other); }
+Tensor& greater_out(const Tensor& self, const Scalar& other, Tensor& result) { return at::gt_out(result, self, other); }
 Tensor greater(const Tensor& self, const Scalar& other) { return self.gt(other); }
 Tensor& greater_(Tensor& self, const Scalar& other) { return self.gt_(other); }
 
-Tensor& ge_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, ge_stub); }
+Tensor& ge_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, ge_stub); }
 Tensor ge(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::ge_out)); }
 Tensor& ge_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::ge_out)); }
-Tensor& ge_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::ge_out)); }
+Tensor& ge_out(const Tensor& self, const Scalar& other, Tensor& result) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::ge_out)); }
 Tensor ge(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::ge_out)); }
 Tensor& ge_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::ge_out)); }
 
 // greater_equal, alias for torch.ge
-Tensor& greater_equal_out(Tensor& result, const Tensor& self, const Tensor& other) { return at::ge_out(result, self, other); }
+Tensor& greater_equal_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::ge_out(result, self, other); }
 Tensor greater_equal(const Tensor& self, const Tensor& other) { return self.ge(other); }
 Tensor& greater_equal_(Tensor& self, const Tensor& other) { return self.ge_(other); }
-Tensor& greater_equal_out(Tensor& result, const Tensor& self, const Scalar& other) { return at::ge_out(result, self, other); }
+Tensor& greater_equal_out(const Tensor& self, const Scalar& other, Tensor& result) { return at::ge_out(result, self, other); }
 Tensor greater_equal(const Tensor& self, const Scalar& other) { return self.ge(other); }
 Tensor& greater_equal_(Tensor& self, const Scalar& other) { return self.ge_(other); }
 
-Tensor& eq_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, eq_stub); }
+Tensor& eq_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, eq_stub); }
 Tensor eq(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::eq_out)); }
 Tensor& eq_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::eq_out)); }
-Tensor& eq_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::eq_out)); }
+Tensor& eq_out(const Tensor& self, const Scalar& other, Tensor& result) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::eq_out)); }
 Tensor eq(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::eq_out)); }
 Tensor& eq_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::eq_out)); }
 
-Tensor& ne_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, ne_stub); }
+Tensor& ne_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, ne_stub); }
 Tensor ne(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::ne_out)); }
 Tensor& ne_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::ne_out)); }
-Tensor& ne_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::ne_out)); }
+Tensor& ne_out(const Tensor& self, const Scalar& other, Tensor& result) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::ne_out)); }
 Tensor ne(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::ne_out)); }
 Tensor& ne_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::ne_out)); }
 
 // not_equal, alias for torch.ne
-Tensor& not_equal_out(Tensor& result, const Tensor& self, const Tensor& other) { return at::ne_out(result, self, other); }
+Tensor& not_equal_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::ne_out(result, self, other); }
 Tensor not_equal(const Tensor& self, const Tensor& other) { return self.ne(other); }
 Tensor& not_equal_(Tensor& self, const Tensor& other) { return self.ne_(other); }
-Tensor& not_equal_out(Tensor& result, const Tensor& self, const Scalar& other) { return at::ne_out(result, self, other); }
+Tensor& not_equal_out(const Tensor& self, const Scalar& other, Tensor& result) { return at::ne_out(result, self, other); }
 Tensor not_equal(const Tensor& self, const Scalar& other) { return self.ne(other); }
 Tensor& not_equal_(Tensor& self, const Scalar& other) { return self.ne_(other); }
 
@@ -871,7 +863,7 @@ Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Scalar& other)
 Tensor logical_xor(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 Tensor& logical_xor_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
-Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& maximum_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   maximum_stub(iter.device_type(), iter);
   return result;
@@ -885,7 +877,7 @@ Tensor maximum(const Tensor& self, const Tensor& other) {
 }
 
 // binary max, alias for maximum
-Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& max_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::maximum_out(result, self, other);
 }
 
@@ -910,7 +902,7 @@ Tensor fmax(const Tensor& self, const Tensor& other) {
   return iter.output();
 }
 
-Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& minimum_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   minimum_stub(iter.device_type(), iter);
   return result;
@@ -924,7 +916,7 @@ Tensor minimum(const Tensor& self, const Tensor& other) {
 }
 
 // binary min, alias for minimum
-Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& min_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::minimum_out(result, self, other);
 }
 
@@ -957,14 +949,14 @@ Tensor& floor_divide_(Tensor& self, const Scalar& other) {
   return at::floor_divide_out(self, self, wrapped_scalar_tensor(other));
 }
 
-Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
+Tensor& fmod_out(const Tensor& self, const Tensor& other, Tensor & result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   fmod_stub(iter.device_type(), iter);
   return result;
 }
 
-Tensor& fmod_out(Tensor & result, const Tensor& self, const Scalar& other) {
-  return native::fmod_out(result, self, wrapped_scalar_tensor(other));
+Tensor& fmod_out(const Tensor& self, const Scalar& other, Tensor & result) {
+  return native::fmod_out(self, wrapped_scalar_tensor(other), result);
 }
 
 Tensor fmod(const Tensor& self, const Tensor & other) {
@@ -979,7 +971,7 @@ Tensor fmod(const Tensor& self, const Scalar& other) {
 }
 
 Tensor& fmod_(Tensor& self, const Tensor& other) {
-  return native::fmod_out(self, self, other);
+  return native::fmod_out(self, other, self);
 }
 
 Tensor& fmod_(Tensor& self, const Scalar& other) {
@@ -1038,7 +1030,7 @@ Tensor& lcm_(Tensor& self, const Tensor& other) {
   return at::lcm_out(self, self, other);
 }
 
-Tensor& hypot_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& hypot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   hypot_stub(iter.device_type(), iter);
   return result;
@@ -1055,7 +1047,7 @@ Tensor& hypot_(Tensor& self, const Tensor& other) {
   return at::hypot_out(self, self, other);
 }
 
-Tensor& igamma_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& igamma_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   igamma_stub(iter.device_type(), iter);
   return result;
@@ -1072,7 +1064,7 @@ Tensor& igamma_(Tensor& self, const Tensor& other) {
   return at::igamma_out(self, self, other);
 }
 
-Tensor& igammac_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& igammac_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   igammac_stub(iter.device_type(), iter);
   return result;
@@ -1089,7 +1081,7 @@ Tensor& igammac_(Tensor& self, const Tensor& other) {
   return at::igammac_out(self, self, other);
 }
 
-Tensor& nextafter_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& nextafter_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   nextafter_stub(iter.device_type(), iter);
   return result;
@@ -1112,7 +1104,7 @@ Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, cons
   return self - (other * alpha);
 }
 
-Tensor& heaviside_out(Tensor& result, const Tensor& self, const Tensor& values) {
+Tensor& heaviside_out(const Tensor& self, const Tensor& values, Tensor& result) {
   TORCH_CHECK(!self.is_complex() && !result.is_complex() && !values.is_complex(),
               "heaviside is not yet implemented for complex tensors.");
   TORCH_CHECK(self.dtype() == values.dtype() &&  result.dtype() == self.dtype(),

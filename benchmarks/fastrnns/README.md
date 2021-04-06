@@ -39,4 +39,3 @@ you can also specify the models to generate nvprof files separately:
 
 Use Linux for the most accurate timing. A lot of these tests only run
 on CUDA.
-
