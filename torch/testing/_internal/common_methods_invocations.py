@@ -3750,6 +3750,9 @@ op_db: List[OpInfo] = [
     OpInfo('polar',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_polar),
+    # To test reference numerics against multiple values of argument `n`,
+    # we make multiple OpInfo entries with each entry corresponding to different value of n (currently 0 to 4).
+    # We run the op tests from test_ops.py only for `n=0` to avoid redundancy in testing.
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_0',
@@ -3788,7 +3791,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients'),
                        SkipInfo('TestOpInfo'),
                        SkipInfo('TestCommon'),
-                       # Mismatch
+                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard'),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal'),
@@ -3807,7 +3810,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients'),
                        SkipInfo('TestOpInfo'),
                        SkipInfo('TestCommon'),
-                       # Mismatch
+                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 2}, {'n': 2})),
     UnaryUfuncInfo('polygamma',
@@ -3823,7 +3826,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients'),
                        SkipInfo('TestOpInfo'),
                        SkipInfo('TestCommon'),
-                       # Mismatch
+                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 3}, {'n': 3})),
     UnaryUfuncInfo('polygamma',
@@ -3840,7 +3843,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients'),
                        SkipInfo('TestOpInfo'),
                        SkipInfo('TestCommon'),
-                       # Mismatch
+                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 4}, {'n': 4})),
     OpInfo('pinverse',
