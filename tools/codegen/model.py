@@ -168,6 +168,10 @@ class NativeFunction:
     # classes for expository clarity.)
     func: 'FunctionSchema'
 
+    # Whether or not to generate mutable tensor arguments like regular
+    # ones
+    use_const_ref_for_mutable_tensors: bool
+
     # Whether or not to omit automatic generation of a DeviceGuard
     device_guard: bool
 
@@ -263,6 +267,11 @@ class NativeFunction:
         assert isinstance(cpp_no_default_args_list, list)
         cpp_no_default_args = set(cpp_no_default_args_list)
 
+        use_const_ref_for_mutable_tensors = e.pop('use_const_ref_for_mutable_tensors', False)
+        assert isinstance(use_const_ref_for_mutable_tensors, bool)
+        if "resize" in str(func.name):
+            assert use_const_ref_for_mutable_tensors, "oh no " + func
+
         variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
         variants: Set[Variant] = set()
@@ -338,6 +347,7 @@ class NativeFunction:
 
         return NativeFunction(
             func=func,
+            use_const_ref_for_mutable_tensors=use_const_ref_for_mutable_tensors,
             variants=variants,
             structured=structured,
             structured_delegate=structured_delegate,
@@ -736,21 +746,25 @@ class Annotation:
     # we can conveniently assume it is canonically ordered
     alias_set: Tuple[str, ...]
     is_write: bool
+    is_const_ref_write: bool
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
-        m = re.match(r'^([a-z])(!?)$', ann)
+        m = re.match(r'^([a-z])(!?)(!?)$', ann)
         assert m is not None, f'unrecognized alias annotation {ann}'
         alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
-        r = Annotation(alias_set=alias_set, is_write=is_write)
+        is_const_ref_write = m.group(3) == '!'
+        r = Annotation(alias_set=alias_set, is_write=is_write,
+                       is_const_ref_write=is_const_ref_write)
         assert str(r) == ann, f'{r} != {ann}'
         return r
 
     def __str__(self) -> str:
         alias_set = '|'.join(self.alias_set)
         is_write = '!' if self.is_write else ''
-        return f'{alias_set}{is_write}'
+        is_const_ref_write = '!' if self.is_const_ref_write else ''
+        return f'{alias_set}{is_write}{is_const_ref_write}'
 
 # The base class for the type system.  This is also loosely modeled
 # off of jit_type.h, but we've simplified the hierarchy to focus
