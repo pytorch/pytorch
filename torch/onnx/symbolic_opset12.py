@@ -211,76 +211,32 @@ def unfold(g, input, dimension, size, step):
         return _unimplemented("Unfold", "input size not accessible")
 
 @parse_args('v', 'v', 'is', 'is', 'v')
-def tensordot(g, input_a, input_b, dim_a, dim_b, out=None):
+def tensordot(g, input_a, input_b, dims_a, dims_b, out=None):
     from torch.onnx.symbolic_opset9 import view
 
-    for i in range(len(dim_a)):
-        if sym_help._get_tensor_dim_size(input_a, dim_a[i]) != sym_help._get_tensor_dim_size(input_b, dim_b[i]):
-            raise RuntimeError(f'Dimensions are not matched')
+    for i in range(len(dims_a)):
+        if sym_help._get_tensor_dim_size(input_a, dims_a[i]) != sym_help._get_tensor_dim_size(input_b, dims_b[i]):
+            raise RuntimeError(f'Dimensions are not matched.')
 
     a_dim_count = input_a.type().dim()
     b_dim_count = input_b.type().dim()
 
-    # a_dim_count = g.op("Constant", value_t=torch.tensor([input_a.type().dim()]))
-    # b_dim_count = g.op("Constant", value_t=torch.tensor([input_b.type().dim()]))
+    left_dims_sizes_a = [sym_help._get_tensor_dim_size(input_a, i) 
+                         for i in range(a_dim_count) 
+                         if ((i not in dims_a) and (i-a_dim_count) not in dims_a)]
+    left_dims_sizes_b = [sym_help._get_tensor_dim_size(input_b, i) 
+                         for i in range(b_dim_count) 
+                         if ((i not in dims_b) and (i-b_dim_count) not in dims_b)]
 
-    # removed_dims_a_product = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
-    # removed_dims_b_product = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
+    output_a = view(g, input_a, tuple(left_dims_sizes_a + [-1]))
+    output_a = view(g, output_a, tuple([-1] + [sym_help._get_tensor_dim_size(output_a, len(left_dims_sizes_a))]))
 
-    removed_dims_a_product = 1
-    for i in range(len(dim_a)):
-        if dim_a[i] < 0:
-            dim_a[i] += a_dim_count
-        removed_dims_a_product *= sym_help._get_tensor_dim_size(input_a, dim_a[i])
+    output_b = view(g, input_b, tuple([-1] + left_dims_sizes_b))
+    output_b = view(g, output_b, tuple([sym_help._get_tensor_dim_size(output_b, 0)] + [-1]))
 
-    removed_dims_b_product = 1
-    for i in range(len(dim_b)):
-        if dim_b[i] < 0:
-            dim_b[i] += b_dim_count
-        removed_dims_b_product *= sym_help._get_tensor_dim_size(input_b, dim_b[i])
-
-    left_dims_a = [sym_help._get_tensor_dim_size(input_a, i) for i in range(a_dim_count) if i not in dim_a]
-    left_dims_b = [sym_help._get_tensor_dim_size(input_b, i) for i in range(b_dim_count) if i not in dim_b]
-   
-    left_dims_a_product = 1
-    left_dims_b_product = 1
-
-    for i in range(len(left_dims_a)):
-        left_dims_a_product *= left_dims_a[i]
-
-    for i in range(len(left_dims_b)):
-        left_dims_b_product *= left_dims_b[i]
-
-    output_a = view(g, input_a, [left_dims_a_product, removed_dims_a_product])
-    output_b = view(g, input_b, [removed_dims_b_product, left_dims_b_product])
     output_list = g.op("prim::ListConstruct", *[output_a, output_b])
 
     output = einsum(g, 'ij,jk->ik', output_list)
+    output = view(g, output, (left_dims_sizes_a + left_dims_sizes_b))
 
-    output = view(g, output, (left_dims_a + left_dims_b))
-
-    print('end here')
     return output
-
-#     dim_size = sym_help._get_tensor_dim_size(self, adjusted_dim)
-#     if (dim < 0 and input_rank is None) or dim_size is None:
-#         # If onnx shape inference is not on, export always as dynamic.
-#         # Because we cannot tell if observed static shape is also static at runtime.
-#         # create 'cond' node (condition is shape[i]==1)
-
-#         dim_constant = g.op("Constant", value_t=torch.tensor([dim]))
-#         size = sym_help._size_helper(g, self, dim_constant)
-#         const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
-#         cond = g.op("Equal", size, const_one)
-
-#         # create the 'If' node and add the 'then' and 'else' blocks to it.
-#         if_node_outputs = g.op("If", cond)
-#         if_node = if_node_outputs.node()
-#         if_block = torch.onnx.utils._add_block(if_node)
-#         squeeze_ = sym_help._squeeze_helper(if_block, self, [dim])
-#         torch.onnx.utils._add_output_to_block(if_block, squeeze_)
-#         else_block = torch.onnx.utils._add_block(if_node)
-#         identity_ = else_block.op("Identity", self)
-#         torch.onnx.utils._add_output_to_block(else_block, identity_)
-#         return if_node_outputs
-
