@@ -39,23 +39,23 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::Bool:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
+    case ScalarType::ComplexHalf:
+      dtype.code = DLDataTypeCode::kDLComplex;
+      break;
+    case ScalarType::ComplexFloat:
+      dtype.code = DLDataTypeCode::kDLComplex;
+      break;
+    case ScalarType::ComplexDouble:
+      dtype.code = DLDataTypeCode::kDLComplex;
+      break;
     case ScalarType::BFloat16:
-      throw std::logic_error("BFloat16 is not supported by dlpack");
+      dtype.code = DLDataTypeCode::kDLBfloat;
       break;
     case ScalarType::QInt8:
     case ScalarType::QUInt8:
     case ScalarType::QInt32:
     case ScalarType::QUInt4x2:
       throw std::logic_error("QUInt/QInt types are not supported by dlpack");
-      break;
-    case ScalarType::ComplexHalf:
-      throw std::logic_error("ComplexHalf is not supported by dlpack");
-      break;
-    case ScalarType::ComplexFloat:
-      throw std::logic_error("ComplexFloat is not supported by dlpack");
-      break;
-    case ScalarType::ComplexDouble:
-      throw std::logic_error("ComplexDouble is not supported by dlpack");
       break;
     case ScalarType::Undefined:
       throw std::logic_error("Undefined is not a valid ScalarType");
@@ -65,8 +65,8 @@ DLDataType getDLDataType(const Tensor& t) {
   return dtype;
 }
 
-DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
-  DLContext ctx;
+DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
+  DLDevice ctx;
   ctx.device_id = device_id;
   switch (tensor.device().type()) {
     case DeviceType::CPU:
@@ -93,7 +93,7 @@ DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
   return ctx;
 }
 
-static Device getATenDevice(const DLContext& ctx) {
+static Device getATenDevice(const DLDevice& ctx) {
   switch (ctx.device_type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
@@ -119,8 +119,8 @@ static Device getATenDevice(const DLContext& ctx) {
 
 ScalarType toScalarType(const DLDataType& dtype) {
   ScalarType stype;
-  if (dtype.lanes != 1)
-    throw std::logic_error("ATen does not support lanes != 1");
+  // if (dtype.lanes != 1)
+  //   throw std::logic_error("ATen does not support lanes != 1");
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
@@ -167,6 +167,32 @@ ScalarType toScalarType(const DLDataType& dtype) {
               "Unsupported kFloat bits " + c10::to_string(dtype.bits));
       }
       break;
+    case DLDataTypeCode::kDLBfloat:
+      switch (dtype.bits) {
+        case 16:
+          stype = ScalarType::BFloat16;
+          break;
+        default:
+          throw std::logic_error(
+              "Unsupported kFloat bits " + c10::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLComplex:
+      switch (dtype.bits) {
+        case 32:
+          stype = ScalarType::ComplexHalf;
+          break;
+        case 64:
+          stype = ScalarType::ComplexFloat;
+          break;
+        case 128:
+          stype = ScalarType::ComplexDouble;
+          break;
+        default:
+          throw std::logic_error(
+              "Unsupported kFloat bits " + c10::to_string(dtype.bits));
+      }
+      break;
     default:
       throw std::logic_error("Unsupported code " + c10::to_string(dtype.code));
   }
@@ -194,7 +220,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   if (src.is_cuda()) {
     device_id = src.get_device();
   }
-  atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src, device_id);
+  atDLMTensor->tensor.dl_tensor.device = getDLDevice(src, device_id);
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape =
@@ -206,7 +232,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
 }
 
 Tensor fromDLPack(const DLManagedTensor* src) {
-  Device device = getATenDevice(src->dl_tensor.ctx);
+  Device device = getATenDevice(src->dl_tensor.device);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   auto deleter = [src](void* self) {
     src->deleter(const_cast<DLManagedTensor*>(src));
