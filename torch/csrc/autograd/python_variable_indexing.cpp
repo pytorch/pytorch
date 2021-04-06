@@ -20,6 +20,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/TracerMode.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/irange.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 #include <vector>
@@ -147,7 +148,7 @@ static inline Variable applySlicing(
   }
 
   Variable result = self;
-  for (int64_t i = 0; i < size; i++) {
+  for(const auto i : c10::irange(size)) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     result = at::indexing::handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,
