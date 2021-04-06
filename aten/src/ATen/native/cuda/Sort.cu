@@ -185,7 +185,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
       at::cuda::cub::sort_pairs<int64_t, int64_t>(
         segment_id.data_ptr<int64_t>(), nullptr,
         sorted_indices.data_ptr<int64_t>(), indices_ptr,
-        n);
+        n, false, 0, segment_bits);
 
       sort_gather_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
         self_ptr, values_ptr, indices_ptr, nsegments, nsort);
