@@ -822,8 +822,12 @@ def check_slow_test_from_stats(test):
     global slow_tests_dict
     if slow_tests_dict is None:
         url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/.pytorch-slow-tests'
-        contents = urlopen(url, timeout=1).read().decode('utf-8')
-        slow_tests_dict = json.loads(contents)
+        try:
+            contents = urlopen(url, timeout=1).read().decode('utf-8')
+            slow_tests_dict = json.loads(contents)
+        except Exception as e:
+            print(f'Could not download slow test stats because of error {e}. Proceeding with no added slow tests.')
+            slow_tests_dict = {}
     test_suite = str(test.__class__).split('\'')[1]
     test_name = f'{test._testMethodName} ({test_suite})'
 
