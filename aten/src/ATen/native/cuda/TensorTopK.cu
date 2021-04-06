@@ -354,7 +354,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   }
   // is this necessary?
   //THCudaLongTensor_free(state, input);
-  
+
   AT_CUDA_CHECK(cudaGetLastError());
   return std::forward_as_tuple(values, indices);
 }
