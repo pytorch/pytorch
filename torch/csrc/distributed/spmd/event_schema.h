@@ -19,7 +19,7 @@ enum EventType {
 // TODO:
 // 1. Add Event frequency field, e.g., EXACTLY_ONCE, AT_MOST_ONCE
 struct EventSchema {
-  EventSchema(EventType type) : type_(type) {}
+  explicit EventSchema(EventType type) : type_(type) {}
 
   bool operator==(const EventSchema& rhs) const {
     return type_ == rhs.type_;

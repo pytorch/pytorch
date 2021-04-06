@@ -14,7 +14,7 @@ namespace spmd {
 // IValue type and can be wrapped with ivalue::Future.
 class Event : public torch::CustomClassHolder {
  public:
-  Event(EventSchema schema) : schema_(std::move(schema)) {}
+  explicit Event(EventSchema schema) : schema_(schema) {}
 
   const EventSchema& schema() const {
     return schema_;

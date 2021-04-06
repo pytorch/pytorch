@@ -93,7 +93,7 @@ std::vector<std::shared_ptr<Future>> DefaultTrigger::handlePrepareModule(
 }
 
 std::vector<std::shared_ptr<Future>> DefaultTrigger::handlePreForward(
-    c10::intrusive_ptr<PreForwardEvent> event) {
+    c10::intrusive_ptr<PreForwardEvent> /* unused */) {
   gradReadyFutures_.clear();
   gradReadyFutures_.reserve(params_.size());
   for (size_t i = 0; i < params_.size(); ++i) {

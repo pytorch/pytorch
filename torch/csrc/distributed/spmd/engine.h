@@ -67,7 +67,7 @@ class TORCH_API Engine {
 
   // Node derived class of an Event
   struct EventNode : Node {
-    explicit EventNode(EventSchema schema) : schema_(std::move(schema)) {}
+    explicit EventNode(EventSchema schema) : schema_(schema) {}
     const EventSchema schema_;
   };
 

@@ -13,7 +13,7 @@ namespace {
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* spmd_init(PyObject* _unused, PyObject* noargs) {
+PyObject* spmd_init(PyObject* /* unused */, PyObject* /* unused */) {
   auto spmd_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed._spmd"));
   if (!spmd_module) {

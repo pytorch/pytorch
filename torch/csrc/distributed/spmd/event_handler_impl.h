@@ -75,9 +75,8 @@ class TORCH_API DefaultBucketer : public EventHandler {
 // 1. Launch AllReduce asynchronously
 class TORCH_API AllReduceComm : public EventHandler {
  public:
-  using EventHandler::EventHandler;
-  AllReduceComm(c10::intrusive_ptr<c10d::ProcessGroup> pg)
-      : pg_(std::move(pg)) {}
+  explicit AllReduceComm(c10::intrusive_ptr<c10d::ProcessGroup> pg)
+      : EventHandler(), pg_(std::move(pg)) {}
 
   std::vector<EventSchema> ingressEvents() const override;
   std::vector<EventSchema> egressEvents() const override;

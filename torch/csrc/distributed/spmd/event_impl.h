@@ -11,7 +11,7 @@ namespace spmd {
 
 class PrepareModuleEvent : public Event {
  public:
-  PrepareModuleEvent(std::vector<at::Tensor> params)
+  explicit PrepareModuleEvent(std::vector<at::Tensor> params)
       : Event(EventSchema(EventType::PREPARE_MODULE)),
         params_(std::move(params)) {}
 
@@ -51,14 +51,14 @@ class LocalGradReadyEvent : public Event {
 struct Bucket final {
   Bucket(
       size_t index,
-      const at::Tensor tensor,
+      const at::Tensor& tensor,
       std::vector<size_t> paramIndices)
       : index_(index),
-        tensor_(std::move(tensor)),
-        paramIndices_(paramIndices) {}
+        tensor_(tensor),
+        paramIndices_(std::move(paramIndices)) {}
 
   const size_t index_;
-  const at::Tensor tensor_;
+  const at::Tensor& tensor_;
   const std::vector<size_t> paramIndices_;
 };
 
