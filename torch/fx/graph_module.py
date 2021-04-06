@@ -37,11 +37,14 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
+
 def _forward_from_src(src: str, globals: Dict[str, Any]):
     # avoid mutating the passed in dict
-    globals = globals.copy()
-    exec_with_source(src, globals)
-    return globals['forward']
+    globals_copy = globals.copy()
+    exec_with_source(src, globals_copy)
+    forward_fn = globals_copy['forward']
+    del globals_copy['forward']
+    return forward_fn
 
 
 def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
