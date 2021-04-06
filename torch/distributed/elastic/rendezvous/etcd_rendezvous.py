@@ -54,6 +54,13 @@ class EtcdRendezvousRetryImmediately(Exception):
     pass
 
 
+# Default timeout for the rendezvous.
+_DEFAULT_TIMEOUT: int = 600  # 10 minutes
+
+# Additional waiting time after reaching the minimum number of nodes
+# in case the rendezvous is elastic (min != max).
+_DEFAULT_LAST_CALL_TIMEOUT: int = 30  # 30 seconds
+
 # Various constants used internally in EtcdRendezvous
 CONST_ETCD_SETUP_TTL = 5
 CONST_ETCD_FROZEN_TTL = 10
@@ -1252,7 +1259,7 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
         run_id=params.run_id,
         num_min_workers=params.min_nodes,
         num_max_workers=params.max_nodes,
-        timeout=params.timeout,
-        last_call_timeout=params.last_call_timeout,
+        timeout=params.get_as_int("timeout", _DEFAULT_TIMEOUT),
+        last_call_timeout=params.get_as_int("last_call_timeout", _DEFAULT_LAST_CALL_TIMEOUT),
     )
     return EtcdRendezvousHandler(rdzv_impl=rdzv)
