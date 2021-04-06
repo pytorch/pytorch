@@ -1,12 +1,12 @@
-from typing import Optional, Iterable, List, Any
+from typing import Optional, Iterable, List, Any, Dict
 from collections import defaultdict
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore
-    from monkeytype.db.base import CallTraceStore, CallTraceStoreLogger
-    from monkeytype.config import default_code_filter
-    from monkeytype.tracing import CallTrace, CodeFilter, CallTraceLogger
+    from monkeytype.db.base import CallTraceStore, CallTraceStoreLogger  #type: ignore[import]
+    from monkeytype.config import default_code_filter    #type: ignore[import]
+    from monkeytype.tracing import CallTrace, CodeFilter, CallTraceLogger    #type: ignore[import]
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
     print("Warning: monkeytype is not installed. Please install monkeytype to enable static type annotation")
@@ -44,6 +44,36 @@ if _IS_MONKEYTYPE_INSTALLED:
             limit: int = 2000
         ) -> List[CallTrace]:
             return self.trace_records[qualified_name]
+
+        def analyze(self, qualified_name: str) -> Dict:
+            # Analyze the types for the given module
+            # and create a dictionary of all the types
+            # for arguments and return values this module can take
+            records = self.trace_records[qualified_name]
+            all_args = defaultdict(set)
+            for record in records:
+                for arg, arg_type in record.arg_types.items():
+                    all_args[arg].add(arg_type)
+                all_args["return_type"].add(record.return_type)
+            return all_args
+
+        def consolidate_types(self, qualified_name: str) -> Dict:
+            all_args = self.analyze(qualified_name)
+            # If there are more types for an argument,
+            # then consolidate the type to `Any` and replace the entry
+            # by type `Any`.
+            # This currently handles only cases with only one return value
+            # TODO: Consolidate types for multiple return values
+            for args, types in all_args.items():
+                if len(types) > 1:
+                    all_args[args] = {'Any'}
+                else:
+                    _element_string_type = types.pop()
+                    all_args[args] = {_element_string_type.__name__}
+            return all_args
+
+        def get_args_types(self, qualified_name: str) -> Dict:
+            return self.consolidate_types(qualified_name)
 
     class JitTypeTraceConfig(monkeytype.config.Config):
         def __init__(self, s: JitTypeTraceStore):
