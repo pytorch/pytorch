@@ -20,7 +20,7 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   return sizes;
 }
 
-using ArgValue = c10::variant<tensorexpr::Tensor*, tensorexpr::VarHandle, double, long int, bool>;
+using ArgValue = c10::variant<tensorexpr::Tensor*, tensorexpr::VarHandle, double, int64_t, bool>;
 
 class TORCH_API TensorExprKernel {
  public:
