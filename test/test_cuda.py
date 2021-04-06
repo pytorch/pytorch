@@ -1696,13 +1696,19 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 2)
         self.assertEqual(torch.cuda.current_stream(), default_stream)
 
-        # Tests using grads inside the stream context
+        # Tests that using grads in the same stream context as backward()
+        # is safe regardless what streams bwd ops ran on
+        bwd_ambient_stream = torch.cuda.Stream()
         x = torch.randn(5, 5, device='cuda', requires_grad=True)
         with torch.cuda.stream(stream):
             stream.wait_stream(default_stream)
             output = MultiplyInStream.apply(x)
+        with torch.cuda.stream(bwd_ambient_stream):
+            bwd_ambient_stream.wait_stream(stream)
             output.sum().backward()
-            # should be ok to use grad without a sync
+            # x was first used on "stream" so its AccumulateGrad leaf should run on "stream".
+            # The end of backward() should have synced "bwd_ambient_stream" with "stream"
+            # so it should be safe to use x.grad here without any syncs.
             self.assertEqual(x.grad, torch.ones_like(x) * 2)
             self.assertEqual(torch.cuda.current_stream(), default_stream)
 
