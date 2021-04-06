@@ -910,6 +910,11 @@ Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
 }
 
+template <typename T, typename... Args>
+Tensor make_view_tensor(Args&&... args) {
+  return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)..., /*is_view*/true));
+}
+
 } // namespace detail
 
 static inline DispatchKey legacyExtractDispatchKey(const Tensor& t) {

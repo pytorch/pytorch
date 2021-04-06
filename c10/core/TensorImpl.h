@@ -233,7 +233,7 @@ struct C10_API VariableVersion {
   // It's okay to return true even for inference tensor which
   // doesn't have version counter enabled.
   bool unique() const {
-    return this->enabled() ? 1 == version_counter_.use_count() : true;
+    return version_counter_ ? 1 == version_counter_.use_count() : true;
   }
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
   // leaves it in a persistently undefined state. See
@@ -268,11 +268,10 @@ struct C10_API VariableVersion {
   //    * or bump() is a no-op for inference tensor.
   //      - e.g. inference_tensor.add_(normal_tensor)
   void bump() {
-    bool enabled = this->enabled();
-    TORCH_CHECK(enabled || InferenceMode::is_enabled(),
+    TORCH_CHECK(version_counter_ || InferenceMode::is_enabled(),
       "Inplace update to inference tensor outside InferenceMode is not allowed."
       "You can make a clone to get a normal tensor before doing inplace update.");
-    if (enabled) {
+    if (version_counter_) {
       ++version_counter_->version_;
     }
   }
@@ -280,7 +279,7 @@ struct C10_API VariableVersion {
   // Inference tensor doesn't have version counter so it shouldn't be
   // accessed.
   uint32_t current_version() const {
-    TORCH_CHECK(this->enabled(),
+    TORCH_CHECK(version_counter_,
       "Accessing version_counter of inference tensor is not allowed.");
     return version_counter_->version_;
   }
@@ -1137,17 +1136,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Inference tensor doesn't have version counter,
   // set_version_counter is no-op for them.
   void set_version_counter(
-    const c10::VariableVersion& version_counter) noexcept {
-    if (!this->is_inference_tensor()) {
-      version_counter_ = version_counter;
-    }
+    const c10::VariableVersion& version_counter) {
+    TORCH_CHECK(!(is_inference_tensor() && version_counter.enabled()),
+      "Cannot set version_counter for inference tensor");
+    version_counter_ = version_counter;
   }
 
   void set_version_counter(
-    c10::VariableVersion&& version_counter) noexcept {
-    if (!this->is_inference_tensor()) {
-      version_counter_ = std::move(version_counter);
-    }
+    c10::VariableVersion&& version_counter) {
+    TORCH_CHECK(!(is_inference_tensor() && version_counter.enabled()),
+      "Cannot set version_counter for inference tensor");
+    version_counter_ = std::move(version_counter);
   }
 
   const c10::VariableVersion& version_counter() const noexcept {

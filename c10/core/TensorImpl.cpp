@@ -320,7 +320,7 @@ AutogradMetaInterface::~AutogradMetaInterface() {}
 // there's no way that we can directly allocate a tensor to have
 // requires_grad = true in C++ constructor.
 void TensorImpl::set_requires_grad(bool requires_grad) {
-  TORCH_CHECK(!requires_grad || !is_inference_tensor() || c10::InferenceMode::is_enabled(),
+  TORCH_CHECK(!(requires_grad && is_inference_tensor() && !c10::InferenceMode::is_enabled()),
     "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.");
   if (!requires_grad && !autograd_meta_) return;
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
