@@ -516,28 +516,18 @@ static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Scalar
       out_name, " with dtype ", out_type);
 }
 
-// check if can run with oneDNN bf16 gemm path
-static inline bool checkOneDnnBf16GemmUsable(const TensorList& input_args, const Tensor& result=Tensor()) {
+// check if can run with MklDnn bf16 gemm path
+static inline bool checkMklDnnBf16GemmUsable(const Tensor& mat1, const Tensor& mat2, const Tensor& bias, const Tensor& result, const Scalar& alpha) {
 #if !AT_MKLDNN_ENABLED()
   return false;
 #endif // AT_MKLDNN_EBABLED
-  bool bf16_device_support = mkldnn_bf16_device_check();
-  if (!bf16_device_support) return false;
-  if (result.defined() && result.scalar_type() != at::kBFloat16)
-    return false;
-  for (auto t : input_args){
-    if (t.scalar_type() != at::kBFloat16 || t.numel() == 0){
-      return false;
-    }
-  }
-  return true;
-}
-
-static inline bool checkOneDnnBf16GemmUsable(const TensorList& input_args, const Tensor& result, const Scalar& alpha) {
-  // If alpha = 0, no OneDnn gemm need to be executed
-  if ((alpha.isFloatingPoint() || alpha.isIntegral()) && alpha.to<float>() == 0.0f)
-    return false;
-  return checkOneDnnBf16GemmUsable(input_args, result);
+  return (
+    mkldnn_bf16_device_check() &&
+    mat1.scalar_type() == kBFloat16 && mat1.numel() != 0 &&
+    mat2.scalar_type() == kBFloat16 && mat2.numel() != 0 &&
+    (bias.defined() ? (bias.scalar_type() ==  kBFloat16 && bias.numel() != 0) : true) &&
+    (alpha.isFloatingPoint() || alpha.isIntegral()) && alpha.to<float>() != 0.0f &&
+    result.scalar_type() ==  kBFloat16);
 }
 
 }}  // namespace at::native
