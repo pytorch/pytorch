@@ -166,8 +166,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   TORCH_CHECK(numDims <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   TORCH_CHECK(dim >= 0 && dim < numDims, "dim not in range");
 
-  int64_t sliceSize = self.size(dim);
-  sliceSize = sliceSize == 0 ? 1: sliceSize;
+  int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
   TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
   Tensor input = self.contiguous();
 
@@ -181,7 +180,6 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   //THCudaLongTensor_resize(state, indices, topKSize, {});
   values.resize_(topKSize);
   indices.resize_(topKSize);
-
   // static_cast is required to ensure that the correct type (INDEX_T)
   // is provided to the kernel for the arguments.
 
@@ -221,25 +219,34 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   }
 
 #define RUN_T(INDEX_T)                                                  \
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "topk_out_cuda", [&] {\
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "topk_out_cuda", [&] {								      \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> inputInfo =           \
       at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(input);          \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> topKInfo =            \
-      at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(values);           \
+      at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(values);         \
     at::cuda::detail::TensorInfo<int64_t, INDEX_T> indicesInfo =          \
       at::cuda::detail::getTensorInfo<int64_t, INDEX_T>(indices);         \
-                                                                          \
+    /* tensorInfoLegacyIfScalar*/                                           \
+    if (!input.dim()) {                                                    \
+      inputInfo.dims = 1;\
+      inputInfo.sizes[0] = 1;\
+      inputInfo.strides[0] = 1;\
+      topKInfo.dims = 1;\
+      topKInfo.sizes[0] = 1;\
+      topKInfo.strides[0] = 1;\
+      indicesInfo.dims = 1;\
+      indicesInfo.sizes[0] = 1;\
+      indicesInfo.strides[0] = 1;\
+    } 	                                                                  \
     /* We use these structures solely to find the offset to */            \
     /* each slice we are operating on */                                  \
     inputInfo.sizes[dim] = 1;                                             \
     topKInfo.sizes[dim] = 1;                                              \
     indicesInfo.sizes[dim] = 1;                                           \
-                                                                          \
     /* Collapse all other dims */                                         \
     int collapseInputDim = inputInfo.collapseDims(dim);                   \
     int collapseTopKDim = topKInfo.collapseDims(dim);                     \
     int collapseIndicesDim = indicesInfo.collapseDims(dim);               \
-                                                                          \
     int64_t inputSlices = 1;                                              \
     for (int i = 0; i < inputInfo.dims; ++i) {                            \
       inputSlices *= inputInfo.sizes[i];                                  \
@@ -355,7 +362,6 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
 std::tuple<Tensor, Tensor> topk_cuda(const Tensor& self,
           int64_t k, int64_t dim, bool largest, bool sorted) {
   //TORCH_CHECK(false);
-  //TORCH_WARN("????TOPK_CUDA???");
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   ::topk_out_cuda(self, k, dim, largest, sorted, values, indices);
