@@ -19,6 +19,8 @@ using index_copy_fn = void(*)(TensorIterator & iter, int64_t dim, int64_t self_d
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
 using index_put_accum_fn = void(*)(Tensor &, const c10::List<c10::optional<Tensor>> &, const Tensor &, bool unsafe);
 using masked_fill_fn = void(*)(TensorIterator &, const Scalar& scalar);
+using put_fn = void(*)(TensorIterator & iter, const Tensor& self, const bool accumulate);
+using take_fn = void(*)(TensorIterator & iter, const Tensor& input);
 using masked_select_fn = void(*)(TensorIterator &, int64_t orig_stride);
 using masked_scatter_fn = void(*)(TensorIterator &, const Tensor &);
 
@@ -36,6 +38,8 @@ DECLARE_DISPATCH(index_fill_fn, index_fill_stub);
 DECLARE_DISPATCH(index_copy_fn, index_copy_stub);
 DECLARE_DISPATCH(index_put_fn, index_put_stub);
 DECLARE_DISPATCH(index_put_accum_fn, index_put_accum_stub);
+DECLARE_DISPATCH(put_fn, put_stub);
+DECLARE_DISPATCH(take_fn, take_stub);
 DECLARE_DISPATCH(masked_fill_fn, masked_fill_stub);
 DECLARE_DISPATCH(masked_select_fn, masked_select_serial_stub);
 DECLARE_DISPATCH(masked_select_fn, masked_select_stub);
