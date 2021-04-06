@@ -599,7 +599,7 @@ class _NnapiSerializer(object):
         model.extend(struct.pack("iifi", t, len(d), s, z) for (t, d, _m, s, z) in self.operands)
         model.extend(serialized_values)
         model.extend(struct.pack("iii", *x) for x in self.operations)
-        model.extend(self.serialize_ints(fix_shape(dims, mf)) for (_, dims, mf, _, _) in self.operands)
+        model.extend(self.serialize_ints(fix_shape(dims, dim_order)) for (_, dims, dim_order, _, _) in self.operands)
         model.extend(serialized_value_data)
         model.append(self.serialize_ints(self.operation_args))
         model.append(self.serialize_ints(self.inputs))
