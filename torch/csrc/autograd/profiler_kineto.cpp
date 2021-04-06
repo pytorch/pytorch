@@ -48,6 +48,7 @@ pid_t cachedTid() {
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
 std::string stacksToStr(const std::vector<std::string>& stacks);
+std::string dtypesToStr(const std::vector<std::string>& types);
 
 struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   using ProfilerThreadLocalState::ProfilerThreadLocalState;
@@ -95,6 +96,9 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
           .scope(ctx->recFunScope);
       if (ctx->shapes && !ctx->shapes->empty()) {
         kineto_events_.back().shapes(*ctx->shapes);
+      }
+      if (ctx->dtypes && !ctx->dtypes->empty()) {
+        kineto_events_.back().dtypes(*ctx->dtypes);
       }
       if (ctx->stack && !ctx->stack->empty()) {
         kineto_events_.back().stack(*ctx->stack);
@@ -144,6 +148,11 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
       } else {
         cpu_trace->activities[idx].inputDims = "[]";
       }
+      if (kineto_events_[idx].hasTypes()) {
+        cpu_trace->activities[idx].inputTypes = dtypesToStr(kineto_events_[idx].dtypes());
+      } else {
+        cpu_trace->activities[idx].inputTypes = "[]";
+      }
       if (kineto_events_[idx].hasStack()) {
         cpu_trace->activities[idx].callStack = stacksToStr(kineto_events_[idx].stack());
       }
@@ -181,6 +190,7 @@ void pushProfilingCallbacks() {
 
         if (state_ptr->config().report_input_shapes) {
           ctx_ptr->shapes = inputSizes(fn);
+          ctx_ptr->dtypes = inputTypes(fn);
         }
 
         if (state_ptr->config().with_flops) {
@@ -242,6 +252,21 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   oss << "]";
   return oss.str();
 }
+
+std::string dtypesToStr(const std::vector<std::string>& types) {
+  std::ostringstream oss;
+  oss << "[";
+  for (size_t t_idx = 0; t_idx < types.size(); ++t_idx) {
+    if (t_idx > 0) {
+      oss << ", ";
+    }
+
+    oss << types[t_idx];
+  }
+  oss << "]";
+  return oss.str();
+}
+
 
 std::string stacksToStr(const std::vector<std::string>& stacks) {
   std::ostringstream oss;
