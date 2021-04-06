@@ -849,7 +849,7 @@ void raw_cudnn_convolution_add_relu_out(
       deterministic,
       allow_tf32);
   args.idesc.set(input);
-  args.wdesc.set(weight, 0, false);
+  args.wdesc.set(weight, input.suggest_memory_format(), 0);
   args.odesc.set(output);
   args.cdesc.set(
       dataType,
