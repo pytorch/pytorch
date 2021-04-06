@@ -66,6 +66,8 @@ Creating TorchScript Code
     ignore
     unused
     isinstance
+    Attribute
+    annotate
 
 Mixing Tracing and Scripting
 ----------------------------

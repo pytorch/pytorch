@@ -245,11 +245,6 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     }
   }
 
-  if (field == "Stream" || field == "Event") {
-    auto class_type = getCustomClass("__torch__.torch.classes.cuda." + field);
-    return std::make_shared<ClassValue>(class_type);
-  }
-
   py::object member = getattr(loc, field);
   // note: is_constant = true because we consider that global properties
   // on modules like math.pi or torch.float to be constants
@@ -932,21 +927,36 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
 
   py::object props = py::module::import("torch._jit_internal")
                          .attr("_get_named_tuple_properties")(obj);
-  std::string unqualName;
-  std::map<std::string, py::object> given_fields;
-  std::vector<std::pair<std::string, IValue>> fields;
-  std::vector<TypePtr> annotations;
-  std::tie(unqualName, given_fields, annotations) = py::cast<
-      std::tuple<std::string, decltype(given_fields), decltype(annotations)>>(
-      props);
 
-  for (const auto& pair : given_fields) {
-    auto type = tryToInferType(pair.second);
-    auto ival = toIValue(pair.second, type.type());
-    fields.emplace_back(std::pair<std::string, IValue>(pair.first, ival));
+  std::string unqualName;
+  std::vector<std::string> field_names;
+  std::vector<TypePtr> field_annotations;
+  std::vector<py::object> field_defaults;
+
+  std::vector<std::pair<std::string, IValue>> fields;
+
+  std::tie(unqualName, field_names, field_annotations, field_defaults) = 
+      py::cast<std::tuple<std::string, 
+               std::vector<std::string>, 
+               std::vector<TypePtr>, 
+               std::vector<py::object>>>(props);
+
+  // In `_get_named_tuple_properties`, we add a dummy value to represent
+  // a missing default parameter, This provides a guarantee that the
+  // two vectors will be the same size, even if the NamedTuple doesn't
+  // have default values for all its fields
+  TORCH_INTERNAL_ASSERT(field_names.size() == field_defaults.size());
+
+  for (auto i = 0; i < field_names.size(); ++i) {
+    auto ival = IValue();
+    if (!field_defaults[i].is_none()) {
+      auto type = tryToInferType(field_defaults[i]);
+      ival = toIValue(field_defaults[i], type.type());
+    }
+    fields.emplace_back(std::pair<std::string, IValue>(field_names[i], ival));
   }
 
-  auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
+  auto tt = TupleType::createNamed(qualifiedName, fields, field_annotations);
   if (auto type = get_python_cu()->get_type(qualifiedName)) {
     TORCH_CHECK(
         type->isSubtypeOf(tt),
@@ -1049,6 +1059,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
       return toSimple(g.insertConstant(py::cast<double>(obj), loc));
+    } else if (PyComplex_CheckExact(obj.ptr())) {
+      auto c_obj = py::cast<std::complex<double>>(obj.ptr());
+      return toSimple(
+          g.insertConstant(static_cast<c10::complex<double>>(c_obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
       return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {

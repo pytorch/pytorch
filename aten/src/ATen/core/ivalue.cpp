@@ -278,11 +278,12 @@ IValue IValue::equals(const IValue& rhs) const {
       // In Python you're not supposed to do this comparison apparently. Not
       // sure if we should warn here or what
       return rhs.isNone();
-    case Tag::Tensor:
+    case Tag::Tensor: {
       if (!rhs.isTensor()) {
         return false;
       }
       return lhs.toTensor().eq(rhs.toTensor());
+    }
     case Tag::Storage:
       return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:

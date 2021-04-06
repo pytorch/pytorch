@@ -67,7 +67,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::TupleType: {
       py::tuple tuple = py::cast<py::tuple>(obj);
       size_t tuple_size = tuple.size();
-      auto tuple_type = type->cast<TupleType>();
+      TupleTypePtr tuple_type = type->cast<TupleType>();
       const auto& elem_types = tuple_type->elements();
       if (elem_types.size() != tuple_size) {
         throw py::cast_error(c10::str(

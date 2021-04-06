@@ -14496,7 +14496,7 @@ dedent """
 
         class Point(NamedTuple):
             x: Optional[torch.Tensor] = None
-            y: Optional[torch.Tensor] = torch.rand(2, 3)
+            y: Optional[torch.Tensor] = torch.rand(2)
 
         make_global(Point)
 

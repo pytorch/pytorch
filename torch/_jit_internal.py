@@ -21,6 +21,7 @@ import builtins
 import torch.distributed.rpc
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
+import torch.package._mangling as package_mangling
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
 
 if sys.version_info[:2] > (3, 7):
@@ -926,6 +927,11 @@ def _qualified_name(obj):
     #     raise RuntimeError(f"Could not get qualified name for class '{name}': "
     #                        f"the attr {name} on module {module_name} is not the the class")
 
+    # torch.package and TorchScript have separate mangling schemes to avoid
+    # name collisions from multiple packages. To avoid them interfering with
+    # each other, remove the package mangling here.
+    module_name = package_mangling.demangle(module_name)
+
     # __main__ is a builtin module, so rewrite it to "__torch__".
     if module_name == "__main__":
         module_name = "__torch__"
@@ -961,16 +967,19 @@ def _try_get_dispatched_fn(fn):
 
 def _get_named_tuple_properties(obj):
     assert issubclass(obj, tuple) and hasattr(obj, '_fields')
-    fields = {field: obj._field_defaults.get(field) for field in obj._fields}
+    defaults = [obj._field_defaults.get(field) 
+                if hasattr(obj, "_field_defaults") 
+                else None 
+                for field in obj._fields]
     annotations = []
     has_annotations = hasattr(obj, '__annotations__')
-    for field in fields.keys():
+    for field in obj._fields:
         if has_annotations and field in obj.__annotations__:
             the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
             annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.getInferred())
-    return type(obj).__name__, fields, annotations
+    return type(obj).__name__, obj._fields, annotations, defaults
 
 
 def _create_named_tuple(t, unqual_name: str, field_names: Dict[str, Any]):
