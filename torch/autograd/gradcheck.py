@@ -115,7 +115,7 @@ def iter_tensor(x_tensor):
 
 
 def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
-                           grad_out=1.0) -> List[Tuple[torch.Tensor, ...]]:
+                            grad_out=1.0) -> List[Tuple[torch.Tensor, ...]]:
     """Computes the numerical jacobian for a given fn and inputs. Returns M * N jacobians
     where M is the number of input tensors that require grad, and N is the number of output
     float/complex tensors.
@@ -148,6 +148,7 @@ def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
 def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
     # Simple wrapper around _get_numerical_jacobian
     warnings.warn("get_analytical_jacobian is deprecated!")
+
     def fn_pack_inps(*inps):
         return fn(inps)
     jacobians = _get_numerical_jacobian(fn_pack_inps, inputs, None, target, eps, grad_out)
@@ -326,11 +327,11 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_sc
 def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
     # Replicates the behavior of the old get_analytical_jacobian before the refactor
     warnings.warn("get_analytical_jacobian is deprecated!")
-
     diff_input_list = list(iter_tensors(inputs, True))
+
     def backward_fn(grad_output):
         return torch.autograd.grad(output, diff_input_list, grad_output,
-                                    retain_graph=True, allow_unused=True)
+                                   retain_graph=True, allow_unused=True)
 
     jacobians_rows = compute_analytical_jacobian_rows(backward_fn, output.clone(), grad_out)
     jacobians_rows_reentrant = compute_analytical_jacobian_rows(backward_fn, output.clone(), grad_out)
