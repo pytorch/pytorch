@@ -466,7 +466,7 @@ ExprHandle TensorExprKernel::constant(const ArgValue v) {
     return *s;
   } else if (auto d = c10::get_if<double>(&v)) {
     return DoubleImm::make(*d);
-  } else if (auto i = c10::get_if<long int>(&v)) {
+  } else if (auto i = c10::get_if<int64_t>(&v)) {
     return LongImm::make(*i);
   } else if (auto b = c10::get_if<bool>(&v)) {
     return BoolImm::make(*b);
