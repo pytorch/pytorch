@@ -107,6 +107,14 @@ class TestMkldnn(TestCase):
         self.assertRaisesRegex(RuntimeError,
                                "copy_mkldnn_: only support same size tensor.",
                                lambda: mkldnn_z.copy_(mkldnn_x))
+        self.assertRaisesRegex(RuntimeError,
+                               "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! "
+                               "Found self type = torch.FloatTensor and src type = Mkldnntorch.FloatTensor",
+                               lambda: x.copy_(mkldnn_x))
+        self.assertRaisesRegex(RuntimeError,
+                               "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! "
+                               "Found self type = Mkldnntorch.FloatTensor and src type = torch.FloatTensor",
+                               lambda: mkldnn_x.copy_(x))
 
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
