@@ -1486,8 +1486,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_allgather_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
+        print(f"Creating pg on rank {self.rank}")
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
-
+        print(f"Created pg on rank {self.rank}")
         # Run with N input tensor per rank
         for n in [1, 2, 3]:
             input = [fn(torch.tensor([n * self.rank + i])) for i in range(n)]

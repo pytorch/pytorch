@@ -25,7 +25,7 @@ inline uint64_t fromVec(const std::vector<T>& values) {
   // Set each byte at the correct location on num
   for (int i = 0; i < values.size(); ++i) {
     uint8_t x = static_cast<uint8_t>(values[i]);
-    num |= (x << (8 * i));
+    num |= (static_cast<int64_t>(x) << (8 * i));
   }
   return num;
 }
