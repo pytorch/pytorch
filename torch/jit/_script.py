@@ -38,7 +38,6 @@ from torch.overrides import (
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
-    import monkeytype  # type: ignore
     from monkeytype import trace as monkeytype_trace
     from torch.jit._monkey_config_jit import JitTypeTraceConfig, type_trace_db
     monkeytype_config = JitTypeTraceConfig(type_trace_db)
