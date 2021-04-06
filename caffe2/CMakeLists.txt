@@ -535,7 +535,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # but references to read/writeArchiveAndTensor is not built for mobile
     # so this condition specifically says we are building for source debug
     # on mobile.
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp PROPERTIES COMPILE_DEFINITIONS FEATURE_TORCH_MOBILE=ON)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp PROPERTIES COMPILE_DEFINITIONS C10_MOBILE=ON)
     list(APPEND MOBILE_DEBUG_SRCS ${MOBILE_EAGER_SYMOBLICATION_SRCS})
   endif()
