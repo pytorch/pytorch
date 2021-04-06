@@ -8,6 +8,7 @@ class ObservedGraphModule(GraphModule):
 
     def get_preserved_attr_names(self) -> List[str]:
         return ['_activation_post_process_map',
+                '_activation_post_process_indexes',
                 '_patterns',
                 '_qconfig_map',
                 '_prepare_custom_config_dict',
