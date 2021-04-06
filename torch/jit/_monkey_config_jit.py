@@ -30,6 +30,36 @@ class JitTypeTraceStore(CallTraceStore):
     ) -> List[CallTrace]:
         return self.trace_records[module]
 
+    def analyze(self, module: str):
+            # Analyze the types for the given module
+            # and create a dictionary of all the types
+            # for arguments and return values this module can take
+            records = self.trace_records[module]
+            all_args = defaultdict(set)
+            for record in records:
+                for arg, arg_type in record.arg_types.items():
+                    all_args[arg].add(arg_type)
+                all_args["return_type"].add(record.return_type)
+            return all_args
+
+    def consolidate_types(self, module: str) -> None:
+        all_args = self.analyze(module)
+        # If there are more types for an argument,
+        # then consolidate the type to `Any` and replace the entry
+        # by type `Any`.
+        # This currently handles only cases with only one return value
+        # TODO: Consolidate types for multiple return values
+        for args, types in all_args.items():
+            if len(types) > 1:
+                all_args[args] = {'Any'}
+            else:
+                _element_string_type = types.pop()
+                all_args[args] = {_element_string_type.__name__}
+        return all_args
+
+    def get_args_types(self, module: str) -> None:
+        return self.consolidate_types(module)
+
 class JitTypeTraceConfig(monkeytype.config.Config):
     def __init__(self, s: JitTypeTraceStore):
         super().__init__()
