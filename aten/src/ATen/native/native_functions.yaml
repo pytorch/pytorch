@@ -4291,11 +4291,18 @@
     SparseCPU, SparseCUDA: _nnz_sparse
   device_guard: False
 
-- func: coalesce(Tensor self) -> Tensor
+# NOTE: [ coalesce autograd ]
+# coalesce returns self directly for already coalesced sparse tensors.
+# This means coalesce cannot have a derivative registered, otherwise it creates
+# circular references in the autograd graph (see gh-52874).
+# Instead, the derivative is registered on the slow-path "_coalesce"
+- func: coalesce(Tensor(a) self) -> Tensor(a)
   variants: method
+
+- func: _coalesce(Tensor self) -> Tensor
   dispatch:
-    SparseCPU: coalesce_sparse_cpu
-    SparseCUDA: coalesce_sparse_cuda
+    SparseCPU: _coalesce_sparse_cpu
+    SparseCUDA: _coalesce_sparse_cuda
 
 - func: is_coalesced(Tensor self) -> bool
   variants: method
@@ -4724,8 +4731,10 @@
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_put_
-    CUDA: legacy::cuda::_th_put_
+    CPU, CUDA: put_
+
+- func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
+  variants: function, method
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   variants: method
@@ -5424,18 +5433,12 @@
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: take_out_cpu
-    CUDA: take_out_cuda
+    CPU, CUDA: take_out
 
 - func: take(Tensor self, Tensor index) -> Tensor
   variants: method, function
   dispatch:
-    CPU: take_cpu
-    CUDA: take_cuda
-
-- func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
-  variants: function
-  device_guard: False
+    CPU, CUDA: take
 
 - func: take_along_dim.out(Tensor self, Tensor indices, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
