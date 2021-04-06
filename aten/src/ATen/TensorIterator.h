@@ -74,7 +74,7 @@ struct DimCounter {
 struct TORCH_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
   OperandInfo() {}
-  explicit OperandInfo(c10::MaybeOwned<Tensor>&& t) : tensor(std::move(t)) {
+  C10_ALWAYS_INLINE explicit OperandInfo(c10::MaybeOwned<Tensor>&& t) : tensor(std::move(t)) {
     if (tensor->defined()) {
       device = tensor->device();
       target_dtype = tensor->scalar_type();
@@ -82,6 +82,8 @@ struct TORCH_API OperandInfo {
     }
     validate();
   }
+
+  C10_ALWAYS_INLINE ~OperandInfo() = default;
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   StrideVector stride_bytes;
