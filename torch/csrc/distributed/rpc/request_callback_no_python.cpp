@@ -49,7 +49,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackNoPython::
 }
 
 std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
-    Message& request, const std::set<c10::DeviceIndex>& deviceIndices) const {
+    Message& request, std::shared_ptr<LazyStreamContext> ctx) const {
   // We need two futures here because it could pause twice when processing a
   // RPC message:
   //  1) waiting for all RRefs in the arguments to become confirmed;
@@ -71,7 +71,7 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
          messageType = request.type(),
          id = request.id(),
-         deviceIndices]() {
+         ctx = std::move(ctx)]() {
           // The cost of pre-request check is minimal thanks to
           // std::shared_lock. The cost is in magnitude
           // of 10us.
@@ -87,7 +87,7 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
                     ->config());
           }
 
-          processRpcWithErrors(*rpc, messageType, id, retFuture, deviceIndices);
+          processRpcWithErrors(*rpc, messageType, id, retFuture, std::move(ctx));
 
           // Response message has been sent at this moment, this post-response
           // work doesn't affect RPC trip time.
@@ -113,9 +113,9 @@ void RequestCallbackNoPython::processRpcWithErrors(
     const MessageType& messageType,
     const int64_t messageId,
     const std::shared_ptr<JitFuture>& responseFuture,
-    const std::set<c10::DeviceIndex>& deviceIndices) const {
+    std::shared_ptr<LazyStreamContext> ctx) const {
   try {
-    processRpc(rpc, messageType, messageId, responseFuture, deviceIndices);
+    processRpc(rpc, messageType, messageId, responseFuture, std::move(ctx));
   } catch (std::exception& e) {
     responseFuture->markCompleted(handleError(e, messageType, messageId));
   }
@@ -172,7 +172,7 @@ void RequestCallbackNoPython::processPythonRemoteCall(
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
     const std::shared_ptr<JitFuture>& /* unused */,
-    const std::set<c10::DeviceIndex>& deviceIndices) const {
+    std::shared_ptr<LazyStreamContext> ctx) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -308,7 +308,8 @@ void RequestCallbackNoPython::processScriptRRefFetchCall(
 void RequestCallbackNoPython::processPythonRRefFetchCall(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& /* unused */) const {
+    const std::shared_ptr<JitFuture>& /* unused */,
+    std::shared_ptr<LazyStreamContext> /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -349,7 +350,7 @@ void RequestCallbackNoPython::processForwardAutogradReq(
     RpcCommandBase& rpc,
     const int64_t messageId,
     const std::shared_ptr<JitFuture>& responseFuture,
-    const std::set<c10::DeviceIndex>& deviceIndices) const {
+    std::shared_ptr<LazyStreamContext> ctx) const {
   auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
   // Need to reverse the device map for the backward pass of distributed
@@ -388,7 +389,7 @@ void RequestCallbackNoPython::processForwardAutogradReq(
       wrappedMessageType,
       messageId,
       wrappedRpcResponseFuture,
-      deviceIndices);
+      std::move(ctx));
 
   auto fromWorkerId = rpcWithAutograd.fromWorkerId();
   // The original future needs to be marked as completed when the wrapped
@@ -525,7 +526,7 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
         wrappedMsgType,
         messageId,
         wrappedRpcResponseFuture,
-        {}); // TODO deviceIndices?
+        {}); // TODO: ctx?
 
     wrappedRpcResponseFuture->addCallback(
         at::wrapPropagateTLSState<void>([wrappedRpcResponseFuture,
@@ -580,7 +581,7 @@ void RequestCallbackNoPython::processRpc(
     const MessageType& messageType,
     const int64_t messageId,
     const std::shared_ptr<JitFuture>& responseFuture,
-    const std::set<c10::DeviceIndex>& deviceIndices) const {
+    std::shared_ptr<LazyStreamContext> ctx) const {
   auto markComplete = [messageId, &responseFuture](Message m) {
     m.setId(messageId);
     responseFuture->markCompleted(
@@ -606,7 +607,7 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
-      processPythonRemoteCall(rpc, markComplete, messageId, responseFuture, deviceIndices);
+      processPythonRemoteCall(rpc, markComplete, messageId, responseFuture, std::move(ctx));
       return;
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
@@ -614,7 +615,7 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
-      processPythonRRefFetchCall(rpc, messageId, responseFuture);
+      processPythonRRefFetchCall(rpc, messageId, responseFuture, std::move(ctx));
       return;
     }
     case MessageType::RREF_USER_DELETE: {
@@ -630,7 +631,7 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
-      processForwardAutogradReq(rpc, messageId, responseFuture, deviceIndices);
+      processForwardAutogradReq(rpc, messageId, responseFuture, std::move(ctx));
       return;
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {

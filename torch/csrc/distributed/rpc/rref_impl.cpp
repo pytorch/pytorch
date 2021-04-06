@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
+#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace {
@@ -258,22 +259,30 @@ void OwnerRRef::setError(std::exception_ptr eptr) {
   future_->setErrorIfNeeded(std::move(eptr));
 }
 
-// #ifdef USE_CUDA_NOT_ROCM
-void OwnerRRef::recordAllDevices(const std::set<c10::DeviceIndex>& deviceIndices) {
-  cudaEvents_.clear();
-  for (auto deviceIndex : deviceIndices) {
-    at::cuda::CUDAEvent cudaEvent;
-    cudaEvent.record(at::cuda::getCurrentCUDAStream(deviceIndex));
-    cudaEvents_.push_back(std::move(cudaEvent));
-  }
+
+void OwnerRRef::recordAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
+#ifdef USE_CUDA_NOT_ROCM
+  // // cudaEvents_.clear();
+  // if (ctx) {
+  //   for (auto deviceIndex : ctx->devices()) {
+  //     at::cuda::CUDAEvent cudaEvent;
+  //     cudaEvent.record(at::cuda::getCurrentCUDAStream(deviceIndex));
+  //     cudaEvents_.push_back(std::move(cudaEvent));
+  //   }
+  // }
+#endif
 }
 
-void OwnerRRef::waitAllDevices() {
-  for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
-    cudaEvent.block(at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
-  }
+void OwnerRRef::waitAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
+#ifdef USE_CUDA_NOT_ROCM
+  // if (ctx) {
+  //   for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
+  //     cudaEvent.block(ctx->getStream(cudaEvent.device_index()));
+  //   }
+  // }
+#endif
 }
-// #endif
+
 
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {
   if (rref.isOwner()) {

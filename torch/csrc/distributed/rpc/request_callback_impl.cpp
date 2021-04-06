@@ -26,6 +26,7 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
+#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/unpickled_python_call.h>
 #include <torch/csrc/distributed/rpc/unpickled_python_remote_call.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -320,7 +321,7 @@ void RequestCallbackImpl::processPythonRemoteCall(
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
     const std::shared_ptr<JitFuture>& responseFuture,
-    const std::set<c10::DeviceIndex>& deviceIndices) const {
+    std::shared_ptr<LazyStreamContext> lsctx) const {
   auto& uprc = static_cast<UnpickledPythonRemoteCall&>(rpc);
 
   const auto& rrefId = uprc.rrefId();
@@ -357,7 +358,7 @@ void RequestCallbackImpl::processPythonRemoteCall(
         messageId,
         responseFuture,
         uprc.isAsyncExecution(),
-        [ownerRRef, rrefId, forkId, markComplete, deviceIndices](
+        [ownerRRef, rrefId, forkId, markComplete, lsctx](
             const py::object& result,
             const int64_t messageId,
             PythonRpcHandler& /* unused */,
@@ -365,11 +366,11 @@ void RequestCallbackImpl::processPythonRemoteCall(
           // Check we have GIL.
           DCHECK(PyGILState_Check());
 
-          IValue py_ivalue = jit::toIValue(result, PyObjectType::get());
+          IValue py_ivalue = jit::toIValue(result, PyObjectType::get()); // 1. compute value for the RRef
 
           py::gil_scoped_release release;
-          ownerRRef->recordAllDevices(deviceIndices);
-          ownerRRef->setValue(std::move(py_ivalue));
+          ownerRRef->recordAllDevices(lsctx); // 2. record events and store events in RRef
+          ownerRRef->setValue(std::move(py_ivalue)); // 3. set RRef value, this will unblock
           auto m = RemoteRet(rrefId, forkId).toMessage();
           m.setId(messageId);
           responseFuture->markCompleted(
@@ -390,9 +391,10 @@ void RequestCallbackImpl::processPythonRemoteCall(
 void RequestCallbackImpl::processPythonRRefFetchCall(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& responseFuture,
+    std::shared_ptr<LazyStreamContext> lsctx) const {
   // Making this lambda mutable to allow move-capture it in callbacks
-  auto postProcessing = [responseFuture](
+  auto postProcessing = [responseFuture, lsctx](
                             const c10::intrusive_ptr<OwnerRRef>& rref,
                             int64_t messageId) mutable {
     auto whenValueSet = rref->getFuture();
@@ -408,12 +410,15 @@ void RequestCallbackImpl::processPythonRRefFetchCall(
         // py::object
         py::gil_scoped_acquire acquire;
         result = std::make_shared<SerializedPyObj>(
-            pythonRpcHandler.serialize(jit::toPyObject(rref->getValue())));
+            pythonRpcHandler.serialize(jit::toPyObject(rref->getValue()))); // a. get the RRef value
       }
+
+      // b. when a is done, we know that 3. is done and hence 2. is done too. So that we can use the cuda events on the RRef.
+
       Message m =
           PythonRRefFetchRet(std::move(*result).toIValues()).toMessage();
       m.setId(messageId);
-      rref->waitAllDevices();
+      rref->waitAllDevices(lsctx);
       responseFuture->markCompleted(
           IValue(c10::make_intrusive<Message>(std::move(m))));
     } catch (py::error_already_set& e) {
@@ -469,9 +474,9 @@ void RequestCallbackImpl::processRpcWithErrors(
     const MessageType& messageType,
     const int64_t messageId,
     const std::shared_ptr<JitFuture>& responseFuture,
-    const std::set<c10::DeviceIndex>& deviceIndices) const {
+    std::shared_ptr<LazyStreamContext> ctx) const {
   try {
-    processRpc(rpc, messageType, messageId, responseFuture, deviceIndices);
+    processRpc(rpc, messageType, messageId, responseFuture, std::move(ctx));
   } catch (py::error_already_set& e) {
     responseFuture->markCompleted(handleError(e, messageType, messageId));
     // There are request callback impls in Python, where Python

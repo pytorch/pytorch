@@ -798,7 +798,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
-            futureResponseMessage = cb_->operator()(requestMessage, ctx->devices());
+            futureResponseMessage = cb_->operator()(requestMessage, ctx);
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
                 std::make_shared<JitFuture>(at::AnyClassType::get());

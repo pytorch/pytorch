@@ -8,9 +8,9 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
-// #ifdef USE_CUDA_NOT_ROCM
+#ifdef USE_CUDA_NOT_ROCM
 #include <ATen/cuda/CUDAEvent.h>
-// #endif
+#endif
 
 #include <atomic>
 
@@ -401,13 +401,13 @@ class TORCH_API OwnerRRef final : public RRef {
 
   std::shared_ptr<JitFuture> future_;
 
-// #ifdef USE_CUDA_NOT_ROCM
 public:
-  void recordAllDevices(const std::set<c10::DeviceIndex>& deviceIndices);
-  void waitAllDevices();
+  void recordAllDevices(std::shared_ptr<LazyStreamContext> ctx);
+  void waitAllDevices(std::shared_ptr<LazyStreamContext> ctx);
 private:
+#ifdef USE_CUDA_NOT_ROCM
   std::vector<at::cuda::CUDAEvent> cudaEvents_;
-// #endif
+#endif
 
 };
 
