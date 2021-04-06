@@ -1684,16 +1684,27 @@ class TestCuda(TestCase):
                 torch.cuda._sleep(1000 * 1000)
                 return grad * 2
 
+        # Tests using grads outside the backward() stream context
+        # See "Stream semantics of backward passes" on https://pytorch.org/docs/stable/notes/cuda.html
         x = torch.randn(5, 5, device='cuda', requires_grad=True)
         with torch.cuda.stream(stream):
             stream.wait_stream(default_stream)
             output = MultiplyInStream.apply(x)
             output.sum().backward()
-        # See "Stream semantics of backward passes" on https://pytorch.org/docs/stable/notes/cuda.html
+        # sync needed
         default_stream.wait_stream(stream)
-
         self.assertEqual(x.grad, torch.ones_like(x) * 2)
         self.assertEqual(torch.cuda.current_stream(), default_stream)
+
+        # Tests using grads inside the stream context
+        x = torch.randn(5, 5, device='cuda', requires_grad=True)
+        with torch.cuda.stream(stream):
+            stream.wait_stream(default_stream)
+            output = MultiplyInStream.apply(x)
+            output.sum().backward()
+            # should be ok to use grad without a sync
+            self.assertEqual(x.grad, torch.ones_like(x) * 2)
+            self.assertEqual(torch.cuda.current_stream(), default_stream)
 
     # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
     @skipIfRocm

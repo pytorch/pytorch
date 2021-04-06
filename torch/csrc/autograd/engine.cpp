@@ -561,7 +561,7 @@ void GraphTask::exec_post_processing() {
         }
         if (current_stream != leaf_stream &&
             current_stream != caller_current_stream &&
-            current_stream != default_stream) {
+            current_stream != caller_default_stream) {
           current_stream.wait(event);
         }
       }
@@ -941,7 +941,6 @@ auto Engine::execute(const edge_list& roots,
 
   // Collects current and default streams for devices where this process has a context,
   // so GraphTask::exec_post_processing can sync them with leaf_streams.
-  // Should this be inside init_to_execute?
   graph_task->stash_current_streams();
 
   // If we receive a single root, skip creating extra root node
