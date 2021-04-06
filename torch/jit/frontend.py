@@ -307,10 +307,10 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None):
     return_type = None
     if getattr(py_def, 'returns', None) is not None:
         return_type = build_expr(ctx, py_def.returns)
-     else:
-        # If the return type is `None`, try to get the return type
-        # from the consolidated _arg_and_types dictionary
+    else:
         if _IS_MONKEYTYPE_INSTALLED and bool(_args_and_types):
+            # If the return type is `None`, try to get the return type
+            # from the consolidated _arg_and_types dictionary
             return_type = Var(Ident(r, _args_and_types["return_type"].pop()))
 
     decl = Decl(r, param_list, return_type)
@@ -355,10 +355,10 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
-    elif getattr(py_arg, 'annotation', None) is None and _IS_MONKEYTYPE_INSTALLED and bool(_args_and_types):
+    elif getattr(py_arg, 'annotation', None) is None and _IS_MONKEYTYPE_INSTALLED and bool(_args_and_types):  # type: ignore[name-defined]
         # If the arguments are not annotated, try to infer annotations using
         # the types from the _args_and_types dictionary from MonkeyTypes
-        annotation_expr = Var(Ident(r, _args_and_types[name].pop()))
+        annotation_expr = Var(Ident(r, _args_and_types[name].pop()))    # type: ignore[name-defined]
     elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
     else:
