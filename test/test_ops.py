@@ -354,6 +354,10 @@ class TestCommon(JitCommonTestCase):
                 if variant is None:
                     continue
 
+                if not callable(variant):
+                    # attributes like real, imag are not callable
+                    continue
+
                 # Create accessor for script function variant
                 name = op.name + '_' if func_type == 'inplace' else op.name
 
