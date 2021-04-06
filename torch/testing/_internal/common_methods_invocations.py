@@ -1114,6 +1114,75 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad):
                   for input_tensor, args in args)
     return inputs
 
+# Missing to test the nondeterminism of the operation
+# https://github.com/pytorch/pytorch/issues/53352
+def sample_inputs_put(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    make_idx = partial(make_tensor, low=0, dtype=torch.int64, device=device, requires_grad=False)
+
+    S = 3
+
+    def gen_inputs():
+        # Generic inputs
+        tgt_gen = (make_arg((S, S), discontiguous=not ctg) for ctg in (True, False))
+        src_gen = (make_arg((S,), discontiguous=not ctg) for ctg in (True, False))
+        idx = torch.randperm(S * S, device=device, dtype=torch.int64)[:S]
+        idx_nonctg = torch.repeat_interleave(idx, 2, dim=-1)[::2]
+        idx_neg = -idx - 1
+        idx_list = [idx, idx_nonctg, idx_neg]
+        for tgt, idx, src, acc in product(tgt_gen, idx_list, src_gen, (True, False)):
+            yield SampleInput(input=tgt, args=(idx, src, acc))
+
+        # Scalar cases
+        scalar_sizes = [(), (1,)]
+        tgt_gen = (make_arg(size) for size in scalar_sizes)
+        idx_gen = (make_idx(size, high=1) for size in scalar_sizes)
+        src_gen = (make_arg(size) for size in scalar_sizes)
+        for tgt, idx, src, acc in product(tgt_gen, idx_gen, src_gen, (True, False)):
+            yield SampleInput(input=tgt, args=(idx, src, acc))
+
+        # Empty cases
+        tgt_sizes = [(0,), (), (1,), (3, 2)]
+        tgt_gen = (make_arg(size) for size in tgt_sizes)
+        idx = make_idx((0,), high=1)
+        src = make_arg((0,))
+        for tgt, acc in product(tgt, (True, False)):
+            yield SampleInput(input=tgt, args=(idx, src, acc))
+
+    return list(gen_inputs())
+
+def sample_inputs_take(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    make_idx = partial(make_tensor, low=0, dtype=torch.int64, device=device, requires_grad=False)
+
+    S = 3
+
+    def gen_inputs():
+        # Generic inputs: take S elements out of S * S
+        src_gen = (make_arg((S, S), discontiguous=not ctg) for ctg in (True, False))
+        idx = make_idx((S,), high=S * S)
+        idx_nonctg = make_idx((S,), high=S * S, discontiguous=True)
+        idx_neg = -idx - 1
+        idx_list = [idx, idx_nonctg, idx_neg]
+        for src, idx in product(src_gen, idx_list):
+            yield SampleInput(input=src, args=(idx,))
+
+        # Scalar cases
+        scalar_sizes = [(), (1,)]
+        src_gen = (make_arg(size) for size in scalar_sizes)
+        idx_gen = (make_idx(size, high=1) for size in scalar_sizes)
+        for src, idx in product(src_gen, idx_gen):
+            yield SampleInput(input=src, args=(idx,))
+
+        # Empty cases
+        src_sizes = [(0,), (), (1,), (3, 2)]
+        src_gen = (make_arg(size) for size in src_sizes)
+        idx = make_idx((0,), high=1)
+        for src in src_gen:
+            yield SampleInput(input=src, args=(idx,))
+
+    return list(gen_inputs())
+
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
     return (
         SampleInput(
@@ -3725,6 +3794,15 @@ op_db: List[OpInfo] = [
                # sort does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('put',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           check_batched_gradgrad=False,  # vmap complains of the sizes
+           sample_inputs_func=sample_inputs_put),
+    OpInfo('take',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           check_batched_grad=False,  # vmap complains of the sizes
+           sample_inputs_func=sample_inputs_take),
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
@@ -4592,10 +4670,6 @@ def method_tests():
         ('topk', (), (1, 0), 'dim_scalar', (), [1]),
         ('topk', (), (1, 0, True), 'dim_desc_scalar', (), [1]),
         ('topk', (), (1, 0, True, True), 'dim_desc_sort_scalar', (), [1]),
-        ('take', (S, S, S), (torch.LongTensor([[-3, 2], [20, 2]]),)),
-        ('take', (S, S, S), (torch.tensor(0, dtype=torch.int64),), 'scalar_index'),
-        ('take', (), (torch.LongTensor([0]),), 'scalar_data'),
-        ('take', (), (torch.tensor(0, dtype=torch.int64),), 'scalar_both'),
         ('where', (M, M), (mask_not_all_zeros((M, M)), (M, M)), '', (True,)),
         ('where', (M, 1, M), (mask_not_all_zeros((M, M)), (M, M, 1)), 'broadcast_all', (True,)),
         ('where', (), (bernoulli_scalar(), ()), 'scalar', (True,)),
