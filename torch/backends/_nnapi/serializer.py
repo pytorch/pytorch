@@ -317,6 +317,9 @@ class _NnapiSerializer(object):
         if config is None:
             config = {}
 
+    # Add a tensor operand corresponding to a JIT Value.
+    # Returns the NNAPI operand ID.  Can be looked up later with
+    # get_tensor_operand_by_jitval.
     def add_tensor_operand(self, jitval, oper):
         assert isinstance(oper, Operand)
         if jitval in self.jitval_operand_map:
@@ -325,6 +328,15 @@ class _NnapiSerializer(object):
         operand_id = len(self.operands)
         self.operands.append(oper)
         self.jitval_operand_map[jitval] = operand_id
+        return operand_id
+
+    # Add a tensor operand that does not correspond to a JIT Value.
+    # Useful for cases where multiple NNAPI operands are required
+    # to implement one JIT IR node.  Returns the NNAPI operand ID.
+    def add_anonymous_tensor_operand(self, oper):
+        assert isinstance(oper, Operand)
+        operand_id = len(self.operands)
+        self.operands.append(oper)
         return operand_id
 
     @staticmethod
@@ -451,6 +463,39 @@ class _NnapiSerializer(object):
             raise Exception(
                 f"Expected constant value of type {typekind}, but got {ctype.kind()} for value '{jitval!r}'")
         return record
+
+    def transpose_to_nhwc(self, in_id, oper):
+        if oper.shape[2:] != (1, 1):
+            raise Exception("Automatic transpose only supported for H,W == 1,1")
+
+        out_oper = oper._replace(dim_order=DimOrder.CHANNELS_LAST)
+
+        inputs = [None] * 2
+        inputs[0] = in_id
+        inputs[1] = self.add_immediate_int_vector([0, 2, 3, 1])
+
+        outputs = [None] * 1
+        outputs[0] = self.add_anonymous_tensor_operand(out_oper)
+
+        self.add_operation(NNAPI_OperationCode.TRANSPOSE, inputs, outputs)
+
+        return outputs[0], out_oper
+
+    # Transpose inputs as necessary to allow broadcasting.
+    def transpose_for_broadcast(self, in0_id, in0_oper, in1_id, in1_oper):
+        if in0_oper.dim_order == in1_oper.dim_order:
+            return in0_id, in0_oper, in1_id, in1_oper
+
+        # Assume NHWC is preferred if there is a mismatch.
+        orders = (in0_oper.dim_order, in1_oper.dim_order)
+        if orders == (DimOrder.PRESUMED_CONTIGUOUS, DimOrder.CHANNELS_LAST):
+            return self.transpose_to_nhwc(in0_id, in0_oper) + (in1_id, in1_oper)
+        if orders == (DimOrder.CHANNELS_LAST, DimOrder.PRESUMED_CONTIGUOUS):
+            return (in0_id, in0_oper) + self.transpose_to_nhwc(in1_id, in1_oper)
+
+        raise Exception(
+            "Automatic transpose not supported for dim_orders: %r, %r" %
+            (in0_oper.dim_order, in1_oper.dim_order))
 
     def get_size_arg(self, jitval):
         ctype, value = self.get_constant_value(jitval)
@@ -930,7 +975,8 @@ class _NnapiSerializer(object):
         in1_id, in1_oper = self.get_tensor_operand_by_jitval(node.inputsAt(1))
 
         assert in0_oper.op_type == in1_oper.op_type
-        assert in0_oper.dim_order == in1_oper.dim_order
+        in0_id, in0_oper, in1_id, in1_oper = self.transpose_for_broadcast(
+            in0_id, in0_oper, in1_id, in1_oper)
         # NOTE: PyTorch and NNAPI have the same broadcast semantics.
         out_shape = broadcast_shapes(in0_oper.shape, in1_oper.shape)
         out_oper = in0_oper._replace(shape=out_shape)
