@@ -19,7 +19,6 @@ import java.io.OutputStream;
 import java.nio.FloatBuffer;
 import org.pytorch.Device;
 import org.pytorch.IValue;
-import org.pytorch.MemoryFormat;
 import org.pytorch.Module;
 import org.pytorch.PyTorchAndroid;
 import org.pytorch.Tensor;
@@ -126,9 +125,7 @@ public class MainActivity extends AppCompatActivity {
         numElements *= shape[i];
       }
       mInputTensorBuffer = Tensor.allocateFloatBuffer((int) numElements);
-      mInputTensor =
-          Tensor.fromBlob(
-              mInputTensorBuffer, BuildConfig.INPUT_TENSOR_SHAPE, MemoryFormat.CHANNELS_LAST);
+      mInputTensor = Tensor.fromBlob(mInputTensorBuffer, BuildConfig.INPUT_TENSOR_SHAPE);
       PyTorchAndroid.setNumThreads(1);
       mModule =
           BuildConfig.USE_VULKAN_DEVICE

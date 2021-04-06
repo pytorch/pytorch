@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-import sys
-
 import torch.distributed as dist
 
 if not dist.is_available():

@@ -51,7 +51,6 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
-#include <torch/csrc/fx/fx_init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
@@ -832,7 +831,6 @@ PyObject* initModule() {
   // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
-  torch::fx::initFx(module);
   torch::impl::dispatch::initDispatchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initNNFunctions(module);
@@ -950,20 +948,6 @@ Call this whenever a new thread is created in order to propagate values from
     "_valgrind_toggle", [](){
       #if defined(USE_VALGRIND)
       CALLGRIND_TOGGLE_COLLECT;
-      #else
-      TORCH_CHECK(false, "Valgrind is not supported.");
-      #endif
-    }
-  );
-
-  py_module.def(
-    "_valgrind_toggle_and_dump_stats", [](){
-      #if defined(USE_VALGRIND)
-      // NB: If we don't toggle collect around dump stats, callgrind_annotate
-      //     won't process the results correctly. Specifically,
-      //     `callgrind_annotate --inclusive=no` will be almost completely empty.
-      CALLGRIND_TOGGLE_COLLECT;
-      CALLGRIND_DUMP_STATS;
       #else
       TORCH_CHECK(false, "Valgrind is not supported.");
       #endif

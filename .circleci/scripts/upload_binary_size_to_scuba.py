@@ -17,7 +17,7 @@ def get_size(file_dir):
         # we should only expect one file, if no, something is wrong
         file_name = glob.glob(os.path.join(file_dir, "*"))[0]
         return os.stat(file_name).st_size
-    except Exception:
+    except:
         logging.exception(f"error getting file from: {file_dir}")
         return 0
 
@@ -145,5 +145,5 @@ if __name__ == "__main__":
         if size != 0:
             try:
                 send_message([build_message(size)])
-            except Exception:
+            except:
                 logging.exception("can't send message")

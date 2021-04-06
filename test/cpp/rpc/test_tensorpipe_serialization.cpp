@@ -42,12 +42,9 @@ TEST(TensorpipeSerialize, Base) {
   EXPECT_EQ(recvingTpMessage.payloads.size(), sendingTpMessage.payloads.size());
   recvingTpMessage.tensors.reserve(sendingTpMessage.tensors.size());
   for (auto& tpTensor : sendingTpMessage.tensors) {
-    tensorpipe::CpuBuffer buffer;
-    buffer.ptr = nullptr;
-
     tensorpipe::Message::Tensor t;
-    t.buffer = buffer;
-    t.length = tpTensor.length;
+    t.buffer = tensorpipe::CpuBuffer{
+        nullptr, tpTensor.buffer.unwrap<tensorpipe::CpuBuffer>().length};
     t.metadata = tpTensor.metadata;
     recvingTpMessage.tensors.push_back(std::move(t));
   }
@@ -75,7 +72,7 @@ TEST(TensorpipeSerialize, Base) {
     memcpy(
         dstTensor.buffer.unwrap<tensorpipe::CpuBuffer>().ptr,
         srcTensor.buffer.unwrap<tensorpipe::CpuBuffer>().ptr,
-        srcTensor.length);
+        srcTensor.buffer.unwrap<tensorpipe::CpuBuffer>().length);
   }
 
   // Mimic read() callback:
@@ -124,7 +121,11 @@ TEST(TensorpipeSerialize, RecopySparseTensors) {
   EXPECT_NE(
       tiny.storage().data(),
       sendingTpMessage.tensors[1].buffer.unwrap<tensorpipe::CpuBuffer>().ptr);
-  EXPECT_EQ(tiny.element_size() * k1K, sendingTpMessage.tensors[1].length);
+  EXPECT_EQ(
+      tiny.element_size() * k1K,
+      sendingTpMessage.tensors[1]
+          .buffer.unwrap<tensorpipe::CpuBuffer>()
+          .length);
 }
 
 TEST(TensorpipeSerialize, NoDeleterTensors) {
@@ -148,9 +149,15 @@ TEST(TensorpipeSerialize, NoDeleterTensors) {
   EXPECT_EQ(tpBuffers.copiedTensors.size(), 2);
   EXPECT_EQ(sendingTpMessage.tensors.size(), 2);
   EXPECT_EQ(
-      tpBuffers.copiedTensors[0].size(), sendingTpMessage.tensors[0].length);
+      tpBuffers.copiedTensors[0].size(),
+      sendingTpMessage.tensors[0]
+          .buffer.unwrap<tensorpipe::CpuBuffer>()
+          .length);
   EXPECT_EQ(
-      tpBuffers.copiedTensors[1].size(), sendingTpMessage.tensors[1].length);
+      tpBuffers.copiedTensors[1].size(),
+      sendingTpMessage.tensors[1]
+          .buffer.unwrap<tensorpipe::CpuBuffer>()
+          .length);
   EXPECT_EQ(
       tpBuffers.copiedTensors[0].data(),
       sendingTpMessage.tensors[0].buffer.unwrap<tensorpipe::CpuBuffer>().ptr);
@@ -161,10 +168,14 @@ TEST(TensorpipeSerialize, NoDeleterTensors) {
       memcmp(
           tpBuffers.copiedTensors[0].data(),
           t1.storage().data(),
-          sendingTpMessage.tensors[0].length) == 0);
+          sendingTpMessage.tensors[0]
+              .buffer.unwrap<tensorpipe::CpuBuffer>()
+              .length) == 0);
   EXPECT_TRUE(
       memcmp(
           tpBuffers.copiedTensors[1].data(),
           t2.storage().data(),
-          sendingTpMessage.tensors[1].length) == 0);
+          sendingTpMessage.tensors[1]
+              .buffer.unwrap<tensorpipe::CpuBuffer>()
+              .length) == 0);
 }

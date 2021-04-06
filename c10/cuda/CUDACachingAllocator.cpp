@@ -1199,11 +1199,7 @@ struct CudaCachingAllocator : public Allocator {
     return {r, r, &raw_delete, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
-    if (forceUncachedAllocator()) {
-      return &uncached_delete;
-    } else {
-      return &raw_delete;
-    }
+    return &raw_delete;
   }
 };
 

@@ -76,7 +76,7 @@ CUDA accessors
 .. code-block:: cpp
 
   __global__ void packed_accessor_kernel(
-      torch::PackedTensorAccessor64<float, 2> foo,
+      PackedTensorAccessor64<float, 2> foo,
       float* trace) {
     int i=threadIdx.x
     gpuAtomicAdd(trace, foo[i][i])

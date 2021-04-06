@@ -759,9 +759,10 @@ void replication_pad3d_backward_out_cuda_template(
 }
 } // namespace
 
-Tensor& replication_pad1d_out_cuda(const Tensor& input,
-    IntArrayRef paddingSize,
-    Tensor& output)
+Tensor& replication_pad1d_out_cuda(
+    Tensor& output,
+    const Tensor& input,
+    IntArrayRef paddingSize)
 {
   replication_pad1d_out_cuda_template(
       output, input, paddingSize);
@@ -778,10 +779,11 @@ Tensor replication_pad1d_cuda(
   return output;
 }
 
-Tensor& replication_pad1d_backward_out_cuda(const Tensor& gradOutput,
+Tensor& replication_pad1d_backward_out_cuda(
+    Tensor& gradInput,
+    const Tensor& gradOutput,
     const Tensor& input,
-    IntArrayRef paddingSize,
-    Tensor& gradInput)
+    IntArrayRef paddingSize)
 {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
@@ -805,9 +807,10 @@ Tensor replication_pad1d_backward_cuda(
   return gradInput;
 }
 
-Tensor& replication_pad2d_out_cuda(const Tensor& input,
-    IntArrayRef paddingSize,
-    Tensor& output)
+Tensor& replication_pad2d_out_cuda(
+    Tensor& output,
+    const Tensor& input,
+    IntArrayRef paddingSize)
 {
   replication_pad2d_out_cuda_template(
       output, input, paddingSize);
@@ -824,10 +827,11 @@ Tensor replication_pad2d_cuda(
   return output;
 }
 
-Tensor& replication_pad2d_backward_out_cuda(const Tensor& gradOutput,
+Tensor& replication_pad2d_backward_out_cuda(
+    Tensor& gradInput,
+    const Tensor& gradOutput,
     const Tensor& input,
-    IntArrayRef paddingSize,
-    Tensor& gradInput)
+    IntArrayRef paddingSize)
 {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
@@ -851,9 +855,10 @@ Tensor replication_pad2d_backward_cuda(
   return gradInput;
 }
 
-Tensor& replication_pad3d_out_cuda(const Tensor& input,
-    IntArrayRef paddingSize,
-    Tensor& output)
+Tensor& replication_pad3d_out_cuda(
+    Tensor& output,
+    const Tensor& input,
+    IntArrayRef paddingSize)
 {
   replication_pad3d_out_cuda_template(
       output, input, paddingSize);
@@ -870,10 +875,11 @@ Tensor replication_pad3d_cuda(
   return output;
 }
 
-Tensor& replication_pad3d_backward_out_cuda(const Tensor& gradOutput,
+Tensor& replication_pad3d_backward_out_cuda(
+    Tensor& gradInput,
+    const Tensor& gradOutput,
     const Tensor& input,
-    IntArrayRef paddingSize,
-    Tensor& gradInput)
+    IntArrayRef paddingSize)
 {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

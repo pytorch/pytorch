@@ -105,3 +105,4 @@ C10_HOST_DEVICE inline double tan<double>(double x) {
 }
 
 } // namespace at
+

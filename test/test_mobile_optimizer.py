@@ -189,9 +189,7 @@ class TestOptimizer(TestCase):
             @torch.jit.export
             def foo(self, x):
                 x = self.d(F.relu(self.l(x)))
-                x = self.l2(x)
-                x = x + torch.ones(1, 100)
-                return F.relu(x)
+                return self.l2(x)
         input_data = torch.ones(1, 10)
         m = torch.jit.script(OptimizeNoForwardTest())
         m.eval()
@@ -202,8 +200,7 @@ class TestOptimizer(TestCase):
 
 
         FileCheck().check_not("dropout.__") \
-            .check_count("aten::_add_relu(", 1, exactly=True) \
-            .run(optimized_scripted_model.foo.graph)
+                   .run(optimized_scripted_model.foo.graph)
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
 

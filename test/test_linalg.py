@@ -117,6 +117,8 @@ class TestLinalg(TestCase):
         run_test_case(zero_strided, b)
         run_test_case(a, zero_strided)
 
+    # https://github.com/pytorch/pytorch/issues/53976 tracks ROCm skip
+    @skipCUDAIfRocm
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -1381,7 +1383,6 @@ class TestLinalg(TestCase):
 
     # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
     # their matrix norm results match
-    @skipMeta  # https://github.com/pytorch/pytorch/issues/54082
     @skipCUDAIfNoMagma
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 2e-5})
@@ -1419,7 +1420,6 @@ class TestLinalg(TestCase):
                 for ord in ord_settings:
                     run_test_case(input, ord, dim, keepdim)
 
-    @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -1474,7 +1474,6 @@ class TestLinalg(TestCase):
                 actual = torch.linalg.cond(input, p)
                 self.assertEqual(actual, expected)
 
-    @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -2770,6 +2769,7 @@ class TestLinalg(TestCase):
 
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-7, torch.complex128: 1e-7})
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinv(self, device, dtype):
@@ -3369,7 +3369,6 @@ class TestLinalg(TestCase):
             a_inv = torch.linalg.tensorinv(a, ind=ind)
             self.assertEqual(a_inv.shape, a.shape[ind:] + a.shape[:ind])
 
-    @skipMeta  # See https://github.com/pytorch/pytorch/issues/53739
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -3658,88 +3657,6 @@ class TestLinalg(TestCase):
         if np.lib.NumpyVersion(np.__version__) >= '1.14.0':
             self.assertEqual(torch.matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
-
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.double)
-    # This tests only the cases where torch.chain_matmul differs from torch.linalg.multi_dot which this is an "alias" for.
-    def test_chain_matmul(self, device, dtype):
-        # chain_matmul accepts a single input tensor while multi_dot does not
-        t = make_tensor((2, 2), device, dtype)
-        self.assertEqual(t, torch.chain_matmul(t))
-        with self.assertRaisesRegex(RuntimeError, r"chain_matmul\(\): Expected one or more matrices"):
-            torch.chain_matmul()
-
-        # chain_matmul expects all tensors to be 2D whereas multi_dot allows the first and last tensors to
-        # be either 1D or 2D
-        with self.assertRaisesRegex(RuntimeError, r"Tensor dimension is 1, expected 2 instead"):
-            torch.chain_matmul(make_tensor(1, device, dtype), make_tensor(1, device, dtype))
-
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.double, torch.cdouble)
-    def test_multi_dot(self, device, dtype):
-        def check(*shapes, discontiguous=False):
-            tensors = [make_tensor(shape, device, dtype, discontiguous=discontiguous) for shape in shapes]
-            np_arrays = [tensor.cpu().numpy() for tensor in tensors]
-            res = torch.linalg.multi_dot(tensors).cpu()
-            ref = torch.from_numpy(np.array(np.linalg.multi_dot(np_arrays)))
-            self.assertEqual(res, ref)
-
-        # test for inputs with empty dimensions
-        check([0], [0])
-        check([2], [2, 0])
-        check([1, 0], [0])
-        check([0, 2], [2, 1])
-        check([2, 2], [2, 0])
-        check([2, 0], [0, 3])
-        check([0, 0], [0, 1])
-        check([4, 2], [2, 0], [0, 3], [3, 2])
-
-        # test variable output shapes
-        check([2], [2])
-        check([1, 2], [2])
-        check([2], [2, 1])
-        check([1, 2], [2, 1])
-        check([3, 2], [2, 4])
-
-        # test multiple input tensors
-        check([3], [3, 4], [4, 2], [2, 5], [5])
-        check([1, 2], [2, 2], [2, 3], [3, 1])
-
-        # test large tensors
-        check([10, 100], [100, 5], [5, 50])
-        check([10, 20], [20, 30], [30, 5])
-
-        # test discontiguous input
-        check([3, 2], [2, 2], [2, 3], [3, 4], discontiguous=True)
-        check([15, 5], [5, 10], [10, 20], [20, 25], discontiguous=True)
-
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.float)
-    def test_multi_dot_errors(self, device, dtype):
-        def check(tensors, out, msg):
-            with self.assertRaisesRegex(RuntimeError, msg):
-                torch.linalg.multi_dot(tensors, out=out)
-
-        a = make_tensor(2, device, dtype)
-
-        check([], None, "expected at least 2 tensors")
-        check([a], None, "expected at least 2 tensors")
-
-        check([torch.tensor(1, device=device, dtype=dtype), a], None, "the first tensor must be 1D or 2D")
-        check([a, torch.tensor(1, device=device, dtype=dtype)], None, "the last tensor must be 1D or 2D")
-
-        check([a, a, a], None, "tensor 1 must be 2D")
-        check([a, make_tensor((2, 2, 2), device, dtype), a], None, "tensor 1 must be 2D")
-
-        check([a, make_tensor(2, device, torch.double)], None, "all tensors must have be the same dtype")
-        check([a, a], torch.empty(0, device=device, dtype=torch.double), "expected out tensor to have dtype")
-
-        if self.device_type == 'cuda':
-            check([a, make_tensor(2, 'cpu', dtype)], None, "all tensors must be on the same device")
-            check([a, a], torch.empty(0, dtype=dtype), "expected out tensor to be on device")
-
-        check([a, make_tensor(3, device, dtype)], None, "cannot be multiplied")
-        check([a, make_tensor((3, 2), device, dtype), a], None, "cannot be multiplied")
 
     @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
     @skipCUDAIfNoMagma
@@ -5834,6 +5751,7 @@ else:
 
     @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinverse(self, device, dtype):
@@ -5866,45 +5784,50 @@ else:
             self.assertEqual(torch.eye(matsize, dtype=dtype, device=device).expand(sizes), M.pinverse().matmul(M),
                              atol=1e-7, rtol=0, msg='pseudo-inverse for invertible matrix')
 
+    @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @dtypes(torch.double, torch.cdouble)
-    def test_matrix_power_non_negative(self, device, dtype):
-        def check(*size, discontiguous=False):
-            t = make_tensor(size, device, dtype, discontiguous=discontiguous)
-            for n in range(8):
-                res = torch.linalg.matrix_power(t, n)
-                ref = np.linalg.matrix_power(t.cpu().numpy(), n)
-                self.assertEqual(res.cpu(), torch.from_numpy(ref))
+    @dtypes(torch.double)
+    def test_matrix_power(self, device, dtype):
+        def run_test(M, sign=1):
+            if sign == -1:
+                M = M.inverse()
+            MP2 = torch.matrix_power(M, 2)
+            self.assertEqual(MP2, torch.matmul(M, M))
 
-        check(0, 0)
-        check(1, 1)
-        check(5, 5)
-        check(5, 5, discontiguous=True)
-        check(0, 3, 3)
-        check(2, 3, 3)
-        check(2, 3, 4, 4, discontiguous=True)
+            MP3 = torch.matrix_power(M, 3)
+            self.assertEqual(MP3, torch.matmul(MP2, M))
 
-    @skipCUDAIfRocm
-    @skipCPUIfNoLapack
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @dtypes(torch.double, torch.cdouble)
-    def test_matrix_power_negative(self, device, dtype):
+            MP4 = torch.matrix_power(M, 4)
+            self.assertEqual(MP4, torch.matmul(MP2, MP2))
+
+            MP6 = torch.matrix_power(M, 6)
+            self.assertEqual(MP6, torch.matmul(MP3, MP3))
+
+            MP0 = torch.matrix_power(M, 0)
+            self.assertEqual(MP0, torch.eye(M.size(-2), dtype=dtype).expand_as(M))
+
+        # Single matrix
+        M = torch.randn(5, 5, dtype=dtype, device=device)
+        run_test(M)
+
+        # Batch matrices
+        M = torch.randn(3, 3, 3, dtype=dtype, device=device)
+        run_test(M)
+
+        # Many batch matrices
+        M = torch.randn(2, 3, 3, 3, dtype=dtype, device=device)
+        run_test(M)
+
+        # This is for negative powers
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        M = random_fullrank_matrix_distinct_singular_value(5, dtype=dtype, device=device)
+        run_test(M, sign=-1)
 
-        def check(*size):
-            t = random_fullrank_matrix_distinct_singular_value(*size, dtype=dtype, device=device)
-            for n in range(-7, 0):
-                res = torch.linalg.matrix_power(t, n)
-                ref = np.linalg.matrix_power(t.cpu().numpy(), n)
-                self.assertEqual(res.cpu(), torch.from_numpy(ref))
+        M = random_fullrank_matrix_distinct_singular_value(3, 3, dtype=dtype, device=device)
+        run_test(M, sign=-1)
 
-        check(0)
-        check(5)
-        check(0, 2)
-        check(3, 0)
-        check(3, 2)
-        check(5, 2, 3)
+        M = random_fullrank_matrix_distinct_singular_value(3, 2, 3, dtype=dtype, device=device)
+        run_test(M, sign=-1)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -6204,6 +6127,25 @@ else:
         run_test(3, 3, 3, 3)
         run_test(3, 3, 4, 4)
         run_test(3, 3, 5, 5)
+
+    @dtypes(torch.double)
+    def test_chain_matmul(self, device, dtype):
+        def product(matrices):
+            for mat in matrices[1:]:
+                matrices[0] = matrices[0].mm(mat)
+            return matrices[0]
+
+        def run_test(p):
+            matrices = []
+            for (pi, pi_1) in zip(p[:-1], p[1:]):
+                matrices.append(torch.randn(pi, pi_1, dtype=dtype, device=device))
+            self.assertEqual(torch.chain_matmul(*matrices), product(matrices))
+
+        run_test([10, 20, 30, 5])
+        run_test([15, 5, 10, 20, 25])
+
+        with self.assertRaisesRegex(RuntimeError, "chain_matmul: Expected one or more matrices"):
+            torch.chain_matmul()
 
     @skipCUDAIfNoMagma
     @skipCUDAIfRocm

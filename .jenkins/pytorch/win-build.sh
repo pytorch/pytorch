@@ -16,16 +16,14 @@ SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
-IMAGE_COMMIT_ID=$(git rev-parse HEAD)
-export IMAGE_COMMIT_ID
+export IMAGE_COMMIT_ID=$(git rev-parse HEAD)
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 if [[ ${JOB_NAME} == *"develop"* ]]; then
   export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}
 fi
 
 export TMP_DIR="${PWD}/build/win_tmp"
-TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
-export TMP_DIR_WIN
+export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR="/c/w/build-results"
 if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
     mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
@@ -33,10 +31,10 @@ fi
 
 # This directory is used only to hold "pytorch_env_restore.bat", called via "setup_pytorch_env.bat"
 CI_SCRIPTS_DIR=$TMP_DIR/ci_scripts
-mkdir -p "$CI_SCRIPTS_DIR"
+mkdir -p $CI_SCRIPTS_DIR
 
-if [ -n "$(ls "$CI_SCRIPTS_DIR"/*)" ]; then
-    rm "$CI_SCRIPTS_DIR"/*
+if [ -n "$(ls $CI_SCRIPTS_DIR/*)" ]; then
+    rm $CI_SCRIPTS_DIR/*
 fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
@@ -56,11 +54,11 @@ if [[ $PYLONG_API_CHECK == 0 ]]; then
 fi
 set -ex
 
-"$SCRIPT_HELPERS_DIR"/build_pytorch.bat
+$SCRIPT_HELPERS_DIR/build_pytorch.bat
 
 assert_git_not_dirty
 
-if [ ! -f "${TMP_DIR}"/"${IMAGE_COMMIT_TAG}".7z ] && [ ! "${BUILD_ENVIRONMENT}" == "" ]; then
+if [ ! -f ${TMP_DIR}/${IMAGE_COMMIT_TAG}.7z ] && [ ! ${BUILD_ENVIRONMENT} == "" ]; then
     exit 1
 fi
 echo "BUILD PASSED"

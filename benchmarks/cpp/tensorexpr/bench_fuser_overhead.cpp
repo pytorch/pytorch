@@ -1,7 +1,6 @@
 #include <benchmark/benchmark.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/torch.h>
-#include <c10/core/InferenceMode.h>
 
 using namespace torch::jit;
 
@@ -11,7 +10,8 @@ def two_adds(self, x: Tensor, y: Tensor, z: Tensor) -> Tensor:
 )JIT";
 
 static void FusedOverhead(benchmark::State& state) {
-  c10::InferenceMode mode;
+  torch::NoGradGuard ng;
+  torch::AutoNonVariableTypeMode nv;
   overrideCanFuseOnCPU(true);
 
   Module m("m");

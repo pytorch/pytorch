@@ -484,3 +484,4 @@ function(torch_set_target_props libname)
     set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}d")
   endif()
 endfunction()
+

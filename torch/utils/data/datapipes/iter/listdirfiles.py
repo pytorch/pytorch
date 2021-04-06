@@ -2,7 +2,7 @@ from torch.utils.data import IterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
 from typing import List, Union, Iterator
 
-class ListDirFilesIterDataPipe(IterDataPipe[str]):
+class ListDirFilesIterDataPipe(IterDataPipe):
     r""" :class:`ListDirFilesIterDataPipe`
 
     Iterable DataPipe to load file pathname(s) (path + filename), yield pathname from given disk root dir.

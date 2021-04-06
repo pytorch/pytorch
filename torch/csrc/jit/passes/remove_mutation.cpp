@@ -3,12 +3,12 @@
 namespace torch {
 namespace jit {
 
-bool MutationRemover::removeListMutation() {
-  return RemoveListMutation(graph_->block());
+void MutationRemover::removeListMutation() {
+  RemoveListMutation(graph_->block());
 }
 
-bool MutationRemover::removeTensorMutation() {
-  return RemoveTensorMutation(graph_->block());
+void MutationRemover::removeTensorMutation() {
+  RemoveTensorMutation(graph_->block());
 }
 
 bool MutationRemover::newMemoryLocation(Value* v) {
@@ -122,14 +122,13 @@ bool MutationRemover::tryMakeUnaliasedIfOutputAndMutationAtomic(
   return aliasDb_->moveBeforeTopologicallyValid(if_node, mutating_op);
 }
 
-bool MutationRemover::RemoveListMutation(Block* block) {
-  bool changed = false;
+void MutationRemover::RemoveListMutation(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto* node = *it;
     it++;
 
     for (Block* sub_block : node->blocks()) {
-      changed |= RemoveListMutation(sub_block);
+      RemoveListMutation(sub_block);
     }
 
     if (!listMutationFollowingListConstruct(node)) {
@@ -140,8 +139,6 @@ bool MutationRemover::RemoveListMutation(Block* block) {
     if (!tryMakeCreationAndMutationAtomic(mutated_value, node)) {
       continue;
     }
-
-    changed = true;
 
     // We rewrite something like:
     // x = {v0}
@@ -184,18 +181,15 @@ bool MutationRemover::RemoveListMutation(Block* block) {
     aliasDb_->writtenToLocationsIndex_ =
         aliasDb_->buildWrittenToLocationsIndex();
   }
-
-  return changed;
 }
 
-bool MutationRemover::RemoveTensorMutation(Block* block) {
-  bool changed = false;
+void MutationRemover::RemoveTensorMutation(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto* node = *it;
     it++;
 
     for (Block* sub_block : node->blocks()) {
-      changed |= RemoveTensorMutation(sub_block);
+      RemoveTensorMutation(sub_block);
     }
 
     if (mutation_filter_) {
@@ -238,7 +232,6 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
       }
     }
 
-    changed = true;
     mutated_value->replaceAllUsesAfterNodeWith(node, new_node->output());
     node->output()->replaceAllUsesWith(new_node->output());
 
@@ -270,20 +263,18 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
     aliasDb_->writtenToLocationsIndex_ =
         aliasDb_->buildWrittenToLocationsIndex();
   }
-
-  return changed;
 }
 
-bool RemoveListMutation(const std::shared_ptr<Graph>& graph) {
+void RemoveListMutation(const std::shared_ptr<Graph>& graph) {
   MutationRemover mr(graph);
-  return mr.removeListMutation();
+  mr.removeListMutation();
 }
 
-bool RemoveTensorMutation(
+void RemoveTensorMutation(
     const std::shared_ptr<Graph>& graph,
     c10::optional<std::function<bool(Node*)>> mutation_filter) {
   MutationRemover mr(graph, std::move(mutation_filter));
-  return mr.removeTensorMutation();
+  mr.removeTensorMutation();
 }
 
 } // namespace jit

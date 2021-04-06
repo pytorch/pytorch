@@ -106,3 +106,4 @@ def transform_caffe2_net(
     pred_net_cut = caffe2_pb2.NetDef()
     pred_net_cut.ParseFromString(pred_net_str)
     return pred_net_cut
+

@@ -64,8 +64,6 @@ class SubgraphMatcher:
 
         # Traverse the use-def relationships to ensure that `pn` is a true
         # match for `gn`
-        if pn.op == "placeholder":
-            return True
         if (pn.op != "output"
                 and len(pn.all_input_nodes) != len(gn.all_input_nodes)):
             return False

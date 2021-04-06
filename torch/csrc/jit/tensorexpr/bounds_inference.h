@@ -50,12 +50,6 @@ enum class HazardKind {
 TORCH_API HazardKind
 getPotentialHazards(analysis::MemDependencyChecker& analyzer, Stmt* A, Stmt* B);
 
-// Returns true if there is a partial overlap between accesses in A and B.
-TORCH_API bool hasPartialOverlap(
-    analysis::MemDependencyChecker& analyzer,
-    Stmt* A,
-    Stmt* B);
-
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

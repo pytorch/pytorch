@@ -1470,19 +1470,17 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             else:
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore
 
-def chain_matmul(*matrices, out=None):
+def chain_matmul(*matrices):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
     using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
     of arithmetic operations (`[CLRS]`_). Note that since this is a function to compute the product, :math:`N`
     needs to be greater than or equal to 2; if equal to 2 then a trivial matrix-matrix product is returned.
     If :math:`N` is 1, then this is a no-op - the original matrix is returned as is.
 
-    .. warning::
-        :func:`torch.chain_matmul` is deprecated, use :func:`torch.linalg.multi_dot` instead.
 
     Args:
         matrices (Tensors...): a sequence of 2 or more 2-D tensors whose product is to be determined.
-        out (Tensor, optional): the output tensor. Ignored if :attr:`out` = ``None``.
+
 
     Returns:
         Tensor: if the :math:`i^{th}` tensor was of dimensions :math:`p_{i} \times p_{i + 1}`, then the product
@@ -1588,10 +1586,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     """
     if not torch._jit_internal.is_scripting():
         if A.requires_grad:
-            if not (A.size(-2) == A.size(-1) and (A.dtype.is_floating_point or A.is_complex)):
+            if not (A.size(-2) == A.size(-1) and A.dtype.is_floating_point):
                 raise ValueError(
                     'lu.backward works only with batches of squared full-rank matrices'
-                    ' of floating or complex types.'
+                    ' of floating types.'
                 )
 
             return _LU.apply(A, pivot, get_infos)

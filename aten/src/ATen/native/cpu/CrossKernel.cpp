@@ -75,3 +75,4 @@ static void cross_kernel_impl(Tensor& result, const Tensor& a, const Tensor& b, 
 REGISTER_DISPATCH(cross_stub, &cross_kernel_impl);
 
 }} // namespace at::native
+

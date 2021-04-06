@@ -409,10 +409,11 @@ void adaptive_max_pool2d_backward_out_cuda_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> adaptive_max_pool2d_out_cuda(const Tensor& input,
-  IntArrayRef output_size,
+std::tuple<Tensor&, Tensor&> adaptive_max_pool2d_out_cuda(
   Tensor& output,
-  Tensor& indices)
+  Tensor& indices,
+  const Tensor& input,
+  IntArrayRef output_size)
 {
   adaptive_max_pool2d_out_cuda_template(
     output,
@@ -436,10 +437,11 @@ std::tuple<Tensor, Tensor> adaptive_max_pool2d_cuda(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& adaptive_max_pool2d_backward_out_cuda(const Tensor& gradOutput_,
+Tensor& adaptive_max_pool2d_backward_out_cuda(
+  Tensor& gradInput,
+  const Tensor& gradOutput_,
   const Tensor& input,
-  const Tensor& indices,
-  Tensor& gradInput)
+  const Tensor& indices)
 {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

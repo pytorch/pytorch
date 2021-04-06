@@ -428,7 +428,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 Tensor cat_cuda(TensorList inputs, int64_t dimension) {
   ScalarType high_type = result_type(inputs);
   Tensor out = at::empty({0}, inputs.front().options().dtype(high_type));
-  at::native::cat_out_cuda(inputs, dimension, out);
+  cat_out_cuda(out, inputs, dimension);
   return out;
 }
 
@@ -451,7 +451,7 @@ inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) 
   return format.value();
 }
 
-Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
+Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
 
   // previously, size [0] tensors were the only possible empty tensors; thus, it
   // wasn't possible to cat empty tensors unless all the other tensors were

@@ -1721,7 +1721,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad1',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv1d',
@@ -2025,7 +2025,6 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.01,
     ),
     dict(
         fullname='Conv2d_depthwise',
@@ -2376,7 +2375,7 @@ new_module_tests = [
         cudnn=True,
         desc='1x1x1_no_bias',
         check_with_long_tensor=False,
-        with_tf32=True,
+        with_tf32=False,
         tf32_precision=0.05,
     ),
     dict(
@@ -3799,7 +3798,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
-        tf32_precision=0.05,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='TransformerDecoderLayer',
@@ -3811,7 +3810,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='relu_activation',
         with_tf32=True,
-        tf32_precision=0.05,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='TransformerDecoderLayer',
@@ -3824,7 +3823,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
-        tf32_precision=0.05,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='Transformer',
@@ -3930,15 +3929,6 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
     elif reduction == 'sum':
         return output.sum()
     return output
-
-
-def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, reduction='mean'):
-    return nlllossNd_reference(
-        torch.log_softmax(input, 1),
-        target,
-        weight,
-        ignore_index=ignore_index,
-        reduction=reduction)
 
 
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
@@ -4253,7 +4243,6 @@ loss_reference_fns: Dict['str', Callable] = {
     'TripletMarginLoss': tripletmarginloss_reference,
     'MarginRankingLoss': marginrankingloss_reference,
     'CTCLoss': ctcloss_reference,
-    'CrossEntropyLoss': cross_entropy_loss_reference
 }
 
 
@@ -4627,58 +4616,6 @@ criterion_tests = [
         check_sum_reduction=True,
         desc='dim_is_3',
         check_bfloat16=True,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        input_size=(2, 3, 5, 5),
-        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='2d',
-        check_bfloat16=False,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        constructor_args_fn=lambda: (torch.rand(3),),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
-        input_size=(2, 3, 5, 5),
-        target=torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, weight=get_weight(m)),
-        desc='2d_weights',
-        check_bfloat16=False,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        constructor_args=(None, None, 1),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight({}).ignore_index(1)',
-        input_size=(2, 3, 5, 5),
-        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, ignore_index=1),
-        desc='2d_ignore_index',
-        check_bfloat16=False,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        input_size=(2, 3, 5, 5, 2, 2),
-        target_fn=lambda: torch.rand(2, 5, 5, 2, 2).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='higher_dim',
-        check_bfloat16=False,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        input_size=(2, 3, 5),
-        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='dim_is_3',
-        check_bfloat16=False,
     ),
     dict(
         module_name='PoissonNLLLoss',  # Default is log_input=True, full=False

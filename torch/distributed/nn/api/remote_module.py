@@ -196,29 +196,21 @@ class _RemoteModule(nn.Module):
             method = torch.jit.export(method)
             setattr(self, method_name, types.MethodType(method, self))
 
-    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef]:
-        """
-        Returns a list of :class:`~torch.distributed.rpc.RRef` pointing to the
-        remote module's parameters. This can typically be used in conjuction
-        with :class:`~torch.distributed.optim.DistributedOptimizer`.
-
+    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
+        r"""Returns a list of RRefs of remote module parameters.
+        This is typically passed to a distributed optimizer.
         Args:
-            recurse (bool): if True, then returns parameters of the remote
-                module and all submodules of the remote module. Otherwise,
-                returns only parameters that are direct members of the
-                remote module.
+            recurse (bool): if True, then returns parameters of the remote module
+                and all submodules of the remote module.
+                Otherwise, returns only parameters that are direct members of the remote module.
 
         Returns:
-            A list of :class:`~torch.distributed.rpc.RRef` (``List[RRef[nn.Parameter]]``)
-            to remote module's parameters.
+            A list of RRefs to remote module parameters.
         """
         return rpc.rpc_sync(self.on, _param_rrefs, args=(self.module_rref, recurse))
 
-    def get_module_rref(self) -> rpc.RRef:
-        """
-        Returns an :class:`~torch.distributed.rpc.RRef` (``RRef[nn.Module]``)
-        pointing to the remote module.
-        """
+    def get_module_rref(self) -> rpc.RRef[nn.Module]:
+        """Returns the RRef to remote module."""
         return self.module_rref
 
     def register_buffer(

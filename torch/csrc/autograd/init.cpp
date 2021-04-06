@@ -177,13 +177,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_prepare_profiler", prepareProfiler);
 #endif
 
-  m.def("kineto_available", []() {
-#ifdef USE_KINETO
-    return true;
-#else
-    return false;
-#endif
-  });
+  m.def("kineto_available", kinetoAvailable);
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
   py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")

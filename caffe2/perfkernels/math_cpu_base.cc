@@ -50,10 +50,10 @@ void quantize_and_compress__base(
   uint8_t max_q = (1 << bitwidth) - 1;
   uint64_t bit_start = 0;
   if (random) {
-    for (uint64_t start = 0; start < input_size; start += segment_size) {
+    for (int start = 0; start < input_size; start += segment_size) {
       uint64_t stride = start + segment_size <= input_size ? segment_size
                                                            : input_size - start;
-      uint64_t i = 0;
+      int i = 0;
       for (; i < stride; ++i) {
         float fval = input_data[start + i];
         float thetimes = (fval - minimum_element) * gap_inverse;
@@ -70,10 +70,10 @@ void quantize_and_compress__base(
       bit_start += bitwidth;
     }
   } else {
-    for (uint64_t start = 0; start < input_size; start += segment_size) {
+    for (int start = 0; start < input_size; start += segment_size) {
       uint64_t stride = start + segment_size <= input_size ? segment_size
                                                            : input_size - start;
-      uint64_t i = 0;
+      int i = 0;
       for (; i < stride; ++i) {
         float fval = input_data[start + i];
         float thetimes = (fval - minimum_element) * gap_inverse;
@@ -137,11 +137,11 @@ void decompress_and_dequantize__base(
   // decoding
   uint64_t bit_start = 0;
   const uint64_t segment_size = input_size - 10;
-  for (uint64_t start = 0; start < output_size; start += segment_size) {
+  for (int start = 0; start < output_size; start += segment_size) {
     uint64_t stride = start + segment_size <= output_size ? segment_size
                                                           : output_size - start;
     uint8_t mask = (1 << bitwidth) - 1;
-    uint64_t i = 0;
+    int i = 0;
     for (; i < stride; ++i) {
       output_data[start + i] =
           ((input_data[10 + i] >> bit_start) & mask) * gap + minimum_element;

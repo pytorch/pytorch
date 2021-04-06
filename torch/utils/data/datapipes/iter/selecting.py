@@ -7,7 +7,7 @@ T_co = TypeVar('T_co', covariant=True)
 
 
 @functional_datapipe('filter')
-class FilterIterDataPipe(MapIterDataPipe):
+class FilterIterDataPipe(MapIterDataPipe[T_co]):
     r""" :class:`FilterIterDataPipe`.
 
     Iterable DataPipe to filter elements from datapipe according to filter_fn.
