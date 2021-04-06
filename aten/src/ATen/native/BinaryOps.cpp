@@ -38,17 +38,17 @@ TORCH_META_FUNC2(div, Tensor) (const Tensor& self, const Tensor& other) {
   build_binary_float_op(maybe_get_output(), self, other);
 }
 
-TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, std::string rounding_mode) {
-  if (rounding_mode == "true") {
+TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
+  if (!rounding_mode.has_value()) {
     build_binary_float_op(maybe_get_output(), self, other);
-  } else if (rounding_mode == "trunc") {
+  } else if (*rounding_mode == "trunc") {
     build_binary_op(maybe_get_output(), self, other);
-  } else if (rounding_mode == "floor") {
+  } else if (*rounding_mode == "floor") {
     build_binary_op(maybe_get_output(), self, other);
   } else {
     TORCH_CHECK(false,
-        "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
-        "but found '", rounding_mode, "'");
+        "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
+        "but found '", *rounding_mode, "'");
   }
 }
 
@@ -141,13 +141,13 @@ TORCH_IMPL_FUNC(div_out) (const Tensor& self, const Tensor& other, const Tensor&
 }
 
 TORCH_IMPL_FUNC(div_out_mode) (
-  const Tensor& self, const Tensor& other, std::string rounding_mode, const Tensor& result
+  const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode, const Tensor& result
 ) {
-  if (rounding_mode == "true") {
+  if (!rounding_mode.has_value()) {
     div_true_stub(device_type(), *this);
-  } else if (rounding_mode == "trunc") {
+  } else if (*rounding_mode == "trunc") {
     div_trunc_stub(device_type(), *this);
-  } else if (rounding_mode == "floor") {
+  } else if (*rounding_mode == "floor") {
     div_floor_stub(device_type(), *this);
   }
 }
@@ -237,11 +237,11 @@ Tensor& div_(Tensor& self, const Scalar& other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
 }
 
-Tensor div(const Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor div(const Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
-Tensor& div_(Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor& div_(Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div_(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
@@ -266,23 +266,23 @@ Tensor& divide_(Tensor& self, const Scalar& other) {
   return self.div_(other);
 }
 
-Tensor& divide_out(const Tensor& self, const Tensor& other, std::string rounding_mode, Tensor& result) {
+Tensor& divide_out(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode, Tensor& result) {
   return at::div_out(result, self, other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Tensor& other, std::string rounding_mode) {
+Tensor divide(const Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Tensor& other, std::string rounding_mode) {
+Tensor& divide_(Tensor& self, const Tensor& other, c10::optional<std::string> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor divide(const Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Scalar& other, std::string rounding_mode) {
+Tensor& divide_(Tensor& self, const Scalar& other, c10::optional<std::string> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
