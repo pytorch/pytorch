@@ -36,7 +36,7 @@ from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.context import with_native_function
+from tools.codegen.context import native_function_manager, with_native_function
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
 from tools.codegen.model import *
@@ -312,16 +312,17 @@ def gen_variable_type_shard(
     filtered_fns_with_diff_infos = list(filter(use_derived, fns_with_diff_infos))
     for fn in filtered_fns_with_diff_infos:
         f = fn.func
-        name = cpp.name(f.func)
-        formals = gen_formals(f)
+        with native_function_manager(f):
+            name = cpp.name(f.func)
+            formals = gen_formals(f)
 
-        type_definitions.append(METHOD_DEFINITION.substitute(
-            return_type=cpp.returns_type(f.func.returns),
-            type_wrapper_name=type_wrapper_name(f),
-            type_definition_body=emit_body(fn),
-            formals=formals,
-        ))
-        wrapper_registrations.append(gen_wrapper_registration(f))
+            type_definitions.append(METHOD_DEFINITION.substitute(
+                return_type=cpp.returns_type(f.func.returns),
+                type_wrapper_name=type_wrapper_name(f),
+                type_definition_body=emit_body(fn),
+                formals=formals,
+            ))
+            wrapper_registrations.append(gen_wrapper_registration(f))
 
         # See Note [Manual Backend kernels]
         assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
@@ -688,7 +689,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables(f))
 
-    body.append(emit_call(f, unpacked_bindings))
+    with native_function_manager(f):
+        body.append(emit_call(f, unpacked_bindings))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called

@@ -2,6 +2,7 @@ from tools.codegen.model import *
 
 from tools.codegen.api.types import *
 from tools.codegen.api import cpp
+from tools.codegen import local
 
 from typing import Union, Sequence, List, Optional
 
@@ -25,7 +26,7 @@ def name(func: FunctionSchema) -> str:
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
     if str(t) == 'Tensor?':
         tensor_type: OptionalCType = OptionalCType(BaseCType('Tensor', binds))
-        if mutable:
+        if mutable and not local.use_const_ref_for_mutable_tensors():
             return MutRefCType(tensor_type)
         else:
             return ConstRefCType(tensor_type)
