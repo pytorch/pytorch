@@ -68,9 +68,11 @@ __global__ void _sparse_mask_copy_kernel(
 
 } // end namespace
 
-SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
+SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();
-  TORCH_INTERNAL_ASSERT(!self.is_coalesced());
+  if (self.is_coalesced()) {
+    return self;
+  }
   // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
   // we should keep the original tensor intact and do coalesce on a copy of the tensor
   if (nnz < 2) {
