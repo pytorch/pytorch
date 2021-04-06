@@ -187,7 +187,7 @@ if (prop) {
 """
 
 GETTER_BODY_STRING = """\
-return PyUnicode_FromString(prop.c_str());
+return PyUnicode_FromStringAndSize(prop.data(), prop.size());
 """
 
 GETTER_BODY_SCALAR = """\
@@ -216,6 +216,7 @@ MISC_GETTER_DEFS = {
     'c10::optional<double>': (GETTER_DEFINITION_OPT, GETTER_BODY_DOUBLE),
     'bool': (GETTER_DEFINITION, GETTER_BODY_BOOL),
     'std::string': (GETTER_DEFINITION, GETTER_BODY_STRING),
+    'c10::optional<std::string>': (GETTER_DEFINITION_OPT, GETTER_BODY_STRING),
     'Scalar': (GETTER_DEFINITION, GETTER_BODY_SCALAR),
     'c10::optional<Scalar>': (GETTER_DEFINITION_OPT, GETTER_BODY_SCALAR),
 }

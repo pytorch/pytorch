@@ -4537,6 +4537,12 @@ for shape in [(1,), ()]:
         q, r = torch.linalg.qr(a, mode="reduced")
         self.assertEqual(q.grad_fn._saved_mode, "reduced")                # std::string -> str
 
+        a = torch.tensor([1.], requires_grad=True)
+        out = torch.div(a, 2., rounding_mode="trunc")
+        self.assertEqual(out.grad_fn._saved_rounding_mode, "trunc")       # c10::optional<std::string> -> str?
+        out = torch.div(a, 2., rounding_mode=None)
+        self.assertIsNone(out.grad_fn._saved_rounding_mode)               # c10::optional<std::string> -> str?
+
         x = torch.zeros(5, requires_grad=True)
         out = torch.threshold(x, threshold=(1 + 0j), value=(1 + 0j))
         self.assertIsInstance(out.grad_fn._saved_threshold, complex)      # Scalar(complex double) -> complex

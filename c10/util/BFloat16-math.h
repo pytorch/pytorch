@@ -38,5 +38,8 @@ inline c10::BFloat16 pow(c10::BFloat16 a, double b) { return std::pow(float(a), 
 #endif
 inline c10::BFloat16 pow(c10::BFloat16 a, c10::BFloat16 b) { return std::pow(float(a), float(b));}
 inline c10::BFloat16 fmod(c10::BFloat16 a, c10::BFloat16 b) { return std::fmod(float(a), float(b));}
+inline c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
+   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
+}
 
 } // namespace std
