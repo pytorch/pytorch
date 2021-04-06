@@ -367,42 +367,6 @@ namespace {
 // Looks for and returns all values in between dependencies and vals, including
 // them.
 struct Dependencies : public IterVisitor {
-  std::unordered_set<Val*> dependencies_;
-  std::unordered_set<Val*> vals_;
-
-  std::vector<Statement*> next(Val* v) override {
-    if (dependencies_.find(v) != dependencies_.end())
-      return std::vector<Statement*>();
-    return IterVisitor::next(v);
-  }
-
-  void handle(Val* val) override {
-    vals_.emplace(val);
-  }
-
-  Dependencies(
-      std::unordered_set<Val*> _dependencies,
-      const std::vector<Val*>& of)
-      : dependencies_(std::move(_dependencies)) {
-    traverseFrom(of[0]->fusion(), of, false);
-  };
-
- public:
-  static std::unordered_set<Val*> getAllVals(
-      const std::unordered_set<Val*>& dependencies,
-      const std::vector<Val*>& of) {
-    if (of.empty()) {
-      return std::unordered_set<Val*>();
-    }
-
-    Dependencies deps(dependencies, of);
-    return deps.vals_;
-  }
-};
-
-// Looks for and returns all values in between dependencies and vals, including
-// them.
-struct Dependencies2 : public IterVisitor {
  private:
   //! A given set of dependency Vals
   const std::unordered_set<Val*> dependencies_;
@@ -427,12 +391,20 @@ struct Dependencies2 : public IterVisitor {
     // 1. it is one of the dependencies, or
     // 2. its defining expression is included in the dependent expr set
     if (dependencies_.find(val) != dependencies_.end()) {
+      TORCH_INTERNAL_ASSERT(
+          dependent_vals_.find(val) == dependent_vals_.end(),
+          "Trying to add already added val: ",
+          val);
       vals_.push_back(val);
       dependent_vals_.insert(val);
     } else {
       auto def = val->definition();
       if (def != nullptr &&
           dependent_exprs_.find(def) != dependent_exprs_.end()) {
+        TORCH_INTERNAL_ASSERT(
+            dependent_vals_.find(val) == dependent_vals_.end(),
+            "Trying to add already added val: ",
+            val);
         vals_.push_back(val);
         dependent_vals_.insert(val);
       }
@@ -449,7 +421,7 @@ struct Dependencies2 : public IterVisitor {
     }
   }
 
-  Dependencies2(
+  Dependencies(
       std::unordered_set<Val*> _dependencies,
       const std::vector<Val*>& of)
       : dependencies_(std::move(_dependencies)) {
@@ -464,7 +436,7 @@ struct Dependencies2 : public IterVisitor {
       return {};
     }
 
-    Dependencies2 deps(dependencies, of);
+    Dependencies deps(dependencies, of);
     return deps.vals_;
   }
 };
@@ -670,16 +642,10 @@ std::deque<std::deque<Val*>> DependencyCheck::getAllUseChains(Val* producer) {
   return DependencyChains::getAllUseChains(producer);
 }
 
-std::unordered_set<Val*> DependencyCheck::getAllValsBetween(
+std::vector<Val*> DependencyCheck::getAllValsBetween(
     const std::unordered_set<Val*>& dependencies,
     const std::vector<Val*>& of) {
   return Dependencies::getAllVals(dependencies, of);
-}
-
-std::vector<Val*> DependencyCheck::getAllValsBetween2(
-    const std::unordered_set<Val*>& dependencies,
-    const std::vector<Val*>& of) {
-  return Dependencies2::getAllVals(dependencies, of);
 }
 
 std::unordered_set<Val*> DependencyCheck::getAllOutputsOf(

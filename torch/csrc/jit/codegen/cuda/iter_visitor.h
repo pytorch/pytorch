@@ -199,13 +199,7 @@ class TORCH_CUDA_CU_API DependencyCheck {
 
   // Grab all values that exist between and including provided
   // vals. Returned values are topologicaly ordered.
-  static std::unordered_set<Val*> getAllValsBetween(
-      const std::unordered_set<Val*>& dependencies,
-      const std::vector<Val*>& of);
-
-  // Grab all values that exist between and including provided
-  // vals. Returned values are topologicaly ordered.
-  static std::vector<Val*> getAllValsBetween2(
+  static std::vector<Val*> getAllValsBetween(
       const std::unordered_set<Val*>& dependencies,
       const std::vector<Val*>& of);
 
