@@ -248,7 +248,10 @@ int main(int argc, char** argv) {
   const auto runner = FLAGS_vulkan ? std::make_unique<vkRunner<ModuleType>>()
                                    : std::make_unique<Runner<ModuleType>>();
 
+#ifndef BUILD_LITE_INTERPRETER
   module.eval();
+#endif
+
   if (FLAGS_print_output) {
     std::cout << runner->run(module, inputs) << std::endl;
   }
