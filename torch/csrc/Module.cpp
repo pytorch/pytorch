@@ -6,8 +6,6 @@
 #endif
 
 #include <unordered_map>
-#include <cstdlib>
-#include <libshm.h>
 #include <TH/TH.h>
 #include <c10/util/Logging.h>
 #include <ATen/ATen.h>
