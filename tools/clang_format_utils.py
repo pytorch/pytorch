@@ -130,11 +130,11 @@ def get_and_check_clang_format(verbose=False):
 
     # Load the reference hash and compare the actual hash to it.
     with open(hashpath, "r") as f:
-        reference_bin_hash = f.readline()
+        reference_bin_hash = f.readline().strip()
 
         if verbose:
-            print("Reference Hash: {}".format(reference_bin_hash))
-            print("Actual Hash: {}".format(actual_bin_hash))
+            print("Reference Hash: {}".format(repr(reference_bin_hash)))
+            print("Actual Hash: {}".format(repr(actual_bin_hash)))
 
         if reference_bin_hash != actual_bin_hash:
             print("The downloaded binary is not what was expected!")

@@ -16,6 +16,7 @@ import textwrap
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._six import inf, nan, string_classes
 from itertools import product, combinations, permutations
+from functools import partial
 from torch import multiprocessing as mp
 from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
@@ -949,44 +950,6 @@ class AbstractTestCases:
 
                         added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor, alpha=-1)
                         self.assertEqual(added, -tensor)
-
-        def test_take(self):
-            def check(src, idx):
-                expected = src.contiguous().view(-1).index_select(
-                    0, idx.contiguous().view(-1)).view_as(idx)
-                actual = src.take(idx)
-                self.assertEqual(actual.size(), idx.size())
-                self.assertEqual(expected, actual)
-
-            src = torch.randn(2, 3, 5)
-            idx = torch.LongTensor([[0, 2], [3, 4]])
-            check(src, idx)
-            check(src.transpose(1, 2), idx)
-            check(src.bool(), idx)
-
-        def test_put_(self):
-            def check(dst, idx, value):
-                expected = dst.clone(memory_format=torch.contiguous_format).view(-1).index_copy_(
-                    0, idx.contiguous().view(-1), value.contiguous().view(-1))
-                expected = expected.view_as(dst)
-                dst.put_(idx, value)
-                self.assertEqual(expected, dst)
-
-            dst = torch.randn(2, 3, 5)
-            idx = torch.LongTensor([[0, 2], [3, 4]])
-            values = torch.randn(2, 2)
-            check(dst, idx, values)
-            check(dst.transpose(1, 2), idx, values)
-
-            values = torch.tensor([[False, False], [False, False]])
-            check(dst.bool(), idx, values)
-
-        def test_put_accumulate(self):
-            dst = torch.ones(2, 2)
-            idx = torch.LongTensor([[0, 1], [0, 1]])
-            src = torch.Tensor([1, 2, 3, 4])
-            dst.put_(idx, src, accumulate=True)
-            self.assertEqual(dst.tolist(), [[5, 7], [1, 1]])
 
         # Fill idx with valid indices.
         @staticmethod
@@ -2647,6 +2610,22 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             out = torch.empty(0, device='meta')
             torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+
+            # Complain if out dtype mismatch
+            x = torch.empty(4, 3, 8, 8, device='meta', dtype=torch.float)
+            out = torch.empty(4, 3, 16, 16, device='meta', dtype=torch.double)
+            self.assertExpectedRaisesInline(
+                RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
+                """Expected out tensor to have dtype float, but got double instead"""
+            )
+
+            # Complain if out device mismatch
+            x = torch.empty(0, 3, 8, 8, device='meta')
+            out = torch.empty(0, 3, 16, 16, device='cpu')
+            self.assertExpectedRaisesInline(
+                RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
+                """Expected out tensor to have device meta, but got cpu instead"""
+            )
 
         @noarchTest
         def test_detach_meta(self):
@@ -4656,6 +4635,131 @@ class TestTorchDeviceType(TestCase):
             out = source.index_select(0, idx)
             self.assertEqual(out.item(), source.item())
 
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_take(self, device, dtype):
+        idx_size = (4,)
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        make_idx = partial(make_tensor, low=0, device=device, dtype=torch.int64)
+
+        def ref_take(src, idx):
+            if dtype == torch.bfloat16:
+                src = src.half()
+            src = src.cpu().numpy()
+            idx = idx.cpu().numpy()
+            out = torch.from_numpy(np.take(src, idx)).to(device=device, dtype=dtype)
+            return out
+
+        for src_contig, idx_contig, idx_reshape in product([True, False], repeat=3):
+            for src_size in ((5,), (4, 5)):
+                src = make_arg(src_size, discontiguous=not src_contig)
+                idx = make_idx(idx_size, high=src.numel(), discontiguous=not idx_contig)
+                if idx_reshape:
+                    idx = idx.reshape(2, 2)
+                out = torch.take(src, idx)
+                out2 = ref_take(src, idx)
+                self.assertEqual(out, out2)
+
+        # Create the 4 possible combinations of scalar sizes for source / index
+        for size_s, size_i in product([(), (1,)], repeat=2):
+            source = make_arg(size_s)
+            idx = make_idx(size_i, high=1)
+            out = source.take(idx)
+            self.assertEqual(out.item(), source.item())
+
+    # The bool instance does not work on GPU. See
+    # https://github.com/pytorch/pytorch/issues/54317
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
+    def test_put(self, device, dtype):
+        src_size = (4,)
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        make_idx = partial(make_tensor, low=0, device=device, dtype=torch.int64)
+
+        def ref_put(dst, idx, src, accumulate):
+            new_dst = dst.clone(memory_format=torch.contiguous_format).view(-1)
+            new_idx = idx.contiguous().view(-1)
+            new_src = src.contiguous().view(-1)
+            method = new_dst.index_add_ if accumulate else new_dst.index_copy_
+            return method(0, new_idx, new_src).view_as(dst)
+
+        for dst_contig, src_contig, idx_contig, idx_reshape, accumulate in product([True, False], repeat=5):
+            for dst_size in ((5,), (4, 5)):
+                dst = make_arg(dst_size, discontiguous=not dst_contig)
+                src = make_arg(src_size, discontiguous=not src_contig)
+
+                # If accumulate=True, `put_` should be deterministic regardless of the inputs on CPU
+                # On CUDA it may not be, but the test has enough tolerance to account for this
+                if accumulate:
+                    idx = make_idx(src_size, high=dst.numel())
+                else:
+                    idx = torch.randperm(dst.numel(), dtype=torch.int64, device=device)[:src_size[0]]
+                if not idx_contig:
+                    idx = torch.repeat_interleave(idx, 2, dim=-1)[..., ::2]
+                if idx_reshape:
+                    idx = idx.reshape(2, 2)
+                out = torch.put(dst, idx, src, accumulate)
+                # out-place
+                reference = ref_put(dst, idx, src, accumulate)
+                self.assertEqual(out, reference)
+
+                # in-place
+                dst.put_(idx, src, accumulate)
+                self.assertEqual(dst, reference)
+
+
+        # Create the 8 possible combinations of scalar sizes for target / index / source
+        scalars = ((make_arg(size_t),
+                    make_idx(size_i, high=1),
+                    make_arg(size_s))
+                   for size_t, size_i, size_s in product([(), (1,)], repeat=3))
+        for (dest, idx, source), accumulate in product(scalars, [True, False]):
+            dest_init = dest.clone()
+            # out-place
+            out = torch.put(dest, idx, source, accumulate=accumulate)
+            # in-place
+            dest1 = dest.clone()
+            dest1.put_(idx, source, accumulate=accumulate)
+            for d in [out, dest1]:
+                if accumulate:
+                    self.assertEqual(d.item(), (dest_init + source).item())
+                else:
+                    self.assertEqual(d.item(), source.item())
+
+        # Empty case
+        dest = make_arg((3, 2))
+        reference = dest.clone()
+        idx = make_idx((0,), high=1)
+        source = make_arg((0,))
+        for accumulate in [True, False]:
+            out = torch.put(dest, idx, source, accumulate=accumulate)
+            self.assertEqual(out, reference)
+            dest.put_(idx, source, accumulate=accumulate)
+            self.assertEqual(dest, reference)
+
+    # The bool instance does not work on GPU. See
+    # https://github.com/pytorch/pytorch/issues/54317
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
+    def test_put_accumulate(self, device, dtype):
+        # Test for parallel adds with accumulate == True
+        low_precision = dtype == torch.half or dtype == torch.bfloat16
+        # Less numbers to avoid overflow with low_precision
+        # Grainsize is 3000 for the for_loop to be parallized on CPU
+        sizes = ((100,)) if low_precision else ((200,), (3002,))
+        # Bfloat16 has a particularly bad performance here
+        # This operation is nondeterministic on GPU, so we are generous with the rtol
+        rtol, atol = (1e-1, 1e-2) if low_precision else (1e-3, 1e-4)
+
+        make_arg = partial(make_tensor, low=-2, high=3, device=device, dtype=dtype)
+        # Dump everything into the 0-th position
+        make_idx = partial(torch.zeros, device=device, dtype=torch.int64)
+        args = ((make_idx(size), make_arg(size)) for size in sizes)
+
+        for idx, source in args:
+            orig = make_arg((1,))
+            out = orig.put(idx, source, accumulate=True)
+            self.assertEqual(out, orig + source.sum(), rtol=rtol, atol=atol)
+
     def test_take_empty(self, device):
         for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
             for indices_shape in [(0,), (0, 1, 2, 0)]:
@@ -5395,6 +5499,25 @@ class TestTorchDeviceType(TestCase):
             x.bernoulli_(p=p)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             torch.bernoulli(torch.rand_like(x), out=x)
+
+    @onlyOnCPUAndCUDA
+    def test_put_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        y = torch.rand((6,), device=device)
+        ind = torch.tensor([2, 1, 0], device=device)
+        value = torch.rand((3,), device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.put_(ind, value)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            y.put_(ind[0], y[0])
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.put_(ind, ind)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            y.put_(ind, y[:3])
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.put_(ind, ind.clone())
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.put_(ind.clone(), ind)
 
     @onlyOnCPUAndCUDA
     def test_index_put_mem_overlap(self, device):
