@@ -1588,14 +1588,13 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         for flag in cflags:
             if 'amdgpu-target' in flag:
                 return ['-fno-gpu-rdc']
-    return [
-        '--amdgpu-target=gfx803',
-        '--amdgpu-target=gfx900',
-        '--amdgpu-target=gfx906',
-        '--amdgpu-target=gfx908',
-        '-fno-gpu-rdc'
-    ]
-
+    # Use same defaults from file cmake/public/LoadHIP.cmake.
+    # Must keep in sync if defaults change.
+    # Allow env var to override, just like during initial cmake build.
+    archs = os.environ.get('PYTORCH_ROCM_ARCH', 'gfx803;gfx900;gfx906;gfx908')
+    flags = ['--amdgpu-target=%s' % arch for arch in archs.split(';')]
+    flags += ['-fno-gpu-rdc']
+    return flags
 
 def _get_build_directory(name: str, verbose: bool) -> str:
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
