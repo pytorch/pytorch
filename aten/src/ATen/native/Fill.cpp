@@ -41,6 +41,15 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
   return fill_out(self, value.item());
 }
 
+Tensor& fill_meta_(Tensor& self, const Scalar& value) {
+  return self;
+}
+
+Tensor& fill_meta_(Tensor& self, const Tensor& value) {
+  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
+  return self;
+}
+
 DEFINE_DISPATCH(fill_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill_diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -112,6 +121,10 @@ Tensor& zero_(Tensor &self) {
     return zero_cpu_(self, nelements);
   }
   return self.fill_(0);
+}
+
+Tensor& zero_meta_(Tensor& self) {
+  return self;
 }
 
 } // namespace native
