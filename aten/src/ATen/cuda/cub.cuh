@@ -26,7 +26,6 @@ namespace cub = at::cuda::detail::cub;
 #define CUB_WRAPPER(func, ...) do {                                        \
   size_t temp_storage_bytes = 0;                                           \
   func(nullptr, temp_storage_bytes, __VA_ARGS__);                          \
-  auto allocator = c10::cuda::CUDACachingAllocator::get();                 \
   auto temp_storage = allocator->allocate(temp_storage_bytes);             \
   func(temp_storage.get(), temp_storage_bytes, __VA_ARGS__);               \
   AT_CUDA_CHECK(cudaGetLastError());                                       \
@@ -53,6 +52,20 @@ static inline void sort_pairs(
 ) {
   using key_t_ = typename cuda_type<key_t>::type;
   using value_t_ = typename cuda_type<value_t>::type;
+
+  auto allocator = c10::cuda::CUDACachingAllocator::get();
+  c10::DataPtr keys_out_owner;
+  c10::DataPtr values_out_owner;
+
+  if (keys_out == nullptr) {
+    keys_out_owner = allocator->allocate(n * sizeof(key_t));
+    keys_out = reinterpret_cast<key_t *>(keys_out_owner.get());
+  }
+  if (keys_out == nullptr) {
+    values_out_owner = allocator->allocate(n * sizeof(value_t));
+    values_out = reinterpret_cast<value_t *>(values_out_owner.get());
+  }
+
   const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
   const value_t_ *values_in_ = reinterpret_cast<const value_t_*>(values_in);

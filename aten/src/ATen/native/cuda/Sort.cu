@@ -3,8 +3,26 @@
 #include <ATen/ATen.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
-
+#include <ATen/core/Array.h>
 #include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/detail/KernelUtils.h>
+
+namespace {
+
+template<typename scalar_t>
+__global__ void sort_gather_kernel(const scalar_t *in, scalar_t *out, const int64_t *index, int nsegments, int nsort) {
+  CUDA_KERNEL_LOOP(i, nsegments * nsort) {
+    int segment = i / nsort;
+    int j = i % nsort;
+    int offset = segment * nsort;
+    const scalar_t *in_ = in + offset;
+    scalar_t *out_ = out + offset;
+    const int64_t *index_ = index + offset;
+    out_[j] = in_[index_[j]];
+  }
+}
+
+}
 
 namespace at { namespace native {
 
@@ -135,43 +153,43 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
 
   int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
-  int64_t nsegments = nbatch / nsort;
-
-  auto segment_id = at::arange(nsegments, indices.options()).view({nsegments, 1}).expand({nsegments, nsort}).contiguous();
-  int64_t *segment_id_ptr = segment_id.data_ptr<int64_t>();
-  auto orig_indices = at::arange(nsort, indices.options()).repeat({nsegments});
-  int64_t *orig_indices_ptr = orig_indices.data_ptr<int64_t>();
-
-  auto tmp = at::empty({nbatch}, self_.options());
-  auto segment_id_tmp = at::empty_like(segment_id);
-  int64_t *segment_id_tmp_ptr = segment_id_tmp.data_ptr<int64_t>();
-  auto orig_indices_tmp = at::empty_like(orig_indices);
-  int64_t *orig_indices_tmp_ptr = orig_indices_tmp.data_ptr<int64_t>();
 
   AT_DISPATCH_ALL_TYPES_AND(kHalf, self_.scalar_type(), "sort", [&]{
     const scalar_t *self_ptr = self_.data_ptr<scalar_t>();
-    scalar_t *tmp_ptr = tmp.data_ptr<scalar_t>();
     auto values_ptr = reinterpret_cast<scalar_t *>(values_ptr_);
     int64_t remaining = numel;
     while (remaining > 0) {
       int64_t n = std::min(remaining, nbatch);
-      int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(n / nsort))));
-      at::cuda::cub::sort_pairs(
-        self_ptr, tmp_ptr,
-        orig_indices_ptr, orig_indices_tmp_ptr,
+      int64_t nsegments = n / nsort;
+      int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
+
+      auto indices_and_segment = at::empty({nsegments, nsort, 2}, indices.options());
+      indices_and_segment.select(-1, 0).copy_(  // reverse indices
+        at::arange(nsort, indices.options()).view({1, nsort}).expand({nsegments, nsort}));
+      indices_and_segment.select(-1, 1).copy_(  // segment id
+        at::arange(nsegments, indices.options()).view({nsegments, 1}).expand({nsegments, nsort}));
+
+      using long2 = at::detail::Array<int64_t, 2>;
+
+      long2 *i_s_ptr = reinterpret_cast<long2 *>(indices_and_segment.data_ptr<int64_t>());
+      auto indices_and_segment2 = at::empty_like(indices_and_segment);
+      long2 *i_s_ptr2 = reinterpret_cast<long2 *>(indices_and_segment2.data_ptr<int64_t>());
+
+      at::cuda::cub::sort_pairs<scalar_t, long2>(
+        self_ptr, nullptr, i_s_ptr, i_s_ptr2,
         n, descending);
-      at::cuda::cub::sort_pairs(
-        self_ptr, tmp_ptr,
-        segment_id_ptr, segment_id_tmp_ptr,
-        n, descending);
-      at::cuda::cub::sort_pairs(
-        segment_id_tmp_ptr, segment_id_ptr,
-        tmp_ptr, values_ptr,
-        n, false, 0, segment_bits);
-      at::cuda::cub::sort_pairs(
-        segment_id_tmp_ptr, segment_id_ptr,
-        orig_indices_tmp_ptr, indices_ptr,
-        n, false, 0, segment_bits);
+
+      auto sorted_indices = indices_and_segment2.select(-1, 0).contiguous();
+      auto segment_id = indices_and_segment2.select(-1, 1).contiguous();
+
+      at::cuda::cub::sort_pairs<int64_t, int64_t>(
+        segment_id.data_ptr<int64_t>(), nullptr,
+        sorted_indices.data_ptr<int64_t>(), indices_ptr,
+        n);
+
+      sort_gather_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
+        self_ptr, values_ptr, indices_ptr, nsegments, nsort);
+
       remaining -= n;
       self_ptr += n;
       values_ptr += n;
