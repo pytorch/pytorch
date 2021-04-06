@@ -1057,11 +1057,11 @@ def _generate_reduction_inputs(device, dtype, requires_grad):
 # with ndim dims appropriate for testing. If supports_multiple_dims
 # is True (default) then dim kwarg can be a list of dims.
 def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
-    all_dims: Tuple[int] = tuple(range(ndim))
+    all_dims: Tuple[int, ...] = tuple(range(ndim))
     dims_to_reduce: List[int] = []
 
     if ndim <= 4:
-        dims_to_reduce = all_dims
+        dims_to_reduce.extend(all_dims)
     else:
         # Always reduce first and last dimension
         dims_to_reduce.append(all_dims[0])
