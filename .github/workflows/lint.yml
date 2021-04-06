@@ -17,13 +17,11 @@ jobs:
           architecture: x64
       - name: Do some stuff
         run: |
-          echo hi
-          echo wow, this sure is running on GitHub actions
+          import sys
 
-          whoami
-          ls
-          pwd
-          uname
+          print("It's me, Python!")
+          print(sys.version)
+        shell: python
 
     
   # quick-checks:
