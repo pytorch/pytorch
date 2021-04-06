@@ -105,8 +105,8 @@ class TestMkldnn(TestCase):
         mkldnn_y.copy_(mkldnn_x)
         self.assertEqual(x, mkldnn_y.to_dense())
         self.assertRaisesRegex(RuntimeError,
-                               "between dense and opaque Tensors is not implemented",
-                               lambda: mkldnn_x.copy_(x))
+                               "copy_mkldnn_: only support same size tensor.",
+                               lambda: mkldnn_z.copy_(mkldnn_x))
 
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
