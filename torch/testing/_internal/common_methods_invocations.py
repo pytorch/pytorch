@@ -1490,9 +1490,11 @@ def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False, *
 
 def sample_inputs_symeig(op_info, device, dtype, requires_grad=False):
     out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
+
     for o in out:
         o.kwargs = {"upper": bool(np.random.choice([True, False])),
                     "eigenvectors": True}
+        o.output_process_fn_grad = lambda output: (output[0], abs(output[1]))
     return out
 
 
