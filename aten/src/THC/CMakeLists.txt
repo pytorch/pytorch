@@ -138,11 +138,6 @@ install(FILES
           generic/THCTensorScatterGather.cu
           generic/THCTensorSort.h
           generic/THCTensorSort.cu
-<<<<<<< HEAD
-          generic/THCTensorTopK.h
-          generic/THCTensorTopK.cu
-=======
           generic/THCTensorMode.h
           generic/THCTensorMode.cu
->>>>>>> update
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")
