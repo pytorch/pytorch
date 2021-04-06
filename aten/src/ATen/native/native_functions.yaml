@@ -1324,15 +1324,15 @@
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
-- func: div.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+- func: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
   variants: function, method
   structured_delegate: div.out_mode
 
-- func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
+- func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
   structured_delegate: div.out_mode
 
-- func: div.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+- func: div.out_mode(Tensor self, Tensor other, *, str? rounding_mode, Tensor(a!) out) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -1349,12 +1349,12 @@
   dispatch:
     CompositeExplicitAutograd: div_
 
-- func: div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+- func: div.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: div
 
-- func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
+- func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
   dispatch:
     CompositeExplicitAutograd: div_
@@ -1374,18 +1374,18 @@
 - func: divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
 
-- func: divide.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+- func: divide.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
   variants: function, method
 
-- func: divide_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
+- func: divide_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
 
-- func: divide.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+- func: divide.out_mode(Tensor self, Tensor other, *, str? rounding_mode, Tensor(a!) out) -> Tensor(a!)
 
-- func: divide.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+- func: divide.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
   variants: function, method
 
-- func: divide_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
+- func: divide_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
 
   # true_divide, an alias for div
@@ -4724,8 +4724,10 @@
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_put_
-    CUDA: legacy::cuda::_th_put_
+    CPU, CUDA: put_
+
+- func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
+  variants: function, method
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   variants: method
@@ -5424,18 +5426,12 @@
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: take_out_cpu
-    CUDA: take_out_cuda
+    CPU, CUDA: take_out
 
 - func: take(Tensor self, Tensor index) -> Tensor
   variants: method, function
   dispatch:
-    CPU: take_cpu
-    CUDA: take_cuda
-
-- func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
-  variants: function
-  device_guard: False
+    CPU, CUDA: take
 
 - func: take_along_dim.out(Tensor self, Tensor indices, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -8547,15 +8543,20 @@
   dispatch:
     CompositeExplicitAutograd: linalg_cholesky_out
 
-# torch.linalg.det, alias for torch.det
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_det
 
+- func: linalg_det.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    CompositeExplicitAutograd: linalg_det_out
+
+# torch.det, alias for torch.linalg.det
 - func: det(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: det
 
 - func: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   python_module: linalg
