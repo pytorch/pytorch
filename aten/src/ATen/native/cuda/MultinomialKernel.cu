@@ -174,6 +174,7 @@ __global__ void sampleMultinomialOnce(
 ) {
   extern __shared__  unsigned char my_smem[];
   __shared__ bool found;
+  __shared__ unsigned foundPos;
 
   accscalar_t *smem = reinterpret_cast<accscalar_t *>(my_smem);
 
@@ -203,6 +204,7 @@ __global__ void sampleMultinomialOnce(
       CUDA_KERNEL_ASSERT(!THCNumerics<accscalar_t>::isinf(sum));
       CUDA_KERNEL_ASSERT(sum > accZero);
 
+      foundPos = 0;
       smem[0] = sum;
       smem[1] = sampled[curDist];
     }
@@ -267,7 +269,7 @@ __global__ void sampleMultinomialOnce(
       if (inBucket) {
         // We're done; we have the sample
         // Torch indices are 1-based
-        dest[curDist] = cat;
+        atomicMax(&foundPos, cat);
         found = true;
       }
 
@@ -277,7 +279,9 @@ __global__ void sampleMultinomialOnce(
       __syncthreads();
     }
 
-    if (threadIdx.x == 0 && !found) {
+    if (threadIdx.x == 0 && found) {
+        dest[curDist] = foundPos;
+    } else if (threadIdx.x == 0 && !found) {
       // This should address a rare bug where we don't select a valid index. This likely occurs when
       // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
       // and our uniform sample is greater than this value. In this case we likely have unitialized memory
