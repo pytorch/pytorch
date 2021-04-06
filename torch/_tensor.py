@@ -243,16 +243,17 @@ class Tensor(torch._C._TensorBase):
                 used to compute the attr::tensors. All the provided inputs must be leaf
                 Tensors.
         """
-        if has_torch_function_unary(self):
-            return handle_torch_function(
-                Tensor.backward,
-                (self,),
-                self,
-                gradient=gradient,
-                retain_graph=retain_graph,
-                create_graph=create_graph,
-                inputs=inputs)
-        torch.autograd.backward(self, gradient, retain_graph, create_graph, inputs=inputs)
+        with torch.autograd.profiler.record_function("Tensor.backward"):
+            if has_torch_function_unary(self):
+                return handle_torch_function(
+                    Tensor.backward,
+                    (self,),
+                    self,
+                    gradient=gradient,
+                    retain_graph=retain_graph,
+                    create_graph=create_graph,
+                    inputs=inputs)
+            torch.autograd.backward(self, gradient, retain_graph, create_graph, inputs=inputs)
 
     def register_hook(self, hook):
         r"""Registers a backward hook.
