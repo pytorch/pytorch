@@ -93,7 +93,7 @@ class ZeroRedundancyOptimizer(Optimizer):
     ``1 / world_size`` optimizer states. After parameters are updated locally,
     each rank will broadcast its parameters to all other peers to keep all
     model replicas in the same state. ``ZeroRedundancyOptimizer`` can be used
-    in conjuction with :class:`torch.nn.parallel.DistributedDataparallel` to
+    in conjunction with :class:`torch.nn.parallel.DistributedDataparallel` to
     reduce per-rank peak memory consumption.
 
     ``ZeroRedundancyOptimizer`` use a greedy algorithm to pack a number of
@@ -105,7 +105,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         params (``Iterable``): an ``Iterable`` of :class:`torch.Tensor` s
 
     Keyword Args:
-        optim_class (:class:`torch.nn.Optimizer`): the class of the local
+        optimizer_class (:class:`torch.nn.Optimizer`): the class of the local
             optimizer.
         group (``ProcessGroup``, optional): ``torch.distributed``
             ``ProcessGroup`` (default: ``group.WORLD`` initialized by
@@ -127,7 +127,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         >>> ddp = DDP(model, device_ids=[rank])
         >>> opt = ZeroRedundancyOptimizer(
         >>>     ddp.parameters(),
-        >>>     optim=torch.optim.Adam,
+        >>>     optimizer_class=torch.optim.Adam,
         >>>     lr=0.01
         >>> )
         >>> ddp(inputs).sum().backward()
@@ -142,7 +142,7 @@ class ZeroRedundancyOptimizer(Optimizer):
     def __init__(
         self,
         params,
-        optim: Type[Optimizer],
+        optimizer_class: Type[Optimizer],
         group: Optional[Any] = None,
         parameters_as_bucket_view: bool = False,
         **default: Any,
@@ -173,7 +173,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         self.parameters_as_bucket_view = parameters_as_bucket_view
 
         self._optim_defaults = default
-        self._optim_constructor = optim
+        self._optim_constructor = optimizer_class
 
         #  Optional consolidated optimizer state
         self._all_states: List[Dict[str, Any]] = []

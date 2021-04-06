@@ -21,6 +21,7 @@ import builtins
 import torch.distributed.rpc
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
+import torch.package._mangling as package_mangling
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
 
 if sys.version_info[:2] > (3, 7):
@@ -225,6 +226,12 @@ def can_compile_class(cls):
     # be compiled and is probably a builtin / bound from C
     if is_ignored_fn(cls):
         return False
+
+    # Ignore the following list of built-in classes.
+    ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
+    if issubclass(cls, ignored_builtin_classes):
+        return False
+
     names = cls.__dict__
     fns = [getattr(cls, name) for name in names if inspect.isroutine(getattr(cls, name, None))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
@@ -875,7 +882,7 @@ def is_scripting():
             return x
 
         def linear(x):
-           if not torch.jit.is_scripting():
+           if torch.jit.is_scripting():
               return torch.linear(x)
            else:
               return unsupported_linear_op(x)
@@ -925,6 +932,11 @@ def _qualified_name(obj):
     # if getattr(sys.modules[module_name], name) is not obj:
     #     raise RuntimeError(f"Could not get qualified name for class '{name}': "
     #                        f"the attr {name} on module {module_name} is not the the class")
+
+    # torch.package and TorchScript have separate mangling schemes to avoid
+    # name collisions from multiple packages. To avoid them interfering with
+    # each other, remove the package mangling here.
+    module_name = package_mangling.demangle(module_name)
 
     # __main__ is a builtin module, so rewrite it to "__torch__".
     if module_name == "__main__":

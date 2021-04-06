@@ -5,6 +5,12 @@ from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
 
 try:
     import dill
+
+    # XXX: By default, dill writes the Pickler dispatch table to inject its
+    # own logic there. This globally affects the behavior of the standard library
+    # pickler for any user who transitively depends on this module!
+    # Undo this extension to avoid altering the behavior of the pickler globally.
+    dill.extend(use_dill=False)
     DILL_AVAILABLE = True
 except ImportError:
     DILL_AVAILABLE = False
@@ -17,6 +23,7 @@ T_co = TypeVar('T_co', covariant=True)
 # of python lambda function
 def default_fn(data):
     return data
+
 
 @functional_datapipe('map')
 class MapIterDataPipe(IterDataPipe[T_co]):
@@ -75,6 +82,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
             self.fn = dill_function  # type: ignore
 
 
+@functional_datapipe('collate')
 class CollateIterDataPipe(MapIterDataPipe):
     r""" :class:`CollateIterDataPipe`.
 
@@ -121,6 +129,7 @@ class CollateIterDataPipe(MapIterDataPipe):
         super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
 
 
+@functional_datapipe('transforms')
 class TransformsIterDataPipe(MapIterDataPipe):
     r""" :class:`TransformsIterDataPipe`.
 

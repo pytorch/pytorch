@@ -18,12 +18,26 @@ static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
   return indices.at(0)->dtype();
 }
 
+void castIndicesToInts(std::vector<const Expr*>& indices) {
+  // Cast all indices to Int
+  // TODO: Should we use int64 here?
+  auto index_dtype = ScalarType::Int;
+  for (auto& index : indices) {
+    const Dtype& dt = index->dtype();
+    if (is_integral(dt.scalar_type()) && dt.scalar_type() != index_dtype) {
+      index = new Cast(Dtype(index_dtype, dt.lanes()), index);
+    }
+  }
+}
+
 Load::Load(
     Dtype dtype,
     const Buf* buf,
     const std::vector<const Expr*>& indices,
     const Expr* mask)
-    : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {}
+    : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
+  castIndicesToInts(indices_);
+}
 
 Load::Load(
     const Buf* buf,
@@ -70,27 +84,7 @@ Store::Store(
     const Expr* value,
     const Expr* mask)
     : buf_(buf), indices_(std::move(indices)), value_(value), mask_(mask) {
-  /*
-  TODO: Reenable the checks.
-  The reason they are disabled is that kernel.cpp is using Buffers somewhat
-  loosely: we don't set dimensions properly and just construct index expressions
-  directly. We should harden that part and then we'd be able to turn on these
-  checks.
-
-  if (!indicesValid(indices)) {
-    throw malformed_input();
-  }
-  if (!mask || !value) {
-    throw malformed_input();
-  }
-  Dtype index_dtype = dtypeOfIndices(indices);
-  if (index_dtype.lanes() != mask->dtype().lanes()) {
-    throw malformed_input();
-  }
-  if (index_dtype.lanes() != value->dtype().lanes()) {
-    throw malformed_input();
-  }
-  */
+  castIndicesToInts(indices_);
 }
 
 Store* Store::make(

@@ -188,6 +188,12 @@ class CppSignatureGroup:
     signature: CppSignature
     faithful_signature: Optional[CppSignature]
 
+    def most_faithful_signature(self) -> CppSignature:
+        if self.faithful_signature:
+            return self.faithful_signature
+        else:
+            return self.signature
+
     @staticmethod
     def from_native_function(f: NativeFunction, *, method: bool, fallback_binding: bool = False) -> 'CppSignatureGroup':
         func = f.func

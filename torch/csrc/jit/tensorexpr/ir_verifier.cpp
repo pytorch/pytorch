@@ -115,7 +115,33 @@ void IRVerifier::visit(const Intrinsics* v) {
 }
 
 void IRVerifier::visit(const Store* v) {
-  // TODO: add index checks, similar to the ones in Load
+  const auto indices = v->indices();
+  if (indices.size() > 0 && v->buf()->base_handle()->dtype() != kHandle) {
+    throw malformed_ir(
+        "Store base handle dtype must be Handle", v->buf()->base_handle());
+  }
+
+  Dtype index_dtype = indices.size() ? indices.at(0)->dtype() : kInt;
+  if (indices.size() > 1) {
+    for (size_t i = 1; i < indices.size(); ++i) {
+      if (indices.at(i)->dtype() != index_dtype) {
+        throw malformed_ir("dtype mismatch in Store indices");
+      }
+    }
+  }
+  if (indices.size() > 1 && index_dtype.lanes() > 1) {
+    throw malformed_ir("Multilane is only allowed in a flattened index");
+  }
+  if (index_dtype.scalar_type() != ScalarType::Int) {
+    throw malformed_ir("Index scalar dtype is not Int!");
+  }
+  if (index_dtype.lanes() != v->mask()->dtype().lanes()) {
+    throw malformed_ir("lane mismatch in Store mask");
+  }
+  if (v->buf()->dtype() != v->value()->dtype()) {
+    throw malformed_ir("buf and value dtype mismatch in Store");
+  }
+
   IRVisitor::visit(v);
 }
 

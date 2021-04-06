@@ -307,11 +307,15 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   rewriter.runOnGraph(graph, torch::jit::graph_rewrite_helper::isClampFusable);
 }
 
-void runCanonicalOptimizations(script::Module& module) {
-  auto graph = module.get_method("forward").graph();
-  // Not sure if we have models running on mobile that require loop unrolling.
-  // Perhaps language/speech models? Conservatively setting that to false.
-  runOptimization(graph, false /* no loop unrolling */);
+void runCanonicalOptimizations(
+    script::Module& module,
+    const std::unordered_set<std::string>& methods_to_optimize) {
+  for (const std::string& method : methods_to_optimize) {
+    auto graph = module.get_method(method).graph();
+    // Not sure if we have models running on mobile that require loop unrolling.
+    // Perhaps language/speech models? Conservatively setting that to false.
+    runOptimization(graph, false /* no loop unrolling */);
+  }
 }
 
 } // namespace
@@ -360,42 +364,80 @@ void FoldPrePackingOps(script::Module& m) {
 script::Module optimizeForMobile(
     const script::Module& m,
     const std::set<MobileOptimizerType>& optimization_blocklist,
-    const std::vector<std::string>& preserved_methods) {
+    const std::vector<std::string>& preserved_methods,
+    const std::vector<std::string>& methods_to_optimize_arg) {
+  std::unordered_set<std::string> methods_to_optimize(
+      methods_to_optimize_arg.begin(), methods_to_optimize_arg.end());
+
+  // Forward is optimized by default if it exists
+  bool optimize_forward = false;
+  if (m.find_method("forward")) {
+    optimize_forward = true;
+    methods_to_optimize.insert("forward");
+  }
+  TORCH_INTERNAL_ASSERT(
+      methods_to_optimize.size() > 0,
+      "Model must either define forward, or pass in at least 1 function to optimize");
+
+  // Preserve all functions we intend to optimize
+  // Need to keep the optimized_set separate because there are often
+  // methods that need to be preserved, but wouldnt need optimization
+  // Convert to set and back to remove duplicates
+  std::unordered_set<std::string> preserved_set(
+      preserved_methods.begin(), preserved_methods.end());
+  preserved_set.insert(methods_to_optimize.begin(), methods_to_optimize.end());
+  std::vector<std::string> preserved_list(
+      preserved_set.begin(), preserved_set.end());
+
   auto cloned_module = m.clone();
   cloned_module.eval();
 
-  if (!optimization_blocklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
+  if (!optimization_blocklist.count(MobileOptimizerType::CONV_BN_FUSION) &&
+      optimize_forward) {
     cloned_module = FoldConvBatchNorm(cloned_module);
   }
 
+  // Many optimizations require a frozen module, but ConvBatchNorm requires
+  // an unfrozen module
+  cloned_module = freeze_module(cloned_module, preserved_list);
+
   if (!optimization_blocklist.count(
-          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
+          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS) &&
+      optimize_forward) {
     insertPrePackedOps(cloned_module);
-    cloned_module = freeze_module(cloned_module, preserved_methods);
+    cloned_module = freeze_module(cloned_module, preserved_list);
     fusePrePackedLinearConvWithClamp(cloned_module);
     FoldPrePackingOps(cloned_module);
   }
 
   if (!optimization_blocklist.count(
-          MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)) {
+          MobileOptimizerType::HOIST_CONV_PACKED_PARAMS) &&
+      optimize_forward) {
     // freeze again in case it was not done in previous optional passes
-    cloned_module = freeze_module(cloned_module, preserved_methods);
+    cloned_module = freeze_module(cloned_module, preserved_list);
     HoistConvPackedParams(cloned_module);
     // and freeze yet again to remove the empty QuantizedConv modules
-    cloned_module = freeze_module(cloned_module, preserved_methods);
+    cloned_module = freeze_module(cloned_module, preserved_list);
   }
 
   // Run canonical optimizations post freezing
   // since freezing inlines the graph. Otherwise we
   // will have to explicitly call Inlining pass.
-  runCanonicalOptimizations(cloned_module);
+  runCanonicalOptimizations(cloned_module, methods_to_optimize);
 
   if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
-    removeDropout(cloned_module);
+    for (const std::string& method : methods_to_optimize) {
+      auto graph = cloned_module.get_method(method).graph();
+      // Module must be not be in training mode but optimize calls eval()
+      removeDropout(graph);
+    }
   }
 
   if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
-    FuseAddRelu(cloned_module);
+    for (const std::string& method : methods_to_optimize) {
+      auto graph = cloned_module.get_method(method).graph();
+      FuseAddRelu(graph);
+    }
   }
   cloned_module.register_attribute("mobile_optimized", BoolType::get(), true);
   return cloned_module;
@@ -426,7 +468,8 @@ void FoldPrePackingOps(script::Module& m) {
 script::Module optimizeForMobile(
     const script::Module& module,
     const std::set<MobileOptimizerType>& blocklist,
-    const std::vector<std::string>& preserved_methods) {
+    const std::vector<std::string>& preserved_methods,
+    const std::vector<std::string>& methods_to_optimize) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimization only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
