@@ -4581,6 +4581,41 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.log_matmul,
+           r"""
+log_matmul(input, other, *, out=None) -> Tensor
+
+Matrix product of two tensors in log space, i.e.
+`log(matmul(input.exp(), other.exp()))`, but with stable computation like `torch.logsumexp`.
+
+The last two dimensions are the matrix
+multiplication dimensions (so inputs of shape :math:`n \times k` and
+:math:`k \times m` give an output of shape :math:`n \times m`. Additional dimensions follow the usual broadcasting rules.
+
+This is compatible with `torch.matmul` conventions except that 1-dimensional inputs are not allowed.
+
+Arguments:
+    input (Tensor): the first tensor to be multiplied
+    other (Tensor): the second tensor to be multiplied
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> # batched matrix x batched matrix
+    >>> tensor1 = torch.randn(10, 3, 4)
+    >>> tensor2 = torch.randn(10, 4, 5)
+    >>> torch.log_matmul(tensor1, tensor2).size()
+    torch.Size([10, 3, 5])
+    >>> # batched matrix x broadcasted matrix
+    >>> tensor1 = torch.randn(10, 3, 4)
+    >>> tensor2 = torch.randn(4, 5)
+    >>> torch.log_matmul(tensor1, tensor2).size()
+    torch.Size([10, 3, 5])
+
+""".format(**common_args))
+
 add_docstr(torch.logaddexp,
            r"""
 logaddexp(input, other, *, out=None) -> Tensor
