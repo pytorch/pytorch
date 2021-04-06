@@ -3,6 +3,7 @@ from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_na
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
 from dataclasses import dataclass
 from contextlib import contextmanager
+import copy
 import torch
 import keyword
 import re
@@ -671,7 +672,9 @@ class Graph:
         kwargs = map_arg(node.kwargs, arg_transform)
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
-        return self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node = self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node.meta = copy.copy(node.meta)
+        return result_node
 
     def output(self, result: 'Argument', type_expr: Optional[Any] = None):
         """
