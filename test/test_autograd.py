@@ -2087,32 +2087,6 @@ class TestAutograd(TestCase):
                                       for j in range(3)], dim=0)
             self.assertEqual(g, g_expected)
 
-    def test_put(self):
-        root = torch.randn(4, 5, requires_grad=True)
-        values = torch.randn(6, requires_grad=True)
-        idx = Variable(torch.LongTensor([1, 2, 3, -1, -2, -3]))
-
-        def func(root, values):
-            x = root.clone()
-            x.put_(idx, values)
-            return x
-
-        gradcheck(func, [root, values])
-        gradgradcheck(func, [root, values])
-
-    def test_put_accumulate(self):
-        root = torch.randn(4, 5, requires_grad=True)
-        values = torch.randn(6, requires_grad=True)
-        idx = Variable(torch.LongTensor([1, 2, 3, 1, 2, 3]))
-
-        def func(root, values):
-            x = root.clone()
-            x.put_(idx, values, accumulate=True)
-            return x
-
-        gradcheck(func, [root, values])
-        gradgradcheck(func, [root, values])
-
     def test_fill(self):
         root = torch.randn(4, 5, requires_grad=True)
 
@@ -4518,9 +4492,9 @@ for shape in [(1,), ()]:
         out = torch.logit(a)
         self.assertIsNone(out.grad_fn._saved_eps)
 
-        a = torch.tensor([1.], requires_grad=True)
-        out = torch.div(a, 2., rounding_mode="trunc")
-        self.assertEqual(out.grad_fn._saved_rounding_mode, "trunc")       # std::string -> str
+        a = torch.ones(1, 1, requires_grad=True)
+        q, r = torch.linalg.qr(a, mode="reduced")
+        self.assertEqual(q.grad_fn._saved_mode, "reduced")                # std::string -> str
 
         x = torch.zeros(5, requires_grad=True)
         out = torch.threshold(x, threshold=(1 + 0j), value=(1 + 0j))
