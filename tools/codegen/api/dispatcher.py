@@ -17,10 +17,6 @@ from typing import Sequence, List, Union
 #
 # Prominent characteristics of the dispatcher API:
 #
-#   - 'use_c10_dispatcher: full' controls whether or not we actually
-#     use the modern calling convention or not.  When use_c10_dispatcher
-#     is not enabled, we don't use the template machinery.
-#
 #   - dtype, layout, device and pin_memory are represented as separate
 #     arguments.
 #

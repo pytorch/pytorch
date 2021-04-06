@@ -16,8 +16,7 @@ T gcd(T a, T b) {
 // Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
 // or Ramp).
 bool isMultilanePrimitive(const Expr* e) {
-  return e->expr_type() == IRNodeType::kBroadcast ||
-      e->expr_type() == IRNodeType::kRamp;
+  return dynamic_cast<const Broadcast*>(e) || dynamic_cast<const Ramp*>(e);
 }
 
 SimplifierHashType Term::hashVars() const {
@@ -1863,7 +1862,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
 
     const Expr* e = c->variables()[0];
 
-    if (e->expr_type() == IRNodeType::kRoundOff) {
+    if (dynamic_cast<const RoundOff*>(e)) {
       rounds.push_back(c);
     } else if (e->expr_type() == IRNodeType::kMod) {
       if (auto a = isModRound(c)) {
