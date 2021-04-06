@@ -114,7 +114,7 @@ def iter_tensor(x_tensor):
             yield x_tensor, x_idx, d_idx
 
 
-def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
+def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
                            grad_out=1.0) -> List[Tuple[torch.Tensor, ...]]:
     """Computes the numerical jacobian for a given fn and inputs. Returns M * N jacobians
     where M is the number of input tensors that require grad, and N is the number of output
@@ -136,13 +136,22 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
     """
     jacobians: List[Tuple[torch.Tensor, ...]] = []
     if outputs is None:
-        outputs = _as_tuple(fn(inputs))
+        outputs = _as_tuple(fn(*_as_tuple(inputs)))
     if target is None:
         target = inputs
     inp_indices = [i for i, a in enumerate(target) if is_tensor_like(a) and a.requires_grad]
     for i, (inp, inp_idx) in enumerate(zip(iter_tensors(target, True), inp_indices)):
         jacobians += [get_numerical_jacobian_helper(fn, inp, inp_idx, inputs, outputs, eps, grad_out)]
     return jacobians
+
+
+def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
+    # Simple wrapper around _get_numerical_jacobian
+    warnings.warn("get_analytical_jacobian is deprecated!")
+    def fn_pack_inps(*inps):
+        return fn(inps)
+    jacobians = _get_numerical_jacobian(fn_pack_inps, inputs, None, target, eps, grad_out)
+    return jacobians[0][0]
 
 
 def prepped_input(input, maybe_perturbed_input):
@@ -314,6 +323,25 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_sc
     return jacobians, failed
 
 
+def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
+    # Replicates the behavior of the old get_analytical_jacobian before the refactor
+    warnings.warn("get_analytical_jacobian is deprecated!")
+
+    diff_input_list = list(iter_tensors(inputs, True))
+    def backward_fn(grad_output):
+        return torch.autograd.grad(output, diff_input_list, grad_output,
+                                    retain_graph=True, allow_unused=True)
+
+    jacobians_rows = compute_analytical_jacobian_rows(backward_fn, output.clone(), grad_out)
+    jacobians_rows_reentrant = compute_analytical_jacobian_rows(backward_fn, output.clone(), grad_out)
+
+    jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, output)
+    jacobians_reentrant, _, _ = combine_jacobian_rows(jacobians_rows_reentrant, inputs, output)
+    reentrant = check_jacobians_equal(jacobians, jacobians_reentrant, nondet_tol)
+
+    return jacobians, reentrant, correct_grad_sizes, correct_grad_types
+
+
 def compute_analytical_jacobian_rows(vjp_fn, sample_output, grad_out_scale):
     # Computes Jacobian row-by-row using backward function `vjp_fn` = v^T J
     # NB: this function does not assume vjp_fn(v) to return tensors with
@@ -381,7 +409,7 @@ def check_outputs(outputs) -> None:
 def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> bool:
     # When there are no differentiable outputs, numerical gradient for a function is
     # expected to be zero.
-    jacobians_all_inputs_outputs = get_numerical_jacobian(func, inputs, func_out, eps=eps)
+    jacobians_all_inputs_outputs = _get_numerical_jacobian(func, inputs, func_out, eps=eps)
     for jacobians_all_outputs_and_fixed_input in jacobians_all_inputs_outputs:
         for jacobian in jacobians_all_outputs_and_fixed_input:
             if torch.ne(jacobian, 0).sum() > 0:
@@ -666,9 +694,9 @@ def gradcheck(
     if not outputs:
         return check_no_differentiable_outputs(fail_test, func, tupled_inputs, _as_tuple(func_out), eps)
 
-    numerical = transpose(get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps))
+    numerical = transpose(_get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps))
     if any(isinstance(o, torch.Tensor) and o.is_complex() for o in _as_tuple(func_out)):
-        numerical_from_imag_grad_out = transpose(get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps, grad_out=1j))
+        numerical_from_imag_grad_out = transpose(_get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps, grad_out=1j))
 
     for i, o in enumerate(outputs):
         analytical, failed = check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, 1.0,
