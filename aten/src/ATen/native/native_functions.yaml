@@ -6315,12 +6315,14 @@
     QuantizedCPU: cat_out_quantized_cpu
 
 - func: _foreach_add.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalar_kernel_slow
     CUDA: foreach_tensor_add_scalar_kernel_cuda
 
 - func: _foreach_add_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalar_kernel_slow_
@@ -6339,12 +6341,14 @@
     CUDA: foreach_tensor_sub_scalar_kernel_cuda_
 
 - func: _foreach_mul.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalar_kernel_slow
     CUDA: foreach_tensor_mul_scalar_kernel_cuda
 
 - func: _foreach_mul_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalar_kernel_slow_
