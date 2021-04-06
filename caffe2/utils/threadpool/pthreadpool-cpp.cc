@@ -11,9 +11,6 @@ namespace {
 // Ref: https://github.com/pytorch/pytorch/issues/54752#issuecomment-810315302
 bool leak_corrupted_threadpool = false;
 
-// mutex to prevent a race-condition
-std::mutex pthreadpool_mutex;
-
 void child_atfork() {
   leak_corrupted_threadpool = true;
 }
@@ -75,7 +72,6 @@ void PThreadPool::run(
 size_t getDefaultNumThreads();
 
 PThreadPool* pthreadpool() {
-  std::lock_guard<std::mutex> lock{pthreadpool_mutex};
   static auto threadpool =
     std::make_unique<PThreadPool>(getDefaultNumThreads());
 #ifndef WIN32
