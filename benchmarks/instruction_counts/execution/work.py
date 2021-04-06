@@ -1,5 +1,6 @@
 """Handle the details of subprocess calls and retries for a given benchmark run."""
 import dataclasses
+import json
 import os
 import pickle
 import signal
@@ -40,6 +41,13 @@ class WorkOrder:
 
     def __hash__(self) -> int:
         return id(self)
+
+    def __str__(self) -> str:
+        return json.dumps({
+            "label": self.label,
+            "autolabels": self.autolabels.as_dict,
+            "num_threads": self.timer_args.num_threads,
+        })
 
 
 class _BenchmarkProcess:
