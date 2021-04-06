@@ -860,7 +860,7 @@ static void addmm_impl_cpu_(
       m1_sizes[0], "x", m1_sizes[1], " @ ", m2_sizes[0], "x", m2_sizes[1], " != ",
       self_sizes[0], "x", self_sizes[1], ")");
 
-  native::resize_(result, self_sizes);
+  at::native::resize_output(result, self_sizes);
   const auto result_strides = result.strides();
   const auto result_sizes = result.sizes();
 
@@ -1133,6 +1133,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   TORCH_CHECK(batch2_sizes[0] == bs && batch2_sizes[1] == contraction_size);
 
   if (is_bmm_out) {
+    // Here it is result
     self_or_result.resize_({bs, res_rows, res_cols});
   } else {
     const auto self_sizes = self_or_result.sizes();
@@ -1956,7 +1957,7 @@ Tensor &frobenius_norm_out(const Tensor& self,
   // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
   //    However, norm_out and sqrt_out do not support automatic differentiation.
   //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
-  resize_output(result, result_.sizes());
+  at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
 }
@@ -1998,7 +1999,7 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
     auto permutation_reverse = create_reverse_permutation(permutation);
     result_ = result_.permute(permutation_reverse);
   }
-  resize_output(result, result_.sizes());
+  at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
 }
@@ -2110,7 +2111,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
       TORCH_CHECK(false, "Order ", ord, " not supported for matrix norm");
     }
   }
-  resize_output(result, result_.sizes());
+  at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
 }
@@ -2146,7 +2147,7 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
       Tensor result_ = at::linalg_vector_norm(self, opt_num_ord, opt_dim, keepdim, opt_dtype);
       // TODO: Resize and copy should be avoided with
       //       https://github.com/pytorch/pytorch/issues/52712
-      resize_output(result, result_.sizes());
+      at::native::resize_output(result, result_.sizes());
       result.copy_(result_);
     } else if (dim_.size() == 2) {
       _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
@@ -2547,7 +2548,7 @@ Tensor& kron_out(const Tensor& self, const Tensor& other, Tensor& result) {
       mul_shape[2 * i] = a_reshape[2 * i];
       mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
     }
-    resize_output(result, result_reshape);
+    at::native::resize_output(result, result_reshape);
     auto result_mul = at::_unsafe_view(result, mul_shape);
     at::mul_out(result_mul, self_view, other_view);
   }

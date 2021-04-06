@@ -1,4 +1,5 @@
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -42,7 +43,8 @@ std::string stringSlice(
 
   int64_t i = start_val;
   std::string result = "";
-  for (int64_t j = 0; j < num_vals; j++) {
+  for (const auto j : c10::irange(num_vals)) {
+    (void)j; // Suppress unused variable warning
     result += string[i];
     i += step;
   }
@@ -864,11 +866,12 @@ RegisterOperators reg(
          complex),
      DEFINE_INT_FLOAT_OP(aten::pow, pow(a, b), float),
      DEFINE_FLOAT_COMPLEX_OP(aten::pow, pow(a, b), complex),
-     DEFINE_SCALAR_BINARY_OP(
+     DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(
          aten::pow,
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
-         float),
+         float,
+         ".Scalar_Scalar"),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::pow.int_to_int(int a, int b) -> int"),
          [](Stack* stack) {
