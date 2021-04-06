@@ -311,9 +311,6 @@ class _NnapiSerializer(object):
         if config is None:
             config = {}
 
-        # XXX get rid of this
-        self.solid_weights = config.get("solid_weights", False)
-
     def add_tensor_operand(self, jitval, oper):
         assert isinstance(oper, Operand)
         if jitval in self.jitval_operand_map:
@@ -366,13 +363,8 @@ class _NnapiSerializer(object):
         tsize = tensor_size(toper.op_type, toper.shape)
         psize = ((tsize - 1) | 0x3) + 1
         self.values.append((operand_id, OperandValueSourceType.NUMBERED_BUFFER))
-        if self.solid_weights:
-            buf_num = 0
-            offset = self.weight_offset
-            self.weight_offset += psize
-        else:
-            buf_num = len(self.used_weights)
-            offset = 0
+        buf_num = len(self.used_weights)
+        offset = 0
         self.value_data.append(struct.pack(
             "iii",
             buf_num,
