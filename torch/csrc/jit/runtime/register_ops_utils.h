@@ -847,7 +847,7 @@ void listSetItem(Stack* stack);
           if (y.isDouble()) {                                     \
             double b = y.toDouble();                              \
             push(stack, float_op);                                \
-          } else {                                                \
+          } else if (y.isInt()) {                                                \
             int64_t b = y.toInt();                                \
             push(stack, int_op);                                  \
           }                                                       \
@@ -870,7 +870,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_COMPARISON_OP_WITH_COMPLEX(aten_op, op)                   \
   DEFINE_GENERIC_OP_WITH_COMPLEX(aten_op, op, op, op, bool, bool, bool), \
       DEFINE_INT_FLOAT_OP(aten_op, op, bool),                            \
-      DEFINE_FLOAT_COMPLEX_OP(aten_op, op, complex),                     \
+      DEFINE_FLOAT_COMPLEX_OP(aten_op, op, bool),                     \
       DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_WITHOUT_INT_COMPLEX_PAIR(aten_op, op, op, op, Scalar), \
       DEFINE_STR_CMP_OP(aten_op, op)
 

@@ -2,6 +2,7 @@ import torch
 import os
 import sys
 from torch.testing._internal.jit_utils import JitTestCase, execWrapper
+from torch.testing._internal.common_utils import IS_MACOS
 from typing import List, Dict
 from itertools import product
 from textwrap import dedent
@@ -139,12 +140,12 @@ class TestComplex(JitTestCase):
                 continue
             self.checkScript(pow_complex_complex, (x, y))
 
-        # --- Binary op ---
-        def rect_fn(x: float, y: float):
-            return cmath.rect(x, y)
-
-        for x, y in product(vals, vals):
-            self.checkScript(rect_fn, (x, y, ))
+        if not IS_MACOS:
+            # --- Binary op ---
+            def rect_fn(x: float, y: float):
+                return cmath.rect(x, y)
+            for x, y in product(vals, vals):
+                self.checkScript(rect_fn, (x, y, ))
 
         func_constants_template = dedent('''
             def func():

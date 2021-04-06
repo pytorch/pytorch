@@ -932,9 +932,8 @@ RegisterOperators reg2({
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_COMPLEX_OP(aten::log, std::log(a) / std::log(b), complex),
     DEFINE_FLOAT_COMPLEX_OP(aten::log, std::log(a) / std::log(b), complex),
-    DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_AVOID_COLLISION(
+    DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(
         aten::log,
-        std::log(a) / std::log(b),
         std::log(a) / std::log(b),
         std::log(a) / std::log(b),
         float,
