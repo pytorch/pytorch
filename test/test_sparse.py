@@ -274,42 +274,42 @@ class TestSparse(TestCase):
             x.requires_grad_(True)
             gradcheck(fn, (x,), check_sparse_nnz=True)
 
-        for value_type in [torch.double]:
-            i = self.index_tensor([
-                [0, 1, 2, 2],
-                [0, 0, 0, 3],
-                [0, 0, 1, 4],
-            ], device=device)
-            # we don't have to_dense for half types on CPU because it is implemented
-            # with a slower add_ operation
-            v = torch.tensor([2, 1, 3, 4], dtype=dtype, device=device)
-            x = self.sparse_tensor(i, v, torch.Size([3, 4, 5]), dtype=value_type, device=device)
-            res = torch.tensor([
-                [[2, 0, 0, 0, 0],
-                 [0, 0, 0, 0, 0],
-                 [0, 0, 0, 0, 0],
-                 [0, 0, 0, 0, 0]],
-                [[1, 0, 0, 0, 0],
-                 [0, 0, 0, 0, 0],
-                 [0, 0, 0, 0, 0],
-                 [0, 0, 0, 0, 0]],
-                [[0, 3, 0, 0, 0],
-                 [0, 0, 0, 0, 0],
-                 [0, 0, 0, 0, 0],
-                 [0, 0, 0, 0, 4]],
-            ], dtype=dtype, device=device)
+        value_type = torch.double
+        i = self.index_tensor([
+            [0, 1, 2, 2],
+            [0, 0, 0, 3],
+            [0, 0, 1, 4],
+        ], device=device)
+        # we don't have to_dense for half types on CPU because it is implemented
+        # with a slower add_ operation
+        v = torch.tensor([2, 1, 3, 4], dtype=dtype, device=device)
+        x = self.sparse_tensor(i, v, torch.Size([3, 4, 5]), dtype=value_type, device=device)
+        res = torch.tensor([
+            [[2, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0]],
+            [[1, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0]],
+            [[0, 3, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 4]],
+        ], dtype=dtype, device=device)
 
-            test_tensor(x, res)
+        test_tensor(x, res)
 
-            i = self.index_tensor([
-                [0, 1, 2, 2],
-                [0, 0, 0, 3],
-                [0, 0, 1, 4],
-            ], device=device)
-            v = torch.empty(4, 0, dtype=dtype, device=device)
-            x = self.sparse_tensor(i, v, torch.Size([3, 4, 5, 0]), dtype=value_type, device=device)
-            res = torch.empty((3, 4, 5, 0), dtype=dtype, device=device)
-            test_tensor(x, res)
+        i = self.index_tensor([
+            [0, 1, 2, 2],
+            [0, 0, 0, 3],
+            [0, 0, 1, 4],
+        ], device=device)
+        v = torch.empty(4, 0, dtype=dtype, device=device)
+        x = self.sparse_tensor(i, v, torch.Size([3, 4, 5, 0]), dtype=value_type, device=device)
+        res = torch.empty((3, 4, 5, 0), dtype=dtype, device=device)
+        test_tensor(x, res)
 
     # half tensors on cpu don't implement to_dense, so need to convert to float
     def _to_dense_half_safe(self, tensor):

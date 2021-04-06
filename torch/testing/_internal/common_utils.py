@@ -974,13 +974,13 @@ class TestCase(expecttest.TestCase):
 
         set_rng_seed(SEED)
 
-    def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu', dtype=torch.double):
+    def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
         # empty numel, but nnz > 0 makes the indices containing values.
         assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
 
         v_size = [nnz] + list(size[sparse_dim:])
-        v = torch.randn(*v_size, dtype=dtype, device=device)
+        v = make_tensor(v_size, device, dtype)
         i = torch.rand(sparse_dim, nnz, device=device)
         i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
         i = i.to(torch.long)
@@ -2093,19 +2093,8 @@ def _wrap_warn_once(regex):
 # This is a wrapper that wraps a test to run this test twice, one with
 # coalesced=True, another with coalesced=False for coalesced/uncoalesced sparse tensors.
 def coalescedonoff(f):
-    nargs = len(inspect.signature(f).parameters)
-    if nargs == 3:
-
-        @wraps(f)
-        def wrapped(self, device):
-            f(self, device, coalesced=True)
-            f(self, device, coalesced=False)
-    else:
-        assert nargs == 4, "this decorator only support function with signature\
-            (self, device, coalesced) or (self, device, dtype, coalesced)"
-
-        @wraps(f)
-        def wrapped(self, device, dtype):
-            f(self, device, dtype, coalesced=True)
-            f(self, device, dtype, coalesced=False)
+    @wraps(f)
+    def wrapped(self, *args, **kwargs):
+        f(self, *args, **kwargs, coalesced=True)
+        f(self, *args, **kwargs, coalesced=False)
     return wrapped
