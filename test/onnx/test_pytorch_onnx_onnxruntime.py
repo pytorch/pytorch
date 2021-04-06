@@ -7855,7 +7855,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(6, (7, 4, 3, 5))
         y = torch.randint(6, (5, 4, 4, 6))
 
-        self.run_test(M(), (x, y))        
+        self.run_test(M(), (x, y))   
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
