@@ -22,8 +22,11 @@ Functions
 .. autofunction:: slogdet
 .. autofunction:: eigh
 .. autofunction:: eigvalsh
+.. autofunction:: matrix_power
 .. autofunction:: matrix_rank
+.. autofunction:: multi_dot
 .. autofunction:: norm
+.. autofunction:: vector_norm
 .. autofunction:: pinv
 .. autofunction:: svd
 .. autofunction:: solve
@@ -32,3 +35,4 @@ Functions
 .. autofunction:: inv
 .. autofunction:: qr
 .. autofunction:: lstsq
+.. autofunction:: householder_product

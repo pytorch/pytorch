@@ -37,11 +37,14 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
+
 def _forward_from_src(src: str, globals: Dict[str, Any]):
     # avoid mutating the passed in dict
-    globals = globals.copy()
-    exec_with_source(src, globals)
-    return globals['forward']
+    globals_copy = globals.copy()
+    exec_with_source(src, globals_copy)
+    forward_fn = globals_copy['forward']
+    del globals_copy['forward']
+    return forward_fn
 
 
 def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
@@ -245,12 +248,13 @@ class GraphModule(torch.nn.Module):
         return self._graph
 
     @graph.setter
-    def graph(self, g) -> None:
+    def graph(self, g : Graph) -> None:
         """
         Set the underlying ``Graph`` for this ``GraphModule``. This will internally
         recompile the ``GraphModule`` so that the generated ``forward()`` function
         corresponds to ``g``
         """
+        assert isinstance(g, Graph), f'Expected a Graph instance, but got {type(g)}'
         self._graph = g
         g.owning_module = self
         self.recompile()

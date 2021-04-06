@@ -821,6 +821,96 @@ void raw_cudnn_convolution_backward_weight_out(
   TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
+void raw_cudnn_convolution_add_relu_out(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& z,
+    float alpha,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  auto dataType = getCudnnDataType(input);
+  ConvolutionArgs args{input, output, weight};
+  args.handle = getCudnnHandle();
+  setConvolutionParams(
+      &args.params,
+      input,
+      weight,
+      padding,
+      stride,
+      dilation,
+      groups,
+      deterministic,
+      allow_tf32);
+  args.idesc.set(input);
+  args.wdesc.set(weight, 0, false);
+  args.odesc.set(output);
+  args.cdesc.set(
+      dataType,
+      input.dim() - 2,
+      args.params.padding,
+      args.params.stride,
+      args.params.dilation,
+      args.params.groups,
+      args.params.allow_tf32);
+
+  TensorDescriptor zdesc;
+  zdesc.set(z);
+
+  TensorDescriptor bdesc;
+  bdesc.set(bias.expand({1, bias.size(0)}), output.dim());
+
+  ActivationDescriptor adesc;
+  adesc.set(CUDNN_ACTIVATION_RELU);
+
+  AlgoIterator<cudnnConvolutionFwdAlgoPerf_t>(args, benchmark)
+      .try_all([&](const cudnnConvolutionFwdAlgoPerf_t& fwdAlgPerf) {
+        Tensor workspace = allocate_workspace(fwdAlgPerf.memory, input);
+
+        // update convDesc mathType since cudnn 7.4+ now requires both algo +
+        // mathType to figure out whether to use Tensor core kernels or not See
+        // Note [behavior of cudnnFind and cudnnGet]
+        ASSERT_CORRECT_PRECISION(fwdAlgPerf.mathType);
+        AT_CUDNN_CHECK_WITH_SHAPES(
+            cudnnSetConvolutionMathType(
+                args.cdesc.mut_desc(), fwdAlgPerf.mathType),
+            args);
+
+        Constant one(dataType, 1);
+        Constant alpha_(dataType, alpha);
+
+        AT_CUDNN_CHECK_WITH_SHAPES(
+            cudnnConvolutionBiasActivationForward(
+                args.handle,
+                &one,
+                args.idesc.desc(),
+                input.data_ptr(),
+                args.wdesc.desc(),
+                weight.data_ptr(),
+                args.cdesc.desc(),
+                fwdAlgPerf.algo,
+                workspace.data_ptr(),
+                fwdAlgPerf.memory,
+                &alpha_,
+                zdesc.desc(),
+                z.data_ptr(),
+                bdesc.desc(),
+                bias.data_ptr(),
+                adesc.desc(),
+                args.odesc.desc(),
+                output.data_ptr()),
+            args,
+            "cudnnConvolutionBiasActivationForward: ",
+            static_cast<int>(fwdAlgPerf.algo),
+            "\n");
+      });
+}
 }}  // namespace at::native
 
 #endif

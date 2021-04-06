@@ -690,6 +690,30 @@ def is_iterable(obj):
     except TypeError:
         return False
 
+
+def is_iterable_of_tensors(iterable, include_empty=False):
+    """ Returns True if iterable is an iterable of tensors and False o.w.
+
+        If the iterable is empty, the return value is :attr:`include_empty`
+    """
+    # Tensor itself is iterable so we check this first
+    if isinstance(iterable, torch.Tensor):
+        return False
+
+    try:
+        if len(iterable) == 0:
+            return include_empty
+
+        for t in iter(iterable):
+            if not isinstance(t, torch.Tensor):
+                return False
+
+    except TypeError as te:
+        return False
+
+    return True
+
+
 class CudaNonDefaultStream():
     def __enter__(self):
         # Before starting CUDA test save currently active streams on all
@@ -859,7 +883,7 @@ def get_comparison_dtype(a, b):
 class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
     def __exit__(self, exc_type, exc_value, tb):
         if exc_type is not None and issubclass(exc_type, NotImplementedError):
-            self.test_case.skipTest("not_implemented: {exc_value}")  # type: ignore[attr-defined]
+            self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
 
 class TestCase(expecttest.TestCase):
@@ -1626,7 +1650,6 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
             result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
         else:
             result = torch.rand(size, device=device, dtype=dtype) * span + low
-        result.requires_grad = requires_grad
     else:
         assert dtype in complex_types()
         low = -9 if low is None else max(low, -9)
@@ -1636,19 +1659,16 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
         result = torch.complex(real, imag)
-        result.requires_grad = requires_grad
 
     if discontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
 
-    return result
+    if dtype in floating_types_and(torch.half, torch.bfloat16) or\
+       dtype in complex_types():
+        result.requires_grad = requires_grad
 
-def prod_single_zero(dim_size):
-    result = torch.randn(dim_size, dim_size)
-    result[0, 1] = 0
     return result
-
 
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l

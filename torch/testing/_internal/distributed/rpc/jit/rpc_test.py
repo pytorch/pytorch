@@ -347,6 +347,7 @@ class MyScriptClass:
 @torch.jit.interface
 class MyModuleInterface(torch.nn.Module):
     def forward(self) -> Tensor:
+        # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
 
