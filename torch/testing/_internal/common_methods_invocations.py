@@ -1075,7 +1075,7 @@ def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
                 yield {'dim': (0, ndim - 1), 'keepdim': keepdim}
 
             # Test reducing every other dimension starting with the second
-            if ndim > 2:
+            if ndim > 3:
                 yield {'dim': tuple(range(1, ndim, 2)), 'keepdim': keepdim}
 
 # Generates sample inputs for reduction ops that contain the input tensor
