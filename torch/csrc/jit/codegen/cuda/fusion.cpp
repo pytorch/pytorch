@@ -42,8 +42,6 @@ TORCH_CUDA_CU_API void swap(Fusion& a, Fusion& b) noexcept {
   swap(a.expr_set_, b.expr_set_);
   swap(a.val_deque_, b.val_deque_);
 
-  swap(a.lookup_index_, b.lookup_index_);
-
   swap(a.val_type_name_map_, b.val_type_name_map_);
   swap(a.expr_name_counter_, b.expr_name_counter_);
 
@@ -98,13 +96,6 @@ IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
     ir_cloner.clone(val)->setUses(ir_cloner.clone(val->uses_));
   }
 
-  to->lookup_index_ = from->lookup_index_;
-  for (auto& index_kv : to->lookup_index_) {
-    for (auto& kv : index_kv.second) {
-      kv.second = ir_cloner.clone(kv.second);
-    }
-  }
-
   to->val_type_name_map_ = from->val_type_name_map_;
   to->expr_name_counter_ = from->expr_name_counter_;
 
@@ -154,8 +145,6 @@ void Fusion::clear() noexcept {
   val_set_.clear();
   val_deque_.clear();
   expr_set_.clear();
-
-  lookup_index_.clear();
 
   for (auto& kv : val_type_name_map_) {
     kv.second = 0;
@@ -398,10 +387,7 @@ StmtNameType Fusion::registerVal(Val* val) {
 
   val_set_.emplace(val);
   val_deque_.push_back(val);
-  const auto vtype = *val->getValType();
-  const auto name = getValName(vtype);
-  TORCH_INTERNAL_ASSERT(lookup_index_[vtype].insert({name, val}).second);
-  return name;
+  return getValName(*(val->getValType()));
 }
 
 StmtNameType Fusion::registerExpr(Expr* expr) {
@@ -452,12 +438,6 @@ StmtNameType Fusion::registerStatement(Statement* stmt) {
       false,
       "Could not register statement as Fusion could not recognize its type.");
   return kInvalidStmName;
-}
-
-Val* Fusion::lookupValue(ValType vtype, StmtNameType name) const {
-  const auto& index = lookup_index_.at(vtype);
-  const auto it = index.find(name);
-  return it != index.end() ? it->second : nullptr;
 }
 
 void Fusion::resetTvUses() {
