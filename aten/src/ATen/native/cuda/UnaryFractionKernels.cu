@@ -29,10 +29,26 @@ void ceil_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+template <typename T>
+__host__ __device__ static inline T frac_wrapper(T a) {
+  if (::isinf(a)) {
+    return ::copysign(static_cast<T>(0), a);
+  }
+  return a - ::trunc(a);
+}
+
+template <>
+__host__ __device__ inline c10::Half frac_wrapper(c10::Half a) {
+  if (::isinf(static_cast<float>(a))) {
+    return ::copysign(static_cast<c10::Half>(0), a);
+  }
+  return a - ::trunc(a);
+}
+
 void frac_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "frac_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return a - ::trunc(a);
+    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return frac_wrapper(a);
     });
   });
 }
