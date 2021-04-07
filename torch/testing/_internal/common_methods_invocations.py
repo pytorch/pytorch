@@ -2496,7 +2496,7 @@ op_db: List[OpInfo] = [
            skips=(
                # https://github.com/pytorch/pytorch/issues/55539 to track all issues for addmv
                # failed with a large difference in tensor outputs for below tests
-               SkipInfo('TestCommon', 'test_variant_consistency_eager', 
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=(torch.float32, torch.complex64), device_type='cpu'),
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                SkipInfo('TestCommon', 'test_out', dtypes=(torch.float32,), device_type='cpu'),
