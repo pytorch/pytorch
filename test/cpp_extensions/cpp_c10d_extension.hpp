@@ -16,7 +16,7 @@
 #include <c10d/Store.hpp>
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
-#include <c10d/sequence_num.h>
+#include <c10d/sequence_num.hpp>
 
 namespace c10d {
 

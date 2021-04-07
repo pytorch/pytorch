@@ -10,7 +10,7 @@
 #include <ATen/ATen.h>
 
 #include <c10d/Types.hpp>
-#include <c10d/sequence_num.h>
+#include <c10d/sequence_num.hpp>
 
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
