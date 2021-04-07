@@ -111,7 +111,7 @@ class PackageExporter:
         self.extern_modules: List[str] = []
         self.provided: Dict[str, bool] = {}
         self.verbose = verbose
-        self.ts_serializer = torch._C.TorchScriptSerializer(self.zip_file, self)
+        self.ts_serializer = torch._C.TorchScriptSerializer(self.zip_file)
 
         if isinstance(importer, Importer):
             self.importer = importer
@@ -223,11 +223,11 @@ class PackageExporter:
         self._next_ts_id += 1
         return str(ret)
 
-    def get_storage_id(self) -> str:
+    def get_storage_id(self) -> int:
         """Get an id for a storage object. This id is guaranteed to only be handed out once for this package."""
         ret = self._next_storage_id
         self._next_storage_id += 1
-        return str(ret)
+        return ret
 
     def save_source_string(
         self,
@@ -571,7 +571,7 @@ node [shape=box];
     def _persistent_id(self, obj):
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            obj_key = self.get_storage_id()
+            obj_key = str(self.get_storage_id())
             location = location_tag(obj)
             self.serialized_storages[obj_key] = obj
 

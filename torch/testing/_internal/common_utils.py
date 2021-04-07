@@ -1650,7 +1650,6 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
             result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
         else:
             result = torch.rand(size, device=device, dtype=dtype) * span + low
-        result.requires_grad = requires_grad
     else:
         assert dtype in complex_types()
         low = -9 if low is None else max(low, -9)
@@ -1660,11 +1659,14 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
         result = torch.complex(real, imag)
-        result.requires_grad = requires_grad
 
     if discontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
+
+    if dtype in floating_types_and(torch.half, torch.bfloat16) or\
+       dtype in complex_types():
+        result.requires_grad = requires_grad
 
     return result
 

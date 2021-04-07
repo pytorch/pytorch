@@ -691,10 +691,10 @@ at::Tensor invokeTestRecordFunctionJIT(at::Tensor& t) {
   return module->forward({t}).toTensor();
 }
 
-using TracedTestInputs =
+using TracedTestValues =
     std::vector<std::tuple<std::string, std::vector<std::vector<int64_t>>>>;
 
-void checkTracedInputs(const TracedTestInputs& inputs) {
+void checkTracedInputs(const TracedTestValues& inputs) {
   bool found_test = false;
   bool found_pow = false;
   bool found_mul = false;
@@ -714,6 +714,32 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
     } else if (fn == "aten::mul") {
       found_mul = true;
       TORCH_CHECK(sizes.size() > 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    }
+  }
+  TORCH_CHECK(found_test);
+  TORCH_CHECK(found_pow);
+  TORCH_CHECK(found_mul);
+}
+
+void checkTracedOutputs(const TracedTestValues& outputs) {
+  bool found_test = false;
+  bool found_pow = false;
+  bool found_mul = false;
+  for (const auto& output : outputs) {
+    const auto& fn = std::get<0>(output);
+    const auto& sizes = std::get<1>(output);
+
+    if (fn == "test") {
+      found_test = true;
+      TORCH_CHECK(sizes.empty());
+    } else if (fn == "aten::pow") {
+      found_pow = true;
+      TORCH_CHECK(sizes.size() == 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    } else if (fn == "aten::mul") {
+      found_mul = true;
+      TORCH_CHECK(sizes.size() == 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
     }
   }
@@ -803,8 +829,10 @@ static bool shouldRunCallback(const RecordFunctionCallback&) {
   return should_run;
 }
 
-static TracedTestInputs traced_inputs;
-static std::unordered_set<std::string> ts_names;
+static TracedTestValues traced_inputs;
+static TracedTestValues traced_outputs;
+static std::unordered_set<std::string> ts_input_names;
+static std::unordered_set<std::string> ts_output_names;
 
 std::unique_ptr<at::ObserverContext> tracedInputsCallback(
     const RecordFunction& fn) {
@@ -820,43 +848,71 @@ std::unique_ptr<at::ObserverContext> tracedInputsCallback(
     }
     traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
   } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-    ts_names.insert(fn.name().str());
+    ts_input_names.insert(fn.name().str());
   }
   return nullptr;
 }
 
-TEST(RecordFunctionTest, TracedTestInputs) {
+void tracedOutputsCallback(const RecordFunction& fn, ObserverContext* ctx_ptr) {
+  if (fn.scope() == RecordScope::FUNCTION) {
+    auto outputs = fn.outputs();
+    std::vector<std::vector<int64_t>> sizes;
+    for (const auto& output : outputs) {
+      if (output.isTensor()) {
+        sizes.push_back(output.toTensor().sizes().vec());
+      } else if (output.isScalar()) {
+        sizes.emplace_back();
+      }
+    }
+    traced_outputs.push_back(std::make_tuple(fn.name().str(), sizes));
+  } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
+    ts_output_names.insert(fn.name().str());
+  }
+}
+
+TEST(RecordFunctionTest, TracedTestInputsOutputs) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
   // [(fn, [[sizes], [sizes], ...]), ...]
   addGlobalCallback(
-      RecordFunctionCallback(tracedInputsCallback).needsInputs(true));
+      RecordFunctionCallback(tracedInputsCallback, tracedOutputsCallback)
+          .needsInputs(true)
+          .needsOutputs(true));
 
-  TracedTestInputs eager_inputs, jit_inputs;
+  TracedTestValues eager_inputs, eager_outputs, jit_inputs, jit_outputs;
   {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     auto t2 = invokeTestRecordFunction(t);
     t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
     eager_inputs = traced_inputs;
+    eager_outputs = traced_outputs;
     traced_inputs.clear();
+    traced_outputs.clear();
 
-    TORCH_CHECK(ts_names.empty());
+    TORCH_CHECK(ts_input_names.empty());
+    TORCH_CHECK(ts_output_names.empty());
 
     t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     t2 = invokeTestRecordFunctionJIT(t);
     t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
     jit_inputs = traced_inputs;
+    jit_outputs = traced_outputs;
     traced_inputs.clear();
+    traced_outputs.clear();
   }
 
-  TORCH_CHECK(ts_names.find("forward") != ts_names.end());
-  TORCH_CHECK(ts_names.find("foo") != ts_names.end());
+  TORCH_CHECK(ts_input_names.find("forward") != ts_input_names.end());
+  TORCH_CHECK(ts_input_names.find("foo") != ts_input_names.end());
+  TORCH_CHECK(ts_output_names.find("forward") != ts_output_names.end());
+  TORCH_CHECK(ts_output_names.find("foo") != ts_output_names.end());
 
   checkTracedInputs(eager_inputs);
+  checkTracedOutputs(eager_outputs);
   checkTracedInputs(jit_inputs);
+  checkTracedOutputs(jit_outputs);
   at::clearCallbacks();
 }
 
