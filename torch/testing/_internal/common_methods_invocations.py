@@ -1078,19 +1078,23 @@ def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
             if ndim > 3:
                 yield {'dim': tuple(range(1, ndim, 2)), 'keepdim': keepdim}
 
-# Generates sample inputs for reduction ops that contain the input tensor
-# and dim and keepdim kwargs. If a reduction op needs to test additional
-# args/kwargs then create a separate sample_inputs function
-def sample_inputs_reduction(op_info, device, dtype, requires_grad):
-    inputs = []
+# Wraps sample_inputs_reduction function to provide the additional supports_multiple_dims args
+def sample_inputs_reduction_wrapper(supports_multiple_dims):
+    # Generates sample inputs for reduction ops that contain the input tensor
+    # and dim and keepdim kwargs. If a reduction op needs to test additional
+    # args/kwargs then create a separate sample_inputs function
+    def fn(op_info, device, dtype, requires_grad):
+        inputs = []
 
-    for t in _generate_reduction_inputs(device, dtype, requires_grad):
-        # Add case without dim and keepdim kwargs
-        inputs.append(SampleInput(t))
-        for kwargs in _generate_reduction_kwargs(t.ndim):
-            inputs.append(SampleInput(t, kwargs=kwargs))
+        for t in _generate_reduction_inputs(device, dtype, requires_grad):
+            # Add case without dim and keepdim kwargs
+            inputs.append(SampleInput(t))
+            for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
+                inputs.append(SampleInput(t, kwargs=kwargs))
 
-    return inputs
+        return inputs
+
+    return fn
 
 def sample_inputs_outer(op_info, device, dtype, requires_grad):
     inputs = []
@@ -3291,7 +3295,7 @@ op_db: List[OpInfo] = [
     OpInfo('sum',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
-           sample_inputs_func=sample_inputs_reduction),
+           sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     OpInfo('mode',
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
