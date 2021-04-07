@@ -176,8 +176,8 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
 
 // amp_update_scale_cuda_kernel is launched with a single thread to compute the new scale.
 // The scale factor is maintained and updated on the GPU to avoid synchronization.
-__global__ void amp_update_scale_cuda_kernel(int* growth_tracker,
-                                             float* current_scale,
+__global__ void amp_update_scale_cuda_kernel(float* current_scale,
+                                             int* growth_tracker,
                                              float* found_inf,
                                              double growth_factor,
                                              double backoff_factor,
@@ -203,8 +203,8 @@ __global__ void amp_update_scale_cuda_kernel(int* growth_tracker,
 // _amp_update_scale_cuda asynchronously updates the scale tensor in place.
 //
 // Args:
-// growth_tracker:  A one-element torch.cuda.IntTensor containing the number of recent consecutive unskipped steps.
 // current_scale:  A one-element cuda float tensor containing the scale value.
+// growth_tracker:  A one-element torch.cuda.IntTensor containing the number of recent consecutive unskipped steps.
 // found_inf:  A one-element cuda float tensor. If > 0, indicates that infs/nans were found by the relevant
 //             prior _amp_non_finite_check_and_unscale_cuda call, and 0 if no infs/nans were found.
 // growth_factor:  Multiplier if no infs/NaNs were found (typically slightly > 1).
@@ -214,12 +214,12 @@ __global__ void amp_update_scale_cuda_kernel(int* growth_tracker,
 //
 // Returns:
 // current_scale
-Tensor _amp_update_scale_cuda_(Tensor& growth_tracker,
-                               const Tensor& current_scale,
-                               const Tensor& found_inf,
-                               double growth_factor,
-                               double backoff_factor,
-                               int64_t growth_interval)
+Tensor& _amp_update_scale_cuda_(Tensor& current_scale,
+                                Tensor& growth_tracker,
+                                const Tensor& found_inf,
+                                double growth_factor,
+                                double backoff_factor,
+                                int64_t growth_interval)
 {
   TORCH_CHECK(growth_tracker.is_cuda(), "growth_tracker must be a CUDA tensor.");
   TORCH_CHECK(current_scale.is_cuda(), "current_scale must be a CUDA tensor.");
@@ -232,8 +232,8 @@ Tensor _amp_update_scale_cuda_(Tensor& growth_tracker,
   TORCH_CHECK(found_inf.scalar_type() == at::ScalarType::Float, "found_inf must be a float tensor.");
 
   amp_update_scale_cuda_kernel<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-    growth_tracker.data_ptr<int>(),
     current_scale.data_ptr<float>(),
+    growth_tracker.data_ptr<int>(),
     found_inf.data_ptr<float>(),
     growth_factor,
     backoff_factor,
