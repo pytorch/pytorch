@@ -2851,8 +2851,7 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
       {a_buf.data(), b_buf.data()}, {c->buf()});
   l.root_stmt()->accept(&analyzer_before);
 
-  For *o, *i, *t;
-  l.splitWithTail(l.getLoopStmtsFor(c)[0], 2, &o, &i, &t);
+  l.splitWithTail(l.getLoopStmtsFor(c)[0], 2);
 
   MemDependencyChecker analyzer_after({a_buf.data(), b_buf.data()}, {c->buf()});
   Stmt* stmt = IRSimplifier::simplify(l.root_stmt());
