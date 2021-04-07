@@ -1,5 +1,10 @@
 #include <torch/csrc/distributed/spmd/event_handler_impl.h>
 
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/utils/lambda_post_hook.h>
+
+
 namespace torch {
 namespace distributed {
 namespace spmd {

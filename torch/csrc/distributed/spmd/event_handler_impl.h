@@ -1,7 +1,9 @@
 #pragma once
 
+#include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/spmd/event_handler.h>
 #include <torch/csrc/distributed/spmd/event_impl.h>
+
 
 namespace torch {
 namespace distributed {

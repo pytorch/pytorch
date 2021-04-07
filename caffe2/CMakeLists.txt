@@ -361,6 +361,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
       add_dependencies(process_group_agent torch c10d)
 
+      add_library(spmd
+        "${TORCH_SRC_DIR}/csrc/distributed/spmd/event_handler_impl.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/spmd/event_handler_impl.h"
+      )
+      target_link_libraries(spmd PRIVATE torch c10d)
+      add_dependencies(spmd torch c10d)
+
       if(USE_TENSORPIPE)
         add_library(tensorpipe_agent
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.cpp"

@@ -5,10 +5,6 @@
 #include <vector>
 
 #include <ATen/core/ivalue.h>
-#include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/autograd/engine.h>
-#include <torch/csrc/autograd/functions/accumulate_grad.h>
-#include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch {
