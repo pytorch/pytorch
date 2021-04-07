@@ -153,7 +153,7 @@ def maybe_insert_observer_for_special_module(
         observed_standalone_module = \
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
         standalone_module_input_idxs = observed_standalone_module.\
-            _standalone_module_input_quantized_idxs.int().tolist()
+            _standalone_module_input_quantized_idxs.int().tolist()  # type: ignore
         observed_standalone_module = ObservedStandaloneGraphModule(
             observed_standalone_module, observed_standalone_module.graph)
         parent_name, name = _parent_name(node.target)
@@ -1327,13 +1327,14 @@ class Quantizer:
          int8 and then float16
         """
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]] = defaultdict(list)
+        cache_for_no_tensor_check: Dict[Node, bool] = dict()
 
         def visit(node, matched_pattern, qconfig):
             def visit_arg(arg):
                 is_weight = node_arg_is_weight(node, arg)
                 is_bias = node_arg_is_bias(node, arg)
                 is_activation = not (is_weight or is_bias)
-                no_tensors = all_node_args_have_no_tensors(arg, modules)
+                no_tensors = all_node_args_have_no_tensors(arg, modules, cache_for_no_tensor_check)
                 # bias needs to be quantized if activation is fp16 and weight is fp16
                 # this is the case for glow
                 should_add_handler = qconfig is not None and (

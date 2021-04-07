@@ -364,7 +364,7 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
     elif node.op == 'call_module':
         assert isinstance(node.target, str)
         if is_activation_post_process(modules[node.target]):
-            result = all_node_args_have_no_tensors(node.args[0], modules)  # type: ignore
+            result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore
     elif node.op == 'call_module':
         result = False
     elif node.op == 'get_attr':
@@ -382,14 +382,14 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
                 for list_el in arg:
                     if isinstance(list_el, Node):
                         this_list_el_args_have_no_tensors = \
-                            all_node_args_have_no_tensors(list_el, modules)
+                            all_node_args_have_no_tensors(list_el, modules, cache)
                         found_one_tensor = found_one_tensor or \
                             (not this_list_el_args_have_no_tensors)
             elif isinstance(arg, int):
                 pass
             else:
                 if isinstance(arg, Node):
-                    this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg, modules)
+                    this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg, modules, cache)
                     found_one_tensor = found_one_tensor or \
                         (not this_arg_args_have_no_tensors)
                 else:
