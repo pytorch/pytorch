@@ -575,7 +575,8 @@ class TestList(JitTestCase):
         def test_index_slice_out_of_bounds_index(x):
             x = x[[4], :, :]
             return x
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3", "x[[4], :, :]"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3",
+                                                               "x[[4], :, :]"):
             self.checkScript(test_index_slice_out_of_bounds_index, (a,))
 
     def test_mutable_list_append(self):
