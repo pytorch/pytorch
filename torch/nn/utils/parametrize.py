@@ -54,10 +54,10 @@ def cached():
 
 
 class ParametrizationList(ModuleList):
-    r"""A sequential container that holds and manages the ``original`` parameter (or buffer) of
+    r"""A sequential container that holds and manages the ``original`` parameter or buffer of
     a parametrized :class:`torch.nn.Module`. It is the type of
     ``module.parametrizations[tensor_name]`` when ``module[tensor_name]`` has been parametrized
-    with :func:`register_parametrization`
+    with :func:`register_parametrization`.
 
     .. note ::
         This class is used internally by :func:`register_parametrization`. It is documented
@@ -119,6 +119,7 @@ class ParametrizationList(ModuleList):
 
 def _inject_new_class(module: Module) -> None:
     r"""Sets up the parametrization mechanism used by parametrizations.
+
     This works by substituting the class of the module by a class
     that extends it to be able to inject a property
 
@@ -148,8 +149,9 @@ def _inject_new_class(module: Module) -> None:
 
 def _inject_property(module: Module, tensor_name: str) -> None:
     r"""Injects a property into module[tensor_name].
+
     It assumes that the class in the module has already been modified from its
-    original one using _inject_new_class and that the tensor under `tensor_name`
+    original one using _inject_new_class and that the tensor under :attr:`tensor_name`
     has already been moved out
 
     Args:
@@ -186,25 +188,25 @@ def register_parametrization(
 ) -> Module:
     r"""Adds a parametrization to a tensor in a module.
 
-    When accessing ``module[tensor_name]``, the module will return the
-    parametrized version ``parametrization(module[tensor_name])``. If the original
-    tensor requires a gradient, the backward pass will differentiate through the
-    :attr:`parametrization`, and the optimizer will update it accordingly
+    Assume that ``tensor_name="weight"`` for simplicity. When accessing ``module.weight``,
+    the module will return the parametrized version ``parametrization(module.weight)``.
+    If the original tensor requires a gradient, the backward pass will differentiate
+    through the :attr:`parametrization`, and the optimizer will update the tensor accordingly.
 
     The first time that a module registers a parametrization, this function will add an attribute
     ``parametrizations`` to the module of type :class:`~ParametrizationList`.
 
     The list of parametrizations on a tensor will be accessible under
-    ``module.parametrizations[tensor_name]``.
+    ``module.parametrizations.weight``.
 
     The original tensor will be accessible under
-    ``module.parametrizations[tensor_name].original``.
+    ``module.parametrizations.weight.original``.
 
     Parametrizations may be concatenated by registering several parametrizations
     on the same attribute.
 
-    Parametrized parameters and buffers have a built-in caching system that can be activated
-    using :func:`cached`.
+    Parametrized parameters and buffers have an inbuilt caching system that can be activated
+    using the context manager :func:`cached`.
 
     A :attr:`parametrization` may optionally implement a method with signature
 
@@ -212,8 +214,8 @@ def register_parametrization(
 
         def right_inverse(self, X: Tensor) -> Tensor
 
-    If this method is implemented, it will be possible to assign to the parametrized tensor.
-    This may be used to initialize the tensor:
+    If :attr:`parametrization` implements this method, it will be possible to assign
+    to the parametrized tensor. This may be used to initialize the tensor, as shown in the example.
 
     In most situations, ``right_inverse`` will be a function such that
     ``forward(right_inverse(X)) == X`` (see
@@ -223,7 +225,7 @@ def register_parametrization(
 
     Args:
         module (nn.Module): module on which to register the parametrization
-        tensor_name (str): name of the parameter, buffer on which to register
+        tensor_name (str): name of the parameter or buffer on which to register
             the parametrization
         parametrization (nn.Module): the parametrization to register
 
@@ -231,7 +233,7 @@ def register_parametrization(
         Module: module
 
     Raises:
-        ValueError: if the module does not have a parameter or a buffer named ``tensor_name``
+        ValueError: if the module does not have a parameter or a buffer named :attr:`tensor_name`
 
     Examples:
         >>> import torch
@@ -263,7 +265,7 @@ def register_parametrization(
         original = getattr(module, tensor_name)
         # Delete the previous parameter or buffer
         delattr(module, tensor_name)
-        # If this is the first parametrization of a buffer or parameter of the module,
+        # If this is the first parametrization registered on the module,
         # we prepare the module to inject the property
         if not is_parametrized(module):
             # Change the class
@@ -278,7 +280,7 @@ def register_parametrization(
         )
     else:
         raise ValueError(
-            "Module '{}' does not have a parameter, a buffer, nor a "
+            "Module '{}' does not have a parameter, a buffer, or a "
             "parametrized element with name '{}'".format(module, tensor_name)
         )
     return module
@@ -286,8 +288,9 @@ def register_parametrization(
 
 def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
     r"""Returns ``True`` if module has an active parametrization.
-    If the argument ``name`` is specified, it returns ``True`` if
-    ``module[name]`` is parametrized.
+
+    If the argument :attr:`tensor_name` is specified, returns ``True`` if
+    ``module[tensor_name]`` is parametrized.
 
     Args:
         module (nn.Module): module to query
@@ -318,7 +321,7 @@ def remove_parametrizations(
     Args:
         module (nn.Module): module from which remove the parametrization
         tensor_name (str): name of the parametrization to be removed
-        leave_parametrized (bool, optional): leave the attribute ``tensor_name`` parametrized.
+        leave_parametrized (bool, optional): leave the attribute :attr:`tensor_name` parametrized.
             Default: ``True``
 
     Returns:
@@ -326,7 +329,8 @@ def remove_parametrizations(
 
     Raises:
         ValueError: if ``module[tensor_name]`` is not parametrized
-        ValueError: if ``leave_parametrized=True`` and the parametrization changes the ``dtype`` of the tensor
+        ValueError: if ``leave_parametrized=True`` and the parametrization changes the size or dtype
+            of the tensor
     """
 
     if not is_parametrized(module, tensor_name):
