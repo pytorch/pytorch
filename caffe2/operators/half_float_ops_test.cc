@@ -5,6 +5,8 @@
 #include "caffe2/operators/half_float_ops.h"
 #include "caffe2/utils/conversions.h"
 
+#include <c10/util/irange.h>
+
 #include <gtest/gtest.h>
 C10_DECLARE_string(caffe_test_root);
 
@@ -57,7 +59,7 @@ TEST(Float16, SimpleTest) {
   const TensorCPU& resultTensor = resultBlob->Get<Tensor>();
   EXPECT_EQ(resultTensor.numel(), 5);
 
-  for (auto i = 0; i < data.size(); ++i) {
+  for (const auto i : c10::irange(data.size())) {
     EXPECT_NEAR(resultTensor.data<float>()[i], data[i], 0.01);
   }
 }
@@ -71,7 +73,7 @@ TEST(Float16, UniformDistributionTest) {
   int64_t size = 5000000L;
   std::vector<int64_t> shape = {size, 32};
   long tot_size = shape[0];
-  for (int i = 1; i < shape.size(); i++) {
+  for (const auto i : c10::irange(1, shape.size())) {
     tot_size *= shape[i];
   }
   caffe2::AddArgument<std::vector<int64_t>>("shape", shape, &def);

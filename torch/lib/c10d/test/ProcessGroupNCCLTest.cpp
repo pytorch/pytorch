@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/autograd/profiler.h>
 #include <gtest/gtest.h>
@@ -272,10 +273,10 @@ void testAllreduce(const std::string& path, int rank, int size) {
   // Validation
   const int totalNumGPUs = test.numDevices() * size;
   const auto expected = (totalNumGPUs * (totalNumGPUs - 1)) / 2;
-  auto tensors = test.getTensors();
-  for (auto & tensor : tensors) {
-    auto data = tensor.data_ptr<float>();
-    for (auto k = 0; k < tensor.numel(); k++) {
+  const auto tensors = test.getTensors();
+  for (const auto & tensor : tensors) {
+    const auto *const data = tensor.data_ptr<float>();
+    for (const auto k : c10::irange(tensor.numel())) {
       EXPECT_EQ(data[k], expected)
           << "Allreduce ouputs do not match expected outputs";
     }
@@ -297,10 +298,10 @@ void testBroadcast(const std::string& path, int rank, int size) {
 
       // Check results
       const auto expected = (rootRank * numDevices + rootTensor);
-      auto tensors = test.getTensors();
-      for (auto & tensor : tensors) {
-        auto data = tensor.data_ptr<float>();
-        for (auto k = 0; k < tensor.numel(); k++) {
+      const auto tensors = test.getTensors();
+      for (const auto & tensor : tensors) {
+        const auto *const data = tensor.data_ptr<float>();
+        for (const auto k : c10::irange(tensor.numel())) {
           EXPECT_EQ(data[k], expected)
               << "Broadcast outputs do not match expected outputs";
         }
@@ -348,11 +349,11 @@ void testAllgather(const std::string& path, int rank, int size) {
   // Validation
   auto tensors = test.getOutputTensors();
   // device index
-  for (auto & i : tensors) {
+  for (auto & device : tensors) {
     // rank index
-    for (size_t j = 0; j < i.size(); ++j) {
+    for (const auto j : c10::irange(device.size())) {
       const auto expected = j;
-      auto& tensor = i[j];
+      auto& tensor = device[j];
       auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
         EXPECT_EQ(data[k], expected)

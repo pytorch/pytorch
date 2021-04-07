@@ -1,7 +1,8 @@
-from torch import Tensor
+from datetime import timedelta
 from enum import Enum
 from typing import Optional, List, Any, overload
-from datetime import timedelta
+
+from torch import Tensor
 
 # This module is defined in torch/csrc/distributed/c10d/init.cpp
 
@@ -13,11 +14,17 @@ class BuiltinCommHookType(Enum):
     FP16_COMPRESS = ...
 
 def _register_comm_hook(reducer: Reducer, state: Any, comm_hook: Any): ...
-def _register_builtin_comm_hook(reducer: Reducer, comm_hook_type: BuiltinCommHookType): ...
+def _register_builtin_comm_hook(
+    reducer: Reducer, comm_hook_type: BuiltinCommHookType
+): ...
 
-class _GradBucket:
+class GradBucket:
     def __init__(self, tensors: List[Tensor]): ...
+    def get_index(self) -> int: ...
     def get_tensors(self) -> List[Tensor]: ...
+    def get_per_parameter_tensors(self) -> List[Tensor]: ...
+    def is_the_last_bucket_to_allreduce(self) -> bool: ...
+    def set_tensor(self, tensor: Tensor, i: int) -> None: ...
 
 class Reducer:
     def __init__(
@@ -34,10 +41,7 @@ class Reducer:
     ...
 
 class Logger:
-    def __init__(
-        self,
-        reducer: Reducer
-    ): ...
+    def __init__(self, reducer: Reducer): ...
     def set_construction_data_and_log(
         self,
         module_name: str,
@@ -46,6 +50,13 @@ class Logger:
         broadcast_buffers: bool,
     ): ...
     ...
+
+def _get_debug_mode(): ...
+
+class _DistributedDebugLevel(Enum):
+    OFF = ...
+    INFO = ...
+    DETAIL = ...
 
 class ReduceOp(Enum):
     SUM = ...
@@ -66,8 +77,7 @@ class AllreduceOptions:
     reduceOp: ReduceOp
     timeout: timedelta
 
-class AllreduceCoalescedOptions(AllreduceOptions):
-    ...
+class AllreduceCoalescedOptions(AllreduceOptions): ...
 
 class ReduceOptions:
     reduceOp: ReduceOp
@@ -110,11 +120,7 @@ class Store:
     def wait(self, keys: List[str], timeout: timedelta): ...
 
 class FileStore(Store):
-    def __init__(
-        self,
-        path: str,
-        numWorkers: int
-    ): ...
+    def __init__(self, path: str, numWorkers: int): ...
 
 class HashStore(Store):
     def __init__(self): ...
@@ -130,11 +136,7 @@ class TCPStore(Store):
     ): ...
 
 class PrefixStore(Store):
-    def __init__(
-        self,
-        prefix: str,
-        store: Store
-    ): ...
+    def __init__(self, prefix: str, store: Store): ...
 
 class Work:
     def is_completed(self) -> bool: ...
@@ -148,6 +150,7 @@ class Work:
     ...
 
 class ProcessGroup:
+    class Options: ...
     def __init__(self): ...
     def rank(self) -> int: ...
     def size(self) -> int: ...
@@ -155,7 +158,7 @@ class ProcessGroup:
     def broadcast(
         self,
         tensors: List[Tensor],
-        opts = BroadcastOptions(),
+        opts=BroadcastOptions(),
     ) -> Work: ...
     @overload
     def broadcast(
@@ -168,43 +171,43 @@ class ProcessGroup:
         self,
         tensors: List[Tensor],
         opts: AllreduceOptions = AllreduceOptions(),
-    ) -> Work:  ...
+    ) -> Work: ...
     @overload
     def allreduce(
         self,
         tensors: List[Tensor],
-        op = ReduceOp.SUM,
+        op=ReduceOp.SUM,
     ) -> Work: ...
     @overload
     def allreduce(
         self,
         tensor: Tensor,
-        op = ReduceOp.SUM,
+        op=ReduceOp.SUM,
     ) -> Work: ...
     def allreduce_coalesced(
         self,
         tensors: List[Tensor],
-        opts = AllreduceCoalescedOptions(),
+        opts=AllreduceCoalescedOptions(),
     ) -> Work: ...
     @overload
     def reduce(
         self,
         tensors: List[Tensor],
-        opts = ReduceOptions(),
+        opts=ReduceOptions(),
     ) -> Work: ...
     @overload
     def reduce(
         self,
         tensor: Tensor,
         root: int,
-        op = ReduceOp.SUM,
+        op=ReduceOp.SUM,
     ) -> Work: ...
     @overload
     def allgather(
         self,
         output_tensors: List[List[Tensor]],
         input_tensors: List[Tensor],
-        opts = AllGatherOptions(),
+        opts=AllGatherOptions(),
     ) -> Work: ...
     @overload
     def allgather(
@@ -216,14 +219,14 @@ class ProcessGroup:
         self,
         output_lists: List[List[Tensor]],
         input_list: List[Tensor],
-        opts = AllGatherOptions(),
+        opts=AllGatherOptions(),
     ) -> Work: ...
     @overload
     def gather(
         self,
         output_tensors: List[List[Tensor]],
         input_tensors: List[Tensor],
-        opts = GatherOptions(),
+        opts=GatherOptions(),
     ) -> Work: ...
     @overload
     def gather(
@@ -237,7 +240,7 @@ class ProcessGroup:
         self,
         output_tensors: List[Tensor],
         input_tensors: List[List[Tensor]],
-        opts = ScatterOptions(),
+        opts=ScatterOptions(),
     ) -> Work: ...
     @overload
     def scatter(
@@ -251,7 +254,7 @@ class ProcessGroup:
         self,
         output_tensors: List[Tensor],
         input_tensors: List[List[Tensor]],
-        opts = ReduceScatterOptions(),
+        opts=ReduceScatterOptions(),
     ) -> Work: ...
     @overload
     def reduce_scatter(
@@ -266,7 +269,7 @@ class ProcessGroup:
         input_tensor: Tensor,
         output_split_sizes: List[int],
         input_split_sizes: List[int],
-        opts = AllToAllOptions(),
+        opts=AllToAllOptions(),
     ) -> Work: ...
     @overload
     def alltoall_base(
@@ -281,7 +284,7 @@ class ProcessGroup:
         self,
         output_tensor: List[Tensor],
         input_tensor: List[Tensor],
-        opts = AllToAllOptions(),
+        opts=AllToAllOptions(),
     ) -> Work: ...
     @overload
     def alltoall(
@@ -301,24 +304,18 @@ class ProcessGroup:
         srcRank: int,
         tag: int,
     ) -> Work: ...
-    def recv_anysource(
-        self,
-        tensors: List[Tensor],
-        tag: int
-    ) -> Work: ...
-    def barrier(
-        self,
-        opts = BarrierOptions()
-    ) -> Work: ...
+    def recv_anysource(self, tensors: List[Tensor], tag: int) -> Work: ...
+    def barrier(self, opts=BarrierOptions()) -> Work: ...
 
 class ProcessGroupRoundRobin(ProcessGroup): ...
+
 def _round_robin_process_groups(
     process_groups: List[ProcessGroup],
 ) -> ProcessGroupRoundRobin: ...
 
-
 class ProcessGroupGloo(ProcessGroup):
     class Device: ...
+    class Options: ...
     def __init__(
         self,
         store: Store,
@@ -327,10 +324,14 @@ class ProcessGroupGloo(ProcessGroup):
         timeout: timedelta,
     ): ...
     @staticmethod
-    def create_device(hostname = str(), interface = str()) -> Device: ...
+    def create_device(hostname=str(), interface=str()) -> Device: ...
+    ...
+    @staticmethod
+    def create_default_device() -> Device: ...
     ...
 
 class ProcessGroupNCCL(ProcessGroup):
+    class Options: ...
     def __init__(
         self,
         store: Store,
@@ -358,7 +359,8 @@ def _compute_bucket_assignment_by_size(
     tensors: List[Tensor],
     bucket_size: int,
     expect_sparse_gradient: List[bool],
-    tensor_indices: List[int]) -> List[List[int]]: ...
+    tensor_indices: List[int],
+) -> List[List[int]]: ...
 def _broadcast_coalesced(
     process_group: ProcessGroup,
     tensors: List[Tensor],
@@ -366,3 +368,9 @@ def _broadcast_coalesced(
     src: int,
 ): ...
 def _test_python_store(store: Store): ...
+def _verify_replicas_within_process(
+    replicas: List[List[Tensor]], expect_sparse_gradient: List[List[bool]]
+): ...
+def _verify_model_across_ranks(
+    process_group: ProcessGroup, replicas: List[List[Tensor]]
+): ...

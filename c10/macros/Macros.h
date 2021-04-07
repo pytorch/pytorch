@@ -186,10 +186,10 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_NOINLINE
 #endif
 
-#if __has_attribute(always_inline) || defined(__GNUC__)
-#define C10_ALWAYS_INLINE __attribute__((__always_inline__)) inline
-#elif defined(_MSC_VER)
+#if defined(_MSC_VER)
 #define C10_ALWAYS_INLINE __forceinline
+#elif __has_attribute(always_inline) || defined(__GNUC__)
+#define C10_ALWAYS_INLINE __attribute__((__always_inline__)) inline
 #else
 #define C10_ALWAYS_INLINE inline
 #endif

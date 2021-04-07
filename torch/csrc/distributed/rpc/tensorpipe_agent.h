@@ -38,14 +38,7 @@ class Context;
 } // namespace transport
 
 namespace channel {
-template <typename TBuffer>
 class Context;
-using CpuContext = Context<CpuBuffer>;
-
-#ifdef USE_CUDA_NOT_ROCM
-using CudaContext = Context<CudaBuffer>;
-#endif
-
 } // namespace channel
 
 using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
@@ -71,7 +64,7 @@ struct TransportRegistration {
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct CpuChannelRegistration {
-  std::shared_ptr<tensorpipe::channel::CpuContext> channel;
+  std::shared_ptr<tensorpipe::channel::Context> channel;
   int64_t priority;
 };
 
@@ -80,7 +73,7 @@ C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 
 struct CudaChannelRegistration {
 #ifdef USE_CUDA_NOT_ROCM
-  std::shared_ptr<tensorpipe::channel::CudaContext> channel;
+  std::shared_ptr<tensorpipe::channel::Context> channel;
   int64_t priority;
 #endif
 };
@@ -231,7 +224,7 @@ class TensorPipeAgent : public RpcAgent {
   void removeFromTimeoutMap(uint64_t messageId);
 
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
-  void collectNames();
+  void prepareNames();
 
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
 
@@ -336,7 +329,8 @@ class TensorPipeAgent : public RpcAgent {
   struct ClientPipe {
     explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe) : pipe_(pipe) {}
     std::shared_ptr<tensorpipe::Pipe> pipe_;
-    bool readError_{false};
+    mutable std::mutex mutex_;
+    bool inError_{false};
     // Map from Message Request ID's to corresponding futures.
     std::unordered_map<uint64_t, std::shared_ptr<AtomicJitFuture>>
         pendingResponseMessage_;
@@ -348,6 +342,8 @@ class TensorPipeAgent : public RpcAgent {
   ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;
   std::shared_ptr<tensorpipe::Listener> listener_;
+
+  mutable std::mutex connectedPipesMutex_;
   std::unordered_map<worker_id_t, ClientPipe> connectedPipes_;
 
   // Maps keyed on name and id for easy WorkerInfo lookup.
@@ -364,8 +360,7 @@ class TensorPipeAgent : public RpcAgent {
   // group, but probably one day we might want to re-implement them using RPCs.
   const c10::intrusive_ptr<::c10d::ProcessGroup> processGroup_;
 
-  mutable std::mutex mutex_;
-  uint64_t nextMessageID_{0};
+  std::atomic<uint64_t> nextMessageID_{0};
 
   // Metadata used for tracking of whether certain RPCs have timed out or not.
   struct TimeoutMessageMetadata {
@@ -408,6 +403,11 @@ class TensorPipeAgent : public RpcAgent {
     return std::chrono::time_point_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() + timeout);
   }
+
+  // Handle error on an outgoing pipe
+  void handleClientError(
+      ClientPipe& clientPipe,
+      const tensorpipe::Error& error);
 
   // This is a generic struct for capturing Time-Series Metrics. It keeps a
   // running sum and count of data points (observations), and can return an
