@@ -50,6 +50,35 @@ class TestCUDA(JitTestCase):
         super(TestCUDA, self).tearDown()
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_cuda_synchronize(self):
+        # Test device synchronization.
+
+        @torch.jit.script
+        def test_device_synchronize():
+            prev_current_device_index = torch.cuda.current_device()
+            torch.cuda.synchronize()
+            torch.cuda.synchronize('cuda')
+            torch.cuda.synchronize('cuda:0')
+            torch.cuda.synchronize(0)
+            torch.cuda.synchronize(torch.device('cuda:1'))
+            after_current_device_index = torch.cuda.current_device()
+
+            return prev_current_device_index == after_current_device_index
+
+        @torch.jit.script
+        def test_multi_device_synchronize():
+            torch.cuda.synchronize(torch.device('cuda:0'))
+            prev_current_device_index = torch.cuda.current_device()
+            torch.cuda.synchronize(1)
+            after_current_device_index = torch.cuda.current_device()
+
+            return prev_current_device_index == after_current_device_index
+
+        self.assertTrue(test_device_synchronize)
+        self.assertTrue(test_multi_device_synchronize)
+
+    @skipIfRocm
     def test_stream_args(self):
         # Test stream creation with default arguments
         @torch.jit.script
