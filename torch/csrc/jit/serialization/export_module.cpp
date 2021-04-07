@@ -567,7 +567,7 @@ class ScriptModuleSerializer {
         ". But the request backport model version is ",
         backport_model_version);
 
-    // From v5 to v4
+    // From bytecode version v5 to v4
     if (backport_model_version == kBytecodeVersionV4) {
       use_tensors_archive_table_ = false;
     }
@@ -577,7 +577,7 @@ class ScriptModuleSerializer {
   void writeByteCode(
       const Module& module,
       bool save_mobile_debug_info,
-      uint64_t version = caffe2::serialize::kProducedBytecodeVersion) {
+      uint64_t bytecode_version = caffe2::serialize::kProducedBytecodeVersion) {
     // Can only support generating model version within
     // kMinProducedBytecodeVersion and kProducedBytecodeVersion. bytecode
     // version difference chart is following: v4 - jit and mobile both write
@@ -596,28 +596,28 @@ class ScriptModuleSerializer {
     //     22736),), 0, (1, 464, 7, 7), (22736, 49, 7, 1), False,
     //     collections.OrderedDict())
     TORCH_CHECK(
-        kMinProducedBytecodeVersion <= version &&
-            version <= caffe2::serialize::kProducedBytecodeVersion,
+        kMinProducedBytecodeVersion <= bytecode_version &&
+            bytecode_version <= caffe2::serialize::kProducedBytecodeVersion,
         "Lite Interpreter can only produce bytecode version between ",
         kMinProducedBytecodeVersion,
         " and ",
         caffe2::serialize::kProducedBytecodeVersion,
         ". But the request model version is ",
-        version);
+        bytecode_version);
 
     use_tensors_archive_table_ = true;
-    for (auto current_version = caffe2::serialize::kProducedBytecodeVersion;
-         current_version > version;
-         current_version--) {
-      backPortByteCode(current_version);
+    for (auto current_bytecode_version = caffe2::serialize::kProducedBytecodeVersion;
+         current_bytecode_version > bytecode_version;
+         current_bytecode_version--) {
+      backPortByteCode(current_bytecode_version);
     }
 
     std::vector<c10::IValue> elements;
-    elements.emplace_back(static_cast<int64_t>(version));
+    elements.emplace_back(static_cast<int64_t>(bytecode_version));
     c10::optional<std::vector<c10::IValue>> debug_info_elements;
     if (save_mobile_debug_info) {
       debug_info_elements = std::vector<c10::IValue>();
-      debug_info_elements->emplace_back(static_cast<int64_t>(version));
+      debug_info_elements->emplace_back(static_cast<int64_t>(bytecode_version));
     }
 
     moduleMethodsTuple(
