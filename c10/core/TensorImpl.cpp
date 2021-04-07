@@ -415,7 +415,9 @@ void TensorImpl::copy_tensor_metadata(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) {
   copy_tensor_metadata_except_version_counter(src_impl, dest_impl, allow_tensor_metadata_change);
-  dest_impl->set_version_counter(version_counter);
+  if (!dest_impl->is_inference_tensor()) {
+    dest_impl->set_version_counter(version_counter);
+  }
 }
 
 void TensorImpl::copy_tensor_metadata(
@@ -424,7 +426,9 @@ void TensorImpl::copy_tensor_metadata(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) {
   copy_tensor_metadata_except_version_counter(src_impl, dest_impl, allow_tensor_metadata_change);
-  dest_impl->set_version_counter(std::move(version_counter));
+  if (!dest_impl->is_inference_tensor()) {
+    dest_impl->set_version_counter(std::move(version_counter));
+  }
 }
 
 namespace impl {
