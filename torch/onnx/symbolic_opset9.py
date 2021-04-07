@@ -450,6 +450,13 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
+def mv(g, mat, vec):
+    vec = sym_help._unsqueeze_helper(g, vec, [0])
+    vec = t(g, vec)
+    out = matmul(g, mat, vec)
+    return sym_help._squeeze_helper(g, out, [1])
+
+
 def expand(g, self, size, implicit):
     size = sym_help._maybe_get_const(size, 'is')
     if not sym_help._is_value(size):
