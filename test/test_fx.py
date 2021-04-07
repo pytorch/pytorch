@@ -2,6 +2,7 @@ import builtins
 import contextlib
 import copy
 import functools
+import inspect
 import math
 import numbers
 import operator
@@ -18,6 +19,7 @@ from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
 import torch._C._fx  # type: ignore
 from torch.fx.node import Target, Argument
@@ -2259,6 +2261,343 @@ class TestOperatorSignatures(JitTestCase):
             assert op.name in known_no_schema
 
 instantiate_device_type_tests(TestOperatorSignatures, globals())
+
+
+# Returns a database of args & kwargs that can be used to construct each module.
+# Each entry is in class -> (args, kwargs) format.
+# Example: torch.nn.Linear -> ((10, 5), {})
+# TODO: Merge this in with the initial ModuleInfo implementation.
+def build_constructor_arg_db():
+    return {
+        torch.nn.AdaptiveAvgPool1d: ((5,), {}),
+        torch.nn.AdaptiveAvgPool2d: ((5,), {}),
+        torch.nn.AdaptiveAvgPool3d: ((5,), {}),
+        torch.nn.AdaptiveLogSoftmaxWithLoss: ((100, 20, [5, 10, 15]), {}),
+        torch.nn.AdaptiveMaxPool1d: ((5,), {}),
+        torch.nn.AdaptiveMaxPool2d: ((5,), {}),
+        torch.nn.AdaptiveMaxPool3d: ((5,), {}),
+        torch.nn.AlphaDropout: ((), {}),
+        torch.nn.AvgPool1d: ((3,), {}),
+        torch.nn.AvgPool2d: ((3,), {}),
+        torch.nn.AvgPool3d: ((3,), {}),
+        torch.nn.BCELoss: ((), {}),
+        torch.nn.BCEWithLogitsLoss: ((), {}),
+        torch.nn.BatchNorm1d: ((5,), {}),
+        torch.nn.BatchNorm2d: ((5,), {}),
+        torch.nn.BatchNorm3d: ((5,), {}),
+        torch.nn.Bilinear: ((2, 3, 4), {}),
+        torch.nn.CELU: ((), {}),
+        torch.nn.CTCLoss: ((), {}),
+        torch.nn.ChannelShuffle: ((4,), {}),
+        torch.nn.ConstantPad1d: ((2, 3.5), {}),
+        torch.nn.ConstantPad2d: ((2, 3.5), {}),
+        torch.nn.ConstantPad3d: ((2, 3.5), {}),
+        torch.nn.Conv1d: ((3, 3, 3), {}),
+        torch.nn.Conv2d: ((3, 3, 3), {}),
+        torch.nn.Conv3d: ((3, 3, 3), {}),
+        torch.nn.ConvTranspose1d: ((3, 3, 3), {}),
+        torch.nn.ConvTranspose2d: ((3, 3, 3), {}),
+        torch.nn.ConvTranspose3d: ((3, 3, 3), {}),
+        torch.nn.CosineEmbeddingLoss: ((), {}),
+        torch.nn.CosineSimilarity: ((), {}),
+        torch.nn.CrossEntropyLoss: ((), {}),
+        torch.nn.CrossMapLRN2d: ((5,), {}),
+        torch.nn.Dropout2d: ((), {}),
+        torch.nn.Dropout3d: ((), {}),
+        torch.nn.Dropout: ((), {}),
+        torch.nn.ELU: ((), {}),
+        torch.nn.Embedding: ((10, 5), {}),
+        torch.nn.EmbeddingBag: ((10, 5), {}),
+        torch.nn.FeatureAlphaDropout: ((), {}),
+        torch.nn.Flatten: ((), {}),
+        torch.nn.Fold: ((5, 2), {}),
+        torch.nn.FractionalMaxPool2d: ((5, 2), {}),
+        torch.nn.FractionalMaxPool3d: ((5, 2), {}),
+        torch.nn.GELU: ((), {}),
+        torch.nn.GLU: ((), {}),
+        torch.nn.GRU: ((5, 10), {}),
+        torch.nn.GRUCell: ((5, 10), {}),
+        torch.nn.GaussianNLLLoss: ((), {}),
+        torch.nn.GroupNorm: ((3, 6, 1e-5, True), {}),
+        torch.nn.Hardshrink: ((), {}),
+        torch.nn.Hardsigmoid: ((), {}),
+        torch.nn.Hardswish: ((), {}),
+        torch.nn.Hardtanh: ((), {}),
+        torch.nn.HingeEmbeddingLoss: ((), {}),
+        torch.nn.HuberLoss: ((), {}),
+        torch.nn.Identity: ((), {}),
+        torch.nn.InstanceNorm1d: ((5, 1e-5, 0.1, True), {}),
+        torch.nn.InstanceNorm2d: ((5, 1e-5, 0.1, True), {}),
+        torch.nn.InstanceNorm3d: ((5, 1e-5, 0.1, True), {}),
+        torch.nn.KLDivLoss: ((), {}),
+        torch.nn.L1Loss: ((), {}),
+        torch.nn.LPPool1d: ((2, 3), {}),
+        torch.nn.LPPool2d: ((2, 3), {}),
+        torch.nn.LSTM: ((5, 10), {}),
+        torch.nn.LSTMCell: ((5, 10), {}),
+        torch.nn.LayerNorm: ((2,), {}),
+        torch.nn.LazyBatchNorm1d: ((), {}),
+        torch.nn.LazyBatchNorm2d: ((), {}),
+        torch.nn.LazyBatchNorm3d: ((), {}),
+        torch.nn.LazyConv1d: ((5, 2), {}),
+        torch.nn.LazyConv2d: ((5, 2), {}),
+        torch.nn.LazyConv3d: ((5, 2), {}),
+        torch.nn.LazyConvTranspose1d: ((5, 2), {}),
+        torch.nn.LazyConvTranspose2d: ((5, 2), {}),
+        torch.nn.LazyConvTranspose3d: ((5, 2), {}),
+        torch.nn.LazyLinear: ((5,), {}),
+        torch.nn.LeakyReLU: ((), {}),
+        torch.nn.Linear: ((10, 5), {}),
+        torch.nn.LocalResponseNorm: ((2,), {}),
+        torch.nn.LogSigmoid: ((), {}),
+        torch.nn.LogSoftmax: ((), {}),
+        torch.nn.MSELoss: ((), {}),
+        torch.nn.MarginRankingLoss: ((), {}),
+        torch.nn.MaxPool1d: ((3,), {}),
+        torch.nn.MaxPool2d: ((3,), {}),
+        torch.nn.MaxPool3d: ((3,), {}),
+        torch.nn.MaxUnpool1d: ((5,), {}),
+        torch.nn.MaxUnpool2d: ((5,), {}),
+        torch.nn.MaxUnpool3d: ((5,), {}),
+        torch.nn.ModuleDict: ((), {}),
+        torch.nn.ModuleList: ((), {}),
+        torch.nn.MultiLabelMarginLoss: ((), {}),
+        torch.nn.MultiLabelSoftMarginLoss: ((), {}),
+        torch.nn.MultiMarginLoss: ((), {}),
+        torch.nn.MultiheadAttention: ((100, 2), {}),
+        torch.nn.NLLLoss2d: ((), {}),
+        torch.nn.NLLLoss: ((), {}),
+        torch.nn.PReLU: ((), {}),
+        torch.nn.PairwiseDistance: ((), {}),
+        torch.nn.ParameterDict: ((), {}),
+        torch.nn.ParameterList: ((), {}),
+        torch.nn.PixelShuffle: ((2,), {}),
+        torch.nn.PixelUnshuffle: ((2,), {}),
+        torch.nn.PoissonNLLLoss: ((), {}),
+        torch.nn.RNN: ((5, 10), {}),
+        torch.nn.RNNBase: (('LSTM', 5, 10), {}),
+        torch.nn.RNNCell: ((5, 10), {}),
+        torch.nn.RNNCellBase: ((5, 10, True, 2), {}),
+        torch.nn.RReLU: ((), {}),
+        torch.nn.ReLU6: ((), {}),
+        torch.nn.ReLU: ((), {}),
+        torch.nn.ReflectionPad1d: ((2,), {}),
+        torch.nn.ReflectionPad2d: ((2,), {}),
+        torch.nn.ReplicationPad1d: ((2,), {}),
+        torch.nn.ReplicationPad2d: ((2,), {}),
+        torch.nn.ReplicationPad3d: ((2,), {}),
+        torch.nn.SELU: ((), {}),
+        torch.nn.Sequential: ((), {}),
+        torch.nn.SiLU: ((), {}),
+        torch.nn.Sigmoid: ((), {}),
+        torch.nn.SmoothL1Loss: ((), {}),
+        torch.nn.SoftMarginLoss: ((), {}),
+        torch.nn.Softmax2d: ((), {}),
+        torch.nn.Softmax: ((), {}),
+        torch.nn.Softmin: ((), {}),
+        torch.nn.Softplus: ((), {}),
+        torch.nn.Softshrink: ((), {}),
+        torch.nn.Softsign: ((), {}),
+        torch.nn.SyncBatchNorm: ((5,), {}),
+        torch.nn.Tanh: ((), {}),
+        torch.nn.Tanhshrink: ((), {}),
+        torch.nn.Threshold: ((0.1, 20), {}),
+        torch.nn.Transformer: ((), {}),
+        torch.nn.TransformerDecoder: ((torch.nn.TransformerDecoderLayer, 3), {}),
+        torch.nn.TransformerDecoderLayer: ((10, 2), {}),
+        torch.nn.TransformerEncoder: ((torch.nn.TransformerEncoderLayer, 3), {}),
+        torch.nn.TransformerEncoderLayer: ((10, 2), {}),
+        torch.nn.TripletMarginLoss: ((), {}),
+        torch.nn.TripletMarginWithDistanceLoss: ((), {}),
+        torch.nn.Unflatten: ((1, (2, 5, 5)), {}),
+        torch.nn.Unfold: ((3,), {}),
+        torch.nn.Upsample: ((), {}),
+        torch.nn.UpsamplingBilinear2d: ((), {}),
+        torch.nn.UpsamplingNearest2d: ((), {}),
+        torch.nn.ZeroPad2d: ((0,), {}),
+        torch.nn.qat.Conv2d: ((3, 3, 3), {
+            'qconfig': torch.quantization.default_qconfig,
+        }),
+        torch.nn.qat.Conv3d: ((3, 3, 3), {
+            'qconfig': torch.quantization.default_qconfig,
+        }),
+        torch.nn.qat.Linear: ((5, 2), {
+            'qconfig': torch.quantization.default_qconfig,
+        }),
+        torch.nn.quantizable.LSTM: ((5, 6), {}),
+        torch.nn.quantizable.LSTMCell: ((5, 6), {}),
+        torch.nn.quantizable.MultiheadAttention: ((10, 2), {}),
+        torch.nn.quantized.BatchNorm2d: ((2,), {}),
+        torch.nn.quantized.BatchNorm3d: ((2,), {}),
+        torch.nn.quantized.Conv1d: ((3, 3, 3), {}),
+        torch.nn.quantized.Conv2d: ((3, 3, 3), {}),
+        torch.nn.quantized.Conv3d: ((3, 3, 3), {}),
+        torch.nn.quantized.ConvTranspose1d: ((3, 3, 3), {}),
+        torch.nn.quantized.ConvTranspose2d: ((3, 3, 3), {}),
+        torch.nn.quantized.ConvTranspose3d: ((16, 33, (3, 3, 5)), {
+            'stride': (2, 1, 1),
+            'padding': (4, 2, 2),
+            'output_padding': (2, 2, 2),
+            'dilation': (1, 1, 1),
+        }),
+        torch.nn.quantized.DeQuantize: ((), {}),
+        torch.nn.quantized.ELU: ((0.01, 0), {}),
+        torch.nn.quantized.Embedding: ((10, 3), {}),
+        torch.nn.quantized.EmbeddingBag: ((10, 3), {}),
+        torch.nn.quantized.GroupNorm: ((2, 3, torch.nn.Parameter(torch.tensor(2.)),
+                                        torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
+        torch.nn.quantized.Hardswish: ((0.1, 0,), {}),
+        torch.nn.quantized.InstanceNorm1d: ((2, torch.nn.Parameter(torch.tensor(2.)),
+                                             torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
+        torch.nn.quantized.InstanceNorm2d: ((2, torch.nn.Parameter(torch.tensor(2.)),
+                                             torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
+        torch.nn.quantized.InstanceNorm3d: ((2, torch.nn.Parameter(torch.tensor(2.)),
+                                             torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
+        torch.nn.quantized.LayerNorm: ((2, torch.nn.Parameter(torch.tensor(2.)),
+                                        torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
+        torch.nn.quantized.LeakyReLU: ((0.01, 0), {}),
+        torch.nn.quantized.Linear: ((5, 2), {}),
+        torch.nn.quantized.MaxPool2d: ((3,), {}),
+        torch.nn.quantized.Quantize: ((0.1, 0), {
+            'dtype': torch.int16,
+        }),
+        torch.nn.quantized.ReLU6: ((), {}),
+        torch.nn.quantized.Sigmoid: ((0.1, 0), {}),
+        torch.nn.quantized.FloatFunctional: ((), {}),
+        torch.nn.quantized.FXFloatFunctional: ((), {}),
+        torch.nn.quantized.QFunctional: ((), {}),
+    }
+
+
+# Instantiates the given class with the given args, kwargs, optionally on a given device.
+def instantiate_class(cls, args, kwargs, extra_kwargs):
+    return cls(*args, **kwargs) if extra_kwargs is None else cls(*args, **kwargs, **extra_kwargs)
+
+
+# Returns a set of args / kwargs that can be used to construct the module.
+def get_example_args(module_cls, constructor_arg_db, extra_kwargs=None):
+    assert module_cls in constructor_arg_db, \
+        f"No entry for {module_cls} in the constructor arg DB. Please add it to pass these tests."
+    args, kwargs = constructor_arg_db[module_cls]
+    extra_kwargs = {} if extra_kwargs is None else extra_kwargs
+
+    # Recursively instantiate args / kwargs that are class objects.
+    args = [instantiate_class(arg, *get_example_args(arg, constructor_arg_db), extra_kwargs=extra_kwargs)
+            if inspect.isclass(arg) else torch.nn.Parameter(arg.to(**extra_kwargs))
+            if isinstance(arg, torch.nn.Parameter) else arg for arg in args]
+    kwargs = {k: instantiate_class(v, *get_example_args(v, constructor_arg_db), extra_kwargs=extra_kwargs)
+              if inspect.isclass(v) else torch.nn.Parameter(v.to(*extra_kwargs))
+              if isinstance(v, torch.nn.Parameter) else v for k, v in kwargs.items()}
+    kwargs.update(extra_kwargs)
+    return args, kwargs
+
+
+def generate_test_func(test_cls, module_cls, constructor_arg_db):
+    # Generate a function for testing the given module.
+    def run_test(test_cls, module_cls=module_cls):
+        args, kwargs = get_example_args(module_cls, constructor_arg_db)
+        m = module_cls(*args, **kwargs)
+        symbolic_traced : torch.fx.GraphModule = symbolic_trace(m)
+    return run_test
+
+
+def generate_tests(test_cls, constructor_arg_db):
+    # test all modules underneath these namespaces...
+    NAMESPACES = [
+        torch.nn,
+        torch.nn.qat,
+        torch.nn.quantizable,
+        torch.nn.quantized,
+    ]
+    # ...except these
+    MODULES_TO_SKIP = {
+        torch.nn.Module,  # no forward() implemented
+        torch.nn.Container,  # deprecated
+        torch.nn.NLLLoss2d,  # deprecated
+        torch.nn.quantized._ConvNd,  # base class in __all__ for some reason
+        torch.nn.quantized.QFunctional,  # not intended to use forward()
+        torch.nn.quantized.FloatFunctional,  # not intended to use forward()
+        torch.nn.quantized.FXFloatFunctional,  # not intended to use forward()
+        torch.nn.RNNBase,  # abstract base class
+        torch.nn.RNNCellBase,  # abstract base class
+        torch.nn.ParameterList,  # no forward() implemented
+        torch.nn.ParameterDict,  # no forward() implemented
+        torch.nn.ModuleList,  # no forward() implemented
+        torch.nn.ModuleDict,  # no forward() implemented
+    }
+    # these modules requires FBGEMM backend to instantiate
+    MODULES_THAT_REQUIRE_FBGEMM = {
+        torch.nn.quantized.Conv1d,
+        torch.nn.quantized.Conv2d,
+        torch.nn.quantized.Conv3d,
+        torch.nn.quantized.ConvTranspose1d,
+        torch.nn.quantized.ConvTranspose2d,
+        torch.nn.quantized.ConvTranspose3d,
+        torch.nn.quantized.Linear,
+    }
+    # these modules currently cannot be symbolically traced (yet)
+    UNTRACEABLE_MODULES = {
+        torch.nn.AdaptiveLogSoftmaxWithLoss,
+        torch.nn.BatchNorm1d,
+        torch.nn.BatchNorm2d,
+        torch.nn.BatchNorm3d,
+        torch.nn.ConvTranspose1d,
+        torch.nn.ConvTranspose2d,
+        torch.nn.ConvTranspose3d,
+        torch.nn.CrossMapLRN2d,
+        torch.nn.GRU,
+        torch.nn.InstanceNorm1d,
+        torch.nn.InstanceNorm2d,
+        torch.nn.InstanceNorm3d,
+        torch.nn.LSTM,
+        torch.nn.LSTMCell,
+        torch.nn.LazyBatchNorm1d,
+        torch.nn.LazyBatchNorm2d,
+        torch.nn.LazyBatchNorm3d,
+        torch.nn.LazyConvTranspose1d,
+        torch.nn.LazyConvTranspose2d,
+        torch.nn.LazyConvTranspose3d,
+        torch.nn.RNN,
+        torch.nn.Softmax2d,
+        torch.nn.SyncBatchNorm,
+        torch.nn.Transformer,
+        torch.nn.TripletMarginWithDistanceLoss,
+        torch.nn.qat.Conv2d,
+        torch.nn.qat.Conv3d,
+        torch.nn.qat.Linear,
+        torch.nn.quantizable.LSTM,
+        torch.nn.quantizable.LSTMCell,
+        torch.nn.quantizable.MultiheadAttention,
+        torch.nn.quantized.Conv1d,
+        torch.nn.quantized.Conv2d,
+        torch.nn.quantized.Conv3d,
+        torch.nn.quantized.ConvTranspose1d,
+        torch.nn.quantized.ConvTranspose2d,
+        torch.nn.quantized.ConvTranspose3d,
+        torch.nn.quantized.ELU,
+        torch.nn.quantized.Hardswish,
+    }
+    for namespace in NAMESPACES:
+        # the "nn" in "torch.nn"
+        namespace_basename = namespace.__name__.split('.')[-1]
+        for module_name in namespace.modules.__all__:
+            # class object for this module (e.g. torch.nn.Linear)
+            module_cls = getattr(namespace.modules, module_name)
+            if module_cls in MODULES_TO_SKIP or module_cls in UNTRACEABLE_MODULES:
+                continue
+            # Generate a function for testing this module and setattr it onto the test class.
+            run_test = generate_test_func(test_cls, module_cls, constructor_arg_db)
+            test_name = f'test_{namespace_basename}_{module_name}'
+            if module_cls in MODULES_THAT_REQUIRE_FBGEMM:
+                run_test = skipIfNoFBGEMM(run_test)
+            setattr(TestModuleTracing, test_name, run_test)
+
+
+class TestModuleTracing(JitTestCase):
+    pass
+
+
+generate_tests(TestModuleTracing, build_constructor_arg_db())
 
 if __name__ == '__main__':
     run_tests()
