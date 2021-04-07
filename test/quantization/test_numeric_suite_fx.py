@@ -326,7 +326,6 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
                 len(results) == results_len,
                 f"expected len {results_len}, got len {len(results)}")
             self.assert_ns_compare_dict_valid(results)
-            return results
 
     def _test_match_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
