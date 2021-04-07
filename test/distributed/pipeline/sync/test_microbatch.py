@@ -44,7 +44,7 @@ def test_batch_non_atomic():
 
 def test_batch_call():
     a = Batch(torch.tensor(42))
-    b = Batch((torch.tensor(42), torch.tensor(21)))
+    b = Batch((torch.tensor(42), torch.tensor(21)), is_single_sequence=True)
 
     def f(x):
         return x

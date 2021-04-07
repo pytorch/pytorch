@@ -68,7 +68,7 @@ def _verify_module(module: nn.Sequential) -> None:
 
 
 def _verify_splitting(
-    module: nn.Sequential, partitions: List[nn.Module], devices: List[torch.device]
+    partitions: nn.Sequential, devices: List[torch.device]
 ) -> None:
     num_parameters = len(list(module.parameters()))
     num_child_parameters = sum(len(list(child.parameters())) for child in module.children())
@@ -117,7 +117,7 @@ def _retrieve_device(module: nn.Module) -> torch.device:
 
     return device if device is not None else torch.device("cpu")
 
-def _retrieve_devices(modules: nn.Sequential) -> Tuple[List[nn.Module], List[torch.device]]:
+def _retrieve_devices(modules: nn.Sequential) -> List[torch.device]:
     devices = []
     for name, module in modules.named_children():
         devices.append(_retrieve_device(module))
@@ -242,7 +242,7 @@ class Pipe(Module):
 
         self.partitions = module
         self.devices = _retrieve_devices(module)
-        _verify_splitting(module, self.partitions, self.devices)
+        _verify_splitting(self.partitions, self.devices)
 
         self._copy_streams: List[List[AbstractStream]] = []
         self._skip_layout = inspect_skip_layout(self.partitions)

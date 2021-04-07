@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
@@ -81,7 +82,7 @@ class Pipeline:
 
     def __init__(
         self,
-        partitions: List[nn.Module],
+        partitions: nn.Sequential,
         devices: List[torch.device],
         copy_streams: List[List[AbstractStream]],
         skip_layout: SkipLayout,
