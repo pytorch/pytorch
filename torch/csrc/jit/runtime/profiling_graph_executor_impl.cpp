@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
@@ -133,7 +132,7 @@ static bool needsGradientInProfilingMode(Block* b) {
 bool guardDifferentiableGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   bool all_inputs_seen = true;
-  for (const auto i : c10::irange(gi.size())) {
+  for (size_t i = 0; i < gi.size(); i++) {
     auto ty = gi[i]->type()->cast<TensorType>();
     if (ty) {
       auto n = gi[i]->uses().at(0).user;
@@ -707,7 +706,7 @@ void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(
       WithInsertPoint wip{*it};
       auto function_call = insertFallbackFunctionCall(
           b->owningGraph(), fallback_func, it->inputs());
-      for (const auto i : c10::irange(function_call->outputs().size())) {
+      for (size_t i = 0; i < function_call->outputs().size(); i++) {
         it->output(i)->replaceAllUsesWith(function_call->output(i));
       }
       it.destroyCurrent();

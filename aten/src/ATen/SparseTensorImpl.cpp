@@ -53,6 +53,12 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
   set_storage_access_should_throw();
 }
 
+void SparseTensorImpl::release_resources() {
+  TensorImpl::release_resources();
+  values_.reset();
+  indices_.reset();
+}
+
 IntArrayRef SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }

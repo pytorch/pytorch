@@ -600,14 +600,22 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //  Module m =
   //  load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
   //  m._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
-     Module m = load(
-         "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
-     m._save_for_mobile(
-         "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
+  //  Module m =
+  //  load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/prod_models/model_GEvf3Ai5k7F7yyQDAHSqkcT3BphpbmQwAAAA.ptl");
+  //  Module m = load(
+  //      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
+  //  m._save_for_mobile(
+  //      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small_v4.ptl",
+  //      {},
+  //      caffe2::serialize::kProducedBytecodeVersion - 1);
+  //  m._save_for_mobile(
+  //      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small_v5.ptl",
+  //      {},
+  //      caffe2::serialize::kProducedBytecodeVersion);
 
   //  c._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/test.ptl");
-//    mobile::Module bc =
-//    _load_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
+  //  mobile::Module cc = _load_for_mobile(
+  //      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
 
   std::stringstream ss;
   c._save_for_mobile(ss, {}, caffe2::serialize::kProducedBytecodeVersion, true);

@@ -35,6 +35,8 @@ char const* toString(OpCode op);
 namespace {
 
 static constexpr const char* kArchiveNameConstants = "constants";
+static constexpr uint64_t kMinProducedBytecodeVersion = 0x4L;
+static constexpr uint64_t kBytecodeVersionV4 = 0x4L;
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
@@ -400,25 +402,19 @@ class ScriptModuleSerializer {
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
 
-    writeArchive(kArchiveNameConstants, c10::ivalue::Tuple::create(ivalue_constants));
+    writeArchive(
+        kArchiveNameConstants, c10::ivalue::Tuple::create(ivalue_constants));
     // Only generate bytecode when a valid version is given.
     if (version.has_value()) {
-      static constexpr uint64_t bytecode_v5 = 0x5l;
-      if(version.value() == bytecode_v5) {
-        use_tensors_archive_table_ = true;
-      }
-      if(use_tensors_archive_table_) {
-        for (size_t i = 0; i < ivalue_constants.size(); i++) {
-          if (ivalue_constants[i].isTensor() &&
-              tensors_archive_table_.find(ivalue_constants[i].toTensor()) ==
-              tensors_archive_table_.end()) {
-            tensors_archive_table_[ivalue_constants[i].toTensor()] =
-                std::make_pair(kArchiveNameConstants, i);
-          }
+      for (size_t i = 0; i < ivalue_constants.size(); i++) {
+        if (ivalue_constants[i].isTensor() &&
+            tensors_archive_table_.find(ivalue_constants[i].toTensor()) ==
+                tensors_archive_table_.end()) {
+          tensors_archive_table_[ivalue_constants[i].toTensor()] =
+              std::make_pair(kArchiveNameConstants, i);
         }
       }
-      writeByteCode(
-          module, save_mobile_debug_info, version.value());
+      writeByteCode(module, save_mobile_debug_info, version.value());
       writeMobileMetadata(module, extra_files);
     }
 
@@ -442,10 +438,8 @@ class ScriptModuleSerializer {
           return type_name_uniquer_.getUniqueName(t);
         },
         &memoizedClassTypes);
-    bool supportTensorsArchiveTable = false;
-    if (!tensors_archive_table_.empty()) {
+    if (use_tensors_archive_table_ && !tensors_archive_table_.empty()) {
       data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
-      supportTensorsArchiveTable = true;
     }
     data_pickle.protocol();
     data_pickle.pushIValue(value);
@@ -455,7 +449,7 @@ class ScriptModuleSerializer {
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
-      if (supportTensorsArchiveTable) {
+      if (use_tensors_archive_table_) {
         const auto found = tensors_archive_table_.find(td);
         if (found == tensors_archive_table_.end()) {
           writer_.writeRecord(
@@ -560,6 +554,26 @@ class ScriptModuleSerializer {
     }
   }
 
+  void backPortByteCode(const uint64_t version) {
+    uint64_t backport_model_version = version - 1;
+    TORCH_CHECK(
+        kMinProducedBytecodeVersion <= backport_model_version &&
+            backport_model_version <=
+                caffe2::serialize::kProducedBytecodeVersion,
+        "Lite Interpreter can only produce bytecode between ",
+        kMinProducedBytecodeVersion,
+        " and ",
+        caffe2::serialize::kProducedBytecodeVersion,
+        ". But the request backport model version is ",
+        backport_model_version);
+
+    // From v5 to v4
+    if (backport_model_version == kBytecodeVersionV4) {
+      use_tensors_archive_table_ = false;
+    }
+    // when support exporting more version, add else if statement here.
+  }
+
   void writeByteCode(
       const Module& module,
       bool save_mobile_debug_info,
@@ -582,14 +596,22 @@ class ScriptModuleSerializer {
     //     22736),), 0, (1, 464, 7, 7), (22736, 49, 7, 1), False,
     //     collections.OrderedDict())
     TORCH_CHECK(
-        caffe2::serialize::kMinProducedBytecodeVersion <= version &&
+        kMinProducedBytecodeVersion <= version &&
             version <= caffe2::serialize::kProducedBytecodeVersion,
         "Lite Interpreter can only produce bytecode version between ",
-        caffe2::serialize::kMinProducedBytecodeVersion,
+        kMinProducedBytecodeVersion,
         " and ",
         caffe2::serialize::kProducedBytecodeVersion,
         ". But the request model version is ",
         version);
+
+    use_tensors_archive_table_ = true;
+    for (auto current_version = caffe2::serialize::kProducedBytecodeVersion;
+         current_version > version;
+         current_version--) {
+      backPortByteCode(current_version);
+    }
+
     std::vector<c10::IValue> elements;
     elements.emplace_back(static_cast<int64_t>(version));
     c10::optional<std::vector<c10::IValue>> debug_info_elements;

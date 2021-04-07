@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 
 namespace torch {
@@ -34,7 +33,7 @@ std::shared_ptr<Graph> Canonicalize(
     r->appendNode(r_node);
     auto outputs = node->outputs();
     auto r_outputs = r_node->outputs();
-    for (const auto i : c10::irange(outputs.size())) {
+    for (size_t i = 0; i < outputs.size(); i++) {
       rn_env[outputs.at(i)] = r_outputs.at(i);
     }
     if (node->hasAttribute(attr::Subgraph)) {
