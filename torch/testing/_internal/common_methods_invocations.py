@@ -19,7 +19,7 @@ from torch.testing import \
      all_types_and_complex_and, all_types_and, all_types_and_complex,
      integral_types_and)
 from torch.testing._internal.common_device_type import \
-    (dtypesIfCPU, skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
