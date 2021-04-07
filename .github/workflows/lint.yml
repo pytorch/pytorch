@@ -118,7 +118,13 @@ jobs:
           set -eux
           pip install -r requirements-flake8.txt
           flake8 --version
-          flake8 | tee ${GITHUB_WORKSPACE}/flake8-output/warnings.txt
+          flake8 | tee ${GITHUB_WORKSPACE}/flake8-output.txt
+
+          tools/translate_annotations.py \
+            --file=flake8-output.txt
+            --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
+            --commit=${{ github.event.pull_request.head.sha }} \
+            > flake8-output/annotations.json
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
@@ -126,7 +132,8 @@ jobs:
           path: flake8-output/
       - name: Fail if there were any warnings
         run: |
-          [ ! -s flake8-output/warnings.txt ]
+          cat flake8-output.txt
+          [ ! -s flake8-output.txt ]
 
   clang-tidy:
     if: github.event_name == 'pull_request'
@@ -215,9 +222,15 @@ jobs:
             -g"-torch/csrc/deploy/interpreter/interpreter.h"  \
             -g"-torch/csrc/deploy/interpreter/interpreter_impl.h"  \
             -g"-torch/csrc/deploy/interpreter/test_main.cpp"  \
-            "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output/warnings.txt
+            "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
-          cat ${GITHUB_WORKSPACE}/clang-tidy-output/warnings.txt
+          cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
+
+          tools/translate_annotations.py \
+            --file=clang-tidy-output.txt
+            --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]'
+            --commit=${{ github.event.pull_request.head.sha }} |
+            > clang-tidy-output/annotations.json
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
