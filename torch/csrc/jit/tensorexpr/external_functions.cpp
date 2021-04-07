@@ -2,6 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
 namespace torch {
@@ -19,10 +20,10 @@ std::vector<at::Tensor> constructTensors(
   std::vector<std::vector<int64_t>> buf_dims_vec;
   std::vector<c10::ScalarType> buf_dtypes_vec;
   int64_t buf_dims_idx = 0;
-  for (int64_t i = 0; i < bufs_num; i++) {
+  for (const auto i : c10::irange(bufs_num)) {
     buf_data_vec.push_back(buf_data[i]);
     buf_dims_vec.emplace_back();
-    for (int64_t dim = 0; dim < buf_ranks[i]; dim++) {
+    for (const auto dim : c10::irange(buf_ranks[i])) {
       buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
     }
     buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
