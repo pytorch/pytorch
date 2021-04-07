@@ -40,9 +40,11 @@ class Batch:
 
     """
 
-    def __init__(self, value: TensorOrTensors) -> None:
+    def __init__(self, value: TensorOrTensors, is_single_sequence=False) -> None:
         self.value = value
         self.atomic = torch.is_tensor(value)
+        # For backward compatibility.
+        self.is_single_sequence = is_single_sequence
 
     @property
     def tensor(self) -> Tensor:
@@ -67,7 +69,14 @@ class Batch:
         """Calls a function by the underlying tensor or tensors. It also wraps
         the output with :class:`Batch`.
         """
-        return Batch(function(self.value))
+        if self.atomic:
+            return Batch(function(self.value), self.is_single_sequence)
+        else:
+            if self.is_single_sequence:
+                # Don't unwrap for backward compatibility
+                return Batch(function(self.value), self.is_single_sequence)
+            else:
+                return Batch(function(*self.value), self.is_single_sequence)
 
     def __repr__(self) -> str:
         return f"Batch[atomic={self.atomic!r}]({self.value!r})"
@@ -132,39 +141,44 @@ class Batch:
         self.value = value[0]
 
 
-def check(input: TensorOrTensors) -> None:
+def check(*inputs) -> None:
     """Checks whether the input is a tensor or tensors.
 
     Raises:
         TypeError: input is not a tensor or tensors.
 
     """
-    if isinstance(input, Sequence):
-        for x in input:
-            if not isinstance(x, Tensor):
-                raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
-        return
+    for input in inputs:
+        if isinstance(input, Sequence):
+            for x in input:
+                if not isinstance(x, Tensor):
+                    raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
+            return
 
-    if not isinstance(input, Tensor):
-        raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
+        if not isinstance(input, Tensor):
+            raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
 
 
-def scatter(input: TensorOrTensors, chunks: int) -> List[Batch]:
+def scatter(*inputs, chunks: int) -> List[Batch]:
     """Splits an input mini-batch into multiple micro-batches."""
-    inputs: Iterable[TensorOrTensors]
-
-    if isinstance(input, Tensor):
-        inputs = input.chunk(chunks)
+    is_single_sequence = False
+    if len(inputs) == 1 and isinstance(inputs[0], Tensor):
+        unwrapped_inputs = inputs[0].chunk(chunks)
     else:
         rotated: List[Tensors] = []
 
-        for tensor in input:
+        # Handle sequences for backward compatibility.
+        if len(inputs) == 1 and isinstance(inputs[0], Sequence):
+            is_single_sequence = True
+            inputs = inputs[0]
+
+        for tensor in inputs:
             tensors = tensor.chunk(chunks)
-            rotated.append(cast(Tensors, tensors))
+            rotated.append(tensors)
 
-        inputs = zip(*rotated)
+        unwrapped_inputs = zip(*rotated)
 
-    return [Batch(x) for x in inputs]
+    return [Batch(x, is_single_sequence) for x in unwrapped_inputs]
 
 
 def gather(outputs: List[Batch]) -> TensorOrTensors:

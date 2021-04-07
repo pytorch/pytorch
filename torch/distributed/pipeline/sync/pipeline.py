@@ -81,7 +81,7 @@ class Pipeline:
 
     def __init__(
         self,
-        partitions: List[nn.Sequential],
+        partitions: List[nn.Module],
         devices: List[torch.device],
         copy_streams: List[List[AbstractStream]],
         skip_layout: SkipLayout,
@@ -193,14 +193,18 @@ class Pipeline:
             if checkpoint:
 
                 def function(
-                    input: TensorOrTensors,
-                    partition: nn.Sequential = partition,
+                    *inputs: TensorOrTensors,
+                    partition: nn.Module = partition,
                     skip_tracker: SkipTrackerThroughPotals = skip_trackers[i],
                     chunk_id: int = i,
                     part_id: int = j,
                 ) -> TensorOrTensors:
                     with use_skip_tracker(skip_tracker), record_function("chunk%d-part%d" % (chunk_id, part_id)):
-                        return partition(input)
+                        if batch.is_single_sequence:
+                            # Don't unwrap inputs for single sequence backward compatibility.
+                            return partition(inputs)
+                        else:
+                            return partition(*inputs)
 
                 chk = Checkpointing(function, batch)
                 task = Task(streams[j], compute=chk.checkpoint, finalize=chk.recompute)
@@ -210,7 +214,7 @@ class Pipeline:
 
                 def compute(
                     batch: Batch = batch,
-                    partition: nn.Sequential = partition,
+                    partition: nn.Module = partition,
                     skip_tracker: SkipTrackerThroughPotals = skip_trackers[i],
                     chunk_id: int = i,
                     part_id: int = j,

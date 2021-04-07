@@ -112,7 +112,7 @@ class Checkpointing:
         if isinstance(output, tuple):
             output = tuple([x if x.is_floating_point() else x.detach() for x in output])
 
-        return Batch(output)
+        return Batch(output, self.batch.is_single_sequence)
 
     def recompute(self, batch: Batch) -> None:
         """Applies :class:`Recompute` to the batch in place."""
@@ -268,8 +268,10 @@ class Checkpoint(torch.autograd.Function):
         ctx.save_for_backward(*input)
 
         with torch.no_grad(), enable_checkpointing():
-            output = function(input[0] if input_atomic else input)
-
+            if input_atomic:
+                output = function(input[0])
+            else:
+                output = function(*input)
         return output
 
     @staticmethod
@@ -317,7 +319,10 @@ class Recompute(torch.autograd.Function):
 
         with restore_rng_states(input[0].device, ctx.rng_states):
             with torch.enable_grad(), enable_recomputing():
-                output = ctx.function(input_leaf[0] if ctx.input_atomic else input_leaf)
+                if ctx.input_atomic:
+                    output = ctx.function(input_leaf[0])
+                else:
+                    output = ctx.function(*input_leaf)
 
         ctx.recomputed.append((output, input_leaf))
 

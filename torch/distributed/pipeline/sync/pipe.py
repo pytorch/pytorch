@@ -68,7 +68,7 @@ def _verify_module(module: nn.Sequential) -> None:
 
 
 def _verify_splitting(
-    module: nn.Sequential, partitions: List[nn.Sequential], devices: List[torch.device]
+    module: nn.Sequential, partitions: List[nn.Module], devices: List[torch.device]
 ) -> None:
     num_parameters = len(list(module.parameters()))
     num_child_parameters = sum(len(list(child.parameters())) for child in module.children())
@@ -117,20 +117,12 @@ def _retrieve_device(module: nn.Module) -> torch.device:
 
     return device if device is not None else torch.device("cpu")
 
-def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[torch.device]]:
-    partitions = []
+def _retrieve_devices(modules: nn.Sequential) -> Tuple[List[nn.Module], List[torch.device]]:
     devices = []
     for name, module in modules.named_children():
         devices.append(_retrieve_device(module))
-        if isinstance(module, nn.Sequential):
-            partition = module
-        else:
-            partition = nn.Sequential(OrderedDict([(name, module)]))
-        partitions.append(partition)
 
-    partitions = cast(List[nn.Sequential], nn.ModuleList(partitions))
-
-    return partitions, devices
+    return devices
 
 MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pipe should manage device placement")
 
@@ -248,7 +240,8 @@ class Pipe(Module):
         if deferred_batch_norm:
             module = DeferredBatchNorm.convert_deferred_batch_norm(module, chunks)
 
-        self.partitions, self.devices = _split_module(module)
+        self.partitions = module
+        self.devices = _retrieve_devices(module)
         _verify_splitting(module, self.partitions, self.devices)
 
         self._copy_streams: List[List[AbstractStream]] = []
@@ -264,7 +257,7 @@ class Pipe(Module):
 
     def __len__(self) -> int:
         """Counts the length of the underlying sequential module."""
-        return sum(len(p) for p in self.partitions)
+        return sum(len(p) if isinstance(p, nn.Sequential) else 1 for p in self.partitions)
 
     def __getitem__(self, index: int) -> nn.Module:
         """Gets a layer in the underlying sequential module."""
@@ -273,12 +266,17 @@ class Pipe(Module):
             partitions = partitions[::-1]
 
         for partition in partitions:
-            try:
-                return partition[index]
-            except IndexError:
-                pass
 
-            shift = len(partition)
+            if isinstance(partition, nn.Sequential):
+                try:
+                    return partition[index]
+                except IndexError:
+                    pass
+                shift = len(partition)
+            else:
+                if index == 0 or index == -1:
+                    return partition
+                shift = 1
 
             if index < 0:
                 index += shift
@@ -290,7 +288,10 @@ class Pipe(Module):
     def __iter__(self) -> Iterable[nn.Module]:
         """Iterates over children of the underlying sequential module."""
         for partition in self.partitions:
-            yield from partition
+            if isinstance(partition, nn.Sequential):
+                yield from partition
+            else:
+                yield partition
 
     # Pipe should manage the device of each partition.
     # Deny cuda(), cpu(), and to() with device, by TypeError.
@@ -335,7 +336,7 @@ class Pipe(Module):
 
         return self._copy_streams
 
-    def forward(self, input) -> RRef:  # type: ignore
+    def forward(self, *inputs) -> RRef:  # type: ignore
         """
         Processes a single input mini-batch through the pipe and returns an
         :class:`~torch.distributed.rpc.RRef` pointing to the output.
@@ -345,6 +346,12 @@ class Pipe(Module):
         :class:`~torch.Tensor` or a sequence of tensors. This restriction is
         applied at partition boundaries too.
 
+        The sequence of inputs are fed into the first stage of the pipeline as
+        ``*inputs``. As a result the positional args for this function should
+        match the positional args for the first stage of the pipeline. The same
+        condition applies for output of one stage of the pipeline which is the
+        input for the next stage.
+
         The input tensor is split into multiple micro-batches based on the
         ``chunks`` parameter used to initialize :class:`Pipe`. The batch size
         is assumed to be the first dimension of the tensor and if the batch
@@ -352,7 +359,7 @@ class Pipe(Module):
         the batch size.
 
         Args:
-            input (torch.Tensor or sequence of :class:`~torch.Tensor`): input mini-batch
+            inputs (torch.Tensor or sequence of :class:`~torch.Tensor`): input mini-batch
 
         Returns:
             :class:`~torch.distributed.rpc.RRef` to the output of the mini-batch
@@ -361,14 +368,14 @@ class Pipe(Module):
             TypeError: input is not a tensor or sequence of tensors.
 
         """
-        microbatch.check(input)
+        microbatch.check(*inputs)
 
         if not self.devices:
             # Empty sequential module is not illegal.
-            return RRef(input)
+            return RRef(*inputs)
 
         # Divide a mini-batch into micro-batches.
-        batches = microbatch.scatter(input, self.chunks)
+        batches = microbatch.scatter(*inputs, chunks=self.chunks)
 
         # Run pipeline parallelism.
         self.pipeline.run(batches)
