@@ -86,3 +86,10 @@ function checkout_install_torchvision() {
   time python setup.py install
   popd
 }
+
+TORCHTEXT_COMMIT=5efd71c4e10eaaacf1936d0a079e18bee5c0fdc6
+
+function install_torchtext() {
+  # Check out torch/vision at April 7, 2021 commit
+  pip_install --user "git+https://github.com/pytorch/text.git@$TORCHTEXT_COMMIT"
+}

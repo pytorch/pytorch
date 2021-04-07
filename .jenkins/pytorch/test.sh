@@ -410,6 +410,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
+  install_torchtext
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test ]]; then
   test_python_legacy_jit
@@ -422,10 +423,12 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   fi
   test_without_numpy
   install_torchvision
+  install_torchtext
   test_python_shard1
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   install_torchvision
+  install_torchtext
   test_python_shard2
   test_libtorch
   test_custom_script_ops
@@ -437,6 +440,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
   install_torchvision
+  install_torchtext
   install_monkeytype
   test_python
   test_aten
