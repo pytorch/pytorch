@@ -336,7 +336,8 @@ def remove_parametrizations(
         # We do this so that the parameter does not to change the id()
         # This way the user does not need to update the optimizer
         if t.dtype == original.dtype:
-            original.set_(t)
+            with torch.no_grad():
+                original.set_(t)
         else:
             raise ValueError(
                 "The parametrization changes the dtype of the tensor from {} to {}. "
