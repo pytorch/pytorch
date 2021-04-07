@@ -250,7 +250,7 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
-    def forward(self):
+    def forward(self, *args):
         raise NotImplementedError()
 
 

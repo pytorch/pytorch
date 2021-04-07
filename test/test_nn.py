@@ -1456,6 +1456,15 @@ class TestNN(NNTestCase):
         module_list.extend(s.modules())
         check()
 
+        # test that ModuleList raises NotImplementedError for all arguments
+        modules = nn.ModuleList()
+        with self.assertRaises(NotImplementedError):
+            modules.forward()
+        with self.assertRaises(NotImplementedError):
+            modules.forward(torch.zeros(4))
+        with self.assertRaises(NotImplementedError):
+            modules.forward(torch.tensor((2, 3)), torch.zeros(4))
+
     def test_ModuleDict(self):
         modules = OrderedDict([
             ('act', nn.ReLU()),
