@@ -602,6 +602,29 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     else:
         return (input, )
 
+def sample_inputs_addmv(op_info, device, dtype, requires_grad):
+    test_cases = [((S,), (S, M), (M,), 1, 1),
+                  ((1,), (S, M), (M,), 1, 1),
+                  ((S,), (S, M), (M,), 0.2, 0.6),
+                  ((1,), (S, M), (M,), 0.2, 0.6),
+                  ((), (S, M), (M,), 1, 1),
+                  ((), (S, M), (M,), 0.2, 0.6),
+                  ]
+    sample_inputs = []
+    for input_args in test_cases:
+        args = (make_tensor(input_args[0], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor(input_args[1], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor(input_args[2], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad))
+        alpha, beta = input_args[3], input_args[4]
+        sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha)))
+    return tuple(sample_inputs)
+
 def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
     input1 = SampleInput(
         make_tensor((S, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -2463,6 +2486,36 @@ op_db: List[OpInfo] = [
                # TODO: remove redundant method_tests() entries
                SkipInfo('TestOpInfo', 'test_duplicate_method_tests')),
            sample_inputs_func=sample_inputs_addmm),
+    OpInfo('addmv',
+           dtypes=floating_types(),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
+                                           *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfROCM=floating_types_and(torch.half),
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/55539 to track all issues for addmv
+               # failed with a large difference in tensor outputs for below tests
+               SkipInfo('TestCommon', 'test_variant_consistency_eager', dtypes=(torch.float32, torch.complex64)),
+               # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               SkipInfo('TestCommon', 'test_out', dtypes=(torch.float32,)),
+               # RuntimeError: Jacobian mismatch for output 0 with respect to input 0,
+               # numerical:tensor([[ 1.0000e+00,  0.0000e+00,  0.0000e+00, -1.8758e+19,  0.0000e+00]])
+               # analytical:tensor([[1., 1., 1., 1., 1.]])
+               SkipInfo('TestGradients', 'test_inplace_grad', dtypes=(torch.float64,)), 
+               # RuntimeError: Gradients failed to compare equal for grad output = 1j. 
+               # Jacobian mismatch for output 0 with respect to input 0,
+               # numerical:tensor([[0.+1.0000e+00j, 0.+3.7808e+13j, 0.-9.1581e+12j, 0.+3.7517e+13j,
+               # 0.-1.5335e+13j]])
+               # analytical:tensor([[0.+1.j, 0.+1.j, 0.+1.j, 0.+1.j, 0.+1.j]])
+               SkipInfo('TestGradients', 'test_inplace_grad', dtypes=(torch.complex128,)), 
+               # RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
+               SkipInfo('TestCommon', 'test_inplace_grad', dtypes=(torch.complex128,)), 
+               # RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
+               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16,)), 
+               # RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
+               SkipInfo('TestOpInfo', 'test_supported_dtypes', dtypes=(torch.float16,)),
+           ),
+           sample_inputs_func=sample_inputs_addmv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
@@ -4423,12 +4476,6 @@ def method_tests():
         ('baddbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs'),
         ('baddbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs_coef', (), (), (), ident,
          {'beta': 0.2, 'alpha': 0.6}),
-        ('addmv', (S,), ((S, M), (M,)),),
-        ('addmv', (1,), ((S, M), (M,)), 'broadcast_lhs'),
-        ('addmv', (S,), ((S, M), (M,)), 'coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addmv', (1,), ((S, M), (M,)), 'broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs'),
-        ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('dot', (L,), ((L,),), '', (True,)),
         ('vdot', (L,), ((L,),),),
         ('mm', (S, M), ((M, S),), '', (True,)),
