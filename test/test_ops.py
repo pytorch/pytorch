@@ -240,8 +240,8 @@ class TestCommon(JitCommonTestCase):
             variants.append(a_op.inplace_variant)
             inplace_ops.append(a_op.inplace_variant)
 
-        inplace_variants = tuple(filter(None, inplace_ops))#(v for v in inplace_ops if v is not None)
-        variants = tuple(filter(None, variants))#v for v in variants if v is not None)
+        inplace_variants = tuple(filter(None, inplace_ops))
+        variants = tuple(filter(None, variants))
         outplace_variants = tuple(set(variants) - set(inplace_variants))
 
         _requires_grad = (op.supports_autograd and
@@ -302,8 +302,8 @@ class TestCommon(JitCommonTestCase):
 
         def _test_inplace_preserve_storage(samples, variants):
             for sample in samples:
-        # Skips inplace variants if the output dtype is not the same as
-            #   the input dtype
+                # Skips inplace variants if the output dtype is not the same as
+                #   the input dtype
                 expected_forward = op(sample.input, *sample.args, **sample.kwargs)
                 tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
                 skip_inplace = False
@@ -317,13 +317,13 @@ class TestCommon(JitCommonTestCase):
                     inp_tensor = cloned if isinstance(cloned, torch.Tensor) else cloned[0]
                     data_ptr = inp_tensor.data_ptr()
                     variant_forward = variant(cloned,
-                                                *sample.args,
-                                                **sample.kwargs)
+                                              *sample.args,
+                                              **sample.kwargs)
 # TODO Support non-tensor outputs if they exist for inplace ops
                     if (isinstance(variant_forward, torch.Tensor)):
                         self.assertEqual(data_ptr, variant_forward.data_ptr(), atol=0, rtol=0)
                     else:
-                        self.assertTrue(False, "Non-tensor outputs for inplace ops are not supported by this test, please fix the test")
+                        self.assertTrue(False, "Non-tensor outputs for inplace ops are not supported")
 
         if len(inplace_ops) > 0:
             inplace_samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad,
