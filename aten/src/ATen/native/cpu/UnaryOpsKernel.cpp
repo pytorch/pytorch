@@ -318,7 +318,7 @@ static void sinc_kernel(TensorIteratorBase& iter) {
   });
 }
 
-static void sinh_kernel(TensorIterator& iter) {
+static void sinh_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel_vec(
         iter,

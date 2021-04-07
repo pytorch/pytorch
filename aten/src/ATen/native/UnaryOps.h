@@ -59,7 +59,7 @@ DECLARE_DISPATCH(unary_fn, signbit_stub);
 DECLARE_DISPATCH(unary_fn, sgn_stub);
 DECLARE_DISPATCH(structured_unary_fn, sin_stub);
 DECLARE_DISPATCH(structured_unary_fn, sinc_stub);
-DECLARE_DISPATCH(unary_fn, sinh_stub);
+DECLARE_DISPATCH(structured_unary_fn, sinh_stub);
 DECLARE_DISPATCH(unary_fn, sqrt_stub);
 DECLARE_DISPATCH(unary_fn, tan_stub);
 DECLARE_DISPATCH(unary_fn, tanh_stub);
