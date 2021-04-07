@@ -10676,10 +10676,6 @@ Keyword args:
                             bound index instead. Default value is False.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
 
-.. note:: If your use case is always 1-D sorted sequence, :func:`torch.bucketize` is preferred,
-          because it has fewer dimension checks resulting in slightly better performance.
-
-
 Example::
 
     >>> sorted_sequence = torch.tensor([[1, 3, 5, 7, 9], [2, 4, 6, 8, 10]])
