@@ -5,10 +5,9 @@
 #ifdef USE_CUDA_NOT_ROCM
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <tensorpipe/tensorpipe.h>
 #endif
 
-#include <tensorpipe/core/message.h>
+#include <tensorpipe/tensorpipe.h>
 
 namespace torch {
 namespace distributed {
@@ -97,9 +96,15 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     if (!tensorData.storageHasDeleter()) {
       std::vector<char> storageData(
           tensorData.data(), tensorData.data() + tensorData.sizeInBytes());
-      tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
-          tensorpipe::CpuBuffer{storageData.data(), storageData.size()},
-          std::move(metadata)});
+      tensorpipe::CpuBuffer buffer;
+      buffer.ptr = storageData.data();
+      buffer.length = storageData.size();
+
+      tensorpipe::Message::Tensor tensor;
+      tensor.buffer = buffer;
+      tensor.metadata = std::move(metadata);
+
+      tpMessage.tensors.push_back(std::move(tensor));
       buffers.copiedTensors.push_back(std::move(storageData));
     } else {
       // TensorPipe uses the same Message class for both reading and writing, so
@@ -107,16 +112,28 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       char* tensorPtr = const_cast<char*>(tensorData.data());
       if (tensorDataVec[i].device().is_cpu()) {
-        tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
-            tensorpipe::CpuBuffer{tensorPtr, tensorData.sizeInBytes()},
-            std::move(metadata)});
+        tensorpipe::CpuBuffer buffer;
+        buffer.ptr = tensorPtr;
+        buffer.length = tensorData.sizeInBytes();
+
+        tensorpipe::Message::Tensor tensor;
+        tensor.buffer = buffer;
+        tensor.metadata = std::move(metadata);
+
+        tpMessage.tensors.push_back(std::move(tensor));
 #ifdef USE_CUDA_NOT_ROCM
       } else if (tensorDataVec[i].device().is_cuda()) {
         auto stream = ctx->getStream(tensorDataVec[i].device().index());
-        tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
-            tensorpipe::CudaBuffer{
-                tensorPtr, tensorData.sizeInBytes(), stream.stream()},
-            std::move(metadata)});
+        tensorpipe::CudaBuffer buffer;
+        buffer.ptr = tensorPtr;
+        buffer.length = tensorData.sizeInBytes();
+        buffer.stream = stream.stream();
+
+        tensorpipe::Message::Tensor tensor;
+        tensor.buffer = buffer;
+        tensor.metadata = std::move(metadata);
+
+        tpMessage.tensors.push_back(std::move(tensor));
         // record tensor data ptrs on TensorPipe streams, so that the tensors
         // won't be destructed before TensorPipe finishing sending them.
         c10::cuda::CUDACachingAllocator::recordStream(
@@ -173,12 +190,13 @@ TensorpipeReadBuffers tensorpipeAllocate(
   tpMessage.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
 
   for (auto& tensor : tpMessage.tensors) {
-    if (tensor.buffer.type == tensorpipe::DeviceType::kCpu) {
-      buffers.tensors.emplace_back(
-          at::getCPUAllocator()->allocate(tensor.buffer.cpu.length));
-      tensor.buffer.cpu.ptr = buffers.tensors.back().get();
+    if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCpu) {
+      buffers.tensors.emplace_back(at::getCPUAllocator()->allocate(
+          tensor.buffer.unwrap<tensorpipe::CpuBuffer>().length));
+      tensor.buffer.unwrap<tensorpipe::CpuBuffer>().ptr =
+          buffers.tensors.back().get();
 #ifdef USE_CUDA_NOT_ROCM
-    } else if (tensor.buffer.type == tensorpipe::DeviceType::kCuda) {
+    } else if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCuda) {
       auto deviceIndex = std::stoi(tensor.metadata);
       auto stream = ctx->getStream(deviceIndex);
       // CUDACachingAllocator will call recordStream accordingly on the current
@@ -186,9 +204,10 @@ TensorpipeReadBuffers tensorpipeAllocate(
       at::cuda::CUDAStreamGuard guard(stream);
       buffers.tensors.emplace_back(
           c10::cuda::CUDACachingAllocator::get()->allocate(
-              tensor.buffer.cuda.length));
-      tensor.buffer.cuda.ptr = buffers.tensors.back().get();
-      tensor.buffer.cuda.stream = stream.stream();
+              tensor.buffer.unwrap<tensorpipe::CudaBuffer>().length));
+      tensor.buffer.unwrap<tensorpipe::CudaBuffer>().ptr =
+          buffers.tensors.back().get();
+      tensor.buffer.unwrap<tensorpipe::CudaBuffer>().stream = stream.stream();
 #endif
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unrecognized TensorPipe buffer type.");

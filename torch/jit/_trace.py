@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
-from torch._jit_internal import _qualified_name, get_callable_argument_names
+from torch._jit_internal import _qualified_name, is_scripting, get_callable_argument_names
 from torch.autograd import function
 from torch.nn import Module
 
@@ -993,6 +993,8 @@ def is_tracing():
     Returns ``True`` in tracing (if a function is called during the tracing of
     code with ``torch.jit.trace``) and ``False`` otherwise.
     """
+    if is_scripting():
+        return False
     return torch._C._is_tracing()
 
 

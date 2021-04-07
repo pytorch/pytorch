@@ -121,21 +121,10 @@ endif()
 set(CPU_AARCH64 OFF)
 set(CPU_INTEL OFF)
 
-if(WIN32)
-  # On Windows, CMAKE_HOST_SYSTEM_PROCESSOR is calculated through `PROCESSOR_ARCHITECTURE`,
-  # which only has the value of `x86` or `AMD64`. We cannot infer whether it's a Intel CPU
-  # or not. However, the environment variable `PROCESSOR_IDENTIFIER` could be used.
-  if($ENV{PROCESSOR_IDENTIFIER} MATCHES "Intel")
-    set(CPU_INTEL ON)
-  else()
-    set(CPU_INTEL OFF)
-  endif()
-else()
- if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|i[3-6]+86)")
-    set(CPU_INTEL ON)
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
-    set(CPU_AARCH64 ON)
-  endif()
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(AMD64|x86_64)")
+  set(CPU_INTEL ON)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
+  set(CPU_AARCH64 ON)
 endif()
 
 
@@ -160,6 +149,7 @@ option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2 "Master flag to build Caffe2" ON)
+option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
 cmake_dependent_option(
     BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
     "BUILD_CAFFE2" OFF)
@@ -263,10 +253,9 @@ if(NOT DEFINED USE_VULKAN)
       "ANDROID" OFF)
 endif()
 
-option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" OFF)
+option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
-option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
-option(USE_VULKAN_WRAPPER "Vulkan - Dynamically load Vulkan functions" ON)
+option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -295,6 +284,19 @@ option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 cmake_dependent_option(
     USE_DEPLOY "Build embedded torch::deploy interpreter" OFF
     "BUILD_PYTHON" OFF)
+cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
+
+if(USE_CCACHE)
+  find_program(CCACHE_PROGRAM ccache)
+  if(CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CUDA_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+  else()
+    message(STATUS "Could not find ccache. Consider installing ccache to speed up compilation.")
+  endif()
+endif()
+
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
@@ -366,7 +368,7 @@ cmake_dependent_option(
 
 if(NOT USE_SYSTEM_ONNX)
   set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
-elseif()
+else()
   set(ONNX_NAMESPACE "onnx" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 endif()
 set(SELECTED_OP_LIST "" CACHE STRING
@@ -631,10 +633,6 @@ if(USE_VULKAN)
 
   if(USE_VULKAN_SHADERC_RUNTIME)
     string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
-  endif()
-
-  if(USE_VULKAN_WRAPPER)
-    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_WRAPPER")
   endif()
 endif()
 

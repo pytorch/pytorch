@@ -11,8 +11,8 @@ namespace detail {
 // Ideally this fast pass should be implemented in TensorIterator,
 // but we also want to skip compute_types which in not avoidable
 // in TensorIterator for now.
-Tensor& scalar_fill(Tensor& self, Scalar value);
-TORCH_API Tensor scalar_tensor_static(Scalar s, c10::optional<ScalarType> dtype_opt, c10::optional<Device> device_opt);
+Tensor& scalar_fill(Tensor& self, const Scalar& value);
+TORCH_API Tensor scalar_tensor_static(const Scalar& s, c10::optional<ScalarType> dtype_opt, c10::optional<Device> device_opt);
 } // namespace detail
 } // namespace at
 
@@ -21,7 +21,7 @@ namespace c10 {
 
 // FIXME: this should be (and was) Scalar::toTensor, but there is currently no way
 // to implement this without going through Derived Types (which are not part of core).
-inline at::Tensor scalar_to_tensor(Scalar s, const Device device = at::kCPU) {
+inline at::Tensor scalar_to_tensor(const Scalar& s, const Device device = at::kCPU) {
   // This is the fast track we have for CPU scalar tensors.
   if (device == at::kCPU) {
     if (s.isFloatingPoint()) {

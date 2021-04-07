@@ -437,6 +437,10 @@ struct TORCH_API Node {
 
   void replaceAllUsesWith(Node* n);
 
+  // replaces `this` with a new node with the same inputs and outputs
+  // but a new node symbol. does not destroy `this`
+  Node* replaceWithNewSymbol(Symbol new_symbol);
+
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
   Value* input() {
@@ -798,7 +802,9 @@ struct TORCH_API Node {
   }
 
   CREATE_ACCESSOR(Float, f)
+  CREATE_ACCESSOR(Complex, c)
   CREATE_ACCESSOR(Floats, fs)
+  CREATE_ACCESSOR(ComplexVals, cs)
   CREATE_ACCESSOR(String, s)
   CREATE_ACCESSOR(Strings, ss)
   CREATE_ACCESSOR(Int, i)
@@ -1088,6 +1094,10 @@ struct Graph {
   size_t next_unique_;
 
   std::unordered_map<std::string, Value*> unique_names_;
+  // name_base_suffix tracks largest suffix currently used by all names sharing
+  // same name_base. Key of this map is name_base, value is largest suffix
+  // numeric value.
+  std::unordered_map<std::string, size_t> name_base_suffix_;
 
   ScopePtr current_scope_;
 

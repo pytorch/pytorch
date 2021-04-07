@@ -226,7 +226,7 @@ Args:
 Example:
 
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
-    >>> fftn = torch.fft.fftn(t)
+    >>> fftn = torch.fft.fftn(x)
 
     The discrete Fourier transform is separable, so :func:`~torch.fft.fftn`
     here is equivalent to two one-dimensional :func:`~torch.fft.fft` calls:
@@ -268,7 +268,7 @@ Args:
 Example:
 
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
-    >>> ifftn = torch.fft.ifftn(t)
+    >>> ifftn = torch.fft.ifftn(x)
 
     The discrete Fourier transform is separable, so :func:`~torch.fft.ifftn`
     here is equivalent to two one-dimensional :func:`~torch.fft.ifft` calls:

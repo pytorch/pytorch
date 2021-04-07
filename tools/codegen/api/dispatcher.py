@@ -1,7 +1,7 @@
 from tools.codegen.model import *
 
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 
 import itertools
 from typing import Sequence, List, Union
@@ -16,10 +16,6 @@ from typing import Sequence, List, Union
 # to this convention will usually need template updates too.
 #
 # Prominent characteristics of the dispatcher API:
-#
-#   - 'use_c10_dispatcher: full' controls whether or not we actually
-#     use the modern calling convention or not.  When use_c10_dispatcher
-#     is not enabled, we don't use the template machinery.
 #
 #   - dtype, layout, device and pin_memory are represented as separate
 #     arguments.

@@ -296,6 +296,11 @@ def _is_fp(value):
             return (type == 'Float') or (type == 'Double') or (type == 'Half')
     return False
 
+def _dtype_is_fp(type_value):
+    if type_value:
+        return (type_value == torch.float16) or (type_value == torch.float32) or (type_value == torch.float64)
+    return False
+
 def _generate_wrapped_number(g, scalar):
     """
     Create a wrapped number based on https://github.com/pytorch/pytorch/issues/9515
@@ -304,7 +309,7 @@ def _generate_wrapped_number(g, scalar):
     wrapped as 0-dim int64 tensors and floating-point types are
     wrapped as 0-dim double tensors.
 
-    The input to this function is constant value. If the data type 
+    The input to this function is constant value. If the data type
     is a floating point type, it is converted to a 0-dim double
     tensor, else it is converted to a 0-dim tensor of its original type
     """

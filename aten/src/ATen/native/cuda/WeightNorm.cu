@@ -363,6 +363,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
             v.data_ptr<scalar_t>(),
             g.data_ptr<scalar_t>(),
             rowSize);
+         C10_CUDA_KERNEL_LAUNCH_CHECK();
        });
   }
   else if(dim == ndims - 1)
@@ -453,6 +454,7 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
             saved_g.data_ptr<scalar_t>(),
             saved_norms.data_ptr<accscalar_t>(),
             rowSize);
+         C10_CUDA_KERNEL_LAUNCH_CHECK();
        });
   }
   else if(dim == ndims - 1)

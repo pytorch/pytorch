@@ -80,7 +80,7 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
     case ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16:
       return at::kBFloat16;
     default:
-      TORCH_CHECK("unexpected tensor scalar type");
+      TORCH_CHECK(false, "unexpected tensor scalar type");
   }
   return c10::optional<at::ScalarType>{};
 }
@@ -97,7 +97,8 @@ Value* addInputToBlock(Block* block) {
   return block->addInput();
 }
 
-::ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType(
+namespace {
+::ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType_aux(
     at::ScalarType at_type) {
   switch (at_type) {
     case at::kDouble:
@@ -127,6 +128,11 @@ Value* addInputToBlock(Block* block) {
     default:
       AT_ERROR("unexpected tensor scalar type");
   }
+}
+} // namespace
+
+int ATenTypeToOnnxType(at::ScalarType at_type) {
+  return static_cast<int>(ATenTypeToOnnxType_aux(at_type));
 }
 
 Node* createONNXUnsqueeze(

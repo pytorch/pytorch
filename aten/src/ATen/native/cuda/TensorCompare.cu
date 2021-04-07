@@ -59,4 +59,27 @@ REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
 
+template <typename scalar_t>
+__global__ void _assert_async_cuda_kernel(scalar_t* input) {
+  CUDA_KERNEL_ASSERT(input[0] != 0);
+}
+
+__global__ void _assert_async_cuda_kernel(c10::complex<float>* input) {
+  CUDA_KERNEL_ASSERT(input[0] != c10::complex<float>(0, 0));
+}
+__global__ void _assert_async_cuda_kernel(c10::complex<double>* input) {
+  CUDA_KERNEL_ASSERT(input[0] != c10::complex<double>(0, 0));
+}
+
+void _assert_async_cuda(const Tensor& self) {
+  auto n = self.numel();
+  TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");
+  TORCH_CHECK(n < 2, "Boolean value of Tensor with more than one value is ambiguous");
+  auto stream = at::cuda::getCurrentCUDAStream();
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "_assert_async_cuda", [&] {
+    _assert_async_cuda_kernel<<<1, 1, 0, stream>>>(self.data_ptr<scalar_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  });
+}
+
 }} // namespace at::native
