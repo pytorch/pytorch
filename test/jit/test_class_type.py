@@ -135,7 +135,7 @@ class TestClassType(JitTestCase):
             fn(2)
 
     def test_conditional_set_attr(self):
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "assignment cannot be in a control-flow block", ):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "assignment cannot be in a control-flow block", ""):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
