@@ -192,7 +192,9 @@ class OpInfo(object):
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         self.op = op if op else _getattr_qual(torch, self.name)
-        self.method_variant = getattr(torch.Tensor, name, None)
+        method_variant = getattr(torch.Tensor, name, None)
+        # attributes like real, imag are not callable
+        self.method_variant = method_variant if callable(method_variant) else None
         inplace_name = name + "_"
         self.inplace_variant = getattr(torch.Tensor, inplace_name, None)
         self.operator_variant = getattr(operator, name, None)
@@ -3856,18 +3858,22 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.complex64])
                    )),
-    OpInfo('real',
-           op=torch.real,
-           dtypes=complex_types(),
-           sample_inputs_func=sample_inputs_real_imag,
-           supports_out=False,
-           supports_inplace_autograd=False,),
-    OpInfo('imag',
-           op=torch.imag,
-           dtypes=complex_types(),
-           sample_inputs_func=sample_inputs_real_imag,
-           supports_out=False,
-           supports_inplace_autograd=False,),
+    UnaryUfuncInfo('real',
+                   ref=np.real,
+                   dtypes=complex_types(),
+                   dtypesIfCPU=complex_types(),
+                   dtypesIfCUDA=complex_types(),
+                   dtypesIfROCM=complex_types(),
+                   supports_out=False,
+                   supports_autograd=False),
+    UnaryUfuncInfo('imag',
+                   ref=np.imag,
+                   dtypes=complex_types(),
+                   dtypesIfCPU=complex_types(),
+                   dtypesIfCUDA=complex_types(),
+                   dtypesIfROCM=complex_types(),
+                   supports_out=False,
+                   supports_autograd=False),
     OpInfo('rsub',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
            variant_test_name='rsub_tensor',
