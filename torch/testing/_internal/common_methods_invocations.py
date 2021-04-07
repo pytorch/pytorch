@@ -3268,7 +3268,16 @@ op_db: List[OpInfo] = [
                                            *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half),
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_matmul),
+           sample_inputs_func=sample_inputs_matmul,
+           skips=(
+               # matmul does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+               # matmul on complex128 doesn't work
+               SkipInfo('TestGradients', 'test_fn_grad',
+                        device_type='cpu', dtypes=(torch.complex128,)),
+               # some how it doesn't throw on cpu, and crash when enabled
+               SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
+                        device_type='cpu', dtypes=(torch.float16,)),)),
     OpInfo('max',
            op=torch.max,
            variant_test_name='binary',
