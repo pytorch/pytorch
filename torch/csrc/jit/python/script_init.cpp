@@ -1619,7 +1619,10 @@ void initJitScriptBindings(PyObject* module) {
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         return import_ir_module(
-            std::move(cu), std::move(reader), optional_device, std::move(ts_id));
+            std::move(cu),
+            std::move(reader),
+            optional_device,
+            std::move(ts_id));
       });
   m.def(
       "import_ir_module_from_buffer",
