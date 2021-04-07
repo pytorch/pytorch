@@ -43,10 +43,24 @@ __MATH_FUNCTIONS_DECL__ double ceil(double x) {
 }
 
 __MATH_FUNCTIONS_DECL__ float copysign(float x, float y) {
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
   return ::copysignf(x, y);
+#else
+  // std::copysign gets ICE/Segfaults with gcc 7.5/8 on arm64
+  // (e.g. Jetson), see PyTorch PR #51834
+  // This host function needs to be here for the compiler but is never used
+  TORCH_INTERNAL_ASSERT(
+      false, "CUDAMathCompat copysign should not run on the CPU");
+#endif
 }
 __MATH_FUNCTIONS_DECL__ double copysign(double x, double y) {
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
   return ::copysign(x, y);
+#else
+  // see above
+  TORCH_INTERNAL_ASSERT(
+      false, "CUDAMathCompat copysign should not run on the CPU");
+#endif
 }
 
 __MATH_FUNCTIONS_DECL__ float floor(float x) {
