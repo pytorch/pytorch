@@ -478,6 +478,11 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
     // report fully qualified parameter name.
     auto param_name = param_names_.find(curVariableIndex);
     const bool found_param_name = param_name != param_names_.end();
+    TORCH_INTERNAL_ASSERT(
+      ddp_debug_level_ == c10d::DistributedDebugLevel::OFF
+      || found_param_name,
+      "Expected to find parameter name in debug mode."
+    );
     std::string paramInfo = c10::str(
         "Parameter at index ",
         curVariableIndex,
