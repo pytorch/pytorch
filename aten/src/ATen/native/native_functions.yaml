@@ -6077,7 +6077,7 @@
   variants: method, function
   dispatch:
     CPU: sort_cpu_stable
-    CUDA: legacy::cuda::_th_sort_stable
+    CUDA: sort_stable_cuda
     QuantizedCPU: sort_quantized_cpu_stable
 
 - func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)

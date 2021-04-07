@@ -159,7 +159,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
   int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
 
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, self_.scalar_type(), "sort", [&]{
+  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, self_.scalar_type(), "sort", [&]{
     const scalar_t *self_ptr = self_.data_ptr<scalar_t>();
     auto values_ptr = reinterpret_cast<scalar_t *>(values_ptr_);
     int64_t remaining = numel;
@@ -185,6 +185,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
 
       TORCH_INTERNAL_ASSERT(segment_bits <= 32);
 
+      // sort on lower 32bits, i.e. segment index
       at::cuda::cub::sort_keys<int64_t>(
         reinterpret_cast<int64_t *>(i_s_ptr2), reinterpret_cast<int64_t *>(i_s_ptr),
         n, false, 0, segment_bits);
