@@ -47,8 +47,11 @@ def main() -> None:
                 if script and step.get('shell', default_shell) == 'bash':
                     job_dir.mkdir(parents=True, exist_ok=True)
 
-                    sanitized = re.sub('[^a-zA-Z_]+', '_', step['name'])
-                    filename = f'{i:0{index_chars}}_{sanitized}.sh'
+                    sanitized = re.sub(
+                        '[^a-zA-Z_]+', '_',
+                        f'_{step["name"]}',
+                    ).rstrip('_')
+                    filename = f'{i:0{index_chars}}{sanitized}.sh'
                     (job_dir / filename).write_text(
                         f'#!/usr/bin/env bash\nset -eo pipefail\n{script}'
                     )
