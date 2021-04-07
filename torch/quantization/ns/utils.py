@@ -2,6 +2,10 @@ import enum
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
+toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.fx.quantize import is_activation_post_process
@@ -24,7 +28,59 @@ class NodeInputOrOutputType(enum.Enum):
     FP32 = enum.auto()  # torch.float
     INT8 = enum.auto()  # torch.qint8 or torch.quint8
     FP16 = enum.auto()  # torch.float16
+    UNKNOWN = enum.auto()  # we cannot determine input/output dtype
     # TODO(future PRs): dynamic quant, fake quant, etc
+
+
+# TODO(future PR): make configurable
+# TODO(future PR): fill out coverage
+fp32_funs = set([
+    F.linear,
+    F.conv1d,
+    F.conv2d,
+    F.conv3d,
+    # TODO(future PR): move this to a new category, since
+    # i/o can be fp32 or int8
+    torch.cat,
+    F.relu,
+])
+
+# TODO(future PR): make configurable
+# TODO(future PR): fill out coverage
+int8_funs = set([
+    toq.linear,
+    toq.linear_relu,
+    toq.conv1d,
+    toq.conv1d_relu,
+    toq.conv2d,
+    toq.conv2d_relu,
+    toq.conv3d,
+    toq.conv3d_relu,
+    toq.cat,
+])
+
+# TODO(future PR): make configurable
+# TODO(future PR): fill out coverage
+fp32_mods = set([
+    nn.Linear,
+    nn.Conv1d,
+    nn.Conv2d,
+    nn.Conv3d,
+    nn.LSTM,
+    # note: nnqd.Linear is an instance of nnq.Linear, so this
+    # check has to happen before the int8 module check
+    nnqd.Linear,
+    nnqd.LSTM,
+])
+
+# TODO(future PR): make configurable
+# TODO(future PR): fill out coverage
+int8_mods = set([
+    nnq.Linear,
+    nnq.Conv1d,
+    nnq.Conv2d,
+    nnq.Conv3d,
+])
 
 
 def get_node_first_input_and_output_type(
@@ -33,19 +89,12 @@ def get_node_first_input_and_output_type(
     logger_cls: Callable,
 ) -> Tuple[NodeInputOrOutputType, NodeInputOrOutputType]:
     if node.op == 'call_function':
-        fp32_fun_target_names = ('torch.nn.functional', 'torch.nn')
-        # hack alert: this is not ready for production
-        # TODO(future PR): use a real mapping
-        fp32_funs = (torch.cat,)
-        int8_fun_target_names = ('torch._ops.quantized',)
-        # For now, hacky check to see which op is in which namespace
-        # TODO(future PR): use a real mapping
-        if node.target.__module__ in fp32_fun_target_names or node.target in fp32_funs:
+        if node.target in fp32_funs:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
-        else:
-            assert node.target.__module__ in int8_fun_target_names, \
-                'unknown node target %s with module %s' % (node.target, node.target.__module__)
+        elif node.target in int8_funs:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
+        else:
+            return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
     elif node.op == 'call_module':
         assert node.op == 'call_module'
@@ -61,20 +110,18 @@ def get_node_first_input_and_output_type(
                     first_arg, gm, logger_cls)
             return (prev_node_output_type, prev_node_output_type)
         # For now, hacky check to see which mod is in which namespace
-        # TODO(future PR): use a real mapping
-        is_known_fp32_input_module = (
-            mod.__module__.startswith('torch.nn.modules') or
-            mod.__module__.startswith('torch.nn.quantized.dynamic')
+        is_known_fp32_input_module = any(
+            isinstance(mod, target_type) for target_type in fp32_mods
+        )
+        is_known_int8_input_module = any(
+            isinstance(mod, target_type) for target_type in int8_mods
         )
         if is_known_fp32_input_module:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
-        else:
-            is_known_int8_module = (
-                mod.__module__.startswith('torch.nn.quantized') or
-                mod.__module__.startswith('torch.nn.intrinsic.quantized')
-            )
-            assert is_known_int8_module, 'unknown node target %s' % mod
+        elif is_known_int8_input_module:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
+        else:
+            return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
     elif node.op == 'call_method':
         if node.target == 'dequantize':
@@ -103,11 +150,9 @@ def get_node_first_input_and_output_type(
 
             return (prev_node_output_type, NodeInputOrOutputType.FP16)
 
-        # TODO(future PR): improve this instead of guessing
-        return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
+        return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
     else:
-        # TODO(future PR): improve this instead of guessing
-        return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
+        return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
 def return_first_non_observer_node(
     node: Node,
@@ -122,18 +167,19 @@ def return_first_non_observer_node(
     graph: (node_non_obs -> obs0), node = obs0 : returns node_non_obs
     graph: (node_non_obs -> obs0 -> fq0), node = fq0 : returns node_non_obs
     """
-    node_obj = getattr_from_fqn(gm, node.target)  # type: ignore
-    if is_activation_post_process(node_obj):
-        assert len(node.args) == 1
-        assert isinstance(node.args[0], Node)
-        node = node.args[0]
-        # code duplication intended, not worth refactoring
-        assert isinstance(node.target, str)
-        node_obj = getattr_from_fqn(gm, node.target)
+    if node.op == 'call_module':
+        node_obj = getattr_from_fqn(gm, node.target)  # type: ignore
         if is_activation_post_process(node_obj):
             assert len(node.args) == 1
             assert isinstance(node.args[0], Node)
             node = node.args[0]
+            # code duplication intended, not worth refactoring
+            assert isinstance(node.target, str)
+            node_obj = getattr_from_fqn(gm, node.target)
+            if is_activation_post_process(node_obj):
+                assert len(node.args) == 1
+                assert isinstance(node.args[0], Node)
+                node = node.args[0]
     return node
 
 def get_number_of_non_param_args(

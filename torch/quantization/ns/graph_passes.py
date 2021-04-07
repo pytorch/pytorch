@@ -177,7 +177,8 @@ def _insert_dtype_cast_after_node(
         dtype_cast_mod_cls = torch.nn.Identity
     else:
         raise AssertionError(
-            f"dtype cast from {node_input_type_c} to {node_input_type_a} needs to be implemented")
+            f"dtype cast from {node_input_type_c} {node_c.format_node()} to " +
+            f"{node_input_type_a} {node_a.format_node()} needs to be implemented")
 
     if isinstance(prev_node_c, Node):
         new_dtype_cast_name = \
@@ -328,13 +329,17 @@ def _insert_copy_of_node_a_after_input_node_c(
     for node_a_arg in node_a.args[num_non_param_args:]:
         if isinstance(node_a_arg, Node):
             arg_a = return_first_non_observer_node(node_a_arg, gm_a)
-            arg_a_copy_name = \
-                get_new_attr_name_with_prefix(arg_a.name + '_shadow_copy_')(gm_b)  # type: ignore
-            arg_a_obj = getattr_from_fqn(gm_a, arg_a.target)  # type: ignore
-            setattr(gm_b, arg_a_copy_name, arg_a_obj.detach())
-            node_a_arg_copy = graph_c.create_node(
-                'get_attr', arg_a_copy_name, (), {}, arg_a_copy_name)
-            new_args.append(node_a_arg_copy)
+            if arg_a.op == 'get_attr':
+                arg_a_copy_name = \
+                    get_new_attr_name_with_prefix(arg_a.name + '_shadow_copy_')(gm_b)  # type: ignore
+                arg_a_obj = getattr_from_fqn(gm_a, arg_a.target)  # type: ignore
+                setattr(gm_b, arg_a_copy_name, arg_a_obj.detach())
+                node_a_arg_copy = graph_c.create_node(
+                    'get_attr', arg_a_copy_name, (), {}, arg_a_copy_name)
+                new_args.append(node_a_arg_copy)
+            else:
+                raise AssertionError(
+                    f"handling of node with op {arg_a.op} is not implemented")
         else:
             raise AssertionError(
                 f"handling for arg of type {type(node_a_arg)} is not implemented")
@@ -438,16 +443,17 @@ def create_a_shadows_b(
             graph_c.output(map_arg(node_b.args[0], load_arg))
             continue
 
-        if node_b.op == 'call_module' and is_activation_post_process(modules[node_b.target]):
+        # calculate the flags to determine what to do with this node
+        node_b_is_observer = \
+            node_b.op == 'call_module' and is_activation_post_process(modules[node_b.target])
+        node_b_is_start_node = node_b in start_node_b_to_matched_subgraph_a_and_name
+        node_b_is_end_node = node_b in end_node_b_to_matched_subgraph_a_and_name
+
+        if node_b_is_observer:
             # remove activation post process node
             env_c[node_b.name] = env_c[node_b.args[0].name]  # type: ignore
 
-        elif (
-            node_b in start_node_b_to_matched_subgraph_a_and_name or
-            node_b in end_node_b_to_matched_subgraph_a_and_name
-        ):
-            node_b_is_start_node = node_b in start_node_b_to_matched_subgraph_a_and_name
-            node_b_is_end_node = node_b in end_node_b_to_matched_subgraph_a_and_name
+        elif (node_b_is_start_node or node_b_is_end_node):
 
             if node_b_is_start_node:
                 subgraph_a, ref_name = \
@@ -456,6 +462,26 @@ def create_a_shadows_b(
                 assert node_b_is_end_node
                 subgraph_a, ref_name = \
                     end_node_b_to_matched_subgraph_a_and_name[node_b]
+
+            # For both start_node and end_node verify that we know how to do
+            # the dtype cast. If we do not, skip.
+            node_input_type_a, node_output_type_a = \
+                get_node_first_input_and_output_type(subgraph_a.start_node, gm_a, logger_cls)
+            node_input_type_b, node_output_type_b = \
+                get_node_first_input_and_output_type(node_b, gm_b, logger_cls)
+            node_io_types_known_a_and_b = (
+                node_input_type_a != NodeInputOrOutputType.UNKNOWN and
+                node_output_type_a != NodeInputOrOutputType.UNKNOWN and
+                node_input_type_b != NodeInputOrOutputType.UNKNOWN and
+                node_output_type_b != NodeInputOrOutputType.UNKNOWN
+            )
+            if not node_io_types_known_a_and_b:
+                print(
+                    f'skipping shadow loggers for node_b: {node_b.format_node()}' +
+                    f', start_node_a: {subgraph_a.start_node.format_node()}' +
+                    ', unknown dtype cast')
+                env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
+                continue
 
             if node_b_is_start_node:
 
