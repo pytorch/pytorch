@@ -2,6 +2,7 @@
 
 #include <exception>
 #include <map>
+#include <stdexcept>
 #include <tuple>
 #include <unordered_set>
 
@@ -669,21 +670,25 @@ void ProcessGroupNCCL::workCleanupLoop() {
           std::chrono::milliseconds(kWorkCleanupThreadSleepMillis),
           [&]() -> bool { return terminateProcessGroup_.load(); });
 
-      for (auto it = workMetaList_.begin(); it != workMetaList_.end();
-           /* no increment*/) {
-        auto& work = *it;
-        if (work.isCompleted()) {
-          // Handle Exceptions on failed GPU operations and remove completed
-          // workNCCL objects from work vector.
-          if (!terminateProcessGroup_.load()) {
-            work.handleNCCLGuard();
+      if (terminateProcessGroup_.load()) {
+        workMetaList_.clear();
+      } else {
+          for (auto it = workMetaList_.begin(); it != workMetaList_.end();
+            /* no increment*/) {
+          auto& work = *it;
+          if (work.isCompleted()) {
+            // Handle Exceptions on failed GPU operations and remove completed
+            // workNCCL objects from work vector.
+            if (!terminateProcessGroup_.load()) {
+              work.handleNCCLGuard();
+            }
+            doneWorks.push_back(std::move(*it));
+            it = workMetaList_.erase(it);
+          } else {
+            // Increment the iterator if the current WorkNCCL object is not
+            // completed.
+            ++it;
           }
-          doneWorks.push_back(std::move(*it));
-          it = workMetaList_.erase(it);
-        } else {
-          // Increment the iterator if the current WorkNCCL object is not
-          // completed.
-          ++it;
         }
       }
       done = workMetaList_.empty();
