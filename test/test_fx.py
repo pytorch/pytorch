@@ -2258,6 +2258,29 @@ class TestOperatorSignatures(JitTestCase):
         except Exception as e:
             assert op.name in known_no_schema
 
+
+class TestFunctional(JitTestCase):
+
+    exception_list = []
+
+    def test_nn_functional(self):
+        functional_list = [f for f in dir(torch.nn.functional) if f.islower() and not f.startswith('_')]
+        total = succ = ignore = 0
+        for f in functional_list:
+            if f in self.exception_list:
+                continue
+            total += 1
+            fn = getattr(torch.nn.functional, f)
+            try:
+                symbolic_trace(fn)
+                succ += 1
+            except Exception as e:
+                #  print('Failed', f)
+                pass
+        #  Now 85/135 success
+        #  print("Success: {} Ignore: {} Total: {}".format(succ, ignore, total))
+
+
 instantiate_device_type_tests(TestOperatorSignatures, globals())
 
 if __name__ == '__main__':
