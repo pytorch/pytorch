@@ -9,7 +9,6 @@ from .quantize_jit import *
 # from .quantize_fx import *
 from .quantization_mappings import *
 from .fuser_method_mappings import *
-from ._numeric_suite import Logger
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -45,7 +44,6 @@ _all__ = [
     # Observers
     'ObserverBase', 'WeightObserver', 'observer', 'default_observer',
     'default_weight_observer', 'default_placeholder_observer',
-    'Logger',
     # FakeQuantize (for qat)
     'default_fake_quant', 'default_weight_fake_quant',
     'default_symmetric_fixed_qparams_fake_quant',
