@@ -2207,6 +2207,12 @@ def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_inputs_msort(op_info, device, dtype, requires_grad):
+    sample = (SampleInput(make_tensor((S, M, S), device, dtype,
+                                      low=None, high=None,
+                                      requires_grad=requires_grad)),)
+
+    return sample
 
 def sample_inputs_lerp(op_info, device, dtype, requires_grad):
     def _make_tensor_helper(shape, low=None, high=None):
@@ -3961,6 +3967,17 @@ op_db: List[OpInfo] = [
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
            sample_inputs_func=sample_inputs_unfold),
+    OpInfo('msort',
+           dtypes=all_types_and(torch.float16),
+           check_batched_gradgrad=False,
+           skips=(
+               #  msort does not correctly warn when resizing out= inputs.
+               SkipInfo('TestCommon', 'test_out',
+                        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+               #  msort does not raise expected Runtime Error.
+               SkipInfo('TestOpInfo', 'test_unsupported_dtypes', dtypes=[torch.bool]),
+           ),
+           sample_inputs_func=sample_inputs_msort),
     OpInfo('movedim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -4769,7 +4786,6 @@ def method_tests():
         ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
         ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
         ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
-        ('msort', (S, M, S), NO_ARGS),
         ('topk', (S, M, S), (3,)),
         ('topk', (S, M, S), (3, 1), 'dim', (), [1]),
         ('topk', (S, M, S), (3, 1, True), 'dim_desc', (), [1]),
