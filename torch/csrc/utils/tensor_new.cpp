@@ -22,6 +22,7 @@
 #include <c10/core/Backend.h>
 #include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 
 #include <stdexcept>
@@ -189,7 +190,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
   }
 
   PyObject** items = PySequence_Fast_ITEMS(seq.get());
-  for (int64_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     recursive_store(data, sizes, strides, dim + 1, scalarType, elementSize, items[i]);
     data += strides[dim] * elementSize;
   }
