@@ -55,17 +55,19 @@ namespace jit {
  * is not serialized. However, exception will be raised using inlined callstack
  * ptr directly. Relevant API will be in following diffs.
  */
+
+using DebugHandleType = int64_t;
 class BackendDebugHandleManager {
  public:
   BackendDebugHandleManager() = default;
   int64_t getNextDebugHandleForInlinedCallStackPtr(
       const SourceRange& range,
       const InlinedCallStackPtr& cs_ptr);
-  std::unordered_map<int64_t, DelegateDebugInfoType> getCallStackPtrMap();
+  std::unordered_map<DebugHandleType, DelegateDebugInfoType> getCallStackPtrMap();
 
  private:
-  static std::atomic<int64_t> unique_debug_handle_;
-  std::unordered_map<int64_t, DelegateDebugInfoType>
+  static std::atomic<DebugHandleType> unique_debug_handle_;
+  std::unordered_map<DebugHandleType, DelegateDebugInfoType>
       handles_to_inlined_callstack_ptrs_;
 };
 

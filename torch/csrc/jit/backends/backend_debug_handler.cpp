@@ -4,12 +4,12 @@ namespace torch {
 namespace jit {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::atomic<int64_t> BackendDebugHandleManager::unique_debug_handle_{0};
+std::atomic<DebugHandleType> BackendDebugHandleManager::unique_debug_handle_{0};
 
-int64_t BackendDebugHandleManager::getNextDebugHandleForInlinedCallStackPtr(
+DebugHandleType BackendDebugHandleManager::getNextDebugHandleForInlinedCallStackPtr(
     const SourceRange& range,
     const InlinedCallStackPtr& cs_ptr) {
-  int64_t debug_handle = unique_debug_handle_;
+  DebugHandleType debug_handle = unique_debug_handle_;
   handles_to_inlined_callstack_ptrs_[debug_handle] =
       std::make_pair(range, cs_ptr);
   // This increment is with seq memory order.
@@ -18,7 +18,7 @@ int64_t BackendDebugHandleManager::getNextDebugHandleForInlinedCallStackPtr(
   return debug_handle;
 }
 
-std::unordered_map<int64_t, DelegateDebugInfoType> BackendDebugHandleManager::
+std::unordered_map<DebugHandleType, DelegateDebugInfoType> BackendDebugHandleManager::
     getCallStackPtrMap() {
   // Note that this is return by copy and since
   // InlinedCallStackPtrs are intrusive ptr it will result in
