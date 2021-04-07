@@ -27,7 +27,6 @@ class BackgroundThread {
     const std::chrono::milliseconds checkTimeout_
         = std::chrono::milliseconds(10);
     HANDLE ghStopEvent_;
-    char* eventName_;
 #else
     std::vector<int> controlPipeFd_{-1, -1};
 #endif
@@ -41,7 +40,6 @@ class BackgroundThread {
 // Run on master process
 class TCPStoreDaemon : public BackgroundThread {
  public:
-  // Empty constructor used for derived classes
   explicit TCPStoreDaemon(int storeListenSocket);
 
  protected:
@@ -72,9 +70,6 @@ class TCPStoreDaemon : public BackgroundThread {
   std::unordered_map<int, size_t> keysAwaited_;
   // From key -> the list of sockets waiting on it
   std::unordered_map<std::string, std::vector<int>> watchedSockets_;
-#ifdef _WIN32
-  char* eventName_ = "tcpStoreDaemonStopEvent";
-#endif
 };
 
 // Listener thread runs on all processes
@@ -90,9 +85,6 @@ class ListenThread : public BackgroundThread {
     void callbackHandler(int socket);
     // List of callbacks map each watched key
     std::unordered_map<std::string, std::function<void(std::string, std::string)>> keyToCallbacks_;
-#ifdef _WIN32
-    char* eventName_ = "listenThreadStopEvent";
-#endif
 };
 
 class TCPStore : public Store {

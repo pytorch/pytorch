@@ -39,23 +39,31 @@ enum class WatchResponseType : uint8_t { KEY_UPDATED };
 // Background thread parent class methods
 BackgroundThread::BackgroundThread(int storeListenSocket)
     : storeListenSocket_(storeListenSocket) {
+  LOG(ERROR) << "start BackgroundThread()";
   // Signal instance destruction to the daemon thread.
   initStopSignal();
+  LOG(ERROR) << "finish BackgroundThread()";
 }
 
 BackgroundThread::~BackgroundThread() {
+  LOG(ERROR) << "start ~BackgroundThread()";
   // Stop the run
+  LOG(ERROR) << "~BackgroundThread.stop()";
   stop();
   // Join the thread
+  LOG(ERROR) << "~BackgroundThread.join()";
   join();
   // Close unclosed sockets
+  LOG(ERROR) << "~BackgroundThread.closeSocket()";
   for (auto socket : sockets_) {
     if (socket != -1) {
       tcputil::closeSocket(socket);
     }
   }
   // Now close the rest control pipe
+  LOG(ERROR) << "a~BackgroundThread.closeStopSignal()";
   closeStopSignal();
+  LOG(ERROR) << "finish ~BackgroundThread()";
 }
 
 void BackgroundThread::join() {
@@ -64,12 +72,13 @@ void BackgroundThread::join() {
 
 #ifdef _WIN32
 void BackgroundThread::initStopSignal() {
-  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, eventName_);
+  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
   if (ghStopEvent_ == NULL) {
     throw std::runtime_error(
         "Failed to create the control pipe to start the "
         "BackgroundThread run");
   }
+  LOG(ERROR) << "finish windows initStopSignal()";
 }
 
 void BackgroundThread::closeStopSignal() {
@@ -201,7 +210,9 @@ void ListenThread::run() {
 // Simply start the daemon thread
 TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket)
     : BackgroundThread(storeListenSocket) {
+  LOG(ERROR) << "start TCPStoreDaemon()";
   daemonThread_ = std::thread(&TCPStoreDaemon::run, this);
+  LOG(ERROR) << "finish TCPStoreDaemon()";
 }
 
 void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {

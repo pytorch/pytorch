@@ -229,7 +229,7 @@ TEST(TCPStoreTest, testWatchKeyCallbackWithPrefix) {
   testWatchKeyCallback("testPrefix");
 }
 
-TEST(TCPStoreTest, newTest) {
+TEST(TCPStoreTest, testCleanShutdown) {
   int numWorkers = 2;
 
   auto serverTCPStore = std::make_unique<c10d::TCPStore>(
@@ -239,6 +239,7 @@ TEST(TCPStoreTest, newTest) {
       true,
       std::chrono::seconds(30),
       /* wait */ false);
+  c10d::test::set(*serverTCPStore, "key", "val");
 
   auto clientTCPStore = c10::make_intrusive<c10d::TCPStore>(
       "127.0.0.1",
@@ -247,12 +248,13 @@ TEST(TCPStoreTest, newTest) {
       false,
       std::chrono::seconds(10),
       /* wait */ false);
+  clientTCPStore->get("key");
 
   auto clientThread = std::thread([&clientTCPStore] {
     EXPECT_THROW(clientTCPStore->get("invalid_key"), std::runtime_error);
   });
 
-  // start server TCPStore shutdown
+  // start server shutdown during a client request
   serverTCPStore = nullptr;
 
   clientThread.join();
