@@ -31,6 +31,12 @@ namespace cub = at::cuda::detail::cub;
   AT_CUDA_CHECK(cudaGetLastError());                                       \
 } while (false)
 
+#ifdef __HIP_PLATFORM_HCC__
+#define NO_ROCM(x)
+#else
+#define NO_ROCM(x) x
+#endif
+
 namespace at {
 namespace cuda {
 namespace cub {
@@ -72,11 +78,11 @@ static inline void sort_pairs(
   value_t_ *values_out_ = reinterpret_cast<value_t_*>(values_out);
 
   if (descending) {
-    CUB_WRAPPER(detail::cub::DeviceRadixSort::SortPairsDescending,
+    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairsDescending,
       keys_in_, keys_out_, values_in_, values_out_, n,
       start_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   } else {
-    CUB_WRAPPER(detail::cub::DeviceRadixSort::SortPairs,
+    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairs,
       keys_in_, keys_out_, values_in_, values_out_, n,
       start_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   }
