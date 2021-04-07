@@ -86,7 +86,7 @@ class TORCH_API TensorExprKernel {
 
   ExprHandle constant(const ArgValue& v);
   ExprHandle constant(const torch::jit::Value* v);
-  ExprHandle broadcastBufTemp(  // TODO(chilli): remove
+  ExprHandle broadcastBufTemp(  // TODO(chilli): switch over to this when finished refactoring
       BufHandle b,
       const std::vector<ExprHandle>& axes);
   ExprHandle broadcast(Tensor* t, const std::vector<ExprHandle>& axes);

@@ -218,7 +218,7 @@ ExprHandle TensorExprKernel::tensorOrConstant(
 ArgValue TensorExprKernel::jitToArgValue(const torch::jit::Value* v) const {
   auto ti = tensors_.find(v);
   if (ti != tensors_.end()) {
-    return ti->second;
+    return BufHandle(ti->second->buf());
   }
   if (v->node()->kind() == prim::Constant) {
     const auto val = toIValue(v).value();
@@ -248,10 +248,10 @@ ArgValue TensorExprKernel::jitToArgValue(const torch::jit::Value* v) const {
 ExprHandle TensorExprKernel::tensorOrConstant(
     const ArgValue& v,
     const std::vector<ExprHandle>& axes) {
-    if (auto b = c10::get_if<BufHandle>(&v)) {
-      return broadcastBufTemp(*b, axes);
-    }
-    return constant(v);
+  if (auto b = c10::get_if<BufHandle>(&v)) {
+    return broadcastBufTemp(*b, axes);
+  }
+  return constant(v);
 }
 ExprHandle TensorExprKernel::tensorOrConstant(
     const torch::jit::Value* v,
@@ -486,16 +486,13 @@ ExprHandle TensorExprKernel::constant(const ArgValue& v) {
     return LongImm::make(*i);
   } else if (auto b = c10::get_if<bool>(&v)) {
     return BoolImm::make(*b);
-  } else if (c10::get_if<ArgNone>(&v)) {
-    // This is just a placeholder so we don't throw.  None-handling
-    // is operator-specific and should be handled properly in
-    // the operator-specific lowering code.
-    return IntImm::make(0);
-  } else {
-    throw unsupported_dtype();
+    } else if (c10::get_if<ArgNone>(&v)) {
+      // This is just a placeholder so we don't throw.  None-handling
+      // is operator-specific and should be handled properly in
+      // the operator-specific lowering code.
+      return IntImm::make(0);
   }
-  assert(false);
-  return c10::get<double>(v);
+  throw unsupported_dtype();
 }
 ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   if (v->node()->kind() == prim::Constant) {
@@ -627,12 +624,10 @@ c10::optional<at::ScalarType> getOutputType(const torch::jit::Value* v) {
   }
 
   if (!v->isCompleteTensor()) {
-    return c10::optional<at::ScalarType>();
+    return c10::nullopt;
   }
 
-  auto tt = v->type()->castRaw<TensorType>()->scalarType();
-
-  return tt;
+  return v->type()->castRaw<TensorType>()->scalarType();
 }
 
 ExprHandle TensorExprKernel::demoteOutput(
@@ -733,13 +728,11 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(
   return ExprVectorToExprHandleVector(it->second->buf()->dims());
 }
 
-std::vector<ExprHandle> TensorExprKernel::valueShape(
-    const ArgValue& v) {
+std::vector<ExprHandle> TensorExprKernel::valueShape(const ArgValue& v) {
   if (auto b = c10::get_if<tensorexpr::BufHandle>(&v)) {
     return ExprVectorToExprHandleVector(b->node()->dims());
-  } else {
-    return {};
   }
+  return {};
 }
 
 Tensor* TensorExprKernel::computeOneOperand(
@@ -819,13 +812,13 @@ Tensor* TensorExprKernel::computeTwoOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(outputShape),
-      [this, inputValues, outputTensorType, innerExpr](const std::vector<VarHandle>& axes) {
+      [this, inputValues, outputTensorType, innerExpr](
+          const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(inputValues[0], indices),
             tensorOrConstant(inputValues[1], indices),
         };
-
 
         promoteInputs(inputs);
         ExprHandle compute = innerExpr(inputs[0], inputs[1]);
