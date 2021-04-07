@@ -20,7 +20,9 @@ class TestSlice(JitTestCase):
         def slice_kwarg(x: List[int]):
             return x[slice(1, stop=2)]
 
-        with self.assertRaisesRegex(RuntimeError, "Slice does not accept any keyword arguments"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "Slice does not accept any keyword arguments",
+                                                 "slice"):
             torch.jit.script(slice_kwarg)
 
     def test_slice_three_nones(self):
