@@ -56,19 +56,19 @@ TORCH_API std::string serialize_model_proto_to_string(
 TORCH_API void check_onnx_proto(const std::string& proto_string);
 
 // Base serializer to hold shared serialization logic for original TS
-// format and unified serialization format 
+// format and unified serialization format
 class ScriptModuleSerializerBase {
  public:
   explicit ScriptModuleSerializerBase(
-      caffe2::serialize::PyTorchStreamWriter& export_writer
-    ) : writer_(export_writer) {}
-    virtual void writeFiles(const std::string& code_dir);
-  
+      caffe2::serialize::PyTorchStreamWriter& export_writer)
+      : writer_(export_writer) {}
+  virtual void writeFiles(const std::string& code_dir);
+
   virtual ~ScriptModuleSerializerBase() = default;
-  
+
  protected:
   void convertNamedType(const c10::NamedTypePtr& class_type);
-  void convertTypes(const at::NamedTypePtr &root_type);
+  void convertTypes(const at::NamedTypePtr& root_type);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
   std::vector<at::IValue> constant_table_;
