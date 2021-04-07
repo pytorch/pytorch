@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/xnnpack/Engine.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
@@ -21,7 +22,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
     : c10::MaybeOwned<Tensor>::owned(c10::in_place);
 
-  if (input.is_mkldnn()) {
+  if (checkMklDnnBf16GemmUsable(input, weight, bias, Tensor(), 1.0) || input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
   }
 #if defined(C10_MOBILE)

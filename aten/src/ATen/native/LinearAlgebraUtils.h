@@ -527,7 +527,7 @@ static inline bool checkMklDnnBf16GemmUsable(const Tensor& mat1, const Tensor& m
     mat2.scalar_type() == kBFloat16 && mat2.numel() != 0 &&
     (bias.defined() ? (bias.scalar_type() ==  kBFloat16 && bias.numel() != 0) : true) &&
     (alpha.isFloatingPoint() || alpha.isIntegral()) && alpha.to<float>() != 0.0f &&
-    result.scalar_type() ==  kBFloat16);
+    (result.defined() ? result.scalar_type() ==  kBFloat16 : true));
 }
 
 }}  // namespace at::native

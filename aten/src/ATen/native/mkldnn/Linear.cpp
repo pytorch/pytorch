@@ -50,8 +50,6 @@ Tensor mkldnn_linear(
       self.dim() != 0,
       "mkldnn_linear: input needs to has dim at least 1, input dim ",
       self.dim());
-  TORCH_CHECK(self.is_mkldnn(),
-      "mkldnn_linear: input needs to be mkldnn layout");
   if (self.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
@@ -61,12 +59,18 @@ Tensor mkldnn_linear(
   auto self_reshaped =
       dim == 2 ? self : self.reshape({-1, self.size(self.dim() - 1)});
 
-  const ideep::tensor x = itensor_from_mkldnn(self_reshaped);
+  const ideep::tensor& x = itensor_from_tensor(self_reshaped);
   // weight_t can be a mkldnn tensor or dense tensor.
   const Tensor weight = (weight_t.is_mkldnn() || weight_t.is_contiguous()) ? weight_t : weight_t.contiguous();
-  const ideep::tensor w = itensor_from_tensor(weight);
+  const ideep::tensor& w = itensor_from_tensor(weight);
 
   ideep::tensor y;
+  Tensor aten_result;
+  if (!self.is_mkldnn()){
+    // aten in, aten out, share aten buffer to avoid copy
+    aten_result = at::empty({self_reshaped.size(0), weight.size(0)}, self.options());
+    y = itensor_from_tensor(aten_result);
+  }
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias);
     ideep::inner_product_forward::compute(x, w, b, y);
@@ -78,12 +82,16 @@ Tensor mkldnn_linear(
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(weight.size(0));
 
-  if (self.dim() != 2) {
-    return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
-                                   self.options().device_opt()).reshape(output_size);
+  if (self.is_mkldnn()){
+    // mkldnn in, mkldnn out
+    aten_result = new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                    self.options().device_opt());
   }
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
-                                 self.options().device_opt());
+
+  if (self.dim() != 2) {
+    aten_result.reshape(output_size);
+  }
+  return aten_result;
 }
 
 

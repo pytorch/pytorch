@@ -2047,6 +2047,7 @@
 - func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
+    CPU: mkldnn_linear
     MkldnnCPU: mkldnn_linear
 
 - func: mkldnn_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
