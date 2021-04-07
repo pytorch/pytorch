@@ -39,6 +39,7 @@ from jit.test_hooks import TestHooks  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
 from jit.test_cuda import TestCUDA  # noqa: F401
+from jit.test_python_builtins import TestPythonBuiltinOP  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 from jit.test_complex import TestComplex  # noqa: F401
 from jit.test_jit_utils import TestJitUtils  # noqa: F401
@@ -4742,26 +4743,6 @@ a")
         s = Variable(torch.rand(2))
         self.assertEqual(s + s + s, foo(s))
 
-    def test_str_to_float(self):
-        @torch.jit.script
-        def foo(a):
-            return 0.5 == float('0.5 hello')
-        s = torch.rand(1)
-        with self.assertRaisesRegex(RuntimeError, "could not convert string to float"):
-            self.assertTrue(foo(s))
-
-        @torch.jit.script
-        def foo(a):
-            return 0.5 == float('0.5')
-        s = torch.rand(1)
-        self.assertTrue(foo(s))
-
-        @torch.jit.script
-        def foo(a):
-            return 0. == float('0')
-        s = torch.rand(1)
-        self.assertTrue(foo(s))
-
     def test_torch_pow(self):
         def func(a, b):
             return pow(a, b)
@@ -4802,101 +4783,6 @@ a")
                 else:
                     self.checkScript(func5, (x, y))
 
-    def test_inf(self):
-        @torch.jit.script
-        def foo(a):
-            return a < float('inf')
-        s = torch.rand(1)
-        self.assertTrue(foo(s))
-
-        @torch.jit.script
-        def bar(a):
-            return a > float('-inf')
-        s = torch.rand(1)
-        self.assertTrue(foo(s))
-
-        # test re-assignment on imported source
-        str = """
-        def foo(x):
-            # type: (bool)
-            a = float("-inf")
-            if not x:
-                a = float(torch.tensor([5]))
-            return a < 4
-        """
-        cu = torch.jit.CompilationUnit(str)
-        self.assertTrue(cu.foo(True))
-        self.assertFalse(cu.foo(False))
-
-    def test_add(self):
-        def func(a, b):
-            c = a + b
-            c += a
-            return c
-
-        a = torch.rand(1, requires_grad=True)
-        b = torch.rand(1, requires_grad=True)
-        self.checkScript(func, (a, b), optimize=True)
-
-    def test_mul(self):
-        def func(a, b):
-            return a * b
-
-        a = torch.rand(1, requires_grad=True)
-        b = torch.rand(1, requires_grad=True)
-        self.checkScript(func, (a, b), optimize=True)
-
-    def test_matmul_py3(self):
-        code = dedent("""
-        def fn(a, b):
-            return a @ b
-        """)
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            script_path = os.path.join(tmp_dir, 'script.py')
-            with open(script_path, 'w') as f:
-                f.write(code)
-            fn = get_fn('test_matmul_py3', script_path)
-
-            a = torch.rand(4, 3, requires_grad=True)
-            b = torch.rand(3, 2, requires_grad=True)
-            self.checkScript(fn, (a, b), optimize=True)
-
-    def test_pow(self):
-        def func(a, b):
-            return a ** b
-
-        def func2(a, b, c, d):
-            return c + a ** b ** d
-
-        def func3(a, b):
-            # type: (int, float) -> float
-            return a ** b
-
-        def func4():
-            # type: () -> float
-            return 2 ** -2
-
-        def func5(x, y):
-            return x.item() ** y.item()
-
-        a = torch.rand(1, requires_grad=True)
-        b = torch.rand(1, requires_grad=True)
-        c = torch.rand(1, requires_grad=True)
-        d = torch.rand(1, requires_grad=True)
-        self.checkScript(func, (a, b), optimize=True)
-        self.checkScript(func2, (a, b, c, d), optimize=True)
-        self.checkScript(func3, (4, -0.5), optimize=True)
-        self.checkScript(func4, ())
-
-        inputs = [torch.tensor(2), torch.tensor(-2), torch.tensor(.5), torch.tensor(.2)]
-        for x in inputs:
-            for y in inputs:
-                if x < 0:
-                    continue
-                else:
-                    self.checkScript(func5, (x, y))
-
     @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
     def test_pow_scalar_backward_cuda(self):
         # see that scalar exponent works with cuda base (#19253)
@@ -4917,60 +4803,6 @@ a")
 
                 a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
                 func(2, a, profile_and_replay=True).backward()
-
-    def test_triple(self):
-        def func(x):
-            return 3. * x
-
-        x = torch.rand(1, dtype=torch.float, requires_grad=True)
-        self.checkScript(func, [x], optimize=True)
-
-    def test_slice(self):
-        def func(x):
-            return x[:5]
-
-        x = torch.rand(10, dtype=torch.float, requires_grad=True)
-        self.checkScript(func, [x], optimize=True)
-
-        def func2(x):
-            return x[5:]
-
-        self.checkScript(func2, [x], optimize=True)
-
-        def func3(x):
-            return x[:8:2]
-
-        self.checkScript(func3, [x], optimize=True)
-
-        def func4(x):
-            return x[1::4]
-
-        self.checkScript(func4, [x], optimize=True)
-
-    def test_gather(self):
-        def func(x):
-            return x[0]
-
-        x = torch.rand(10, dtype=torch.float, requires_grad=True)
-        self.checkScript(func, [x], optimize=True)
-
-    def test_random(self):
-        @torch.jit.script
-        def f(mean, std):
-            return torch.normal(mean, std)
-
-        mean, std = torch.zeros(5, 5), torch.ones(5, 5)
-        with torch.random.fork_rng(devices=[]):
-            output = torch.normal(mean, std)
-        with torch.random.fork_rng(devices=[]):
-            script_output = f(mean, std)
-        self.assertEqual(output, script_output)
-
-    def _check_code(self, code_str, fn_name, inputs):
-        scope = {}
-        exec(code_str, globals(), scope)
-        cu = torch.jit.CompilationUnit(code_str)
-        self.assertEqual(cu.func(*inputs), scope[fn_name](*inputs))
 
     @unittest.skipIf(not RUN_CUDA, 'no CUDA')
     def test_scriptmodule_releases_tensors_cuda(self):
@@ -4996,103 +4828,6 @@ a")
                     test(backward=True)
                     test(backward=True)
                     test(backward=True)
-
-    def test_index(self):
-        def consec(size, start=0):
-            numel = torch.tensor(size).prod().item()
-            return torch.arange(numel).view(size)
-
-        def check_indexing(indexing, tensor):
-            template = dedent("""
-            def func(x):
-                return x{}
-            """)
-
-            self._check_code(template.format(indexing), "func", [tensor])
-
-        def check_dynamic_indexing(indexing, tensor, value1, value2):
-            value1 = torch.tensor(value1)
-            value2 = torch.tensor(value2)
-
-            template = dedent("""
-            def func(x, value1, value2):
-                i = int(value1)
-                j = int(value2)
-                return x{}
-            """)
-
-            self._check_code(template.format(indexing), "func", [tensor, value1, value2])
-
-        # basic slices
-        check_indexing('[0]', consec((3, 3)))
-        check_indexing('[1]', consec((3, 3), 10))
-        check_indexing('[2]', consec((3, 3), 19))
-        check_indexing('[2]', consec((3,)))
-        check_indexing('[-1]', consec((3, 3), 19))
-        check_indexing('[0:2]', consec((3, 3, 3)))
-        check_indexing('[1:-1]', consec((3, 3, 3)))
-        check_indexing('[-3:-1]', consec((6, 3)))
-        check_indexing('[1:]', consec((3, 3)))
-        check_indexing('[:1]', consec((3, 3)))
-        check_indexing('[:]', consec((3, 2)))
-
-        # multi-dim: indexes
-        check_indexing('[0, 1]', consec((3, 3)))
-        check_indexing('[0, 1]', consec((3, 3, 2)))
-        check_indexing('[1, 0, 2]', consec((3, 3, 3)))
-        check_indexing('[2, -1]', consec((3, 3)))
-
-        # multi-dim: mixed slicing and indexing
-        check_indexing('[0, 1:2]', consec((3, 3)))
-        check_indexing('[0, :1]', consec((3, 3, 2)))
-        check_indexing('[1, 2:]', consec((3, 3, 3)))
-        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
-        check_indexing('[1:, -1, 0]', consec((3, 3, 3, 3)))
-        check_indexing('[-1, 2:, 1:2]', consec((3, 3, 3, 3)))
-        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
-        check_indexing('[-1, :, 0, 2]', consec((3, 3, 3, 3)))
-
-        # zero-sized slices
-        check_indexing('[0:0]', consec((2, 2)))
-        check_indexing('[0:0, 1]', consec((3, 3)))
-
-        # trivial expression usage
-        check_indexing('[1+1]', consec((3, 3)))
-        check_indexing('[1:(0 + 2)]', consec((3, 3, 3)))
-
-        # None for new dimensions
-        check_indexing('[None, 0]', consec((3, 3)))
-        check_indexing('[1, None]', consec((3, 3), 10))
-        check_indexing('[None, None, 2]', consec((3, 3), 19))
-        check_indexing('[None, 2, None]', consec((3,)))
-        check_indexing('[0:2, None]', consec((3, 3, 3)))
-        check_indexing('[None, 1:-1]', consec((3, 3, 3)))
-        check_indexing('[None, -3:-1, None]', consec((6, 3)))
-        check_indexing('[-1, None, 2:, None, 1:2]', consec((3, 3, 3, 3)))
-        check_indexing('[None, -1, None, 2:, None, 1:2, None]', consec((3, 3, 3, 3)))
-
-        # dynamic expression usage
-        check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
-        check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
-
-    def test_index_ellipses(self):
-        vals = [":", 1, None]
-        for _ in range(100):
-            indices = [random.choice(vals) for _ in range(4)]
-            indices[random.randint(0, len(indices) - 1)] = "..."
-            test_str = dedent("""
-            def f():
-                x = torch.ones(10, 9, 8, 7, 6)
-                return x{indices}.shape
-            """.format(indices=indices))
-            test_str = test_str.replace(r"'", r'')
-            scope = {}
-            execWrapper(test_str, globals(), scope)
-            cu = torch.jit.CompilationUnit(test_str)
-            res1 = cu.f()
-            res2 = scope['f']()
-            self.assertEqual(res1, res2)
-
 
     def test_tensor_item(self):
         def test_scalar_cast(x):
