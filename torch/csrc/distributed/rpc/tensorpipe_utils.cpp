@@ -98,10 +98,10 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
           tensorData.data(), tensorData.data() + tensorData.sizeInBytes());
       tensorpipe::CpuBuffer buffer;
       buffer.ptr = storageData.data();
-      buffer.length = storageData.size();
 
       tensorpipe::Message::Tensor tensor;
       tensor.buffer = buffer;
+      tensor.length = storageData.size();
       tensor.metadata = std::move(metadata);
 
       tpMessage.tensors.push_back(std::move(tensor));
@@ -114,10 +114,10 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       if (tensorDataVec[i].device().is_cpu()) {
         tensorpipe::CpuBuffer buffer;
         buffer.ptr = tensorPtr;
-        buffer.length = tensorData.sizeInBytes();
 
         tensorpipe::Message::Tensor tensor;
         tensor.buffer = buffer;
+        tensor.length = tensorData.sizeInBytes();
         tensor.metadata = std::move(metadata);
 
         tpMessage.tensors.push_back(std::move(tensor));
@@ -126,11 +126,11 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         auto stream = ctx->getStream(tensorDataVec[i].device().index());
         tensorpipe::CudaBuffer buffer;
         buffer.ptr = tensorPtr;
-        buffer.length = tensorData.sizeInBytes();
         buffer.stream = stream.stream();
 
         tensorpipe::Message::Tensor tensor;
         tensor.buffer = buffer;
+        tensor.length = tensorData.sizeInBytes();
         tensor.metadata = std::move(metadata);
 
         tpMessage.tensors.push_back(std::move(tensor));
@@ -191,8 +191,8 @@ TensorpipeReadBuffers tensorpipeAllocate(
 
   for (auto& tensor : tpMessage.tensors) {
     if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCpu) {
-      buffers.tensors.emplace_back(at::getCPUAllocator()->allocate(
-          tensor.buffer.unwrap<tensorpipe::CpuBuffer>().length));
+      buffers.tensors.emplace_back(
+          at::getCPUAllocator()->allocate(tensor.length));
       tensor.buffer.unwrap<tensorpipe::CpuBuffer>().ptr =
           buffers.tensors.back().get();
 #ifdef USE_CUDA_NOT_ROCM
@@ -203,8 +203,7 @@ TensorpipeReadBuffers tensorpipeAllocate(
       // stream.
       at::cuda::CUDAStreamGuard guard(stream);
       buffers.tensors.emplace_back(
-          c10::cuda::CUDACachingAllocator::get()->allocate(
-              tensor.buffer.unwrap<tensorpipe::CudaBuffer>().length));
+          c10::cuda::CUDACachingAllocator::get()->allocate(tensor.length));
       tensor.buffer.unwrap<tensorpipe::CudaBuffer>().ptr =
           buffers.tensors.back().get();
       tensor.buffer.unwrap<tensorpipe::CudaBuffer>().stream = stream.stream();
