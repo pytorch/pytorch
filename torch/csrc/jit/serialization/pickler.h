@@ -257,10 +257,11 @@ class TORCH_API Pickler {
 
   // List of all the types that it wrote, inspect from the IValues it wrote.
   std::vector<c10::ClassTypePtr>* memoized_class_types_;
-  // Function to grab next id_name for tensor storage, function is responsible
-  // for returning unique ids
-  std::function<std::string()> get_tensor_id_;
 
+  // Function to grab next id_name for tensor storage, function is responsible
+  // for returning unique ids 
+  std::function<std::string()> get_tensor_id_;
+  
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
   std::vector<at::Tensor> tensor_data_;

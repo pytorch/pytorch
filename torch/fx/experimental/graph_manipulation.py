@@ -2,12 +2,11 @@ from typing import Dict, List, NamedTuple, Any, Optional
 
 import torch
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
-from torch.fx.node import _get_qualified_name
-from torch.fx.graph_module import GraphModule
 from torch.fx.graph import Graph
+from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node, Target, Argument, map_arg
+from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import ShapeProp
-
 
 def replace_target_nodes_with(
     fx_module: GraphModule,
@@ -195,6 +194,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
             weight = serialize_weight(p)
             serialized_dict["weights"][prefix + name] = weight
             weights[prefix + name] = p
+
     add_weight_tensors(fx_module.named_parameters())
     add_weight_tensors(fx_module.named_buffers())
 
@@ -205,9 +205,13 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         node_rep: Dict[str, Any] = {}
         # Get shape/type info, currently not needed for call_module node
         # whose target is a GraphModule and output node.
-        if not (node.op == "call_module" and isinstance(
-            submodules[node.target], GraphModule
-        )) and node.op != "output":
+        if (
+            not (
+                node.op == "call_module"
+                and isinstance(submodules[node.target], GraphModule)
+            )
+            and node.op != "output"
+        ):
             shape, dtype = get_shape_and_dtype(node)
             node_rep["shape"] = serialize_shape(shape)
             node_rep["dtype"] = str(dtype)
@@ -236,10 +240,11 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         if node.op == "get_attr":
             # If we are targeting a parent constant we update the target.
             if node.target.startswith("parent."):
-                node.name = node.name[len("parent."):]
-                node_rep["target"] = str(node.target[len("parent."):])
-                weight = serialize_weight(weights[node.target[len("parent."):]])
-                serialized_dict["weights"][node.target[len("parent."):]] = weight
+                stripped_name = node.target[len("parent.") :]
+                node.name = stripped_name
+                node_rep["target"] = stripped_name
+                weight = serialize_weight(weights[stripped_name])
+                serialized_dict["weights"][stripped_name] = weight
             else:
                 # Find the actual target parameter/buffer from the fx_module.
                 submod_path, _, target_name = node.target.rpartition(".")
@@ -253,13 +258,14 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 # Check that the target is a tensor, and that we haven't added it already from a leaf module.
                 if isinstance(target, torch.Tensor) and qualname not in weights:
                     weight = serialize_weight(target)
-                    serialized_dict["weights"][prefix + node.target] = weight
-                    weights[prefix + node.target] = target
+                    serialized_dict["weights"][qualname] = weight
+                    weights[qualname] = target
 
         node_rep["op_code"] = node.op
         node_rep["name"] = node.name
 
         if node.op == "output":
+
             def get_output_info(arg: Node) -> Argument:
                 shape, dtype = get_shape_and_dtype(arg)
                 return {
