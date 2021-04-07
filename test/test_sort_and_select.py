@@ -3,7 +3,7 @@ import numpy as np
 
 import random
 from torch._six import nan
-from itertools import permutations, product
+from itertools import permutations
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, make_tensor, slowTest)
@@ -113,10 +113,10 @@ class TestSortAndSelect(TestCase):
             x[3][0] = float('NaN')
             torch.sort(x, out=(res2val, res2ind))
             self.assertIsOrdered('ascending', x, res2val, res2ind,
-                                'random with NaNs')
+                                 'random with NaNs')
             torch.sort(x, out=(res2val, res2ind), descending=True)
             self.assertIsOrdered('descending', x, res2val, res2ind,
-                                'random with NaNs')
+                                 'random with NaNs')
 
     @onlyCUDA
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
