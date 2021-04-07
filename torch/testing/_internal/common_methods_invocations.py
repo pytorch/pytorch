@@ -2501,17 +2501,17 @@ op_db: List[OpInfo] = [
                # RuntimeError: Jacobian mismatch for output 0 with respect to input 0,
                # numerical:tensor([[ 1.0000e+00,  0.0000e+00,  0.0000e+00, -1.8758e+19,  0.0000e+00]])
                # analytical:tensor([[1., 1., 1., 1., 1.]])
-               SkipInfo('TestGradients', 'test_inplace_grad', dtypes=(torch.float64,)), 
-               # RuntimeError: Gradients failed to compare equal for grad output = 1j. 
+               SkipInfo('TestGradients', 'test_inplace_grad', dtypes=(torch.float64,)),
+               # RuntimeError: Gradients failed to compare equal for grad output = 1j.
                # Jacobian mismatch for output 0 with respect to input 0,
                # numerical:tensor([[0.+1.0000e+00j, 0.+3.7808e+13j, 0.-9.1581e+12j, 0.+3.7517e+13j,
                # 0.-1.5335e+13j]])
                # analytical:tensor([[0.+1.j, 0.+1.j, 0.+1.j, 0.+1.j, 0.+1.j]])
-               SkipInfo('TestGradients', 'test_inplace_grad', dtypes=(torch.complex128,)), 
+               SkipInfo('TestGradients', 'test_inplace_grad', dtypes=(torch.complex128,)),
                # RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
-               SkipInfo('TestCommon', 'test_inplace_grad', dtypes=(torch.complex128,)), 
+               SkipInfo('TestCommon', 'test_inplace_grad', dtypes=(torch.complex128,)),
                # RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
-               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16,)), 
+               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16,)),
                # RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
                SkipInfo('TestOpInfo', 'test_supported_dtypes', dtypes=(torch.float16,)),
            ),
