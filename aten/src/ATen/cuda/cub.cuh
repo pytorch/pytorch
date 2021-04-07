@@ -90,7 +90,7 @@ static inline void sort_pairs(
     keys_out_owner = allocator->allocate(n * sizeof(key_t));
     keys_out = reinterpret_cast<key_t *>(keys_out_owner.get());
   }
-  if (keys_out == nullptr) {
+  if (values_out == nullptr) {
     values_out_owner = allocator->allocate(n * sizeof(value_t));
     values_out = reinterpret_cast<value_t *>(values_out_owner.get());
   }
