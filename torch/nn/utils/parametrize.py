@@ -184,7 +184,7 @@ def register_parametrization(
     When accessing ``module[tensor_name]``, the module will return the
     parametrized version ``parametrization(module[tensor_name])``. The backward
     pass will differentiate through the ``parametrization`` and if the original
-    tensor is a :class:``torch.nn.Parameter``, it will be updated accordingly by the optimizer.
+    tensor is a :class:`torch.nn.Parameter`, it will be updated accordingly by the optimizer.
     The first time that a module registers a parametrization, this function will add an attribute
     ``parametrizations`` to the module of type :class:`~ParametrizationList`.
     The list of parametrizations on a tensor will be accessible under
