@@ -69,7 +69,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             jit_o = t_jit(x, y)
             jit_o = t_jit(x, y)
             o = t(x, y)
- 
+
             FileCheck().check("prim::DifferentiableGraph").run(t_jit.graph_for(x, y))
             # validate the differentiableGraphOps are marking proper requires_grad
             for oo, jit_oo in zip(o, jit_o):
