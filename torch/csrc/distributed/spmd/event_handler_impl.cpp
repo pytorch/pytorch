@@ -28,27 +28,6 @@ std::vector<std::shared_ptr<Future>> createOneFutureEvent(
 } // namespace
 
 /////////////////////////////////////////////////////////////////////
-//                           RootHandler                           //
-/////////////////////////////////////////////////////////////////////
-
-std::vector<EventSchema> RootHandler::ingressEvents() const {
-  return {};
-}
-
-std::vector<EventSchema> RootHandler::egressEvents() const {
-  return {
-      EventType::PREPARE_MODULE,
-      EventType::PRE_FORWARD,
-      EventType::POST_FORWARD};
-}
-
-std::vector<std::shared_ptr<Future>> RootHandler::handleEvent(
-    const c10::intrusive_ptr<Event>& /* unused */) {
-  TORCH_INTERNAL_ASSERT(
-      false, "RootHandler should not handle any ingress Events.");
-}
-
-/////////////////////////////////////////////////////////////////////
 //                         DefaultTrigger                          //
 /////////////////////////////////////////////////////////////////////
 

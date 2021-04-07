@@ -1,10 +1,35 @@
 #include <torch/csrc/distributed/spmd/engine.h>
 
-#include <torch/csrc/distributed/spmd/event_handler_impl.h>
+#include <torch/csrc/distributed/spmd/event_impl.h>
 
 namespace torch {
 namespace distributed {
 namespace spmd {
+
+/////////////////////////////////////////////////////////////////////
+//                           RootHandler                           //
+/////////////////////////////////////////////////////////////////////
+
+std::vector<EventSchema> RootHandler::ingressEvents() const {
+  return {};
+}
+
+std::vector<EventSchema> RootHandler::egressEvents() const {
+  return {
+      EventType::PREPARE_MODULE,
+      EventType::PRE_FORWARD,
+      EventType::POST_FORWARD};
+}
+
+std::vector<std::shared_ptr<Future>> RootHandler::handleEvent(
+    const c10::intrusive_ptr<Event>& /* unused */) {
+  TORCH_INTERNAL_ASSERT(
+      false, "RootHandler should not handle any ingress Events.");
+}
+
+/////////////////////////////////////////////////////////////////////
+//                             Engine                              //
+/////////////////////////////////////////////////////////////////////
 
 Engine::Engine(std::vector<std::shared_ptr<EventHandler>> handlers)
     : handlers_(std::move(handlers)) {

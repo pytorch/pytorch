@@ -10,6 +10,17 @@ namespace torch {
 namespace distributed {
 namespace spmd {
 
+// WIP RootHandler
+// TODO: generate POST_FORWARD event
+class TORCH_API RootHandler : public EventHandler {
+ public:
+  using EventHandler::EventHandler;
+  C10_NODISCARD std::vector<EventSchema> ingressEvents() const override;
+  C10_NODISCARD std::vector<EventSchema> egressEvents() const override;
+  std::vector<std::shared_ptr<Future>> handleEvent(
+      const c10::intrusive_ptr<Event>& /* unused */) override;
+};
+
 // The event-based engine that maintains the event-handling graph and routes
 // events to corresponding handlers properly.
 //
