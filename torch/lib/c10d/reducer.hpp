@@ -438,6 +438,12 @@ class Reducer {
   // Retrieves parameter names that have not been marked as ready as part of
   // previous iteration.
   std::vector<std::string> getUnmarkedParamsForIteration();
+  // Retrives parameter indices that have not been marked as ready as part of
+  // previous iteration.
+  std::vector<size_t> getUnmarkedParamIndicesForIteration();
+  // Raises appropriate error if mark_variable_ready is called on the same
+  // variable twice, which is unexpected.
+  void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
   friend class Logger;
 };
 

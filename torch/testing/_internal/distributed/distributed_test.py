@@ -3244,6 +3244,7 @@ class DistributedTest:
                 powersgd_state = powerSGD.PowerSGDState(
                     process_group=None,
                     matrix_approximation_rank=1,
+                    start_powerSGD_iter=2,
                     warm_start=warm_start,
                 )
                 self._test_ddp_hook_parity(state=powersgd_state, hook=powerSGD.powerSGD_hook)
@@ -4925,10 +4926,16 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         msg = str(e)
+                        if self.rank == 0:
+                            print(f"Got error {msg}")
+
+                        # 2nd linear layer is unused
+                        unused_param_index = 1
                         expected_strs = [
                             ddp_prev_reduction_unfinished_str,
                             ddp_recommend_find_unused_params_str,
-                            ddp_outputs_not_used_in_loss_str
+                            ddp_outputs_not_used_in_loss_str,
+                            f"Parameter indices which did not receive grad for rank {self.rank}: {unused_param_index}"
                         ]
                         # In debug mode, should show parameters that weren't reduced.
                         # Without debug mode, should show suggestion to use debug mode.
@@ -5027,10 +5034,12 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         msg = str(e)
+                        unused_param_index = 1
                         expected_strs = [
                             ddp_prev_reduction_unfinished_str,
                             ddp_recommend_find_unused_params_str,
-                            ddp_outputs_not_used_in_loss_str
+                            ddp_outputs_not_used_in_loss_str,
+                            f"Parameter indices which did not receive grad for rank {self.rank}: {unused_param_index}"
                         ]
                         # In debug mode, should show parameters that weren't reduced.
                         # Without debug mode, should show suggestion to use debug mode.
@@ -5143,11 +5152,16 @@ class DistributedTest:
                             loss.backward()
                         except RuntimeError as e:
                             msg = str(e)
+                            unused_index = 0
+                            unused_index_substr = (
+                                f"Parameter indices which did not receive grad for rank {self.rank}: {unused_index}"
+                            )
                             if ddp == net:
                                 expected_strs = [
                                     ddp_prev_reduction_unfinished_str,
                                     ddp_recommend_find_unused_params_str,
                                     ddp_outputs_not_used_in_loss_str,
+                                    unused_index_substr,
                                 ]
                                 unexpected_strs = [
                                     ddp_find_unused_params_enabled_str,
@@ -5157,6 +5171,7 @@ class DistributedTest:
                                     ddp_prev_reduction_unfinished_str,
                                     ddp_outputs_not_used_in_loss_str,
                                     ddp_find_unused_params_enabled_str,
+                                    unused_index_substr,
                                 ]
                                 unexpected_strs = [
                                     ddp_recommend_find_unused_params_str,
@@ -5201,7 +5216,10 @@ class DistributedTest:
             if self.rank == failed_rank:
                 return
             if self.rank == 0:
-                with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"Rank {failed_rank} failed to pass monitoredBarrier"
+                ):
                     dist.monitored_barrier(timeout=timeout)
             else:
                 # It is permissible for other ranks that did not fail to
@@ -5226,7 +5244,10 @@ class DistributedTest:
                 return
 
             if self.rank == 0:
-                with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"Rank {failed_rank} failed to pass monitoredBarrier"
+                ):
                     dist.monitored_barrier(subgroup, timeout)
             else:
                 # Other ranks call into monitored_barrier, but this should be a
@@ -5234,12 +5255,7 @@ class DistributedTest:
                 # there are no errors here.
                 dist.monitored_barrier(subgroup, timeout)
 
-        @with_nccl_blocking_wait
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
-        @skip_if_rocm
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        def test_monitored_barrier_allreduce_hang(self):
+        def _test_monitored_barrier_allreduce_hang(self, wait_all_ranks):
             # tests expected behavior when nonzero rank hangs.
             nccl_pg = dist.new_group(
                 ranks=list(i for i in range(int(self.world_size))),
@@ -5267,20 +5283,40 @@ class DistributedTest:
                     nccl_pg.allreduce(tensors).wait(timedelta(seconds=0.1))
                 return
 
-            # Rank 0 should report timed out rank.
-            monitored_barrier_timeout_seconds = timedelta(seconds=0.1)
-            world_size = int(self.world_size)
-            if world_size == 2:
-                err_regex = "Rank 1"
+            # Rank 0 should report first (in order) timed out rank or all ranks
+            # depending on wait_all_ranks flag passed into monitored_barrier.
+            if wait_all_ranks:
+                rank_str = ", ".join([str(i) for i in range(1, int(self.world_size))])
+                err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
             else:
-                # monitored_barrier() does not enforce an order it waits on for
-                # the ranks, so accept any rank that should be caught.
-                # TODO: provide an option in monitored_barrier() to collect all
-                # hanging ranks.
-                err_regex = f"Rank [1-{world_size - 1}]"
+                expected_first_fail_rank = 1
+                err_regex = f"Rank {expected_first_fail_rank} failed to pass monitoredBarrier"
+            monitored_barrier_timeout_seconds = timedelta(seconds=0.1)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                err_regex
+            ):
+                gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks)
 
-            with self.assertRaisesRegex(RuntimeError, err_regex):
-                gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds)
+        @with_nccl_blocking_wait
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_rocm
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        def test_monitored_barrier_allreduce_hang(self):
+            # tests expected behavior when nonzero rank hangs and we want to
+            # report first timed out rank.
+            self._test_monitored_barrier_allreduce_hang(wait_all_ranks=False)
+
+        @with_nccl_blocking_wait
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_rocm
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        def test_monitored_barrier_allreduce_hang_wait_all_ranks(self):
+            # tests expected behavior when nonzero rank hangs and we want to
+            # report all timed out ranks.
+            self._test_monitored_barrier_allreduce_hang(wait_all_ranks=True)
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
@@ -5295,6 +5331,39 @@ class DistributedTest:
                     RuntimeError, f"Rank {self.rank} timed out in monitoredBarrier"
                 ):
                     process_group.monitored_barrier(timeout)
+
+        @require_backend({"gloo"})
+        @require_backends_available({"gloo"})
+        @skip_if_small_worldsize
+        def test_monitored_barrier_failure_order(self):
+            # Ensure that the first (in sorted order) rank is reported when
+            # multiple ranks fail to pass the monitored_barrier.
+            # TODO(#54879): Provide ability to wait and report all failed ranks
+            expected_first_failed_rank = 2
+            timeout = timedelta(seconds=2)
+            if self.rank == 0:
+                with self.assertRaisesRegex(RuntimeError, f"Rank {expected_first_failed_rank}"):
+                    dist.monitored_barrier(timeout=timeout)
+            elif self.rank == 1:
+                # Successfully pass barrier
+                dist.monitored_barrier(timeout=timeout)
+
+        @require_backend({"gloo"})
+        @require_backends_available({"gloo"})
+        @skip_if_small_worldsize
+        def test_monitored_barrier_wait_all_ranks(self):
+            # Tests simple case where > 1 rank does not call into monitored
+            # barrier and verifies all ranks are reported by rank 0.
+            if self.rank == 0:
+                timeout = timedelta(seconds=0.1)
+                rank_str = ", ".join([str(i) for i in range(1, int(self.world_size))])
+                err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
+                with self.assertRaisesRegex(RuntimeError, err_regex):
+                    dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
+
+            # We need a barrier since otherwise non-zero ranks exit too early
+            # and cause a timeout.
+            self._barrier(timeout=30)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -5327,6 +5396,8 @@ class DistributedTest:
             self.assertDictEqual(expected_mapping, param_to_name_mapping)
 
         def _test_ddp_multiple_nested_unused_params_error(self, ignore_sparse):
+            debug_mode_off = dist._get_debug_mode() == dist._DistributedDebugLevel.OFF
+
             class SubModule(nn.Module):
                 def __init__(self):
                     super().__init__()
@@ -5374,11 +5445,17 @@ class DistributedTest:
                     model.sub_module.lin.b,
                 ]
 
+
             expected_unused_param_fqns = []
             used_param_fqns = []  # Validate that these don't mistakenly show up.
+            fqn_to_param_index = {}
+            index = 0
             for module_name, module in model.named_modules():
                 for parameter_name, param in module.named_parameters(recurse=False):
                     fqn = f"{module_name}.{parameter_name}"
+                    fqn_to_param_index[fqn] = index
+                    if fqn not in sparse_embedding_fqns:
+                        index += 1
                     if module in unused_modules:
                         expected_unused_param_fqns.append(fqn)
                     else:
@@ -5406,13 +5483,22 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         e = str(e)
+                        if self.rank == 0:
+                            print(f"-- GOT error {str(e)} --")
+                            print(f"fqn_to_param_index {fqn_to_param_index}")
                         unused_param_substr = e[e.find("did not receive grad") :]
                         # Validate that each unused param fully qualified name
                         # shows up in error logs. We do this instead of
                         # constructing a joined string since order of parameters
-                        # can be different in Reducer.
+                        # can be different in Reducer. In addition, validate
+                        # param indices show up as well.
                         for unused_param_fqn in expected_unused_param_fqns:
-                            self.assertTrue(unused_param_fqn in unused_param_substr)
+                            self.assertTrue(unused_param_fqn in unused_param_substr or debug_mode_off)
+                            self.assertTrue(
+                                str(fqn_to_param_index[unused_param_fqn]) in unused_param_substr,
+                                f"Did not find index {fqn_to_param_index[unused_param_fqn]} for {unused_param_fqn}"
+                            )
+
                         # Validate that used param fqns don't show up in error
                         # logs.
                         for used_param_fqn in used_param_fqns:
@@ -5421,19 +5507,21 @@ class DistributedTest:
                         # (since DDP does not track them)
                         for sparse_param_fqn in sparse_embedding_fqns:
                             self.assertFalse(sparse_param_fqn in unused_param_substr)
+                    else:
+                        self.assertTrue(False, "Expected error was not raised!")
 
-        @with_dist_debug_levels(levels=["INFO", "DETAIL"])
+        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
         def test_ddp_multiple_nested_unused_params_error(self):
             self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=False)
 
-        @with_dist_debug_levels(levels=["INFO", "DETAIL"])
+        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
-        def test_ddp_multiple_nested_unused_params_error_ignore_params(self):
+        def test_ddp_multiple_nested_unused_params_err_ignore_params(self):
             # Tests unused parameter reporting when DDP is configured to ignore
             # certain parameters.
             self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=True)

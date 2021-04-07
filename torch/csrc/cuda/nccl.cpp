@@ -257,7 +257,7 @@ void check_inputs(
   int64_t numel = inputs[0].numel();
   auto dtype = inputs[0].scalar_type();
 
-  for(const auto i : c10::irange(len)) {
+  for (size_t i = 0; i < len; i++) {
     auto input = inputs[i];
     auto output = outputs[i];
 
@@ -288,7 +288,7 @@ void check_inputs(
   int64_t numel = inputs[0].numel();
   auto dtype = inputs[0].scalar_type();
 
-  for(const auto i : c10::irange(len)) {
+  for (size_t i = 0; i < len; i++) {
     auto input = inputs[i];
 
     check_tensor(
@@ -464,7 +464,7 @@ void reduce(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for(const auto i : c10::irange(len)) {
+  for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -516,7 +516,7 @@ void all_reduce(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for(const auto i : c10::irange(len)) {
+  for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -558,7 +558,7 @@ void reduce_scatter(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for(const auto i : c10::irange(len)) {
+  for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -599,7 +599,7 @@ void all_gather(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for(const auto i : c10::irange(len)) {
+  for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
@@ -727,7 +727,7 @@ void all2all(std::vector<at::Tensor>& outputTensors,
   auto comm = to_nccl_comm(_comm);
 
   NCCL_CHECK(ncclGroupStart());
-  for(const auto r : c10::irange(outputTensors.size())) {
+  for (size_t r = 0; r < outputTensors.size(); r++) {
     at::Tensor &input = inputTensors[r];
     at::Tensor &output = outputTensors[r];
     if (input.numel() != 0) {

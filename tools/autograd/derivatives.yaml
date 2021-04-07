@@ -377,8 +377,8 @@
 - name: deg2rad(Tensor self) -> Tensor
   self: deg2rad_backward(grad)
 
-- name: det(Tensor self) -> Tensor
-  self: det_backward(grad, self, result)
+- name: linalg_det(Tensor self) -> Tensor
+  self: linalg_det_backward(grad, self, result)
 
 - name: diag(Tensor self, int diagonal=0) -> Tensor
   self: diag_backward(grad, self.sizes(), diagonal)
@@ -400,11 +400,11 @@
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
-- name: div.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+- name: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
   self: div_tensor_self_backward(grad, other, self.scalar_type(), rounding_mode)
   other: div_tensor_other_backward(grad, self, other, rounding_mode)
 
-- name: div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+- name: div.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type(), rounding_mode)
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
@@ -912,9 +912,9 @@
   self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim)
 
 - name: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
-  self: grad.clone().put_(index, zeros_like(source), accumulate)
+  self: "accumulate ? grad : grad.put(index, zeros_like(source), false)"
   index: non_differentiable
-  source: grad.take(index)
+  source: grad.take(index).reshape_as(source)
 
 - name: linalg_qr(Tensor self, str mode='reduced') -> (Tensor Q, Tensor R)
   self: linalg_qr_backward(grads, self, mode, Q, R)
@@ -1114,7 +1114,7 @@
   self: grad.rot90(-k, dims)
 
 - name: take(Tensor self, Tensor index) -> Tensor
-  self: take_backward(grad, self, index)
+  self: zeros_like(self).put_(index, grad, true)
   index: non_differentiable
 
 - name: tan(Tensor self) -> Tensor

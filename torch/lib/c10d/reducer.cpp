@@ -6,7 +6,6 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
-#include <c10/util/irange.h>
 #include <c10d/comm.hpp>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
@@ -177,7 +176,7 @@ Reducer::Reducer(
       local_used_maps_.resize(replica_count);
       local_used_maps_dev_.resize(replica_count);
 
-      for(const auto i : c10::irange(replica_count)) {
+      for (size_t i = 0; i < replica_count; i++) {
         at::TensorOptions options;
         options = options.dtype(at::kInt);
 
@@ -468,41 +467,40 @@ void Reducer::autograd_hook(VariableIndex index) {
   mark_variable_ready(index);
 }
 
-void Reducer::mark_variable_ready(VariableIndex index) {
-  const auto replica_index = index.replica_index;
-  const auto variable_index = index.variable_index;
-  TORCH_CHECK(replica_index < replicas_.size(), "Out of range replica index.");
-  TORCH_CHECK(
-      variable_index < variable_locators_.size(),
-      "Out of range variable index.");
-  if (ddp_debug_level_ != DistributedDebugLevel::OFF && replica_index == 0) {
-    // We don't expect the same variable to be marked ready twice.
-    TORCH_INTERNAL_ASSERT(
-        perIterationReadyParams_.find(variable_index) ==
-            perIterationReadyParams_.end(),
-        c10::str(
-            "Variable index ",
-            variable_index,
-            " already has been marked as ready!"));
-    perIterationReadyParams_.insert(variable_index);
-  }
-  backward_stats_[replica_index][variable_index] =
-      current_time_in_nanos() - cpu_timer_.backward_compute_start_time;
-
-  // Any time we mark a variable ready (be it in line due to unused parameters,
-  // or via an autograd hook), we require a call to the finalize function. If
-  // this doesn't happen before the next iteration (or call to
-  // `prepare_for_backwards`), we know something is wrong.
-  require_finalize_ = true;
-
-  const auto& bucket_index = variable_locators_[variable_index];
-  auto& bucket = buckets_[bucket_index.bucket_index];
-  auto& replica = bucket.replicas[replica_index];
-
+void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
   // Something is wrong if all variables contained in this bucket replica have
   // already been marked as ready.
-  if (replica.pending == 0) {
-    const auto common_error = c10::str(
+  // We don't expect the same variable to be marked ready twice.
+  bool marked_twice = perIterationReadyParams_.find(curVariableIndex) != perIterationReadyParams_.end();
+
+  if (marked_twice) {
+    // Report index of param that has been marked twice. In debug mode, also
+    // report fully qualified parameter name.
+    auto param_name = param_names_.find(curVariableIndex);
+    std::string paramInfo;
+    // param_names_ is empty in debug mode.
+    if (param_name != param_names_.end()) {
+      paramInfo += c10::str(
+        "Parameter at index ",
+        curVariableIndex,
+        " with name ",
+        param_name->second,
+        " has been marked as ready twice. This means that multiple autograd engine ",
+        " hooks have fired for this particular parameter during this iteration.",
+        " You can set the environment variable TORCH_DISTRIBUTED_DEBUG to either",
+        " INFO or DETAIL to print parameter names for further debugging."
+      );
+    } else {
+      paramInfo += c10::str(
+        "Parameter at index ",
+        curVariableIndex,
+        " has been marked as ready twice. This means that multiple autograd engine ",
+        " hooks have fired for this particular parameter during this iteration.",
+        " "
+
+      );
+    }
+    std::string common_error = c10::str(
         "Expected to mark a variable ready only once. ",
         "",
         "This error is caused by one of the following reasons: ",
@@ -515,6 +513,9 @@ void Reducer::mark_variable_ready(VariableIndex index) {
         "parameters been used by different reentrant backward passes ",
         "multiple times, and hence marking a variable ready multiple times. ",
         "DDP does not support such use cases yet.");
+
+    common_error += c10::str("\n", paramInfo);
+
     TORCH_CHECK(
         has_marked_unused_parameters_,
         common_error,
@@ -531,6 +532,33 @@ void Reducer::mark_variable_ready(VariableIndex index) {
         "`torch.nn.parallel.DistributedDataParallel`.");
     TORCH_CHECK(!has_marked_unused_parameters_, common_error);
   }
+}
+
+void Reducer::mark_variable_ready(VariableIndex index) {
+  const auto replica_index = index.replica_index;
+  const auto variable_index = index.variable_index;
+  TORCH_CHECK(replica_index < replicas_.size(), "Out of range replica index.");
+  TORCH_CHECK(
+      variable_index < variable_locators_.size(),
+      "Out of range variable index.");
+
+  if (replica_index == 0) {
+    checkAndRaiseMarkedTwiceError(variable_index);
+    perIterationReadyParams_.insert(variable_index);
+  }
+  backward_stats_[replica_index][variable_index] =
+      current_time_in_nanos() - cpu_timer_.backward_compute_start_time;
+
+  // Any time we mark a variable ready (be it in line due to unused parameters,
+  // or via an autograd hook), we require a call to the finalize function. If
+  // this doesn't happen before the next iteration (or call to
+  // `prepare_for_backwards`), we know something is wrong.
+  require_finalize_ = true;
+
+  const auto& bucket_index = variable_locators_[variable_index];
+  auto& bucket = buckets_[bucket_index.bucket_index];
+  auto& replica = bucket.replicas[replica_index];
+
 
   // If it was scheduled, wait on allreduce in forward pass that tells us
   // division factor based on no. of currently participating processes.
@@ -573,7 +601,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     // See Note [Skip allreducing local_used_maps_dev]
     if (find_unused_parameters_) {
       // H2D from local_used_maps_ to local_used_maps_dev_
-      for(const auto i : c10::irange(local_used_maps_.size())) {
+      for (size_t i = 0; i < local_used_maps_.size(); i++) {
         if (local_used_maps_dev_[i].is_cuda()) {
           // Note [local_used_maps_ -> local_used_maps_dev copying]
           // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -672,7 +700,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     } else {
       GradBucket grad_bucket(
           next_bucket_,
-          tensors,
+          tensors[0],
           // Since currently we do not support single-process multiple-device
           // mode, we can assume only one replica in the bucket.
           bucket.replicas[0].offsets,
@@ -714,7 +742,7 @@ void Reducer::initialize_buckets(
   const auto bucket_count = bucket_indices.size();
   const auto replica_count = replicas_.size();
   buckets_.reserve(bucket_count);
-  for(const auto bucket_index : c10::irange(bucket_count)) {
+  for (size_t bucket_index = 0; bucket_index < bucket_count; bucket_index++) {
     Bucket bucket;
 
     // TODO(@pietern): Validate indices.
@@ -856,7 +884,7 @@ void Reducer::initialize_buckets(
 void Reducer::initialize_bucket_views(
     Reducer::BucketReplica& replica,
     at::Tensor& contents) {
-  for(const auto i : c10::irange(replica.variables.size())) {
+  for (size_t i = 0; i < replica.variables.size(); i++) {
     auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
     const auto length = replica.lengths[i];
@@ -907,7 +935,7 @@ void Reducer::populate_bucket_views_out(
     Reducer::BucketReplica& replica,
     at::Tensor& tensor) {
   replica.bucket_views_out.clear();
-  for(const auto i : c10::irange(replica.variables.size())) {
+  for (size_t i = 0; i < replica.variables.size(); i++) {
     const auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
     const auto length = replica.lengths[i];
@@ -1052,7 +1080,7 @@ void Reducer::copy_bucket_to_grad(
 }
 
 std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
-  TORCH_INTERNAL_ASSERT(ddp_debug_level_ != DistributedDebugLevel::OFF);
+  // TORCH_INTERNAL_ASSERT(ddp_debug_level_ != DistributedDebugLevel::OFF);
   std::vector<std::string> unMarkedParamNames;
   for (const auto& it : param_names_) {
     if (perIterationReadyParams_.find(it.first) ==
@@ -1061,6 +1089,17 @@ std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
     }
   }
   return unMarkedParamNames;
+}
+
+std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
+  std::vector<size_t> unmarked_param_indices;
+  const auto variable_count = replicas_[0].size();
+  for (size_t variable_index = 0; variable_index < variable_count; variable_index++) {
+    if (perIterationReadyParams_.find(variable_index) == perIterationReadyParams_.end()) {
+      unmarked_param_indices.push_back(variable_index);
+    }
+  }
+  return unmarked_param_indices;
 }
 
 // A bucket with one or more dense tensors needs to be unflattened.
@@ -1104,7 +1143,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
           // Wait for local_used_maps reduction to complete.
           local_used_work_->wait();
           // D2H from local_used_maps_dev_ to local_used_maps_
-          for(const auto i : c10::irange(local_used_maps_.size())) {
+          for (size_t i = 0; i < local_used_maps_.size(); i++) {
             // Blocking copy, if local_used_maps_dev_ is cuda
             local_used_maps_[i].copy_(local_used_maps_dev_[i]);
           }
@@ -1203,7 +1242,7 @@ void Reducer::finalize_backward() {
       auto future_result =
           comm_hook_->parseHookResult(bucket.future_work->value());
 
-      for(const auto i : c10::irange(future_result.size())) {
+      for (size_t i = 0; i < future_result.size(); i++) {
         auto& replica = bucket.replicas[i];
         if (bucket.expect_sparse_gradient) {
           replica.contents.copy_(future_result[i]);
@@ -1278,7 +1317,7 @@ void Reducer::sync_bucket_indices(
   std::vector<size_t> bucket_sizes;
   bucket_sizes.reserve(num_buckets);
   int64_t total_size = 0;
-  for(const auto i : c10::irange(num_buckets)) {
+  for (size_t i = 0; i < num_buckets; i++) {
     auto bucket_size = bucket_indices.at(i).size();
     bucket_sizes.push_back(bucket_size);
     total_size += bucket_size;
@@ -1293,9 +1332,9 @@ void Reducer::sync_bucket_indices(
   auto indices_tensor = at::empty({total_size + 1}, at::kInt);
   auto indices_accessor = indices_tensor.accessor<int, 1>();
   auto indices_accessor_Index = 0;
-  for(const auto i : c10::irange(num_buckets)) {
+  for (size_t i = 0; i < num_buckets; i++) {
     const auto& bucket_size = bucket_indices.at(i).size();
-    for(const auto j : c10::irange(bucket_size)) {
+    for (size_t j = 0; j < bucket_size; j++) {
       indices_accessor[indices_accessor_Index++] = bucket_indices[i][j];
     }
   }
@@ -1315,7 +1354,7 @@ void Reducer::sync_bucket_indices(
   // Broadcast bucket_sizes
   auto bucket_sizes_tensor = at::empty({(int64_t)num_buckets}, at::kInt);
   auto bucket_sizes_accessor = bucket_sizes_tensor.accessor<int, 1>();
-  for(const auto i : c10::irange(num_buckets)) {
+  for (size_t i = 0; i < num_buckets; i++) {
     // For rank != 0, it is possible that local num buckets bucket_sizes.size()
     // is smaller than broadcasted num_buckets
     bucket_sizes_accessor[i] =
@@ -1334,11 +1373,11 @@ void Reducer::sync_bucket_indices(
   bucket_indices.clear();
   bucket_indices.reserve(num_buckets);
   indices_accessor_Index = 0;
-  for(const auto i : c10::irange(num_buckets)) {
+  for (size_t i = 0; i < num_buckets; i++) {
     const auto& bucket_size = bucket_sizes_accessor[i];
     std::vector<size_t> bucket;
     bucket.reserve(bucket_size);
-    for(const auto j : c10::irange(bucket_size)) {
+    for (size_t j = 0; j < bucket_size; j++) {
       bucket.push_back(indices_accessor[indices_accessor_Index++]);
     }
     bucket_indices.emplace_back(std::move(bucket));
@@ -1399,11 +1438,6 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_comm_hook or register_builtin_comm_hook can only be called once.");
-  // TODO(#42542): Single-process multiple-device mode support for DDP
-  // communication hook.
-  TORCH_CHECK(
-      replicas_.size() == 1,
-      "Communication hook does not support single-process multiple-device mode.");
 
   comm_hook_ = std::move(iface);
 }
@@ -1414,9 +1448,6 @@ void Reducer::register_builtin_comm_hook(
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_builtin_comm_hook or register_comm_hook can only be called once.");
-  TORCH_CHECK(
-      replicas_.size() == 1,
-      "Communication hook does not support single-process multiple-device mode.");
   // TODO: Support GLOO and MPI backends for DDP communication hook.
   TORCH_CHECK(
       process_group_->getBackendName() == "nccl",
@@ -1444,8 +1475,12 @@ void Reducer::ensure_prior_reduction_finished() {
   // Check that any prior reduction has finished.
   // The variable `require_finalize_` is true until all gradients
   // have been computed and reduction of all buckets has been kicked off.
-  std::string unmarkedParamInfo;
   if (require_finalize_) {
+    // Collect unmarked parameter indices, additionally, in debug mode retrieve
+    // parameter names.
+    auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
+    const std::string unmarkedParamIndices = c10::Join(", ", unmarked_param_indices);
+    std::string unmarkedParamInfo;
     if (ddp_debug_level_ != DistributedDebugLevel::OFF) {
       // Retrieve set of parameter names that did not receive gradient.
       auto unmarkedParams = getUnmarkedParamsForIteration();
@@ -1458,6 +1493,7 @@ void Reducer::ensure_prior_reduction_finished() {
         unmarkedParamInfo = c10::Join(", ", unmarkedParams);
       }
     }
+
     std::string kBaseErrorMsg =
         "Expected to have finished reduction in the prior iteration before "
         "starting a new one. "
@@ -1494,13 +1530,26 @@ void Reducer::ensure_prior_reduction_finished() {
       kBaseErrorMsg += kOutputsNotUsedInLossErrorMsg;
       kBaseErrorMsg += kDDPBugErrorMsg;
     }
+
+    const std::string unmarked_param_indices_info = c10::str(
+        "\n",
+        "Parameter indices which did not receive grad for rank ",
+        process_group_->getRank(),
+        ": ",
+        unmarked_param_indices
+      );
+
     if (ddp_debug_level_ == DistributedDebugLevel::OFF) {
+      // Without debug mode, log unmarked_param_indices, as well as recommendation
+      // to use debug mode to print parameter names.
+      kBaseErrorMsg += unmarked_param_indices_info;
       kBaseErrorMsg +=
         "\n In addition, you can set the environment variable "
         "TORCH_DISTRIBUTED_DEBUG to either INFO or DETAIL to print out information "
         "about which particular parameters did not receive gradient on this rank "
         "as part of this error";
     } else {
+      // In debug mode, log param names and indices that went unused.
       kBaseErrorMsg +=
         c10::str(
           "\n",
@@ -1509,6 +1558,7 @@ void Reducer::ensure_prior_reduction_finished() {
           ": ",
           unmarkedParamInfo
         );
+      kBaseErrorMsg += unmarked_param_indices_info;
       // TODO: we can validate that no parameter here is part of unused_parameters_,
       // otherwise this is a bug in DDP unused parameter detection.
     }
@@ -1665,7 +1715,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   std::unordered_map<BucketKey, BucketAccumulator, c10::hash<BucketKey>>
       buckets;
 
-  for(const auto i : c10::irange(tensors.size())) {
+  for (size_t i = 0; i < tensors.size(); i++) {
     const auto& tensor = tensors[i];
     TORCH_CHECK(!tensor.is_sparse(), "No support for sparse tensors.");
 
@@ -1820,7 +1870,7 @@ void verify_replica0_across_processes(
   control.copy_(metadata_dev, /*non_blocking=*/false);
   auto control_accessor = control.accessor<int64_t, 1>();
   i = 0;
-  for(const auto p : c10::irange(model_replicas[0].size())) {
+  for (size_t p = 0; p < model_replicas[0].size(); p++) {
     const auto& t = model_replicas[0][p];
     // I'd like to include which process we are in the message,
     // but ProcessGroup::getRank is not public!

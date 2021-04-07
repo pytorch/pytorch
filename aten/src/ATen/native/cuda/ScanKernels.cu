@@ -8,7 +8,7 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
 
-#include <cub/device/device_scan.cuh>
+#include <ATen/cuda/CubUtils.cuh>
 
 
 namespace at { namespace native {
