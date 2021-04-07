@@ -210,7 +210,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_scalar_type_analysis",
           [](std::shared_ptr<Graph>& graph,
-             bool lowprecision_cast = true,
+             bool lowprecision_cast,
              int opset_version) {
             ScalarTypeAnalysisForONNX(graph, lowprecision_cast, opset_version);
           })
