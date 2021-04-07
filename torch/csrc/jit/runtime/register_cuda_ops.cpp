@@ -121,18 +121,15 @@ RegisterOperators const reg({
         aliasAnalysisFromSchema()),
     Operator(
         "cuda::synchronize() -> ()",
-        [](Stack* stack) {
-          c10::cuda::device_synchronize();
-        },
+        [](Stack* stack) { c10::cuda::device_synchronize(); },
         aliasAnalysisFromSchema()),
     Operator(
         "cuda::synchronize.device(Device? device) -> ()",
         [](Stack* stack) {
           auto device = pop(stack).toOptional<c10::Device>();
           auto current_device_index = c10::cuda::current_device();
-          c10::DeviceIndex device_index = device.has_value()
-              ? device->index()
-              : current_device_index;
+          c10::DeviceIndex device_index =
+              device.has_value() ? device->index() : current_device_index;
 
           // If the current_device and the device to synchronize are not
           // the same, set the device to the device_index of the device
