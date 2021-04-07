@@ -1015,8 +1015,8 @@ class DeviceCachingAllocator {
     for (auto it = graph_pools_freeable.begin(); it != graph_pools_freeable.end(); ) {
       // See notifyCaptureDestroy for the strategy here.
       TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
-      free_blocks(it->second->small_blocks);
-      free_blocks(it->second->large_blocks);
+      release_blocks(it->second->small_blocks);
+      release_blocks(it->second->large_blocks);
       if (it->second->cudaMalloc_count == 0) {
         auto erase_count = graph_pools.erase(it->first);
         TORCH_INTERNAL_ASSERT(erase_count == 1);
@@ -1042,7 +1042,7 @@ class DeviceCachingAllocator {
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_segments, -1);
 
-    block->pool.blocks->erase(block);
+    block->pool->blocks.erase(block);
     delete block;
   }
 
