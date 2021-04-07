@@ -3,9 +3,14 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/rref_interface.h>
 #include <c10/util/Optional.h>
+// #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/types.h>
+
+// #ifdef USE_CUDA_NOT_ROCM
+#include <ATen/cuda/CUDAEvent.h>
+// #endif
 
 #include <atomic>
 
@@ -395,6 +400,13 @@ class TORCH_API OwnerRRef final : public RRef {
   friend class RRefContext;
 
   std::shared_ptr<JitFuture> future_;
+
+ public:
+  void recordAllDevices(std::shared_ptr<LazyStreamContext> ctx);
+  void waitAllDevices(std::shared_ptr<LazyStreamContext> ctx);
+ private:
+  std::vector<at::cuda::CUDAEvent> cudaEvents_;
+
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const RRef& rref);

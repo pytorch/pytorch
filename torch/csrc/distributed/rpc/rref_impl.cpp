@@ -2,11 +2,16 @@
 #include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+// #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
+#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+
+// #include <unistd.h>
+// #include <thread>
 
 namespace {
 // If the type is subtype of named type, return its qualifiedname, otherwise
@@ -256,6 +261,36 @@ void OwnerRRef::setValue(IValue&& value) {
 
 void OwnerRRef::setError(std::exception_ptr eptr) {
   future_->setErrorIfNeeded(std::move(eptr));
+}
+
+void OwnerRRef::recordAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
+// #ifdef USE_CUDA_NOT_ROCM
+  // std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "OwnerRRef::recordAllDevices";
+  if (ctx) {
+    // std::cout << " with ctx->devices().size() = " << ctx->devices().size() << std::endl;
+    for (auto deviceIndex : ctx->devices()) {
+      at::cuda::CUDAEvent cudaEvent;
+      cudaEvent.record(at::cuda::getCurrentCUDAStream(deviceIndex));
+      cudaEvents_.push_back(std::move(cudaEvent));
+    }
+  // } else {
+  //   std::cout << " with empty ctx" << std::endl;
+  }
+// #endif
+}
+
+void OwnerRRef::waitAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
+// #ifdef USE_CUDA_NOT_ROCM
+  // std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "OwnerRRef::waitAllDevices";
+  if (ctx) {
+    // std::cout << " with cudaEvents_.size() = " << cudaEvents_.size() << std::endl;
+    for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
+      cudaEvent.block(ctx->getStream(cudaEvent.device_index()));
+    }
+  // } else {
+  //   std::cout << " with empty ctx" << std::endl;
+  }
+// #endif
 }
 
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {
