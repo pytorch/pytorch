@@ -602,6 +602,36 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     else:
         return (input, )
 
+def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
+    return (
+        SampleInput(
+            make_tensor((S, M, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            args=(
+                make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            )
+        ),
+    )
+
+def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
+    return (
+        SampleInput(
+            make_tensor((M, S, M, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            args=(
+                make_tensor((M, M, S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            )
+        ),
+    )
+
+def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
+    return (
+        SampleInput(
+            make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            args=(
+                make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            )
+        ),
+    )
+
 def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
     input1 = SampleInput(
         make_tensor((S, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -4028,6 +4058,35 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    sample_inputs_func=sample_inputs_logit,
                    safe_casts_outputs=True),
+    OpInfo('dot',
+           dtypes=all_types_and_complex_and(torch.float16),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_dot_vdot),
+    OpInfo('vdot',
+           dtypes=all_types_and_complex_and(torch.float16),
+           sample_inputs_func=sample_inputs_dot_vdot),
+    OpInfo('bmm',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           assert_autodiffed=True,
+           skips=(
+               # bmm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),),
+           sample_inputs_func=sample_inputs_bmm),
+    OpInfo('mv',
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           skips=(
+               # bmm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16,)),
+               # mv calls into addmv which doesn't fully support float16
+               # RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
+               SkipInfo('TestOpInfo', 'test_supported_dtypes', dtypes=(torch.float16,)),
+               ),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_mv),
 ]
 
 # Common operator groupings
@@ -4429,11 +4488,7 @@ def method_tests():
         ('addmv', (1,), ((S, M), (M,)), 'broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs'),
         ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('dot', (L,), ((L,),), '', (True,)),
-        ('vdot', (L,), ((L,),),),
         ('mm', (S, M), ((M, S),), '', (True,)),
-        ('bmm', (M, S, M), ((M, M, S),), '', (True,)),
-        ('mv', (S, M), ((M,),), '', (True,)),
         ('inner', (S,), ((S,),), "1d_1d", (False,)),
         ('inner', (), ((S, S),), "scalar_2d", (False,)),
         ('matmul', (L,), ((L,),), '', (True,)),
