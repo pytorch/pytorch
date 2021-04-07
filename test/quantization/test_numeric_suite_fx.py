@@ -61,6 +61,89 @@ class LinearReluFunctional(nn.Module):
         return x
 
 
+class AllConvAndLinearFusionModules(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        # conv1d
+        self.conv1d_0 = nn.Conv1d(1, 1, 1)
+        # conv1d - relu
+        self.conv1d_1 = nn.Conv1d(1, 1, 1)
+        self.relu_0 = nn.ReLU()
+        # conv1d - bn (qat only)
+        self.conv1d_2 = nn.Conv1d(1, 1, 1)
+        self.bn1d_0 = nn.BatchNorm1d(1)
+        # conv1d - bn - relu (qat only)
+        self.conv1d_3 = nn.Conv1d(1, 1, 1)
+        self.bn1d_1 = nn.BatchNorm1d(1)
+        self.relu_4 = nn.ReLU()
+        # conv2d
+        self.conv2d_0 = nn.Conv2d(1, 1, 1)
+        # conv2d - relu
+        self.conv2d_1 = nn.Conv2d(1, 1, 1)
+        self.relu_1 = nn.ReLU()
+        # conv2d - bn (qat only)
+        self.conv2d_2 = nn.Conv2d(1, 1, 1)
+        self.bn2d_0 = nn.BatchNorm2d(1)
+        # conv2d - bn - relu (qat only)
+        self.conv2d_3 = nn.Conv2d(1, 1, 1)
+        self.bn2d_1 = nn.BatchNorm2d(1)
+        self.relu_5 = nn.ReLU()
+        # conv3d
+        self.conv3d_0 = nn.Conv3d(1, 1, 1)
+        # conv3d - relu
+        self.conv3d_1 = nn.Conv3d(1, 1, 1)
+        self.relu_2 = nn.ReLU()
+        # conv3d - bn (qat only)
+        self.conv3d_2 = nn.Conv3d(1, 1, 1)
+        self.bn3d_0 = nn.BatchNorm3d(1)
+        # conv3d - bn - relu (qat only)
+        self.conv3d_3 = nn.Conv3d(1, 1, 1)
+        self.bn3d_1 = nn.BatchNorm3d(1)
+        self.relu_6 = nn.ReLU()
+        # linear
+        self.linear_0 = nn.Linear(1, 1)
+        # linear - relu
+        self.linear_1 = nn.Linear(1, 1)
+        self.relu_3 = nn.ReLU()
+
+    def forward(self, x):
+        # conv1d
+        x = self.conv1d_0(x)
+        x = self.conv1d_1(x)
+        x = self.relu_0(x)
+        x = self.conv1d_2(x)
+        x = self.bn1d_0(x)
+        x = self.conv1d_3(x)
+        x = self.bn1d_1(x)
+        x = self.relu_4(x)
+        # conv2d
+        x = x.reshape(1, 1, 1, 1)
+        x = self.conv2d_0(x)
+        x = self.conv2d_1(x)
+        x = self.relu_1(x)
+        x = self.conv2d_2(x)
+        x = self.bn2d_0(x)
+        x = self.conv2d_3(x)
+        x = self.bn2d_1(x)
+        x = self.relu_5(x)
+        # conv3d
+        x = x.reshape(1, 1, 1, 1, 1)
+        x = self.conv3d_0(x)
+        x = self.conv3d_1(x)
+        x = self.relu_2(x)
+        x = self.conv3d_2(x)
+        x = self.bn3d_0(x)
+        x = self.conv3d_3(x)
+        x = self.bn3d_1(x)
+        x = self.relu_6(x)
+        # linear
+        x = x.reshape(1, 1)
+        x = self.linear_0(x)
+        x = self.linear_1(x)
+        x = self.relu_3(x)
+        return x
+
+
 class TestFXGraphMatcher(QuantizationTestCase):
 
     @override_qengines
@@ -308,10 +391,12 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
 
 
 class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
-    def _test_extract_weights(self, m, results_len=0, qconfig_dict=None):
+    def _test_extract_weights(
+        self, m, results_len=0, qconfig_dict=None, prepare_fn=prepare_fx
+    ):
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
+        mp = prepare_fn(m, qconfig_dict)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
@@ -406,53 +491,16 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
 class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
-    def test_extract_weights_mod(self):
+    def test_extract_weights_mod_ptq(self):
+        m = AllConvAndLinearFusionModules().eval()
+        self._test_extract_weights(m, results_len=14)
 
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                # conv1d
-                self.conv1d_0 = nn.Conv1d(1, 1, 1)
-                # conv1d - relu
-                self.conv1d_1 = nn.Conv1d(1, 1, 1)
-                self.relu_0 = nn.ReLU()
-                # conv2d
-                self.conv2d_0 = nn.Conv2d(1, 1, 1)
-                # conv2d - relu
-                self.conv2d_1 = nn.Conv2d(1, 1, 1)
-                self.relu_1 = nn.ReLU()
-                # conv3d
-                self.conv3d_0 = nn.Conv3d(1, 1, 1)
-                # conv3d - relu
-                self.conv3d_1 = nn.Conv3d(1, 1, 1)
-                self.relu_2 = nn.ReLU()
-                # linear
-                self.linear_0 = nn.Linear(1, 1)
-                # linear - relu
-                self.linear_1 = nn.Linear(1, 1)
-                self.relu_3 = nn.ReLU()
-
-
-            def forward(self, x):
-                x = self.conv1d_0(x)
-                x = self.conv1d_1(x)
-                x = self.relu_0(x)
-                x = x.reshape(1, 1, 1, 1)
-                x = self.conv2d_0(x)
-                x = self.conv2d_1(x)
-                x = self.relu_1(x)
-                x = x.reshape(1, 1, 1, 1, 1)
-                x = self.conv3d_0(x)
-                x = self.conv3d_1(x)
-                x = self.relu_2(x)
-                x = x.reshape(1, 1)
-                x = self.linear_0(x)
-                x = self.linear_1(x)
-                x = self.relu_3(x)
-                return x
-
-        m = M().eval()
-        self._test_extract_weights(m, results_len=8)
+    @skipIfNoFBGEMM
+    def test_extract_weights_mod_qat(self):
+        m = AllConvAndLinearFusionModules().train()
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        self._test_extract_weights(
+            m, results_len=14, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
 
     @skipIfNoFBGEMM
     def test_extract_weights_linear_fun(self):
