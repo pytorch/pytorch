@@ -61,7 +61,7 @@ BackgroundThread::~BackgroundThread() {
     }
   }
   // Now close the rest control pipe
-  LOG(ERROR) << "a~BackgroundThread.closeStopSignal()";
+  LOG(ERROR) << "~BackgroundThread.closeStopSignal()";
   closeStopSignal();
   LOG(ERROR) << "finish ~BackgroundThread()";
 }
@@ -598,23 +598,23 @@ TCPStore::TCPStore(
       waitForWorkers();
     }
 
-#ifndef _WIN32
+// #ifndef _WIN32
     // socket to handle requests from server
     listenSocket_ = tcputil::connect(
         tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
     watchListener_ = std::make_unique<ListenThread>(listenSocket_);
-#endif
+// #endif
   } catch (const std::exception&) {
     if (isServer_) {
       tcpStoreDaemon_ = nullptr;
       tcputil::closeSocket(masterListenSocket_);
     }
-#ifndef _WIN32
+// #ifndef _WIN32
     watchListener_ = nullptr;
     if (listenSocket_ != -1) {
       tcputil::closeSocket(listenSocket_);
     }
-#endif
+// #endif
     if (storeSocket_ != -1) {
       tcputil::closeSocket(storeSocket_);
     }
@@ -706,16 +706,16 @@ bool TCPStore::deleteKey(const std::string& key) {
 void TCPStore::watchKey(
     const std::string& key,
     std::function<void(std::string, std::string)> callback) {
-#ifdef _WIN32
-  TORCH_INTERNAL_ASSERT(false, "watchKey not implemented for windows.");
-#else
+// #ifdef _WIN32
+//   TORCH_INTERNAL_ASSERT(false, "watchKey not implemented for windows.");
+// #else
   std::string regKey = regularPrefix_ + key;
 
   watchListener_->addCallback(regKey, callback);
 
   tcputil::sendValue<QueryType>(listenSocket_, QueryType::WATCH_KEY);
   tcputil::sendString(listenSocket_, regKey);
-#endif
+// #endif
 }
 
 int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {

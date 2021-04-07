@@ -183,7 +183,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   }
 
   std::vector<std::thread> threads;
-  int keyChangeOperationCount = 0;
+  std::atomic<int> keyChangeOperationCount{0};
   for (auto i = 0; i < numThreads; i++) {
     threads.push_back(std::thread([&clientStores,
                                    &internalKey,
@@ -211,6 +211,16 @@ void testWatchKeyCallback(const std::string& prefix = "") {
 
   // Check number of callbacks executed equal to number of key change operations
   EXPECT_EQ(keyChangeOperationCount, numCallbacksExecuted);
+
+  // Test the correctness of new_value and 
+  std::function<void(std::string, std::string)> checkCallback1 =
+    [](const std::string& old_value, const std::string& new_value) {
+          EXPECT_EQ("val1", old_value);
+          EXPECT_EQ("val2", new_value);
+    };
+  c10d::test::set(*serverStore, "testKey1", "val1");
+  serverStore->watchKey("testKey1", checkCallback1);
+  c10d::test::set(*serverStore, "testKey1", "val2");
 }
 
 TEST(TCPStoreTest, testHelper) {
