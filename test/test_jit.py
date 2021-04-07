@@ -12774,49 +12774,6 @@ dedent """
 
         self.checkScript(foo, (True,))
 
-        @torch.jit.script
-        def fn(x):
-            # type: (int) -> int
-            return other_fn(x)
-
-        self.assertEqual(fn(2), 2)
-
-        @torch.jit.script
-        def unify_to_optional(x):
-            # type: (bool) -> Optional[int]
-            if x:
-                a = None
-            else:
-                a = 2
-            return a
-
-        self.assertEqual(unify_to_optional(True), None)
-        self.assertEqual(unify_to_optional(False), 2)
-
-        @torch.jit.script
-        def opt_list(x):
-            # type: (Optional[List[float]]) -> int
-            return 2
-
-        @torch.jit.script
-        def broadcast_opt_list(x):
-            # type: (Optional[BroadcastingList2[float]]) -> int
-            return 2
-
-        @torch.jit.script
-        def opt_list_tuple_caller(x):
-            # type: (Tuple[float, float]) -> int
-            return opt_list(x) + broadcast_opt_list(x)
-
-        self.assertEqual(opt_list_tuple_caller((2., 3.)), 4)
-
-    def test_lhs_indexing(self):
-        def foo(a, b):
-            a = a.clone()
-            a[0] = b
-            return a
-        self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
-
     def test_lhs_advanced_indexing_assignment(self):
         def foo(x, y):
             a = torch.exp(x)
