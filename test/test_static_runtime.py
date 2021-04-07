@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+import unittest
+
 from torch import nn
 from torch.testing._internal.common_utils import TestCase, run_tests
 
@@ -218,6 +220,7 @@ class TestStaticModule(TestCase):
         o_test = tg_a(s)[0]
         torch.testing.assert_allclose(o_ref, o_test)
 
+    @unittest.skip("Temporarily disabled")
     def test_fusion_trivial_graph(self):
         s = torch.full((2, 2), 2)
         tg = torch.jit.script(trivial_graph)
@@ -227,6 +230,7 @@ class TestStaticModule(TestCase):
         o_test = tg(s, s, s)
         torch.testing.assert_allclose(o_ref, o_test)
 
+    @unittest.skip("Temporarily disabled")
     def test_fusion_multihead_attention_layer(self):
         HID_DIM = 256
         QUERY_LEN = 8
@@ -251,6 +255,7 @@ class TestStaticModule(TestCase):
         for a, b in zip(o_ref, o_test):
             torch.testing.assert_allclose(a, b)
 
+    @unittest.skip("Temporarily disabled")
     def test_fusion_loop(self):
         a = torch.randn(5, 5)
         b = torch.randn(5, 5)
@@ -262,6 +267,7 @@ class TestStaticModule(TestCase):
         o_test = lg(a, b, c)
         torch.testing.assert_allclose(o_ref, o_test)
 
+    @unittest.skip("Temporarily disabled")
     def test_fusion_outputs(self):
         a = torch.randn(2, 2)
         b = torch.randn(2, 2)
