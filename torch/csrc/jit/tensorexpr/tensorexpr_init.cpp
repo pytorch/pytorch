@@ -127,7 +127,26 @@ void initTensorExprBindings(PyObject* module) {
           [](Placeholder& self, const std::vector<ExprHandle>& v) {
             return self.load(v);
           })
-      .def("buf", [](Placeholder& self) { return BufHandle(self.data()); });
+      .def(
+          "loadWithMask",
+          [](Placeholder& self,
+             const std::vector<ExprHandle>& args,
+             const ExprHandle& mask) { return self.loadWithMask(args, mask); })
+      .def(
+          "store",
+          [](Placeholder& self,
+             const std::vector<ExprHandle>& args,
+             const ExprHandle& val) { return self.store(args, val); })
+      .def(
+          "storeWithMask",
+          [](Placeholder& self,
+             const std::vector<ExprHandle>& args,
+             const ExprHandle& val,
+             const ExprHandle& mask) {
+            return self.storeWithMask(args, val, mask);
+          })
+      .def("buf", [](Placeholder& self) { return BufHandle(self.data()); })
+      .def("data", [](Placeholder& self) { return self.data(); });
   py::class_<Tensor, std::unique_ptr<Tensor, py::nodelete>>(te, "Tensor")
       .def(py::init(
           [](BufHandle& b, Stmt* s) { return new Tensor(b.node(), s); }))
@@ -222,6 +241,30 @@ void initTensorExprBindings(PyObject* module) {
         return Reduce(func_name, dim_args, reducer, buffer, reduce_args);
       },
       py::return_value_policy::reference);
+  te.def(
+      "Reduce",
+      [](const std::string& func_name,
+         const std::vector<DimArg>& dim_args,
+         const Reducer& reducer,
+         const std::function<ExprHandle(const std::vector<VarHandle>&)>&
+             body_func,
+         const std::vector<DimArg>& reduce_args) {
+        return Reduce(func_name, dim_args, reducer, body_func, reduce_args);
+      },
+      py::return_value_policy::reference);
+  te.def(
+      "Reduce",
+      [](const std::string& func_name,
+         const std::vector<DimArg>& dim_args,
+         const Reducer& reducer,
+         const std::function<ExprHandle(const std::vector<VarHandle>&)>&
+             init_func,
+         const std::function<ExprHandle(const std::vector<VarHandle>&)>&
+             body_func,
+         const std::vector<DimArg>& reduce_args) {
+        return Reduce(func_name, dim_args, reducer, body_func, reduce_args);
+      },
+      py::return_value_policy::reference);
 
   py::class_<Stmt, std::unique_ptr<Stmt, py::nodelete>>(te, "Stmt")
       .def(py::init([](const std::vector<Stmt*>& stmts) {
@@ -232,12 +275,57 @@ void initTensorExprBindings(PyObject* module) {
         ss << self;
         return ss.str();
       });
+  py::class_<Store, Stmt, std::unique_ptr<Store, py::nodelete>>(te, "Store")
+      .def_static(
+          "make",
+          [](const BufHandle& buf,
+             std::vector<ExprHandle>& indicies,
+             const ExprHandle& value) {
+            return Store::make(buf, indicies, value);
+          },
+          py::return_value_policy::reference)
+      .def_static(
+          "make",
+          [](const BufHandle& buf,
+             std::vector<ExprHandle>& indicies,
+             const ExprHandle& value,
+             const ExprHandle& mask) {
+            return Store::make(buf, indicies, value, mask);
+          },
+          py::return_value_policy::reference);
+
   py::class_<For, Stmt, std::unique_ptr<For, py::nodelete>>(te, "For")
       .def(
           "index_var",
           [](const For& self) { return VarHandle(self.var()); },
           py::return_value_policy::reference)
-      .def("body", &For::body, py::return_value_policy::reference);
+      .def("body", &For::body, py::return_value_policy::reference)
+      .def("set_parallel", &For::set_parallel)
+      .def_static(
+          "make",
+          [](const VarHandle& var,
+             const ExprHandle& start,
+             const ExprHandle& stop,
+             Stmt* body,
+             const LoopOptions& loop_options) {
+            return For::make(var, start, stop, body, loop_options);
+          },
+          py::return_value_policy::reference)
+      .def_static(
+          "make",
+          [](const VarHandle& var,
+             const ExprHandle& start,
+             const ExprHandle& stop,
+             Stmt* body) { return For::make(var, start, stop, body); },
+          py::return_value_policy::reference);
+
+  py::class_<Cond, Stmt, std::unique_ptr<Cond, py::nodelete>>(te, "Cond")
+      .def_static(
+          "make",
+          [](const ExprHandle& condition, Stmt* true_stmt, Stmt* false_stmt) {
+            return new Cond(condition.node(), true_stmt, false_stmt);
+          },
+          py::return_value_policy::reference);
 
   py::class_<
       tensorexpr::Block,
