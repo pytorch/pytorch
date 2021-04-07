@@ -56,12 +56,12 @@ static uint64_t readURandomLong()
  * Gets a non deterministic random number number from either the
  * /dev/urandom or the current time. For CUDA, gets random from
  * std::random_device and adds a transformation on it.
- * 
+ *
  * FIXME: The behavior in this function is from legacy code (THRandom_seed/THCRandom_seed)
  * and is probably not the right thing to do, even though our tests pass.
  * Figure out if tests get perturbed
  * - when the same algorithm is used for all backends. Note that the current behavior is
- *   different for CPU, CUDA and Windows CPU. 
+ *   different for CPU, CUDA and Windows CPU.
  * - when using C++11 std objects, such as std::random_device
  * - when constructing a 64 bit seed properly, rather than static casting
  *   a 32 bit number to 64 bit.

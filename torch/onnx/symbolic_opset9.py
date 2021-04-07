@@ -476,16 +476,12 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     if scale_grad_by_freq and sym_help._training_mode:
         raise RuntimeError('Unsupported: ONNX export of embedding with scale_grad_by_freq=True '
                            'for training mode. ONNX does not support scaling the gradients.')
-    # To match the torch operator behavior for padding_idx: 
-    # if (padding_idx >= 0) {
-    #   embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
-    # }
-    weight = g.op("Gather", weight, indices)
-    if (padding_idx >= 0):
-        mask = eq(g, indices, g.op("Constant", value_t=torch.tensor(padding_idx)))
-        mask = reshape(g, mask, g.op("Constant", value_t=torch.tensor([-1, 1], dtype=torch.int64)))
-        weight = masked_fill(g, weight, mask, torch.tensor(0.))
-    return weight
+    if padding_idx >= 0 and sym_help._training_mode:
+        warnings.warn('Warning: ONNX export of embedding with padding_idx >= 0 '
+                      'for training mode. '
+                      'ONNX does not support not updating the embedding vector at padding_idx during training.')
+
+    return g.op("Gather", weight, indices)
 
 
 @parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
@@ -2459,7 +2455,7 @@ def scatter_add(g, self, dim, index, src):
 
 def log2(g, self):
     _ln2 = 0.693147180559945309
-    return g.op('Div', log(g, self), g.op('Constant', value_t=torch.Tensor([_ln2])))
+    return g.op('Div', log(g, self), g.op('Constant', value_t=torch.tensor([_ln2])))
 
 
 def prim_shape(g, self):
@@ -3003,3 +2999,37 @@ def __range_length(g, lo, hi, step):
     sub = g.op("Sub", hi, lo)
     div = g.op("Ceil", true_divide(g, sub, step))
     return g.op("Cast", div, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+
+
+def linear(g, input, weight, bias):
+    rank = sym_help._get_tensor_rank(input)
+    weight = t(g, weight)
+    if rank == 2 and not bias.node().mustBeNone():
+        alpha = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        beta = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        output = addmm(g, bias, input, weight, alpha, beta)
+    else:
+        output = matmul(g, input, weight)
+        if not bias.node().mustBeNone():
+            output = add(g, bias, output)
+
+    return output
+
+@parse_args('v', 'b', 'i', 'v', 'v', 'v', 'v')
+def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device=None, pin_memory=None, requires_grad=False):
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+        if sym_help._dtype_is_fp(dtype) is False:
+            dtype = torch.float
+        dtype = sym_help.scalar_type_to_pytorch_type.index(dtype)
+
+    n_array = arange(g, window_length, 4, None, None, None)
+    output = g.op('Cast', n_array, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    output = mul(g, g.op('Constant', value_t=torch.tensor(math.pi, dtype=torch.float)), output)
+
+    if periodic is False:
+        window_length = sub(g, window_length, g.op("Constant", value_t=torch.tensor(1, dtype=torch.int)))
+    output = div(g, output, window_length)
+    output = g.op("Cast", square(g, sin(g, output)), to_i=sym_help.scalar_type_to_onnx[dtype])
+
+    return output
