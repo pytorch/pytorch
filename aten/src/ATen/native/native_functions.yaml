@@ -1062,15 +1062,15 @@
 
 - func: cosh(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: cosh
+  structured_delegate: cosh.out
 
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: cosh_
+  structured_delegate: cosh.out
 
 - func: cosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: cosh_out
 
