@@ -312,12 +312,12 @@ SparseTensor clone_sparse(const SparseTensor& self, c10::optional<c10::MemoryFor
  * reshaping methods
  ******************************************************************************/
 
-const SparseTensor& sparse_resize_(const SparseTensor& self, ArrayRef<int64_t> size, int64_t sparse_dim, int64_t dense_dim) {
+SparseTensor& sparse_resize_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparse_dim, int64_t dense_dim) {
   get_sparse_impl(self)->resize_(sparse_dim, dense_dim, size);
   return self;
 }
 
-const SparseTensor& sparse_resize_and_clear_(const SparseTensor& self, ArrayRef<int64_t> size, int64_t sparse_dim, int64_t dense_dim) {
+SparseTensor& sparse_resize_and_clear_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparse_dim, int64_t dense_dim) {
   get_sparse_impl(self)->resize_and_clear_(sparse_dim, dense_dim, size);
   return self;
 }
@@ -329,7 +329,7 @@ namespace {
 }
 
 // Invoked from native/Resize.cpp (no dynamic dispatch necessary)
-const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTensor& src) {
+SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
     sparse_resize_(self, src.sizes(), src.sparse_dim(), src.dense_dim());
   }
