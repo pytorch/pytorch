@@ -2164,6 +2164,22 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
 
     return samples
 
+def sample_inputs_inner(self, device, dtype, requires_grad, **kwargs):
+    return (
+        SampleInput(
+            make_tensor((S, ), device, dtype, requires_grad=requires_grad),
+            args=(
+                make_tensor((S, ), device, dtype, requires_grad=requires_grad),
+            )
+        ),
+        SampleInput(
+            make_tensor((), device, dtype, requires_grad=requires_grad),
+            args=(
+                make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+            )
+        ),
+    )
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('exp'),
     ForeachUnaryFuncInfo('acos'),
@@ -3876,6 +3892,12 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_out=False,
            sample_inputs_func=sample_inputs_trace),
+    OpInfo('inner',
+           dtypes=all_types_and_complex(),
+           dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+           supports_out=True,
+           sample_inputs_func=sample_inputs_inner,
+           skips=(SkipInfo('TestCommon', 'test_out', dtypes=[torch.float32]),)),
     UnaryUfuncInfo('sigmoid',
                    ref=reference_sigmoid if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 1e-2,
@@ -4407,8 +4429,6 @@ def method_tests():
         ('mm', (S, M), ((M, S),), '', (True,)),
         ('bmm', (M, S, M), ((M, M, S),), '', (True,)),
         ('mv', (S, M), ((M,),), '', (True,)),
-        ('inner', (S,), ((S,),), "1d_1d", (False,)),
-        ('inner', (), ((S, S),), "scalar_2d", (False,)),
         ('matmul', (L,), ((L,),), '', (True,)),
         ('matmul', (S, M), ((M,),), "2d_1d", (True,)),
         ('matmul', (M,), ((M, S),), "1d_2d", (True,)),
