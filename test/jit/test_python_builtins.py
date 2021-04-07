@@ -1,15 +1,11 @@
 import os
 import sys
-import gc
-import unittest
 import tempfile
 import random
 from textwrap import dedent
 
 import torch
 from torch.testing._internal.jit_utils import JitTestCase, execWrapper
-from torch.testing._internal.common_utils import IS_SANDCASTLE
-from typing import NamedTuple, List, Tuple, Iterable, Optional, Dict
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
