@@ -565,3 +565,109 @@ class TestModuleContainers(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"Attribute 0 is not of annotated type"):
             torch.jit.script(ModWithWrongAnnotation())
+
+    def test_module_properties(self):
+        class ModuleWithProperties(torch.nn.Module):
+            __jit_unused_properties__ = ["ignored_attr"]
+
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr = a + b
+                return self.attr
+
+            @property
+            def attr(self):
+                return self.a
+
+            @property
+            def ignored_attr(self):
+                return sum([self.a])
+
+            @torch.jit.unused
+            @property
+            def ignored_attr_2(self):
+                return sum([self.a])
+
+            @ignored_attr_2.setter
+            def ignored_attr_2(self, value):
+                self.a = sum([self.a])
+
+            @attr.setter
+            def attr(self, a: int):
+                if a > 0:
+                    self.a = a
+                else:
+                    self.a = 0
+
+        class ModuleWithNoSetter(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr + a + b
+
+            @property
+            def attr(self):
+                return self.a + 1
+
+        self.checkModule(ModuleWithProperties(5), (5, 6,))
+        self.checkModule(ModuleWithProperties(5), (-5, -6,))
+        self.checkModule(ModuleWithNoSetter(5), (5, 6,))
+        self.checkModule(ModuleWithNoSetter(5), (-5, -6,))
+
+        mod = ModuleWithProperties(3)
+        scripted_mod = torch.jit.script(mod)
+
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
+            scripted_mod.ignored_attr
+
+    def test_module_inplace_construct(self):
+        class M(nn.Module):
+            def __init__(self, start: int):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.attribute = start
+                self.parameter = nn.Parameter(torch.tensor(3, dtype=torch.float))
+
+            def method(self) -> int:
+                return self.attribute
+
+            @torch.jit.unused
+            def unused_method(self):
+                return self.attribute + self.attribute
+
+            def forward(self, x):
+                return self.linear(self.linear(x))
+
+
+        class N(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(4, 4)
+
+            @torch.jit.ignore
+            def ignored_method(self, x):
+                return x
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = torch.jit.script(M(3))
+        n = torch.jit.script(N())
+
+        n._reconstruct(m._c)
+
+        inp = torch.rand((3))
+
+        # Check that both modules produce the same output.
+        with torch.no_grad():
+            m_out = m(inp)
+            n_out = n(inp)
+            self.assertEqual(m_out, n_out)
+
+        # Check that ignored method is still intact.
+        self.assertEqual(inp, n.ignored_method(inp))
