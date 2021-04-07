@@ -593,18 +593,81 @@ void GroupNormKernelImplInternal(
         : X.scalar_type();
     Tensor a = at::empty({N, C}, X.options().dtype(kAccType));
     Tensor b = at::empty({N, C}, X.options().dtype(kAccType));
-    const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
-    const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
-    T_ACC* a_data = a.data_ptr<T_ACC>();
-    T_ACC* b_data = b.data_ptr<T_ACC>();
+
+    // const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
+    // const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
+    // T_ACC* a_data = a.data_ptr<T_ACC>();
+    // T_ACC* b_data = b.data_ptr<T_ACC>();
 
     // TODO: Since there is some issues in gpu_kernel_multiple_outputs, we are
     // using maunal kernel here. Make it using gpu_kernel_multiple_outputs once
     // the issue fixed.
-    const int64_t B = (N * C + kCUDANumThreads - 1) / kCUDANumThreads;
-    ComputeFusedParamsCUDAKernel<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
-        N, C, G, mean_data, rstd_data, gamma_data, beta_data, a_data, b_data);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    // const int64_t B = (N * C + kCUDANumThreads - 1) / kCUDANumThreads;
+    // ComputeFusedParamsCUDAKernel<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
+    //     N, C, G, mean_data, rstd_data, gamma_data, beta_data, a_data,
+    //     b_data);
+    // C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+    if (!gamma.defined()) {
+      auto iter1 = TensorIteratorConfig()
+                       .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                       .resize_outputs(false)
+                       .add_output(a.view({N, G, D}))
+                       .add_output(b.view({N, G, D}))
+                       .add_input(mean.view({N, G, 1}))
+                       .add_input(rstd.view({N, G, 1}))
+                       .add_input(beta.view({1, G, D}))
+                       .build();
+      gpu_kernel_multiple_outputs(
+          iter1,
+          [] GPU_LAMBDA(T mean, T rstd, T beta) -> thrust::tuple<T_ACC, T_ACC> {
+            const T_ACC a = static_cast<T_ACC>(rstd);
+            const T_ACC b =
+                -a * static_cast<T_ACC>(mean) + static_cast<T_ACC>(beta);
+            return thrust::make_tuple(a, b);
+          });
+    } else if (!beta.defined()) {
+      auto iter1 = TensorIteratorConfig()
+                       .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                       .resize_outputs(false)
+                       .add_output(a.view({N, G, D}))
+                       .add_output(b.view({N, G, D}))
+                       .add_input(mean.view({N, G, 1}))
+                       .add_input(rstd.view({N, G, 1}))
+                       .add_input(gamma.view({1, G, D}))
+                       .build();
+      gpu_kernel_multiple_outputs(
+          iter1,
+          [] GPU_LAMBDA(
+              T mean, T rstd, T gamma) -> thrust::tuple<T_ACC, T_ACC> {
+            const T_ACC a =
+                static_cast<T_ACC>(rstd) * static_cast<T_ACC>(gamma);
+            const T_ACC b = -a * static_cast<T_ACC>(mean);
+            return thrust::make_tuple(a, b);
+          });
+    } else {
+      auto iter1 = TensorIteratorConfig()
+                       .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                       .resize_outputs(false)
+                       .add_output(a.view({N, G, D}))
+                       .add_output(b.view({N, G, D}))
+                       .add_input(mean.view({N, G, 1}))
+                       .add_input(rstd.view({N, G, 1}))
+                       .add_input(gamma.view({1, G, D}))
+                       .add_input(beta.view({1, G, D}))
+                       .build();
+      gpu_kernel_multiple_outputs(
+          iter1,
+          [] GPU_LAMBDA(
+              T mean, T rstd, T gamma, T beta) -> thrust::tuple<T_ACC, T_ACC> {
+            const T_ACC a =
+                static_cast<T_ACC>(rstd) * static_cast<T_ACC>(gamma);
+            const T_ACC b =
+                -a * static_cast<T_ACC>(mean) + static_cast<T_ACC>(beta);
+            return thrust::make_tuple(a, b);
+          });
+    }
+
     auto iter = TensorIteratorConfig()
                     .check_all_same_dtype(std::is_same<T, T_ACC>::value)
                     .resize_outputs(false)
