@@ -293,8 +293,15 @@ if (strides.empty()) {{
                 # We can add one in if for the perf if we need to. But it'll be easier when external backends
                 # have access to meta functions, and we can write one for resize_.
                 resize_impl = "resize_output"
+            # TODO: Provide a way of bypassing the tests here, if the meta
+            # function consulted maybe_get_output()
             return f"""
 {maybe_set_guard}
+const auto& out = outputs_[output_idx].get();
+TORCH_CHECK(options.dtype() == out.dtype(),
+    "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
+TORCH_CHECK(options.device() == out.device(),
+    "Expected out tensor to have device ", options.device(), ", but got ", out.device(), " instead");
 bool resized = at::native::{resize_impl}(outputs_[output_idx], sizes);
 // Only restride if a resize occurred; otherwise we ignore the (advisory)
 // strides from the meta function and directly use the output tensor's

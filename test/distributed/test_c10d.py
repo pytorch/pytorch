@@ -1,4 +1,5 @@
 import copy
+import logging
 import math
 import operator
 import os
@@ -594,6 +595,24 @@ class RendezvousEnvTest(TestCase):
 
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
+
+    @retry_on_connect_failures
+    def test_logging_init(self):
+        os.environ["WORLD_SIZE"] = "1"
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = str(common.find_free_port())
+        os.environ["RANK"] = "0"
+
+        previous_handlers = logging.root.handlers
+
+        c10d.init_process_group(backend="gloo", init_method="env://")
+
+        current_handlers = logging.root.handlers
+        self.assertEqual(len(previous_handlers), len(current_handlers))
+        for current, previous in zip(current_handlers, previous_handlers):
+            self.assertEqual(current, previous)
+
+        c10d.destroy_process_group()
 
 
 class RendezvousFileTest(TestCase):
@@ -3123,7 +3142,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         def allreduce_hook(
             process_group: object, bucket: dist.GradBucket
         ) -> torch._C.Future:
-            tensors = [t / self.world_size for t in bucket.get_tensors()]
+            tensors = [bucket.get_tensor() / self.world_size]
             return process_group.allreduce(tensors).get_future()
 
         self._test_accumulate_gradients_no_sync(
@@ -3143,7 +3162,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         def allreduce_with_then_hook(
             process_group: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
-            fut = process_group.allreduce(bucket.get_tensors()).get_future()
+            fut = process_group.allreduce([bucket.get_tensor()]).get_future()
 
             def mult(fut):
                 # Multiply the result by 2.
@@ -3789,7 +3808,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self, state: object, bucket: dist.GradBucket
     ) -> torch.futures.Future:
         fut = torch.futures.Future()
-        fut.set_result([torch.ones_like(t) for t in bucket.get_tensors()])
+        fut.set_result([torch.ones_like(bucket.get_tensor())])
 
         def fut_then(fut):
             # Add ones to fut's result.
@@ -3842,7 +3861,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce_hook(state: object, bucket: dist.GradBucket) -> torch._C.Future:
-            tensors = [t / self.world_size for t in bucket.get_tensors()]
+            tensors = [bucket.get_tensor() / self.world_size]
             return process_group.allreduce(tensors).get_future()
 
         # Get GPU model with allreduce_hook registered.
@@ -4023,7 +4042,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         def allreduce_with_then_hook(
             state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
-            tensors = [t / self.world_size for t in bucket.get_tensors()]
+            tensors = [bucket.get_tensor() / self.world_size]
             fut = process_group.allreduce(tensors).get_future()
 
             def mult(fut):
@@ -4126,7 +4145,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         def dummy_hook(state, bucket):
             fut = torch.futures.Future()
-            fut.set_result(bucket.get_tensors())
+            fut.set_result([bucket.get_tensor()])
             return fut
 
         model.register_comm_hook(None, dummy_hook)
@@ -4161,11 +4180,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
             # Prepare allreduced grad bucket tensors by running an async work.
-            work = process_group.allreduce(bucket.get_tensors())
+            work = process_group.allreduce([bucket.get_tensor()])
             work.wait()
 
             fut = torch.futures.Future()
-            fut.set_result([t / self.world_size for t in bucket.get_tensors()])
+            fut.set_result([bucket.get_tensor() / self.world_size])
             return fut
 
         ddp_model.register_comm_hook(None, allreduce_hook_gloo)
@@ -4560,6 +4579,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_nonblocking(self):
         # Note: we unset and restore NCCL_ASYNC_ERROR_HANDLING for this test
         # since test_c10d runs with async error handling by default, but this
@@ -4620,6 +4640,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_blocking_clean_exit(self):
         self._test_nccl_errors_blocking(lambda: sys.exit(0))
 
@@ -4627,6 +4648,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_blocking_nonzero_exit(self):
         self._test_nccl_errors_blocking(lambda: sys.exit(1))
 
@@ -4634,6 +4656,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_blocking_abort(self):
         self._test_nccl_errors_blocking(lambda: os.abort())
 
@@ -4641,6 +4664,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_blocking_sigkill(self):
         self._test_nccl_errors_blocking(lambda: os.kill(os.getpid(), signal.SIGKILL))
 
@@ -4648,6 +4672,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_blocking_sigterm(self):
         self._test_nccl_errors_blocking(lambda: os.kill(os.getpid(), signal.SIGTERM))
 
