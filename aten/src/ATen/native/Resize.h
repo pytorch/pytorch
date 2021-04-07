@@ -84,7 +84,7 @@ static inline void checkInBoundsForStorage(
     const caffe2::TypeMeta data_type,
     const Storage& new_storage) {
   int64_t storage_size_bytes =
-      detail::computeStorageNbytes(size, stride, data_type.itemsize());
+      at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
   int64_t storage_offset_bytes = storage_offset * data_type.itemsize();
   if (storage_size_bytes == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
