@@ -794,8 +794,9 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     return params_;
   }
 
- private:
   static int OpArgCount(IntrinsicsOp op_type);
+
+ private:
   static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1);
   static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2);
   static Dtype IntrinsicsDtype(
