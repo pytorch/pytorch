@@ -286,7 +286,7 @@
 - func: conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
   dispatch:
-    CompositeExplicitAutograd: conj
+    CPU, CUDA: conj
 
 - func: view_as_real_physical(Tensor(a) self) -> Tensor(a)
   variants: function
@@ -296,7 +296,7 @@
 - func: conj_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    CompositeExplicitAutograd: conj_
+    CPU, CUDA: conj_
 
 - func: resolve_conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
