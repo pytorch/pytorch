@@ -346,7 +346,7 @@ def create_qparam_nodes(quantizer: QuantizerCls, node_name: str, scale: Any, zer
     return (scale_node, zero_point_node)
 
 
-def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module], cache: Optional[Dict[Node, bool]] = None) -> bool:
+def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module], cache: Dict[Node, bool]) -> bool:
     """
     If we know for sure that all of this node's args have no
     tensors (are primitives), return True.  If we either
