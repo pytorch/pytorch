@@ -517,8 +517,8 @@ calls::
   class LoggingTensor(torch.Tensor):
       @classmethod
       def __torch_function__(cls, func, types, args=(), kwargs=None):
-          # NOTE: Logging a tensor calls Tensor.__repr__, so we can't log __repr__ without infinite recursion
-          if func != torch.Tensor.__repr__:
+          # NOTE: Logging calls Tensor.__repr__, so we can't log __repr__ without infinite recursion
+          if func is not torch.Tensor.__repr__:
               logging.info(f"func: {func.__name__}, args: {args!r}, kwargs: {kwargs!r}")
           if kwargs is None:
               kwargs = {}
