@@ -64,7 +64,6 @@ if [[ -z "$DOCKER_IMAGE" ]]; then
   elif [[ "$DESIRED_CUDA" == cpu ]]; then
     export DOCKER_IMAGE="pytorch/manylinux-cuda100"
   else
-    export PYTORCH_TESTING_ONLY_FOR="cuda"
     export DOCKER_IMAGE="pytorch/manylinux-cuda${DESIRED_CUDA:2}"
   fi
 fi
@@ -140,7 +139,6 @@ export DATE="$DATE"
 export NIGHTLIES_DATE_PREAMBLE=1.9.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
-export PYTORCH_TESTING_ONLY_FOR="${PYTORCH_TESTING_ONLY_FOR:-}"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
 
 # TODO: We don't need this anymore IIUC
