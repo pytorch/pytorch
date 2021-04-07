@@ -40,15 +40,12 @@ DLDataType getDLDataType(const Tensor& t) {
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
     case ScalarType::ComplexHalf:
-      dtype.lanes = 2;
       dtype.code = DLDataTypeCode::kDLComplex;
       break;
     case ScalarType::ComplexFloat:
-      dtype.lanes = 2;
       dtype.code = DLDataTypeCode::kDLComplex;
       break;
     case ScalarType::ComplexDouble:
-      dtype.lanes = 2;
       dtype.code = DLDataTypeCode::kDLComplex;
       break;
     case ScalarType::BFloat16:
@@ -123,9 +120,7 @@ static Device getATenDevice(const DLDevice& ctx) {
 ScalarType toScalarType(const DLDataType& dtype) {
   ScalarType stype;
   if (dtype.lanes != 1) {
-      if (!(dtype.lanes == 2 && dtype.code == DLDataTypeCode::kDLComplex)) {
-          throw std::logic_error("ATen does not support lanes != 1");
-      }
+      throw std::logic_error("ATen does not support lanes != 1");
   }
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:

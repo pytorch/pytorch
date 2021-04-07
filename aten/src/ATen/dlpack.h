@@ -190,4 +190,4 @@ typedef struct DLManagedTensor {
 #ifdef __cplusplus
 }  // DLPACK_EXTERN_C
 #endif
-#endif  // DLPACK_DLPACK_H_:
+#endif  // DLPACK_DLPACK_H_
