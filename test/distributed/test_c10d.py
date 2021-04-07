@@ -2804,6 +2804,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF", "DETAIL", "INFO"])
     def test_find_unused_parameters_kwarg(self):
         self._test_find_unused_parameters_kwarg()
 

@@ -477,27 +477,19 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
     // Report index of param that has been marked twice. In debug mode, also
     // report fully qualified parameter name.
     auto param_name = param_names_.find(curVariableIndex);
-    std::string paramInfo;
-    // param_names_ is empty in debug mode.
-    if (param_name != param_names_.end()) {
-      paramInfo += c10::str(
+    const bool found_param_name = param_name != param_names_.end();
+    std::string paramInfo = c10::str(
         "Parameter at index ",
         curVariableIndex,
-        " with name ",
-        param_name->second,
+        found_param_name ? c10::str(" with name ", param_name->second) : "",
         " has been marked as ready twice. This means that multiple autograd engine ",
-        " hooks have fired for this particular parameter during this iteration.",
+        " hooks have fired for this particular parameter during this iteration."
+    );
+    // param_names_ is empty in debug mode.
+    if (!found_param_name) {
+      paramInfo += c10::str(
         " You can set the environment variable TORCH_DISTRIBUTED_DEBUG to either",
         " INFO or DETAIL to print parameter names for further debugging."
-      );
-    } else {
-      paramInfo += c10::str(
-        "Parameter at index ",
-        curVariableIndex,
-        " has been marked as ready twice. This means that multiple autograd engine ",
-        " hooks have fired for this particular parameter during this iteration.",
-        " "
-
       );
     }
     std::string common_error = c10::str(

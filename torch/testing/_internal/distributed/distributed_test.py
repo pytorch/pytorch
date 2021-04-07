@@ -4926,9 +4926,6 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         msg = str(e)
-                        if self.rank == 0:
-                            print(f"Got error {msg}")
-
                         # 2nd linear layer is unused
                         unused_param_index = 1
                         expected_strs = [
@@ -5483,9 +5480,7 @@ class DistributedTest:
                         loss.backward()
                     except RuntimeError as e:
                         e = str(e)
-                        if self.rank == 0:
-                            print(f"-- GOT error {str(e)} --")
-                            print(f"fqn_to_param_index {fqn_to_param_index}")
+
                         unused_param_substr = e[e.find("did not receive grad") :]
                         # Validate that each unused param fully qualified name
                         # shows up in error logs. We do this instead of
