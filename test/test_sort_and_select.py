@@ -196,7 +196,6 @@ class TestSortAndSelect(TestCase):
     def test_sort_discontiguous_cpu(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
 
-    @onlyCPU
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_stable_sort_against_numpy(self, device, dtype):
         if dtype in torch.testing.floating_types_and(torch.float16):
@@ -216,6 +215,16 @@ class TestSortAndSelect(TestCase):
 
         def generate_samples():
             from itertools import chain, combinations
+
+            for sizes in [(1025,), (10000,)]:
+                size = sizes[0]
+                # binary strings
+                yield (torch.tensor([0, 1] * size, dtype=dtype, device=device), 0)
+
+            if self.device_type == 'cuda':
+                return
+
+            yield (torch.tensor([0, 1] * 100, dtype=dtype, device=device), 0)
 
             def repeated_index_fill(t, dim, idxs, vals):
                 res = t
@@ -241,14 +250,9 @@ class TestSortAndSelect(TestCase):
                         idxs_subset, vals_subset = zip(*subset)
                         yield (repeated_index_fill(x, dim, idxs_subset, vals_subset), dim)
 
-            for sizes in [(100,), (1000,), (10000,)]:
-                size = sizes[0]
-                # binary strings
-                yield (torch.tensor([0, 1] * size, dtype=dtype, device=device), 0)
-
         for sample, dim in generate_samples():
             _, idx_torch = sample.sort(dim=dim, stable=True)
-            sample_numpy = sample.numpy()
+            sample_numpy = sample.cpu().numpy()
             idx_numpy = np.argsort(sample_numpy, axis=dim, kind='stable')
             self.assertEqual(idx_torch, idx_numpy)
 
