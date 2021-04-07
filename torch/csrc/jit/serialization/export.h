@@ -56,19 +56,19 @@ TORCH_API std::string serialize_model_proto_to_string(
 TORCH_API void check_onnx_proto(const std::string& proto_string);
 
 // Base serializer to hold shared serialization logic for original TS
-// format and unified serialization format 
+// format and unified serialization format
 class ScriptModuleSerializerBase {
  public:
   explicit ScriptModuleSerializerBase(
-      caffe2::serialize::PyTorchStreamWriter& export_writer
-    ) : writer_(export_writer) {}
-    virtual void writeFiles(const std::string& code_dir);
-  
+      caffe2::serialize::PyTorchStreamWriter& export_writer)
+      : writer_(export_writer) {}
+  virtual void writeFiles(const std::string& code_dir);
+
   virtual ~ScriptModuleSerializerBase() = default;
-  
+
  protected:
   void convertNamedType(const c10::NamedTypePtr& class_type);
-  void convertTypes(const at::NamedTypePtr &root_type);
+  void convertTypes(const at::NamedTypePtr& root_type);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
   std::vector<at::IValue> constant_table_;
@@ -80,20 +80,24 @@ class ScriptModuleSerializerBase {
   OrderedDict<std::string, PythonPrint> file_streams_;
 };
 
-// Implementation of ScriptModuleSerializerBase to export unified format 
+// Implementation of ScriptModuleSerializerBase to export unified format
 class ScriptModuleSerializerUniversal : public ScriptModuleSerializerBase {
  public:
-   explicit ScriptModuleSerializerUniversal(caffe2::serialize::PyTorchStreamWriter& export_writer)
-     : ScriptModuleSerializerBase(export_writer) {}
+  explicit ScriptModuleSerializerUniversal(
+      caffe2::serialize::PyTorchStreamWriter& export_writer)
+      : ScriptModuleSerializerBase(export_writer) {}
 
-  uint64_t serialize(Module& module, const std::string& ts_id, uint64_t starting_tensor_id);
+  uint64_t serialize(
+      Module& module,
+      const std::string& ts_id,
+      uint64_t starting_tensor_id);
   void writeFiles();
   uint64_t writeArchive(
-      const std::string& archive_name, 
+      const std::string& archive_name,
       const IValue& value,
       const std::string& pickle_dir_ext,
       uint64_t next_tensor_id);
-}; 
+};
 
 // For testing purposes
 TORCH_API std::string pretty_print_onnx(
