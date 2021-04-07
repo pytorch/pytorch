@@ -80,6 +80,21 @@ class ScriptModuleSerializerBase {
   OrderedDict<std::string, PythonPrint> file_streams_;
 };
 
+// Implementation of ScriptModuleSerializerBase to export unified format 
+class ScriptModuleSerializerUniversal : public ScriptModuleSerializerBase {
+ public:
+   explicit ScriptModuleSerializerUniversal(caffe2::serialize::PyTorchStreamWriter& export_writer)
+     : ScriptModuleSerializerBase(export_writer) {}
+
+  uint64_t serialize(Module& module, const std::string& ts_id, uint64_t starting_tensor_id);
+  void writeFiles();
+  uint64_t writeArchive(
+      const std::string& archive_name, 
+      const IValue& value,
+      const std::string& pickle_dir_ext,
+      uint64_t next_tensor_id);
+}; 
+
 // For testing purposes
 TORCH_API std::string pretty_print_onnx(
     const std::shared_ptr<Graph>& graph,
