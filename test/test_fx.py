@@ -47,6 +47,9 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
+
+import torchtext  # noqa
+
 class SimpleTest(torch.nn.Module):
     def forward(self, x):
         return torch.relu(x + 3.0)
