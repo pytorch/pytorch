@@ -1,11 +1,16 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/MaybeOwned.h>
 
 #include <string>
 
 template<typename T>
 using MaybeOwned = c10::MaybeOwned<T>;
+
+struct MyString : public c10::intrusive_ptr_target, public std::string {
+  using std::string::string;
+};
 
 template <typename T>
 static void assertBorrow(const MaybeOwned<T>& mo, const T& borrowedFrom) {
@@ -20,47 +25,38 @@ static void assertOwn(const MaybeOwned<T>& mo, const T& original) {
 }
 
 
-TEST(MaybeOwnedTest, SimpleDereferencingInt) {
-  int x = 123;
-  auto borrowed = MaybeOwned<int>::borrowed(x);
-  auto owned = MaybeOwned<int>::owned(c10::in_place, x);
-
-  assertBorrow(borrowed, x);
-  assertOwn(owned, x);
-}
-
 TEST(MaybeOwnedTest, SimpleDereferencingString) {
-  std::string x = "hello";
-  std::string y = x;
-  auto borrowed = MaybeOwned<std::string>::borrowed(x);
-  auto owned = MaybeOwned<std::string>::owned(c10::in_place, x);
-  auto owned2 = MaybeOwned<std::string>::owned(std::move(y));
+  auto x = c10::make_intrusive<MyString>("hello");
+  auto y = x;
+  auto borrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(x);
+  auto owned = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place, x);
+  auto owned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(std::move(y));
 
   assertBorrow(borrowed, x);
   assertOwn(owned, x);
   assertOwn(owned2, x);
 
-  EXPECT_EQ(borrowed->size(), x.size());
-  EXPECT_EQ(owned->size(), x.size());
-  EXPECT_EQ(owned2->size(), x.size());
+  EXPECT_EQ((*borrowed)->size(), x->size());
+  EXPECT_EQ((*owned)->size(), x->size());
+  EXPECT_EQ((*owned2)->size(), x->size());
 }
 
-TEST(MaybeOwnedTest, DefaultCtorInt) {
-  int x = 123;
-  MaybeOwned<int> borrowed, owned;
-  borrowed = MaybeOwned<int>::borrowed(x);
-  owned = MaybeOwned<int>::owned(c10::in_place, x);
+TEST(MaybeOwnedTest, DefaultCtor) {
+  auto x = c10::make_intrusive<MyString>("123");
+  MaybeOwned<c10::intrusive_ptr<MyString>> borrowed, owned;
+  borrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(x);
+  owned = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place, x);
 
   assertBorrow(borrowed, x);
   assertOwn(owned, x);
 }
 
 TEST(MaybeOwnedTest, CopyConstructor) {
-  std::string x = "hello";
+  auto x = c10::make_intrusive<MyString>("hello");
 
-  auto borrowed = MaybeOwned<std::string>::borrowed(x);
-  auto owned = MaybeOwned<std::string>::owned(c10::in_place, x);
-  auto owned2 = MaybeOwned<std::string>::owned(std::string(x));
+  auto borrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(x);
+  auto owned = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place, x);
+  auto owned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::intrusive_ptr<MyString>(x));
 
   auto copiedBorrowed(borrowed);
   auto copiedOwned(owned);
@@ -76,10 +72,10 @@ TEST(MaybeOwnedTest, CopyConstructor) {
 }
 
 TEST(MaybeOwnedTest, MoveConstructor) {
-  std::string x = "hello";
-  auto borrowed = MaybeOwned<std::string>::borrowed(x);
-  auto owned = MaybeOwned<std::string>::owned(c10::in_place, x);
-  auto owned2 = MaybeOwned<std::string>::owned(std::string(x));
+  auto x = c10::make_intrusive<MyString>("hello");
+  auto borrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(x);
+  auto owned = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place, x);
+  auto owned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::intrusive_ptr<MyString>(x));
 
   auto movedBorrowed(std::move(borrowed));
   auto movedOwned(std::move(owned));
@@ -91,14 +87,14 @@ TEST(MaybeOwnedTest, MoveConstructor) {
 }
 
 TEST(MaybeOwnedTest, CopyAssignmentIntoOwned) {
-  std::string x = "hello";
-  auto borrowed = MaybeOwned<std::string>::borrowed(x);
-  auto owned = MaybeOwned<std::string>::owned(c10::in_place, x);
-  auto owned2 = MaybeOwned<std::string>::owned(std::string(x));
+  auto x = c10::make_intrusive<MyString>("hello");
+  auto borrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(x);
+  auto owned = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place, x);
+  auto owned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::intrusive_ptr<MyString>(x));
 
-  auto copiedBorrowed = MaybeOwned<std::string>::owned(c10::in_place, "");
-  auto copiedOwned = MaybeOwned<std::string>::owned(c10::in_place, "");
-  auto copiedOwned2 = MaybeOwned<std::string>::owned(c10::in_place, "");
+  auto copiedBorrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place);
+  auto copiedOwned = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place);
+  auto copiedOwned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place);
 
   copiedBorrowed = borrowed;
   copiedOwned = owned;
@@ -112,15 +108,15 @@ TEST(MaybeOwnedTest, CopyAssignmentIntoOwned) {
 }
 
 TEST(MaybeOwnedTest, CopyAssignmentIntoBorrowed) {
-  std::string x = "hello";
-  auto borrowed = MaybeOwned<std::string>::borrowed(x);
-  auto owned = MaybeOwned<std::string>::owned(c10::in_place, x);
-  auto owned2 = MaybeOwned<std::string>::owned(std::string(x));
+  auto x = c10::make_intrusive<MyString>("hello");
+  auto borrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(x);
+  auto owned = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place, x);
+  auto owned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::intrusive_ptr<MyString>(x));
 
-  std::string y = "goodbye";
-  auto copiedBorrowed = MaybeOwned<std::string>::borrowed(y);
-  auto copiedOwned = MaybeOwned<std::string>::borrowed(y);
-  auto copiedOwned2 = MaybeOwned<std::string>::borrowed(y);
+  auto y = c10::make_intrusive<MyString>("goodbye");
+  auto copiedBorrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(y);
+  auto copiedOwned = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(y);
+  auto copiedOwned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(y);
 
   copiedBorrowed = borrowed;
   copiedOwned = owned;
@@ -135,14 +131,14 @@ TEST(MaybeOwnedTest, CopyAssignmentIntoBorrowed) {
 
 
 TEST(MaybeOwnedTest, MoveAssignmentIntoOwned) {
-  std::string x = "hello";
-  auto borrowed = MaybeOwned<std::string>::borrowed(x);
-  auto owned = MaybeOwned<std::string>::owned(c10::in_place, x);
-  auto owned2 = MaybeOwned<std::string>::owned(std::string(x));
+  auto x = c10::make_intrusive<MyString>("hello");
+  auto borrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(x);
+  auto owned = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place, x);
+  auto owned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::intrusive_ptr<MyString>(x));
 
-  auto movedBorrowed = MaybeOwned<std::string>::owned(c10::in_place, "");
-  auto movedOwned = MaybeOwned<std::string>::owned(c10::in_place, "");
-  auto movedOwned2 = MaybeOwned<std::string>::owned(c10::in_place, "");
+  auto movedBorrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place);
+  auto movedOwned = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place);
+  auto movedOwned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place);
 
   movedBorrowed = std::move(borrowed);
   movedOwned = std::move(owned);
@@ -151,15 +147,15 @@ TEST(MaybeOwnedTest, MoveAssignmentIntoOwned) {
 
 
 TEST(MaybeOwnedTest, MoveAssignmentIntoBorrowed) {
-  std::string x = "hello";
-  auto borrowed = MaybeOwned<std::string>::borrowed(x);
-  auto owned = MaybeOwned<std::string>::owned(c10::in_place, x);
-  auto owned2 = MaybeOwned<std::string>::owned(std::string(x));
+  auto x = c10::make_intrusive<MyString>("hello");
+  auto borrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(x);
+  auto owned = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place, x);
+  auto owned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::intrusive_ptr<MyString>(x));
 
-  std::string y = "goodbye";
-  auto movedBorrowed = MaybeOwned<std::string>::borrowed(y);
-  auto movedOwned = MaybeOwned<std::string>::borrowed(y);
-  auto movedOwned2 = MaybeOwned<std::string>::borrowed(y);
+  auto y = c10::make_intrusive<MyString>("goodbye");
+  auto movedBorrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(y);
+  auto movedOwned = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(y);
+  auto movedOwned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(y);
 
   movedBorrowed = std::move(borrowed);
   movedOwned = std::move(owned);
@@ -171,11 +167,11 @@ TEST(MaybeOwnedTest, MoveAssignmentIntoBorrowed) {
 }
 
 TEST(MaybeOwnedTest, SelfAssignment) {
-  std::string x = "hello";
+  auto x = c10::make_intrusive<MyString>("hello");
 
-  auto borrowed = MaybeOwned<std::string>::borrowed(x);
-  auto owned = MaybeOwned<std::string>::owned(c10::in_place, x);
-  auto owned2 = MaybeOwned<std::string>::owned(std::string(x));
+  auto borrowed = MaybeOwned<c10::intrusive_ptr<MyString>>::borrowed(x);
+  auto owned = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::in_place, x);
+  auto owned2 = MaybeOwned<c10::intrusive_ptr<MyString>>::owned(c10::intrusive_ptr<MyString>(x));
 
   borrowed = borrowed;
   owned = owned;
