@@ -51,7 +51,7 @@ class TestEnum(JitTestCase):
         def unsupported_enum_types(a: TensorEnum):
             return a.name
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot create Enum with value type 'Tensor'"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Cannot create Enum with value type 'Tensor'", ""):
             torch.jit.script(unsupported_enum_types)
 
     def test_enum_comp(self):
@@ -103,7 +103,7 @@ class TestEnum(JitTestCase):
         def enum_comp(x: Color, y: Color) -> bool:
             return x == y
 
-        with self.assertRaisesRegex(RuntimeError, "Could not unify type list"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Could not unify type list", ""):
             torch.jit.script(enum_comp)
 
     def test_enum_name(self):
