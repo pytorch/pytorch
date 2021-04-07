@@ -10,7 +10,7 @@
 
 namespace at { namespace native {
 
-void acos_kernel_cuda(TensorIterator& iter) {
+void acos_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "acos_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::acos(a);
