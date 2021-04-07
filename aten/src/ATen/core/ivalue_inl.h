@@ -1391,7 +1391,7 @@ namespace detail {
 
 template <typename T>
 IValue from_(T&& x, std::true_type) {
-  return IValue(std::move(x));
+  return IValue(std::forward<T>(x));
 }
 template <typename T>
 IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
