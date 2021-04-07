@@ -1310,7 +1310,7 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
 std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
   auto result = at::native::split(self, split_size, dim);
   for (auto& t : result) {
-    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion());
+    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(0));
   }
   return result;
 }
@@ -1339,7 +1339,7 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
 std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   auto result = at::native::split_with_sizes(self, split_sizes, dim);
   for (auto& t : result) {
-    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion());
+    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(0));
   }
   return result;
 }
