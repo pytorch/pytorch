@@ -130,11 +130,11 @@ def get_and_check_clang_format(verbose=False):
 
     # Load the reference hash and compare the actual hash to it.
     with open(hashpath, "r") as f:
-        reference_bin_hash = f.readline()
+        reference_bin_hash = f.readline().strip()
 
         if verbose:
-            print("Reference Hash: {}".format(reference_bin_hash))
-            print("Actual Hash: {}".format(actual_bin_hash))
+            print("Reference Hash: {}".format(repr(reference_bin_hash)))
+            print("Actual Hash: {}".format(repr(actual_bin_hash)))
 
         if reference_bin_hash != actual_bin_hash:
             print("The downloaded binary is not what was expected!")
@@ -142,6 +142,7 @@ def get_and_check_clang_format(verbose=False):
             # Err on the side of caution and try to delete the downloaded binary.
             try:
                 os.unlink(CLANG_FORMAT_PATH)
+                print("The binary has been deleted just to be safe")
             except OSError as e:
                 print("Failed to delete binary: {}".format(str(e)))
                 print("Delete this binary as soon as possible and do not execute it!")
