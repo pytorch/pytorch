@@ -558,7 +558,7 @@ if _enabled:
             Args:
                 f: a string containing a file name.
                 _extra_files: Map from filename to contents which will be stored as part of 'f'.
-
+                _version: Optional argument to export old bytecode version.
             """
             return self._c._save_for_mobile(*args, **kwargs)
 

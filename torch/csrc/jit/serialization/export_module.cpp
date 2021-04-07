@@ -388,8 +388,8 @@ class ScriptModuleSerializer {
   void serialize(
       const Module& module,
       const ExtraFilesMap& extra_files,
-      at::optional<uint64_t> version,
-      bool save_mobile_debug_info) {
+      at::optional<uint64_t> bytecode_version = at::optional<uint64_t>(),
+      bool save_mobile_debug_info = false) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
     // Serialize the model object
@@ -404,8 +404,8 @@ class ScriptModuleSerializer {
 
     writeArchive(
         kArchiveNameConstants, c10::ivalue::Tuple::create(ivalue_constants));
-    // Only generate bytecode when a valid version is given.
-    if (version.has_value()) {
+    // Only generate bytecode when a valid bytecode_version is given.
+    if (bytecode_version.has_value()) {
       for (size_t i = 0; i < ivalue_constants.size(); i++) {
         if (ivalue_constants[i].isTensor() &&
             tensors_archive_table_.find(ivalue_constants[i].toTensor()) ==
@@ -414,7 +414,7 @@ class ScriptModuleSerializer {
               std::make_pair(kArchiveNameConstants, i);
         }
       }
-      writeByteCode(module, save_mobile_debug_info, version.value());
+      writeByteCode(module, save_mobile_debug_info, bytecode_version.value());
       writeMobileMetadata(module, extra_files);
     }
 
@@ -673,38 +673,42 @@ class ScriptModuleSerializer {
   OrderedDict<std::string, PythonPrint> file_streams_;
 };
 
+// bytecode will be exported, if version is a valid and supported number.
 void ExportModule(
     const Module& module,
     std::ostream& out,
     const ExtraFilesMap& extra_files,
-    at::optional<uint64_t> version,
+    at::optional<uint64_t> bytecode_version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(
       [&](const void* buf, size_t nbytes) -> size_t {
         out.write(static_cast<const char*>(buf), nbytes);
         return !out ? 0 : nbytes;
       });
-  serializer.serialize(module, extra_files, version, save_mobile_debug_info);
+  serializer.serialize(
+      module, extra_files, bytecode_version, save_mobile_debug_info);
 }
 
 void ExportModule(
     const Module& module,
     const std::string& filename,
     const ExtraFilesMap& extra_files,
-    at::optional<uint64_t> version,
+    at::optional<uint64_t> bytecode_version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(filename);
-  serializer.serialize(module, extra_files, version, save_mobile_debug_info);
+  serializer.serialize(
+      module, extra_files, bytecode_version, save_mobile_debug_info);
 }
 
 void ExportModule(
     const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& extra_files,
-    at::optional<uint64_t> version,
+    at::optional<uint64_t> bytecode_version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(writer_func);
-  serializer.serialize(module, extra_files, version, save_mobile_debug_info);
+  serializer.serialize(
+      module, extra_files, bytecode_version, save_mobile_debug_info);
 }
 
 namespace {

@@ -220,6 +220,8 @@ struct TORCH_API Module : public Object {
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
+  // Save bytecode. If version is valid, export the corresponding bytecode.
+  // Default to export latest bytecode version.
   void _save_for_mobile(
       std::ostream& out,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
