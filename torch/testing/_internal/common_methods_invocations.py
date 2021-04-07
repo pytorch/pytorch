@@ -4059,7 +4059,7 @@ op_db: List[OpInfo] = [
                    sample_inputs_func=sample_inputs_logit,
                    safe_casts_outputs=True),
     OpInfo('dot',
-           dtypes=floating_and_complex_types_and(torch.float16),
+           dtypes=all_types_and_complex_and(torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
            skips=(
                # dot does not handle correctly out= dtypes
