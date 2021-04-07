@@ -52,6 +52,7 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(len(seen), size)
 
     def test_sort(self, device):
+        # on CUDA 2048 vs >2048 have different code path for the dim being sorted
         for SIZE in (4, 2049):
             x = torch.rand(4, SIZE, device=device)
             res1val, res1ind = torch.sort(x)
