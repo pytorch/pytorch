@@ -1966,16 +1966,16 @@ torch.cuda.synchronize()
         found_inf = torch.full((1,), 0.0, dtype=torch.float, device="cuda:0")
 
         # Simulates 2 consecutive unskipped iterations
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 1)
         self.assertEqual(scale, 4.0)
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 8.0)
 
         # Simulates a skipped iteration
         found_inf.fill_(1.0)
-        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        torch._amp_update_scale_(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 2.0)
 
