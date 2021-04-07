@@ -1540,8 +1540,8 @@ class TestONNXRuntime(unittest.TestCase):
     def test_div_rounding_mode(self):
         class TrueDivModule(torch.nn.Module):
             def forward(self, x, y):
-                return (x.div(y, rounding_mode='true'),
-                        torch.div(x, y, rounding_mode='true'))
+                return (x.div(y, rounding_mode=None),
+                        torch.div(x, y, rounding_mode=None))
 
         class TruncDivModule(torch.nn.Module):
             def forward(self, x, y):
@@ -2468,6 +2468,15 @@ class TestONNXRuntime(unittest.TestCase):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
+    def test_std_correction(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
     def test_var(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -2525,6 +2534,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_correction(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
         self.run_test(model, x)
 
     def test_var_mean(self):
@@ -2602,6 +2620,15 @@ class TestONNXRuntime(unittest.TestCase):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+    def test_var_mean_correction(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
     def test_std_mean(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -2650,6 +2677,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         model = StandardDeviationUnbiased()
+        self.run_test(model, x)
+
+    def test_std_mean_correction(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), correction=3, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
         self.run_test(model, x)
 
     def test_bitshift(self):
@@ -5392,7 +5428,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_det(self):
         class Det(torch.nn.Module):
             def forward(self, x):
-                return torch.det(x)
+                return torch.linalg.det(x)
 
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)

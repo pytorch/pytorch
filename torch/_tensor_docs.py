@@ -2702,19 +2702,22 @@ See :func:`torch.prod`
 
 add_docstr_all('put_',
                r"""
-put_(indices, tensor, accumulate=False) -> Tensor
+put_(index, source, accumulate=False) -> Tensor
 
-Copies the elements from :attr:`tensor` into the positions specified by
-indices. For the purpose of indexing, the :attr:`self` tensor is treated as if
+Copies the elements from :attr:`source` into the positions specified by
+:attr:`index`. For the purpose of indexing, the :attr:`self` tensor is treated as if
 it were a 1-D tensor.
 
-If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
-:attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
+:attr:`index` and :attr:`source` need to have the same number of elements, but not necessarily
+the same shape.
+
+If :attr:`accumulate` is ``True``, the elements in :attr:`source` are added to
+:attr:`self`. If accumulate is ``False``, the behavior is undefined if :attr:`index`
 contain duplicate elements.
 
 Args:
-    indices (LongTensor): the indices into self
-    tensor (Tensor): the tensor containing values to copy from
+    index (LongTensor): the indices into self
+    source (Tensor): the tensor containing values to copy from
     accumulate (bool): whether to accumulate into self
 
 Example::
@@ -2724,6 +2727,14 @@ Example::
     >>> src.put_(torch.tensor([1, 3]), torch.tensor([9, 10]))
     tensor([[  4,   9,   5],
             [ 10,   7,   8]])
+""")
+
+add_docstr_all('put',
+               r"""
+put(input, index, source, accumulate=False) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.put_`.
+`input` corresponds to `self` in :meth:`torch.Tensor.put_`.
 """)
 
 add_docstr_all('qr',
@@ -2740,15 +2751,13 @@ qscheme() -> torch.qscheme
 Returns the quantization scheme of a given QTensor.
 """)
 
-add_docstr_all('quantile',
-               r"""
+add_docstr_all('quantile', r"""
 quantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.quantile`
 """)
 
-add_docstr_all('nanquantile',
-               r"""
+add_docstr_all('nanquantile', r"""
 nanquantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.nanquantile`

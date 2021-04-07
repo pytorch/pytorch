@@ -38,6 +38,7 @@ allow_list = [
     ("aten::ifft", datetime.date(2021, 1, 31)),
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
+    ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
     ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
     ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
@@ -76,8 +77,11 @@ allow_list = [
     ("aten::_foreach_addcdiv", datetime.date(2021, 4, 2)),
     ("aten::_foreach_addcmul", datetime.date(2021, 4, 2)),
     ("aten::mkldnn_linear", datetime.date(2021, 3, 2)),
+    ("aten::_mode*", datetime.date(2021, 5, 2)),
     ("aten::linalg_multi_dot", datetime.date(2021, 3, 25)),
     ("aten::empty_meta", datetime.date(2021, 4, 1)),
+    ("aten::div", datetime.date(2021, 4, 28)),
+    ("aten::divide", datetime.date(2021, 4, 28)),
     ("aten::_var", datetime.date(2021, 4, 28)),
     ("aten::_std", datetime.date(2021, 4, 28)),
     ("aten::var", datetime.date(2021, 4, 28)),
@@ -89,6 +93,7 @@ allow_list = [
     ("aten::cumprod_backward", datetime.date(2021, 5, 1)),
     ("aten::_triangular_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::complex*", datetime.date(2021, 5, 1)),
+    ("aten::take_backward", datetime.date(2021, 5, 1)),
 ]
 
 def allow_listed(schema, allow_list):
