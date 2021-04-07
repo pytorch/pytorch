@@ -19,7 +19,7 @@ from torch.testing import \
      all_types_and_complex_and, all_types_and, all_types_and_complex,
      integral_types_and)
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (dtypesIfCPU, skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
@@ -3320,6 +3320,11 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
+    OpInfo('nansum',
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bool),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     OpInfo('mode',
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -4422,14 +4427,6 @@ def method_tests():
         ('nanmedian', (), NO_ARGS, 'scalar'),
         ('nanmedian', (), (0,), 'scalar_dim', (), [0]),
         ('nanmedian', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('nansum', (S, S, S), NO_ARGS),
-        ('nansum', (S, S, S), (1,), 'dim', (), [0]),
-        ('nansum', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
-        ('nansum', (), NO_ARGS, 'scalar'),
-        ('nansum', (), (0,), 'scalar_dim', (), [0]),
-        ('nansum', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('nansum', (S, S, S), ([1, 2],), 'multi_dim'),
-        ('nansum', (S, S, S), ([1, 2], True,), 'multi_dim_keepdim'),
         ('var_mean', (S, S, S), NO_ARGS, ''),
         ('var_mean', (S, S, S), (1,), 'dim', [0]),
         ('var_mean', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
