@@ -602,7 +602,7 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     else:
         return (input, )
 
-def sample_inputs_addcmul(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
     test_cases =[((S, S), (S, S), (S, S)),
                  ((S, S), (S, 1), (1, S)),
                  ((1,), (S, S, 1), (1, S)),
@@ -2508,7 +2508,15 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
                SkipInfo('TestGradients', 'test_inplace_grad'),
                SkipInfo('TestGradients', 'test_inplace_gradgrad'),),
-           sample_inputs_func=sample_inputs_addcmul),
+           sample_inputs_func=sample_inputs_addcmul_addcdiv),
+    OpInfo('addcdiv',
+           dtypes=floating_and_complex_types(),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
+               SkipInfo('TestGradients', 'test_inplace_grad'),
+               SkipInfo('TestGradients', 'test_inplace_gradgrad'),),
+           sample_inputs_func=sample_inputs_addcmul_addcdiv),
     OpInfo('amax',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_amax_amin,),
@@ -4487,18 +4495,6 @@ def method_tests():
         ('mvlgamma', torch.empty(S,).uniform_(1, 2), [2], "p=2"),
         ('mvlgamma', torch.empty(S, S).uniform_(1.5, 3), [3], "p=3"),
         ('mvlgamma', torch.empty(S, S).uniform_(2.5, 5), [5], "p=5"),
-        ('addcdiv', (S, S), ((S, S), (S, S))),
-        ('addcdiv', (S, S), ((S, 1), (1, S)), 'broadcast_rhs'),
-        ('addcdiv', (1,), ((S, S, 1), (1, S)), 'broadcast_all'),
-        ('addcdiv', (S, S), ((S, S), (S, S)), 'scale', (), (), (), ident, {'value': 0.5}),
-        ('addcdiv', (S, S), ((S, 1), (1, S)), 'scale_broadcast_rhs', (), (), (), ident, {'value': 0.5}),
-        ('addcdiv', (1,), ((S, S, 1), (1, S)), 'scale_broadcast_all', (), (), (), ident, {'value': 0.5}),
-        ('addcdiv', (), ((), ()), 'scalar'),
-        ('addcdiv', (S, S), ((), ()), 'scalar_broadcast_rhs'),
-        ('addcdiv', (), ((S, S, 1), (1, S)), 'scalar_broadcast_lhs'),
-        ('addcdiv', (), ((), ()), 'scalar_scale', (), (), (), ident, {'value': 0.5}),
-        ('addcdiv', (S, S), ((), ()), 'scalar_scale_broadcast_rhs', (), (), (), ident, {'value': 0.5}),
-        ('addcdiv', (), ((S, S, 1), (1, S)), 'scalar_scale_broadcast_lhs', (), (), (), ident, {'value': 0.5}),
         ('zero_', (S, S, S), NO_ARGS),
         ('zero_', (), NO_ARGS, 'scalar'),
         ('logaddexp', (S, S), ((S, S),)),
