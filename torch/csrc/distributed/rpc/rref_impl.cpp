@@ -265,30 +265,22 @@ void OwnerRRef::setError(std::exception_ptr eptr) {
 
 void OwnerRRef::recordAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
 // #ifdef USE_CUDA_NOT_ROCM
-  // std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "OwnerRRef::recordAllDevices";
   if (ctx) {
-    // std::cout << " with ctx->devices().size() = " << ctx->devices().size() << std::endl;
-    for (auto deviceIndex : ctx->devices()) {
+    for (auto stream : ctx->getReservedStreams()) {
       at::cuda::CUDAEvent cudaEvent;
-      cudaEvent.record(at::cuda::getCurrentCUDAStream(deviceIndex));
+      cudaEvent.record(stream);
       cudaEvents_.push_back(std::move(cudaEvent));
     }
-  // } else {
-  //   std::cout << " with empty ctx" << std::endl;
   }
 // #endif
 }
 
 void OwnerRRef::waitAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
 // #ifdef USE_CUDA_NOT_ROCM
-  // std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "OwnerRRef::waitAllDevices";
   if (ctx) {
-    // std::cout << " with cudaEvents_.size() = " << cudaEvents_.size() << std::endl;
     for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
       cudaEvent.block(ctx->getStream(cudaEvent.device_index()));
     }
-  // } else {
-  //   std::cout << " with empty ctx" << std::endl;
   }
 // #endif
 }

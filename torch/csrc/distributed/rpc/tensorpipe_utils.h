@@ -39,12 +39,12 @@ struct TORCH_API LazyStreamContext {
     return {};
   }
 
-#ifdef USE_CUDA_NOT_ROCM
+// #ifdef USE_CUDA_NOT_ROCM
   virtual std::vector<CUDAStream> getReservedStreams() const {
     throw std::runtime_error(
         "Attempting to access CUDA streams, but torch is not built with CUDA");
   }
-#endif
+
   virtual CUDAStream getStream(c10::DeviceIndex index) {
     throw std::runtime_error(c10::str(
         "Attempting to access CUDA stream of device ",
