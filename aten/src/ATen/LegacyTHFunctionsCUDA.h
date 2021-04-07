@@ -20,7 +20,6 @@ namespace cuda {
 
 Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, const Scalar& value);
 Tensor & _th_masked_fill_bool_(Tensor & self, const Tensor & mask, const Scalar& value);
-Tensor & _th_put_(Tensor & self, const Tensor & index, const Tensor & source, bool accumulate);
 std::tuple<Tensor &,Tensor &> _th_sort_out(const Tensor & self, int64_t dim, bool descending, Tensor & values, Tensor & indices);
 std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending);
 std::tuple<Tensor &,Tensor &> _th_sort_out_stable(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices);
