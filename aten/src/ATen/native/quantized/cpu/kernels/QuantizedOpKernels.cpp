@@ -436,7 +436,7 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
 }
 
 static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
-                                   Scalar negval_) {
+                                   const Scalar& negval_) {
   int64_t i_zp = qx.q_zero_point();
   float i_scale = qx.q_scale();
 
@@ -595,8 +595,8 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
 
 void qclamp_kernel(
     const Tensor& qx,
-    Scalar min_scalar,
-    Scalar max_scalar,
+    const Scalar& min_scalar,
+    const Scalar& max_scalar,
     Tensor& qy) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
@@ -629,7 +629,7 @@ void qclamp_kernel(
   });
 }
 
-void qclamp_min_kernel(const Tensor& qx, Scalar min_scalar, Tensor& qy) {
+void qclamp_min_kernel(const Tensor& qx, const Scalar& min_scalar, Tensor& qy) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
         qx.sizes(),
@@ -654,7 +654,7 @@ void qclamp_min_kernel(const Tensor& qx, Scalar min_scalar, Tensor& qy) {
   });
 }
 
-void qclamp_max_kernel(const Tensor& qx, Scalar max_scalar, Tensor& qy) {
+void qclamp_max_kernel(const Tensor& qx, const Scalar& max_scalar, Tensor& qy) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
         qx.sizes(),
@@ -684,8 +684,8 @@ void qthreshold_kernel(
   // the input ones, it might make sense to implement this completely in the
   // quantized domain.
    const Tensor& qx,
-   Scalar threshold_scalar,
-   Scalar value_scalar,
+   const Scalar& threshold_scalar,
+   const Scalar& value_scalar,
    Tensor& qy) {
 
   // defines input and output scales and zero_points
@@ -843,9 +843,9 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
 
 void qelu_kernel(
     const Tensor& qx,
-    Scalar alpha,
-    Scalar scale,
-    Scalar input_scale,
+    const Scalar& alpha,
+    const Scalar& scale,
+    const Scalar& input_scale,
     Tensor& qy) {
   // scale and input_scale arguments refer to a generalized ELU formula
   // if x >= 0, ELU(x) = x * scale
@@ -933,7 +933,7 @@ void qelu_kernel(
 // Note: other is already assumed to be in int32, i.e., it's
 // round(float/self_scale)
 template <bool ReLUFused = false>
-void qadd_scalar_kernel(Tensor& out, const Tensor& self, Scalar other) {
+void qadd_scalar_kernel(Tensor& out, const Tensor& self, const Scalar& other) {
   int64_t zero_point = out.q_zero_point();
   float scale = out.q_scale();
   float inv_scale = 1.0f / scale;
@@ -2071,17 +2071,18 @@ void fake_quantize_tensor_cachemask_kernel(
     .add_input(input)
     .build();
 
-  // TODO(#51090): make it work for other dtypes
-  iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    for (int64_t i = 0; i < n; i++) {
-      float* output_val = (float*)(data[0] + i * strides[0]);
-      bool* mask_val = (bool*)(data[1] + i * strides[1]);
-      float* input_val = (float*)(data[2] + i * strides[2]);
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_type_handling", [&] {
+    iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
+      for (int64_t i = 0; i < n; i++) {
+        scalar_t* output_val = (scalar_t*)(data[0] + i * strides[0]);
+        bool* mask_val = (bool*)(data[1] + i * strides[1]);
+        scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
 
-      const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
-      *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
-      *mask_val = ((quant_min <= qval) && (qval <= quant_max));
-    }
+        const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
+        *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
+        *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+      }
+    });
   });
 
 }
@@ -2092,7 +2093,8 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
     float inv_scale,
     int64_t zero_point,
     int64_t quant_min,
-    int64_t quant_max) {
+    int64_t quant_max,
+    float grad_factor) {
   float dscale_small = quant_min - zero_point;
   float dscale_big = quant_max - zero_point;
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
@@ -2121,14 +2123,14 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
       int64_t xqi = std::nearbyint(zero_point + (*XInput) * inv_scale);
       *dXOutput = (*dYInput) * (xqi >= quant_min && xqi <= quant_max);
       // Calculate gradients for scale and zero point.
-      xqi = std::max(std::min(xqi, quant_max), quant_min);
-      float xfqi = static_cast<float>((xqi - zero_point) * scale);
-      if (xqi == quant_min || xqi == quant_max) {
-        *dZeroPointOutput = (*dYInput) * (-1) * scale;
-        *dScaleOutput = (xqi == quant_min) ? ((*dYInput) * dscale_small) : ((*dYInput) * dscale_big);
+      float xfqi = static_cast<float>((std::max(std::min(xqi, quant_max), quant_min) - zero_point) * scale);
+      // Calculate gradients according to the gradient of the clamp function.
+      if (xqi < quant_min || xqi > quant_max) {
+        *dZeroPointOutput = (*dYInput) * (-1) * scale * grad_factor;
+        *dScaleOutput = ((xqi < quant_min) ? ((*dYInput) * dscale_small) : ((*dYInput) * dscale_big)) * grad_factor;
       } else {
         *dZeroPointOutput = 0;
-        *dScaleOutput = (*dYInput) * (xfqi - (*XInput)) * inv_scale;
+        *dScaleOutput = (*dYInput) * (xfqi - (*XInput)) * inv_scale * grad_factor;
       }
     }
   });
@@ -2166,7 +2168,8 @@ void fake_quant_per_channel_cachemask_cpu(
 void fake_quantize_learnable_channel_grad_kernel_cpu(
     TensorIterator& iter,
     int64_t quant_min,
-    int64_t quant_max) {
+    int64_t quant_max,
+    float grad_factor) {
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     /*  To see how the input and outputs are referenced and assigned,
         please see the implemenetation of
@@ -2188,14 +2191,13 @@ void fake_quantize_learnable_channel_grad_kernel_cpu(
       int64_t xqi = std::nearbyint((*zero_point_input) + (*x_input) * inv_scale);
       *dx_output = (*dy_input) * (xqi >= quant_min && xqi <= quant_max);
       // Calculate gradients for scale and zero point.
-      xqi = std::max(std::min(xqi, quant_max), quant_min);
-      float xfqi = static_cast<float>((xqi - (*zero_point_input)) * (*scale_input));
-      if (xqi == quant_min || xqi == quant_max) {
-        *dzero_point_output = (*dy_input) * (-1) * (*scale_input);
-        *dscale_output = (xqi == quant_min) ? ((*dy_input) * dscale_small) : ((*dy_input) * dscale_big);
+      float xfqi = static_cast<float>((std::max(std::min(xqi, quant_max), quant_min) - (*zero_point_input)) * (*scale_input));
+      if (xqi < quant_min || xqi > quant_max) {
+        *dzero_point_output = (*dy_input) * (-1) * (*scale_input) * grad_factor;
+        *dscale_output = ((xqi < quant_min) ? ((*dy_input) * dscale_small) : ((*dy_input) * dscale_big)) * grad_factor;
       } else {
         *dzero_point_output = 0;
-        *dscale_output = (*dy_input) * (xfqi - (*x_input)) * inv_scale;
+        *dscale_output = (*dy_input) * (xfqi - (*x_input)) * inv_scale * grad_factor;
       }
     }
   });

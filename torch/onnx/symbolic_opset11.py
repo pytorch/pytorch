@@ -61,13 +61,19 @@ def select(g, self, dim, index):
 
 
 def index_put(g, self, indices_list_value, values, accumulate=False):
-    indices_list = sym_help._unpack_list(indices_list_value)
+    if sym_help._is_packed_list(indices_list_value):
+        indices_list = sym_help._unpack_list(indices_list_value)
+    else:
+        indices_list = [indices_list_value]
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         args = [self] + indices_list + [values, accumulate]
         return g.op("ATen", *args, operator_s='index_put')
 
     from torch.onnx.symbolic_opset9 import add, expand
     accumulate = sym_help._parse_arg(accumulate, 'b')
+
+    if len(indices_list) == 0:
+        return values
 
     index = indices_list[0]
 
@@ -84,95 +90,41 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         # when inputs to the index_put node contains boolean inputs
         #
         # index_put -> masked_fill
+        #   * input index contains single tensor of Bool type (e.g.: %24 <- %23).
+        #   * input value contains single element (e.g.: %18).
         #
-        # before graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=1, device=cpu),
-        #       %some_const : Float(requires_grad=0, device=cpu)):
-        #   %6 : None = prim::Constant()
+        # Torch IR
         #   %mask : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = aten::clone(%0, %6)
-        #   %8 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = aten::ne(%mask, %some_const)
-        #   %26 : Long(requires_grad=0, device=cpu) = prim::Constant[value={11}]()
-        #   %27 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-        #   %11 : Device = prim::Constant[value="cpu"]()
-        #   %12 : None = prim::Constant()
-        #   %28 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-        #   %29 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-        #   %15 : None = prim::Constant()
         #   %16 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) =
         #               aten::to(%8, %26, %27, %11, %12, %28, %29, %15)
         #   %18 : Float(requires_grad=0, device=cpu) = prim::Constant[value={1}]()
-        #   %30 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-        #   %22 : int[] = prim::Constant[value=[-1]]()
-        #   %23 : Tensor = aten::view(%16, %22)
+        #   %23 : Bool(8, strides=[1], device=cpu) = aten::view(%16, %22)
         #   %24 : Tensor?[] = prim::ListConstruct(%23)
         #   %25 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) =
         #                aten::index_put(%mask, %24, %18, %30)
         #   return (%25)
         #
-        # after graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu),
-        #       %some_const : Float(requires_grad=0, device=cpu)):
-        #   %3 : Tensor = onnx::Equal(%0, %some_const)
-        #   %4 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%3)
-        #   %12 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Cast[to=9](%4)
-        #   %19 : Tensor = onnx::Cast[to=9](%12)
-        #   %20 : Tensor = onnx::Constant[value={1}]()
-        #   %21 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
-        #                = onnx::Where(%19, %20, %0)
-        #   return (%21)
         #
         # index_put -> masked_scatter
+        #   * input index contains single tensor of Bool type (e.g.: %32 <- %31).
+        #   * input value contains multiple elements (e.g.: %28).
         #
-        # before graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=1, device=cpu),
-        #       %some_const : Float(requires_grad=0, device=cpu)):
-        #   %6 : None = prim::Constant()
+        # Torch IR
         #   %mask : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = aten::clone(%0, %6)
         #   %28 : Float(8, strides=[1], requires_grad=0, device=cpu)
         #                = prim::Constant[value= 1  1  1  1  1  1  1  1 [ CPUFloatType{8} ]]()
         #   %15 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
         #                = aten::ne(%mask, %some_const)
-        #   %34 : Long(requires_grad=0, device=cpu) = prim::Constant[value={11}]()
-        #   %35 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-        #   %18 : Device = prim::Constant[value="cpu"]()
-        #   %19 : None = prim::Constant()
-        #   %36 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-        #   %37 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-        #   %22 : None = prim::Constant()
         #   %23 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
         #                = aten::to(%15, %34, %35, %18, %19, %36, %37, %22)
         #   %38 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
         #   %30 : int[] = prim::Constant[value=[-1]]()
-        #   %31 : Tensor = aten::view(%23, %30)
+        #   %31 : Bool(8, strides=[1], device=cpu) = aten::view(%23, %30)
         #   %32 : Tensor?[] = prim::ListConstruct(%31)
         #   %33 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
         #               = aten::index_put(%mask, %32, %28, %38)
         #   return (%33)
-        #
-        # after graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu),
-        #       %some_const : Float(requires_grad=0, device=cpu)):
-        #   %3 : Float(8, strides=[1], requires_grad=0, device=cpu)
-        #               = onnx::Constant[value= 1  1  1  1  1  1  1  1 [ CPUFloatType{8} ]]()
-        #   %4 : Tensor = onnx::Equal(%0, %some_const)
-        #   %5 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%4)
-        #   %13 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Cast[to=9](%5)
-        #   %19 : Tensor = onnx::Shape(%0)
-        #   %20 : Tensor = onnx::Expand(%13, %19)
-        #   %21 : Tensor = onnx::NonZero(%20)
-        #   %22 : Tensor = onnx::Transpose[perm=[1, 0]](%21)
-        #   %23 : Tensor = onnx::Constant[value={-1}]()
-        #   %24 : Tensor = onnx::Reshape(%3, %23)
-        #   %25 : Tensor = onnx::Shape(%22)
-        #   %27 : Tensor = onnx::Constant[value={0}]()
-        #   %28 : Tensor = onnx::Gather[axis=0](%25, %27)
-        #   %29 : Tensor = onnx::Constant[value={0}]()
-        #   %30 : Tensor = onnx::Unsqueeze[axes=[0]](%29)
-        #   %31 : Tensor = onnx::Unsqueeze[axes=[0]](%28)
-        #   %32 : Tensor = onnx::Constant[value={0}]()
-        #   %33 : Tensor = onnx::Unsqueeze[axes=[0]](%32)
-        #   %34 : Tensor = onnx::Slice(%24, %30, %31, %33)
-        #   %35 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
-        #               = onnx::ScatterND(%0, %22, %34)
-        #   return (%35)
-
-        bool_inp = list(index.node().inputs())[0]
+        bool_inp = index
         if bool_inp.type() is not None and bool_inp.type().scalarType() == 'Bool':
             rank = sym_help._get_tensor_rank(values)
             if rank is not None and rank == 0:
@@ -184,12 +136,19 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     sub_data_shape = sym_help._slice_helper(
         g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[maxsize])
     values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
+    # Check if values is a singular value and expand accordingly
+    rank = sym_help._get_tensor_rank(values)
+    if rank is not None and rank == 0:
+        values = expand(g, values, values_shape, None)
     values = g.op("Reshape", values, values_shape)
 
+    dtype = self.type().scalarType()
+    if dtype is not None and dtype != values.type().scalarType():
+        values = g.op("Cast", values, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+
     if accumulate:
-        dtype = self.type().scalarType()
-        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-        dtype = sym_help.scalar_type_to_pytorch_type[dtype]
         zeros = g.op("ConstantOfShape", g.op("Shape", self), value_t=torch.tensor([0], dtype=dtype))
         result = g.op("ScatterND", zeros, index, values)
         result = add(g, self, result)
@@ -322,6 +281,8 @@ def insert(g, self, pos, tensor):
 def pop(g, tensor_list, dim):
     return g.op("SequenceErase", tensor_list, dim)
 
+def Delete(g, tensor_list, dim):
+    return g.op("SequenceErase", tensor_list, dim)
 
 def cat(g, tensor_list, dim):
     if sym_help._is_packed_list(tensor_list):
@@ -485,13 +446,13 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
-def det(g, self):
+def linalg_det(g, self):
     return g.op("Det", self)
 
 
 def logdet(g, input):
     from torch.onnx.symbolic_opset9 import log
-    return log(g, det(g, input))
+    return log(g, linalg_det(g, input))
 
 
 def arange(g, *args):
@@ -863,8 +824,7 @@ def embedding_bag(g,
 def prim_ConstantChunk(g, self, chunks, dim):
     input_shape = g.op("Shape", self)
     axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
-    axis_next = g.op("Constant", value_t=torch.tensor([dim + 1], dtype=torch.long))
-    input_shape_dim = g.op("Slice", input_shape, axis, axis_next)
+    input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
     start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
     chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
     chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))

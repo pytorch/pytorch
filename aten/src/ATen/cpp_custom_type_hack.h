@@ -95,7 +95,7 @@ Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   // size doesn't really matter, but we can align it to the actual size
   // returning variables because one likely want to use this hack from python
   auto retval = at::empty({sizeof(T)}, options.device(kCPU).dtype(at::kByte));
-  retval.storage().set_data_ptr(std::move(at_ptr));
+  retval.storage().set_data_ptr_noswap(std::move(at_ptr));
   return retval;
 }
 

@@ -21,10 +21,10 @@
 
 namespace tensorpipe {
 
-class CpuBuffer;
+struct CpuBuffer;
 
 #ifdef USE_CUDA_NOT_ROCM
-class CudaBuffer;
+struct CudaBuffer;
 #endif
 
 class Context;
@@ -35,20 +35,10 @@ class Pipe;
 
 namespace transport {
 class Context;
-namespace uv {
-class Context;
-} // namespace uv
 } // namespace transport
 
 namespace channel {
-template <typename TBuffer>
 class Context;
-using CpuContext = Context<CpuBuffer>;
-
-#ifdef USE_CUDA_NOT_ROCM
-using CudaContext = Context<CudaBuffer>;
-#endif
-
 } // namespace channel
 
 using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
@@ -74,7 +64,7 @@ struct TransportRegistration {
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct CpuChannelRegistration {
-  std::shared_ptr<tensorpipe::channel::CpuContext> channel;
+  std::shared_ptr<tensorpipe::channel::Context> channel;
   int64_t priority;
 };
 
@@ -83,7 +73,7 @@ C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 
 struct CudaChannelRegistration {
 #ifdef USE_CUDA_NOT_ROCM
-  std::shared_ptr<tensorpipe::channel::CudaContext> channel;
+  std::shared_ptr<tensorpipe::channel::Context> channel;
   int64_t priority;
 #endif
 };
@@ -191,7 +181,7 @@ class TensorPipeAgent : public RpcAgent {
 
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
-  void join() override;
+  void join(bool shutdown = false) override;
   void sync() override;
   void startImpl() override;
   void shutdownImpl() override;
@@ -221,22 +211,20 @@ class TensorPipeAgent : public RpcAgent {
   // Returns NetworkSourceInfo struct
   NetworkSourceInfo getNetworkSourceInfo();
 
-  static std::string guessUvAddress(
-      tensorpipe::transport::uv::Context& uvContext);
+  static const std::string& guessAddress();
 
   // For testing purposes.
   size_t timeoutMapSize();
   size_t numPendingResponses();
+  size_t messageIdToTimeoutMapSize();
 
  private:
   // Removes the given messageId with the given expirationTime from the
   // timeoutMap_.
-  void removeFromTimeoutMap(
-      uint64_t messageId,
-      steady_clock_time_point expirationTime);
+  void removeFromTimeoutMap(uint64_t messageId);
 
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
-  void collectNames();
+  void prepareNames();
 
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
 
@@ -341,7 +329,8 @@ class TensorPipeAgent : public RpcAgent {
   struct ClientPipe {
     explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe) : pipe_(pipe) {}
     std::shared_ptr<tensorpipe::Pipe> pipe_;
-    bool readError_{false};
+    mutable std::mutex mutex_;
+    bool inError_{false};
     // Map from Message Request ID's to corresponding futures.
     std::unordered_map<uint64_t, std::shared_ptr<AtomicJitFuture>>
         pendingResponseMessage_;
@@ -353,6 +342,8 @@ class TensorPipeAgent : public RpcAgent {
   ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;
   std::shared_ptr<tensorpipe::Listener> listener_;
+
+  mutable std::mutex connectedPipesMutex_;
   std::unordered_map<worker_id_t, ClientPipe> connectedPipes_;
 
   // Maps keyed on name and id for easy WorkerInfo lookup.
@@ -369,8 +360,7 @@ class TensorPipeAgent : public RpcAgent {
   // group, but probably one day we might want to re-implement them using RPCs.
   const c10::intrusive_ptr<::c10d::ProcessGroup> processGroup_;
 
-  mutable std::mutex mutex_;
-  uint64_t nextMessageID_{0};
+  std::atomic<uint64_t> nextMessageID_{0};
 
   // Metadata used for tracking of whether certain RPCs have timed out or not.
   struct TimeoutMessageMetadata {
@@ -389,6 +379,9 @@ class TensorPipeAgent : public RpcAgent {
   // Map to store the expiration times for each message.
   std::map<steady_clock_time_point, std::vector<TimeoutMessageMetadata>>
       timeoutMap_;
+
+  // Map to store the messageId to expiry time.
+  std::unordered_map<uint64_t, steady_clock_time_point> messageIdToTimeout_;
 
   // Thread that will poll the timeoutMap_ for timed out messages and mark them
   // with an error accordingly
@@ -410,6 +403,11 @@ class TensorPipeAgent : public RpcAgent {
     return std::chrono::time_point_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() + timeout);
   }
+
+  // Handle error on an outgoing pipe
+  void handleClientError(
+      ClientPipe& clientPipe,
+      const tensorpipe::Error& error);
 
   // This is a generic struct for capturing Time-Series Metrics. It keeps a
   // running sum and count of data points (observations), and can return an
@@ -452,6 +450,10 @@ class TensorPipeAgent : public RpcAgent {
   int32_t serverActiveCalls_{0};
   // Running total of RPC requests that will be completed asynchronously
   int32_t serverActiveAsyncCalls_{0};
+
+  // Whether a global graceful shutdown has begun, in which case we'll silence
+  // error messages due to remote workers closing their pipes.
+  std::atomic<bool> shuttingDown_{false};
 
   // Helpers to modify the counts while correctly dealing with the mutex and cv.
   void increaseCallCount(int32_t& count);

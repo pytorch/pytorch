@@ -150,6 +150,23 @@ using ValueSet = std::unordered_set<const Value*>;
 
 struct OperatorSet;
 
+// This is a wrapper to allow invalidating the Python object
+// safely when the C++ object for a Node/Value/Block is deleted
+// like much of graph, it isn't safe for different threads to
+// access the same graph
+template <typename T>
+struct Wrap {
+  explicit Wrap(T* p) : elem(p), clear_cb(nullptr) {}
+  void clear() {
+    if (clear_cb) {
+      clear_cb(elem);
+    }
+    elem = nullptr;
+  }
+  T* elem;
+  void (*clear_cb)(void*);
+};
+
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
   Value(Node* node_, size_t offset_);
@@ -163,6 +180,8 @@ struct Value {
   use_list uses_;
   std::string unique_name_;
   TypePtr type_;
+  // a managing wrapper for Python to allow invalidation
+  std::shared_ptr<Wrap<Value>> wrap_;
 
  public:
   Value* setType(TypePtr type);
@@ -248,6 +267,19 @@ struct Value {
   TORCH_API void replaceAllUsesAfterNodeWith(const Node* node, Value* newValue);
 
   TORCH_API Value* copyMetadata(Value* from);
+
+  TORCH_API std::shared_ptr<Wrap<Value>> wrap() {
+    if (!wrap_) {
+      wrap_ = std::make_shared<Wrap<Value>>(this);
+    }
+    return wrap_;
+  }
+
+  virtual ~Value() {
+    if (wrap_) {
+      wrap_->clear();
+    }
+  }
 };
 
 struct TORCH_API Node {
@@ -277,6 +309,8 @@ struct TORCH_API Node {
   // change the schema. note: mutable because schema_ is effectively a cache
   mutable const Operator* op_;
   topo_position_t topo_position_ = 0;
+  // a managing wrapper for Python to allow invalidation
+  std::shared_ptr<Wrap<Node>> wrap_;
 
  protected:
   Node(Graph* graph_, NodeKind kind_); // defined after graph
@@ -290,6 +324,13 @@ struct TORCH_API Node {
   // pointer using an array to allow the same iterator class for forward and
   // reverse node lists This list represents a topological sort
   Node* next_in_graph[2] = {nullptr, nullptr};
+
+  std::shared_ptr<Wrap<Node>> wrap() {
+    if (!wrap_) {
+      wrap_ = std::make_shared<Wrap<Node>>(this);
+    }
+    return wrap_;
+  }
 
   Node*& next() {
     return next_in_graph[kNextDirection];
@@ -395,6 +436,10 @@ struct TORCH_API Node {
   }
 
   void replaceAllUsesWith(Node* n);
+
+  // replaces `this` with a new node with the same inputs and outputs
+  // but a new node symbol. does not destroy `this`
+  Node* replaceWithNewSymbol(Symbol new_symbol);
 
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
@@ -689,7 +734,11 @@ struct TORCH_API Node {
       bool print_scopes = true,
       bool print_body = true) const;
 
-  virtual ~Node() = default;
+  virtual ~Node() {
+    if (wrap_) {
+      wrap_->clear();
+    }
+  }
 
   // Methods for accessing attributes
   Node* copyAttributes(const Node& rhs) {
@@ -753,7 +802,9 @@ struct TORCH_API Node {
   }
 
   CREATE_ACCESSOR(Float, f)
+  CREATE_ACCESSOR(Complex, c)
   CREATE_ACCESSOR(Floats, fs)
+  CREATE_ACCESSOR(ComplexVals, cs)
   CREATE_ACCESSOR(String, s)
   CREATE_ACCESSOR(Strings, ss)
   CREATE_ACCESSOR(Int, i)
@@ -992,6 +1043,19 @@ struct Block {
   TORCH_API void cloneFrom(Block* src, std::function<Value*(Value*)> value_map);
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
+  TORCH_API std::shared_ptr<Wrap<Block>> wrap() {
+    if (!wrap_) {
+      wrap_ = std::make_shared<Wrap<Block>>(this);
+    }
+    return wrap_;
+  }
+
+  virtual ~Block() {
+    if (wrap_) {
+      wrap_->clear();
+    }
+  }
+
  private:
   void reIndexTopology();
 
@@ -1009,6 +1073,8 @@ struct Block {
   Node* const input_;
   Node* const
       owning_node_; // either the node that has this block or nullptr for root
+  // a managing wrapper for Python to allow invalidation
+  std::shared_ptr<Wrap<Block>> wrap_;
 };
 
 struct Graph {
@@ -1028,6 +1094,10 @@ struct Graph {
   size_t next_unique_;
 
   std::unordered_map<std::string, Value*> unique_names_;
+  // name_base_suffix tracks largest suffix currently used by all names sharing
+  // same name_base. Key of this map is name_base, value is largest suffix
+  // numeric value.
+  std::unordered_map<std::string, size_t> name_base_suffix_;
 
   ScopePtr current_scope_;
 

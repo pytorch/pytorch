@@ -28,7 +28,7 @@ import subprocess
 import time
 from collections import OrderedDict
 from collections.abc import Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from functools import wraps
 from itertools import product
 from copy import deepcopy
@@ -39,6 +39,8 @@ from urllib.request import urlopen
 import __main__  # type: ignore[import]
 import errno
 from typing import cast, Any, Dict, Iterable, Iterator, Optional
+
+import numpy as np
 
 from torch.testing._internal import expecttest
 from torch.testing import \
@@ -248,6 +250,10 @@ def get_test_names(test_cases):
 def chunk_list(lst, nchunks):
     return [lst[i::nchunks] for i in range(nchunks)]
 
+# sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
+def sanitize_test_filename(filename):
+    strip_py = re.sub(r'.py$', '', filename)
+    return re.sub('/', r'.', strip_py)
 
 def run_tests(argv=UNITTEST_ARGS):
     if TEST_DISCOVER:
@@ -282,7 +288,9 @@ def run_tests(argv=UNITTEST_ARGS):
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
+        test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
+        test_report_path = os.path.join(test_report_path, test_filename)
         os.makedirs(test_report_path, exist_ok=True)
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
@@ -375,26 +383,35 @@ TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 # it felt a little awkward.
 TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 
-if TEST_NUMPY:
-    import numpy as np
+# Disables noarch tests; all but one CI configuration disables these.  We don't
+# disable them for local runs because you still want to run them
+# (unlike slow tests!)
+TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
 
-    # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
-    numpy_to_torch_dtype_dict = {
-        np.bool_      : torch.bool,
-        np.uint8      : torch.uint8,
-        np.int8       : torch.int8,
-        np.int16      : torch.int16,
-        np.int32      : torch.int32,
-        np.int64      : torch.int64,
-        np.float16    : torch.float16,
-        np.float32    : torch.float32,
-        np.float64    : torch.float64,
-        np.complex64  : torch.complex64,
-        np.complex128 : torch.complex128
-    }
+# Dict of NumPy dtype -> torch dtype (when the correspondence exists)
+numpy_to_torch_dtype_dict = {
+    np.bool_      : torch.bool,
+    np.uint8      : torch.uint8,
+    np.int8       : torch.int8,
+    np.int16      : torch.int16,
+    np.int32      : torch.int32,
+    np.int64      : torch.int64,
+    np.float16    : torch.float16,
+    np.float32    : torch.float32,
+    np.float64    : torch.float64,
+    np.complex64  : torch.complex64,
+    np.complex128 : torch.complex128
+}
 
-    # Dict of torch dtype -> NumPy dtype
-    torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
+if IS_WINDOWS:
+    # Size of `np.intc` is platform defined.
+    # It is returned by functions like `bitwise_not`.
+    # On Windows `int` is 32-bit
+    # https://docs.microsoft.com/en-us/cpp/cpp/data-type-ranges?view=msvc-160
+    numpy_to_torch_dtype_dict[np.intc] = torch.int
+
+# Dict of torch dtype -> NumPy dtype
+torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
@@ -566,6 +583,20 @@ def slowTest(fn):
     return wrapper
 
 
+# noarch tests are tests that should be only run on one CI configuration,
+# because they don't exercise any interesting platform specific code
+# and so if run once, indicate the test should pass everywhere.
+# See https://github.com/pytorch/pytorch/issues/53743
+def noarchTest(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_SKIP_NOARCH:
+            raise unittest.SkipTest("test is noarch: we are skipping noarch tests due to TEST_SKIP_NOARCH")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+
 def slowAwareTest(fn):
     fn.__dict__['slow_test'] = True
     return fn
@@ -639,8 +670,10 @@ def freeze_rng_state():
 def set_default_dtype(dtype):
     saved_dtype = torch.get_default_dtype()
     torch.set_default_dtype(dtype)
-    yield
-    torch.set_default_dtype(saved_dtype)
+    try:
+        yield
+    finally:
+        torch.set_default_dtype(saved_dtype)
 
 def iter_indices(tensor):
     if tensor.dim() == 0:
@@ -656,6 +689,30 @@ def is_iterable(obj):
         return True
     except TypeError:
         return False
+
+
+def is_iterable_of_tensors(iterable, include_empty=False):
+    """ Returns True if iterable is an iterable of tensors and False o.w.
+
+        If the iterable is empty, the return value is :attr:`include_empty`
+    """
+    # Tensor itself is iterable so we check this first
+    if isinstance(iterable, torch.Tensor):
+        return False
+
+    try:
+        if len(iterable) == 0:
+            return include_empty
+
+        for t in iter(iterable):
+            if not isinstance(t, torch.Tensor):
+                return False
+
+    except TypeError as te:
+        return False
+
+    return True
+
 
 class CudaNonDefaultStream():
     def __enter__(self):
@@ -711,6 +768,13 @@ class CudaMemoryLeakCheck():
                 before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
                     self.name, after - before, i))
 
+@contextmanager
+def skip_exception_type(exc_type):
+    try:
+        yield
+    except exc_type as e:
+        raise unittest.SkipTest(f"not implemented: {e}") from e
+
 #  "min_satisfying_examples" setting has been deprecated in hypythesis
 #  3.56.0 and removed in hypothesis 4.x
 try:
@@ -751,6 +815,27 @@ try:
     )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
+
+
+slow_tests_dict: Optional[Dict[str, float]] = None
+def check_slow_test_from_stats(test):
+    global slow_tests_dict
+    if slow_tests_dict is None:
+        url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/.pytorch-slow-tests'
+        try:
+            contents = urlopen(url, timeout=1).read().decode('utf-8')
+            slow_tests_dict = json.loads(contents)
+        except Exception as e:
+            print(f'Could not download slow test stats because of error {e}. Proceeding with no added slow tests.')
+            slow_tests_dict = {}
+    test_suite = str(test.__class__).split('\'')[1]
+    test_name = f'{test._testMethodName} ({test_suite})'
+
+    if test_name in slow_tests_dict:
+        getattr(test, test._testMethodName).__dict__['slow_test'] = True
+        if not TEST_WITH_SLOW:
+            raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+
 
 disabled_test_from_issues: Optional[Dict[str, Any]] = None
 def check_disabled(test_name):
@@ -808,12 +893,39 @@ def get_comparison_dtype(a, b):
 
     return compare_dtype
 
+# This implements a variant of assertRaises/assertRaisesRegex where we first test
+# if the exception is NotImplementedError, and if so just skip the test instead
+# of failing it.
+#
+# This is implemented by inheriting from the (private) implementation of
+# assertRaises from unittest.case, and slightly tweaking it for this new
+# behavior.  The year is 2021: this private class hierarchy hasn't changed since
+# 2010, seems low risk to inherit from.
+class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
+    def __exit__(self, exc_type, exc_value, tb):
+        if exc_type is not None and issubclass(exc_type, NotImplementedError):
+            self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
+        return super().__exit__(exc_type, exc_value, tb)
+
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
     # atol values when comparing tensors. Used by @precisionOverride, for
     # example.
     # TODO: provide a better mechanism for generated tests to set rtol/atol.
     _precision: float = 0
+
+    # checker to early terminate test suite if unrecoverable failure occurs.
+    def _should_stop_test_suite(self):
+        if torch.cuda.is_initialized():
+            # CUDA device side error will cause subsequence test cases to fail.
+            # stop entire test suite if catches RuntimeError during torch.cuda.synchronize().
+            try:
+                torch.cuda.synchronize()
+            except RuntimeError as rte:
+                return True
+            return False
+        else:
+            return False
 
     @property
     def precision(self) -> float:
@@ -825,6 +937,10 @@ class TestCase(expecttest.TestCase):
 
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
+
+    # When True, if a test case raises a NotImplementedError, instead of failing
+    # the test, skip it instead.
+    _ignore_not_implemented_error = False
 
     def __init__(self, method_name='runTest'):
         super().__init__(method_name)
@@ -842,6 +958,9 @@ class TestCase(expecttest.TestCase):
             if self._do_cuda_non_default_stream and not IS_WINDOWS:
                 self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
+            if self._ignore_not_implemented_error:
+                self.wrap_with_policy(method_name, lambda: skip_exception_type(NotImplementedError))
+
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
         return CudaMemoryLeakCheck(self, name)
@@ -854,12 +973,21 @@ class TestCase(expecttest.TestCase):
         # the import below may initialize CUDA context, so we do it only if
         # self._do_cuda_memory_leak_check or self._do_cuda_non_default_stream
         # is True.
+        # TODO: sure looks like we unconditionally initialize the context here
+        # -- ezyang
         from torch.testing._internal.common_cuda import TEST_CUDA
         fullname = self.id().lower()  # class_name.method_name
         if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
-            setattr(self, method_name, self.wrap_method_with_cuda_policy(test_method, policy))
+            setattr(self, method_name, self.wrap_method_with_policy(test_method, policy))
 
-    def wrap_method_with_cuda_policy(self, method, policy):
+    def wrap_with_policy(self, method_name, policy):
+        test_method = getattr(self, method_name)
+        setattr(self, method_name, self.wrap_method_with_policy(test_method, policy))
+
+    # A policy is a zero-argument function that returns a context manager.
+    # We don't take the context manager directly as it may be necessary to
+    # construct it once per test method
+    def wrap_method_with_policy(self, method, policy):
         # Assumes that `method` is the tested function in `self`.
         # NOTE: Python Exceptions (e.g., unittest.Skip) keeps objects in scope
         #       alive, so this cannot be done in setUp and tearDown because
@@ -873,12 +1001,17 @@ class TestCase(expecttest.TestCase):
         return types.MethodType(wrapper, self)
 
     def wrap_with_cuda_memory_check(self, method):
-        return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
+        return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
+    def run(self, result=None):
+        super().run(result=result)
+        # Early terminate test if necessary.
+        if self._should_stop_test_suite():
+            result.stop()
 
     def setUp(self):
 
-
+        check_slow_test_from_stats(self)
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
@@ -1238,6 +1371,30 @@ class TestCase(expecttest.TestCase):
                 return
         raise AssertionError("object not found in iterable")
 
+    # Reimplemented to provide special behavior when
+    # _ignore_not_implemented_error is True
+    def assertRaises(self, expected_exception, *args, **kwargs):
+        if self._ignore_not_implemented_error:
+            context: Optional[AssertRaisesContextIgnoreNotImplementedError] = \
+                AssertRaisesContextIgnoreNotImplementedError(expected_exception, self)  # type: ignore[call-arg]
+            try:
+                return context.handle('assertRaises', args, kwargs)  # type: ignore[union-attr]
+            finally:
+                # see https://bugs.python.org/issue23890
+                context = None
+        else:
+            return super().assertRaises(expected_exception, *args, **kwargs)
+
+    # Reimplemented to provide special behavior when
+    # _ignore_not_implemented_error is True
+    def assertRaisesRegex(self, expected_exception, expected_regex, *args, **kwargs):
+        if self._ignore_not_implemented_error:
+            context = AssertRaisesContextIgnoreNotImplementedError(  # type: ignore[call-arg]
+                expected_exception, self, expected_regex)
+            return context.handle('assertRaisesRegex', args, kwargs)  # type: ignore[attr-defined]
+        else:
+            return super().assertRaisesRegex(expected_exception, expected_regex, *args, **kwargs)
+
     # TODO: Support context manager interface
     # NB: The kwargs forwarding to callable robs the 'subname' parameter.
     # If you need it, manually apply your callable in a lambda instead.
@@ -1264,26 +1421,28 @@ class TestCase(expecttest.TestCase):
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
-    def maybeWarnsRegex(self, category, regex=''):
-        """Context manager for code that *may* warn, e.g. ``TORCH_WARN_ONCE``.
+    def assertWarnsOnceRegex(self, category, regex=''):
+        """Context manager for code that *must always* warn
 
-        This filters expected warnings from the test log and fails the test if
-        any unexpected warnings are caught.
+        This filters expected warnings from the test and fails if
+        the expected warning is not caught. It uses set_warn_always() to force
+        TORCH_WARN_ONCE to behave like TORCH_WARN
         """
+        pattern = re.compile(regex)
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            # Ignore expected warnings
-            warnings.filterwarnings("ignore", message=regex, category=category)
+            prev = torch.is_warn_always_enabled()
+            torch.set_warn_always(True)
             try:
                 yield
             finally:
-                if len(ws) != 0:
-                    msg = 'Caught unexpected warnings:\n'
-                    for w in ws:
-                        msg += warnings.formatwarning(
-                            str(w.message), w.category, w.filename, w.lineno, w.line)
-                        msg += '\n'
-                    self.fail(msg)
+                torch.set_warn_always(prev)
+            if len(ws) == 0:
+                self.fail('no warning caught')
+            for w in ws:
+                self.assertTrue(type(w.message) is category)
+                self.assertTrue(re.match(pattern, str(w.message)),
+                                f'{pattern}, {w.message}')
 
     def assertExpected(self, s, subname=None):
         r"""
@@ -1415,14 +1574,12 @@ def download_file(url, binary=True):
         warnings.warn(msg, RuntimeWarning)
         raise unittest.SkipTest(msg) from e
 
-
 def find_free_port():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(('localhost', 0))
-    sockname = sock.getsockname()
-    sock.close()
-    return sockname[1]
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(('localhost', 0))
+        _, port = sock.getsockname()
+        return port
 
 # Errors that we can get in c10d initialization for which we should retry tests for.
 ADDRESS_IN_USE = "Address already in use"
@@ -1477,41 +1634,43 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 # Used in test_autograd.py and test_torch.py
-def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
-                low, high, requires_grad: bool = False) -> torch.Tensor:
-    """Returns a tensor of the specified size on the given device and dtype.
-       The tensors values are between -9 and 9, inclusive, for most dtypes,
-       unless low (high) is not None in which case the values are between
-       max(-9, low) and min(9, high).
-       For unsigned types the values are between 0 and 9, and for complex
-       dtypes the real and imaginary parts are each between -9 and 9,
-       independently."""
+def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
+                requires_grad: bool = False, discontiguous: bool = False) -> torch.Tensor:
+    """ Creates a random tensor with the given size, device and dtype.
+
+        By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
+        and/or high are specified then the values will be in the range [max(-9, low), min(9, high)].
+
+        For unsigned types the values are in the range[0, 9] and for complex types the real and imaginary
+        parts are each in the range [-9, 9].
+
+        If discontiguous=True, a discontiguous tensor with the given size will be returned unless the size
+        specifies a tensor with a 1 or 0 elements in which case the discontiguous parameter is ignored because
+        it is not possible to create a discontiguous Tensor with a single element.
+    """
 
     assert low is None or low < 9, "low value too high!"
     assert high is None or high > -9, "high value too low!"
 
     if dtype is torch.bool:
-        return torch.randint(0, 2, size, device=device, dtype=dtype)
-
-    if dtype is torch.uint8:
+        result = torch.randint(0, 2, size, device=device, dtype=dtype)
+    elif dtype is torch.uint8:
         low = math.floor(0 if low is None else max(low, 0))
         high = math.ceil(10 if high is None else min(high, 10))
-        return torch.randint(low, high, size, device=device, dtype=dtype)
+        result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
         low = math.floor(-9 if low is None else max(low, -9))
         high = math.ceil(10 if high is None else min(high, 10))
-        return torch.randint(low, high, size, device=device, dtype=dtype)
+        result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
         low = -9 if low is None else max(low, -9)
         high = 9 if high is None else min(high, 10)
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            t = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
+            result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
         else:
-            t = torch.rand(size, device=device, dtype=dtype) * span + low
-        t.requires_grad = requires_grad
-        return t
+            result = torch.rand(size, device=device, dtype=dtype) * span + low
     else:
         assert dtype in complex_types()
         low = -9 if low is None else max(low, -9)
@@ -1520,16 +1679,17 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
-        c = torch.complex(real, imag)
-        c.requires_grad = requires_grad
-        return c
+        result = torch.complex(real, imag)
 
+    if discontiguous and result.numel() > 1:
+        result = torch.repeat_interleave(result, 2, dim=-1)
+        result = result[..., ::2]
 
-def prod_single_zero(dim_size):
-    result = torch.randn(dim_size, dim_size)
-    result[0, 1] = 0
+    if dtype in floating_types_and(torch.half, torch.bfloat16) or\
+       dtype in complex_types():
+        result.requires_grad = requires_grad
+
     return result
-
 
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l
@@ -1542,6 +1702,27 @@ def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
             s[i] = 1
     return u.mm(torch.diag(s).to(dtype)).mm(v.transpose(0, 1))
 
+def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001):
+    """
+    Returns a random rectangular matrix (batch of matrices)
+    with singular values sampled from a Gaussian with
+    mean `mean` and standard deviation `sigma`.
+    The smaller the `sigma`, the better conditioned
+    the output matrix is.
+    """
+    primitive_dtype = {
+        torch.float: torch.float,
+        torch.double: torch.double,
+        torch.cfloat: torch.float,
+        torch.cdouble: torch.double
+    }
+    x = torch.rand(shape, dtype=dtype, device=device)
+    m = x.size(-2)
+    n = x.size(-1)
+    u, _, v = x.svd()
+    s = (torch.randn(*(shape[:-2] + (min(m, n),)), dtype=primitive_dtype[dtype], device=device) * sigma + mean) \
+        .sort(-1, descending=True).values.to(dtype)
+    return (u * s.unsqueeze(-2)) @ v.transpose(-2, -1).conj()
 
 def random_symmetric_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
@@ -1946,3 +2127,12 @@ dtype2prec_DONTUSE = {torch.float: 1e-5,
                       torch.double: 1e-5,
                       torch.half: 1e-2,
                       torch.bfloat16: 1e-1}
+
+
+def _wrap_warn_once(regex):
+    def decorator(fn):
+        def inner(self, *args, **kwargs):
+            with self.assertWarnsOnceRegex(UserWarning, regex):
+                fn(self, *args, **kwargs)
+        return inner
+    return decorator

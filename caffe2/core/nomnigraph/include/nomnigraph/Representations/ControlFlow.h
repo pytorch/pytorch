@@ -4,7 +4,6 @@
 #include "caffe2/core/common.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/Compiler.h"
-#include "nomnigraph/Support/Pointer.h"
 
 #include <unordered_map>
 

@@ -118,6 +118,7 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::cosh(Tensor self) -> Tensor",
       "aten::sinh(Tensor self) -> Tensor",
       "aten::tanh(Tensor self) -> Tensor",
+      "aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor",
       "aten::sqrt(Tensor self) -> Tensor",
       "aten::rsqrt(Tensor self) -> Tensor",
       "aten::abs(Tensor self) -> Tensor",
@@ -153,11 +154,16 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor",
       "aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor",
       "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor",
+      "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
       // TODO: enable other min/max variants, operators that can be both
       // elementwise or reductions:
       "aten::min.other(Tensor self, Tensor other) -> Tensor",
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
+
+      // TODO: enable once we have an out variant for conv2d to use in the NNC's
+      // external call or when we have a performant TE representation for conv
+      // "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
   };
   // clang-format on
 
@@ -173,6 +179,8 @@ bool isSupported(Node* node) {
   static const OperatorSet cuda_only_operator_set{
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
   };
+  static const OperatorSet cpu_only_operator_set{
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"};
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
@@ -211,6 +219,17 @@ bool isSupported(Node* node) {
       }
     }
 
+    // Operator is only supported on CPU.
+    if (node->isMemberOf(cpu_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || !device->is_cpu()) {
+        return false;
+      }
+    }
+
     // non-const dtype / device
     for (auto arg_name : {"dtype", "device"}) {
       if (auto index = node->schema().argumentIndexWithName(arg_name)) {
@@ -222,6 +241,24 @@ bool isSupported(Node* node) {
 
     if (FLAGS_torch_jit_disable_cat && node->kind() == aten::cat) {
       return false;
+    }
+
+    // We only support conv2d with constant strides/padding/dilation/groups
+    if (node->kind() == aten::conv2d) {
+      // Strides, padding and dilation are inputs 3, 4, and 5. They all must be
+      // an IntList of size 2.
+      for (size_t idx = 3; idx <= 5; idx++) {
+        if (node->input(idx)->node()->kind() != prim::Constant ||
+            !toIValue(node->input(idx))->isIntList() ||
+            toIValue(node->input(idx))->toIntList().size() != 2) {
+          return false;
+        }
+      }
+      // Groups is input 6. It must be a constant int.
+      if (node->input(6)->node()->kind() != prim::Constant ||
+          !toIValue(node->input(6))->isInt()) {
+        return false;
+      }
     }
 
     return true;
@@ -815,7 +852,7 @@ class TensorExprFuser {
       if (!v->isCompleteTensor()) {
         return false;
       }
-      if (*v->type()->cast<TensorType>()->dim() == 0) {
+      if (*v->type()->castRaw<TensorType>()->dim() == 0) {
         return false;
       }
     }
@@ -849,8 +886,11 @@ class TensorExprFuser {
       return canFuseOnCPU();
     } else if (device->is_cuda()) {
       return canFuseOnGPU();
+    } else if (device->is_xpu()) {
+      return false;
+    } else {
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "Unknown device for tensorexpr fuser")
     }
-    throw std::runtime_error("Unknown device");
   }
 
   bool isFusableOnDevice(Node* node) {
@@ -978,6 +1018,12 @@ class TensorExprFuser {
       REQ(tensorexpr::pickDeviceType(listconstruct->inputs()));
     } else {
       REQ(tensorexpr::pickDeviceType(node->inputs()));
+    }
+
+    // Only fuse aten::batch_norm when the parameter 'training' is false
+    if (node->kind() == aten::batch_norm) {
+      REQ(node->input(5)->node()->kind() == prim::Constant);
+      REQ(!toIValue(node->input(5)).value().toBool());
     }
 
     REQ(tensorexpr::isSupported(node));

@@ -1,4 +1,5 @@
 import torch
+import operator
 import unittest
 import sys
 from typing import Callable, Dict, Union, List
@@ -11,7 +12,7 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.fx.experimental.subgraph_creation_example import split_module
+from torch.fx.passes.split_module import split_module
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,
@@ -20,15 +21,20 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionerConfig,
     PartitionMode
 )
-from torch.fx.experimental.fuser import fuse
+import torch.fx.experimental.optimization as optimization
 from torch.fx.experimental import merge_matmul
+from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
+from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
+from torch.testing._internal.common_nn import module_tests, new_module_tests
 
 try:
     from torchvision.models import resnet18
+    import torchvision.models
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+skipIfNoMkldnn = unittest.skipIf(not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()), "no MKLDNN")
 
 
 def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
@@ -69,16 +75,16 @@ class TestFXExperimental(JitTestCase):
         # Fix for now to add type/shape to output
         for node in traced.graph.nodes:
             if node.op == "output":
-                node.shape = a.shape
-                node.dtype = a.dtype
+                node.meta['shape'] = a.shape
+                node.meta['dtype'] = a.dtype
         for mod in module_with_submodules.modules():
             if isinstance(mod, GraphModule):
                 for node in mod.graph.nodes:
-                    node.shape = a.shape
-                    node.dtype = a.dtype
+                    node.meta['shape'] = a.shape
+                    node.meta['dtype'] = a.dtype
         for node in module_with_submodules.graph.nodes:
-            node.shape = a.shape
-            node.dtype = a.dtype
+            node.meta['shape'] = a.shape
+            node.meta['dtype'] = a.dtype
 
         weights1 = {}
         weights2 = {}
@@ -105,7 +111,7 @@ class TestFXExperimental(JitTestCase):
         assert serialized_graph1["nodes"][0]["target"] == "a"
         assert serialized_graph1["nodes"][0]["op_code"] == "placeholder"
         assert serialized_graph1["nodes"][0]["name"] == "a"
-        assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_2"
+        assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_1"
         assert serialized_graph1["nodes"][6]["args"][0]["is_node"] is True
 
         # Test quantization info serialization.
@@ -213,10 +219,10 @@ class TestFXExperimental(JitTestCase):
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         partition = partitioner.partitions[0]
         assert partition.used_mem_bytes == 112
-        # Select add_3 node to remove
+        # Select add_2 node to remove
         selected_node = None
         for node in partition.nodes:
-            if node.name == 'add_3':
+            if node.name == 'add_2':
                 selected_node = node
         partition.remove_node(selected_node)
         assert(partition.used_mem_bytes == 80)
@@ -573,7 +579,7 @@ class TestFXExperimental(JitTestCase):
     def test_conv_bn_fusion(self):
         rn18 = resnet18().eval()
         traced = symbolic_trace(rn18)
-        fused = fuse(traced)
+        fused = optimization.fuse(traced)
 
         self.assertTrue(all(not isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules()))
 
@@ -592,7 +598,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
@@ -620,7 +626,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
@@ -648,7 +654,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
@@ -680,7 +686,7 @@ terrible spacing
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
@@ -748,6 +754,192 @@ terrible spacing
         a = torch.rand(64, 3, 7, 7)
         module_with_submodules = split_module(traced, m, lambda node: 0)
         module_with_submodules(a)
+
+    def test_normalize_binary_operators(self):
+        ops_to_test = {
+            torch.add,
+            torch.mul,
+            torch.sub,
+            torch.div,
+            torch.floor_divide,
+            torch.remainder,
+            torch.eq,
+            torch.ne,
+            torch.lt,
+            torch.le,
+            torch.gt,
+            torch.ge,
+        }
+
+        # Test Tensor/Tensor callsite
+        for op in ops_to_test:
+            class WrapperMod(torch.nn.Module):
+                def forward(self, x, y):
+                    return op(x, y)
+
+            traced = symbolic_trace(WrapperMod())
+            normalized = NormalizeOperators(traced).transform()
+            x, y = torch.randn(3, 4), torch.randn(3, 4)
+            torch.testing.assert_allclose(traced(x, y), normalized(x, y))
+            self.assertFalse(any(n.target in ops_to_test for n in normalized.graph.nodes))
+
+
+        # Test Tensor/scalar callsite
+        for op in ops_to_test:
+            class WrapperMod(torch.nn.Module):
+                def forward(self, x):
+                    return op(x, 42)
+
+            traced = symbolic_trace(WrapperMod())
+            normalized = NormalizeOperators(traced).transform()
+            x = torch.randn(3, 4)
+            torch.testing.assert_allclose(traced(x), normalized(x))
+            self.assertFalse(any(n.target in ops_to_test for n in normalized.graph.nodes))
+
+    @skipIfNoTorchVision
+    def test_normalize_args(self):
+        m = resnet18()
+
+        class FunctionalTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                # `leaves` contains the set of standard `nn.Modules` that are not
+                # currently symbolically traceable. Ideally this set would be empty
+                leaves = set([torch.nn.BatchNorm2d])
+                return type(m) in leaves
+
+        traced = torch.fx.GraphModule(m, FunctionalTracer().trace(m))
+
+        input = torch.randn(5, 3, 224, 224)
+        ref_outs = traced(input)
+
+        traced = NormalizeArgs(traced).transform()
+
+        test_outs = traced(input)
+        self.assertEqual(test_outs, ref_outs)
+
+        modules = dict(traced.named_modules())
+        for node in traced.graph.nodes:
+            if node.op == 'call_function' and node.target.__module__ == 'torch.nn.functional':
+                self.assertEqual(len(node.args), 0)
+            if node.op == 'call_module':
+                submod_class = modules[node.target].__class__
+                nn_class = getattr(torch.nn, submod_class.__name__)
+                if submod_class == nn_class:
+                    self.assertEqual(len(node.args), 0)
+
+    def test_normalize_modules_exhaustive(self):
+        """
+        Exhaustively test `NormalizeArgs` on all standard
+        torch.nn Module classes
+        """
+        for test_params in module_tests + new_module_tests:
+            if 'constructor' not in test_params:
+                constructor = getattr(torch.nn, test_params['module_name'])
+            else:
+                constructor = test_params['constructor']
+
+            if 'constructor_args' not in test_params:
+                args = ()
+            else:
+                args = test_params['constructor_args']
+
+            mod = constructor(*args)
+            # Skip modules that are not standard `torch.nn`
+            # instances, including functionals. (functionals
+            # are tested in test_normalize_args)
+            if mod.__class__.__name__ not in dir(torch.nn):
+                continue
+
+            if 'input_fn' not in test_params:
+                inputs = torch.randn(test_params['input_size'])
+            else:
+                inputs = test_params['input_fn']()
+
+            if not isinstance(inputs, (tuple, list)):
+                inputs = (inputs,)
+
+            params = ', '.join(f'v{i}' for i in range(len(inputs)))
+
+            # Generate a class to wrap this standard `nn.Module` instance
+            test_classname = f'Test{mod.__class__.__name__}'
+            test_mod_code = f"""
+class {test_classname}(torch.nn.Module):
+    def __init__(self, mod):
+        super().__init__()
+        self.mod = mod
+
+    def forward(self, {params}):
+        return self.mod({params})
+            """
+
+            gbls = {'torch' : torch}
+            exec(test_mod_code, gbls)
+
+            test_instance = gbls[test_classname](mod)
+            traced = symbolic_trace(test_instance)
+
+            # Now actually test arg normalization!
+            traced = NormalizeArgs(traced).transform()
+
+            # These Modules have an RNG in their forward, so testing
+            # correctness by comparing outputs is not correct. Skip that
+            # check for these
+            stochastic_modules = {'FractionalMaxPool2d', 'FractionalMaxPool3d',
+                                  'RReLU'}
+
+            if mod.__class__.__name__ not in stochastic_modules:
+                self.assertEqual(traced(*inputs), mod(*inputs))
+
+            # Ensure all args/kwargs are normalized into kwargs
+            modules = dict(traced.named_modules())
+            for node in traced.graph.nodes:
+                if node.op == 'call_module':
+                    submod_class = modules[node.target].__class__
+                    nn_class = getattr(torch.nn, submod_class.__name__)
+                    if submod_class == nn_class:
+                        self.assertEqual(len(node.args), 0)
+
+    @skipIfNoTorchVision
+    def test_annotate_returns_with_schema(self):
+        m = resnet18()
+
+        traced_modules = symbolic_trace(m)
+        traced_modules_annotated = AnnotateTypesWithSchema(traced_modules).transform()
+        for node in traced_modules_annotated.graph.nodes:
+            if node.type is None:
+                check = (node.op, node.target)
+                self.assertTrue(check in {('placeholder', 'x'), ('call_function', operator.add),
+                                          ('call_function', torch.flatten), ('output', 'output')})
+
+        # Smoke test torchscript compilation since now we're emitting type annotations
+        torch.jit.script(traced_modules_annotated)
+
+        class FunctionalTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                # `leaves` contains the set of standard `nn.Modules` that are not
+                # currently symbolically traceable. Ideally this set would be empty
+                leaves = set([torch.nn.BatchNorm2d])
+                return type(m) in leaves
+
+        traced_functionals = torch.fx.GraphModule(m, FunctionalTracer().trace(m))
+
+        traced_functionals_annotated = AnnotateTypesWithSchema(traced_functionals).transform()
+        for node in traced_functionals_annotated.graph.nodes:
+            if node.type is None:
+                check = (node.op, node.target)
+                excluded_nodes = {
+                    ('placeholder', 'x'),
+                    ('call_function', torch.conv2d),
+                    # Return type differs based on boolean dispatch :(
+                    ('call_function', torch.nn.functional.max_pool2d),
+                    ('call_function', operator.add),
+                    ('call_function', torch.flatten),
+                    ('output', 'output'),
+                }
+                self.assertTrue(check in excluded_nodes)
+
+        # Smoke test torchscript compilation since now we're emitting type annotations
+        torch.jit.script(traced_functionals_annotated)
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
@@ -969,6 +1161,67 @@ terrible spacing
         # Basic graph structure check; the number of matrix multiplcations should not have changed.
         self.assertEqual(_count_matmuls(module), 2)
         self.assertEqual(_count_matmuls(opt_module), 2)
+
+    @skipIfNoMkldnn
+    def test_prepare_for_inference_cpu(self):
+        import torch.nn as nn
+
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                layers = []
+                layers2 = []
+                for _ in range(10):
+                    layers.append(nn.Conv2d(3, 3, 1))
+                    layers.append(nn.BatchNorm2d(3))
+                    layers.append(nn.ReLU())
+
+                    layers2.append(nn.Conv2d(3, 3, 1))
+                    layers2.append(nn.BatchNorm2d(3))
+                    layers2.append(nn.ReLU())
+                self.model = nn.Sequential(*layers)
+                self.model2 = nn.Sequential(*layers2)
+
+            def forward(self, x):
+                return self.model(x) + self.model2(x)
+
+
+        N, C, H, W, = 1, 3, 224, 224
+        inp = torch.randn(N, C, H, W)
+        with torch.no_grad():
+            model = Foo().eval()
+            optimized_model = optimization.prepare_for_inference(model)
+            torch.testing.assert_allclose(model(inp), optimized_model(inp))
+
+    @skipIfNoTorchVision
+    @skipIfNoMkldnn
+    def test_prepare_for_inference_cpu_torchvision(self):
+        models = [
+            torchvision.models.resnet18,
+            torchvision.models.resnet50,
+            torchvision.models.densenet121,
+            torchvision.models.shufflenet_v2_x1_0,
+            torchvision.models.vgg16,
+            torchvision.models.mobilenet_v2,
+            torchvision.models.mnasnet1_0,
+            torchvision.models.resnext50_32x4d
+        ]
+        with torch.no_grad():
+            for model_type in models:
+                model = model_type()
+                C, H, W, = 3, 224, 224
+                inp = torch.randn(3, C, H, W)
+                model(inp)
+                model.eval()
+                inp = torch.randn(1, C, H, W)
+                heuristic = optimization.gen_mkl_autotuner(inp, iters=0, warmup=0)
+                optimized_model = optimization.prepare_for_inference(model)
+
+                orig_out = model(inp)
+                new_out = optimized_model(inp)
+                torch.testing.assert_allclose(orig_out, new_out)
+
+
 
 if __name__ == "__main__":
     run_tests()

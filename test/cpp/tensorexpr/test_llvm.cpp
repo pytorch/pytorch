@@ -19,7 +19,6 @@
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
-using namespace torch::jit::tensorexpr;
 
 using LLVMExprEval = ExprEval<LLVMCodeGen>;
 
@@ -467,6 +466,36 @@ TEST(LLVM, CondNestedTest) {
       }
     }
   }
+}
+
+TEST(LLVM, DirectVectorization) {
+  KernelScope ks;
+  constexpr int M = 3;
+  constexpr int N = 64;
+  BufHandle a("a", {M, N}, kFloat);
+  BufHandle b("b", {M, N}, kFloat);
+  BufHandle c("c", {M, N}, kFloat);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  Stmt* s = For::make(
+      m,
+      0,
+      M,
+      Store::make(
+          c,
+          {Ramp::make(m * 64, 1, 64)},
+          Load::make(
+              {kFloat, 64},
+              a,
+              {Ramp::make(m * 64, 1, 64)},
+              Broadcast::make(1, 64)) *
+              Load::make(
+                  {kFloat, 64},
+                  b,
+                  {Ramp::make(m * 64, 1, 64)},
+                  Broadcast::make(1, 64)),
+          Broadcast::make(1, 64)));
+  LLVMCodeGen cg(s, {a, b, c});
 }
 
 TEST(LLVM, VecLoadStoreTest) {
@@ -1302,6 +1331,24 @@ TEST(LLVM, BitwiseOps) {
   ASSERT_EQ(cg.value<int>(), 11);
 }
 
+TEST(LLVM, ArithmeticRightShift) {
+  KernelScope ks;
+  auto a = CharImm::make(-4);
+  auto b = CharImm::make(1);
+  ExprHandle f = a >> b;
+  LLVMExprEval cg(f);
+  ASSERT_EQ(cg.value<int8_t>(), -2);
+}
+
+TEST(LLVM, LogicalRightShift) {
+  KernelScope ks;
+  auto a = ByteImm::make(0xfc);
+  auto b = ByteImm::make(1);
+  ExprHandle f = a >> b;
+  LLVMExprEval cg(f);
+  ASSERT_EQ(cg.value<uint8_t>(), 0x7e);
+}
+
 TEST(LLVM, DynamicShapeAdd) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
@@ -1561,6 +1608,128 @@ TEST(LLVM, RFactorVectorizedReduction) {
   cg.call({a_v, b_v});
 
   ExpectAllNear(b_v, b_ref, 1e-5);
+}
+
+TEST(LLVM, SimpleParallel) {
+  for (int test_cfg = 0; test_cfg < 4; test_cfg++) {
+    // Compute a simple operation, and try all loop-axis combination to be
+    // parallel or sequential.
+    ExecutionCounter counter(llvm_codegen_parallel_dispatched);
+    KernelScope kernel_scope;
+    const int M = 4;
+    const int N = 6;
+    Tensor* f = Compute(
+        "f", {{M, "m"}, {N, "n"}}, [](const VarHandle& m, const VarHandle& n) {
+          return cast<float>(m + n);
+        });
+    LoopNest loop_nest({f});
+    auto const& loops = loop_nest.getLoopStmtsFor(f);
+    For* m = loops[0];
+    For* n = loops[1];
+    if (test_cfg & 0x1) {
+      m->set_parallel();
+    }
+    if (test_cfg & 0x2) {
+      n->set_parallel();
+    }
+    loop_nest.prepareForCodegen();
+    Stmt* stmt = loop_nest.root_stmt();
+    LLVMCodeGen cg(stmt, {f});
+
+    PaddedBuffer<float> f_v(M, N, "f_v");
+    std::vector<void*> args({f_v.data()});
+    int value = cg.value<int>(args);
+    ASSERT_EQ(value, 0);
+    PaddedBuffer<float> f_ref(M, N, "f_ref");
+    for (int m = 0; m < M; m++) {
+      for (int n = 0; n < N; n++) {
+        f_ref(m, n) = m + n;
+      }
+    }
+    ExpectAllNear(f_v, f_ref, 1e-5);
+    int count = counter.elapsed_value();
+    if (test_cfg == 0) {
+      ASSERT_EQ(count, 0);
+    } else {
+      ASSERT_GT(count, 0);
+    }
+  }
+}
+
+TEST(LLVM, CompositeParallel) {
+  int loop_count = 6;
+  int test_count = 1 << loop_count;
+  // Compute a composite operation, and try all loop-axis combination to be
+  // parallel or sequential.
+  for (int test_cfg = 0; test_cfg < test_count; test_cfg++) {
+    ExecutionCounter counter(llvm_codegen_parallel_dispatched);
+    KernelScope kernel_scope;
+    int M = 5;
+    int N = 7;
+    Tensor* t1 =
+        Compute("t1", {{M, "M"}}, [](const VarHandle& m) { return m + 1.f; });
+    Tensor* t2 =
+        Compute("t2", {{N, "N"}}, [](const VarHandle& n) { return n + 2.f; });
+    Tensor* t3 = Compute(
+        "t3",
+        {{M, "M"}, {N, "N"}},
+        [=](const VarHandle& m, const VarHandle& n) {
+          return t1->call(m) * t2->call(n);
+        });
+    Tensor* t4 = Compute(
+        "t4",
+        {{M, "M"}, {N, "N"}},
+        [=](const VarHandle& m, const VarHandle& n) {
+          return t3->call(m, n) + m + n;
+        });
+    LoopNest loop_nest({t4}, {t1, t2, t3, t4});
+    std::vector<For*> loop_list;
+    {
+      auto const& loops = loop_nest.getLoopStmtsFor(t1);
+      loop_list.push_back(loops[0]);
+    }
+    {
+      auto const& loops = loop_nest.getLoopStmtsFor(t2);
+      loop_list.push_back(loops[0]);
+    }
+    {
+      auto const& loops = loop_nest.getLoopStmtsFor(t3);
+      loop_list.push_back(loops[0]);
+      loop_list.push_back(loops[1]);
+    }
+    {
+      auto const& loops = loop_nest.getLoopStmtsFor(t4);
+      loop_list.push_back(loops[0]);
+      loop_list.push_back(loops[1]);
+    }
+    ASSERT_EQ(loop_list.size(), loop_count);
+    for (int i = 0; i < loop_count; i++) {
+      if (test_cfg & (1 << i)) {
+        loop_list[i]->set_parallel();
+      }
+    }
+    loop_nest.prepareForCodegen();
+    Stmt* stmt = loop_nest.root_stmt();
+    LLVMCodeGen cg(stmt, {t4});
+
+    PaddedBuffer<float> t4_v(M, N, "t4_v");
+    std::vector<void*> args({t4_v.data()});
+    int value = cg.value<int>(args);
+    ASSERT_EQ(value, 0);
+    PaddedBuffer<float> t4_ref(M, N, "t4_ref");
+    for (int m = 0; m < M; m++) {
+      for (int n = 0; n < N; n++) {
+        t4_ref(m, n) = (m + 1) * (n + 2) + m + n;
+      }
+    }
+    ExpectAllNear(t4_v, t4_ref, 1e-5);
+    int count = counter.elapsed_value();
+    if (test_cfg == 0) {
+      ASSERT_EQ(count, 0);
+    } else {
+      ASSERT_GT(count, 0);
+    }
+  }
 }
 
 TEST(LLVM, VectorizedGEMM) {

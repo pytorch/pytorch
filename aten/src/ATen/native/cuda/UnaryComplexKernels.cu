@@ -81,11 +81,12 @@ __host__ __device__ static inline c10::complex<T> conj_wrapper(c10::complex<T> v
 }
 
 void conj_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "conj_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return conj_wrapper(a);
-    });
-  });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cuda", [&]() {
+        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return conj_wrapper(a);
+        });
+      });
 }
 
 REGISTER_DISPATCH(angle_stub, &angle_kernel_cuda);

@@ -12,7 +12,7 @@ namespace jit {
 char const* toString(OpCode op);
 namespace mobile {
 Function::Function(c10::QualifiedName name)
-    : name_(name), code_(std::make_shared<Code>()) {}
+    : name_(std::move(name)), code_(std::make_shared<Code>()) {}
 
 const c10::QualifiedName& Function::qualname() const {
   return name_;
@@ -23,11 +23,6 @@ const std::string& Function::name() const {
 }
 
 void Function::append_instruction(OpCode op, int X, int N) {
-  TORCH_CHECK(
-      op != CREATE_OBJECT,
-      "CREATE_OBJECT is not supported in mobile module. ",
-      "Workaround: instead of using arbitrary class type (class Foo()), ",
-      "define a pytorch class (class Foo(torch.nn.Module)).");
   TORCH_CHECK(
       isOpSupportedInMobile(op),
       toString(op),
@@ -43,7 +38,7 @@ bool Function::append_operator(
   code_->op_names_.emplace_back(name, overload_name);
   auto opname = code_->op_names_.back();
 
-  auto opname_c10 = opname;
+  const auto& opname_c10 = opname;
   std::function<void(Stack&)> fn;
 
   auto jit_op = findOperatorFor(opname);
@@ -58,13 +53,13 @@ bool Function::append_operator(
     }
   }
 
-  if (model_version == 0x3L &&
-      model_version < caffe2::serialize::kProducedBytecodeVersion &&
+  if (model_version == 0x3LL &&
       opname == c10::OperatorName("aten::_convolution", "")) {
-    // A default-value argument will be added in
-    // https://github.com/pytorch/pytorch/pull/40737. This wrapper is used to
-    // handle backward compatibility, where there is no default bool value in
-    // old models.
+    // Since byte-code versions 0x4L, convolution has an additional
+    // default-value argument (allow_tf32=True, see
+    // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
+    // backward compatibility with models of byte-code version <= 0x3L, where
+    // this bool argument does not yet exist.
     fn = [fn](Stack& stack) {
       stack.push_back(true);
       fn(stack);
@@ -108,14 +103,26 @@ std::string Function::get_module_debug_info(size_t pc) const {
   return pc_to_module_debug_info_[pc];
 }
 
+void Function::setSchema(c10::FunctionSchema schema) {
+  schema_ = std::move(schema);
+}
+
+const at::optional<c10::FunctionSchema>& Function::getSchema() const {
+  return schema_;
+}
+
 bool Function::run(Stack& stack) const {
+  const auto& schema = getSchema();
+  if (schema) { // if we have a schema then resolve optional args if any
+    schema->checkAndNormalizeInputs(
+        stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
+  }
   InterpreterState interp_state(code_);
   return interp_state.run(stack);
 }
 
-c10::IValue Function::operator()(Stack& stack) {
-  InterpreterState interp_state(code_);
-  interp_state.run(stack);
+c10::IValue Function::operator()(Stack& stack) const {
+  run(stack);
   return stack.front();
 }
 

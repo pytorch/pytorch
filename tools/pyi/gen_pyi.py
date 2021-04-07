@@ -322,8 +322,8 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                  ' layout: _layout=strided, {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS)],
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...'],
-        'nonzero': ['def nonzero(input: Tensor, *, out: Optional[Tensor]=None) -> Tensor: ...',
-                    'def nonzero(input: Tensor, *, as_tuple: bool=...) -> Tensor: ...'],
+        'nonzero': ['def nonzero(input: Tensor, *, as_tuple: Literal[False]=False, out: Optional[Tensor]=None) -> Tensor: ...',
+                    'def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...'],
         'binary_cross_entropy_with_logits': ['def binary_cross_entropy_with_logits(input: Tensor, target: Tensor, '
                                              'weight: Optional[Tensor] = None, size_average: Optional[bool] = None, '
                                              'reduce: Optional[bool] = None, reduction: str = ..., '
@@ -350,8 +350,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'saddmm': ['def saddmm(input: Tensor, mat1: Tensor, mat2: Tensor, *, beta: Number=1, '
                    'alpha: Number=1, out: Optional[Tensor]=None) -> Tensor: ...'],
         'spmm': ['def spmm(input: Tensor, mat2: Tensor) -> Tensor: ...'],
+        'div': ['def div(input: Union[Tensor, Number], other: Union[Tensor, Number], *, '
+                'rounding_mode: Optional[str] = None, out: Optional[Tensor]=None) -> Tensor: ...'],
     })
-    for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
+    for binop in ['mul', 'true_divide', 'floor_divide']:
         unsorted_function_hints[binop].append(
             'def {}(input: Union[Tensor, Number],'
             ' other: Union[Tensor, Number],'
@@ -413,7 +415,6 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
         'clamp_': ["def clamp_(self, min: _float=-inf, max: _float=inf) -> Tensor: ..."],
-        '__get__': ["def __get__(self, instance, owner=None) -> Tensor: ..."],
         '__getitem__': ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
         '__setitem__': ["def __setitem__(self, {}, val: Union[Tensor, Number])"
                         " -> None: ...".format(INDICES)],
@@ -422,7 +423,8 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'element_size': ['def element_size(self) -> _int: ...'],
         'data_ptr': ['def data_ptr(self) -> _int: ...'],
         'dim': ['def dim(self) -> _int: ...'],
-        'nonzero': ['def nonzero(self, *, as_tuple: _bool=...) -> Tensor: ...'],
+        'nonzero': ['def nonzero(self, *, as_tuple: Literal[False]=False) -> Tensor: ...',
+                    'def nonzero(self, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...'],
         'numel': ['def numel(self) -> _int: ...'],
         'ndimension': ['def ndimension(self) -> _int: ...'],
         'nelement': ['def nelement(self) -> _int: ...'],
@@ -460,8 +462,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                  'def set_(self, storage: Storage) -> Tensor: ...'],
         'split': ['def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...',
                   'def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...'],
+        'div': ['def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
+        'div_': ['def div_(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
     })
-    for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
+    for binop in ['mul', 'true_divide', 'floor_divide']:
         for inplace in [False, True]:
             out_suffix = ', *, out: Optional[Tensor]=None'
             if inplace:

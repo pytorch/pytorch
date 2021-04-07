@@ -1,6 +1,6 @@
 import torch
-from torch._six import container_abcs
 from itertools import repeat
+import collections
 from torch.nn.modules.module import _addindent
 
 def _quantize_weight(float_wt, observer):
@@ -26,7 +26,7 @@ def _ntuple_from_first(n):
     """Converts the argument to a tuple of size n
     with the first element repeated."""
     def parse(x):
-        while isinstance(x, container_abcs.Sequence):
+        while isinstance(x, collections.abc.Sequence):
             if len(x) == n:
                 break
             x = x[0]

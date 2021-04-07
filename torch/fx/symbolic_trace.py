@@ -7,8 +7,10 @@ from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 from itertools import chain
 import torch
+import torch._C._fx  # type: ignore
 from torch._C import ScriptObject  # type: ignore
 
+import sys
 from .node import Argument, map_aggregate
 from .graph import Graph
 from .graph_module import GraphModule
@@ -48,6 +50,43 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normal variables
 
+class _CPatchManager(object):
+    """
+    Calls patch_function in order to intercept functions at the C-extension level
+    """
+    def __init__(self, tracer):
+        self.tracer = tracer
+        patched_fns = [torch.randn, torch.rand, torch.randint]
+
+        def patched_impl(to_patch, args, kwargs):
+            return tracer.create_proxy('call_function', to_patch, args, kwargs)
+
+        c_patch_enabled = True
+
+        def patched_in(to_patch, args, kwargs):
+            nonlocal c_patch_enabled
+            try:
+                c_patch_enabled = False
+                r = patched_impl(to_patch, args, kwargs)
+            finally:
+                c_patch_enabled = True
+            return r
+
+        def trace_func(frame, action, arg):
+            if action == 'c_call':
+                if c_patch_enabled:
+                    if arg in patched_fns:
+                        torch._C._fx.patch_function(arg, patched_in)
+
+        self.func = trace_func
+
+    def __enter__(self):
+        if self.tracer.enable_cpatching:
+            sys.setprofile(self.func)
+
+    def __exit__(self, type, value, tb):
+        sys.setprofile(None)
+
 class Tracer(TracerBase):
     """
     ``Tracer`` is the class that implements the symbolic tracing functionality
@@ -58,7 +97,7 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self, autowrap_modules : Tuple[ModuleType] = (math, )):
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), enable_cpatching: bool = False) -> None:
         """
         Construct a Tracer object.
 
@@ -67,6 +106,16 @@ class Tracer(TracerBase):
             autowrap_modules (List[ModuleType]): defaults to `[math]`,
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap().
+
+            enable_cpatching (bool): defaults to `False`,
+                Allows you to enable/disable monkeypatching of torch functions at the
+                C-level (which captures functins like randn).
+
+                C-level monkeypatching works by directly modifying the PyCFunctionObject*
+                so that calling it returns a different function.
+
+                Turning this on is likely to slow down tracing by 1.5-3x.
+
         """
 
         super().__init__()
@@ -80,7 +129,9 @@ class Tracer(TracerBase):
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
         self._autowrap_search: List[ModuleType] = list(autowrap_modules)
+        self.enable_cpatching = enable_cpatching
 
+        self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
 
     def create_arg(self, a: Any) -> 'Argument':
         """
@@ -185,10 +236,21 @@ class Tracer(TracerBase):
 
             mod (str): The ``Module`` to retrieve the qualified name for.
         """
-        for n, p in self.root.named_modules():
-            if mod is p:
-                return n
-        raise NameError('module is not installed as a submodule')
+        # Prefer the O(1) algorithm
+        if self.submodule_paths:
+            path = self.submodule_paths.get(mod)
+            if path is None:
+                raise NameError('module is not installed as a submodule')
+            assert isinstance(path, str)
+            return path
+        # O(N^2) fallback in the case that we didn't store the submodule
+        # paths. (This happens e.g. in using NormalizeArgs. See
+        #  `test/test_fx_experimental:test_normalize_args`)
+        else:
+            for n, p in self.root.named_modules():
+                if mod is p:
+                    return n
+            raise NameError('module is not installed as a submodule')
 
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
         """
@@ -202,7 +264,6 @@ class Tracer(TracerBase):
 
         This method can be overridden to--for example--create nested traced
         GraphModules, or any other behavior you would want while tracing across
-        ``Module`` boundaries.
         ``Module`` boundaries.
 
         Args:
@@ -223,7 +284,7 @@ class Tracer(TracerBase):
             return forward(*args, **kwargs)
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
-    def create_args_for_root(self, root_fn, is_module):
+    def create_args_for_root(self, root_fn, is_module, concrete_args=None):
         """
         Create ``placeholder`` nodes corresponding to the signature of the ``root``
         Module. This method introspects root's signature and emits those
@@ -249,6 +310,8 @@ class Tracer(TracerBase):
         sig = inspect.signature(fn_for_analysis)
 
         def proxy_placeholder(name: str):
+            if concrete_args is not None and name in concrete_args:
+                return concrete_args[name]
             if name[0] == '*':
                 default = ()    # type: ignore
             else:
@@ -269,7 +332,7 @@ class Tracer(TracerBase):
 
         return root_fn, args
 
-    def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
+    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
         can either be an ``nn.Module`` instance or a Python callable.
@@ -284,6 +347,7 @@ class Tracer(TracerBase):
 
             root (Union[Module, Callable]): Either a ``Module`` or a function to be
                 traced through.
+            concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
 
         Returns:
 
@@ -292,6 +356,7 @@ class Tracer(TracerBase):
         if isinstance(root, torch.nn.Module):
             self.root = root
             fn = type(root).forward
+            self.submodule_paths = {mod: name for name, mod in root.named_modules()}
         else:
             self.root = torch.nn.Module()
             fn = root
@@ -315,7 +380,7 @@ class Tracer(TracerBase):
         assert isinstance(fn, FunctionType)
 
         fn_globals = fn.__globals__  # run before it gets patched
-        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
+        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module), concrete_args)
 
         parameter_proxy_cache : Dict[str, Proxy] = {}  # Reduce number of get_attr calls
 
@@ -341,17 +406,20 @@ class Tracer(TracerBase):
                             self._autowrap_function_ids)
             return self.call_module(mod, forward, args, kwargs)
 
-        with _Patcher() as patcher:
-            # allow duplicate patches to support the case of nested calls
-            patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
-            patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
-            _patch_wrapped_functions(patcher)
-            _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
-            for module in self._autowrap_search:
-                _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
+        with _CPatchManager(self):
+            with _Patcher() as patcher:
+                # allow duplicate patches to support the case of nested calls
+                patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
+                patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
+                _patch_wrapped_functions(patcher)
+                _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
+                for module in self._autowrap_search:
+                    _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
 
-            self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
-                             type_expr=fn.__annotations__.get('return', None))
+                self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
+                                 type_expr=fn.__annotations__.get('return', None))
+
+        self.submodule_paths = None
 
         return self.graph
 
@@ -585,7 +653,8 @@ def wrap(fn_or_name : Union[str, Callable]):
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
 
-def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
+def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None,
+                   enable_cpatching: bool = False) -> GraphModule:
     """Symbolic tracing API
 
     Given an ``nn.Module`` or function instance ``root``, this function will return a ``GraphModule``
@@ -594,12 +663,14 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
     Args:
         root (Union[torch.nn.Module, Callable]): Module or function to be traced and converted
             into a Graph representation.
+        concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
+        enable_cpatching: Enables C-level patching of functions (captures things like `torch.randn`)
 
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
 
     """
-    tracer = Tracer()
-    graph = tracer.trace(root)
+    tracer = Tracer(enable_cpatching=enable_cpatching)
+    graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     return GraphModule(tracer.root, graph, name)

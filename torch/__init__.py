@@ -26,7 +26,7 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 if sys.executable == 'torch_deploy':
     __version__ = "torch-deploy-1.8"
 else:
-    from .version import __version__
+    from .version import __version__ as __version__
 from ._six import string_classes as _string_classes
 
 from typing import Set, Type, TYPE_CHECKING
@@ -41,7 +41,8 @@ __all__ = [
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
-    'are_deterministic_algorithms_enabled', 'is_deterministic'
+    'are_deterministic_algorithms_enabled', 'is_deterministic',
+    'set_warn_always', 'is_warn_always_enabled',
 ]
 
 ################################################################################
@@ -229,6 +230,19 @@ __all__ += [name for name in dir(_C)
             if name[0] != '_' and
             not name.endswith('Base')]
 
+if not TYPE_CHECKING:
+    # issue 38137 and python issue 43367. Submodules of a C extension are
+    # non-standard, and attributes of those submodules cannot be pickled since
+    # pickle expect to be able to import them as "from _C.sub import attr"
+    # which fails with "_C is not a package
+    for attr in dir(_C):
+        candidate = getattr(_C, attr)
+        if type(candidate) is type(_C):
+            # submodule
+            if f'torch._C.{attr}' not in sys.modules:
+                sys.modules[f'torch._C.{attr}'] = candidate
+
+
 ################################################################################
 # Define basic utilities
 ################################################################################
@@ -353,6 +367,12 @@ def use_deterministic_algorithms(d):
         * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.__getitem__` backward when `self` is a CPU tensor and
+          ``indices`` is a list of tensors
+        * :func:`torch.index_put` with ``accumulate=True`` when called on a CPU
+          tensor
+        * :func:`torch.put` with ``accumulate=True`` when called on a CPU
+          tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when `d=True`:
@@ -383,6 +403,8 @@ def use_deterministic_algorithms(d):
         * :func:`torch.scatter_add_` when called on a CUDA tensor
         * :func:`torch.index_add_` when called on a CUDA tensor
         * :func:`torch.index_copy`
+        * :func:`torch.put` when ``accumulate=False``
+        * :func:`torch.put` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.index_select` when called on a CUDA tensor that requires grad
         * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
         * :func:`torch.histc` when called on a CUDA tensor
@@ -436,11 +458,29 @@ def is_deterministic():
     return are_deterministic_algorithms_enabled()
 
 
+def set_warn_always(b):
+    r"""When this flag is False (default) then some PyTorch warnings may only
+    appear once per process. This helps avoid excessive warning information.
+    Setting it to True causes these warnings to always appear, which may be
+    helpful when debugging.
+
+    Args:
+        b (:class:`bool`): If True, force warnings to always be emitted
+                           If False, set to the default behaviour
+    """
+    _C._set_warnAlways(b)
+
+def is_warn_always_enabled():
+    r"""Returns True if the global warn_always flag is turned on. Refer to
+    :func:`torch.set_warn_always` documentation for more details.
+    """
+    return _C._get_warnAlways()
+
 ################################################################################
 # Define Storage and Tensor classes
 ################################################################################
 
-from .tensor import Tensor
+from ._tensor import Tensor
 from .storage import _StorageBase
 
 
@@ -593,37 +633,46 @@ def _assert(condition, message):
 # Import most common subpackages
 ################################################################################
 
-import torch.cuda
-import torch.autograd
-from torch.autograd import no_grad, enable_grad, set_grad_enabled
-import torch.fft
-import torch.futures
-import torch.nn
+# Use the redundant form so that type checkers know that these are a part of
+# the public API. The "regular" import lines are there solely for the runtime
+# side effect of adding to the imported module's members for other users.
+
+from torch import cuda as cuda
+from torch import autograd as autograd
+from torch.autograd import (
+    no_grad as no_grad,
+    enable_grad as enable_grad,
+    set_grad_enabled as set_grad_enabled,
+)
+from torch import fft as fft
+from torch import futures as futures
+from torch import nn as nn
 import torch.nn.intrinsic
 import torch.nn.quantizable
 import torch.nn.quantized
-import torch.optim
+from torch import optim as optim
 import torch.optim._multi_tensor
-import torch.multiprocessing
-import torch.sparse
+from torch import multiprocessing as multiprocessing
+from torch import sparse as sparse
+from torch import special as special
 import torch.utils.backcompat
-import torch.onnx
-import torch.jit
-import torch.linalg
-import torch.hub
-import torch.random
-import torch.distributions
-import torch.testing
+from torch import onnx as onnx
+from torch import jit as jit
+from torch import linalg as linalg
+from torch import hub as hub
+from torch import random as random
+from torch import distributions as distributions
+from torch import testing as testing
 import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
-import torch.quantization
+from torch import quantization as quantization
 import torch.utils.data
-import torch.__config__
-import torch.__future__
-import torch.profiler
+from torch import __config__ as __config__
+from torch import __future__ as __future__
+from torch import profiler as profiler
 
 _C._init_names(list(torch._storage_classes))
 
@@ -642,7 +691,7 @@ from torch._ops import ops
 from torch._classes import classes
 
 # Import the quasi random sampler
-import torch.quasirandom
+from torch import quasirandom as quasirandom
 
 # If you are seeing this, it means that this call site was not checked if
 # the memory format could be preserved, and it was switched to old default
@@ -656,12 +705,12 @@ del register_after_fork
 
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
-from ._lobpcg import lobpcg
+from ._lobpcg import lobpcg as lobpcg
 
-from ._vmap_internals import vmap
+from ._vmap_internals import vmap as vmap
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
-# class usage. We add these lines here to preserve backward compatbility.
+# class usage. We add these lines here to preserve backward compatibility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru

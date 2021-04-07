@@ -7,6 +7,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
@@ -20,6 +21,16 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
+  export BUILD_SPLIT_CUDA=ON
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *noarch* ]]; then
+  export PYTORCH_TEST_SKIP_NOARCH=0
+else
+  export PYTORCH_TEST_SKIP_NOARCH=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -115,6 +126,12 @@ test_python_shard2() {
   assert_git_not_dirty
 }
 
+test_python() {
+  time python test/run_test.py --exclude-jit-executor --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
+}
+
+
 test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
@@ -140,6 +157,12 @@ test_aten() {
   fi
 }
 
+test_without_numpy() {
+  pushd "$(dirname "${BASH_SOURCE[0]}")"
+  python -c "import sys;sys.path.insert(0, 'fake_numpy');from unittest import TestCase;import torch;x=torch.randn(3,3);TestCase().assertRaises(RuntimeError, lambda: x.numpy())"
+  popd
+}
+
 # pytorch extensions require including torch/extension.h which includes all.h
 # which includes utils.h which includes Parallel.h.
 # So you can call for instance parallel_for() from your extension,
@@ -152,7 +175,7 @@ test_aten() {
 # which transitively includes tbb.h which is not available!
 if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
   sudo mkdir -p /usr/include/tbb
-  sudo cp -r $PWD/third_party/tbb/include/tbb/* /usr/include/tbb
+  sudo cp -r "$PWD"/third_party/tbb/include/tbb/* /usr/include/tbb
 fi
 
 test_libtorch() {
@@ -162,19 +185,24 @@ test_libtorch() {
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
 
+    # Make test_reports directory
+    # NB: the ending test_libtorch must match the current function name for the current
+    # test reporting process (in print_test_stats.py) to function as expected.
+    TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
+    mkdir -p $TEST_REPORTS_DIR
+
     # Run JIT cpp tests
-    mkdir -p test/test-reports/cpp-unittest
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      build/bin/test_jit  --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
+      build/bin/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     else
-      build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
+      build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
     python test/cpp/jit/tests_setup.py shutdown
     # Wait for background download to finish
     wait
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
-    build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
+    build/bin/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
     assert_git_not_dirty
   fi
 }
@@ -182,30 +210,39 @@ test_libtorch() {
 test_vulkan() {
   if [[ "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
-    mkdir -p test/test-reports/cpp-vulkan
-    build/bin/vulkan_test --gtest_output=xml:test/test-reports/cpp-vulkan/vulkan_test.xml
+    # NB: the ending test_vulkan must match the current function name for the current
+    # test reporting process (in print_test_stats.py) to function as expected.
+    TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
+    mkdir -p $TEST_REPORTS_DIR
+    build/bin/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
   fi
 }
 
 test_distributed() {
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
     echo "Testing distributed C++ tests"
-    mkdir -p test/test-reports/cpp-distributed
-    build/bin/FileStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/FileStoreTest.xml
-    build/bin/HashStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/HashStoreTest.xml
-    build/bin/TCPStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/TCPStoreTest.xml
+    # NB: the ending test_distributed must match the current function name for the current
+    # test reporting process (in print_test_stats.py) to function as expected.
+    TEST_REPORTS_DIR=test/test-reports/cpp-distributed/test_distributed
+    mkdir -p $TEST_REPORTS_DIR
+    build/bin/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
+    build/bin/HashStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/HashStoreTest.xml
+    build/bin/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
-    build/bin/ProcessGroupGlooTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupGlooTest.xml
-    build/bin/ProcessGroupNCCLTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLTest.xml
-    build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLErrorsTest.xml
+    build/bin/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
+    build/bin/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
+    build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
   fi
 }
 
 test_rpc() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing RPC C++ tests"
-    mkdir -p test/test-reports/cpp-rpc
-    build/bin/test_cpp_rpc --gtest_output=xml:test/test-reports/cpp-rpc/test_cpp_rpc.xml
+    # NB: the ending test_rpc must match the current function name for the current
+    # test reporting process (in print_test_stats.py) to function as expected.
+    TEST_REPORTS_DIR=test/test-reports/cpp-rpc/test_rpc
+    mkdir -p $TEST_REPORTS_DIR
+    build/bin/test_cpp_rpc --gtest_output=xml:$TEST_REPORTS_DIR/test_cpp_rpc.xml
   fi
 }
 
@@ -278,8 +315,10 @@ test_xla() {
   echo "Running Python Tests"
   ./test/run_tests.sh
 
-  echo "Running MNIST Test"
-  python test/test_train_mnist.py --tidy
+  # Disabled due to MNIST download issue.
+  # See https://github.com/pytorch/pytorch/issues/53267
+  # echo "Running MNIST Test"
+  # python test/test_train_mnist.py --tidy
 
   echo "Running C++ Tests"
   pushd test/cpp
@@ -295,6 +334,7 @@ test_backward_compatibility() {
   set -x
   pushd test/backward_compatibility
   python -m venv venv
+  # shellcheck disable=SC1091
   . venv/bin/activate
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch
@@ -347,7 +387,7 @@ test_vec256() {
     vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
     for vec256_exec in $vec256_tests
     do
-      $vec256_exec --gtest_output=xml:test/test-reports/vec256/$vec256_exec.xml
+      $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
     done
     popd
     assert_git_not_dirty
@@ -355,7 +395,8 @@ test_vec256() {
 }
 
 test_torch_deploy() {
-  SIMPLE_MODEL_PATH=torch/csrc/deploy/example/simple.pt LIBINTERPRETER_PATH=build/lib/libinterpreter.so build/bin/interpreter_test
+  python torch/csrc/deploy/example/generate_examples.py
+  build/bin/test_deploy
   assert_git_not_dirty
 }
 
@@ -379,12 +420,13 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1 ]]; then
     test_torch_deploy
   fi
+  test_without_numpy
   install_torchvision
   test_python_shard1
+  test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   install_torchvision
   test_python_shard2
-  test_aten
   test_libtorch
   test_custom_script_ops
   test_custom_backend
@@ -393,14 +435,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
-elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
-  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure
-  # cpp extension can be built correctly under this old env
-  test_cpp_extensions
 else
   install_torchvision
-  test_python_shard1
-  test_python_shard2
+  install_monkeytype
+  test_python
   test_aten
   test_vec256
   test_libtorch

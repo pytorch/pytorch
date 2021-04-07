@@ -1,10 +1,16 @@
 
 import os
+import sys
 
 import numpy as np
 import torch
-import torch.distributed as c10d
 from torch import nn
+import torch.distributed as dist
+
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 from torch.distributed.algorithms.ddp_comm_hooks import (
     DDPCommHookType,
     register_ddp_comm_hook,
@@ -14,7 +20,6 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
     skip_if_lt_x_gpu,
-    skip_if_rocm,
 )
 from torch.testing._internal.common_utils import run_tests
 
@@ -98,7 +103,6 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_ddp_comm_hook_allreduce_hook(self):
         """
         This unit test verifies the ``allreduce`` hook registered case gives same result
@@ -116,7 +120,6 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_ddp_comm_hook_fp16compress_hook(self):
         """
         This unit test verifies the ``fp16 compress`` hook registered case
@@ -134,7 +137,6 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_ddp_comm_hook_quantize_per_tensor_hook(self):
         """
         This unit test verifies the ``quantize per tensor`` hook registered case
@@ -152,7 +154,6 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_ddp_comm_hook_quantize_per_channel_hook(self):
         """
         This unit test verifies the ``quantize per channel`` hook registered case

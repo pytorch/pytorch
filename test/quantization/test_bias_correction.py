@@ -25,36 +25,6 @@ class TestBiasCorrection(QuantizationTestCase):
         Pn = torch.norm(x - y)
         return 20 * torch.log10(Ps / Pn)
 
-    def correct_artificial_bias_float(self, float_model, img_data):
-        ''' Adding artificial bias and testing if bias persists after bias
-            correction. This test case changes the bias of a floating point submodule
-        '''
-        artificial_model = copy.deepcopy(float_model)
-
-        # manually changing bias
-        for name, submodule in artificial_model.named_modules():
-            if type(submodule) in _supported_modules:
-                x = get_param(submodule, 'bias')
-                if x is not None:
-                    x.data = x.data * 3
-
-        bias_correction(float_model, artificial_model, img_data, target_modules=_supported_modules)
-
-        for name, submodule in artificial_model.named_modules():
-            if isinstance(submodule, ns.Shadow):
-                parent_name, child_name = parent_child_names(name)
-                parent = get_module(artificial_model, parent_name)
-                parent._modules[child_name] = submodule.orig_module
-
-        for name, artificial_submodule in artificial_model.named_modules():
-            if type(artificial_submodule) in _supported_modules:
-                submodule = get_module(float_model, name)
-                float_bias = get_param(submodule, 'bias')
-                artificial_bias = get_param(artificial_submodule, 'bias')
-
-                self.assertTrue(self.compute_sqnr(float_bias, artificial_bias) > 30,
-                                "Correcting quantized bias produced too much noise, sqnr score too low")
-
     def correct_artificial_bias_quantize(self, float_model, img_data):
         ''' Adding artificial bias and testing if bias persists after bias
             correction. This test case changes the bias of a quantized submodule
@@ -109,7 +79,6 @@ class TestBiasCorrection(QuantizationTestCase):
         float_model = QuantWrapper(LinearChain())
         img_data = [(torch.rand(10, 3, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
-        self.correct_artificial_bias_float(float_model, img_data)
         self.correct_artificial_bias_quantize(float_model, img_data)
 
     @skipIfNoFBGEMM
@@ -129,5 +98,4 @@ class TestBiasCorrection(QuantizationTestCase):
         float_model = QuantWrapper(ConvChain())
         img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
-        self.correct_artificial_bias_float(float_model, img_data)
         self.correct_artificial_bias_quantize(float_model, img_data)

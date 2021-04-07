@@ -8,6 +8,7 @@ functionalities in `torch.jit`.
 """
 import functools
 import collections
+import enum
 import inspect
 import copy
 import pickle
@@ -22,7 +23,7 @@ from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_method
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
-from torch._six import with_metaclass, get_function_from_type
+from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
 from torch.jit._fuser import _graph_for
@@ -52,6 +53,64 @@ else:
     def Attribute(value, type):  # type: ignore
         return value
 
+Attribute.__doc__ = """
+    This method is a pass-through function that returns `value`, mostly
+    used to indicate to the TorchScript compiler that the left-hand side
+    expression is a class instance attribute with type of `type`. Note that
+    `torch.jit.Attribute` should only be used in `__init__` method of `nn.Module`
+    subclasses.
+
+    Though TorchScript can infer correct type for most Python expressions, there are some cases where
+    type infernece can be wrong, including:
+    - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`s
+    - Optional types like `Optional[T]` but assigned a valid value of type `T`, TorchScript would assume
+    it is type `T` rather than `Optional[T]`
+
+    In eager mode, it is simply a pass-through function that returns `value`
+    without other implications.
+
+    Example:
+
+    .. testcode::
+
+        import torch
+        from typing import Dict
+
+        class AttributeModule(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.foo = torch.jit.Attribute(0.1, float)
+
+                # we should be able to use self.foo as a float here
+                assert 0.0 < self.foo
+
+                self.names_ages = torch.jit.Attribute({}, Dict[str, int])
+                self.names_ages["someone"] = 20
+                assert isinstance(self.names_ages["someone"], int)
+
+        m = AttributeModule()
+        # m will contain two attributes
+        # 1. foo of type float
+        # 2. names_ages of type Dict[str, int]
+
+    .. testcleanup::
+
+        del AttributeModule
+        del m
+
+    Args:
+        value: An initial value to be assigned to attribute.
+        type: A Python type
+
+    Returns:
+        Returns `value`
+"""
+
+
+# Gets a function from the name of a method on a type
+def _get_function_from_type(cls, name):
+    return getattr(cls, name, None)
+
 
 # ScriptClasses must be new-style classes because we construct them using their
 # __new__ method.
@@ -63,8 +122,9 @@ def _is_new_style_class(cls):
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
     defaults = torch.jit.frontend.get_default_args_for_class(obj)
-    torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
-    torch.jit._state._add_script_class(obj, qualified_name)
+    script_class = torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
+    torch.jit._state._add_script_class(obj, script_class)
+    return script_class
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -629,7 +689,7 @@ if _enabled:
         # it is not overriden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
-            if self_method.__func__ == get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__dir__"
             ):
                 return super(RecursiveScriptModule, self).__dir__()
@@ -640,7 +700,7 @@ if _enabled:
         # class throws if it isn't overriden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
-            if self_method.__func__ == get_function_from_type(  # type: ignore
+            if self_method.__func__ == _get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__bool__"
             ):
                 return True
@@ -929,7 +989,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
+
+    # No-op for modules and functions that are already scripted
     if isinstance(obj, ScriptModule):
+        return obj
+    if isinstance(obj, ScriptFunction):
         return obj
 
     if isinstance(obj, torch.nn.Module):
@@ -948,6 +1012,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                 " from nn.Module,"
                 " pass an instance instead".format(obj)
             )
+
+        # Enums are automatically usable in TorchScript, explicitly scripting
+        # is not necessary, but not harmful either.
+        if issubclass(obj, enum.Enum):
+            return obj
 
         if not _is_new_style_class(obj):
             raise RuntimeError(
@@ -1080,10 +1149,10 @@ def interface(obj):
     # instead of a class interface type, an module interface type only compile
     # the user provided methods as part of the interface
     ast = get_jit_class_def(obj, obj.__name__)
-    torch._C._jit_script_interface_compile(
+    mangled_classname = torch._C._jit_script_interface_compile(
         qualified_name, ast, rcb, is_module_interface
     )
-    obj.__torch_script_interface__ = True
+    obj.__torch_script_interface__ = mangled_classname
     return obj
 
 
@@ -1093,7 +1162,7 @@ def _recursive_compile_class(obj, loc):
     # case it fails
     error_stack = torch._C.CallStack(_qual_name, loc)
     rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
-    _compile_and_register_class(obj, rcb, _qual_name)
+    return _compile_and_register_class(obj, rcb, _qual_name)
 
 CompilationUnit = torch._C.CompilationUnit
 set_module(CompilationUnit, "torch.jit")

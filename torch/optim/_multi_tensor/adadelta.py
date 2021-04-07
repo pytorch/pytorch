@@ -57,7 +57,7 @@ class Adadelta(Optimizer):
             rho, eps = group['rho'], group['eps']
 
             for p in group['params']:
-                if p.grad is not None: 
+                if p.grad is not None:
                     if p.grad.is_sparse:
                         raise RuntimeError('Adadelta does not support sparse gradients')
 

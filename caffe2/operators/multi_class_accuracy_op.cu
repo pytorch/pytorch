@@ -37,8 +37,8 @@ template <>
 bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
-  
-  
+
+
   DCHECK_EQ(X.dim(), 2);
   // amount, number of instances
   int N = X.dim32(0);
@@ -59,9 +59,13 @@ bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
   MultiClassAccuracyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
                               0, context_.cuda_stream()>>>(
       N, D, Xdata, labeldata, accuracies, amounts);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   MultiClassAccuracyDivideKernel<<<CAFFE_GET_BLOCKS(D), CAFFE_CUDA_NUM_THREADS,
                                   0, context_.cuda_stream()>>>(
     D, accuracies, amounts);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

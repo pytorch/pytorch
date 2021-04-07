@@ -16,28 +16,46 @@
 
 // The import process to serialize the bytecode package.
 // An example for bytecode.pkl of a small mobile_module looks like:
-// (3,
-//   ('__torch__.m.forward',
-//     (('instructions',
-//       (('STOREN', 1, 2),
-//        ('DROPR', 1, 0),
-//        ('MOVE', 2, 0),
-//        ('OP', 0, 0),
-//        ('RET', 0, 0))),
-//      ('operators', (('aten::Int', 'Tensor'),)),
-//      ('constants', ()),
-//      ('types', ()),
-//      ('register_size', 2))))
+// (4,  # model version number (caffe2::serialize::kProducedBytecodeVersion)
+//  # first method
+//  (
+//   # function name
+//   '__torch__.m.forward',
+//   # code
+//   (('instructions',
+//     (('STOREN', 1, 2),
+//      ('DROPR', 1, 0),
+//      ('MOVE', 2, 0),
+//      ('OP', 0, 0),
+//      ('RET', 0, 0))),
+//    ('operators', (('aten::Int', 'Tensor'),)),
+//    ('constants', ()),
+//    ('types', ()),
+//    ('register_size', 2)),
+//   # schema -- optional (forward-compatible addition to version 4)
+//   (('arguments',
+//     ((('name', 'x'), ('type', 'Tensor'), ('default_value', 13)),
+//      ...)),  # more args follow here
+//    ('returns',
+//     ((('name', ''), ('type', 'Tensor'), ('default_value', None)),
+//      ...)),  # more return values follow here
+//   )),
+//  # more methods follow here
+//  ...)
 
 // In addition, the module debugging information can be saved
 // in mobile_debug.pkl. An example for it looks like:
-// (3,
-//   ('__torch__.m.forward',
-//     (('module_debug_info', (top(A).foo(B).forward)))))
+// (4,
+//  ('__torch__.m.forward',
+//   (('module_debug_info', (top(A).foo(B).forward)))))
 
 // Note that currently the backward compatibility is not supported by bytecode.
-// This format and process need to be revisted and redesigned if we want to
+// This format and process need to be revisited and redesigned if we want to
 // support backward compatibility in future.
+
+// Note that the following function-schema fields are not supported:
+//  - Argument::{known_length_,kwarg_only_}
+//  - FunctionSchema::{overload_name_, is_vararg_, is_varret_}
 
 namespace c10 {
 // std::string serializeType(const Type &t);
@@ -91,7 +109,102 @@ void print_unsupported_ops_and_throw(
       error_message);
 }
 
-void parseMethods(
+// The deserializer class which loads the bytecode package from bc files.
+class BytecodeDeserializer final {
+ public:
+  explicit BytecodeDeserializer(
+      std::unique_ptr<PyTorchStreamReader> reader,
+      uint64_t module_load_options = 0);
+  mobile::Module deserialize(c10::optional<at::Device> device);
+  mobile::Module deserialize(
+      c10::optional<at::Device> device,
+      ExtraFilesMap& extra_files);
+  std::unordered_map<std::string, std::string> deserializeMetadata(
+      c10::optional<at::Device> device);
+  void deserialize_only_extra(
+      c10::optional<at::Device> device,
+      ExtraFilesMap& extra_files);
+
+ private:
+  TypePtr resolveTypeName(const c10::QualifiedName& qn);
+  void parseMethods(
+      const std::vector<IValue>& vals,
+      const c10::optional<std::vector<IValue>>& debug_info_vals,
+      mobile::CompilationUnit& mcu);
+  c10::IValue readArchive(
+      const std::string& archive_name,
+      std::shared_ptr<mobile::CompilationUnit> mcu);
+  std::unordered_map<std::string, std::string> readMobileMetadata(
+      std::shared_ptr<mobile::CompilationUnit> mcu);
+  /**
+   * Loads operators by looking them up in the Dispatcher and returns
+   * the set of operator names (with overload) that are not supported
+   * by the current runtime.
+   */
+  std::unordered_set<std::string> load_and_find_unsupported_operator_names(
+      const std::vector<IValue>& ops_list,
+      mobile::Function* function,
+      int64_t model_version) const;
+  std::shared_ptr<CompilationUnit> compilation_unit_;
+  std::unordered_set<std::string> imported_libs_;
+  std::unique_ptr<PyTorchStreamReader> reader_{};
+  c10::optional<at::Device> device_;
+  uint64_t module_load_options_;
+};
+
+BytecodeDeserializer::BytecodeDeserializer(
+    std::unique_ptr<PyTorchStreamReader> reader,
+    uint64_t module_load_options)
+    : compilation_unit_(std::make_shared<CompilationUnit>()),
+      reader_(std::move(reader)),
+      module_load_options_(module_load_options) {}
+
+std::unordered_set<std::string> BytecodeDeserializer::
+    load_and_find_unsupported_operator_names(
+        const std::vector<IValue>& ops_list,
+        mobile::Function* function,
+        int64_t model_version) const {
+  std::unordered_set<std::string> unsupported_op_names;
+  // ops_list is the list of operator names that were read in from
+  // bytecode.plk for the method that is currently being processed.
+  for (const auto& op : ops_list) {
+    auto op_item = op.toTuple()->elements();
+    TORCH_CHECK(
+        op_item.size() == 2, "There should be two parts in an operator name.");
+    auto op_found = function->append_operator(
+        op_item[0].toString()->string(),
+        op_item[1].toString()->string(),
+        model_version);
+    if (!op_found) {
+      unsupported_op_names.emplace(operator_str(
+          op_item[0].toString()->string(), op_item[1].toString()->string()));
+    }
+  }
+  return unsupported_op_names;
+}
+
+TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
+  // HACK: first we check whether the name starts with special prefix to
+  // tell if it's a supported pytorch class type. There are two special
+  // prefixes. "__torch__" for nn module, and "torch.jit" from to_backend.
+  // This is a reliable
+  // check today, but there is no guarantee that this is the case. The
+  // real solution is to merge type parsers so we can share class
+  // resolution logic.
+  static const c10::QualifiedName torchPrefix = "__torch__";
+  static const c10::QualifiedName jitPrefix = "torch.jit";
+  if (torchPrefix.isPrefixOf(qn) || jitPrefix.isPrefixOf(qn)) {
+    if (compilation_unit_->get_class(qn) == nullptr) {
+      auto typeptr = ClassType::create(qn, compilation_unit_, true);
+      compilation_unit_->register_type(typeptr);
+    }
+    return compilation_unit_->get_class(qn);
+  } else {
+    return c10::parseType(qn.qualifiedName());
+  }
+}
+
+void BytecodeDeserializer::parseMethods(
     const std::vector<IValue>& vals,
     const c10::optional<std::vector<IValue>>& debug_info_vals,
     mobile::CompilationUnit& mcu) {
@@ -128,27 +241,33 @@ void parseMethods(
     const auto& element = vals[i];
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
-    IValue table = m_tuple[1];
+    IValue codeTable = m_tuple[1];
+    auto schemaTable = // older files do not store function schema
+        (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >= 3))
+        ? at::optional<IValue>{m_tuple[2]}
+        : at::nullopt;
 
     auto function = std::unique_ptr<mobile::Function>(
         new mobile::Function(c10::QualifiedName(function_name)));
 
     const auto& ins_list =
-        expect_field(table, "instructions", BYTECODE_INDEX_INSTRUCTION)
+        expect_field(codeTable, "instructions", BYTECODE_INDEX_INSTRUCTION)
             .toTuple()
             ->elements();
     const auto& ops_list =
-        expect_field(table, "operators", BYTECODE_INDEX_OPERATOR)
+        expect_field(codeTable, "operators", BYTECODE_INDEX_OPERATOR)
             .toTuple()
             ->elements();
     const auto& consts_list =
-        expect_field(table, "constants", BYTECODE_INDEX_CONSTANT)
+        expect_field(codeTable, "constants", BYTECODE_INDEX_CONSTANT)
             .toTuple()
             ->elements();
     const auto& types_list =
-        expect_field(table, "types", BYTECODE_INDEX_TYPE).toTuple()->elements();
+        expect_field(codeTable, "types", BYTECODE_INDEX_TYPE)
+            .toTuple()
+            ->elements();
     const auto& register_size =
-        expect_field(table, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
+        expect_field(codeTable, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
     std::vector<IValue> module_debug_info_list;
@@ -191,71 +310,80 @@ void parseMethods(
       }
     }
 
-    std::unordered_set<std::string> unsupported_op_names;
-    // ops_list is the list of operator names that were read in from
-    // bytecode.plk for the method that is currently being processed.
-    for (const auto& op : ops_list) {
-      auto op_item = op.toTuple()->elements();
-      TORCH_CHECK(
-          op_item.size() == 2,
-          "There should be two parts in an operator name.");
-      auto op_found = function->append_operator(
-          op_item[0].toString()->string(),
-          op_item[1].toString()->string(),
-          model_version);
-      if (!op_found) {
-        unsupported_op_names.emplace(operator_str(
-            op_item[0].toString()->string(), op_item[1].toString()->string()));
-      }
-    }
-    if (!unsupported_op_names.empty()) {
+    std::unordered_set<std::string> unsupported_op_names =
+        load_and_find_unsupported_operator_names(
+            ops_list, function.get(), model_version);
+    if ((module_load_options_ & MobileModuleLoadOptions::OPERATOR_CHECK) &&
+        !unsupported_op_names.empty()) {
       print_unsupported_ops_and_throw(unsupported_op_names);
-    };
+    }
 
     for (const auto& constant : consts_list) {
       function->append_constant(constant);
     }
 
+    static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
     for (const auto& t : types_list) {
-      function->append_type(c10::parseType(t.toStringRef()));
+      c10::QualifiedName qn(t.toStringRef());
+      if (classPrefix.isPrefixOf(qn)) {
+        auto classType = getCustomClass(qn.qualifiedName());
+        TORCH_CHECK(
+            classType,
+            "The implementation of class ",
+            qn.qualifiedName(),
+            " cannot be found.");
+        function->append_type(classType);
+      } else {
+        function->append_type(c10::parseType(t.toStringRef()));
+      }
     }
 
     function->set_register_size(register_size);
 
+    // function schema
+    if (schemaTable) { // (schema is optional for back compat)
+      auto parseArgList = [this](const std::vector<IValue>& argTables) {
+        std::vector<c10::Argument> args;
+        for (auto&& argTable : argTables) {
+          auto name =
+              expect_field(argTable, "name", BYTECODE_INDEX_ARGUMENT_NAME)
+                  .toStringRef();
+          const auto& type = resolveTypeName(
+              (expect_field(argTable, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
+                  .toStringRef());
+          auto default_value = expect_field(
+                                   argTable,
+                                   "default_value",
+                                   BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE)
+                                   .toIValue();
+          auto arg =
+              c10::Argument(name, type, c10::nullopt /*N*/, default_value);
+          args.emplace_back(std::move(arg));
+        }
+        return args;
+      };
+      const auto& arg_list =
+          expect_field(
+              *schemaTable, "arguments", BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+              .toTuple()
+              ->elements();
+      const auto& ret_list =
+          expect_field(*schemaTable, "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
+              .toTuple()
+              ->elements();
+      c10::FunctionSchema schema(
+          function_name,
+          "" /*overload_name*/,
+          parseArgList(arg_list),
+          parseArgList(ret_list),
+          false /*is_varargs*/,
+          false /*is_varret*/);
+      function->setSchema(std::move(schema));
+    }
+
     mcu.register_function(std::move(function));
   }
 }
-
-// The deserializer class which loads the bytecode package from bc files.
-class BytecodeDeserializer final {
- public:
-  explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
-  mobile::Module deserialize(c10::optional<at::Device> device);
-  mobile::Module deserialize(
-      c10::optional<at::Device> device,
-      ExtraFilesMap& extra_files);
-  std::unordered_map<std::string, std::string> deserializeMetadata(
-      c10::optional<at::Device> device);
-  void deserialize_only_extra(
-      c10::optional<at::Device> device,
-      ExtraFilesMap& extra_files);
-
- private:
-  c10::IValue readArchive(
-      const std::string& archive_name,
-      std::shared_ptr<mobile::CompilationUnit> mcu);
-  std::unordered_map<std::string, std::string> readMobileMetadata(
-      std::shared_ptr<mobile::CompilationUnit> mcu);
-  std::shared_ptr<CompilationUnit> compilation_unit_;
-  std::unordered_set<std::string> imported_libs_;
-  std::unique_ptr<PyTorchStreamReader> reader_;
-  c10::optional<at::Device> device_;
-};
-
-BytecodeDeserializer::BytecodeDeserializer(
-    std::unique_ptr<PyTorchStreamReader> reader)
-    : compilation_unit_(std::make_shared<CompilationUnit>()),
-      reader_(std::move(reader)) {}
 
 std::unordered_map<std::string, std::string> BytecodeDeserializer::
     deserializeMetadata(c10::optional<at::Device> device) {
@@ -319,9 +447,9 @@ std::unordered_map<std::string, std::string> BytecodeDeserializer::
     return res;
   }
   auto ivalue_dict = readArchive("metadata", mcu).toGenericDict();
-  for (auto it = ivalue_dict.begin(); it != ivalue_dict.end(); ++it) {
-    auto key = it->key().toString()->string();
-    auto value = it->value().toString()->string();
+  for (const auto& it : ivalue_dict) {
+    const auto key = it.key().toString()->string();
+    const auto value = it.value().toString()->string();
     res[key] = value;
   }
   return res;
@@ -350,23 +478,8 @@ c10::IValue BytecodeDeserializer::readArchive(
     return len;
   };
 
-  static const c10::QualifiedName torchPrefix = "__torch__";
-  auto type_resolver = [&](const c10::QualifiedName& qn) {
-    TypePtr type;
-    // HACK: first we check whether the name starts with `__torch__` to tell if
-    // it's "supposed" to be a class type. This is a reliable check today, but
-    // there is no guarantee that this is the case. The real solution is to
-    // merge type parsers so we can share class resolution logic.
-    if (torchPrefix.isPrefixOf(qn)) {
-      if (compilation_unit_->get_class(qn) == nullptr) {
-        auto typeptr = ClassType::create(qn, compilation_unit_, true);
-        compilation_unit_->register_type(typeptr);
-      }
-      type = compilation_unit_->get_class(qn);
-    } else {
-      type = c10::parseType(qn.qualifiedName());
-    }
-    return c10::StrongTypePtr(compilation_unit_, type);
+  auto type_resolver = [this](const c10::QualifiedName& qn) {
+    return c10::StrongTypePtr(compilation_unit_, resolveTypeName(qn));
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
@@ -425,6 +538,14 @@ c10::IValue BytecodeDeserializer::readArchive(
 
 } // namespace
 
+// Forward declare so that _load_for_mobile() overloads can
+// call this method directly.
+mobile::Module _load_for_mobile_impl(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options);
+
 mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device) {
@@ -465,16 +586,38 @@ mobile::Module _load_for_mobile(
 }
 
 mobile::Module _load_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  auto module = _load_for_mobile_impl(
+      std::move(rai), device, extra_files, module_load_options);
+  return module;
+}
+
+mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files) {
+  auto module = _load_for_mobile_impl(
+      std::move(rai), device, extra_files, _default_mobile_module_load_options);
+  return module;
+}
+
+mobile::Module _load_for_mobile_impl(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device,
+    ExtraFilesMap& extra_files,
+    uint64_t module_load_options) {
   auto observer = torch::observerConfig().getModuleObserver();
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
   }
+  const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  BytecodeDeserializer deserializer(std::move(reader));
+  BytecodeDeserializer deserializer(std::move(reader), module_load_options);
   try {
     mobile::Module result = deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
@@ -482,6 +625,7 @@ mobile::Module _load_for_mobile(
     if (result.metadata().find("model_name") == result.metadata().end()) {
       copied_metadata["model_name"] = result.name();
     }
+    copied_metadata["model_size"] = c10::guts::to_string(model_size);
     if (observer) {
       observer->onExitLoadModel(instance_key, copied_metadata);
     }

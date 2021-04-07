@@ -1,13 +1,13 @@
 import torch
 
 import math
-from pathlib import PurePosixPath
+import random
 
 from torch.testing._internal.common_utils import \
     (TestCase, make_tensor, run_tests, slowTest)
+from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
-from torch.testing._internal import mypy_wrapper
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -434,30 +434,90 @@ class TestTesting(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
+    @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
+    def test_make_tensor(self, device, dtype):
+        def check(size, low, high, requires_grad, discontiguous):
+            t = make_tensor(size, device, dtype, low=low, high=high,
+                            requires_grad=requires_grad, discontiguous=discontiguous)
+
+            self.assertEqual(t.shape, size)
+            self.assertEqual(t.device, torch.device(device))
+            self.assertEqual(t.dtype, dtype)
+
+            low = -9 if low is None else low
+            high = 9 if high is None else high
+
+            if t.numel() > 0 and dtype in [torch.long, torch.float]:
+                self.assertTrue(t.le(high).logical_and(t.ge(low)).all().item())
+
+            if dtype in [torch.float, torch.cfloat]:
+                self.assertEqual(t.requires_grad, requires_grad)
+            else:
+                self.assertFalse(t.requires_grad)
+
+            if t.numel() > 1:
+                self.assertEqual(t.is_contiguous(), not discontiguous)
+            else:
+                self.assertTrue(t.is_contiguous())
+
+        for size in (tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)):
+            check(size, None, None, False, False)
+            check(size, 2, 4, True, True)
+
     def test_assert_messages(self, device):
         self.assertIsNone(self._get_assert_msg(msg=None))
         self.assertEqual("\nno_debug_msg", self._get_assert_msg("no_debug_msg"))
         self.assertEqual("no_user_msg", self._get_assert_msg(msg=None, debug_msg="no_user_msg"))
         self.assertEqual("debug_msg\nuser_msg", self._get_assert_msg(msg="user_msg", debug_msg="debug_msg"))
 
+    # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
+    # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
+    # These tests are slow because it spawn another process to run test suite.
+    # See: https://github.com/pytorch/pytorch/issues/49019
     @onlyCUDA
     @slowTest
-    def test_cuda_assert_should_stop_test_suite(self, device):
-        # This test is slow because it spawn another process to run another test suite.
-
-        # Test running of cuda assert test suite should early terminate.
+    def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
+        # test to ensure common_utils.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python
 
 import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
 
+class TestThatContainsCUDAAssertFailure(TestCase):
+
+    @slowTest
+    def test_throw_unrecoverable_cuda_exception(self):
+        x = torch.rand(10, device='cuda')
+        # cause unrecoverable CUDA exception, recoverable on CPU
+        y = x[torch.tensor([25])].cpu()
+
+    @slowTest
+    def test_trivial_passing_test_case_on_cpu_cuda(self):
+        x1 = torch.tensor([0., 1.], device='cuda')
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        # should capture CUDA error
+        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # should run only 1 test because it throws unrecoverable error.
+        self.assertIn('Ran 1 test', stderr)
+
+
+    @onlyCUDA
+    @slowTest
+    def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
+        # test to ensure common_device_type.py override has early termination for CUDA.
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+#!/usr/bin/env python
+
+import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
-# This test is added to ensure that test suite terminates early when
-# CUDA assert was thrown since all subsequent test will fail.
-# See: https://github.com/pytorch/pytorch/issues/49019
-# This test file should be invoked from test_testing.py
 class TestThatContainsCUDAAssertFailure(TestCase):
 
     @slowTest
@@ -487,62 +547,140 @@ if __name__ == '__main__':
         self.assertIn('Ran 1 test', stderr)
 
 
+    @onlyCUDA
+    @slowTest
+    def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
+        # test to ensure common_distributed.py override should not early terminate CUDA.
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+#!/usr/bin/env python
+
+import torch
+from torch.testing._internal.common_utils import (run_tests, slowTest)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import MultiProcessTestCase
+
+class TestThatContainsCUDAAssertFailure(MultiProcessTestCase):
+
+    @slowTest
+    def test_throw_unrecoverable_cuda_exception(self, device):
+        x = torch.rand(10, device=device)
+        # cause unrecoverable CUDA exception, recoverable on CPU
+        y = x[torch.tensor([25])].cpu()
+
+    @slowTest
+    def test_trivial_passing_test_case_on_cpu_cuda(self, device):
+        x1 = torch.tensor([0., 1.], device=device)
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
+
+instantiate_device_type_tests(
+    TestThatContainsCUDAAssertFailure,
+    globals(),
+    only_for='cuda'
+)
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        # we are currently disabling CUDA early termination for distributed tests.
+        self.assertIn('Ran 2 test', stderr)
+
+
 instantiate_device_type_tests(TestTesting, globals())
 
 
-class TestMypyWrapper(TestCase):
-    def test_glob(self):
-        # can match individual files
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename=PurePosixPath('test/test_torch.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename=PurePosixPath('test/test_testing.py'),
-        ))
+class TestFrameworkUtils(TestCase):
+    tests = [
+        'super_long_test',
+        'long_test1',
+        'long_test2',
+        'normal_test1',
+        'normal_test2',
+        'normal_test3',
+        'short_test1',
+        'short_test2',
+        'short_test3',
+        'short_test4',
+        'short_test5',
+    ]
 
-        # dir matters
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/codegen/utils.py',
-            filename=PurePosixPath('torch/nn/modules.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename=PurePosixPath('setup.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename=PurePosixPath('foo/setup.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='foo/setup.py',
-            filename=PurePosixPath('foo/setup.py'),
-        ))
+    test_times = {
+        'super_long_test': 55,
+        'long_test1': 22,
+        'long_test2': 18,
+        'normal_test1': 9,
+        'normal_test2': 7,
+        'normal_test3': 5,
+        'short_test1': 1,
+        'short_test2': 0.6,
+        'short_test3': 0.4,
+        'short_test4': 0.3,
+        'short_test5': 0.01,
+    }
 
-        # can match dirs
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('torch/random.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('torch/nn/cpp.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('tools/fast_nvcc/fast_nvcc.py'),
-        ))
+    def test_calculate_2_shards_with_complete_test_times(self):
+        expected_shards = [
+            (60, ['super_long_test', 'normal_test3']),
+            (58.31, ['long_test1', 'long_test2', 'normal_test1', 'normal_test2', 'short_test1', 'short_test2',
+                     'short_test3', 'short_test4', 'short_test5'])
+        ]
+        self.assertEqual(expected_shards, calculate_shards(2, self.tests, self.test_times))
 
-        # can match wildcards
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename=PurePosixPath('tools/autograd/gen_autograd.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename=PurePosixPath('tools/autograd/deprecated.yaml'),
-        ))
+
+    def test_calculate_5_shards_with_complete_test_times(self):
+        expected_shards = [
+            (55, ['super_long_test']),
+            (22, ['long_test1', ]),
+            (18, ['long_test2', ]),
+            (11.31, ['normal_test1', 'short_test1', 'short_test2', 'short_test3', 'short_test4', 'short_test5']),
+            (12, ['normal_test2', 'normal_test3']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(5, self.tests, self.test_times))
+
+
+    def test_calculate_2_shards_with_incomplete_test_times(self):
+        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
+        expected_shards = [
+            (22, ['long_test1', 'long_test2', 'normal_test3', 'short_test3', 'short_test5']),
+            (10, ['normal_test1', 'short_test1', 'super_long_test', 'normal_test2', 'short_test2', 'short_test4']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(2, self.tests, incomplete_test_times))
+
+
+    def test_calculate_5_shards_with_incomplete_test_times(self):
+        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
+        expected_shards = [
+            (22, ['long_test1', 'normal_test2', 'short_test5']),
+            (9, ['normal_test1', 'normal_test3']),
+            (1, ['short_test1', 'short_test2']),
+            (0, ['super_long_test', 'short_test3']),
+            (0, ['long_test2', 'short_test4']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(5, self.tests, incomplete_test_times))
+
+    def test_calculate_2_shards_against_optimal_shards(self):
+        for _ in range(100):
+            random.seed(120)
+            random_times = {k: random.random() * 10 for k in self.tests}
+            # all test times except first two
+            rest_of_tests = [i for k, i in random_times.items() if k != 'super_long_test' and k != 'long_test1']
+            sum_of_rest = sum(rest_of_tests)
+            random_times['super_long_test'] = max(sum_of_rest / 2, max(rest_of_tests))
+            random_times['long_test1'] = sum_of_rest - random_times['super_long_test']
+            # An optimal sharding would look like the below, but we don't need to compute this for the test:
+            # optimal_shards = [
+            #     (sum_of_rest, ['super_long_test', 'long_test1']),
+            #     (sum_of_rest, [i for i in self.tests if i != 'super_long_test' and i != 'long_test1']),
+            # ]
+            calculated_shards = calculate_shards(2, self.tests, random_times)
+            max_shard_time = max(calculated_shards[0][0], calculated_shards[1][0])
+            if sum_of_rest != 0:
+                # The calculated shard should not have a ratio worse than 7/6 for num_shards = 2
+                self.assertGreaterEqual(7.0 / 6.0, max_shard_time / sum_of_rest)
+                sorted_tests = sorted(self.tests)
+                sorted_shard_tests = sorted(calculated_shards[0][1] + calculated_shards[1][1])
+                # All the tests should be represented by some shard
+                self.assertEqual(sorted_tests, sorted_shard_tests)
 
 
 if __name__ == '__main__':

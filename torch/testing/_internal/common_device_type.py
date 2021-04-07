@@ -5,13 +5,13 @@ import runpy
 import threading
 from enum import Enum
 from functools import wraps
-from typing import List, Any, ClassVar, Optional, Sequence
+from typing import List, Any, ClassVar, Optional, Sequence, Tuple
 import unittest
 import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
@@ -232,9 +232,6 @@ class DeviceTypeTestBase(TestCase):
             return self.precision
         return test.precision_overrides.get(dtype, self.precision)
 
-    def _should_stop_test_suite(self, rte):
-        return False
-
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test, *, generic_cls=None):
@@ -244,33 +241,38 @@ class DeviceTypeTestBase(TestCase):
             # Constructs the test's name
             test_name = _construct_test_name(name, op, cls.device_type, dtype)
 
-            # wraps instantiated test with op decorators
+            # Wraps instantiated test with op decorators
             # NOTE: test_wrapper exists because we don't want to apply
             #   op-specific decorators to the original test.
-            #   Test-sepcific decorators are applied to the original test,
+            #   Test-specific decorators are applied to the original test,
             #   however.
             if op is not None:
-                active_decorators = []
-                if op.should_skip(generic_cls.__name__, name, cls.device_type, dtype):
-                    active_decorators.append(skipIf(True, "Skipped!"))
+                try:
+                    active_decorators = []
+                    if op.should_skip(generic_cls.__name__, name, cls.device_type, dtype):
+                        active_decorators.append(skipIf(True, "Skipped!"))
 
-                if op.decorators is not None:
-                    for decorator in op.decorators:
-                        # Can't use isinstance as it would cause a circular import
-                        if decorator.__class__.__name__ == 'DecorateInfo':
-                            if decorator.is_active(generic_cls.__name__, name, cls.device_type, dtype):
-                                active_decorators += decorator.decorators
-                        else:
-                            active_decorators.append(decorator)
+                    if op.decorators is not None:
+                        for decorator in op.decorators:
+                            # Can't use isinstance as it would cause a circular import
+                            if decorator.__class__.__name__ == 'DecorateInfo':
+                                if decorator.is_active(generic_cls.__name__, name, cls.device_type, dtype):
+                                    active_decorators += decorator.decorators
+                            else:
+                                active_decorators.append(decorator)
 
-                @wraps(test)
-                def test_wrapper(*args, **kwargs):
-                    return test(*args, **kwargs)
+                    @wraps(test)
+                    def test_wrapper(*args, **kwargs):
+                        return test(*args, **kwargs)
 
-                for decorator in active_decorators:
-                    test_wrapper = decorator(test_wrapper)
+                    for decorator in active_decorators:
+                        test_wrapper = decorator(test_wrapper)
 
-                test_fn = test_wrapper
+                    test_fn = test_wrapper
+                except Exception as ex:
+                    # Provides an error message for debugging before rethrowing the exception
+                    print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
+                    raise ex
             else:
                 test_fn = test
 
@@ -290,7 +292,7 @@ class DeviceTypeTestBase(TestCase):
                     result = test_fn(self, *args)
                 except RuntimeError as rte:
                     # check if rte should stop entire test suite.
-                    self._stop_test_suite = self._should_stop_test_suite(rte)
+                    self._stop_test_suite = self._should_stop_test_suite()
                     # raise the runtime error as is for the test suite to record.
                     raise rte
                 finally:
@@ -345,6 +347,18 @@ class DeviceTypeTestBase(TestCase):
 class CPUTestBase(DeviceTypeTestBase):
     device_type = 'cpu'
 
+    # No critical error should stop CPU test suite
+    def _should_stop_test_suite(self):
+        return False
+
+# The meta device represents tensors that don't have any storage; they have
+# all metadata (size, dtype, strides) but they don't actually do any compute
+class MetaTestBase(DeviceTypeTestBase):
+    device_type = 'meta'
+    _ignore_not_implemented_error = True
+
+    def _should_stop_test_suite(self):
+        return False
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
@@ -354,15 +368,6 @@ class CUDATestBase(DeviceTypeTestBase):
     cudnn_version: ClassVar[Any]
     no_magma: ClassVar[bool]
     no_cudnn: ClassVar[bool]
-
-    def _should_stop_test_suite(self, rte):
-        # CUDA device side error will cause subsequence test cases to fail.
-        # stop entire test suite if catches RuntimeError during torch.cuda.synchronize().
-        try:
-            torch.cuda.synchronize()
-        except RuntimeError as rte:
-            return True
-        return False
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -403,13 +408,16 @@ def get_device_type_test_bases():
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
-            # skip if sanitizer is enabled
+            # Skip if sanitizer is enabled
             if not TEST_WITH_ASAN and not TEST_WITH_TSAN and not TEST_WITH_UBSAN:
                 test_bases.append(CUDATestBase)
         else:
             test_bases.append(CPUTestBase)
+            test_bases.append(MetaTestBase)
     else:
         test_bases.append(CPUTestBase)
+        if not TEST_SKIP_NOARCH:
+            test_bases.append(MetaTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
@@ -478,6 +486,10 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
             continue
         if only_for is not None and base.device_type not in only_for:
             continue
+        # Special-case for ROCm testing -- only test for 'cuda' i.e. ROCm device by default
+        # The except_for and only_for cases were already checked above. At this point we only need to check 'cuda'.
+        if TEST_WITH_ROCM and base.device_type != 'cuda':
+            continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
@@ -487,13 +499,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
-                # Requires tests be a function for Python2 compat
-                # (In Python2 tests are type checked methods wrapping functions)
                 test = getattr(generic_test_class, name)
-                if hasattr(test, '__func__'):
-                    test = test.__func__
-                assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
-
                 # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
                 sig = inspect.signature(device_type_test_class.instantiate_test)
                 if len(sig.parameters) == 3:
@@ -503,12 +509,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                     device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member
                 assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
-
-                # Unwraps to functions (when available) for Python2 compat
                 nontest = getattr(generic_test_class, name)
-                if hasattr(nontest, '__func__'):
-                    nontest = nontest.__func__
-
                 setattr(device_type_test_class, name, nontest)
 
         # Mimics defining the instantiated class in the caller's file
@@ -540,7 +541,7 @@ class OpDTypes(Enum):
 #   <test_name>(self, device, dtype, op)
 # For example:
 # @ops(unary_ufuncs)
-# test_numerics(self, device, dtype, op):
+# def test_numerics(self, device, dtype, op):
 #   <test_code>
 class ops(object):
     def __init__(self, op_list, *, dtypes: OpDTypes = OpDTypes.basic,
@@ -594,6 +595,12 @@ class skipCUDAIf(skipIf):
 
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='cuda')
+
+# Skips a test on Meta if the condition is true.
+class skipMetaIf(skipIf):
+
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='meta')
 
 def _has_sufficient_memory(device, size):
     if torch.device(device).type == 'cuda':
@@ -717,7 +724,7 @@ def onlyOnCPUAndCUDA(fn):
     @wraps(fn)
     def only_fn(self, device, *args, **kwargs):
         if self.device_type != 'cpu' and self.device_type != 'cuda':
-            reason = "Doesn't run on {0}".format(self.device_type)
+            reason = "onlyOnCPUAndCUDA: doesn't run on {0}".format(self.device_type)
             raise unittest.SkipTest(reason)
 
         return fn(self, device, *args, **kwargs)
@@ -767,9 +774,7 @@ class precisionOverride(object):
 # @dtypes((torch.long, torch.float32), (torch.int, torch.float64))
 class dtypes(object):
 
-    # Note: *args, **kwargs for Python2 compat.
-    # Python 3 allows (self, *args, device_type='all').
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, device_type="all"):
         if len(args) > 0 and isinstance(args[0], (list, tuple)):
             for arg in args:
                 assert isinstance(arg, (list, tuple)), \
@@ -781,7 +786,7 @@ class dtypes(object):
             assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
 
         self.args = args
-        self.device_type = kwargs.get('device_type', 'all')
+        self.device_type = device_type
 
     def __call__(self, fn):
         d = getattr(fn, 'dtypes', {})
@@ -815,6 +820,9 @@ def onlyCUDA(fn):
 
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
+
+def expectedFailureMeta(fn):
+    return expectedFailure('meta')(fn)
 
 class expectedAlertNondeterministic:
     def __init__(self, caller_name, device_type=None, fn_has_device_arg=True):
@@ -870,9 +878,15 @@ def skipCPUIfNoMkl(fn):
 def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
+# Skips a test on CUDA if cuSOLVER is not available
+def skipCUDAIfNoCusolver(fn):
+    version = _get_torch_cuda_version()
+    return skipCUDAIf(version < (10, 2), "cuSOLVER not available")(fn)
+
+# Skips a test if both cuSOLVER and MAGMA are not available
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
     version = _get_torch_cuda_version()
-    if version >= [10, 2]:
+    if version >= (10, 2):
         return fn
     else:
         # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
@@ -886,6 +900,21 @@ def skipCUDAIfRocm(fn):
 def skipCUDAIfNotRocm(fn):
     return skipCUDAIf(not TEST_WITH_ROCM, "test doesn't currently work on the CUDA stack")(fn)
 
+# Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
+def skipCUDAVersionIn(versions : List[Tuple[int, int]] = None):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            version = _get_torch_cuda_version()
+            if version == (0, 0):  # cpu
+                return fn(self, *args, **kwargs)
+            if version in (versions or []):
+                reason = "test skipped for CUDA version {0}".format(version)
+                raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
+    return dec_fn
 
 # Skips a test on CUDA if cuDNN is unavailable or its version is lower than requested.
 def skipCUDAIfCudnnVersionLessThan(version=0):
@@ -909,3 +938,6 @@ def skipCUDAIfCudnnVersionLessThan(version=0):
 
 def skipCUDAIfNoCudnn(fn):
     return skipCUDAIfCudnnVersionLessThan(0)(fn)
+
+def skipMeta(fn):
+    return skipMetaIf(True, "test doesn't work with meta tensors")(fn)

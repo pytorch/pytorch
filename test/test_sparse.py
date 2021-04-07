@@ -246,6 +246,31 @@ class TestSparse(TestCase):
             t, _, _ = self._gen_sparse(len(sparse_size), nnz, sparse_size + dense_size)
             _test_coalesce(t)  # this tests correctness
 
+    def test_coalesce_reference_cycle(self):
+        # Test coalesce doesn't create autograd graph cycles (gh-52253)
+
+        # Sanity check that the helper class works as expected
+        t = torch.rand(2)
+        t_ref = torch._C._WeakTensorRef(t)
+        self.assertFalse(t_ref.expired())
+
+        del t
+        self.assertTrue(t_ref.expired())
+
+        def test_sparse_sum():
+            i = torch.tensor([[0], [4]], dtype=torch.long, device=self.device)
+            v = torch.tensor([[[-0.4567, -1.8797, 0.0380, 1.4316]]],
+                             dtype=torch.double, device=self.device)
+            S = torch.sparse_coo_tensor(i, v)
+            S = S.coalesce()
+            S.requires_grad_(True)
+            S2 = S.coalesce()
+            self.assertTrue(S2.is_coalesced())
+            return torch._C._WeakTensorRef(S2)
+
+        ref = test_sparse_sum()
+        self.assertTrue(ref.expired())
+
     def test_ctor_size_checks(self):
         indices = self.index_tensor([
             [0, 0, 0],
@@ -979,7 +1004,7 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        TEST_CUDA and _get_torch_cuda_version() < [10, 1],
+        TEST_CUDA and _get_torch_cuda_version() < (10, 1),
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm(self):
@@ -1043,7 +1068,7 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        _get_torch_cuda_version() < [10, 1],
+        _get_torch_cuda_version() < (10, 1),
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm_deterministic(self):
@@ -1078,7 +1103,7 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(
-        not IS_WINDOWS or _get_torch_cuda_version() >= [11, 0],
+        not IS_WINDOWS or _get_torch_cuda_version() >= (11, 0),
         "this test ensures bmm sparse-dense CUDA gives an error when run on Windows with CUDA < 11.0"
     )
     def test_bmm_windows_error(self):
@@ -1092,7 +1117,7 @@ class TestSparse(TestCase):
     @cuda_only
     @skipIfRocm
     @unittest.skipIf(
-        _get_torch_cuda_version() >= [10, 1],
+        _get_torch_cuda_version() >= (10, 1),
         "this test ensures bmm gives error if CUDA version is less than 10.1"
     )
     def test_bmm_cuda_version_error(self):
@@ -1466,9 +1491,11 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
-        y1 = x1 // 37.5
+        with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
+            y1 = x1 // 37.5
         y2 = x1.clone()
-        y2.floor_divide_(37.5)
+        with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
+            y2.floor_divide_(37.5)
         expected = self.safeToDense(x1) // 37.5
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
@@ -3020,7 +3047,7 @@ class TestSparse(TestCase):
 
     def test_sparse_matmul(self):
         """
-        This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors. 
+        This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
         """
 
         def _indices2csr(indices, dim):
@@ -3132,10 +3159,10 @@ class TestSparse(TestCase):
             def fn(D1, D2):
                 return torch.sparse.mm(D1, D2).to_dense()
 
-            # For cuda, `nondet_tol` is set with `1e-5` 
+            # For cuda, `nondet_tol` is set with `1e-5`
             # This is because cuSparse sometimes returns approximate zero values like `~e-323`
-            # TODO: Check this cuSparse issue. 
-            # This happens when you do chain multiplication `torch.sparse.mm` operations 
+            # TODO: Check this cuSparse issue.
+            # This happens when you do chain multiplication `torch.sparse.mm` operations
             gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
             grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
@@ -3148,8 +3175,8 @@ class TestSparse(TestCase):
             # This is not a matrix
             self.assertRaises(RuntimeError, lambda: fn(3, 4, [2, 2, 2], [2, 2, 2]))
 
-            # Shapes does not 
-            self.assertRaisesRegex(RuntimeError, 
+            # Shapes does not
+            self.assertRaisesRegex(RuntimeError,
                                    r"mat1 and mat2 shapes cannot be multiplied \(2x3 and 4x2\)",
                                    lambda: fn(2, 10, [2, 3], [4, 2]))
 
@@ -3190,6 +3217,14 @@ class TestCudaSparse(TestSparse):
         self.is_cuda = True
         self.device = 'cuda'
         self.legacy_sparse_tensor = torch.cuda.sparse.DoubleTensor
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    def test_mixed_device_constructor(self):
+        # https://github.com/pytorch/pytorch/issues/54075
+        v = torch.empty(2, 0).cuda()
+        torch.sparse_coo_tensor(([0, 1],), v, (4, 0))
+        v = torch.empty(2, 0).cuda(1)
+        torch.sparse_coo_tensor(([0, 1],), v, (4, 0))
 
 
 @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -3262,13 +3297,11 @@ class TestSparseUnaryUfuncs(TestCase):
 
         sample = samples[0]
 
-        if len(sample.input) > 1:
-            self.skipTest("Skipped! Testing unary ops, one input is expected")
-        sample = sample.input[0]
+        assert isinstance(sample.input, torch.Tensor)
 
-        expected = op(sample)
+        expected = op(sample.input)
         assert torch.is_tensor(expected)
-        output = op(sample.to_sparse())
+        output = op(sample.input.to_sparse())
         assert torch.is_tensor(output)
         self.assertEqual(output.to_dense(), expected)
 

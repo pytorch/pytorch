@@ -25,6 +25,8 @@ class BaseTestClass(JitTestCase):
         torch._C._jit_set_texpr_fuser_enabled(True)
         self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
@@ -36,6 +38,7 @@ class BaseTestClass(JitTestCase):
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -861,6 +864,10 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.relu(torch.add(x, y))
             return c
 
+        def test_hardtanh(x, y):
+            c = F.hardtanh(torch.add(x, y), -1.0, 1.0)
+            return c
+
         def test_threshold(x, y):
             c = F.threshold(torch.add(x, y), 0.5, 10)
             return c
@@ -896,6 +903,7 @@ class TestTensorExprFuser(BaseTestClass):
             test_threshold,
             test_relu,
             test_tanh,
+            test_hardtanh,
             test_sigmoid,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']

@@ -15,10 +15,13 @@
 #include <llvm/ExecutionEngine/SectionMemoryManager.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Mangler.h>
+#include <llvm/Support/CFGUpdate.h>
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
+
+#include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
 #include <c10/util/Half.h>
 
@@ -80,6 +83,13 @@ static void registerIntrinsics(
     intrinsics.insert(sym.symbol);
   }
   assertSuccess(JD.define(absoluteSymbols(symbols)));
+
+  for (const auto& kv : getNNCFunctionRegistry()) {
+    assertSuccess(
+        JD.define(absoluteSymbols({entry(kv.first.c_str(), kv.second)})));
+  }
+  assertSuccess(JD.define(
+      absoluteSymbols({entry("DispatchParallel", DispatchParallel)})));
 }
 
 namespace llvm {
@@ -87,7 +97,7 @@ namespace orc {
 
 // Lightly modified implementation from LLVM's Kaleidoscope JIT tutorial:
 // https://llvm.org/docs/tutorial/BuildingAJIT1.html
-#if LLVM_VERSION_MAJOR >= 9 && LLVM_VERSION_MAJOR <= 12
+#if LLVM_VERSION_MAJOR >= 9
 class TORCH_API PytorchLLVMJITImpl {
  private:
   std::unique_ptr<TargetMachine> TM;
@@ -226,7 +236,7 @@ class TORCH_API PytorchLLVMJITImpl {
 };
 
 #else // LLVM_VERSION_MAJOR
-#error Only LLVM versions 8 through 12 are supported.
+#error Only LLVM versions 8 and above are supported.
 #endif
 
 PytorchLLVMJIT::PytorchLLVMJIT()
@@ -255,6 +265,15 @@ TargetMachine& PytorchLLVMJIT::getTargetMachine() {
 const DataLayout& PytorchLLVMJIT::getDataLayout() {
   return impl_->getDataLayout();
 }
+
+#if !defined(NDEBUG)
+void dumpCFG(const llvm::cfg::Update<llvm::BasicBlock*>& update) {
+  // XXX: This method call is only here to placate gcov builds.  The `dump`
+  // method is conditionally defined when NDEBUG is unset, so if you try to
+  // link a debug-mode pytorch with an opt-mode llvm, the symbol is undefined.
+  update.dump();
+}
+#endif
 
 } // end namespace orc
 } // end namespace llvm

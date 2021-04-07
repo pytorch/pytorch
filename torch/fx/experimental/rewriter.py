@@ -3,7 +3,7 @@ import inspect
 import textwrap
 import copy
 from types import FunctionType
-from typing import cast, Union, Callable
+from typing import cast, Union, Callable, Dict, Optional, Any
 from torch.fx.symbolic_trace import Tracer
 from torch.fx.graph import Graph
 from torch.jit.frontend import normalize_source_lines
@@ -66,24 +66,26 @@ class AST_Rewriter(ast.NodeTransformer):
 
 
 class RewritingTracer(Tracer):
-    def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
-        return super().trace(_rewrite(root))
+    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
+        return super().trace(_rewrite(root), concrete_args)
 
 
-def _rewrite(fn : Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Callable]:
+def _rewrite(fn: Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Callable]:
     if isinstance(fn, torch.nn.Module):
-        # Rewrite this module's forward() and all of its recursive children's
-        # forward. Return the new rewritten module hierarchy.
+        # Rewrite this module's `forward` as well as the `forward`s of
+        # all of this module's recursive descendents. Return the new,
+        # rewritten module hierarchy.
         def rewrite_module(m : torch.nn.Module):
             class RewrittenModule(torch.nn.Module):
                 def __init__(self, orig):
                     super().__init__()
-                    self.__dict__ = copy.copy(orig.__dict__)
+                    for k, v in orig.__dict__.items():
+                        if isinstance(v, torch.nn.Module):
+                            self.__dict__[k] = copy.copy(rewrite_module(v))
+                        else:
+                            self.__dict__[k] = copy.copy(v)
             RewrittenModule.forward = AST_Rewriter().rewrite(cast(FunctionType, m.forward))
-            new_m = RewrittenModule(m)
-            for name, child in new_m.named_children():
-                new_m[name] = rewrite_module(child)    # type: ignore
-            return new_m
+            return RewrittenModule(m)
         return rewrite_module(fn)
     else:
         # Rewrite this single free function

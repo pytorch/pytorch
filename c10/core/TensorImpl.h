@@ -6,19 +6,18 @@
 #include <numeric>
 
 #include <c10/core/Backend.h>
-#include <c10/core/MemoryFormat.h>
-#include <c10/core/Storage.h>
-#include <c10/core/TensorOptions.h>
+#include <c10/core/CopyBytes.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/SizesAndStrides.h>
-#include <c10/core/CopyBytes.h>
-
-
+#include <c10/core/MemoryFormat.h>
+#include <c10/core/Storage.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#include <c10/util/Optional.h>
 #include <c10/util/python_stub.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -424,7 +423,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * True if this tensor has storage. See storage() for details.
    */
-  virtual bool has_storage() const;
+#ifdef DEBUG
+// Allow subclasses to check that their storage_ is never getting set in debug builds.
+  virtual
+#else
+  TENSORIMPL_MAYBE_VIRTUAL
+#endif
+  bool has_storage() const
+  // NOTE: we devirtualize this because it arguably shouldn't be an
+  // error just to ask subclasses if they have storage.
+  // This used to throw for most subclasses, but OpaqueTensorImpl
+  // wanted it to successfully return false, so we went ahead and made
+  // it a non-error.
+#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  {
+    return storage_;
+  }
+#else
+  ;
+#endif
 
   /**
    * Return the underlying storage of a Tensor.  Multiple tensors may share
@@ -434,7 +451,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Avoid using this method if possible; try to use only Tensor APIs to perform
    * operations.
    */
-  virtual const Storage& storage() const;
+  TENSORIMPL_MAYBE_VIRTUAL const Storage& storage() const {
+    if (C10_UNLIKELY(storage_access_should_throw_)) {
+      throw_storage_access_error();
+    }
+    return storage_;
+  }
 
   /**
    * The number of elements in a tensor.
@@ -484,6 +506,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::Meta);
   }
 
+  bool is_cpu() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    return key_set_.has(DispatchKey::CPU) ||
+        key_set_.has(DispatchKey::SparseCPU) ||
+        key_set_.has(DispatchKey::QuantizedCPU) ||
+        key_set_.has(DispatchKey::MkldnnCPU);
+  }
+
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::CUDA) ||
@@ -497,6 +527,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::XPU) ||
         key_set_.has(DispatchKey::SparseXPU) ||
         key_set_.has(DispatchKey::QuantizedXPU);
+  }
+
+  bool is_xla() const {
+    return key_set_.has(DispatchKey::XLA);
   }
 
   bool is_hip() const {
@@ -517,12 +551,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::Metal);
   }
 
+  bool is_mlc() const {
+    return key_set_.has(DispatchKey::MLC);
+  }
+
   // TODO: remove this once we don't automatically enabled Autograd dispatch keys
   //       in TensorImpl constructor.
   // DON'T USE THIS API!! It's only created for testing purpose in
   // file aten/src/ATen/core/boxing/impl/test_helpers.h
   void remove_autograd_key() {
     key_set_ = key_set_ - autograd_dispatch_keyset;
+  }
+
+  // Inference tensor doesn't have autograd or InplaceOrView key.
+  bool is_inference_tensor() {
+    bool no_InplaceOrView = !key_set_.has(c10::DispatchKey::InplaceOrView);
+    bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(no_InplaceOrView == no_Autograd,
+      "InplaceOrView and Autograd keys must be on/off at the same time.");
+    return no_InplaceOrView && no_Autograd;
   }
 
   int64_t get_device() const {
@@ -644,7 +691,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "self" should represent the Tensor whose forward grad is accessed. It is
    *     required when dealing with view.
    */
-  const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const;
+  const at::Tensor& _fw_grad(uint64_t level, const at::Tensor& self) const;
 
   /**
    * Sets the forward gradient for this Tensor.
@@ -664,7 +711,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "is_inplace_op" is a boolean flag that tells if this gradient was generated
    *     by an inplace operation or an out of place one. This allows better error checking.
    */
-  void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
+  void _set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
@@ -681,13 +728,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T * data() const {
-    TORCH_CHECK(has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
-    TORCH_CHECK(
-        storage_initialized(),
-        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
-        "mutable_data() or raw_mutable_data() to actually allocate memory.");
     TORCH_CHECK(
         data_type_.Match<T>(),
         "Tensor type mismatch, caller expects elements to be ",
@@ -695,7 +735,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         ", while tensor contains ",
         data_type_.name(),
         ". ");
-    // We managed the type check ourselves
+    return data_ptr_impl<T>();
+  }
+
+  /**
+   * More efficient helper for Tensor::data_ptr(). Like data<T>(), but
+   * does not do a type check. Unlike the untemplated data(), does
+   * check has_storage() and storage_initialized().
+   */
+  template <typename T>
+  inline T * data_ptr_impl() const {
+    TORCH_CHECK(has_storage(),
+        "Cannot access data pointer of Tensor that doesn't have storage");
+    TORCH_CHECK(
+        storage_initialized(),
+        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
+        "Caffe2 uses a lazy allocation, so you will need to call "
+        "mutable_data() or raw_mutable_data() to actually allocate memory.");
+    // Caller does the type check.
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
@@ -753,13 +810,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for example, an index into a tensor will have a non-zero storage_offset().
    *
    * WARNING: This is NOT computed in bytes.
-   *
-   * XXX: The only thing stopping this function from being virtual is Variable.
    */
-  virtual int64_t storage_offset() const {
+  TENSORIMPL_MAYBE_VIRTUAL int64_t storage_offset() const {
     return storage_offset_;
   }
 
+ protected:
+  /**
+   * Returns the human-readable name of the actual type of this object (e.g.,
+   * TensorImpl, BatchedTensorImpl, etc.). Used for error messages.
+   */
+  virtual const char* tensorimpl_type_name() const {
+    return "TensorImpl";
+  }
+
+ private:
+  [[noreturn]] void throw_storage_access_error() const;
+
+ public:
   /**
    * True if a tensor has no elements (e.g., numel() == 0).
    */
@@ -936,7 +1004,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return named_tensor_meta_.get();
   }
 
-  bool has_named_tensor_meta() {
+  bool has_named_tensor_meta() const {
     return named_tensor_meta_ != nullptr;
   }
 
@@ -1095,11 +1163,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       Resize(newDims);
       return;
     }
-    auto newNumel = std::accumulate(
-        newDims.begin(),
-        newDims.end(),
-        static_cast<int64_t>(1),
-        std::multiplies<int64_t>());
+    const auto newNumel = c10::multiply_integers(newDims.begin(), newDims.end());
     if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
       sizes_and_strides_.set_sizes(newDims);
       numel_ = newNumel;
@@ -1156,11 +1220,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // TODO: eliminate newCapacity.
     SmallVector<int64_t, 5> newCapacity(sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
     newCapacity[0] = outer_dim;
-    auto newNumel = std::accumulate(
-        newCapacity.begin(),
-        newCapacity.end(),
-        static_cast<int64_t>(1),
-        std::multiplies<int64_t>());
+    auto newNumel = c10::multiply_integers(newCapacity);
     if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
       return;
     }
@@ -1196,27 +1256,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void Resize(Ts... dim_source) {
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
-      // If needed, we will free the data. the next mutable_data() call
-      // will create the data storage.
-      bool reset_tensor = false;
-      if (reserved_) {
-        // If tensor is reserved then don't claim its memeory unless nbytes()
-        // is smaller than new size
-        reset_tensor = storage_.nbytes() <
-            (storage_offset_ + numel_) * data_type_.itemsize();
-      } else {
-        reset_tensor = storage_.nbytes() <
-                (storage_offset_ + numel_) * data_type_.itemsize() ||
-            !FLAGS_caffe2_keep_on_shrink ||
-            storage_.nbytes() -
-                    (storage_offset_ + numel_) * data_type_.itemsize() >
-                static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
-      }
-
-      if (reset_tensor && storage_initialized()) {
-        FreeMemory();
-      }
+      HandleResize();
     }
+  }
+
+  template <typename T>
+  void Resize(const std::vector<T>& dim_source) {
+    Resize(ArrayRef<T>(dim_source));
   }
 
   /**
@@ -1375,12 +1421,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         auto size = numel_;
         auto dtor = data_type_.placementDelete();
         auto data_ptr = allocator->allocate(numel_ * data_type_.itemsize());
-        storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
+        storage_.set_data_ptr_noswap(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
         data_type_.placementNew()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
-        storage_.set_data_ptr(
+        storage_.set_data_ptr_noswap(
             allocator->allocate(numel_ * data_type_.itemsize()));
       }
       storage_.set_nbytes(numel_ * data_type_.itemsize());
@@ -1504,6 +1550,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
 private:
+  void HandleResize();
 
   // The Caffe2 Resize() method supports being called both as Resize({2,2}) as
   // well as variadic with Resize(2, 2).  These overloads provide all of the
@@ -1672,6 +1719,12 @@ protected:
   // See NOTE [ Metadata Change for a Detached Tensor ] for details.
   static const char * const err_msg_tensor_metadata_change_not_allowed;
 
+public:
+  void set_storage_access_should_throw() {
+    storage_access_should_throw_ = true;
+  }
+
+protected:
   Storage storage_;
 
 private:
@@ -1747,15 +1800,11 @@ protected:
   // (which do not have a device.)
   c10::optional<c10::Device> device_opt_;
 
-  // The set of DispatchKeys which describe this tensor.  NB: this
-  // does NOT include Autograd (historically, it did, but
-  // not anymore!)
-  //
-  // INVARIANT: named_tensor_meta_ != nullptr  <==>  key_set_.has(DispatchKey::Named)
-  DispatchKeySet key_set_;
-
   // Tensor is contiguous
   bool is_contiguous_ = true;
+
+  // Tensor is a subclass that does not permit storage access.
+  bool storage_access_should_throw_ = false;
 
   // default member initializers for bit-fields only available with -std=c++2a or -std=gnu++2a
   inline void init_bitfields() {
@@ -1818,6 +1867,13 @@ protected:
   // The logic is that if Extend() or ReserveSpace() were ever called,
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ : 1;
+
+  // The set of DispatchKeys which describe this tensor.  NB: this
+  // does NOT include Autograd (historically, it did, but
+  // not anymore!)
+  //
+  // INVARIANT: named_tensor_meta_ != nullptr  <==>  key_set_.has(DispatchKey::Named)
+  DispatchKeySet key_set_;
 };
 
 // Note [TensorImpl size constraints]
@@ -1850,6 +1906,7 @@ protected:
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
+//    named tensor metadata pointer
 //    version counter pointer
 //    PyObject pointer
 //    SizesAndStrides size/pointer
@@ -1865,13 +1922,11 @@ protected:
 //    SizesAndStrides strides (pre-allocated 4)
 //    storage offset
 //    numel
-//    data type
-//    (optional) device
-//    tensor type id
-//    miscellaneous bitfield
+//    data type, device, is_contiguous, storage_access_should_throw_, bitfields
+//    DispatchKeySet
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 24,
+              sizeof(TensorImpl) == sizeof(int64_t) * 23,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10

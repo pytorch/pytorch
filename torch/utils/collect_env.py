@@ -122,7 +122,7 @@ def get_gpu_info(run_lambda):
 
 
 def get_running_cuda_version(run_lambda):
-    return run_and_parse_first_match(run_lambda, 'nvcc --version', r'V(.*)$')
+    return run_and_parse_first_match(run_lambda, 'nvcc --version', r'release .+ V(.*)')
 
 
 def get_cudnn_version(run_lambda):

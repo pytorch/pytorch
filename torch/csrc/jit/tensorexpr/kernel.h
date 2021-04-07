@@ -31,8 +31,12 @@ class TORCH_API TensorExprKernel {
 
   Stmt* getCodeGenStmt();
 
-  std::string getCodeText() {
-    return codegen_->getCodeText();
+  std::string getCodeText(const std::string& attr = "") {
+    return codegen_->getCodeText(attr);
+  }
+
+  const std::shared_ptr<Graph> graph() {
+    return graph_;
   }
 
  private:
@@ -55,6 +59,7 @@ class TORCH_API TensorExprKernel {
   };
 
   void compile();
+  void genInputDebugNames();
 
   void runKernel(Stack& stack);
 
@@ -139,10 +144,13 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeSoftmax(const torch::jit::Value* v, bool log_softmax);
 
+  Tensor* computeCatWoConditionals(const torch::jit::Value* v);
+
+  Tensor* computeConv2d(const torch::jit::Value* v);
+
   Tensor* computeValue(const torch::jit::Value* v);
 
-  Stmt* generateStmt(BackendType backendType);
-  std::vector<CodeGen::BufferArg> prepareBufferArgs();
+  Stmt* transformLoops(BackendType backendType, Stmt* st);
 
   std::string getCodeGenName(BackendType backendType);
 
@@ -171,40 +179,6 @@ class TORCH_API TensorExprKernel {
   std::vector<int64_t> getReductionAxes(const torch::jit::Node* node);
 
  private:
-  struct ShapeArg {
-    size_t idx;
-    VarHandle var;
-
-    ShapeArg(size_t i, VarHandle v) : idx(i), var(v) {}
-  };
-
-  struct KernelArg {
-    template <typename B>
-    KernelArg(B&& b) : bufferArg_(std::forward<B>(b)) {}
-
-    template <typename B, typename T>
-    KernelArg(B&& b, T&& sizes, T&& strides)
-        : bufferArg_(b),
-          sizeArgs_(std::forward<T>(sizes)),
-          strideArgs_(std::forward<T>(strides)) {}
-
-    const CodeGen::BufferArg& buffer() const {
-      return bufferArg_;
-    }
-
-    const std::vector<ShapeArg>& sizes() const {
-      return sizeArgs_;
-    }
-
-    const std::vector<ShapeArg>& strides() const {
-      return strideArgs_;
-    }
-
-    CodeGen::BufferArg bufferArg_;
-    std::vector<ShapeArg> sizeArgs_;
-    std::vector<ShapeArg> strideArgs_;
-  };
-
   struct UnpackedTensorOptions {
     c10::optional<c10::ScalarType> dtype;
     c10::optional<c10::Layout> layout;
@@ -219,13 +193,14 @@ class TORCH_API TensorExprKernel {
   };
 
   int64_t nInputs_ = 0;
-  std::vector<KernelArg> kernelArgs_;
+  std::vector<CodeGen::BufferArg> bufferArgs_;
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
-  std::vector<Tensor*> tensorOutputs_;
-  std::unordered_map<int64_t, Tensor*> tensors_;
-  std::unordered_map<int64_t, VarHandle> scalars_;
+  std::unordered_set<const Buf*> bufOutputs_;
+  std::unordered_map<const torch::jit::Value*, Tensor*> tensors_;
+  std::unordered_map<const torch::jit::Value*, VarHandle> scalars_;
+  std::unordered_map<const torch::jit::Value*, std::string> input_name_map_;
   std::unique_ptr<CodeGen> codegen_;
   at::Device device_ = at::kCPU;
   KernelArena kernelArena_;
@@ -247,6 +222,7 @@ TORCH_API bool& getTEGenerateBlockCode();
 TORCH_API bool& getTEMustUseLLVMOnCPU();
 TORCH_API bool fallbackAllowed();
 TORCH_API bool setFallbackAllowed(bool value);
+TORCH_API bool& getCatWoConditionals();
 
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);

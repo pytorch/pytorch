@@ -40,123 +40,6 @@ __device__ inline scalar_t max(scalar_t a, scalar_t b) {
   return a > b ? a : b;
 }
 
-static inline void upsample_1d_shape_check(
-    const Tensor& input,
-    const Tensor& grad_output,
-    int nbatch,
-    int nchannels,
-    int input_width,
-    int output_width) {
-  TORCH_CHECK(
-      input_width > 0 && output_width > 0,
-      "input and output sizes should be greater than 0, but got input (W: ",
-      input_width,
-      ") and output (W: ",
-      output_width,
-      ")");
-
-  if (input.defined()) {
-    // Allow for empty batch size but not other dimensions
-    bool valid_empty = false;
-    valid_empty = input.size(0) == 0 && input.size(1) != 0 && input.size(2) != 0;
-
-    TORCH_CHECK(
-                (input.numel() != 0 || valid_empty) && input.dim() == 3,
-                "Non-empty 3D data tensor expected but got a tensor with sizes ",
-                input.sizes());
-  } else if (grad_output.defined()) {
-    check_dim_size(grad_output, 3, 0, nbatch);
-    check_dim_size(grad_output, 3, 1, nchannels);
-    check_dim_size(grad_output, 3, 2, output_width);
-  }
-}
-
-static inline void upsample_2d_shape_check(
-    const Tensor& input,
-    const Tensor& grad_output,
-    int nbatch,
-    int nchannels,
-    int input_height,
-    int input_width,
-    int output_height,
-    int output_width) {
-  TORCH_CHECK(
-      input_height > 0 && input_width > 0 && output_height > 0 &&
-          output_width > 0,
-      "input and output sizes should be greater than 0,"
-      " but got input (H: ",
-      input_height,
-      ", W: ",
-      input_width,
-      ") output (H: ",
-      output_height,
-      ", W: ",
-      output_width,
-      ")");
-
-  if (input.defined()) {
-    // Allow for empty batch size but not other dimensions
-    bool valid_empty = false;
-    valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
-      input.size(2) != 0 && input.size(3) != 0;
-    TORCH_CHECK(
-                (input.numel() != 0 || valid_empty) && input.dim() == 4,
-                "Non-empty 4D data tensor expected but got a tensor with sizes ",
-                input.sizes());
-  } else if (grad_output.defined()) {
-    check_dim_size(grad_output, 4, 0, nbatch);
-    check_dim_size(grad_output, 4, 1, nchannels);
-    check_dim_size(grad_output, 4, 2, output_height);
-    check_dim_size(grad_output, 4, 3, output_width);
-  }
-}
-
-static inline void upsample_3d_shape_check(
-    const Tensor& input,
-    const Tensor& grad_output,
-    int nbatch,
-    int nchannels,
-    int input_depth,
-    int input_height,
-    int input_width,
-    int output_depth,
-    int output_height,
-    int output_width) {
-  TORCH_CHECK(
-      input_depth > 0 && input_height > 0 && input_width > 0 &&
-          output_depth > 0 && output_height > 0 && output_width > 0,
-      "Input and output sizes should be greater than 0, but got input (D: ",
-      input_depth,
-      ", H: ",
-      input_height,
-      ", W: ",
-      input_width,
-      ") output (D: ",
-      output_depth,
-      ", H: ",
-      output_height,
-      ", W: ",
-      output_width,
-      ")");
-
-  if (input.defined()) {
-    // Allow for empty batch size but not other dimensions
-    bool valid_empty = false;
-    valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
-      input.size(2) != 0 && input.size(3) != 0 && input.size(4) != 0;
-    TORCH_CHECK(
-                (input.numel() != 0 || valid_empty) && input.dim() == 5,
-                "Non-empty 5D data tensor expected but got a tensor with sizes ",
-                input.sizes());
-  } else if (grad_output.defined()) {
-    check_dim_size(grad_output, 5, 0, nbatch);
-    check_dim_size(grad_output, 5, 1, nchannels);
-    check_dim_size(grad_output, 5, 2, output_depth);
-    check_dim_size(grad_output, 5, 3, output_height);
-    check_dim_size(grad_output, 5, 4, output_width);
-  }
-}
-
 // NOTE [ Nearest neighbor upsampling kernel implementation ]
 //
 // The nearest neighbor upsampling kernel implementation is symmetrical as
@@ -253,7 +136,7 @@ __device__ __forceinline__ static int nearest_neighbor_bw_compute_source_index(
     int dst_index,
     int output_size) {
   const int src_index =
-      static_cast<int>(ceilf(dst_index * scale));
+      min(static_cast<int>(ceilf(dst_index * scale)), output_size);
   return src_index;
 }
 

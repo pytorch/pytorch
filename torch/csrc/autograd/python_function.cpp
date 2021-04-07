@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -362,30 +363,39 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     self->output_info.reserve(num_outputs);
   }
 
-  auto as_variable = [&](PyObject* obj, int i) -> Variable {
-    if (THPVariable_Check(obj)) {
-      return ((THPVariable*)obj)->cdata;
-    }
-    throw TypeError("%s.forward: expected Tensor or tuple of Tensor (got %s) for return value %d",
-        Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i);
-  };
-
   auto non_differentiable = _parse_non_differentiable(self);
   auto dirty_inputs = _mark_dirty(self);
 
-  std::vector<Variable> raw_output_vars;
+  std::vector<c10::optional<Variable>> raw_output_vars;
   raw_output_vars.reserve(num_outputs);
   for(int i = 0; i < num_outputs; ++i){
     PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
-    raw_output_vars.push_back(as_variable(obj,i));
+    // Only process tensors as outputs for autograd purposes.
+    if (THPVariable_Check(obj)) {
+      raw_output_vars.emplace_back(((THPVariable*)obj)->cdata);
+    } else {
+      raw_output_vars.emplace_back();
+    }
   }
 
+  // Wrap only the tensor outputs.
   auto wrapped_outputs = _wrap_outputs(input_vars, non_differentiable, dirty_inputs, raw_output_vars, cdata_if_executable);
+
   for (int i = 0; i < num_outputs; i++) {
-    if (is_executable) {
-      self->output_info.emplace_back(wrapped_outputs[i]);
+    PyObject* obj = PyTuple_GetItem(raw_output, i);
+    // Keep the non-tensor outputs as is.
+    if (!THPVariable_Check(obj)) {
+      if (is_executable) {
+        self->output_info.emplace_back();
+      }
+      Py_INCREF(obj);
+      PyTuple_SetItem(outputs, i, obj);
+    } else {
+      if (is_executable) {
+        self->output_info.emplace_back(*wrapped_outputs[i]);
+      }
+      PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
     }
-    PyTuple_SET_ITEM(outputs, i, THPVariable_Wrap(wrapped_outputs[i]));
   }
 }
 
@@ -410,7 +420,7 @@ static void _save_variables(const std::shared_ptr<PyNode>& cdata_ptr, THPFunctio
       bool is_output = variable->cdata.grad_fn().get() == cdata_ptr.get();
       self->saved_variables.emplace_back(variable->cdata, is_output);
     } else {
-      throw TypeError(
+      throw torch::TypeError(
           "save_for_backward can only save variables, but argument %d is of "
           "type %s", i, Py_TYPE(obj)->tp_name);
     }
@@ -487,12 +497,12 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   }
 
   flags.is_executable = GradMode::is_enabled() && any_variable_requires_grad(unpacked.input_vars);
-  flags.next_edges = collect_next_edges(unpacked.input_vars);
+  flags.next_edges = (flags.is_executable ? collect_next_edges(unpacked.input_vars) : edge_list());
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
 static void _assert_not_tracing(const char* name, const variable_list& input_vars) {
-  if (tracer::isTracing()) {
+  if (jit::tracer::isTracing()) {
     std::ostringstream oss;
     oss << "Attempted to trace " << name;
     oss << ", but tracing of legacy functions is not supported";
@@ -557,11 +567,14 @@ static void _trace_post_record(
     node = unpacked;
   }
   for (int i = 0; i < num_outputs; ++i) {
-    auto var = (THPVariable*)PyTuple_GET_ITEM(output_objects, i);
-    Value* value = node->outputs()[i];
-    if (var->cdata.defined()) {
-      value->inferTypeFrom(var->cdata);
-      jit::tracer::setValueTrace(var->cdata, value);
+    PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
+    if (THPVariable_Check(obj)) {
+      auto var = (THPVariable*)obj;
+      Value* value = node->outputs()[i];
+      if (var->cdata.defined()) {
+        value->inferTypeFrom(var->cdata);
+        jit::tracer::setValueTrace(var->cdata, value);
+      }
     }
   }
 }

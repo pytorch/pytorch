@@ -8,7 +8,7 @@ from torch import _VF
 from torch._C import _infer_size, _add_docstr
 from torch._torch_docs import reproducibility_notes, tf32_notes
 
-from .._jit_internal import boolean_dispatch, _overload
+from .._jit_internal import boolean_dispatch, _overload, BroadcastingList1, BroadcastingList2, BroadcastingList3
 from ..overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function)
@@ -45,8 +45,16 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or
       a one-element tuple `(sW,)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a one-element tuple `(padW,)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
     dilation: the spacing between kernel elements. Can be a single number or
       a one-element tuple `(dW,)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
@@ -78,14 +86,24 @@ Note:
         **reproducibility_notes, **tf32_notes
     )
     + r"""
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
     weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padH, padW)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
+
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
@@ -125,8 +143,17 @@ Args:
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padT, padH, padW)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
+
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dT, dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
@@ -380,9 +407,13 @@ Args:
 
 
 def fractional_max_pool2d_with_indices(
-    input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None
-):
-    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], Optional[BroadcastingList2[float]], bool, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
+    input: Tensor, kernel_size: BroadcastingList2[int],
+    output_size: Optional[BroadcastingList2[int]] = None,
+    output_ratio: Optional[BroadcastingList2[float]] = None,
+    return_indices: bool = False,
+    _random_samples: Optional[Tensor] = None
+) -> Tuple[Tensor, Tensor]:
+    # noqa
     r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -436,9 +467,13 @@ def fractional_max_pool2d_with_indices(
 
 
 def _fractional_max_pool2d(
-    input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None
-):
-    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], Optional[BroadcastingList2[float]], bool, Optional[Tensor]) -> Tensor  # noqa
+    input: Tensor, kernel_size: BroadcastingList2[int],
+    output_size: Optional[BroadcastingList2[int]] = None,
+    output_ratio: Optional[BroadcastingList2[float]] = None,
+    return_indices: bool = False,
+    _random_samples: Optional[Tensor] = None
+) -> Tensor:
+    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             fractional_max_pool2d,
@@ -467,9 +502,13 @@ fractional_max_pool2d = boolean_dispatch(
 
 
 def fractional_max_pool3d_with_indices(
-    input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None
-):
-    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], Optional[BroadcastingList3[float]], bool, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
+    input: Tensor, kernel_size: BroadcastingList3[int],
+    output_size: Optional[BroadcastingList3[int]] = None,
+    output_ratio: Optional[BroadcastingList3[float]] = None,
+    return_indices: bool = False,
+    _random_samples: Optional[Tensor] = None
+) -> Tuple[Tensor, Tensor]:
+    # noqa
     r"""Applies 3D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -484,7 +523,7 @@ def fractional_max_pool3d_with_indices(
                      or a tuple `(kT, kH, kW)`
         output_size: the target output size of the form :math:`oT \times oH \times oW`.
                      Can be a tuple `(oT, oH, oW)` or a single number :math:`oH` for a cubic output
-                      :math:`oH \times oH \times oH`
+                     :math:`oH \times oH \times oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
                       This has to be a number or tuple in the range (0, 1)
         return_indices: if ``True``, will return the indices along with the outputs.
@@ -528,9 +567,13 @@ def fractional_max_pool3d_with_indices(
 
 
 def _fractional_max_pool3d(
-    input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None
-):
-    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], Optional[BroadcastingList3[float]], bool, Optional[Tensor]) -> Tensor  # noqa
+    input: Tensor, kernel_size: BroadcastingList3[int],
+    output_size: Optional[BroadcastingList3[int]] = None,
+    output_ratio: Optional[BroadcastingList3[float]] = None,
+    return_indices: bool = False,
+    _random_samples: Optional[Tensor] = None
+) -> Tensor:
+    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             fractional_max_pool3d,
@@ -559,9 +602,14 @@ fractional_max_pool3d = boolean_dispatch(
 
 
 def max_pool1d_with_indices(
-    input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False
-):
-    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tuple[Tensor, Tensor]  # noqa
+    input: Tensor, kernel_size: BroadcastingList1[int],
+    stride: Optional[BroadcastingList1[int]] = None,
+    padding: BroadcastingList1[int] = 0,
+    dilation: BroadcastingList1[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
+) -> Tuple[Tensor, Tensor]:
+    # noqa
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
@@ -584,8 +632,15 @@ def max_pool1d_with_indices(
     return torch.max_pool1d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False):
-    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tensor  # noqa
+def _max_pool1d(
+    input: Tensor, kernel_size: BroadcastingList1[int],
+    stride: Optional[BroadcastingList1[int]] = None,
+    padding: BroadcastingList1[int] = 0,
+    dilation: BroadcastingList1[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
+) -> Tensor:
+    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d,
@@ -615,9 +670,14 @@ max_pool1d = boolean_dispatch(
 
 
 def max_pool2d_with_indices(
-    input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False
-):
-    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tuple[Tensor, Tensor]  # noqa
+    input: Tensor, kernel_size: BroadcastingList2[int],
+    stride: Optional[BroadcastingList2[int]] = None,
+    padding: BroadcastingList2[int] = 0,
+    dilation: BroadcastingList2[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
+) -> Tuple[Tensor, Tensor]:
+    # noqa
     r"""Applies a 2D max pooling over an input signal composed of several input
     planes.
 
@@ -640,8 +700,15 @@ def max_pool2d_with_indices(
     return torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False):
-    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tensor  # noqa
+def _max_pool2d(
+    input: Tensor, kernel_size: BroadcastingList2[int],
+    stride: Optional[BroadcastingList2[int]] = None,
+    padding: BroadcastingList2[int] = 0,
+    dilation: BroadcastingList2[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
+) -> Tensor:
+    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d,
@@ -671,9 +738,14 @@ max_pool2d = boolean_dispatch(
 
 
 def max_pool3d_with_indices(
-    input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False
-):
-    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tuple[Tensor, Tensor]  # noqa
+    input: Tensor, kernel_size: BroadcastingList3[int],
+    stride: Optional[BroadcastingList3[int]] = None,
+    padding: BroadcastingList3[int] = 0,
+    dilation: BroadcastingList3[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
+) -> Tuple[Tensor, Tensor]:
+    # noqa
     r"""Applies a 3D max pooling over an input signal composed of several input
     planes.
 
@@ -696,8 +768,15 @@ def max_pool3d_with_indices(
     return torch._C._nn.max_pool3d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False):
-    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tensor  # noqa
+def _max_pool3d(
+    input: Tensor, kernel_size: BroadcastingList3[int],
+    stride: Optional[BroadcastingList3[int]] = None,
+    padding: BroadcastingList3[int] = 0,
+    dilation: BroadcastingList3[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
+) -> Tensor:
+    # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d,
@@ -759,8 +838,14 @@ def _unpool_output_size(
     return ret
 
 
-def max_unpool1d(input, indices, kernel_size, stride=None, padding=0, output_size=None):
-    # type: (Tensor, Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], Optional[BroadcastingList1[int]]) -> Tensor  # noqa
+def max_unpool1d(
+    input: Tensor, indices: Tensor,
+    kernel_size: BroadcastingList1[int],
+    stride: Optional[BroadcastingList1[int]] = None,
+    padding: BroadcastingList1[int] = 0,
+    output_size: Optional[BroadcastingList1[int]] = None
+) -> Tensor:
+    # noqa
     r"""Computes a partial inverse of :class:`MaxPool1d`.
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
@@ -790,8 +875,14 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0, output_siz
     return torch._C._nn.max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3), output_size).squeeze(3)
 
 
-def max_unpool2d(input, indices, kernel_size, stride=None, padding=0, output_size=None):
-    # type: (Tensor, Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], Optional[BroadcastingList2[int]]) -> Tensor  # noqa
+def max_unpool2d(
+    input: Tensor, indices: Tensor,
+    kernel_size: BroadcastingList2[int],
+    stride: Optional[BroadcastingList2[int]] = None,
+    padding: BroadcastingList2[int] = 0,
+    output_size: Optional[BroadcastingList2[int]] = None
+) -> Tensor:
+    # noqa
     r"""Computes a partial inverse of :class:`MaxPool2d`.
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
@@ -817,8 +908,14 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0, output_siz
     return torch._C._nn.max_unpool2d(input, indices, output_size)
 
 
-def max_unpool3d(input, indices, kernel_size, stride=None, padding=0, output_size=None):
-    # type: (Tensor, Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], Optional[BroadcastingList3[int]]) -> Tensor  # noqa
+def max_unpool3d(
+    input: Tensor, indices: Tensor,
+    kernel_size: BroadcastingList3[int],
+    stride: Optional[BroadcastingList3[int]] = None,
+    padding: BroadcastingList3[int] = 0,
+    output_size: Optional[BroadcastingList3[int]] = None
+) -> Tensor:
+    # noqa
     r"""Computes a partial inverse of :class:`MaxPool3d`.
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
@@ -844,8 +941,12 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0, output_siz
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
 
 
-def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
-    # type: (Tensor, float, int, Optional[BroadcastingList2[int]], bool) -> Tensor
+def lp_pool2d(
+    input: Tensor, norm_type: float,
+    kernel_size: int,
+    stride: Optional[BroadcastingList2[int]] = None,
+    ceil_mode: bool = False
+) -> Tensor:
     r"""Applies a 2D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -865,8 +966,12 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1.0 / norm_type)
 
 
-def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
-    # type: (Tensor, float, int, Optional[BroadcastingList1[int]], bool) -> Tensor
+def lp_pool1d(
+    input: Tensor, norm_type: float,
+    kernel_size: int,
+    stride: Optional[BroadcastingList1[int]] = None,
+    ceil_mode: bool = False
+) -> Tensor:
     r"""Applies a 1D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -885,8 +990,9 @@ def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1.0 / norm_type)
 
 
-def adaptive_max_pool1d_with_indices(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
+def adaptive_max_pool1d_with_indices(
+    input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False
+) -> Tuple[Tensor, Tensor]:
     r"""Applies a 1D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -903,8 +1009,7 @@ def adaptive_max_pool1d_with_indices(input, output_size, return_indices=False):
     return torch.adaptive_max_pool1d(input, output_size)
 
 
-def _adaptive_max_pool1d(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
+def _adaptive_max_pool1d(input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False) -> Tensor:
     if has_torch_function_unary(input):
         return handle_torch_function(
             adaptive_max_pool1d, (input,), input, output_size, return_indices=return_indices
@@ -923,8 +1028,10 @@ adaptive_max_pool1d = boolean_dispatch(
 )
 
 
-def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList2[int], bool) -> Tuple[Tensor, Tensor]
+def adaptive_max_pool2d_with_indices(
+    input: Tensor, output_size: BroadcastingList2[int],
+    return_indices: bool = False
+) -> Tuple[Tensor, Tensor]:
     r"""Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -943,8 +1050,7 @@ def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
     return torch._C._nn.adaptive_max_pool2d(input, output_size)
 
 
-def _adaptive_max_pool2d(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList2[int], bool) -> Tensor
+def _adaptive_max_pool2d(input: Tensor, output_size: BroadcastingList2[int], return_indices: bool = False) -> Tensor:
     if has_torch_function_unary(input):
         return handle_torch_function(
             adaptive_max_pool2d, (input,), input, output_size, return_indices=return_indices
@@ -963,8 +1069,10 @@ adaptive_max_pool2d = boolean_dispatch(
 )
 
 
-def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList3[int], bool) -> Tuple[Tensor, Tensor]
+def adaptive_max_pool3d_with_indices(
+    input: Tensor, output_size: BroadcastingList3[int],
+    return_indices: bool = False
+) -> Tuple[Tensor, Tensor]:
     r"""Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -983,8 +1091,7 @@ def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
     return torch._C._nn.adaptive_max_pool3d(input, output_size)
 
 
-def _adaptive_max_pool3d(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList3[int], bool) -> Tensor
+def _adaptive_max_pool3d(input: Tensor, output_size: BroadcastingList3[int], return_indices: bool = False) -> Tensor:
     if has_torch_function_unary(input):
         return handle_torch_function(
             adaptive_max_pool3d, (input,), input, output_size, return_indices=return_indices
@@ -1019,8 +1126,7 @@ Args:
 )
 
 
-def adaptive_avg_pool2d(input, output_size):
-    # type: (Tensor, BroadcastingList2[int]) -> Tensor
+def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
     r"""
     Applies a 2D adaptive average pooling over an input signal composed of
     several input planes.
@@ -1037,8 +1143,7 @@ def adaptive_avg_pool2d(input, output_size):
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
 
-def adaptive_avg_pool3d(input, output_size):
-    # type: (Tensor, BroadcastingList3[int]) -> Tensor
+def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> Tensor:
     r"""
     Applies a 3D adaptive average pooling over an input signal composed of
     several input planes.
@@ -1277,7 +1382,11 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:
     """
     if has_torch_function_unary(input):
         return handle_torch_function(relu6, (input,), input, inplace=inplace)
-    return hardtanh(input, 0.0, 6.0, inplace)
+    if inplace:
+        result = torch._C._nn.relu6_(input)
+    else:
+        result = torch._C._nn.relu6(input)
+    return result
 
 
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
@@ -1711,9 +1820,7 @@ def sigmoid(input):
 
 
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""hardsigmoid(input) -> Tensor
-
-    Applies the element-wise function
+    r"""Applies the element-wise function
 
     .. math::
         \text{Hardsigmoid}(x) = \begin{cases}
@@ -1750,15 +1857,7 @@ def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tens
     """
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(linear, (input, weight), input, weight, bias=bias)
-    if input.dim() == 2 and bias is not None:
-        # fused op is marginally faster
-        ret = torch.addmm(bias, input, weight.t())
-    else:
-        output = input.matmul(weight.t())
-        if bias is not None:
-            output += bias
-        ret = output
-    return ret
+    return torch._C._nn.linear(input, weight, bias)
 
 
 def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
@@ -1778,11 +1877,19 @@ def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tens
         - output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
           and all but the last dimension are the same shape as the input.
     """
+    if has_torch_function_variadic(input1, input2, weight):
+        return handle_torch_function(
+            bilinear,
+            (input1, input2, weight),
+            input1, input2, weight,
+            bias=bias
+        )
     return torch.bilinear(input1, input2, weight, bias)
 
 
 def silu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Applies the silu function, element-wise.
+    r"""Applies the Sigmoid Linear Unit (SiLU) function, element-wise.
+    The SiLU function is also known as the swish function.
 
     .. math::
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
@@ -1854,8 +1961,9 @@ def embedding(
         input (LongTensor): Tensor containing indices into the embedding matrix
         weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
             and number of columns equal to the embedding size
-        padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
-                                         (initialized to zeros) whenever it encounters the index.
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
+                                     therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
+                                     i.e. it remains as a fixed "pad".
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
                                     Note: this will modify :attr:`weight` in-place.
@@ -1868,7 +1976,7 @@ def embedding(
     Shape:
         - Input: LongTensor of arbitrary shape containing the indices to extract
         - Weight: Embedding matrix of floating point type with shape `(V, embedding_dim)`,
-                            where V = maximum index + 1 and embedding_dim = the embedding size
+          where V = maximum index + 1 and embedding_dim = the embedding size
         - Output: `(*, embedding_dim)`, where `*` is the input shape
 
     Examples::
@@ -1900,6 +2008,12 @@ def embedding(
                  [ 0.6262,  0.2438,  0.7471]]])
     """
 
+    if has_torch_function_variadic(input, weight):
+        return handle_torch_function(
+            embedding, (input, weight),
+            input, weight, padding_idx, max_norm, norm_type,
+            scale_grad_by_freq, sparse
+        )
     if padding_idx is not None:
         if padding_idx > 0:
             assert padding_idx < weight.size(0), "Padding_idx must be within num_embeddings"
@@ -1909,13 +2023,15 @@ def embedding(
     else:
         padding_idx = -1
     if max_norm is not None:
+        # Note [embedding_renorm contiguous]
         # `embedding_renorm_` will call .contiguous() on input anyways, so we
         # call it here and take advantage of the improved locality in the
         # `embedding` call below too.
         input = input.contiguous()
+        # Note [embedding_renorm set_grad_enabled]
         # XXX: equivalent to
         # with torch.no_grad():
-        #   torch.nembedding_renorm_
+        #   torch.embedding_renorm_
         # remove once script supports set_grad_enabled
         _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
@@ -1966,33 +2082,25 @@ def embedding_bag(
             :attr:`offsets`, if those are not None.
 
         include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
-        The last element is the size of the input, or the ending index position of the last bag (sequence).
+            The last element is the size of the input, or the ending index position of the last bag (sequence).
 
 
     Shape:
-
         - :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
 
-          - If :attr:`input` is 2D of shape `(B, N)`,
+          - If :attr:`input` is 2D of shape `(B, N)`, it will be treated as ``B`` bags (sequences)
+            each of fixed length ``N``, and this will return ``B`` values aggregated in a way
+            depending on the :attr:`mode`. :attr:`offsets` is ignored and required to be ``None`` in this case.
 
-            it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
-            this will return ``B`` values aggregated in a way depending on the :attr:`mode`.
-            :attr:`offsets` is ignored and required to be ``None`` in this case.
+          - If :attr:`input` is 1D of shape `(N)`, it will be treated as a concatenation of
+            multiple bags (sequences). :attr:`offsets` is required to be a 1D tensor containing
+            the starting index positions of each bag in :attr:`input`. Therefore, for :attr:`offsets`
+            of shape `(B)`, :attr:`input` will be viewed as having ``B`` bags.
+            Empty bags (i.e., having 0-length) will have returned vectors filled by zeros.
 
-          - If :attr:`input` is 1D of shape `(N)`,
+        - :attr:`weight` (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
 
-            it will be treated as a concatenation of multiple bags (sequences).
-            :attr:`offsets` is required to be a 1D tensor containing the
-            starting index positions of each bag in :attr:`input`. Therefore,
-            for :attr:`offsets` of shape `(B)`, :attr:`input` will be viewed as
-            having ``B`` bags. Empty bags (i.e., having 0-length) will have
-            returned vectors filled by zeros.
-
-        - :attr:`weight` (Tensor): the learnable weights of the module of
-          shape `(num_embeddings, embedding_dim)`
-
-        - :attr:`per_sample_weights` (Tensor, optional). Has the same shape as
-          :attr:`input`.
+        - :attr:`per_sample_weights` (Tensor, optional). Has the same shape as :attr:`input`.
 
         - :attr:`output`: aggregated embedding values of shape `(B, embedding_dim)`
 
@@ -2309,6 +2417,13 @@ def ctc_loss(
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
+    if has_torch_function_variadic(log_probs, targets, input_lengths, target_lengths):
+        return handle_torch_function(
+            ctc_loss,
+            (log_probs, targets, input_lengths, target_lengths),
+            log_probs, targets, input_lengths, target_lengths,
+            blank=blank, reduction=reduction, zero_infinity=zero_infinity
+        )
     return torch.ctc_loss(
         log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction), zero_infinity
     )
@@ -2381,43 +2496,7 @@ def nll_loss(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    dim = input.dim()
-    if dim < 2:
-        raise ValueError("Expected 2 or more dimensions (got {})".format(dim))
-
-    if input.size(0) != target.size(0):
-        raise ValueError(
-            "Expected input batch_size ({}) to match target batch_size ({}).".format(input.size(0), target.size(0))
-        )
-    if dim == 2:
-        ret = torch._C._nn.nll_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-    elif dim == 4:
-        ret = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-    else:
-        # dim == 3 or dim > 4
-        n = input.size(0)
-        c = input.size(1)
-        out_size = (n,) + input.size()[2:]
-        if target.size()[1:] != input.size()[2:]:
-            raise ValueError("Expected target size {}, got {}".format(out_size, target.size()))
-        input = input.contiguous()
-        target = target.contiguous()
-        # support empty batches, see #15870
-        if input.numel() > 0:
-            input = input.view(n, c, 1, -1)
-        else:
-            input = input.view(n, c, 0, 0)
-        if target.numel() > 0:
-            target = target.view(n, 1, -1)
-        else:
-            target = target.view(n, 0, 0)
-        reduction_enum = _Reduction.get_enum(reduction)
-        if reduction != "none":
-            ret = torch._C._nn.nll_loss2d(input, target, weight, reduction_enum, ignore_index)
-        else:
-            out = torch._C._nn.nll_loss2d(input, target, weight, reduction_enum, ignore_index)
-            ret = out.view(out_size)
-    return ret
+    return torch._C._nn.nll_loss_nd(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
 
 
 def poisson_nll_loss(
@@ -2695,7 +2774,7 @@ def cross_entropy(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)
+    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
 
 
 def binary_cross_entropy(
@@ -2870,6 +2949,36 @@ def smooth_l1_loss(
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
     return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
+
+
+def huber_loss(
+    input: Tensor,
+    target: Tensor,
+    reduction: str = 'mean',
+    delta: float = 1.0,
+) -> Tensor:
+    r"""Function that uses a squared term if the absolute
+    element-wise error falls below delta and a delta-scaled L1 term otherwise.
+
+    See :class:`~torch.nn.HuberLoss` for details.
+    """
+    if has_torch_function_variadic(input, target):
+        return handle_torch_function(
+            huber_loss,
+            (input, target),
+            input,
+            target,
+            reduction=reduction,
+            delta=delta,
+        )
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
+
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    return torch._C._nn.huber_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), delta)
 
 
 def l1_loss(
@@ -3262,14 +3371,12 @@ Examples::
 
 
 @_overload  # noqa: F811
-def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=None):  # noqa: F811
-    # type: (Tensor, Optional[int], Optional[float], str, Optional[bool]) -> Tensor
+def upsample(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
     pass
 
 
 @_overload  # noqa: F811
-def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=None):  # noqa: F811
-    # type: (Tensor, Optional[List[int]], Optional[float], str, Optional[bool]) -> Tensor
+def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
     pass
 
 
@@ -3338,20 +3445,17 @@ upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 
 @_overload  # noqa: F811
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
-    # type: (Tensor, Optional[int], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
-    # type: (Tensor, Optional[List[int]], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
+def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
-    # type: (Tensor, Optional[int], Optional[float], str, Optional[bool], Optional[bool]) -> Tensor
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
     pass
 
 
@@ -3366,8 +3470,7 @@ def interpolate(  # noqa: F811
 ) -> Tensor:  # noqa: F811
     pass
 
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
-    # type: (Tensor, Optional[int], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -3588,14 +3691,12 @@ interpolate.__doc__ = interpolate.__doc__.format(**reproducibility_notes)
 
 
 @_overload  # noqa: F811
-def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
-    # type: (Tensor, Optional[int], Optional[float]) -> Tensor
+def upsample_nearest(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None) -> Tensor:  # noqa: F811
     pass
 
 
 @_overload  # noqa: F811
-def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
-    # type: (Tensor, Optional[List[int]], Optional[float]) -> Tensor
+def upsample_nearest(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None) -> Tensor:  # noqa: F811
     pass
 
 
@@ -4053,6 +4154,8 @@ def pairwise_distance(x1: Tensor, x2: Tensor, p: float = 2.0, eps: float = 1e-6,
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
+    if has_torch_function_variadic(x1, x2):
+        return handle_torch_function(pairwise_distance, (x1, x2), x1, x2, p=p, eps=eps, keepdim=keepdim)
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
@@ -4253,7 +4356,7 @@ def triplet_margin_with_distance_loss(
         return output
 
 
-def normalize(input: Tensor, p: float = 2, dim: int = 1, eps: float = 1e-12, out: Optional[Tensor] = None) -> Tensor:
+def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, out: Optional[Tensor] = None) -> Tensor:
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 
     For a tensor :attr:`input` of sizes :math:`(n_0, ..., n_{dim}, ..., n_k)`, each
@@ -4286,8 +4389,13 @@ def assert_int_or_pair(arg: List[int], arg_name: str, message: str) -> None:
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
-def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
-    # type: (Tensor, BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int]) -> Tensor  # noqa
+def unfold(
+    input: Tensor, kernel_size: BroadcastingList2[int],
+    dilation: BroadcastingList2[int] = 1,
+    padding: BroadcastingList2[int] = 0,
+    stride: BroadcastingList2[int] = 1
+) -> Tensor:
+    # noqa
     r"""Extracts sliding local blocks from a batched input tensor.
 
     .. warning::
@@ -4320,8 +4428,14 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
 
 
-def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
-    # type: (Tensor, BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int]) -> Tensor  # noqa
+def fold(
+    input: Tensor, output_size: BroadcastingList2[int],
+    kernel_size: BroadcastingList2[int],
+    dilation: BroadcastingList2[int] = 1,
+    padding: BroadcastingList2[int] = 0,
+    stride: BroadcastingList2[int] = 1
+) -> Tensor:
+    # noqa
     r"""Combines an array of sliding local blocks into a large containing
     tensor.
 
@@ -4523,13 +4637,13 @@ def multi_head_attention_forward(
     embed_dim_to_check: int,
     num_heads: int,
     in_proj_weight: Tensor,
-    in_proj_bias: Tensor,
+    in_proj_bias: Optional[Tensor],
     bias_k: Optional[Tensor],
     bias_v: Optional[Tensor],
     add_zero_attn: bool,
     dropout_p: float,
     out_proj_weight: Tensor,
-    out_proj_bias: Tensor,
+    out_proj_bias: Optional[Tensor],
     training: bool = True,
     key_padding_mask: Optional[Tensor] = None,
     need_weights: bool = True,
@@ -4631,7 +4745,11 @@ def multi_head_attention_forward(
     # allow MHA to have different sizes for the feature dimension
     assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
 
-    head_dim = embed_dim // num_heads
+    if isinstance(embed_dim, torch.Tensor):
+        # embed_dim can be a tensor when JIT tracing
+        head_dim = embed_dim.div(num_heads, rounding_mode='trunc')
+    else:
+        head_dim = embed_dim // num_heads
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 

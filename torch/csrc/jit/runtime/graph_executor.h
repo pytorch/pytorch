@@ -85,6 +85,8 @@ struct TORCH_API GraphExecutor {
 
   static size_t getDefaultNumBailOuts();
 
+  void debugFlushCompilationCache();
+
  private:
   std::shared_ptr<GraphExecutorImplBase> pImpl;
 };
@@ -125,6 +127,8 @@ struct TORCH_API GraphOptimizerEnabledGuard {
 namespace detail {
 
 GraphExecutor* getGradExecutor(Operation& op);
+
+GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op);
 
 // for debugging information we expose a way to get the last actually
 // run graph. Previous approaches allowed querying the GraphExecutor

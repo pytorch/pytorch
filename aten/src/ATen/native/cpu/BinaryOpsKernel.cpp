@@ -19,9 +19,30 @@ namespace {
 
 using namespace vec256;
 
+// Note: Explicit implementation of copysign for Half and BFloat16
+// is needed to workaround g++-7/8 crash on aarch64, but also makes
+// copysign faster for the half-precision types
+template<typename T>
+T copysign(T a, T b) {
+  return std::copysign(a, b);
+}
+
+// Implement copysign for half precision floats using bit ops
+// Sign is the most significant bit for both half and bfloat16 types
+template<>
+c10::Half copysign(c10::Half a, c10::Half b) {
+  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
+}
+
+template<>
+c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
+   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
+}
+
+
 // Note: Undefined behavior when performing addition is intentionally
 // ignored.
-void add_kernel(TensorIteratorBase& iter, Scalar alpha_scalar) {
+void add_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
   if (iter.dtype() == ScalarType::Bool) {
       using scalar_t = bool;
       auto alpha = alpha_scalar.to<scalar_t>();
@@ -40,7 +61,7 @@ void add_kernel(TensorIteratorBase& iter, Scalar alpha_scalar) {
   }
 }
 
-void add_clamp_kernel(TensorIterator& iter, Scalar alpha_scalar, Scalar min_val, Scalar max_val) {
+void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Scalar& min_val, const Scalar& max_val) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_clamp_cpu", [&]() {
     auto alpha = alpha_scalar.to<scalar_t>();
     auto alpha_vec = Vec256<scalar_t>(alpha);
@@ -61,7 +82,7 @@ void add_clamp_kernel(TensorIterator& iter, Scalar alpha_scalar, Scalar min_val,
     });
 }
 
-void atan2_kernel(TensorIterator& iter) {
+void atan2_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atan2_cpu", [&]() {
     cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
     return std::atan2(a, b);
@@ -74,11 +95,11 @@ void atan2_kernel(TensorIterator& iter) {
 
 // Note: Undefined behavior when performing subtraction is intentionally
 // ignored.
-void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) __ubsan_ignore_undefined__ {
+void sub_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) __ubsan_ignore_undefined__ {
   add_kernel(iter, -alpha_scalar);
 }
 
-void mul_kernel(TensorIterator& iter) {
+void mul_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
   } else {
@@ -92,25 +113,98 @@ void mul_kernel(TensorIterator& iter) {
   }
 }
 
-void div_kernel(TensorIterator& iter) {
-  if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
+void div_true_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "div_cpu", [&]() {
+    cpu_kernel_vec(iter,
+      [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+        return a / b;
+      },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        return a / b;
+      });
+  });
+}
+
+void div_trunc_kernel(TensorIteratorBase& iter) {
+  const auto dtype = iter.common_dtype();
+  if (isIntegralType(dtype, /*includeBool*/ false)) {
     // There's no SIMD integer division, so don't try to vectorize it.
     // TODO: if the divisor is a scalar, rewrite as multiplication by a constant.
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "div_cpu", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_trunc_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
         return a / b;
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_trunc_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return a / b;
+          return std::trunc(a / b);
         },
         [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-          return a / b;
+          return (a / b).trunc();
         });
+    });
+  }
+}
+
+// NOTE: [Floor Division in Python]
+// Python's __floordiv__ operator is more complicated than just floor(a / b).
+// It aims to maintain the property: a == (a // b) * b + remainder(a, b)
+// which can otherwise fail due to rounding errors in the remainder.
+// So, instead it is calculated as: a // b = (a - remainder(a, b)) / b
+// With some additional fix-ups added to the result.
+//
+// For reference, see CPython's implementation:
+// https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
+
+void div_floor_kernel(TensorIteratorBase& iter) {
+  const auto dtype = iter.common_dtype();
+  if (dtype == kByte) {
+    // In the special case of unsigned integer division, floor division is
+    // equivalent to truncation division (since the signs of the divisor and
+    // dividend are always the same)
+    return div_trunc_kernel(iter);
+  } else if (isIntegralType(dtype, /*includeBool*/ false)) {
+    // There's no SIMD integer division, so don't try to vectorize it.
+    AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        TORCH_CHECK(b != 0, "ZeroDivisionError");
+        if ((a < 0) != (b < 0)) {
+          // Subtracts one from the results of truncation division if the
+          // divisor and dividend have different sign(bit)s and the remainder of
+          // the division is nonzero
+          const auto quot = a / b;
+          const auto rem = a % b;
+          return rem ? quot - 1 : quot;
+        }
+
+        return a / b;
+      });
+    });
+  } else {
+    // See NOTE: [Floor Division in Python]
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
+      cpu_kernel(iter,
+          [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+            auto mod = std::fmod(a, b);
+            auto div = (a - mod) / b;
+            if ((mod != 0) && (b < 0) != (mod < 0)) {
+              div -= scalar_t(1);
+            }
+
+            scalar_t floordiv;
+            if (div != 0) {
+              floordiv = std::floor(div);
+              if (div - floordiv > scalar_t(0.5)) {
+                floordiv += scalar_t(1.0);
+              }
+            } else {
+              floordiv = copysign(scalar_t(0), a / b);
+            }
+            return floordiv;
+          });
     });
   }
 }
@@ -554,6 +648,28 @@ void smooth_l1_kernel(TensorIterator& iter, double beta) {
       });
 }
 
+void huber_kernel(TensorIterator& iter, double delta) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "huber_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
+    const scalar_t delta_val(delta);
+    const Vec delta_val_vec(delta_val);
+    const Vec point_five_vec(static_cast<scalar_t>(0.5));
+    cpu_kernel_vec(
+      iter,
+      [&delta_val](scalar_t a, scalar_t b) -> scalar_t {
+        auto z = std::abs(a - b);
+        return z < delta_val ? static_cast<scalar_t>(0.5) * z * z :
+        delta_val * (z - static_cast<scalar_t>(0.5) * delta_val);
+      },
+      [&delta_val_vec, &point_five_vec](Vec a, Vec b) {
+        auto z = (a - b).abs();
+        return Vec::blendv(point_five_vec * z * z,
+          delta_val_vec * (z - point_five_vec * delta_val_vec),
+          z >= delta_val_vec);
+    });
+  });
+}
+
 void sigmoid_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
@@ -567,7 +683,7 @@ void sigmoid_backward_kernel(TensorIterator& iter) {
   });
 }
 
-void logit_backward_kernel(TensorIterator& iter, Scalar eps_scalar) {
+void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.dtype(), "logit_backward_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
@@ -816,24 +932,7 @@ void heaviside_kernel(TensorIterator& iter) {
   });
 }
 
-template<typename T>
-T copysign(T a, T b) {
-  return std::copysign(a, b);
-}
-
-// Implement copysign for half precision floats using bit ops
-// Sign is the most significant bit for both half and bfloat16 types
-template<>
-c10::Half copysign(c10::Half a, c10::Half b) {
-  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
-}
-
-template<>
-c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
-   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
-}
-
-void copysign_kernel(TensorIterator& iter) {
+void copysign_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "copysign_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         return copysign(a, b);
@@ -861,7 +960,9 @@ REGISTER_DISPATCH(add_stub, &add_kernel);
 REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
-REGISTER_DISPATCH(div_stub, &div_kernel);
+REGISTER_DISPATCH(div_true_stub, &div_true_kernel);
+REGISTER_DISPATCH(div_trunc_stub, &div_trunc_kernel);
+REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel);
 REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel);
@@ -883,6 +984,7 @@ REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
 REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
 REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
+REGISTER_DISPATCH(huber_stub, &huber_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel);
 REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);

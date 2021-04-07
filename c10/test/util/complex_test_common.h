@@ -3,7 +3,9 @@
 #include <sstream>
 #include <c10/util/complex.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/hash.h>
 #include <gtest/gtest.h>
+#include <unordered_map>
 
 #if (defined(__CUDACC__) || defined(__HIPCC__))
 #define MAYBE_GLOBAL __global__
@@ -51,7 +53,7 @@ TEST(TestMemory, ReinterpretCast) {
   ASSERT_EQ(zz.real(), double(1));
   ASSERT_EQ(zz.imag(), double(2));
   }
-  
+
   {
   c10::complex<double> z(3, 4);
   std::complex<double> zz = *reinterpret_cast<std::complex<double>*>(&z);
@@ -82,7 +84,7 @@ TEST(TestMemory, ThrustReinterpretCast) {
   ASSERT_EQ(zz.real(), double(1));
   ASSERT_EQ(zz.imag(), double(2));
   }
-  
+
   {
   c10::complex<double> z(3, 4);
   thrust::complex<double> zz = *reinterpret_cast<thrust::complex<double>*>(&z);
@@ -167,6 +169,17 @@ TEST(TestConstructors, FromThrust) {
 }
 #endif
 
+TEST(TestConstructors, UnorderedMap) {
+  std::unordered_map<c10::complex<double>, c10::complex<double>, c10::hash<c10::complex<double>>> m;
+  auto key1 = c10::complex<double>(2.5, 3);
+  auto key2 = c10::complex<double>(2, 0);
+  auto val1 = c10::complex<double>(2, -3.2);
+  auto val2 = c10::complex<double>(0, -3);
+  m[key1] = val1;
+  m[key2] = val2;
+  ASSERT_EQ(m[key1], val1);
+  ASSERT_EQ(m[key2], val2);
+}
 
 }  // constructors
 
@@ -535,6 +548,10 @@ void test_values_() {
 TEST(TestStd, BasicFunctions) {
   test_values_<float>();
   test_values_<double>();
+  // CSQRT edge cases: checks for overflows which are likely to occur
+  // if square root is computed using polar form
+  ASSERT_LT(std::abs(std::sqrt(c10::complex<float>(-1e20, -4988429.2)).real()), 3e-4);
+  ASSERT_LT(std::abs(std::sqrt(c10::complex<double>(-1e60, -4988429.2)).real()), 3e-4);
 }
 
 } // namespace test_std

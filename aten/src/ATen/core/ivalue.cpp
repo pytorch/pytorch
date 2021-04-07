@@ -4,6 +4,7 @@
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
 #include <cmath>
@@ -81,7 +82,7 @@ TypePtr IValue::type() const {
     case Tag::Double:
       return FloatType::get();
     case Tag::ComplexDouble:
-      return ComplexDoubleType::get();
+      return ComplexType::get();
     case Tag::Int:
       return IntType::get();
     case Tag::Bool:
@@ -407,7 +408,7 @@ std::ostream& printList(
     const std::string finish,
     IValueFormatter formatter) {
   out << start;
-  for (size_t i = 0; i < list.size(); ++i) {
+  for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
       out << ", ";
     }
@@ -463,7 +464,7 @@ std::ostream& printMaybeAnnotatedDict(
     std::ostream& out,
     const IValue& the_dict,
     IValueFormatter formatter) {
-  auto value_type = the_dict.type()->cast<DictType>()->getValueType();
+  auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
   if (the_dict.toGenericDict().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type()->annotation_str() << ",";
@@ -472,6 +473,18 @@ std::ostream& printMaybeAnnotatedDict(
     return printDict(out, the_dict.toGenericDict(), formatter);
   }
   return out;
+}
+
+std::ostream& printComplex(std::ostream & out, const IValue & v) {
+  c10::complex<double> d = v.toComplexDouble();
+  IValue real(d.real()), imag(std::abs(d.imag()));
+  auto sign = "";
+  if (d.imag() >= 0) {
+    sign = "+";
+  } else {
+    sign = "-";
+  }
+  return out << real << sign << imag << "j";
 }
 
 std::ostream& IValue::repr(
@@ -507,6 +520,9 @@ std::ostream& IValue::repr(
       auto orig_prec = out.precision();
       return out << std::setprecision(std::numeric_limits<double>::max_digits10)
                  << d << std::setprecision(orig_prec);
+    }
+    case IValue::Tag::ComplexDouble: {
+      return printComplex(out, v);
     }
     case IValue::Tag::Int:
       return out << v.toInt();
@@ -609,7 +625,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
 
       std::vector<IValueComparator> elements_lts;
       elements_lts.reserve(n);
-      for (size_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         elements_lts.push_back(getLessThanComparator(elements[i]));
       }
 
@@ -617,7 +633,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
         const auto& a_elements = a.toTuple()->elements();
         const auto& b_elements = b.toTuple()->elements();
 
-        for (size_t i = 0; i < n; ++i) {
+        for (const auto i : c10::irange(n)) {
           if (elements_lts[i](a_elements[i], b_elements[i])) {
             return true;
           }
@@ -693,15 +709,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
         << v.toDouble()
         << std::setprecision(orig_prec);
     } case IValue::Tag::ComplexDouble: {
-      c10::complex<double> d = v.toComplexDouble();
-      IValue real(d.real()), imag(std::abs(d.imag()));
-      auto sign = "";
-      if (d.imag() >= 0) {
-        sign = "+";
-      } else {
-        sign = "-";
-      }
-      return out << real << sign << imag << "j";
+      return printComplex(out, v);
     } case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::Bool:
@@ -841,6 +849,10 @@ IValue IValue::deepcopy(
   return copy;
 }
 
+void IValue::reportToTensorTypeError() const {
+  TORCH_CHECK(false, "Expected Tensor but got ", tagKind());
+}
+
 std::string ivalue::Object::name() const {
   return type()->name()->qualifiedName();
 }
@@ -867,7 +879,7 @@ void ivalue::Object::resizeObject(size_t slot) {
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
   auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
-  for (auto i = 0; i < slots_.size(); ++i) {
+  for (const auto i : c10::irange(slots_.size())) {
     object->setSlot(i, slots_[i]);
   }
   return object;
@@ -880,7 +892,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
   auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
-  for (size_t i = 0; i < slots_.size(); ++i) {
+  for (const auto i : c10::irange(slots_.size())) {
     if (slots_[i].type() == c10::CapsuleType::get()) {
       // If we've gotten here, it means that we have *not* copied this
       // class via __getstate__ and __setstate__. That fact and the
@@ -935,17 +947,24 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
   };
 
   auto ctx = std::make_shared<Ctx>(std::move(srcs));
-  std::function<void()> func = [ctx]() {
-    if (--ctx->remaining == 0) {
-      ctx->dstFuture->markCompleted(ctx->asIvalue);
-    }
-  };
   if (ctx->srcFutures.size() == 0) {
     ctx->dstFuture->markCompleted(ctx->asIvalue);
   } else {
     auto typePtr = ctx->srcFutures.get(0)->elementType();
-    for (int32_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
-      TORCH_CHECK(i == 0 || *ctx->srcFutures.get(i)->elementType() == *typePtr);
+    for (const auto i : c10::irange(ctx->srcFutures.size())) {
+
+      auto fut = ctx->srcFutures.get(i);
+      std::function<void()> func = [ctx, fut]() {
+        // Set error and exit early if encountered.
+        if (fut->hasError()) {
+          ctx->dstFuture->setErrorIfNeeded(fut->exception_ptr());
+          return;
+        }
+
+        if (--ctx->remaining == 0 && !ctx->dstFuture->completed()) {
+          ctx->dstFuture->markCompleted(ctx->asIvalue);
+        }
+      };
       ctx->srcFutures.get(i)->addCallback(func);
     }
   }
@@ -960,7 +979,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     return res;
   }
   TypePtr typePtr = srcs.get(0)->elementType();
-  for (size_t i = 0, tot = srcs.size(); i < tot; ++i) {
+  for (const auto i : c10::irange(srcs.size())) {
     if (srcs.get(i)->completed()) {
       return srcs.get(i);
     }
@@ -989,7 +1008,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
       }
     }
   };
-  for (size_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
+  for (const auto i : c10::irange(ctx->srcFutures.size())) {
     ctx->srcFutures.get(i)->addCallback([func, i]() { func(i); });
   }
   return ctx->dstFuture;

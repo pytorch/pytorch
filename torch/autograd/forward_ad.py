@@ -65,7 +65,7 @@ def make_dual(tensor, tangent, *, level=None):
         raise RuntimeError("Trying to create a dual Tensor for forward AD but no level "
                            "exists, make sure to enter_dual_level() first.")
 
-    return torch.make_dual(tensor, tangent, level=level)
+    return torch._VF._make_dual(tensor, tangent, level=level)
 
 def unpack_dual(tensor, *, level=None):
     r"""Function that unpacks a "dual object" to recover two plain tensors, one representing
@@ -80,7 +80,7 @@ def unpack_dual(tensor, *, level=None):
     if level < 0:
         return tensor, None
 
-    return torch.unpack_dual(tensor, level=level)
+    return torch._VF._unpack_dual(tensor, level=level)
 
 class dual_level(_DecoratorContextManager):
     r"""Context-manager that controls the current forward ad level. It

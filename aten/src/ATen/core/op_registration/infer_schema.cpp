@@ -21,6 +21,10 @@ std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
 C10_EXPORT FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
   return FunctionSchema(std::move(name), std::move(overload_name), createArgumentVector(arguments), createArgumentVector(returns));
 }
+
+C10_EXPORT FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
+  return make_function_schema("", "", arguments, returns);
+}
 }
 }
 

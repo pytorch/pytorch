@@ -5,14 +5,22 @@
 ONNXIFI a Caffe2 net
 """
 
-
-
-
-
-
 from caffe2.proto import caffe2_pb2
 import caffe2.python._import_c_extension as C
 
+
+def onnxifi_set_option(option_name, option_value):
+    """
+    Set onnxifi option
+    """
+    return C.onnxifi_set_option(option_name, str(option_value))
+
+
+def onnxifi_get_option(option_name):
+    """
+    Get onnxifi option
+    """
+    return C.onnxifi_get_option(option_name)
 
 def onnxifi_caffe2_net(
         pred_net,

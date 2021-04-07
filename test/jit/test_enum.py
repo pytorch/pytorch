@@ -348,3 +348,13 @@ class TestEnum(JitTestCase):
         # PURPLE always appears last because we follow Python's Enum definition order.
         self.assertEqual(scripted(Color.RED), [Color.GREEN.value, Color.BLUE.value])
         self.assertEqual(scripted(Color.GREEN), [Color.RED.value, Color.BLUE.value])
+
+    # Tests that explicitly and/or repeatedly scripting an Enum class is permitted.
+    def test_enum_explicit_script(self):
+
+        @torch.jit.script
+        class Color(Enum):
+            RED = 1
+            GREEN = 2
+
+        torch.jit.script(Color)

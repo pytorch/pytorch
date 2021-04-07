@@ -63,8 +63,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         weights ? THCTensor_(data)(state, weights) : NULL,
         n_classes,
         ignore_index);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-    THCudaCheck(cudaGetLastError());
     if (weights) {
       THCTensor_(free)(state, weights);
     }
@@ -96,7 +96,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         n_classes,
         ignore_index
     );
-
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 2) {
     cunn_ClassNLLCriterion_updateOutput_kernel<scalar_t, accreal>
       <<<1, NTHREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
@@ -111,8 +111,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         n_classes,
         ignore_index
     );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  THCudaCheck(cudaGetLastError());
 
   if (weights) {
     THCTensor_(free)(state, weights);
@@ -186,8 +186,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         weights ? THCTensor_(data)(state, weights) : NULL,
         n_classes,
         ignore_index);
-
-    THCudaCheck(cudaGetLastError());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     if (weights) {
       THCTensor_(free)(state, weights);
@@ -217,6 +216,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         n_classes,
         ignore_index
     );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     cunn_ClassNLLCriterion_updateGradInput_kernel<scalar_t>
       <<<1, NTHREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
@@ -231,8 +231,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         n_classes,
         ignore_index
     );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  THCudaCheck(cudaGetLastError());
 
   if (weights) {
     THCTensor_(free)(state, weights);

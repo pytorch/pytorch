@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # in ScriptModule or pass it to a ScriptFunction
 # _ScriptLocalOptimizerInterface serves as a common
 # interface type for Optimizer ScriptModules.
-# 
+#
 # TODO (wanchaol): remove this once we added TorchScript
 # class reference semantics
 @jit.interface
@@ -149,6 +149,13 @@ class DistributedOptimizer:
     at a time. This means that the gradients being applied may not correspond
     to the latest forward pass executed on a given worker. Also, there is no
     guaranteed ordering across workers.
+
+    `DistributedOptimizer` creates the local optimizer with TorchScript enabled
+    by default, so that optimizer updates are not blocked by the Python Global
+    Interpreter Lock (GIL) during multithreaded training (e.g. Distributed Model
+    Parallel). This feature is currently in beta stage, enabled for optimizers
+    including `Adagrad`, `Adam`, `SGD`, `RMSprop`, `AdamW` and `Adadelta`. We
+    are increasing the coverage to all optimizers in future releases.
 
     Args:
         optimizer_class (optim.Optimizer): the class of optimizer to

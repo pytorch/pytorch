@@ -13,7 +13,7 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 ir_version = _C._onnx.IR_VERSION
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
-constant_folding_opset_versions = [9, 10, 11, 12]
+constant_folding_opset_versions = [9, 10, 11, 12, 13]
 
 
 class ExportTypes:
@@ -42,60 +42,60 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
     Args:
         model (torch.nn.Module): the model to be exported.
-        args (tuple of arguments or torch.Tensor, a dictionary consisting of named arguments (optional)): 
-            a dictionary to specify the input to the corresponding named parameter: 
-            - KEY: str, named parameter 
-            - VALUE: corresponding input 
-            args can be structured either as: 
+        args (tuple of arguments or torch.Tensor, a dictionary consisting of named arguments (optional)):
+            a dictionary to specify the input to the corresponding named parameter:
+            - KEY: str, named parameter
+            - VALUE: corresponding input
+            args can be structured either as:
 
-            1. ONLY A TUPLE OF ARGUMENTS or torch.Tensor:: 
+            1. ONLY A TUPLE OF ARGUMENTS or torch.Tensor::
 
-                ‘’args = (x, y, z)’'  
+                "args = (x, y, z)"
 
-            The inputs to the model, e.g., such that ``model(*args)`` is a valid invocation 
+            The inputs to the model, e.g., such that ``model(*args)`` is a valid invocation
             of the model. Any non-Tensor arguments will be hard-coded into the exported model;
-            any Tensor arguments will become inputs of the exported model, in the order they 
-            occur in args. If args is a Tensor, this is equivalent to having 
-            called it with a 1-ary tuple of that Tensor. 
+            any Tensor arguments will become inputs of the exported model, in the order they
+            occur in args. If args is a Tensor, this is equivalent to having
+            called it with a 1-ary tuple of that Tensor.
 
-            2. A TUPLE OF ARGUEMENTS WITH A DICTIONARY OF NAMED PARAMETERS:: 
+            2. A TUPLE OF ARGUEMENTS WITH A DICTIONARY OF NAMED PARAMETERS::
 
-                ‘’args = (x, 
-                        { 
-                        ‘y’: input_y, 
-                        ‘z’: input_z 
-                        }) ‘’ 
+                "args = (x,
+                        {
+                        'y': input_y,
+                        'z': input_z
+                        })"
 
-            The inputs to the model are structured as a tuple consisting of  
-            non-keyword arguments and the last value of this tuple being a dictionary 
-            consisting of named parameters and the corresponding inputs as key-value pairs. 
-            If certain named argument is not present in the dictionary, it is assigned  
-            the default value, or None if default value is not provided. 
+            The inputs to the model are structured as a tuple consisting of
+            non-keyword arguments and the last value of this tuple being a dictionary
+            consisting of named parameters and the corresponding inputs as key-value pairs.
+            If certain named argument is not present in the dictionary, it is assigned
+            the default value, or None if default value is not provided.
 
-            Cases in which an dictionary input is the last input of the args tuple 
-            would cause a conflict when a dictionary of named parameters is used. 
-            The model below provides such an example. 
+            Cases in which an dictionary input is the last input of the args tuple
+            would cause a conflict when a dictionary of named parameters is used.
+            The model below provides such an example.
 
-                class Model(torch.nn.Module): 
-                    def forward(self, k, x): 
-                        ... 
-                        return x 
+                class Model(torch.nn.Module):
+                    def forward(self, k, x):
+                        ...
+                        return x
 
-                m = Model() 
-                k = torch.randn(2, 3)   
-                x = {torch.tensor(1.): torch.randn(2, 3)} 
+                m = Model()
+                k = torch.randn(2, 3)
+                x = {torch.tensor(1.): torch.randn(2, 3)}
 
                 In the previous iteration, the call to export API would look like
 
-                    torch.onnx.export(model, (k, x), ‘test.onnx’) 
+                    torch.onnx.export(model, (k, x), 'test.onnx')
 
-                This would work as intended. However, the export function 
-                would now assume that the ‘x’ input is intended to represent the optional 
-                dictionary consisting of named arguments. In order to prevent this from being 
-                an issue a constraint is placed to provide an empty dictionary as the last 
-                input in the tuple args in such cases. The new call would look like this. 
+                This would work as intended. However, the export function
+                would now assume that the `x` input is intended to represent the optional
+                dictionary consisting of named arguments. In order to prevent this from being
+                an issue a constraint is placed to provide an empty dictionary as the last
+                input in the tuple args in such cases. The new call would look like this.
 
-                    torch.onnx.export(model, (k, x, {}), ‘test.onnx’) 
+                    torch.onnx.export(model, (k, x, {}), 'test.onnx')
 
         f: a file-like object (has to implement fileno that returns a file descriptor)
             or a string containing a file name.  A binary Protobuf will be written
@@ -255,7 +255,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             to 1 by default.
         enable_onnx_checker (bool, default True): If True the onnx model checker will be run
             as part of the export, to ensure the exported model is a valid ONNX model.
-        external_data_format (bool, default False): If True, then the model is exported
+        use_external_data_format (bool, default False): If True, then the model is exported
             in ONNX external data format, in which case some of the model parameters are stored
             in external binary files and not in the ONNX model file itself. See link for format
             details:

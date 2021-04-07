@@ -111,6 +111,43 @@
         paths:
           - .
 
+  pytorch_macos_10_15_py3_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-macos-10.15-py3-arm64-build
+    macos:
+      xcode: "12.3.0"
+    steps:
+      - checkout
+      - run_brew_for_macos_build
+      - run:
+          name: Build
+          no_output_timeout: "1h"
+          command: |
+            set -e
+            export IN_CI=1
+            export CROSS_COMPILE_ARM64=1
+
+            # Install sccache
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
+
+            # This IAM user allows write access to S3 bucket for sccache
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            set -x
+
+            chmod a+x .jenkins/pytorch/macos-build.sh
+            unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
+
+      - persist_to_workspace:
+          root: /Users/distiller/workspace/
+          paths:
+            - miniconda3
+      - store_artifacts:
+          path: /Users/distiller/project/dist
+
   pytorch_macos_10_13_py3_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
@@ -127,7 +164,7 @@
             export IN_CI=1
 
             # Install sccache
-            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 
@@ -164,6 +201,28 @@
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
+      - store_test_results:
+          path: test/test-reports
+
+  pytorch_macos_10_13_py3_lite_interpreter_build_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
+    macos:
+      xcode: "12.0"
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/workspace
+      - run_brew_for_macos_build
+      - run:
+          name: Test
+          no_output_timeout: "1h"
+          command: |
+            set -e
+            export IN_CI=1
+            export BUILD_LITE_INTERPRETER=1
+            chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
+            unbuffer ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
       - store_test_results:
           path: test/test-reports
 
@@ -361,7 +420,7 @@
           echo "DOCKER_IMAGE: ${DOCKER_IMAGE}:${DOCKER_TAG}"
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
 
-          git submodule sync && git submodule update -q --init --recursive
+          git submodule sync && git submodule update -q --init --recursive --depth 1
           VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
           export id=$(docker run --env-file "${BASH_ENV}" ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
@@ -425,12 +484,12 @@
                 $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
             }
 
-            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests --yes
+            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
 
             # sync submodules
             cd ${PROJ_ROOT}
             git submodule sync
-            git submodule update --init --recursive
+            git submodule update --init --recursive --depth 1
 
             # export
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
@@ -440,6 +499,7 @@
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
             echo "USE_PYTORCH_METAL": "${USE_METAL}"
+            echo "BUILD_LITE_INTERPRETER": "${BUILD_LITE_INTERPRETER}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -457,6 +517,10 @@
           no_output_timeout: "30m"
           command: |
             set -e
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              echo "Run Build Test is not for BUILD_LITE_INTERPRETER, skipping."
+              exit 0
+            fi
             PROJ_ROOT=/Users/distiller/project
             PROFILE=PyTorch_CI_2021
             # run the ruby build script
@@ -481,6 +545,9 @@
             set -e
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
+              exit 0
+            elif [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              echo "Run Simulator Tests is not for BUILD_LITE_INTERPRETER, skipping."
               exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
@@ -515,7 +582,7 @@
 
           echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
 
-          git submodule sync && git submodule update -q --init --recursive
+          git submodule sync && git submodule update -q --init --recursive --depth 1
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 

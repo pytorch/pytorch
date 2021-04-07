@@ -144,7 +144,8 @@ static void ReplaceAddWithConcat(Block* b) {
         continue;
       }
 
-      TypePtr elem = it->input(0)->type()->cast<ListType>()->getElementType();
+      TypePtr elem =
+          it->input(0)->type()->castRaw<ListType>()->getElementType();
       if (elem->cast<IntType>()) {
         Node* concat_node = b->owningGraph()->create(onnx::Concat, 1);
         concat_node->i_(attr::axis, 0);
@@ -198,7 +199,7 @@ static void fuseListAndListUnpack(Block* b) {
             it->input()->type()->cast<ListType>() &&
             it->input()
                 ->type()
-                ->cast<ListType>()
+                ->castRaw<ListType>()
                 ->getElementType()
                 ->cast<IntType>()) {
           Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);

@@ -10,23 +10,27 @@ a single data type.
 
 Torch defines 10 tensor types with CPU and GPU variants which are as follows:
 
-========================== ===========================================   ============================= ================================
-Data type                  dtype                                         CPU tensor                    GPU tensor
-========================== ===========================================   ============================= ================================
-32-bit floating point      ``torch.float32`` or ``torch.float``          :class:`torch.FloatTensor`    :class:`torch.cuda.FloatTensor`
-64-bit floating point      ``torch.float64`` or ``torch.double``         :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
-16-bit floating point [1]_ ``torch.float16`` or ``torch.half``           :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
-16-bit floating point [2]_ ``torch.bfloat16``                            :class:`torch.BFloat16Tensor` :class:`torch.cuda.BFloat16Tensor`
-32-bit complex             ``torch.complex32``
-64-bit complex             ``torch.complex64``
-128-bit complex            ``torch.complex128`` or ``torch.cdouble``
-8-bit integer (unsigned)   ``torch.uint8``                               :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
-8-bit integer (signed)     ``torch.int8``                                :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
-16-bit integer (signed)    ``torch.int16`` or ``torch.short``            :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
-32-bit integer (signed)    ``torch.int32`` or ``torch.int``              :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
-64-bit integer (signed)    ``torch.int64`` or ``torch.long``             :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
-Boolean                    ``torch.bool``                                :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
-========================== ===========================================   ============================= ================================
+======================================= =========================================== ============================= ================================
+Data type                               dtype                                       CPU tensor                    GPU tensor
+======================================= =========================================== ============================= ================================
+32-bit floating point                   ``torch.float32`` or ``torch.float``        :class:`torch.FloatTensor`    :class:`torch.cuda.FloatTensor`
+64-bit floating point                   ``torch.float64`` or ``torch.double``       :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
+16-bit floating point [1]_              ``torch.float16`` or ``torch.half``         :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
+16-bit floating point [2]_              ``torch.bfloat16``                          :class:`torch.BFloat16Tensor` :class:`torch.cuda.BFloat16Tensor`
+32-bit complex                          ``torch.complex32``
+64-bit complex                          ``torch.complex64``
+128-bit complex                         ``torch.complex128`` or ``torch.cdouble``
+8-bit integer (unsigned)                ``torch.uint8``                             :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
+8-bit integer (signed)                  ``torch.int8``                              :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
+16-bit integer (signed)                 ``torch.int16`` or ``torch.short``          :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
+32-bit integer (signed)                 ``torch.int32`` or ``torch.int``            :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
+64-bit integer (signed)                 ``torch.int64`` or ``torch.long``           :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
+Boolean                                 ``torch.bool``                              :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
+quantized 8-bit integer (unsigned)      ``torch.quint8``                            :class:`torch.ByteTensor`     /
+quantized 8-bit integer (signed)        ``torch.qint8``                             :class:`torch.CharTensor`     /
+quantized 32-bit integer (signed)       ``torch.qfint32``                           :class:`torch.IntTensor`      /
+quantized 4-bit integer (unsigned) [3]_ ``torch.quint4x2``                          :class:`torch.ByteTensor`     /
+======================================= =========================================== ============================= ================================
 
 .. [1]
   Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
@@ -35,6 +39,8 @@ Boolean                    ``torch.bool``                                :class:
   Sometimes referred to as Brain Floating Point: uses 1 sign, 8 exponent, and 7
   significand bits. Useful when range is important, since it has the same
   number of exponent bits as ``float32``
+.. [3]
+  quantized 4-bit integer is stored as a 8-bit signed integer. Currently it's only supported in EmbeddingBag operator.
 
 :class:`torch.Tensor` is an alias for the default tensor type (:class:`torch.FloatTensor`).
 
@@ -153,6 +159,11 @@ view of a storage and defines numeric operations on it.
      (see :ref:`tensor-creation-ops`).
    - To create a tensor with similar type but different size as another tensor,
      use ``tensor.new_*`` creation ops.
+
+   .. warning::
+      The :class:`torch.Tensor` constructor is deprecated. Instead, consider using:
+      :func:`torch.tensor` for creating tensors from tensor-like objects (e.g. lists and tuples);
+      or :func:`torch.empty` for creating uninitialized tensors with specific sizes (e.g. int).
 
    .. automethod:: new_tensor
    .. automethod:: new_full
@@ -290,6 +301,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: fill_diagonal_
    .. automethod:: fmax
    .. automethod:: fmin
+   .. automethod:: diff
    .. automethod:: digamma
    .. automethod:: digamma_
    .. automethod:: dim
@@ -336,6 +348,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: fmod_
    .. automethod:: frac
    .. automethod:: frac_
+   .. automethod:: frexp
    .. automethod:: gather
    .. automethod:: gcd
    .. automethod:: gcd_
@@ -609,6 +622,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: to
    .. automethod:: to_mkldnn
    .. automethod:: take
+   .. automethod:: take_along_dim
    .. automethod:: tan
    .. automethod:: tan_
    .. automethod:: tanh

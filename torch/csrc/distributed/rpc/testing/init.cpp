@@ -67,6 +67,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       module, "FaultyProcessGroupAgent", rpc_module.attr("ProcessGroupAgent"))
       .def(
           py::init<
+              const c10::intrusive_ptr<::c10d::Store>,
               std::string,
               c10::intrusive_ptr<::c10d::ProcessGroup>,
               int,
@@ -74,6 +75,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
               const std::vector<std::string>&,
               const std::unordered_map<std::string, float>&,
               int>(),
+          py::arg("store"),
           py::arg("name"),
           py::arg("process_group"),
           py::arg("num_send_recv_threads"),
@@ -84,7 +86,8 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "join",
           &ProcessGroupAgent::join,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          py::arg("shutdown") = false)
       .def(
           "shutdown",
           &ProcessGroupAgent::shutdown,

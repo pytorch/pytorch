@@ -47,9 +47,9 @@ void multinomial_with_replacement_apply(
     for (int64_t j = 0; j < n_categories; j++) {
       val = self_ptr[i * self_stride_0 + j * self_stride_1];
       TORCH_CHECK(val >= 0, "invalid multinomial distribution (encountering probability entry < 0)");
-// NB: std::isfinite doesn't bode well with clang for half datatypes,
+// NB: std::isfinite doesn't bode well with libc++ for half datatypes,
 // so we manually cast it to a double and perform the check.
-#if defined(__clang__)
+#if defined(_LIBCPP_VERSION)
       TORCH_CHECK(std::isfinite(static_cast<double>(val)),
                   "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
 #else

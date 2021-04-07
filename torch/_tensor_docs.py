@@ -1158,6 +1158,13 @@ floor_divide_(value) -> Tensor
 In-place version of :meth:`~Tensor.floor_divide`
 """)
 
+add_docstr_all('diff',
+               r"""
+diff(n=1, dim=-1, prepend=None, append=None) -> Tensor
+
+See :func:`torch.diff`
+""")
+
 add_docstr_all('digamma',
                r"""
 digamma() -> Tensor
@@ -1187,25 +1194,25 @@ See :func:`torch.dist`
 """)
 
 add_docstr_all('div', r"""
-div(value) -> Tensor
+div(value, *, rounding_mode=None) -> Tensor
 
 See :func:`torch.div`
 """)
 
 add_docstr_all('div_', r"""
-div_(value) -> Tensor
+div_(value, *, rounding_mode=None) -> Tensor
 
 In-place version of :meth:`~Tensor.div`
 """)
 
 add_docstr_all('divide', r"""
-divide(value) -> Tensor
+divide(value, *, rounding_mode=None) -> Tensor
 
 See :func:`torch.divide`
 """)
 
 add_docstr_all('divide_', r"""
-divide_(value) -> Tensor
+divide_(value, *, rounding_mode=None) -> Tensor
 
 In-place version of :meth:`~Tensor.divide`
 """)
@@ -1430,6 +1437,13 @@ add_docstr_all('frac_',
 frac_() -> Tensor
 
 In-place version of :meth:`~Tensor.frac`
+""")
+
+add_docstr_all('frexp',
+               r"""
+frexp(input) -> (Tensor mantissa, Tensor exponent)
+
+See :func:`torch.frexp`
 """)
 
 add_docstr_all('flatten',
@@ -1682,12 +1696,12 @@ See :func:`torch.histc`
 
 add_docstr_all('index_add_',
                r"""
-index_add_(dim, index, tensor) -> Tensor
+index_add_(dim, index, tensor, *, alpha=1) -> Tensor
 
-Accumulate the elements of :attr:`tensor` into the :attr:`self` tensor by adding
-to the indices in the order given in :attr:`index`. For example, if ``dim == 0``
-and ``index[i] == j``, then the ``i``\ th row of :attr:`tensor` is added to the
-``j``\ th row of :attr:`self`.
+Accumulate the elements of attr:`alpha` times :attr:`tensor` into the :attr:`self`
+tensor by adding to the indices in the order given in :attr:`index`. For example,
+if ``dim == 0``, ``index[i] == j``, and ``alpha=-1``, then the ``i``\ th row of
+:attr:`tensor` is subtracted from the ``j``\ th row of :attr:`self`.
 
 The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
@@ -1701,6 +1715,9 @@ Args:
     index (IntTensor or LongTensor): indices of :attr:`tensor` to select from
     tensor (Tensor): the tensor containing values to add
 
+Keyword args:
+    alpha (Number): the scalar multiplier for :attr:`tensor`
+
 Example::
 
     >>> x = torch.ones(5, 3)
@@ -1712,6 +1729,12 @@ Example::
             [  8.,   9.,  10.],
             [  1.,   1.,   1.],
             [  5.,   6.,   7.]])
+    >>> x.index_add_(0, index, t, alpha=-1)
+    tensor([[  1.,   1.,   1.],
+            [  1.,   1.,   1.],
+            [  1.,   1.,   1.],
+            [  1.,   1.,   1.],
+            [  1.,   1.,   1.]])
 """.format(**reproducibility_notes))
 
 add_docstr_all('index_copy_',
@@ -1752,15 +1775,15 @@ Example::
 
 add_docstr_all('index_fill_',
                r"""
-index_fill_(dim, index, val) -> Tensor
+index_fill_(dim, index, value) -> Tensor
 
-Fills the elements of the :attr:`self` tensor with value :attr:`val` by
+Fills the elements of the :attr:`self` tensor with value :attr:`value` by
 selecting the indices in the order given in :attr:`index`.
 
 Args:
     dim (int): dimension along which to index
     index (LongTensor): indices of :attr:`self` tensor to fill in
-    val (float): the value to fill with
+    value (float): the value to fill with
 
 Example::
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float)
@@ -2256,11 +2279,12 @@ masked_select(mask) -> Tensor
 See :func:`torch.masked_select`
 """)
 
-add_docstr_all('matrix_power',
-               r"""
+add_docstr_all('matrix_power', r"""
 matrix_power(n) -> Tensor
 
-See :func:`torch.matrix_power`
+.. note:: :meth:`~Tensor.matrix_power` is deprecated, use :func:`torch.linalg.matrix_power` instead.
+
+Alias for :func:`torch.linalg.matrix_power`
 """)
 
 add_docstr_all('matrix_exp',
@@ -2463,9 +2487,9 @@ narrow_copy(dimension, start, length) -> Tensor
 
 Same as :meth:`Tensor.narrow` except returning a copy rather
 than shared storage.  This is primarily for sparse tensors, which
-do not have a shared-storage narrow method.  Calling ```narrow_copy``
-with ```dimemsion > self.sparse_dim()``` will return a copy with the
-relevant dense dimension narrowed, and ```self.shape``` updated accordingly.
+do not have a shared-storage narrow method.  Calling ``narrow_copy``
+with ``dimemsion > self.sparse_dim()`` will return a copy with the
+relevant dense dimension narrowed, and ``self.shape`` updated accordingly.
 """)
 
 add_docstr_all('ndimension',
@@ -2678,19 +2702,22 @@ See :func:`torch.prod`
 
 add_docstr_all('put_',
                r"""
-put_(indices, tensor, accumulate=False) -> Tensor
+put_(index, source, accumulate=False) -> Tensor
 
-Copies the elements from :attr:`tensor` into the positions specified by
-indices. For the purpose of indexing, the :attr:`self` tensor is treated as if
+Copies the elements from :attr:`source` into the positions specified by
+:attr:`index`. For the purpose of indexing, the :attr:`self` tensor is treated as if
 it were a 1-D tensor.
 
-If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
-:attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
+:attr:`index` and :attr:`source` need to have the same number of elements, but not necessarily
+the same shape.
+
+If :attr:`accumulate` is ``True``, the elements in :attr:`source` are added to
+:attr:`self`. If accumulate is ``False``, the behavior is undefined if :attr:`index`
 contain duplicate elements.
 
 Args:
-    indices (LongTensor): the indices into self
-    tensor (Tensor): the tensor containing values to copy from
+    index (LongTensor): the indices into self
+    source (Tensor): the tensor containing values to copy from
     accumulate (bool): whether to accumulate into self
 
 Example::
@@ -2700,6 +2727,14 @@ Example::
     >>> src.put_(torch.tensor([1, 3]), torch.tensor([9, 10]))
     tensor([[  4,   9,   5],
             [ 10,   7,   8]])
+""")
+
+add_docstr_all('put',
+               r"""
+put(input, index, source, accumulate=False) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.put_`.
+`input` corresponds to `self` in :meth:`torch.Tensor.put_`.
 """)
 
 add_docstr_all('qr',
@@ -2716,15 +2751,13 @@ qscheme() -> torch.qscheme
 Returns the quantization scheme of a given QTensor.
 """)
 
-add_docstr_all('quantile',
-               r"""
+add_docstr_all('quantile', r"""
 quantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.quantile`
 """)
 
-add_docstr_all('nanquantile',
-               r"""
+add_docstr_all('nanquantile', r"""
 nanquantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.nanquantile`
@@ -3843,6 +3876,13 @@ add_docstr_all('take',
 take(indices) -> Tensor
 
 See :func:`torch.take`
+""")
+
+add_docstr_all('take_along_dim',
+               r"""
+take_along_dim(indices, dim) -> Tensor
+
+See :func:`torch.take_along_dim`
 """)
 
 add_docstr_all('tan',

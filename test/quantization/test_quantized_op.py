@@ -2090,7 +2090,7 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_batch_norm_relu(self):
         # hypothesis too slow for this test, create test cases manually
-        max_sides = (3, 4, 5)
+        max_sides = (2, 3, 4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
@@ -2114,7 +2114,7 @@ class TestQuantizedOps(TestCase):
                 bias = torch.rand(c).float()
                 eps = 0.001
                 qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-                if len(X.shape) == 3:
+                if len(X.shape) == 2 or len(X.shape) == 3:
                     qy = torch.ops.quantized.batch_norm1d_relu(
                         qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
                 elif len(X.shape) == 4:
@@ -2141,7 +2141,7 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_batch_norm(self):
         # hypothesis too slow for this test, create test cases manually
-        max_sides = (3, 4, 5)
+        max_sides = (2, 3, 4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
         combined = [max_sides, side_lens, torch_types]
@@ -2165,13 +2165,13 @@ class TestQuantizedOps(TestCase):
                 bias = torch.rand(c).float()
                 eps = 0.001
                 qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
-                if len(X.shape) == 3:
+                if len(X.shape) == 2 or len(X.shape) == 3:
                     qy = torch.ops.quantized.batch_norm1d(
                         qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
-                if len(X.shape) == 4:
+                elif len(X.shape) == 4:
                     qy = torch.ops.quantized.batch_norm2d(
                         qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
-                if len(X.shape) == 5:
+                elif len(X.shape) == 5:
                     qy = torch.ops.quantized.batch_norm3d(
                         qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
 
@@ -2400,6 +2400,109 @@ class TestQuantizedOps(TestCase):
                         power > min_power or mse < max_mse,
                         msg=(f"Error is too high: SNR(dB): {power}, "
                              f"Signal: {signal}, MSE: {mse}"))
+
+    @override_qengines
+    def test_custom_module_multi_head_attention(self):
+        class MultiheadAttentionModel(torch.nn.Module):
+            def __init__(self, *args, **kwargs):
+                super(MultiheadAttentionModel, self).__init__()
+                self.layer = torch.nn.MultiheadAttention(*args, **kwargs)
+
+            def forward(self, query, key, value, key_padding_mask=None, need_weights=True, attn_mask=None):
+                return self.layer(query, key, value, key_padding_mask, need_weights, attn_mask)
+
+        qengine = torch.backends.quantized.engine
+
+        min_power = 30
+        max_mse = 2
+
+        num_heads = 16
+        batch_size = 4
+        target_seq_length = 128
+        source_seq_length = 64
+        qembed_dim = 512  # Must be divisible by the number of heads
+        kembed_dim = 128
+        vembed_dim = 256
+
+        dropout = 0  # This is not supported
+
+        Bias = [False, True]
+        Add_bias_kv = [False, True]
+        Add_zero_attn = [False, True]
+
+        dtype = np.uint8
+        qtype = torch.quint8
+
+        custom_module_config = {
+            'float_to_observed_custom_module_class': {
+                torch.nn.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
+            },
+            'observed_to_quantized_custom_module_class': {
+                torch.nn.quantizable.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
+            }
+        }
+
+        for kdim, vdim in ((kembed_dim, vembed_dim), (None, None)):
+            fp_data = [
+                torch.randn(target_seq_length, batch_size, qembed_dim),  # Q
+                torch.randn(source_seq_length, batch_size,
+                            qembed_dim if kdim is None else kembed_dim),  # K
+                torch.randn(source_seq_length, batch_size,
+                            qembed_dim if vdim is None else vembed_dim)   # V
+            ]
+
+            q_data = []
+            reduce_range = (qengine == 'fbgemm')
+            for idx, x in enumerate(fp_data):
+                scale, zero_point = _calculate_dynamic_qparams(
+                    x, dtype=dtype, reduce_range=reduce_range)
+                x = x.to(torch.float)
+                qx = torch.quantize_per_tensor(x, scale=scale,
+                                               zero_point=zero_point, dtype=qtype)
+                q_data.append(qx)
+
+                # Dequantize the data back for reference
+                fp_data[idx] = qx.dequantize()
+
+            with torch.no_grad():
+                for bias, add_bias_kv, add_zero_attn in itertools.product(
+                        Bias, Add_bias_kv, Add_zero_attn):
+                    mha = MultiheadAttentionModel(qembed_dim, num_heads, dropout,
+                                                  bias, add_bias_kv, add_zero_attn,
+                                                  kdim=kdim, vdim=vdim)
+                    mha.eval()
+
+                    # Prepare
+                    mha.qconfig = torch.quantization.get_default_qconfig(qengine)
+                    mha_prepared = torch.quantization.prepare(
+                        mha, prepare_custom_config_dict=custom_module_config)
+
+                    # Calibrate
+                    y = mha_prepared(*fp_data)
+                    y_ref = mha(*fp_data)
+                    # Check the result of the prepare
+                    self.assertEqual(y_ref[0], y[0])  # Attention
+                    self.assertEqual(y_ref[1], y[1])  # Weight
+
+                    # Quantize
+                    mha_quantized = torch.quantization.convert(
+                        mha_prepared,
+                        convert_custom_config_dict=custom_module_config)
+                    qy = mha_quantized(*q_data)
+
+                    # Reference result
+                    mha.layer = mha_quantized.layer.dequantize()
+                    y_ref = mha(*fp_data)
+
+                    snr = _snr(y, qy)
+                    for signal, mse, power in snr:
+                        self.assertTrue(
+                            power > min_power or mse < max_mse,
+                            msg=(f"Error is too high: SNR(dB): {power}, "
+                                 f"Signal: {signal}, MSE: {mse}; "
+                                 f"Run with bias={bias}, "
+                                 f"add_bias_kv={add_bias_kv}, "
+                                 f"add_zero_attn={add_zero_attn}"))
 
 
 class TestDynamicQuantizedLinear(TestCase):

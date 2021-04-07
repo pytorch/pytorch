@@ -72,7 +72,7 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
-inline int64_t getTime() {
+inline int64_t getTime(bool allow_monotonic = false) {
 #if defined(C10_IOS) && defined(C10_MOBILE)
 // clock_gettime is only available on iOS 10.0 or newer. Unlike OS X, iOS can't rely on
 // CLOCK_REALTIME, as it is defined no matter if clock_gettime is implemented or not
@@ -86,7 +86,11 @@ inline int64_t getTime() {
 #else
   // clock_gettime is *much* faster than std::chrono implementation on Linux
   struct timespec t{};
-  clock_gettime(CLOCK_MONOTONIC, &t);
+  auto mode = CLOCK_REALTIME;
+  if (allow_monotonic) {
+    mode = CLOCK_MONOTONIC;
+  }
+  clock_gettime(mode, &t);
   return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
 #endif
 }
@@ -171,6 +175,10 @@ struct TORCH_API LegacyEvent {
     throw std::runtime_error("unknown event kind");
   }
 
+  EventKind kind() const {
+    return kind_;
+  }
+
   const char* name() const {
     return name_.str();
   }
@@ -206,10 +214,10 @@ struct TORCH_API LegacyEvent {
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
-    if (device.type() == c10::DeviceType::CUDA ||
+    if (device.is_cuda() ||
         device.type() == c10::DeviceType::HIP) {
       cuda_memory_usage_ = alloc_size;
-    } else if (device.type() == c10::DeviceType::CPU ||
+    } else if (device.is_cpu() ||
         device.type() == c10::DeviceType::MKLDNN ||
         device.type() == c10::DeviceType::IDEEP) {
       cpu_memory_usage_ = alloc_size;
@@ -331,7 +339,7 @@ struct TORCH_API LegacyEvent {
   uint64_t correlation_id_;
   // Extra arguments for computing op flops
   std::unordered_map<std::string, c10::IValue> extra_args_;
-  uint64_t flops_;
+  uint64_t flops_ = 0;
 };
 
 // a linked-list of fixed sized vectors, to avoid

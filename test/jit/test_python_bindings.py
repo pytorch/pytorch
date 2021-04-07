@@ -35,3 +35,43 @@ class TestPythonBindings(JitTestCase):
         self.assertEqual(inp * 2, cu.test_fn(inp))
         with self.assertRaises(AttributeError):
             cu.doesnt_exist(inp)
+
+    def test_invalidation(self):
+        @torch.jit.script
+        def test_invalidation_fn(x: torch.Tensor):
+            return 2 * x
+
+        gr = test_invalidation_fn.graph.copy()
+        n = gr.insertNode(gr.create("prim::profile"))
+        v = n.output()
+        # check that they work
+        str((n, v))
+        torch._C._jit_pass_dce(gr)
+        with self.assertRaisesRegex(RuntimeError, "invalidated"):
+            str(n)
+        with self.assertRaisesRegex(RuntimeError, "invalidated"):
+            str(v)
+
+    def test_graph_iterator_keepalive(self):
+        @torch.jit.script
+        def test_iterator_keepalive_fn(x: torch.Tensor):
+            return 2 * x
+
+        # the list would segfault before because inlined_graph
+        # is temporary and had been deleted (see issue #50454)
+        n = test_iterator_keepalive_fn.inlined_graph.nodes()
+        list(n)
+        i = test_iterator_keepalive_fn.inlined_graph.inputs()
+        list(i)
+        o = test_iterator_keepalive_fn.inlined_graph.outputs()
+        list(o)
+
+    def test_aliasdb(self):
+        @torch.jit.script
+        def test_aliasdb_fn(x: torch.Tensor):
+            return 2 * x
+
+        gr = test_aliasdb_fn.graph.copy()
+        alias_db = gr.alias_db()
+        self.assertTrue("WILDCARD" in str(alias_db))
+        self.assertTrue("digraph alias_db" in alias_db.to_graphviz_str())

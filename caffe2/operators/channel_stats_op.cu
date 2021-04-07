@@ -112,6 +112,8 @@ bool ChannelStatsOp<CUDAContext>::ComputeChannelStatsNHWC<float>(
   ChannelStatsNHWCCUDAKernel<float>
       <<<C, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, C, HxW, X, sum, sumsq);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

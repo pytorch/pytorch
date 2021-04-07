@@ -3,6 +3,8 @@
 #include <numeric>
 #include <iterator>
 #include <algorithm>
+#include <utility>
+#include <vector>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -10,16 +12,19 @@
 #include <c10/util/Optional.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/cpu/Loops.h>
 
 namespace at { namespace native { namespace {
 
-template <typename scalar_t, typename scalar_t_2=int64_t, typename func_t>
-static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
+template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
+static inline void compare_base_kernel_core(
+    Tensor& result1,
+    Tensor& result2,
     const Tensor& self,
     int64_t dim,
     bool keepdim,
-    const func_t& f) {
+    const loop1d_t& loop) {
   auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
   self_sizes[dim] = 1;
 
@@ -33,40 +38,53 @@ static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
       result2.unsqueeze_(dim);
     }
   }
-  result1.resize_(self_sizes);
-  result2.resize_(self_sizes);
 
-  auto self_dim_stride = ensure_nonempty_stride(self, dim);
+  at::native::resize_output(result1, self_sizes);
+  at::native::resize_output(result2, self_sizes);
 
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
+    .declare_static_shape(self.sizes(), /*squash_dims=*/dim)
     .add_output(result1)
     .add_output(result2)
     .add_input(self)
     .build();
 
-  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-    auto* result1_data_bytes = data[0];
-    auto* result2_data_bytes = data[1];
-    const auto* self_data_bytes = data[2];
-    for (int64_t i = 0; i < n; ++i) {
-      f(
-        (scalar_t*)result1_data_bytes, (scalar_t_2*)result2_data_bytes,
-        (scalar_t*)self_data_bytes, self_dim_stride
-      );
-      result1_data_bytes += strides[0];
-      result2_data_bytes += strides[1];
-      self_data_bytes += strides[2];
-    }
-  };
   iter.for_each(loop, /* grain_size */ 1);
 
   if (!keepdim) {
     result1.squeeze_(dim);
     result2.squeeze_(dim);
   }
+}
+
+template <typename scalar_t, typename scalar_t_2=int64_t, typename func_t>
+static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim,
+    const func_t& f) {
+
+  auto self_dim_stride = ensure_nonempty_stride(self, dim);
+
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+    auto* result1_data_bytes = data[0];
+    auto* result2_data_bytes = data[1];
+    const auto* self_data_bytes = data[2];
+    for (int64_t i = 0; i < n; ++i) {
+      f((scalar_t*)result1_data_bytes,
+        (scalar_t_2*)result2_data_bytes,
+        (scalar_t*)self_data_bytes,
+        self_dim_stride);
+      result1_data_bytes += strides[0];
+      result2_data_bytes += strides[1];
+      self_data_bytes += strides[2];
+    }
+  };
+
+  compare_base_kernel_core<scalar_t, scalar_t_2>(
+      result1, result2, self, dim, keepdim, loop);
 }
 
 static void min_kernel_impl(
@@ -81,7 +99,7 @@ static void min_kernel_impl(
   TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
     "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -118,7 +136,7 @@ static void max_kernel_impl(
   TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
     "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -213,6 +231,76 @@ static void isneginf_kernel_impl(TensorIterator& iter) {
   });
 }
 
+static void mode_kernel_impl(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  auto self_dim_size = ensure_nonempty_size(self, dim);
+  auto self_dim_stride = ensure_nonempty_stride(self, dim);
+
+  AT_DISPATCH_ALL_TYPES_AND3(
+      kHalf, kBFloat16, kBool, self.scalar_type(), "mode_cpu", [&] {
+        auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+          auto* values_data_bytes = data[0];
+          auto* indices_data_bytes = data[1];
+          const auto* self_data_bytes = data[2];
+
+          std::vector<std::pair<scalar_t, int64_t>> elements(self_dim_size);
+
+          for (int64_t k = 0; k < n; ++k) {
+            scalar_t* values_data = (scalar_t*)values_data_bytes;
+            int64_t* indices_data = (int64_t*)indices_data_bytes;
+            const scalar_t* self_data = (scalar_t*)self_data_bytes;
+
+            scalar_t mode = 0;
+            int64_t modei = 0;
+            int64_t temp_freq = 0;
+            int64_t max_freq = 0;
+
+            for (int64_t i = 0; i < self_dim_size; i++) {
+              elements[i] = std::make_pair(self_data[i * self_dim_stride], i);
+            }
+
+            // Even though, theoretically, we don't need to specify this lambda
+            // (it's basically the same as std::less), doing so degrades
+            // performance. That is because its implementation for std::pair
+            // uses 3 comparisons.
+            std::sort(
+                elements.begin(),
+                elements.end(),
+                [=](const auto& i, const auto& j) {
+                  return i.first < j.first;
+                });
+
+            for (int64_t i = 0; i < self_dim_size; i++) {
+              temp_freq++;
+              if ((i == self_dim_size - 1) ||
+                  (elements[i].first != elements[i + 1].first)) {
+                if (temp_freq > max_freq) {
+                  mode = elements[i].first;
+                  modei = elements[i].second;
+                  max_freq = temp_freq;
+                }
+                temp_freq = 0;
+              }
+            }
+
+            *values_data = mode;
+            *indices_data = modei;
+
+            values_data_bytes += strides[0];
+            indices_data_bytes += strides[1];
+            self_data_bytes += strides[2];
+          }
+        };
+
+        compare_base_kernel_core<scalar_t>(
+            values, indices, self, dim, keepdim, loop);
+      });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
@@ -221,5 +309,6 @@ REGISTER_DISPATCH(_aminmax_stub, &_aminmax_kernel_impl);
 REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
+REGISTER_DISPATCH(mode_stub, &mode_kernel_impl);
 
 }} // namespace at::native

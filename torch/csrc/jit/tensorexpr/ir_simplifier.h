@@ -282,7 +282,7 @@ class Polynomial : public ExprNode<Polynomial> {
 class RoundOff : public BinaryOpNode<RoundOff> {
  public:
   RoundOff(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kRoundOff) {}
+      : BinaryOpNode(lhs, rhs, IRNodeType::kOther) {}
 };
 
 class MaxTerm : public ExprNode<MaxTerm> {
@@ -563,7 +563,6 @@ class TORCH_API TermExpander : public IRSimplifierBase {
 
   // Eliminate zero length allocations.
   Stmt* mutate(const Allocate* v) override;
-
   Stmt* mutate(const Free* v) override;
 
   // Override to enable condition fusing.
@@ -610,6 +609,8 @@ class TORCH_API IRSimplifier {
   }
 };
 
+// Flattens the buf and performs the simplifier on the flattened dims.
+const Expr* buf_flat_size(const Buf* v);
 // Returns true if expressions A and B can be simplified to an equal expression.
 TORCH_API bool exprEquals(const Expr* A, const Expr* B);
 

@@ -33,7 +33,7 @@ class WorkerInfo:
     def __repr__(self) -> str: ...
 
 class RpcAgent:
-    def join(self): ...
+    def join(self, shutdown: bool = False): ...
     def sync(self): ...
     def shutdown(self): ...
     @overload
@@ -77,6 +77,7 @@ class ProcessGroupRpcBackendOptions(RpcBackendOptions):
 class ProcessGroupAgent(RpcAgent):
     def __init__(
         self,
+        store: Store,
         worker_name: str,
         pg: ProcessGroup,
         numSendRecvThreads: int,

@@ -1,12 +1,13 @@
 import bisect
-import random
 import warnings
+import functools
 
 from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
+from torch.utils.data._typing import _DataPipeMeta
+from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
 from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)
@@ -40,7 +41,7 @@ class Dataset(Generic[T_co]):
     # in pytorch/torch/utils/data/sampler.py
 
 
-class IterableDataset(Dataset[T_co]):
+class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
     r"""An iterable Dataset.
 
     All datasets that represent an iterable of data samples should subclass it.
@@ -142,6 +143,8 @@ class IterableDataset(Dataset[T_co]):
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
+    functions: Dict[str, Callable] = {}
+    reduce_ex_hook : Optional[Callable] = None
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
@@ -151,6 +154,41 @@ class IterableDataset(Dataset[T_co]):
 
     # No `def __len__(self)` default?
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
+
+    def __getattr__(self, attribute_name):
+        if attribute_name in IterableDataset.functions:
+            function = functools.partial(IterableDataset.functions[attribute_name], self)
+            return function
+        else:
+            raise AttributeError
+
+    @classmethod
+    def register_function(cls, function_name, function):
+        IterableDataset.functions[function_name] = function
+
+    @classmethod
+    def register_datapipe_as_function(cls, function_name, cls_to_register):
+        if function_name in IterableDataset.functions:
+            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
+
+        def class_function(cls, source_dp, *args, **kwargs):
+            return cls(source_dp, *args, **kwargs)
+        function = functools.partial(class_function, cls_to_register)
+        IterableDataset.functions[function_name] = function
+
+    def __reduce_ex__(self, *args, **kwargs):
+        if IterableDataset.reduce_ex_hook is not None:
+            try:
+                return IterableDataset.reduce_ex_hook(self)
+            except NotImplementedError:
+                pass
+        return super().__reduce_ex__(*args, **kwargs)
+
+    @classmethod
+    def set_reduce_ex_hook(cls, hook_fn):
+        if IterableDataset.reduce_ex_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing reduce_ex_hook")
+        IterableDataset.reduce_ex_hook = hook_fn
 
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
@@ -252,63 +290,6 @@ class ChainDataset(IterableDataset):
             # Cannot verify that all self.datasets are Sized
             total += len(d)  # type: ignore
         return total
-
-
-class BufferedShuffleDataset(IterableDataset[T_co]):
-    r"""Dataset shuffled from the original dataset.
-
-    This class is useful to shuffle an existing instance of an IterableDataset.
-    The buffer with `buffer_size` is filled with the items from the dataset first. Then,
-    each item will be yielded from the buffer by reservoir sampling via iterator.
-
-    `buffer_size` is required to be larger than 0. For `buffer_size == 1`, the
-    dataset is not shuffled. In order to fully shuffle the whole dataset, `buffer_size`
-    is required to be greater than or equal to the size of dataset.
-
-    When it is used with :class:`~torch.utils.data.DataLoader`, each item in the
-    dataset will be yielded from the :class:`~torch.utils.data.DataLoader` iterator.
-    And, the method to set up a random seed is different based on :attr:`num_workers`.
-
-    For single-process mode (:attr:`num_workers == 0`), the random seed is required to
-    be set before the :class:`~torch.utils.data.DataLoader` in the main process.
-
-        >>> ds = BufferedShuffleDataset(dataset)
-        >>> random.seed(...)
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
-
-    For multi-process mode (:attr:`num_workers > 0`), the random seed is set by a callable
-    function in each worker.
-
-        >>> ds = BufferedShuffleDataset(dataset)
-        >>> def init_fn(worker_id):
-        ...     random.seed(...)
-        >>> print(list(torch.utils.data.DataLoader(ds, ..., num_workers=n, worker_init_fn=init_fn)))
-
-    Args:
-        dataset (IterableDataset): The original IterableDataset.
-        buffer_size (int): The buffer size for shuffling.
-    """
-    dataset: IterableDataset[T_co]
-    buffer_size: int
-
-    def __init__(self, dataset: IterableDataset[T_co], buffer_size: int) -> None:
-        super(BufferedShuffleDataset, self).__init__()
-        assert buffer_size > 0, "buffer_size should be larger than 0"
-        self.dataset = dataset
-        self.buffer_size = buffer_size
-
-    def __iter__(self) -> Iterator[T_co]:
-        buf: List[T_co] = []
-        for x in self.dataset:
-            if len(buf) == self.buffer_size:
-                idx = random.randint(0, self.buffer_size - 1)
-                yield buf[idx]
-                buf[idx] = x
-            else:
-                buf.append(x)
-        random.shuffle(buf)
-        while buf:
-            yield buf.pop()
 
 
 class Subset(Dataset[T_co]):

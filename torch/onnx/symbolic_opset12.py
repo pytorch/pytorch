@@ -1,4 +1,3 @@
-
 import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
@@ -15,6 +14,12 @@ def einsum(g, equation, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
     return g.op("Einsum", *tensors, equation_s=equation)
 
+@parse_args('v', 'v')
+def outer(g, input, other):
+    # make sure to cast other to self's type
+    if other.type().scalarType() != input.type().scalarType():
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[input.type().scalarType()])
+    return g.op("Einsum", input, other, equation_s='i,j->ij')
 
 @parse_args('v', 'f', 'i')
 def dropout(g, input, p, train):
@@ -50,6 +55,29 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
 
 def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
+
+
+def nll_loss_nd(g, self, target, weight, reduction, ignore_index):
+    return nll_loss(g, self, target, weight, reduction, ignore_index)
+
+
+def cross_entropy_loss(g, self, target, weight, reduction, ignore_index):
+    # none reduction : onnx::Constant[value={0}]
+    # mean reduction : onnx::Constant[value={1}]
+    # sum reduction : onnx::Constant[value={2}]
+    reduction = sym_help._maybe_get_const(reduction, 'i')
+    reduction_vals = ['none', 'mean', 'sum']
+    reduction = reduction_vals[reduction]
+
+    # in onnx SoftmaxCrossEntropyLoss specification, ignore_index is optional without default value.
+    # therefore we need to set ignore_index attribute even if it is not specified (e.g. ignore_index=-100).
+    ignore_index = sym_help._maybe_get_const(ignore_index, 'i')
+    if weight.node().mustBeNone():
+        celoss = g.op("SoftmaxCrossEntropyLoss", self, target, reduction_s=reduction, ignore_index_i=ignore_index)
+    else:
+        celoss = g.op("SoftmaxCrossEntropyLoss", self, target, weight, reduction_s=reduction, ignore_index_i=ignore_index)
+
+    return celoss
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
@@ -124,11 +152,11 @@ def le(g, input, other):
 
 @parse_args('v', 'i', 'v', 'v')
 def unfold(g, input, dimension, size, step):
-    size = sym_help._maybe_get_const(size, 'i')
-    step = sym_help._maybe_get_const(step, 'i')
-    if not sym_help._is_value(size) and not sym_help._is_value(step):
+    const_size = sym_help._maybe_get_const(size, 'i')
+    const_step = sym_help._maybe_get_const(step, 'i')
+    if not sym_help._is_value(const_size) and not sym_help._is_value(const_step):
         from torch.onnx.symbolic_opset9 import unfold as _unfold
-        return _unfold(g, input, dimension, size, step)
+        return _unfold(g, input, dimension, const_size, const_step)
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 

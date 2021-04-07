@@ -1,17 +1,58 @@
-from .node import Node, Argument, Target, map_arg
+from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 
-from typing import Callable, Any, List, Dict, Optional, Tuple, Set
-import builtins
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
+from dataclasses import dataclass
+from contextlib import contextmanager
+import copy
 import torch
-import types
 import keyword
 import re
+import builtins
+import math
+import warnings
 
-def _shadows_builtin_name(name: str) -> bool:
-    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan', 'NoneType'}
+
+if TYPE_CHECKING:
+    from .graph_module import GraphModule  # noqa
+
+
+# Mapping of builtins to their `typing` equivalent.
+_origin_type_map = {
+    list: List,
+    dict: Dict,
+    set: Set,
+    frozenset: FrozenSet,
+    tuple: Tuple,
+}
+
+class _CustomBuiltin(NamedTuple):
+    """Additional objs that we add to every graph's globals.
+
+    The repr() for some standard library objects is not valid Python code without
+    an import. For common objects of this sort, we bundle them in the globals of
+    every FX graph.
+    """
+    # How to import this object from the standard library.
+    import_str: str
+    # The actual object, produced from that import string.
+    obj: Any
+
+_custom_builtins: Dict[str, _CustomBuiltin] = {}
+
+
+def _register_custom_builtin(name: str, import_str: str, obj: Any):
+    _custom_builtins[name] = _CustomBuiltin(import_str, obj)
+
+
+_register_custom_builtin('inf', 'from math import inf', math.inf)
+_register_custom_builtin('nan', 'from math import nan', math.nan)
+_register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
+_register_custom_builtin('torch', 'import torch', torch)
+
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
+
 
 def _snake_case(s: str) -> str:
     """
@@ -31,25 +72,103 @@ def _snake_case(s: str) -> str:
         prev_lower = c.islower()
     return ''.join(chars)
 
-def get_qualified_name(func: Callable[..., Any]) -> str:
-    # things like getattr just appear in builtins
-    if getattr(builtins, func.__name__, None) is func:
-        return func.__name__
-    name = func.__name__
-    module = _find_module_of_method(func)
-    module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
-    return f'{module}.{name}'
 
-# this is fixed on master, WAR for 1.5
-def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
-    name = orig_method.__name__
-    module = orig_method.__module__
-    if module is not None:
-        return module
-    for guess in [torch, torch.nn.functional]:
-        if getattr(guess, name, None) is orig_method:
-            return guess.__name__
-    raise RuntimeError(f'cannot find module for {orig_method}')
+def _is_from_torch(obj: Any) -> bool:
+    module_name = getattr(obj, '__module__', None)
+    if module_name is not None:
+        base_module = module_name.partition('.')[0]
+        return base_module == 'torch'
+
+    name = getattr(obj, '__name__', None)
+    # exclude torch because torch.torch.torch.torch works. idk mang
+    if name is not None and name != 'torch':
+        for guess in [torch, torch.nn.functional]:
+            if getattr(guess, name, None) is obj:
+                return True
+
+    return False
+
+
+class _Namespace:
+    """A context for associating names uniquely with objects.
+
+    The following invariants are enforced:
+    - Each object gets a single name.
+    - Each name is unique within a given namespace.
+    - Names generated do not shadow builtins, unless the object is indeed that builtin.
+    """
+    def __init__(self):
+        self._obj_to_name: Dict[Any, str] = {}
+        self._unassociated_names = set()
+        self._used_names: Dict[str, int] = {}
+
+        self._illegal_char_regex = re.compile('[^0-9a-zA-Z_]+')
+        self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
+
+    def create_name(self, candidate: str, obj: Optional[Any]) -> str:
+        """Create a unique name.
+
+        Arguments:
+            candidate: used as the basis for the unique name, relevant to the user.
+            obj: If not None, an object that will be associated with the unique name.
+        """
+        if obj is not None and obj in self._obj_to_name:
+            return self._obj_to_name[obj]
+
+        # delete all characters that are illegal in a Python identifier
+        candidate = self._illegal_char_regex.sub('_', candidate)
+        if candidate[0].isdigit():
+            candidate = f'_{candidate}'
+
+        while candidate in self._used_names or self._is_illegal_name(candidate, obj):
+            match = self._name_suffix_regex.match(candidate)
+            if match is None:
+                candidate = candidate + '_1'
+            else:
+                base, num = match.group(1, 2)
+                candidate = f'{base}_{int(num) + 1}'
+
+        self._used_names.setdefault(candidate)
+        if obj is None:
+            self._unassociated_names.add(candidate)
+        else:
+            self._obj_to_name[obj] = candidate
+        return candidate
+
+    def associate_name_with_obj(self, name: str, obj: Any):
+        """Associate a unique name with an object.
+
+        Neither `name` nor `obj` should be associated already.
+        """
+        assert obj not in self._obj_to_name
+        assert name in self._unassociated_names
+        self._obj_to_name[obj] = name
+        self._unassociated_names.remove(name)
+
+    def _is_illegal_name(self, name: str, obj: Any) -> bool:
+        # 1. keywords are never allowed as names.
+        if name in keyword.kwlist:
+            return True
+
+        # 2. Can't shadow a builtin name, unless you *are* that builtin.
+        if name in builtins.__dict__:
+            return obj is not builtins.__dict__[name]
+
+        # 3. Can't shadow our custom builtins either
+        if name in _custom_builtins:
+            return obj is not _custom_builtins[name].obj
+
+        return False
+
+
+@dataclass
+class PythonCode:
+    """Represents all the information necessary to exec or save a graph as Python code."""
+    # Python source code for the forward function definition.
+    src: str
+    # Values in global scope during exection of `src_def`.
+    globals: Dict[str, Any]
+
 
 def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
     args_s = ', '.join(repr(a) for a in args)
@@ -67,29 +186,6 @@ def _format_target(base: str, target: str) -> str:
         else:
             r = f'{r}.{e}'
     return r
-
-# Borrowed from CPython typing module
-# https://github.com/python/cpython/blob/f90dc36c15d7fee0efaf6d39e97be0bdf2683e93/Lib/typing.py#L156
-def _type_repr(obj):
-    """Return the repr() of an object, special-casing types (internal helper).
-    If obj is a type, we return a shorter version than the default
-    type.__repr__, based on the module and qualified name, which is
-    typically enough to uniquely identify a type.  For everything
-    else, we fall back on repr(obj).
-    """
-    # HACK: In Python 3.6, type aliases from ``typing`` are instances of ``type``, but in
-    # later Python versions, type aliases are not instances of ``type``!! We want
-    # all type aliases to fall through to ``repr``, so if we have a type that is
-    # in the module typing, don't go down this path.
-    if isinstance(obj, type) and obj.__module__ != 'typing':
-        if obj.__module__ == 'builtins':
-            return obj.__qualname__
-        return f'{obj.__module__}.{obj.__qualname__}'
-    if obj is ...:
-        return('...')
-    if isinstance(obj, types.FunctionType):
-        return obj.__name__
-    return repr(obj)
 
 class _InsertPoint:
     def __init__(self, graph, new_insert):
@@ -165,7 +261,7 @@ class Graph:
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
-    def __init__(self):
+    def __init__(self, owning_module: Optional["GraphModule"] = None):
         """
         Construct an empty Graph.
         """
@@ -173,6 +269,19 @@ class Graph:
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
+        self._graph_namespace = _Namespace()
+        self._owners = 0
+        self._owning_module = owning_module
+
+    @property
+    def owning_module(self):
+        return self._owning_module
+
+    @owning_module.setter
+    def owning_module(self, mod: Optional["GraphModule"]):
+        if mod:
+            self._owning_module = mod if not self._owners else None
+            self._owners += 1
 
     @property
     def nodes(self) -> _node_list:
@@ -264,8 +373,13 @@ class Graph:
         kwargs = {} if kwargs is None else kwargs
         assert isinstance(args, tuple), "args must be a tuple"
         assert isinstance(kwargs, dict), "kwargs must be a dict"
-        unique_name = self._create_unique_name(name if name is not None else self._target_to_str(target))
-        n = Node(self, unique_name, op, target, args, kwargs, type_expr)
+
+        candidate = name if name is not None else self._target_to_str(target)
+        name = self._graph_namespace.create_name(candidate, None)
+        n = Node(self, name, op, target, args, kwargs, type_expr)
+
+        self._graph_namespace.associate_name_with_obj(name, n)
+
         self._insert(n)
         self._len += 1
         return n
@@ -386,6 +500,37 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as ``Graph.create_node``.
         """
+        def _get_attr_reference_exists(mod: torch.nn.Module, qualified_name: str) -> bool:
+            module_path, _, name = qualified_name.rpartition(".")
+
+            submod: Optional[torch.nn.Module] = mod.get_submodule(module_path)
+
+            if not submod:
+                return False
+
+            if not hasattr(submod, name):
+                return False
+
+            res = getattr(submod, name)
+
+            if (not isinstance(res, torch.nn.Module)
+                    and not isinstance(res, torch.nn.Parameter)
+                    and name not in submod._buffers):
+                return False
+
+            return True
+
+        if (self.owning_module and
+                not _get_attr_reference_exists(self.owning_module, qualified_name)):
+            warnings.warn("Attempted to insert a get_attr Node with no "
+                          "underlying reference in the owning "
+                          "GraphModule! Call "
+                          "GraphModule.add_submodule to add the "
+                          "necessary submodule, "
+                          "GraphModule.add_parameter to add the "
+                          "necessary Parameter, or "
+                          "nn.Module.register_buffer to add the "
+                          "necessary buffer")
         return self.create_node('get_attr', qualified_name, type_expr=type_expr)
 
     def call_module(self,
@@ -423,6 +568,13 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
         """
+        if (self.owning_module and
+                self.owning_module.get_submodule(module_name) is not None):
+            warnings.warn("Attempted to insert a get_attr Node with no "
+                          "underlying reference in the owning "
+                          "GraphModule! Call "
+                          "GraphModule.add_submodule to add the "
+                          "necessary submodule")
         return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
 
     def call_method(self,
@@ -520,7 +672,9 @@ class Graph:
         kwargs = map_arg(node.kwargs, arg_transform)
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
-        return self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node = self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node.meta = copy.copy(node.meta)
+        return result_node
 
     def output(self, result: 'Argument', type_expr: Optional[Any] = None):
         """
@@ -553,30 +707,7 @@ class Graph:
         op = _snake_case(op)
         return op
 
-    def _create_unique_name(self, candidate : str) -> str:
-        # delete all characters that are illegal in a Python identifier
-        candidate = re.sub('[^0-9a-zA-Z_]+', '_', candidate)
-        if candidate[0].isdigit():
-            candidate = f'_{candidate}'
-
-        def illegal_shadowing_name(name : str) -> bool:
-            return hasattr(torch, name) or \
-                hasattr(torch.nn.functional, name) or \
-                hasattr(torch.nn, name) or \
-                _shadows_builtin_name(name)
-
-        while candidate in self._used_names or illegal_shadowing_name(candidate):
-            match = re.match(r"(.*)_(\d+)$", candidate)
-            if match is None:
-                candidate = candidate + '_1'
-            else:
-                base, num = match.group(1, 2)
-                candidate = f'{base}_{int(num) + 1}'
-
-        self._used_names.setdefault(candidate)
-        return candidate
-
-    def python_code(self, root_module: str) -> str:
+    def python_code(self, root_module: str) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
 
@@ -587,32 +718,105 @@ class Graph:
 
         Returns:
 
-            The string source code generated from this ``Graph``.
+            A PythonCode object, consisting of two fields:
+                src: the Python source code representing the object
+                globals: a dictionary of global names in `src` -> the objects that they reference.
         """
+        # NOTE: [Graph Namespaces]
+        #
+        # There are two types of symbols in generated Python source code:
+        # locals and globals.
+        #   Locals are locally defined by the output of a node in the Graph.
+        #   Globals are references to external objects, like functions or types.
+        #
+        # When generating Python code, we need to make sure to name things
+        # appropriately. In particular:
+        # - All names should be unique, to avoid weird shadowing bugs.
+        # - These names need to be consistent, e.g. a object should always be
+        #   referenced by the same name.
+        #
+        # To do this, we create a new namespace just for this source. All names
+        # that get printed must come from this namespace.
+        #
+        # Why can't we re-use node.name? Because it was generated within the
+        # namespace `self._graph_namespace`. In order to provide uniqueness
+        # over both locals (node.name) *and* globals, we create a completely
+        # new namespace to put all identifiers in.
+        namespace = _Namespace()
+
+        # Override Node's repr to generate a valid name within our namespace.
+        # Since repr() is designed to produce a valid Python expression, it
+        # makes sense to re-use it. This way, it's easy to print something like
+        # Tuple[Node, Node] by simply calling repr() on it. Node's __repr__ is
+        # implemented cooperatively to allow this.
+        def node_repr(n: Node):
+            return namespace.create_name(n.name, n)
+
+        @contextmanager
+        def override_node_repr(graph: Graph):
+            orig_repr_fns = {}
+            for node in graph.nodes:
+                orig_repr_fns[node] = node._repr_fn
+                node._repr_fn = node_repr
+            try:
+                yield None
+            finally:
+                # restore the original repr functions
+                for node in graph.nodes:
+                    node._repr_fn = orig_repr_fns[node]
+
+        with override_node_repr(self):
+            return self._python_code(root_module, namespace)
+
+    def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
         free_vars: List[str] = []
-        modules_used : Set[str] = set()
         body: List[str] = []
+        globals_: Dict[str, Any] = {}
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
 
-        def register_modules_used(qualified_name : str):
-            if '.' in qualified_name:
-                module_name = qualified_name.split('.', maxsplit=1)[0]
-                modules_used.add(module_name)
+        def add_global(name_hint: str, obj: Any):
+            """Add an obj to be tracked as a global.
+
+            We call this for names that reference objects external to the
+            Graph, like functions or types.
+
+            Returns: the global name that should be used to reference 'obj' in generated source.
+            """
+            if _is_from_torch(obj):
+                # HACK: workaround for how torch custom ops are registered. We
+                # can't import them like normal modules so they must retain their
+                # fully qualified name.
+                return _get_qualified_name(obj)
+
+            # normalize the name hint to get a proper identifier
+            global_name = namespace.create_name(name_hint, obj)
+            if global_name in globals_:
+                assert globals_[global_name] is obj
+                return global_name
+
+            globals_[global_name] = obj
+            return global_name
+
+        # Pre-fill the globals table with registered builtins.
+        for name, (_, obj) in _custom_builtins.items():
+            add_global(name, obj)
 
         def type_repr(o : Any):
             typename = _type_repr(o)
-            if all(x.isidentifier() for x in typename.split('.')):
-                register_modules_used(typename)
-            else:
-                # this is a constructor type, e.g. typing.List[torch.Tensor]
-                modules_used.add(o.__module__)
-                for sub_type in o.__args__:
-                    # make sure we have torch.Tensor
-                    type_repr(sub_type)
-            return typename
 
+            # This is a generic type, e.g. typing.List[torch.Tensor]
+            if hasattr(o, '__origin__'):
+                origin_type = _origin_type_map.get(o.__origin__, o.__origin__)
+                origin_typename = add_global(_type_repr(origin_type), origin_type)
+
+                # Assign global names for each of the inner type variables.
+                args = [type_repr(arg) for arg in o.__args__]
+                return f'{origin_typename}[{",".join(args)}]'
+
+            # Common case: this is a regular module name like 'foo.bar.baz'
+            return add_global(typename, o)
 
         # Run through reverse nodes and record the first instance of a use
         # of a given node. This represents the *last* use of the node in the
@@ -643,25 +847,26 @@ class Graph:
                 return
             nodes_to_delete = user_to_last_uses.get(user, [])
             if len(nodes_to_delete):
-                to_delete_str = ' = '.join([n.name for n in nodes_to_delete] + ['None'])
+                to_delete_str = ' = '.join([repr(n) for n in nodes_to_delete] + ['None'])
                 body.append(f';  {to_delete_str}\n')
             else:
                 body.append('\n')
 
+
         def emit_node(node : Node):
+            maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
-                maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
                 maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
-                if raw_name != node.name:
-                    body.append(f'{node.name} = {raw_name}\n')
+                if raw_name != repr(node):
+                    body.append(f'{repr(node)} = {raw_name}\n')
                 return
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
                 body.append(
-                    f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
+                    f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.target)}'
                     f'({_format_args(node.args[1:], node.kwargs)})')
                 return
             elif node.op == 'call_function':
@@ -669,26 +874,28 @@ class Graph:
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
-                    body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
+                    body.append(f'{repr(node)}{maybe_type_annotation} = '
+                                f'{magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
                     return
-                qualified_name = get_qualified_name(node.target)
-                register_modules_used(qualified_name)
-                if qualified_name == 'getattr' and \
+                qualified_name = _get_qualified_name(node.target)
+                global_name = add_global(qualified_name, node.target)
+                if global_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
                    isinstance(node.args[1], str) and \
                    node.args[1].isidentifier():
                     # pretty print attribute access
-                    body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}')
+                    body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
-                body.append(f'{node.name} = {qualified_name}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
-                body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{repr(node)}{maybe_type_annotation} = '
+                            f'{_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
-                body.append(f'{node.name} = {_format_target(root_module, node.target)}')
+                body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(root_module, node.target)}')
                 return
             elif node.op == 'output':
                 if node.type is not None:
@@ -703,11 +910,6 @@ class Graph:
             emit_node(node)
             delete_unused_values(node)
 
-        # repr() for inf and nan floating point values aren't parseable by
-        # python as literals. Explicitly import the names from the ``math`` module.
-        import_strs = [f'import {name}' for name in sorted(modules_used)]
-        import_block = '\n'.join(import_strs)
-
         if len(body) == 0:
             # If the Graph has no non-placeholder nodes, no lines for the body
             # have been emitted. To continue to have valid Python code, emit a
@@ -716,12 +918,12 @@ class Graph:
 
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
-        fn_code = f"""\
-{import_block}
+        fn_code = f"""
 def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
 {code}"""
 
-        return fn_code
+        return PythonCode(fn_code,
+                          globals_)
 
     def __str__(self) -> str:
         """
@@ -733,66 +935,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
         # over value
         maybe_return_typename : List[str] = ['']
 
-        def format_arg(arg) -> str:
-            if isinstance(arg, list):
-                items = ', '.join(format_arg(a) for a in arg)
-                return f'[{items}]'
-            elif isinstance(arg, tuple):
-                items = ', '.join(format_arg(a) for a in arg)
-                maybe_comma = ',' if len(arg) == 1 else ''
-                return f'({items}{maybe_comma})'
-            elif isinstance(arg, dict):
-                items_str = ', '.join(f'{k}: {format_arg(v)}' for k, v in arg.items())
-                return f'{{{items_str}}}'
-
-            if isinstance(arg, Node):
-                return '%' + str(arg)
-            else:
-                return str(arg)
-
-        def pretty_print_target(target):
-            """
-            Make target printouts more user-friendly.
-            1) builtins will be printed as `builtins.xyz`
-            2) operators will be printed as `operator.xyz`
-            3) other callables will be printed with qualfied name, e.g. torch.add
-            """
-            if isinstance(target, str):
-                return target
-            if hasattr(target, '__module__'):
-                if not hasattr(target, '__name__'):
-                    # Just to be defensive, if we don't have `__name__`, get the
-                    # qualname. Not sure if this happens for any members of `operator`
-                    # or `builtins`. This fallback path is not as good, since e.g.
-                    # things in `operator` have `_operator` as their __module__.
-                    return get_qualified_name(target)
-                if target.__module__ == 'builtins':
-                    return f'builtins.{target.__name__}'
-                elif target.__module__ == '_operator':
-                    return f'operator.{target.__name__}'
-            return get_qualified_name(target)
-
-        def format_node(n : Node) -> Optional[str]:
-            if n.op == 'placeholder':
-                assert isinstance(n.target, str)
-                arg_str = n.target
-                arg_str += arg_str + f': {_type_repr(n.type)}' if n.type is not None else ''
-                placeholder_names.append(arg_str)
-                return None
-            elif n.op == 'get_attr':
-                maybe_typename = f'{_type_repr(n.type)} ' if n.type is not None else ''
-                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = self.{n.target}'
-            elif n.op == 'output':
-                if n.type is not None:
-                    maybe_return_typename[0] = f' -> {_type_repr(n.type)}'
-                return f'return {n.args[0]}'
-            else:
-                maybe_typename = f'{_type_repr(n.type)} ' if n.type is not None else ''
-                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={pretty_print_target(n.target)}](' \
-                       f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
-
-
-        node_strs = [format_node(node) for node in self.nodes]
+        node_strs = [node.format_node(placeholder_names) for node in self.nodes]
         param_str = ', '.join(placeholder_names)
         s = f'graph({param_str}){maybe_return_typename[0]}:'
         for node_str in node_strs:
@@ -816,19 +959,14 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
         print(tabulate(node_specs,
               headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
-    def lint(self, root : Optional[torch.nn.Module] = None):
+    def lint(self):
         """
         Runs various checks on this Graph to make sure it is well-formed. In
         particular:
         - Checks Nodes have correct ownership (owned by this graph)
         - Checks Nodes appear in topological order
-        - If ``root`` is provided, checks that targets exist in ``root``
-
-        Args:
-
-            root (Optional[torch.nn.Module]): The root module with which to check
-                for targets. This is equivalent to the ``root`` argument that is
-                passed when constructing a ``GraphModule``.
+        - If this Graph has an owning GraphModule, checks that targets
+        exist in that GraphModule
         """
 
         # Check topo order
@@ -858,18 +996,62 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             seen_names.add(node.name)
 
         # Check targets are legit
-        if root:
+        if self.owning_module:
             for node in self.nodes:
                 if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
-                    m_itr = root
+                    m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):
                         m_itr = getattr(m_itr, atom, None)
                         if m_itr is None:
                             seen_qualname = '.'.join(target_atoms[:i])
                             raise RuntimeError(f'Node {node} target {node.target} references nonexistent attribute '
                                                f'{atom} of {seen_qualname}')
+
+    def eliminate_dead_code(self):
+        """
+        Remove all dead code from the graph, based on each node's number of
+        users, and whether the nodes have any side effects The graph must be
+        topologically sorted before calling.
+
+        Returns:
+          bool: Whether the graph was changed as a result of the pass.
+
+        Example:
+
+        Before dead code is eliminated, `a` from `a = x + 1` below has no users
+        and thus can be eliminated from the graph without having an effect.
+
+        .. code-block:: python
+
+            def forward(self, x):
+                a = x + 1
+                return x + self.attr_1
+
+        After dead code is eliminated, `a = x + 1` has been removed, and the rest
+        of `forward` remains.
+
+        .. code-block:: python
+
+            def forward(self, x):
+                return x + self.attr_1
+
+        """
+        # Lint the graph first to make sure its topologically sorted, otherwise
+        # DCE below will not behave as expected.
+        self.lint()
+
+        # Reverse iterate so that when we remove a node, any nodes used as an
+        # input to that node have an updated user count that no longer reflects
+        # the removed node.
+        changed = False
+        for node in reversed(self.nodes):
+            if not node.is_impure() and len(node.users) == 0:
+                self.erase_node(node)
+                changed = True
+
+        return changed
 
 
 reflectable_magic_methods = {

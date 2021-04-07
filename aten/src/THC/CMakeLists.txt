@@ -9,7 +9,7 @@ set(extra_src)
 # loop over all types
 foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    # loop over files which need to be split between types (because of long compile times)
-   foreach(THC_FILE TensorSort TensorMathPointwise TensorMathReduce TensorMasked TensorTopK)
+   foreach(THC_FILE TensorSort TensorMathPointwise TensorMathReduce TensorTopK)
       if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
          file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu"
            "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerate${THC_TYPE}Type.h>\n")
@@ -18,7 +18,7 @@ foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    endforeach()
 endforeach()
 
-foreach(THC_FILE TensorMathPointwise TensorMathReduce TensorMasked)
+foreach(THC_FILE TensorMathPointwise TensorMathReduce)
    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
       file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu"
         "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerateBoolType.h>\n")
@@ -26,7 +26,7 @@ foreach(THC_FILE TensorMathPointwise TensorMathReduce TensorMasked)
    list(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
 endforeach()
 
-foreach(THC_FILE TensorMathReduce TensorMasked TensorSort TensorTopK)
+foreach(THC_FILE TensorMathReduce TensorSort TensorTopK)
    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu")
       file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu"
         "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerateBFloat16Type.h>\n")
@@ -50,16 +50,10 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathMagma.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorIndex.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorRandom.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorSort.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCSortUtils.cu
   ${extra_src}
-  PARENT_SCOPE)
-
-set(ATen_CUDA_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY}
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMode.cu
   PARENT_SCOPE)
 
 install(FILES
@@ -72,7 +66,6 @@ install(FILES
           THCTensor.h
           THCTensorCopy.h
           THCTensorCopy.hpp
-          THCTensorRandom.h
           THCTensorMath.h
           THCApply.cuh
           THCReduce.cuh
@@ -111,10 +104,8 @@ install(FILES
           THCTensorInfo.cuh
           THCTensorMathPointwise.cuh
           THCTensorTypeUtils.cuh
-          THCTensorRandom.cuh
           THCTensorMathMagma.cuh
           THCThrustAllocator.cuh
-          THCTensorMode.cuh
           THCTensorTopK.cuh
           # See Note [TH abstraction violation]
           THCTensor.hpp
@@ -134,8 +125,6 @@ install(FILES
           generic/THCStorageCopy.h
           generic/THCTensorCopy.cu
           generic/THCTensorCopy.h
-          generic/THCTensorMasked.h
-          generic/THCTensorMasked.cu
           generic/THCTensorMath.h
           generic/THCTensorMath.cu
           generic/THCTensorMathMagma.h
@@ -148,14 +137,8 @@ install(FILES
           generic/THCTensorMathReduce.cu
           generic/THCTensorScatterGather.h
           generic/THCTensorScatterGather.cu
-          generic/THCTensorIndex.h
-          generic/THCTensorIndex.cu
           generic/THCTensorSort.h
           generic/THCTensorSort.cu
-          generic/THCTensorRandom.h
-          generic/THCTensorRandom.cu
-          generic/THCTensorMode.h
-          generic/THCTensorMode.cu
           generic/THCTensorTopK.h
           generic/THCTensorTopK.cu
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")

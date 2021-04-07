@@ -16,8 +16,7 @@ T gcd(T a, T b) {
 // Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
 // or Ramp).
 bool isMultilanePrimitive(const Expr* e) {
-  return e->expr_type() == IRNodeType::kBroadcast ||
-      e->expr_type() == IRNodeType::kRamp;
+  return dynamic_cast<const Broadcast*>(e) || dynamic_cast<const Ramp*>(e);
 }
 
 SimplifierHashType Term::hashVars() const {
@@ -1293,7 +1292,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
   // Constant Folding.
   if (lhs_new->isConstant() && rhs_new->isConstant()) {
     const Expr* v_new = new CompareSelect(
-        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+        lhs_new,
+        rhs_new,
+        true_branch,
+        false_branch,
+        v->compare_select_op(),
+        v->bias());
     return evaluateOp(v_new);
   }
 
@@ -1302,7 +1306,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return new CompareSelect(
-        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+        lhs_new,
+        rhs_new,
+        true_branch,
+        false_branch,
+        v->compare_select_op(),
+        v->bias());
   }
 
   // If diff is constant, we can determine it.
@@ -1311,7 +1320,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
 
   if (!diff->isConstant()) {
     return new CompareSelect(
-        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+        lhs_new,
+        rhs_new,
+        true_branch,
+        false_branch,
+        v->compare_select_op(),
+        v->bias());
   }
 
   bool equal = immediateEquals(diff, 0);
@@ -1334,7 +1348,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
 
   // should not be possible but just in case.
   return new CompareSelect(
-      lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+      lhs_new,
+      rhs_new,
+      true_branch,
+      false_branch,
+      v->compare_select_op(),
+      v->bias());
 }
 
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
@@ -1697,80 +1716,279 @@ const Expr* polyGCD(const Polynomial* poly) {
   return getImmediateByType(poly->dtype(), GCD);
 }
 
-// Searches the polynomial for Terms that can be merged in the Round + Mod
-// pattern: (x/y) * y + x % y => RoundOff(x,y) + Mod(x, y) => x.
+// A ModRound is a div-mod-mul in which the divisor in div and multiplier in mul
+// are identical and not equal to 1.
+// In a ModRound x/y%z*y*c (c is constant), 'scalar' denotes c, 'denominator'
+// denotes x, 'divisor' denotes y and 'mod_divisor' denotes z.
+class ModRound {
+ public:
+  ModRound(
+      const Expr* scalar,
+      const Expr* denom,
+      const Expr* divisor,
+      const Expr* mod_divisor)
+      : scalar(scalar),
+        denom(denom),
+        divisor(divisor),
+        mod_divisor(mod_divisor) {}
+  const Expr* scalar;
+  const Expr* denom;
+  const Expr* divisor;
+  const Expr* mod_divisor;
+};
+
+c10::optional<class ModRound*> isModRound(const Term* e) {
+  const Div* div{nullptr};
+  const Mod* mod{nullptr};
+  const Expr* denom{nullptr};
+  const Expr* divisor{nullptr};
+  const Expr* mod_divisor{nullptr};
+  const Expr* multiplier = e->scalar();
+  const Expr* scalar{nullptr};
+  const Expr* other{nullptr};
+
+  for (auto* m : e->variables()) {
+    if (m->expr_type() == IRNodeType::kMod) {
+      // TODO: currently only identify terms with one variable being mod; it is
+      // possible to extend this if we have to handle terms like (t/(x%2 * y) %
+      // z) * (x%2 *y).
+      if (!mod) {
+        mod = dynamic_cast<const Mod*>(m);
+      } else {
+        return c10::nullopt;
+      }
+    } else {
+      // Take care of special cases before multiplying the scalar and variable.
+      if (multiplier->isConstant()) {
+        // Take care of lane mismatch first.
+        if (multiplier->dtype().lanes() != m->dtype().lanes()) {
+          multiplier = new Broadcast(multiplier, m->dtype().lanes());
+        }
+        // Take care of scalar type mismatch.
+        if (multiplier->dtype().scalar_type() != m->dtype().scalar_type()) {
+          multiplier = new Cast(m->dtype(), multiplier);
+          if (m->dtype().lanes() == 1) {
+            multiplier = evaluateOp(multiplier);
+          }
+        }
+      }
+
+      // All non-mod vairables are considered as part of the multiplier.
+      multiplier = new Mul(multiplier, m);
+    }
+  }
+  multiplier = IRSimplifier::simplify(multiplier);
+
+  if (!mod) {
+    return c10::nullopt;
+  }
+
+  mod_divisor = IRSimplifier::simplify(mod->rhs());
+  other = mod->lhs();
+
+  if (!(div = dynamic_cast<const Div*>(other))) {
+    return c10::nullopt;
+  }
+
+  divisor = IRSimplifier::simplify(div->rhs());
+  other = div->lhs();
+
+  denom = IRSimplifier::simplify(other);
+
+  // Deny cases in which divisor!=multiplier.
+  HashProvider& hasher = e->hasher();
+  if (hasher.hash(divisor) != hasher.hash(multiplier)) {
+    // TODO: currently we do not extract a common factor if divisor and
+    // multiplier are not constants. The extraction is not supported (e.g.,
+    // x*2/x -> 2) in IRSimplifier.simplify because x could be 0. As future
+    // work, we can extend division to 2 versions: 1) division for customers
+    // that has to be strictly simplified and 2) division we introduced in our
+    // transformations which can be simplified without considering 0s, e.g.,
+    // Div_nonzero. The second division will be only used to facilitate our
+    // transformations.
+    if (divisor->isConstant() && multiplier->isConstant()) {
+      // If both are scalar we may be able to find a common factor.
+      if (immediateEquals(evaluateOp(new Mod(multiplier, divisor)), 0)) {
+        // The common factor becomes 'scalar' of the term, e.g.,in t/3%7*6,
+        // divisor=multiplier=3, scalar=2.
+        Expr* c = evaluateOp(new Div(multiplier, divisor));
+        scalar = c;
+      } else if (immediateEquals(evaluateOp(new Mod(divisor, multiplier)), 0)) {
+        // The common factor becomes part of 'denom', e.g., in t/14%7*2,
+        // divisor=multiplier=2, denom=t/7.
+        Expr* c = evaluateOp(new Div(divisor, multiplier));
+        divisor = multiplier;
+        denom = IRSimplifier::simplify(new Div(other, c));
+      } else {
+        return c10::nullopt;
+      }
+    } else {
+      return c10::nullopt;
+    }
+  }
+
+  // Deny cases in which divisor=1. Such cases are considered as Mods.
+  if (divisor->isConstant() && immediateEquals(divisor, 1)) {
+    return c10::nullopt;
+  }
+
+  if (!scalar) {
+    scalar = getImmediateByType(multiplier->dtype(), 1);
+  }
+
+  return new ModRound(scalar, denom, divisor, mod_divisor);
+}
+
+// Search the polynomial for Terms that can be merged in
+// (1) Round + Mod pattern: (x/y) * y + x % y => RoundOff(x,y) + Mod(x, y) => x
+// (2) Mod round + Mod pattern: (x/y % z)*y + x%y => ModRound(x, y, z) + Mod(x,
+// y) => x % (y*z)
 const Expr* simplifyRoundModPattern(const Polynomial* poly) {
-  std::set<const Term*> rounds;
-  std::set<const Term*> mods;
+  std::vector<const Term*> rounds;
+  std::vector<const Term*> mods;
+  std::vector<const Term*> mod_rounds;
   std::vector<const Term*> others;
 
-  // Split out the RoundOffs and Mod operations so we can inspect.
+  // Split out the Mod, ModRounds and RoundOffs operations so we can inspect.
   for (auto* c : poly->variables()) {
     if (c->variables().size() > 1) {
-      others.push_back(c);
+      if (auto a = isModRound(c)) {
+        mod_rounds.push_back(c);
+      } else {
+        others.push_back(c);
+      }
       continue;
     }
 
     const Expr* e = c->variables()[0];
 
-    if (e->expr_type() == IRNodeType::kRoundOff) {
-      rounds.insert(c);
+    if (dynamic_cast<const RoundOff*>(e)) {
+      rounds.push_back(c);
     } else if (e->expr_type() == IRNodeType::kMod) {
-      mods.insert(c);
+      if (auto a = isModRound(c)) {
+        mod_rounds.push_back(c);
+      } else {
+        mods.push_back(c);
+      }
     } else {
       others.push_back(c);
     }
   }
 
-  // Can't continue without at least one RoundOff and one Mod.
-  if (rounds.empty() || mods.empty()) {
+  // Can't continue without at least one RoundOff/ModRound and one Mod.
+  if ((rounds.empty() && mod_rounds.empty()) || mods.empty()) {
     return nullptr;
   }
 
   HashProvider& hasher = poly->hasher();
   bool didAnything = false;
+  std::vector<const Term*> mods_merged;
+  bool repeat = true;
+  // Repeat merging terms till there are no Mods or the terms cannot be merged
+  // any further.
+  while (!mods.empty() && repeat) {
+    repeat = false;
+    for (int i = mods.size() - 1; i >= 0; i--) {
+      const Term* m = mods[i];
+      const Mod* mod = dynamic_cast<const Mod*>(m->variables()[0]);
+      CHECK(mod);
+      const Expr* mod_lhs = IRSimplifier::simplify(mod->lhs());
+      const Expr* mod_rhs = IRSimplifier::simplify(mod->rhs());
+      bool merged = false;
+      for (int j = mod_rounds.size() - 1; j >= 0; j--) {
+        const Term* mr = mod_rounds[j];
+        auto a = isModRound(mr);
+        CHECK(a);
+        const ModRound* mod_round = dynamic_cast<const ModRound*>(*a);
 
-  for (auto* r : rounds) {
-    bool merged = false;
-    const RoundOff* roundoff = dynamic_cast<const RoundOff*>(r->variables()[0]);
-    CHECK(roundoff);
+        // TODO: for now don't attempt partial factorization of this
+        // optimization. E.g. it's possible to do: 2 * (x/y%z) * y + (x%y) =>
+        // x%(y*z) + (x/y%z) * y
+        if (!immediateEquals(
+                evaluateOp(new Sub(mod_round->scalar, m->scalar())), 0)) {
+          continue;
+        }
+        // Valid optimization if mod LHS matches denom and mod RHS matches
+        // divisor.
+        if (hasher.hash(mod_round->denom) == hasher.hash(mod_lhs) &&
+            hasher.hash(mod_round->divisor) == hasher.hash(mod_rhs)) {
+          const Term* merged_m = new Term(
+              hasher,
+              mod_round->scalar,
+              IRSimplifier::simplify(new Mod(
+                  mod_round->denom,
+                  new Mul(mod_round->divisor, mod_round->mod_divisor))));
+          mods_merged.push_back(merged_m);
+          merged = true;
+          repeat = true;
+          didAnything = true;
+          mods.erase(mods.begin() + i);
+          mod_rounds.erase(mod_rounds.begin() + j);
+          break;
+        }
+      }
 
-    for (auto* m : mods) {
-      // TODO: for now don't attempt partial factorization of this optimization.
-      // E.g. it's possible to do: 2 * (x/y) * y + (x%y) => x + (x/y) * y but
-      // unsure thats actually much better, particulary with CSE.
-      if (!immediateEquals(evaluateOp(new Sub(r->scalar(), m->scalar())), 0)) {
+      if (merged) {
         continue;
       }
 
-      const Mod* mod = dynamic_cast<const Mod*>(m->variables()[0]);
-      CHECK(mod);
+      for (int k = rounds.size() - 1; k >= 0; k--) {
+        const Term* r = rounds[k];
+        const RoundOff* roundoff =
+            dynamic_cast<const RoundOff*>(r->variables()[0]);
+        CHECK(roundoff);
 
-      // Valid optimization if LHS and RHS are equal for both.
-      if (hasher.hash(roundoff->lhs()) == hasher.hash(mod->lhs()) &&
-          hasher.hash(roundoff->rhs()) == hasher.hash(mod->rhs())) {
-        others.push_back(new Term(hasher, r->scalar(), roundoff->lhs()));
-        merged = true;
-        didAnything = true;
-        mods.erase(m);
-        break;
+        // TODO: for now don't attempt partial factorization of this
+        // optimization. E.g. it's possible to do: 2 * (x/y) * y + (x%y) => x +
+        // (x/y) * y but unsure thats actually much better, particulary with
+        // CSE.
+        if (!immediateEquals(
+                evaluateOp(new Sub(r->scalar(), m->scalar())), 0)) {
+          continue;
+        }
+        const Expr* round_lhs = IRSimplifier::simplify(roundoff->lhs());
+        const Expr* round_rhs = IRSimplifier::simplify(roundoff->rhs());
+        // Valid optimization if LHS and RHS are equal for both.
+        if (hasher.hash(round_lhs) == hasher.hash(mod_lhs) &&
+            hasher.hash(round_rhs) == hasher.hash(mod_rhs)) {
+          const Term* merged_r = new Term(hasher, r->scalar(), round_lhs);
+          others.push_back(merged_r);
+          merged = true;
+          didAnything = true;
+          mods.erase(mods.begin() + i);
+          rounds.erase(rounds.begin() + k);
+          break;
+        }
       }
+
+      // If we didn't merge, move out the Mod.
+      if (!merged) {
+        others.push_back(m);
+        mods.erase(mods.begin() + i);
+      }
+
+    } // end of for-loop
+
+    // Add newly generated Mods for merging opportunities in the next iteration.
+    if (!mods_merged.empty()) {
+      mods.insert(mods.end(), mods_merged.begin(), mods_merged.end());
+      mods_merged.clear();
     }
 
-    // If we didn't merge, keep the roundoff.
-    if (!merged) {
-      others.push_back(r);
-    }
-  }
+  } // end of while-loop
 
   // If we made no changes, just exit.
   if (!didAnything) {
     return nullptr;
   }
 
-  // Keep remaining Mods.
-  for (auto* m : mods) {
-    others.push_back(m);
+  // Keep remaining ModRounds and RoundOffs.
+  if (!mod_rounds.empty()) {
+    others.insert(others.end(), mod_rounds.begin(), mod_rounds.end());
+  }
+
+  if (!rounds.empty()) {
+    others.insert(others.end(), rounds.begin(), rounds.end());
   }
 
   return new Polynomial(hasher, poly->scalar(), others);
@@ -1961,51 +2179,51 @@ const Expr* TermExpander::mutate(const RoundOff* v) {
   return term->accept_mutator(this);
 }
 
-Stmt* TermExpander::mutate(const Allocate* v) {
-  const Var* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
-  bool any_change = buffer_var_new == buffer_var_old;
+const Expr* buf_flat_size(const Buf* v) {
+  std::vector<const Expr*> dims = v->dims();
 
   const Expr* flattened = getImmediateByType(kInt, 1);
-  std::vector<const Expr*> dims_old = v->dims();
-  std::vector<const Expr*> dims_new(dims_old.size());
-  for (size_t i = 0; i < dims_old.size(); i++) {
-    dims_new[i] = dims_old[i]->accept_mutator(this);
-    any_change |= (dims_new[i] == dims_old[i]);
-    flattened = new Mul(flattened, dims_new[i]);
+  for (auto& dim : dims) {
+    flattened = new Mul(flattened, dim);
   }
-
-  // Safe to do this as there can't be an Allocate inside an Allocate:
   flattened = IRSimplifier::simplify(flattened);
 
+  return flattened;
+}
+
+Stmt* TermExpander::mutate(const Allocate* v) {
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(v->buf()->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(buf_new);
+  const Expr* flattened = buf_flat_size(buf_new);
+
   if (flattened->isConstant() && immediateEquals(flattened, 0)) {
-    eliminated_allocations_.insert(buffer_var_new);
+    eliminated_allocations_.insert(buf_new->base_handle());
     return nullptr;
   }
 
-  if (!any_change) {
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
 
-  return new Allocate(buffer_var_new, v->dtype(), dims_new);
+  return new Allocate(buf_new);
 }
 
 Stmt* TermExpander::mutate(const Free* v) {
-  const Expr* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(v->buf()->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(buf_new);
 
-  if (eliminated_allocations_.count(buffer_var_new)) {
-    eliminated_allocations_.erase(buffer_var_new);
+  if (eliminated_allocations_.count(buf_new->base_handle())) {
+    eliminated_allocations_.erase(buf_new->base_handle());
     return nullptr;
   }
 
-  if (buffer_var_new == buffer_var_old) {
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
 
-  return new Free(buffer_var_new);
+  return new Free(buf_new);
 }
 
 // Combines adjactent Cond nodes with identical conditions.

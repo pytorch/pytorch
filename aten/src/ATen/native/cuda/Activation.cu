@@ -246,7 +246,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
 // -----------------------------------
 // hardshrink
 // -----------------------------------
-void hardshrink_kernel(TensorIterator& iter, Scalar value) {
+void hardshrink_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardshrink_cuda", [&]() {
     auto lambd = value.to<scalar_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -255,7 +255,7 @@ void hardshrink_kernel(TensorIterator& iter, Scalar value) {
   });
 }
 
-void softshrink_kernel(TensorIterator& iter, Scalar value) {
+void softshrink_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softshrink_cuda", [&]() {
     auto lambd = value.to<scalar_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -264,7 +264,7 @@ void softshrink_kernel(TensorIterator& iter, Scalar value) {
   });
 }
 
-void shrink_backward_kernel(TensorIterator& iter, Scalar value) {
+void shrink_backward_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "shrink_backward_cuda", [&]() {
     auto lambd = value.to<scalar_t>();
     gpu_kernel(iter, [lambd]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
@@ -273,7 +273,7 @@ void shrink_backward_kernel(TensorIterator& iter, Scalar value) {
   });
 }
 
-void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
+void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, iter.dtype(), "hardtanh_backward_cuda", [&]() {
     auto min_val = min.to<scalar_t>();
     auto max_val = max.to<scalar_t>();
@@ -283,7 +283,7 @@ void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
   });
 }
 
-void softplus_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
+void softplus_kernel(TensorIterator& iter, const Scalar& beta_, const Scalar& threshold_) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softplus_cuda", [&]() {
     auto beta = beta_.to<scalar_t>();
     auto threshold = threshold_.to<scalar_t>();
@@ -293,7 +293,7 @@ void softplus_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
   });
 }
 
-void softplus_backward_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
+void softplus_backward_kernel(TensorIterator& iter, const Scalar& beta_, const Scalar& threshold_) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "softplus_backward_cuda", [&]() {
     auto beta = beta_.to<scalar_t>();
     auto threshold = threshold_.to<scalar_t>();
@@ -311,13 +311,13 @@ void threshold_kernel_impl(TensorIterator& iter, scalar_t threshold, scalar_t va
   });
 }
 
-static void threshold_kernel(TensorIterator& iter, Scalar threshold, Scalar value) {
+static void threshold_kernel(TensorIterator& iter, const Scalar& threshold, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "threshold_cuda", [&] {
     threshold_kernel_impl<scalar_t>(iter, threshold.to<scalar_t>(), value.to<scalar_t>());
   });
 }
 
-void elu_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale) {
+void elu_kernel(TensorIterator& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "elu_cuda", [&]() {
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
@@ -328,7 +328,7 @@ void elu_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_s
   });
 }
 
-void elu_backward_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result) {
+void elu_backward_kernel(TensorIterator& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "elu_backward_cuda", [&]() {
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
@@ -371,7 +371,7 @@ void GeluBackwardCUDAKernelImpl(TensorIterator& it) {
       });
 }
 
-void leaky_relu_kernel(TensorIterator& iter, Scalar negval_) {
+void leaky_relu_kernel(TensorIterator& iter, const Scalar& negval_) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "leaky_relu_cuda", [&]() {
     auto negval = negval_.to<scalar_t>();
     gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -380,7 +380,7 @@ void leaky_relu_kernel(TensorIterator& iter, Scalar negval_) {
   });
 }
 
-void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
+void leaky_relu_backward_kernel(TensorIterator& iter, const Scalar& negval_) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "leaky_relu_backward_cuda", [&]() {
     auto negval = negval_.to<scalar_t>();
     gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
@@ -452,7 +452,7 @@ void hardsigmoid_backward_kernel(TensorIterator& iter) {
       [zero, three, neg_three, one_sixth]GPU_LAMBDA(scalar_t grad_val_, scalar_t self_val_) -> scalar_t {
         T_ACC grad_val = static_cast<T_ACC>(grad_val_);
         T_ACC self_val = static_cast<T_ACC>(self_val_);
-        return (self_val >= neg_three && self_val <= three)
+        return (self_val > neg_three && self_val < three)
           ? grad_val * one_sixth
           : zero;
     });
@@ -499,14 +499,26 @@ void silu_backward_kernel(TensorIterator& iter) {
 } // namespace
 
 Tensor gelu_cuda(const Tensor& self) {
-  Tensor Y = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor Y = at::native::empty_like(
+      self,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::unary_op(Y, self);
   GeluCUDAKernelImpl(it);
   return Y;
 }
 
 Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
-  Tensor dX = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor dX = at::native::empty_like(
+      self,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::binary_op(dX, grad, self);
   GeluBackwardCUDAKernelImpl(it);
   return dX;
@@ -517,8 +529,8 @@ Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
 static Tensor threshold_out_cuda(
     optional<Tensor> opt_result,
     const Tensor& self,
-    Scalar threshold,
-    Scalar value,
+    const Scalar& threshold,
+    const Scalar& value,
     const Tensor& other) {
   Tensor result = opt_result.value_or(Tensor());
   auto iter = TensorIteratorConfig()
@@ -535,21 +547,21 @@ static Tensor threshold_out_cuda(
   return iter.output();
 }
 
-Tensor threshold_cuda(const Tensor& self, Scalar threshold, Scalar value) {
+Tensor threshold_cuda(const Tensor& self, const Scalar& threshold, const Scalar& value) {
   return threshold_out_cuda(nullopt, self, threshold, value, self);
 }
 
-Tensor& threshold__cuda(Tensor& self, Scalar threshold, Scalar value) {
+Tensor& threshold__cuda(Tensor& self, const Scalar& threshold, const Scalar& value) {
   threshold_out_cuda(make_optional(self), self, threshold, value, self);
   return self;
 }
 
-Tensor& threshold_out_cuda(Tensor& result, const Tensor& self, Scalar threshold, Scalar value) {
+Tensor& threshold_out_cuda(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
   threshold_out_cuda(make_optional(result), self, threshold, value, self);
   return result;
 }
 
-Tensor threshold_backward_cuda(const Tensor& grad, const Tensor& self, Scalar threshold) {
+Tensor threshold_backward_cuda(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
   return threshold_out_cuda(nullopt, self, threshold, 0, grad);
 }
 

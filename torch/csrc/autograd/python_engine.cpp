@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -237,7 +238,12 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
       THPUtils_assert(input_var->cdata.requires_grad(),
           "One of the differentiated Tensors does not require grad");
       if (!grad_fn) {
-        output_edges.emplace_back();
+        // NOTE [ Autograd Unreachable Input ]
+        // Since input has no grad_accumulator, its guaranteed to be unreachable.
+        // We initialize an edge pointing to a non-nullptr Node so nodes in the graph
+        // (e.g., mul when an operand is scalar) that have edges pointing to nullptr
+        // don't get erroneously assigned `needed = True` in exec_info.
+        output_edges.emplace_back(std::make_shared<Identity>(), 0);
       } else {
         output_edges.emplace_back(grad_fn, output_nr);
       }

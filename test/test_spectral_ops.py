@@ -185,6 +185,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, match):
             op(t)
 
+    @onlyOnCPUAndCUDA
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
@@ -197,7 +198,6 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, "ihfft expects a real input tensor"):
             torch.fft.ihfft(t)
 
-    @skipCUDAIfRocm
     @skipCPUIfNoMkl
     @onlyOnCPUAndCUDA
     @dtypes(torch.int8, torch.float, torch.double, torch.complex64, torch.complex128)
@@ -425,7 +425,6 @@ class TestFFT(TestCase):
 
                 self.assertEqual(actual, expect)
 
-    @skipCUDAIfRocm
     @skipCPUIfNoMkl
     @onlyOnCPUAndCUDA
     def test_fft2_invalid(self, device):
@@ -453,7 +452,6 @@ class TestFFT(TestCase):
     # Helper functions
 
     @skipCPUIfNoMkl
-    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double)
@@ -480,7 +478,6 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expected, exact_dtype=False)
 
     @skipCPUIfNoMkl
-    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
     def test_fftfreq_out(self, device, dtype):
@@ -493,7 +490,6 @@ class TestFFT(TestCase):
 
 
     @skipCPUIfNoMkl
-    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
@@ -520,7 +516,6 @@ class TestFFT(TestCase):
                 self.assertEqual(actual, expected)
 
     @skipCPUIfNoMkl
-    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float, torch.double)
@@ -680,8 +675,8 @@ class TestFFT(TestCase):
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
-    @skipCUDAIfRocm
     @skipCPUIfNoMkl
+    @onlyOnCPUAndCUDA
     @dtypes(torch.double)
     def test_stft(self, device, dtype):
         if not TEST_LIBROSA:
@@ -712,9 +707,8 @@ class TestFFT(TestCase):
             else:
                 window = None
             if expected_error is None:
-                with self.maybeWarnsRegex(UserWarning, "stft with return_complex=False"):
-                    result = x.stft(n_fft, hop_length, win_length, window,
-                                    center=center, return_complex=False)
+                result = x.stft(n_fft, hop_length, win_length, window,
+                                center=center, return_complex=False)
                 # NB: librosa defaults to np.complex64 output, no matter what
                 # the input dtype
                 ref_result = librosa_stft(x, n_fft, hop_length, win_length, window, center)
@@ -749,6 +743,7 @@ class TestFFT(TestCase):
 
 
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @skipCPUIfNoMkl
     @dtypes(torch.double, torch.cdouble)
     def test_complex_stft_roundtrip(self, device, dtype):
@@ -791,6 +786,7 @@ class TestFFT(TestCase):
             self.assertEqual(x_roundtrip, x)
 
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @skipCPUIfNoMkl
     @dtypes(torch.double, torch.cdouble)
     def test_stft_roundtrip_complex_window(self, device, dtype):
@@ -852,6 +848,7 @@ class TestFFT(TestCase):
             self.assertEqual(actual, expected)
 
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @skipCPUIfNoMkl
     @dtypes(torch.cdouble)
     def test_complex_stft_real_equiv(self, device, dtype):
@@ -912,7 +909,6 @@ class TestFFT(TestCase):
                                  return_complex=True)
             self.assertEqual(expected, actual)
 
-    @skipCUDAIfRocm
     @skipCPUIfNoMkl
     def test_complex_stft_onesided(self, device):
         # stft of complex input cannot be onesided
@@ -934,13 +930,14 @@ class TestFFT(TestCase):
             x.stft(10, pad_mode='constant', onesided=True)
 
     # stft is currently warning that it requires return-complex while an upgrader is written
+    @onlyOnCPUAndCUDA
+    @skipCPUIfNoMkl
     def test_stft_requires_complex(self, device):
         x = torch.rand(100)
         y = x.stft(10, pad_mode='constant')
         # with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
         #     y = x.stft(10, pad_mode='constant')
 
-    @skipCUDAIfRocm
     @skipCPUIfNoMkl
     def test_fft_input_modification(self, device):
         # FFT functions should not modify their input (gh-34551)
@@ -961,6 +958,7 @@ class TestFFT(TestCase):
         _ = torch.fft.irfftn(half_spectrum_copy, s=(2, 2), dim=(-2, -1))
         self.assertEqual(half_spectrum, half_spectrum_copy)
 
+    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @skipCPUIfNoMkl
     @dtypes(torch.double)
@@ -974,6 +972,7 @@ class TestFFT(TestCase):
         _test(torch.ones(4, dtype=dtype, device=device), 4, 4)
         _test(torch.zeros(4, dtype=dtype, device=device), 4, 4)
 
+    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @skipCPUIfNoMkl
     @dtypes(torch.double)
@@ -1076,8 +1075,8 @@ class TestFFT(TestCase):
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2)), 2)
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
 
-    @onlyOnCPUAndCUDA
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
@@ -1111,8 +1110,8 @@ class TestFFT(TestCase):
         _test(amplitude=80, L=9, n=6)
         _test(amplitude=99, L=10, n=7)
 
-    @onlyOnCPUAndCUDA
     @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
     @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_istft_linearity(self, device, dtype):
@@ -1178,9 +1177,9 @@ class TestFFT(TestCase):
         for data_size, kwargs in patterns:
             _test(data_size, kwargs)
 
+    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @skipCPUIfNoMkl
-    @skipCUDAIfRocm
     def test_batch_istft(self, device):
         original = torch.tensor([
             [[4., 0.], [4., 0.], [4., 0.], [4., 0.], [4., 0.]],
@@ -1200,7 +1199,6 @@ class TestFFT(TestCase):
 
     @onlyCUDA
     @skipIf(not TEST_MKL, "Test requires MKL")
-    @skipCUDAIfRocm
     def test_stft_window_device(self, device):
         # Test the (i)stft window must be on the same device as the input
         x = torch.randn(1000, dtype=torch.complex64)

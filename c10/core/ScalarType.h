@@ -201,7 +201,7 @@ static inline size_t elementSize(ScalarType t) {
   switch (t) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CASE_ELEMENTSIZE_CASE)
     default:
-      AT_ERROR("Unknown ScalarType");
+      TORCH_CHECK(false, "Unknown ScalarType");
   }
 #undef CASE_ELEMENTSIZE_CASE
 }
@@ -309,8 +309,14 @@ static inline ScalarType toComplexType(ScalarType t) {
       return ScalarType::ComplexFloat;
     case ScalarType::Double:
       return ScalarType::ComplexDouble;
+    case ScalarType::ComplexHalf:
+      return ScalarType::ComplexHalf;
+    case ScalarType::ComplexFloat:
+      return ScalarType::ComplexFloat;
+    case ScalarType::ComplexDouble:
+      return ScalarType::ComplexDouble;
     default:
-      TORCH_CHECK(false, "Unknown Complex ScalarType");
+      TORCH_CHECK(false, "Unknown Complex ScalarType for ", t);
   }
 }
 
@@ -367,7 +373,7 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   }
 
   if (isQIntType(a) || isQIntType(b)) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be, offending types: ",
         toString(a),
         " ",

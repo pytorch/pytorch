@@ -324,6 +324,8 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
             filter.data<float>(),
             Y->mutable_data<float>(),
             Y->size());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     if (InputSize() == 3) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bias_desc_,
@@ -431,6 +433,8 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
             X.data<float>(),
             dfilter->mutable_data<float>(),
             dY.size());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     DepthwiseConv2dBackpropInputGPUKernelNCHW<float, 3, 3>
         <<<CAFFE_GET_BLOCKS(dX->size()),
            CAFFE_CUDA_NUM_THREADS,
@@ -441,6 +445,8 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
             filter.data<float>(),
             dX->mutable_data<float>(),
             dX->size());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     if (!no_bias_) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bias_desc_,

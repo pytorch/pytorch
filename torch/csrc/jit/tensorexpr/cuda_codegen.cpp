@@ -310,6 +310,10 @@ void CudaPrinter::visit(const Intrinsics* v) {
   os() << ")";
 }
 
+void CudaPrinter::visit(const ExternalCall* v) {
+  throw unimplemented_lowering(v);
+}
+
 void CudaPrinter::visit(const Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
   // Detects whether the load target is also a store target.

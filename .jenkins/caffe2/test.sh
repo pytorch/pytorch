@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Skip tests in environments where they are not built/applicable
@@ -39,39 +40,42 @@ fi
 ################################################################################
 # C++ tests #
 ################################################################################
-echo "Running C++ tests.."
-for test in $(find "$cpp_test_dir" -executable -type f); do
-  case "$test" in
-    # skip tests we know are hanging or bad
-    */mkl_utils_test|*/aten/integer_divider_test)
-      continue
-      ;;
-    */scalar_tensor_test|*/basic|*/native_test)
-      if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+# Don't run cpp tests a second time in the sharded ort_test2 job
+if [[ "$BUILD_ENVIRONMENT" != *ort_test2* ]]; then
+  echo "Running C++ tests.."
+  for test in $(find "$cpp_test_dir" -executable -type f); do
+    case "$test" in
+      # skip tests we know are hanging or bad
+      */mkl_utils_test|*/aten/integer_divider_test)
         continue
-      else
-        LD_LIBRARY_PATH="$ld_library_path" "$test"
-      fi
-      ;;
-    */*_benchmark)
-      LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
-      ;;
-    *)
-      # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
-      # planning to migrate to gtest as the common PyTorch c++ test suite, we
-      # currently do NOT use the xml test reporter, because Catch doesn't
-      # support multiple reporters
-      # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
-      # which means that enabling XML output means you lose useful stdout
-      # output for Jenkins.  It's more important to have useful console
-      # output than it is to have XML output for Jenkins.
-      # Note: in the future, if we want to use xml test reporter once we switch
-      # to all gtest, one can simply do:
-      LD_LIBRARY_PATH="$ld_library_path" \
-          "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
-      ;;
-  esac
-done
+        ;;
+      */scalar_tensor_test|*/basic|*/native_test)
+        if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+          continue
+        else
+          LD_LIBRARY_PATH="$ld_library_path" "$test"
+        fi
+        ;;
+      */*_benchmark)
+        LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
+        ;;
+      *)
+        # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
+        # planning to migrate to gtest as the common PyTorch c++ test suite, we
+        # currently do NOT use the xml test reporter, because Catch doesn't
+        # support multiple reporters
+        # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
+        # which means that enabling XML output means you lose useful stdout
+        # output for Jenkins.  It's more important to have useful console
+        # output than it is to have XML output for Jenkins.
+        # Note: in the future, if we want to use xml test reporter once we switch
+        # to all gtest, one can simply do:
+        LD_LIBRARY_PATH="$ld_library_path" \
+            "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
+        ;;
+    esac
+  done
+fi
 
 ################################################################################
 # Python tests #
@@ -84,7 +88,8 @@ fi
 # CircleCI docker images could install conda as jenkins user, or use the OS's python package.
 PIP=$(which pip)
 PIP_USER=$(stat --format '%U' $PIP)
-if [[ "$PIP_USER" = root ]]; then
+CURRENT_USER=$(id -u -n)
+if [[ "$PIP_USER" = root && "$CURRENT_USER" != root ]]; then
   MAYBE_SUDO=sudo
 fi
 
@@ -158,9 +163,9 @@ pip install --user pytest-sugar
 # torchvision tests #
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  # Check out torch/vision at Jun 11 2020 commit
+  # Check out torch/vision at 0.9.0-rc1 commit
   # This hash must match one in .jenkins/pytorch/test.sh
-  pip install -q --user git+https://github.com/pytorch/vision.git@ae0d80b3c52dc98b3a9763bdb974c3ef7b6eb83d
+  pip install -q --user git+https://github.com/pytorch/vision.git@8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db
   pip install -q --user ninja
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"

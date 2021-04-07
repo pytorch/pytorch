@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/hash.h>
 
 #include <atomic>
 #include <climits>
@@ -444,6 +445,10 @@ struct Environment {
            makeMagic(
                "__float__",
                std::make_shared<CastValue>(FloatType::get(), aten::Float))},
+          {"complex",
+           makeMagic(
+               "__complex__",
+               std::make_shared<CastValue>(ComplexType::get(), aten::Complex))},
           {"int",
            makeMagic(
                "__int__",
@@ -485,12 +490,16 @@ struct Environment {
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
+          {"any", std::make_shared<BuiltinFunction>(aten::any, at::nullopt)},
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
+          {"sum", std::make_shared<BuiltinFunction>(aten::sum, at::nullopt)},
           {"list", SpecialFormValue::create(prim::list)},
+          {"dict", SpecialFormValue::create(prim::dict)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
+          {"pow", std::make_shared<BuiltinFunction>(aten::pow, at::nullopt)},
           {"range", SpecialFormValue::create(prim::range)},
           {"zip", SpecialFormValue::create(prim::zip)},
           {"enumerate", SpecialFormValue::create(prim::enumerate)},
@@ -566,12 +575,12 @@ struct Environment {
   ValueTable value_table;
 };
 
-template <class T>
+template <class T, class Hash>
 static Value* materializeConstant(
     T val,
     Graph& graph,
     const SourceRange& r,
-    std::unordered_map<T, Value*>& map) {
+    std::unordered_map<T, Value*, Hash>& map) {
   auto existing_constant = map.find(val);
   if (existing_constant != map.end()) {
     return existing_constant->second;
@@ -658,8 +667,13 @@ struct to_ir {
   Function& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
-  std::unordered_map<int64_t, Value*> integral_constants;
-  std::unordered_map<double, Value*> fp_constants;
+  std::unordered_map<int64_t, Value*, std::hash<int64_t>> integral_constants;
+  std::unordered_map<double, Value*, std::hash<double>> fp_constants;
+  std::unordered_map<
+      c10::complex<double>,
+      Value*,
+      c10::hash<c10::complex<double>>>
+      complex_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
   LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;
@@ -1258,6 +1272,15 @@ struct to_ir {
       const TernaryIf& expr,
       const TypePtr& type_hint = nullptr) {
     CondValue cond_value = emitCondExpr(expr.cond());
+    // If the cond expr is a static value, then we metacompile the `if`
+    // statemement and only emit true or false branch
+    if (cond_value.staticIf()) {
+      if (*cond_value.staticIf()) {
+        return emitExpr(expr.true_expr(), type_hint);
+      } else {
+        return emitExpr(expr.false_expr(), type_hint);
+      }
+    }
     auto true_expr = [&] { return emitExpr(expr.true_expr(), type_hint); };
     auto false_expr = [&] { return emitExpr(expr.false_expr(), type_hint); };
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
@@ -1267,7 +1290,6 @@ struct to_ir {
     const auto loc = lc.range();
     const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
     const auto itrs = List<Expr>::create(lc.range(), {lc.iter()});
-
     // If there is no type hint, and this is emitted over an iterable that is
     // unrolled and of length 0, then we emit a List of tensors
     Value* list_value = graph->insertNode(graph->create(prim::ListConstruct, 1))
@@ -1881,13 +1903,13 @@ struct to_ir {
       auto* rhs = emitExpr(e);
       auto* n = graph->insertNode(graph->create(prim::Enter, {rhs}));
       entered.push(rhs);
-      auto rhsClass = rhs->type()->expect<ClassType>();
 
-      if (!rhsClass) {
+      if (rhs->type()->kind() != TypeKind::ClassType) {
         throw ErrorReport(e.range())
-            << "With item expression does not return a class type";
+            << "With item expression must return an object";
       }
 
+      auto rhsClass = rhs->type()->expect<ClassType>();
       auto* enterMethod = rhsClass->findMethod("__enter__");
       auto* exitMethod = rhsClass->findMethod("__exit__");
 
@@ -1906,13 +1928,8 @@ struct to_ir {
       // Check the schema of __exit__.
       auto& exitSchema = exitMethod->getSchema();
       if (exitSchema.arguments().size() != 4) {
-        throw ErrorReport(e.range())
-            << "__exit__ must have four arguments and no return value";
+        throw ErrorReport(e.range()) << "__exit__ must have four arguments";
       } else {
-        if (exitSchema.returns().at(0).type() != NoneType::get()) {
-          throw ErrorReport(e.range()) << "__exit__ must have no return value";
-        }
-
         for (unsigned i = 1; i < 4; ++i) {
           if (exitSchema.arguments().at(i).type() != AnyType::get()) {
             throw ErrorReport(e.range())
@@ -2281,13 +2298,14 @@ struct to_ir {
   NamedValue emitValueToTensor(
       const NamedValue& value,
       const NamedValue& matchTypeOf) {
-    // Add implicit conversion of int/float/bool/number types to tensors
+    // Add implicit conversion of int/float/complex/bool/number types to tensors
     // Used in emitSubscriptAssign to convert:
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
     if (kind == c10::TypeKind::NumberType || kind == c10::TypeKind::IntType ||
-        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType) {
+        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType ||
+        kind == c10::TypeKind::ComplexType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
@@ -2329,7 +2347,7 @@ struct to_ir {
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
 
-      // rhs must be a tensor, implicitly convert int/float/bool
+      // rhs must be a tensor, implicitly convert int/float/complex/bool
       const auto convertedRhs = emitValueToTensor(rhs, slicedArg);
 
       if (tensorIndices.size() == 0) {
@@ -2966,51 +2984,238 @@ struct to_ir {
         return iterable_tree;
       }
       case prim::list: {
-        if (apply.inputs().size() == 0) {
-          TypePtr type = type_hint ? type_hint : ListType::ofTensors();
-          if (!type->cast<ListType>()) {
-            throw ErrorReport(apply.range())
-                << "Expected list type annotation for list(), found "
-                << type_hint->repr_str();
-          }
-          return std::make_shared<SimpleValue>(
-              graph
-                  ->insertNode(graph->createList(
-                      type->expectRef<ListType>().getElementType(), {}))
-                  ->output());
-        }
-        // list(iter) desugars to [_elem for _elem in iter]
-        checkApplyNumInputs(apply, 1);
-        auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
-
-        // aten::list builtin op is registered for List and Str input
-        // dispatch to the builtin op to avoid perf slowdown on existing uses
-        if (auto simple = asSimple(iter_input)) {
-          if (simple->type()->cast<ListType>() ||
-              simple->type()->cast<StringType>()) {
-            return std::make_shared<SimpleValue>(emitBuiltinCall(
-                apply.range(), *method.graph(), aten::list, {simple}, {}));
-          }
-        }
-        const std::string& iter_name = createTempName("$_iter");
-        environment_stack->setSugaredVar(
-            apply.range(),
-            iter_name,
-            iter_input,
-            /*annotated_type=*/nullptr);
-
-        const std::string& elem_name = createTempName("$_elem");
-        auto ident =
-            Var::create(apply.range(), Ident::create(apply.range(), elem_name));
-        auto iter =
-            Var::create(apply.range(), Ident::create(apply.range(), iter_name));
-        auto lc = ListComp::create(apply.range(), ident, ident, iter);
-        return std::make_shared<SimpleValue>(
-            emitListComprehension(lc, type_hint));
+        return emitApplySpecialFormForList(apply, type_hint);
+      }
+      case prim::dict: {
+        return emitApplySpecialFormForDict(apply, type_hint);
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
     }
+  }
+
+  std::shared_ptr<SugaredValue> emitApplySpecialFormForList(
+      Apply& apply,
+      const TypePtr& type_hint = nullptr) {
+    if (apply.inputs().size() == 0) {
+      TypePtr type = type_hint ? type_hint : ListType::ofTensors();
+      if (!type->cast<ListType>()) {
+        throw ErrorReport(apply.range())
+            << "Expected list type annotation for list(), found "
+            << type_hint->repr_str();
+      }
+      return std::make_shared<SimpleValue>(
+          graph
+              ->insertNode(graph->createList(
+                  type->expectRef<ListType>().getElementType(), {}))
+              ->output());
+    }
+    // list(iter) desugars to [_elem for _elem in iter]
+    checkApplyNumInputs(apply, 1);
+    auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+
+    // aten::list builtin op is registered for List and Str input
+    // dispatch to the builtin op to avoid perf slowdown on existing uses
+    if (auto simple = asSimple(iter_input)) {
+      if (simple->type()->cast<ListType>() ||
+          simple->type()->cast<StringType>()) {
+        return std::make_shared<SimpleValue>(emitBuiltinCall(
+            apply.range(), *method.graph(), aten::list, {simple}, {}));
+      }
+    }
+    const std::string& iter_name = createTempName("$_iter");
+    environment_stack->setSugaredVar(
+        apply.range(),
+        iter_name,
+        iter_input,
+        /*annotated_type=*/nullptr);
+
+    const std::string& elem_name = createTempName("$_elem");
+    auto ident =
+        Var::create(apply.range(), Ident::create(apply.range(), elem_name));
+    auto iter =
+        Var::create(apply.range(), Ident::create(apply.range(), iter_name));
+    auto lc = ListComp::create(apply.range(), ident, ident, iter);
+    return std::make_shared<SimpleValue>(emitListComprehension(lc, type_hint));
+  }
+
+  std::shared_ptr<SugaredValue> emitApplySpecialFormForDict(
+      Apply& apply,
+      const TypePtr& type_hint = nullptr) {
+    auto add_kwargs = [&](Value* dc_value) {
+      NamedValue self = NamedValue(apply.range(), "self", dc_value);
+      for (const auto& kwarg : apply.attributes()) {
+        auto name = StringLiteral::create(kwarg.range(), kwarg.name().name());
+        auto k = emitExpr(name);
+        auto v = emitExpr(kwarg.value());
+        NamedValue input_k = NamedValue(kwarg.range(), "", k);
+        NamedValue input_v = NamedValue(kwarg.range(), "", v);
+        emitBuiltinCall(
+            kwarg.range(),
+            *graph,
+            aten::_set_item,
+            {self, input_k, input_v},
+            {});
+      }
+    };
+
+    auto treat_as_empty_container = [&] {
+      if (apply.inputs().empty() && !apply.attributes().empty()) {
+        return true;
+      }
+      if (!apply.inputs().empty() &&
+          apply.inputs()[0].kind() == TK_DICT_LITERAL) {
+        auto dict_lit = DictLiteral(apply.inputs()[0]);
+        return dict_lit.key_inputs().empty() && dict_lit.value_inputs().empty();
+      }
+      if (!apply.inputs().empty() &&
+          apply.inputs()[0].kind() == TK_LIST_LITERAL) {
+        auto list_lit = ListLiteral(apply.inputs()[0]);
+        return list_lit.inputs().empty();
+      }
+      return false;
+    };
+
+    // If possible, just cast what we have to a Dict and add the
+    // kwargs by hand. This is not only the simplest solution; it also
+    // hits cases like `dict(dict([1, 2, 3]))` or `dict(x)` (where `x`
+    // is some previously-defined variable)
+    if (!apply.inputs().empty()) {
+      auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+      if (auto simple = asSimple(iter_input)) {
+        if (simple->type()->cast<DictType>()) {
+          auto dc_value = emitBuiltinCall(
+              apply.range(), *method.graph(), aten::dict, {simple}, {});
+          add_kwargs(dc_value);
+          return std::make_shared<SimpleValue>(dc_value);
+        }
+      }
+    }
+
+    // If we have a call with an empty container, or if we have a
+    // call with kwargs only
+    if (treat_as_empty_container()) {
+      auto expr_list = List<Expr>::create(apply.range(), {});
+      apply = Apply::create(
+          apply.range(), apply.callee(), expr_list, apply.attributes());
+    }
+
+    // If we have a completely empty call to dict()
+    if (apply.inputs().empty() && apply.attributes().empty()) {
+      TypePtr type = type_hint;
+      if (!type_hint) {
+        type = DictType::create(StringType::get(), TensorType::get());
+      }
+      TORCH_CHECK(
+          type->expect<DictType>(),
+          "Expected a type annotation "
+          "of Dict for dict constructor dict(), got ",
+          type_hint->str());
+      return std::make_shared<SimpleValue>(
+          graph
+              ->insertNode(graph->createDict(
+                  type->expect<DictType>()->getKeyType(),
+                  type->expect<DictType>()->getValueType(),
+                  {},
+                  {}))
+              ->output());
+    }
+
+    // Special case logic for if we have a dict comprehension
+    if (!apply.inputs().empty() && apply.inputs()[0].kind() == TK_DICT_COMP) {
+      auto dc = DictComp(apply.inputs()[0]);
+      auto dc_value = emitDictComprehension(dc, type_hint);
+      add_kwargs(dc_value);
+      return std::make_shared<SimpleValue>(dc_value);
+    }
+
+    // We can't feasibly register all possible key x value
+    // combinations of new prim ops for the case that we use the
+    // constructor with a dict literal. It makes much more sense
+    // to transform the dict literal into a list of tuples so that
+    // we can use the existing constructors
+    if (!apply.inputs().empty() &&
+        apply.inputs()[0].kind() == TK_DICT_LITERAL) {
+      auto dict_lit = DictLiteral(apply.inputs()[0]);
+      std::vector<Expr> zipped;
+      zipped.reserve(dict_lit.key_inputs().size());
+      TORCH_INTERNAL_ASSERT(
+          dict_lit.key_inputs().size() == dict_lit.value_inputs().size());
+      for (auto key_it = dict_lit.key_inputs().begin(),
+                val_it = dict_lit.value_inputs().begin();
+           key_it != dict_lit.key_inputs().end();
+           ++key_it, ++val_it) {
+        auto tuple_inputs =
+            List<Expr>::create(apply.range(), {*key_it, *val_it});
+        auto tuple = TupleLiteral::create(apply.range(), tuple_inputs);
+        zipped.push_back(tuple);
+      }
+      auto ll_values = List<Expr>::create(apply.range(), zipped);
+      auto ll = ListLiteral::create(apply.range(), ll_values);
+      auto expr_list = List<Expr>::create(apply.range(), {ll});
+      // Change `apply` to a new Apply node holding a list of
+      // tuples
+      apply = Apply::create(
+          apply.range(), apply.callee(), expr_list, apply.attributes());
+    }
+
+    // If we have kwargs to include, we'll take a similar approach
+    // to the above logic and standardize the Apply node
+    if (!apply.attributes().empty() &&
+        (apply.inputs().empty() ||
+         apply.inputs()[0].kind() == TK_LIST_LITERAL)) {
+      std::vector<Expr> exprs;
+      // Gather all the existing tuples in the input iterable
+      if (!apply.inputs().empty()) {
+        auto tuple_list = ListLiteral(apply.inputs()[0]).inputs();
+        for (const auto& tuple : tuple_list) {
+          exprs.push_back(tuple);
+        }
+      }
+      // Create tuples out of each kwarg and gather them as well
+      for (const auto& attr : apply.attributes()) {
+        auto k = StringLiteral::create(apply.range(), attr.name().name());
+        auto v = attr.value();
+        auto tuple_inputs = List<Expr>::create(apply.range(), {k, v});
+        auto tuple = TupleLiteral::create(apply.range(), tuple_inputs);
+        exprs.push_back(tuple);
+      }
+      auto expr_list = List<Expr>::create(apply.range(), {exprs});
+      auto ll = ListLiteral::create(apply.range(), expr_list);
+      auto new_inputs = List<Expr>::create(apply.range(), {ll});
+      auto new_kwargs = List<Attribute>::create(apply.range(), {});
+      apply =
+          Apply::create(apply.range(), apply.callee(), new_inputs, new_kwargs);
+    }
+
+    checkApplyNumInputs(apply, 1);
+
+    auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+
+    const std::string& iter_name = createTempName("$_iter");
+    const std::string& key_name = createTempName("$_key");
+    const std::string& value_name = createTempName("$_value");
+
+    auto key =
+        Var::create(apply.range(), Ident::create(apply.range(), key_name));
+    auto value =
+        Var::create(apply.range(), Ident::create(apply.range(), value_name));
+    auto target = TupleLiteral::create(
+        apply.range(), List<Expr>::create(apply.range(), {key, value}));
+    auto iter =
+        Var::create(apply.range(), Ident::create(apply.range(), iter_name));
+
+    environment_stack->setSugaredVar(
+        apply.range(),
+        iter_name,
+        iter_input,
+        /*annotated_type=*/nullptr);
+
+    auto dc = DictComp::create(apply.range(), key, value, target, iter);
+    auto dc_value = emitDictComprehension(dc, type_hint);
+    add_kwargs(dc_value);
+
+    return std::make_shared<SimpleValue>(dc_value);
   }
 
   Value* emitExpr(const Expr& tree, const TypePtr& type_hint = nullptr) {
@@ -3481,6 +3686,9 @@ struct to_ir {
     if (c.isFloatingPoint())
       return materializeConstant(
           c.asFloatingPoint(), *graph, c.range(), fp_constants);
+    else if (c.isComplex())
+      return materializeConstant(
+          c.asComplex(), *graph, c.range(), complex_constants);
     else
       return materializeConstant(
           c.asIntegral(), *graph, c.range(), integral_constants);

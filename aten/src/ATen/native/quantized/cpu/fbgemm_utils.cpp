@@ -1,21 +1,17 @@
 #include <ATen/ATen.h>
-#include <ATen/native/TensorFactories.h>
-
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
+#include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
-
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
-
+#include <c10/util/accumulate.h>
 #include <torch/custom_class.h>
-
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
 
 torch::class_<LinearPackedParamsBase> register_linear_params();
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
@@ -143,7 +139,7 @@ Tensor MakeStridedQTensorCPU(
   AT_ASSERT(options.device().is_cpu());
   at::native::check_size_nonnegative(sizes);
   auto* allocator = at::getCPUAllocator();
-  const int64_t nelements = at::prod_intlist(sizes);
+  const int64_t nelements = c10::multiply_integers(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),

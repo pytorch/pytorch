@@ -1,10 +1,14 @@
 import torch
 import torch.nn as nn
+import unittest
 from torch.testing._internal.jit_utils import JitTestCase
 
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_utils import set_default_dtype
+from torch.utils import mkldnn as mkldnn_utils
+
 
 from torch.jit._recursive import wrap_cpp_module
 from typing import Any
@@ -12,10 +16,24 @@ from itertools import product
 
 import io
 
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
+
+TEST_CUDA = torch.cuda.is_available()
+TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
+TEST_CUDNN = False
+if TEST_CUDA and not TEST_ROCM:  # Skip ROCM
+    torch.ones(1).cuda()  # initialize cuda context
+    TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0')))
 
 class TestFreezing(JitTestCase):
     def test_freeze_module(self):
@@ -1008,6 +1026,24 @@ class TestFreezing(JitTestCase):
         m_f = torch._C._freeze_module(m_s._c)
         self.assertTrue(m_f.hasattr('conv1'))
 
+    def test_freeze_module_no_forward(self):
+
+        class FreezeMe(nn.Module):
+            def __init__(self):
+                super(FreezeMe, self).__init__()
+                self.lin = nn.Linear(10, 1)
+
+            @torch.jit.export
+            def foo(self, x):
+                return self.lin(x)
+
+        m = FreezeMe()
+        m_s = torch.jit.script(m)
+        m_s.eval()
+        m_f = torch._C._freeze_module(m_s._c, preservedAttrs=['foo'])
+        input = torch.ones(10)
+        self.assertEqual(m_s.foo(input), m_f.foo(input))
+
 
     def test_freeze_module_in_training_mode(self):
         class Net(nn.Module):
@@ -1301,10 +1337,10 @@ class TestFreezing(JitTestCase):
         self.assertEqual(mod_eager(True), frozen_mod(True))
         self.assertEqual(mod_eager(False), frozen_mod(False))
 
-    def test_freeze_module_with_non_static_module_dict_index(self):
+    def test_freeze_module_with_non_static_module_container_index(self):
         """
-        Test that a Module contained a non-static ModuleDict index
-        cannot be frozen.
+        Test that Modules containing non-static ModuleDict or ModuleList
+        indexing cannot be frozen.
         """
         @torch.jit.interface
         class ModuleInterface(torch.nn.Module):
@@ -1318,8 +1354,7 @@ class TestFreezing(JitTestCase):
 
                 return inp
 
-        # Test annotation of submodule.
-        class Mod(torch.nn.Module):
+        class ModWithDict(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
@@ -1328,9 +1363,23 @@ class TestFreezing(JitTestCase):
                 value: ModuleInterface = self.d[key]
                 return value.forward(x)
 
-        m = torch.jit.script(Mod())
+        m = torch.jit.script(ModWithDict())
         m.eval()
-        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleDictIndex is not supported"):
+        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleContainerIndex is not supported"):
+            mf = torch._C._freeze_module(m._c)
+
+        class ModWithList(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.ModuleList([ImplementsInterface()])
+
+            def forward(self, x: torch.Tensor, idx: int) -> Any:
+                value: ModuleInterface = self.l[idx]
+                return value.forward(x)
+
+        m = torch.jit.script(ModWithList())
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleContainerIndex is not supported"):
             mf = torch._C._freeze_module(m._c)
 
     def test_freeze_non_module_class_getattr(self):
@@ -1508,7 +1557,7 @@ class TestFrozenOptimizations(JitTestCase):
         bn = torch.nn.BatchNorm2d(out_channels, eps=.001)
         mod = torch.nn.Sequential(conv, bn)
         # set optimize to False here, by default freezing runs optimize_frozen_module
-        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize_numerics=False)
         # inspect frozen mod
         FileCheck().check("batch_norm").run(frozen_mod.graph)
         torch.jit.optimize_frozen_module(frozen_mod)
@@ -1517,3 +1566,361 @@ class TestFrozenOptimizations(JitTestCase):
         # optimize_frozen_module should be run
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
         FileCheck().check_not("batch_norm").run(frozen_mod.graph)
+
+    def test_freeze_remove_dropout(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.dropout = nn.Dropout(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        mod = torch.jit.script(Net())
+        # inspect mod
+        torch._C._jit_pass_inline(mod.graph)
+        FileCheck().check("aten::dropout").run(mod.graph)
+        frozen_mod = torch.jit.freeze(mod.eval())
+        FileCheck().check_not("aten::dropout").run(frozen_mod.graph)
+
+        input = torch.randn(2)
+        output_s = mod.forward(input)
+        output_f = frozen_mod.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_remove_feature_dropout(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.dropout = nn.Dropout2d(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        mod = torch.jit.script(Net().eval())
+        # inspect mod
+        torch._C._jit_pass_inline(mod.graph)
+        FileCheck().check("aten::feature_dropout").run(mod.graph)
+        frozen_mod = torch.jit.freeze(mod)
+        FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
+
+        input = torch.randn(2, 2)
+        output_s = mod.forward(input)
+        output_f = frozen_mod.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_freeze_mkdlnn(self):
+        conv = torch.nn.Conv2d(3, 32, kernel_size=3, stride=2).eval().float()
+        convmkl = mkldnn_utils.to_mkldnn(conv)
+        out = torch.jit.freeze(torch.jit.script(convmkl.eval()))
+        inp = torch.rand([4, 3, 4, 4]).float()
+        self.assertEqual(out(inp.to_mkldnn()).to_dense(), conv(inp))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_conv_to_mkldnn(self):
+        with set_default_dtype(torch.float):
+            for module, trace in product([nn.Conv2d, nn.Conv3d], [False, True]):
+                mod = module(3, 32, kernel_size=3, stride=2).eval()
+                inps = [4, 3, 4]
+                if module == nn.Conv2d:
+                    inps.append(inps[-1])
+                if module == nn.Conv3d:
+                    inps.append(inps[-1])
+                    inps.append(inps[-1])
+
+                inp = torch.rand(inps)
+                if trace:
+                    scripted_mod = torch.jit.script(mod)
+                else:
+                    scripted_mod = torch.jit.trace(mod, (inp,))
+
+                self.run_pass("inline", scripted_mod.graph)
+
+                FileCheck().check("conv").run(scripted_mod.graph)
+                # successfully no-ops with non-const inputs
+                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                FileCheck().check_not("to_mkldnn").run(scripted_mod.graph)
+
+                scripted_mod = torch.jit.freeze(scripted_mod)
+                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                FileCheck().check("to_mkldnn").check("prim::mkldnn_convolution").check("to_dense").run(scripted_mod.graph)
+
+                self.assertEqual(mod(inp), scripted_mod(inp))
+                self.assertEqual(mod(inp), scripted_mod(inp))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_linear_to_mkldnn(self):
+
+        with set_default_dtype(torch.float):
+            # make sure mkldnn handles broadcast rules
+            inp_shapes = [[20], [20, 20], [1, 20, 20]]
+            for inp_shape in inp_shapes:
+                mod = nn.Linear(20, 30).eval()
+                scripted_mod = torch.jit.script(mod)
+                inp = torch.rand(inp_shape)
+
+                self.run_pass("inline", scripted_mod.graph)
+                FileCheck().check("aten::linear").run(scripted_mod.graph)
+                # successfully no-ops with non-const inputs
+                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                FileCheck().check_not("ConvertToMKLDNN").run(scripted_mod.graph)
+
+                scripted_mod = torch.jit.freeze(scripted_mod)
+                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                FileCheck().check("to_mkldnn").check("aten::linear").check("to_dense").run(scripted_mod.graph)
+
+                self.assertEqual(mod(inp), scripted_mod(inp))
+                self.assertEqual(mod(inp), scripted_mod(inp))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_collapse_adjacent_conversions(self):
+
+        with set_default_dtype(torch.float):
+            mod = nn.Sequential(nn.Linear(20, 20), nn.Linear(20, 20)).eval()
+            scripted_mod = torch.jit.script(mod)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            FileCheck().check("to_mkldnn").check("aten::linear").check("aten::linear").check("to_dense").run(scripted_mod.graph)
+            FileCheck().check_count("to_mkldnn", 1, exactly=True).run(scripted_mod.graph)
+
+            inp = torch.rand([20, 20])
+            self.assertEqual(scripted_mod(inp), mod(inp))
+            self.assertEqual(scripted_mod(inp), mod(inp))
+
+            # testing unsupported behavior
+            class Add(nn.Module):
+                def __init__(self, tensor):
+                    super().__init__()
+                    self.tensor = tensor
+
+                def forward(self, x):
+                    return x + self.tensor
+
+            def test_unsupported(module, preserved_attrs=None):
+                mod = torch.jit.freeze(torch.jit.script(module.eval()), preserved_attrs)
+                self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                FileCheck().check("to_mkldnn").check("linear").check("to_dense").check("add").run(mod.graph)
+
+            lin = nn.Linear(20, 20)
+            # Scalar-Tensor not supported
+            test_unsupported(nn.Sequential(lin, Add(.5)))
+            # # 0-dim not supported
+            test_unsupported(nn.Sequential(lin, Add(torch.tensor(.5))))
+            # tensor of unknown dtype (getAttr node here) not supported
+            test_unsupported(nn.Sequential(lin, Add(torch.tensor([20]))), ['1'])
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_mkldnn_fuser_broadcasting(self):
+        class Add(nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.tensor = tensor
+
+            def forward(self, x):
+                return x + self.tensor
+
+        with set_default_dtype(torch.float):
+            for add_inp in [20], [20, 20, 1]:
+                mod = nn.Sequential(nn.Linear(20, 20), Add(torch.rand(add_inp))).eval()
+                scripted_mod = torch.jit.script(mod)
+                scripted_mod = torch.jit.freeze(scripted_mod)
+                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                FileCheck().check("prim::BroadcastMKLDNNTensors").run(scripted_mod.graph)
+                inp = torch.rand([20, 20])
+                self.assertEqual(scripted_mod(inp), mod(inp))
+                self.assertEqual(scripted_mod(inp), mod(inp))
+
+                # for good measure, check that broadcasting does not work without this op
+                # so we can remove the op if it ever gets supported
+                with self.assertRaisesRegex(RuntimeError, ""):
+                    torch.rand([20, 20]).to_mkldnn() + torch.rand(add_inp).to_mkldnn()
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_mkldnn_inplace_removal(self):
+        class AddMul(nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.tensor = tensor
+
+            def forward(self, x):
+                return x.add_(self.tensor).div_(self.tensor) - 4
+
+        with set_default_dtype(torch.float):
+            mod = nn.Sequential(nn.Linear(20, 20), AddMul(torch.rand([20]))).eval()
+            scripted_mod = torch.jit.script(mod)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            # add gets uninplaced and reinplaced
+            FileCheck().check("aten::to_mkldnn").check("aten::add_").check("aten::div_").run(scripted_mod.graph)
+            inp = torch.rand([20, 20])
+            self.assertEqual(scripted_mod(inp), mod(inp))
+            self.assertEqual(scripted_mod(inp), mod(inp))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @skipIfNoTorchVision
+    def test_maxpool_mkldnn(self):
+        with set_default_dtype(torch.float):
+            model = torchvision.models.resnet18()
+            sub_model = torch.nn.Sequential(model.conv1, model.bn1, model.relu, model.maxpool)
+            mod = torch.jit.freeze(torch.jit.script(sub_model.eval()))
+            N, C, H, W, = 10, 3, 224, 224
+            inp = torch.randn(N, C, H, W)
+            self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+            FileCheck().check("max_pool").check("to_dense").run(mod.graph)
+            FileCheck().check_count("to_dense", 1, exactly=True).run(mod.graph)
+            self.assertEqual(mod(inp), sub_model(inp))
+
+    @unittest.skipIf(torch._C.has_mkldnn, "Testing no mkldnn")
+    def test_conv_to_mkldnn_no_mkldnn(self):
+        # test no error when mkldnn not available
+        with set_default_dtype(torch.float):
+            mod = torch.jit.script(nn.Conv2d(3, 32, kernel_size=3, stride=2).eval())
+            frozen = torch.jit.freeze(mod)
+            self.run_pass("convert_frozen_ops_to_mkldnn", frozen.graph)
+            inp = torch.rand([4, 3, 4, 4])
+            self.assertEqual(frozen(inp), mod(inp))
+
+    @unittest.skipIf(not TEST_CUDNN, "requires CUDNN")
+    def test_freeze_conv_relu_fusion(self):
+        conv_bias = [True, False]
+        conv_ops = [nn.Conv2d, nn.Conv3d]
+        add_z = [True, False]
+        use_tracing = [True, False]
+        for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, add_z, use_tracing):
+            class Net(nn.Module):
+                def __init__(self, in_channels, out_channels, **kwargs):
+                    super(Net, self).__init__()
+                    self.conv = conv(in_channels, out_channels, bias=use_bias, **kwargs)
+                    self.relu = nn.ReLU(inplace=True)
+                    self.add_z = add_z
+
+                def forward(self, x):
+                    z = self.conv(x)
+                    out = self.conv(x)
+                    if self.add_z:
+                        out += z
+                    out = self.relu(out)
+                    return out
+
+            mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
+
+            inps = [5, 3, 4, 4]
+            if conv == nn.Conv3d:
+                inps.append(inps[-1])
+            inp = torch.rand(inps).cuda()
+
+            if tracing:
+                scripted_mod = torch.jit.trace(mod_eager, (inp))
+            else:
+                scripted_mod = torch.jit.script(mod_eager)
+
+            frozen_mod = torch.jit.freeze(scripted_mod)
+            FileCheck().check("aten::relu").run(frozen_mod.graph)
+            self.run_pass("fuse_frozen_conv_add_relu", frozen_mod.graph)
+            if add_z:
+                FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
+            else:
+                FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
+
+            self.assertEqual(mod_eager(inp), frozen_mod(inp))
+
+@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+class TestMKLDNNReinplacing(JitTestCase):
+    def setUp(self):
+        self.default_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.float)
+
+    def tearDown(self):
+        torch.set_default_dtype(self.default_dtype)
+
+    def getConv(self):
+        return nn.Conv2d(3, 32, kernel_size=3, stride=2).eval()
+
+    def getInput(self):
+        return torch.rand([4, 3, 4, 4])
+
+    def freezeAndConvert(self, mod):
+        mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+        self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+        return mod
+
+    def checkResults(self, mod1, mod2):
+        inp = self.getInput()
+        self.assertEqual(mod1(inp), mod2(inp))
+
+    def test_successful(self):
+        # simple conv-relu
+        mod_eager = nn.Sequential(self.getConv(), nn.ReLU(), nn.ReLU())
+        mod = self.freezeAndConvert(mod_eager)
+        FileCheck().check("mkldnn_convolution").check_next("aten::relu_").check_next("aten::relu_").run(mod.graph)
+        self.checkResults(mod_eager, mod)
+
+    def test_merge_liveness(self):
+        class Mod(nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.tensor = tensor
+
+            def forward(self, x):
+                # this mul can be inplaced since x is dead after this use
+                temporary = x * self.tensor
+                # temporary livespan is the return node,
+                # add can not be inplaced
+                return temporary + temporary, temporary
+
+        mod_eager = nn.Sequential(self.getConv(), Mod(torch.rand([4, 32, 1, 1])))
+        mod = self.freezeAndConvert(mod_eager)
+        FileCheck().check("aten::mul_").check_not("aten::add_").run(mod.graph)
+        self.checkResults(mod_eager, mod)
+
+    def test_always_alive_values(self):
+        class Mod(nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.tensor = tensor
+
+            def forward(self, x):
+                # x can't be inplaced because its a return value,
+                # check that the inplacing pass doesnt try to inplace
+                # self.tensor because its always alive
+                return x * self.tensor, x
+
+        mod_eager = nn.Sequential(self.getConv(), Mod(torch.rand([4, 32, 1, 1])))
+        mod = self.freezeAndConvert(mod_eager)
+        FileCheck().check_not("aten::mul_").run(mod.graph)
+        self.checkResults(mod_eager, mod)
+
+        conv = self.getConv()
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tensor = torch.rand([4, 32, 1, 1])
+                self.conv = conv
+
+            def forward(self, x):
+                # the shapes dont add up on this just testing a particular pattern
+                conv_output = self.conv(x)
+                return conv_output, self.conv(torch.add(x, x))
+
+        mod = self.freezeAndConvert(Mod())
+        # x is an input to the graph, and so it should not be inplaced
+        # in the torch.add(x, x) call
+        FileCheck().check_not("aten::add_").run(mod.graph)
+
+    def test_switch_inputs_to_inplace(self):
+        class Mod(nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.tensor = tensor
+
+            def forward(self, x):
+                # self.tensor cannot be inplaced, however x can,
+                # and bc add is commutative we can reverse inputs to add_
+                return self.tensor + x
+
+        mod_eager = nn.Sequential(self.getConv(), Mod(torch.rand([4, 32, 1, 1])))
+        mod = self.freezeAndConvert(mod_eager)
+        FileCheck().check("aten::add_").run(mod.graph)
+        self.checkResults(mod_eager, mod)

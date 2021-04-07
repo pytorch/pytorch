@@ -13,18 +13,6 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
-template <typename T, typename MaskT>
-struct TensorMaskedFillOp {
-  TensorMaskedFillOp(T v) : value(v) {}
-  __device__ inline void operator()(T* t, MaskT* mask) {
-    if (*mask) {
-      *t = value;
-    }
-  }
-
-  T value;
-};
-
 template <typename T, typename MaskT, typename MaskPrefixSumT>
 struct TensorMaskedSelectOp {
   TensorMaskedSelectOp(T* t) : out(t) {}

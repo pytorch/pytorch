@@ -12,12 +12,12 @@ class Module;
 struct TORCH_API Method {
   Method(const Module* owner, Function* function);
 
-  void run(Stack& stack);
-  void run(Stack&& stack) {
+  void run(Stack& stack) const;
+  void run(Stack&& stack) const {
     run(stack);
   }
 
-  c10::IValue operator()(std::vector<c10::IValue> stack);
+  c10::IValue operator()(std::vector<c10::IValue> stack) const;
 
   const std::string& name() const {
     return function_->name();

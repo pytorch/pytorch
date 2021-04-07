@@ -4,7 +4,7 @@
 torch.nn
 ===================================
 
-These are the basic building block for graphs
+These are the basic building blocks for graphs:
 
 .. contents:: torch.nn
     :depth: 2
@@ -92,6 +92,7 @@ Pooling layers
     nn.AvgPool2d
     nn.AvgPool3d
     nn.FractionalMaxPool2d
+    nn.FractionalMaxPool3d
     nn.LPPool1d
     nn.LPPool2d
     nn.AdaptiveMaxPool1d
@@ -176,6 +177,9 @@ Normalization Layers
     nn.BatchNorm1d
     nn.BatchNorm2d
     nn.BatchNorm3d
+    nn.LazyBatchNorm1d
+    nn.LazyBatchNorm2d
+    nn.LazyBatchNorm3d
     nn.GroupNorm
     nn.SyncBatchNorm
     nn.InstanceNorm1d
@@ -283,6 +287,7 @@ Loss Functions
     nn.MarginRankingLoss
     nn.HingeEmbeddingLoss
     nn.MultiLabelMarginLoss
+    nn.HuberLoss
     nn.SmoothL1Loss
     nn.SoftMarginLoss
     nn.MultiLabelSoftMarginLoss
@@ -344,8 +349,18 @@ From the ``torch.nn.utils`` module
 .. autosummary::
     :toctree: generated
     :nosignatures:
+
+    parametrize.register_parametrization
+    parametrize.remove_parametrizations
+    parametrize.cached
+    parametrize.is_parametrized
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
     :template: classtemplate.rst
 
+    parametrize.ParametrizationList
     prune.BasePruningMethod
 
 .. autosummary::
@@ -385,6 +400,11 @@ Utility functions in other modules
     nn.utils.rnn.pad_packed_sequence
     nn.utils.rnn.pad_sequence
     nn.utils.rnn.pack_sequence
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
     nn.Flatten
     nn.Unflatten

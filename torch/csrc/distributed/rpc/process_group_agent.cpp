@@ -3,6 +3,7 @@
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
 #include <fmt/format.h>
+#include <torch/csrc/distributed/rpc/agent_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -57,38 +58,8 @@ const std::string kClientActiveCalls = "agent.client_active_calls";
 const std::string kServerActiveCalls = "agent.server_active_calls";
 const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 
-void ProcessGroupAgent::collectNames() {
-  const std::string& workerName = workerInfo_.name_;
-  const auto worldSize = pg_->getSize();
-
-  // use c10d allgather to collect names
-  torch::Tensor nameTensor =
-      torch::zeros({WorkerInfo::MAX_NAME_LEN}, torch::kChar);
-  memcpy(nameTensor.storage().data(), workerName.c_str(), workerName.length());
-  std::vector<torch::Tensor> inputName = {nameTensor};
-  std::vector<std::vector<torch::Tensor>> outputNames(1);
-  for (int i = 0; i < worldSize; ++i) {
-    outputNames[0].emplace_back(
-        torch::empty({WorkerInfo::MAX_NAME_LEN}, {torch::kChar}));
-  }
-  pg_->allgather(outputNames, inputName)->wait();
-
-  // convert collected name tensors into string names
-  for (worker_id_t i = 0; i < worldSize; ++i) {
-    torch::Tensor& tensor = outputNames[0][i];
-    std::string peerName((const char*)tensor.storage().data<signed char>());
-
-    TORCH_CHECK(
-        nameMap_.find(peerName) == nameMap_.end(),
-        "RpcAgent name ",
-        peerName,
-        " is not unique.");
-
-    nameMap_[std::move(peerName)] = i;
-  }
-}
-
 ProcessGroupAgent::ProcessGroupAgent(
+    const c10::intrusive_ptr<::c10d::Store>& store,
     std::string workerName,
     c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
@@ -109,7 +80,12 @@ ProcessGroupAgent::ProcessGroupAgent(
   metrics_.resize(ProcessGroupAgentMetrics::N_METRICS);
   metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] =
       std::make_unique<AverageMetricsTracker>(kGilAverageWaitTime);
-  collectNames();
+
+  nameMap_ = collectNames(
+      ::c10d::PrefixStore("names", store),
+      workerInfo_.id_,
+      workerInfo_.name_,
+      pg_->getSize());
   auto workerRankIter = nameMap_.find(workerInfo_.name_);
   TORCH_CHECK(
       workerRankIter != nameMap_.end(),
@@ -162,7 +138,7 @@ std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
   return allWorkerInfo_;
 }
 
-void ProcessGroupAgent::join() {
+void ProcessGroupAgent::join(bool /* unused */) {
   sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(

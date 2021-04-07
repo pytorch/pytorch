@@ -8,51 +8,57 @@ on:
 
 jobs:
   quick-checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
+        uses: actions/checkout@v2
+      - name: Install requirements
+        run: pip install -r requirements.txt
       - name: Ensure consistent CircleCI YAML config
+        run: cd .circleci && ./ensure-consistency.py
+      - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
         run: |
-          pip install -r requirements.txt
-          cd .circleci && ./ensure-consistency.py
+          import yaml
+          import subprocess
+          workflows = subprocess.check_output(['python', '.github/scripts/generate_workflow_names.py'],
+                                              encoding="ascii").splitlines()
+          with open('.github/workflows/cancel_redundant_workflows.yml') as f:
+                data = yaml.safe_load(f)
+                workflows_to_cancel = data[True]['workflow_run']['workflows']
+          assert workflows.sort() == workflows_to_cancel.sort()
+        shell: python
       - name: Shellcheck Jenkins scripts
-        # https://github.com/koalaman/shellcheck#installing-a-pre-compiled-binary
+        # https://github.com/koalaman/shellcheck/tree/v0.7.1#installing-a-pre-compiled-binary
         run: |
-          scversion="stable"
+          scversion="v0.7.1"
           wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
           sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
           rm -r "shellcheck-${scversion}"
           shellcheck --version
           .jenkins/run-shellcheck.sh
+      - name: Ensure correct trailing newlines
+        run: |
+          (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
+      - name: Ensure no trailing spaces
+        run: |
+          (! git grep -I -no ' $' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above files have trailing spaces; please remove them"; false))
       - name: Ensure no tabs
         run: |
-          (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
+          (! git grep -I -no $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
       - name: Ensure canonical include
         run: |
-          (! git grep -I -l $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
-      # note that this next step depends on a clean shallow checkout;
-      # if you run it locally in a deep checkout then it will complain
-      # about android/libs/fbjni/gradlew (in a submodule),
-      # as well as all the generated files in torch/test
+          (! git grep -I -no $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
+      # note that this next step depends on a clean checkout;
+      # if you run it locally then it will likely to complain
+      # about all the generated files in torch/test
       - name: Ensure C++ source files are not executable
         run: |
-          (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
+          (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format|gradlew)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
       - name: C++ docs check
         run: |
           sudo apt-get install -y doxygen && pip install -r requirements.txt
@@ -61,64 +67,83 @@ jobs:
         run: |
           set -eux
           python torch/testing/check_kernel_launches.py |& tee ${GITHUB_WORKSPACE}/cuda_kernel_launch_checks.txt
+      - name: Ensure no direct cub include
+        run: |
+          (! git grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/CubUtils.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/CubUtils.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
+
+  toc:
+    runs-on: ubuntu-18.04
+    # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
+    env:
+      NPM_CONFIG_PREFIX: ~/.npm-global
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v2
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+      - name: Install markdown-toc
+        run: npm install -g markdown-toc
+      - name: Regenerate ToCs
+        run: |
+          set -eux
+          export PATH=~/.npm-global/bin:"$PATH"
+          for FILE in {CONTRIBUTING,README}.md; do
+            markdown-toc --bullets='-' -i "$FILE"
+          done
+      - name: Assert that regenerating the ToCs didn't change them
+        run: |
+          set -eux
+          CHANGES=$(git status --porcelain)
+          echo "$CHANGES"
+          git diff
+          [ -z "$CHANGES" ]
 
   flake8-py3:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
+        uses: actions/checkout@v2
+      - name: Prepare output dir with HEAD commit SHA
         run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
+          mkdir flake8-output
+          cd flake8-output
+          echo ${{ github.event.pull_request.head.sha }} > commit-sha.txt
       - name: Run flake8
         run: |
           set -eux
           pip install -r requirements-flake8.txt
           flake8 --version
-          flake8 | tee ${GITHUB_WORKSPACE}/flake8-output.txt
-      - name: Add annotations
-        uses: pytorch/add-annotations-github-action@master
+          flake8 | tee ${GITHUB_WORKSPACE}/flake8-output/warnings.txt
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
         with:
-          check_name: 'flake8-py3'
-          linter_output_path: 'flake8-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: flake8-py3
+          path: flake8-output/
+      - name: Fail if there were any warnings
+        run: |
+          [ ! -s flake8-output/warnings.txt ]
 
   clang-tidy:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
+        uses: actions/checkout@v2
+      - name: Prepare output dir with HEAD commit SHA
         run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
+          mkdir clang-tidy-output
+          cd clang-tidy-output
+          echo ${{ github.event.pull_request.head.sha }} > commit-sha.txt
       - name: Install dependencies
         run: |
           set -eux
@@ -130,7 +155,7 @@ jobs:
           sudo apt-get update
           sudo apt-get --no-install-recommends -y install cuda-toolkit-10-2
           # Install dependencies
-          pip install pyyaml
+          pip install pyyaml typing_extensions
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
           sudo apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-11 main"
           sudo apt-get update
@@ -142,8 +167,6 @@ jobs:
           git remote add upstream https://github.com/pytorch/pytorch
           git fetch upstream "$GITHUB_BASE_REF"
           BASE_SHA=${{ github.event.pull_request.base.sha }}
-          HEAD_SHA=${{ github.event.pull_request.head.sha }}
-          MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
 
           if [[ ! -d build ]]; then
             git submodule update --init --recursive
@@ -175,7 +198,7 @@ jobs:
           python tools/clang_tidy.py                               \
             --verbose                                              \
             --paths torch/csrc/                                    \
-            --diff "$MERGE_BASE"                                   \
+            --diff "$BASE_SHA"                                   \
             -g"-torch/csrc/jit/passes/onnx/helper.cpp"             \
             -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp"\
             -g"-torch/csrc/jit/serialization/onnx.cpp"             \
@@ -192,39 +215,25 @@ jobs:
             -g"-torch/csrc/deploy/interpreter/interpreter.h"  \
             -g"-torch/csrc/deploy/interpreter/interpreter_impl.h"  \
             -g"-torch/csrc/deploy/interpreter/test_main.cpp"  \
-            "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
+            "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output/warnings.txt
 
-          cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
-      - name: Add annotations
-        uses: suo/add-annotations-github-action@master
+          cat ${GITHUB_WORKSPACE}/clang-tidy-output/warnings.txt
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
         with:
-          check_name: 'clang-tidy'
-          linter_output_path: 'clang-tidy-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: clang-tidy
+          path: clang-tidy-output/
 
   cmakelint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
+        uses: actions/checkout@v2
       - name: Run cmakelint
         run: |
           set -eux
@@ -233,3 +242,29 @@ jobs:
           git ls-files -z -- bootstrap '*.cmake' '*.cmake.in' '*CMakeLists.txt' | \
           grep -E -z -v '^(cmake/Modules/|cmake/Modules_CUDA_fix/)' | \
           xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
+
+  mypy:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@v2
+      - name: Install dependencies
+        run: |
+          set -eux
+          pip install -r requirements.txt
+          pip install mypy==0.770
+      - name: Run autogen
+        run: |
+          set -eux
+          time python -mtools.generate_torch_version --is_debug=false
+          time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
+          time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
+      - name: Run mypy
+        run: |
+          set -eux
+          for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done

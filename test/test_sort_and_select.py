@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA)
+     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU)
 
 # TODO: remove this
 SIZE = 100
@@ -112,6 +112,84 @@ class TestSortAndSelect(TestCase):
         torch.sort(x, out=(res2val, res2ind), descending=True)
         self.assertIsOrdered('descending', x, res2val, res2ind,
                              'random with NaNs')
+
+    @onlyCUDA
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    def test_stable_sort_fails_on_CUDA(self, device, dtype):
+        x = torch.tensor([1, 0, 1, 0], dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "stable=True is not implemented on CUDA yet."):
+            x.sort(stable=True)
+
+    @onlyCPU
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    def test_stable_sort(self, device, dtype):
+        for ncopies in (100, 1000, 10000):
+            x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=device)
+            _, idx = x.sort(stable=True)
+            self.assertEqual(
+                idx[:ncopies],
+                torch.arange(start=0, end=2 * ncopies, step=2, device=device)
+            )
+            self.assertEqual(
+                idx[ncopies:],
+                torch.arange(start=1, end=2 * ncopies, step=2, device=device)
+            )
+
+    @onlyCPU
+    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    def test_stable_sort_against_numpy(self, device, dtype):
+        if dtype in torch.testing.floating_types_and(torch.float16):
+            inf = float('inf')
+            neg_inf = -float('inf')
+            nan = float('nan')
+        else:
+            if dtype != torch.bool:
+                # no torch.iinfo support for torch.bool
+                inf = torch.iinfo(dtype).max
+                neg_inf = torch.iinfo(dtype).min
+            else:
+                inf = True
+                neg_inf = ~inf
+            # no nan for integral types, we use inf instead for simplicity
+            nan = inf
+
+        def generate_samples():
+            from itertools import chain, combinations
+
+            def repeated_index_fill(t, dim, idxs, vals):
+                res = t
+                for idx, val in zip(idxs, vals):
+                    res = res.index_fill(dim, idx, val)
+                return res
+
+            for sizes in [(1, 10), (10, 1), (10, 10), (10, 10, 10)]:
+                size = min(*sizes)
+                x = (torch.randn(*sizes, device=device) * size).to(dtype)
+                yield (x, 0)
+
+                # Generate tensors which are being filled at random locations
+                # with values from the non-empty subsets of the set (inf, neg_inf, nan)
+                # for each dimension.
+                n_fill_vals = 3  # cardinality of (inf, neg_inf, nan)
+                for dim in range(len(sizes)):
+                    idxs = (torch.randint(high=size, size=(size // 10,)) for i in range(n_fill_vals))
+                    vals = (inf, neg_inf, nan)
+                    subsets = chain.from_iterable(combinations(list(zip(idxs, vals)), r)
+                                                  for r in range(1, n_fill_vals + 1))
+                    for subset in subsets:
+                        idxs_subset, vals_subset = zip(*subset)
+                        yield (repeated_index_fill(x, dim, idxs_subset, vals_subset), dim)
+
+            for sizes in [(100,), (1000,), (10000,)]:
+                size = sizes[0]
+                # binary strings
+                yield (torch.tensor([0, 1] * size, dtype=dtype, device=device), 0)
+
+        for sample, dim in generate_samples():
+            _, idx_torch = sample.sort(dim=dim, stable=True)
+            sample_numpy = sample.numpy()
+            idx_numpy = np.argsort(sample_numpy, axis=dim, kind='stable')
+            self.assertEqual(idx_torch, idx_numpy)
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_msort(self, device, dtype):

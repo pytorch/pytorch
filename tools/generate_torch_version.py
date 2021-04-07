@@ -3,27 +3,28 @@ import os
 import subprocess
 from pathlib import Path
 from distutils.util import strtobool
+from typing import Optional, Union
 
-def get_sha():
+def get_sha(pytorch_root: Union[str, Path]) -> str:
     try:
         return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=pytorch_root).decode('ascii').strip()
     except Exception:
         return 'Unknown'
 
-def get_torch_version(sha=None):
+def get_torch_version(sha: Optional[str] = None) -> str:
     pytorch_root = Path(__file__).parent.parent
     version = open('version.txt', 'r').read().strip()
 
     if os.getenv('PYTORCH_BUILD_VERSION'):
         assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
-        build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
-        version = os.getenv('PYTORCH_BUILD_VERSION')
+        build_number = int(os.getenv('PYTORCH_BUILD_NUMBER', ""))
+        version = os.getenv('PYTORCH_BUILD_VERSION', "")
         if build_number > 1:
             version += '.post' + str(build_number)
     elif sha != 'Unknown':
         if sha is None:
-            sha = get_sha()
-        version += '+' + sha[:7]
+            sha = get_sha(pytorch_root)
+        version += '+git' + sha[:7]
     return version
 
 if __name__ == "__main__":
@@ -40,7 +41,7 @@ if __name__ == "__main__":
 
     pytorch_root = Path(__file__).parent.parent
     version_path = pytorch_root / "torch" / "version.py"
-    sha = get_sha()
+    sha = get_sha(pytorch_root)
     version = get_torch_version(sha)
 
     with open(version_path, 'w') as f:

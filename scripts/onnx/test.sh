@@ -59,6 +59,7 @@ pytest "${args[@]}" \
   --ignore "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
   --ignore "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py" \
   --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime_cuda.py" \
+  --ignore "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py" \
   "${test_paths[@]}"
 
 # onnxruntime only support py3
@@ -71,7 +72,8 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ]]; then
     "$top_dir/test/onnx/test_custom_ops.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" \
     "$top_dir/test/onnx/test_utility_funs.py" \
-    "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py"
+    "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
+    "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py"
 fi
 if [[ "$BUILD_ENVIRONMENT" == *ort_test2* ]]; then
   # Update the loop for new opsets
@@ -79,8 +81,6 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test2* ]]; then
     pytest "${args[@]}" \
       "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
   done
-  pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset12_onnx_shape_inference"
 fi
 
 # Our CI expects both coverage.xml and .coverage to be within test/

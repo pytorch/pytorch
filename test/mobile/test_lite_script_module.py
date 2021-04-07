@@ -5,7 +5,7 @@ import io
 from typing import NamedTuple
 from collections import namedtuple
 
-from torch.jit.mobile import _load_for_lite_interpreter
+from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 class TestLiteScriptModule(TestCase):
@@ -190,7 +190,54 @@ class TestLiteScriptModule(TestCase):
         mobile_module_result = mobile_module.forward(*bundled_inputs[0])
         torch.testing.assert_allclose(script_module_result, mobile_module_result)
 
-    def test_unsupported_createobject(self):
+    def test_method_calls_with_optional_arg(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            # opt arg in script-to-script invocation
+            def forward(self, x, two: int = 2):
+                return x + two
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+                self.A0 = A()
+
+            # opt arg in Python-to-script invocation
+            def forward(self, x, one: int = 1):
+                return self.A0(x) + one
+
+        script_module = torch.jit.script(B())
+        buffer = io.BytesIO(
+            script_module._save_to_buffer_for_lite_interpreter()
+        )
+        mobile_module = _load_for_lite_interpreter(buffer)
+
+        input = torch.tensor([5])
+        script_module_forward_result = script_module.forward(input)
+        mobile_module_forward_result = mobile_module.forward(input)
+        torch.testing.assert_allclose(
+            script_module_forward_result,
+            mobile_module_forward_result
+        )
+
+        # change ref only
+        script_module_forward_result = script_module.forward(input, 2)
+        self.assertFalse(
+            (script_module_forward_result == mobile_module_forward_result)
+            .all()
+            .item()
+        )
+
+        # now both match again
+        mobile_module_forward_result = mobile_module.forward(input, 2)
+        torch.testing.assert_allclose(
+            script_module_forward_result,
+            mobile_module_forward_result
+        )
+
+    def test_unsupported_classtype(self):
         class Foo():
             def __init__(self):
                 return
@@ -205,7 +252,6 @@ class TestLiteScriptModule(TestCase):
 
         script_module = torch.jit.script(MyTestModule())
         with self.assertRaisesRegex(RuntimeError,
-                                    r"^CREATE_OBJECT is not supported in mobile module\. "
                                     r"Workaround: instead of using arbitrary class type \(class Foo\(\)\), "
                                     r"define a pytorch class \(class Foo\(torch\.nn\.Module\)\)\.$"):
             script_module._save_to_buffer_for_lite_interpreter()
@@ -285,6 +331,48 @@ class TestLiteScriptModule(TestCase):
                                     r"Workaround\: instead of using pytorch class as their element type\, "
                                     r"use a combination of list\, dictionary\, and single types\.$"):
             script_module._save_to_buffer_for_lite_interpreter()
+
+    def test_module_export_operator_list(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.weight = torch.ones((20, 1, 5, 5))
+                self.bias = torch.ones(20)
+
+            def forward(self, input):
+                x1 = torch.zeros(2, 2)
+                x2 = torch.empty_like(torch.empty(2, 2))
+                x3 = torch._convolution(
+                    input,
+                    self.weight,
+                    self.bias,
+                    [1, 1],
+                    [0, 0],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                    False,
+                    False,
+                    True,
+                    True,
+                )
+                return (x1, x2, x3)
+
+        m = torch.jit.script(Foo())
+
+        buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        mobile_module = _load_for_lite_interpreter(buffer)
+
+        expected_ops = {
+            "aten::_convolution",
+            "aten::empty.memory_format",
+            "aten::empty_like",
+            "aten::zeros",
+        }
+        actual_ops = _export_operator_list(mobile_module)
+        self.assertEqual(actual_ops, expected_ops)
 
 if __name__ == '__main__':
     run_tests()

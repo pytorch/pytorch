@@ -241,10 +241,7 @@ public:
     return Vec256(_mm256_permute_ps(ln.values, 0xB1)).conj();         //-i*ln()
   }
   Vec256<c10::complex<float>> acos() const {
-    // acos(x) = pi/2 - asin(x)
-    constexpr float pi_2f = c10::pi<float> / 2;
-    const __m256 pi_2 = _mm256_setr_ps(pi_2f, 0.0, pi_2f, 0.0, pi_2f, 0.0, pi_2f, 0.0);
-    return _mm256_sub_ps(pi_2, asin());
+    return map(std::acos);
   }
   Vec256<c10::complex<float>> atan() const;
   Vec256<c10::complex<float>> atan2(const Vec256<c10::complex<float>> &b) const {

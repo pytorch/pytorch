@@ -23,6 +23,7 @@ from torch.testing._internal.common_quantization import (
     AnnotatedConvModel,
     AnnotatedSingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
+    AnnotatedTwoLayerLinearModel,
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
     test_only_eval_fn,
@@ -33,29 +34,29 @@ from torch.testing._internal.common_quantized import override_qengines
 class SubModule(torch.nn.Module):
     def __init__(self):
         super(SubModule, self).__init__()
-        self.mod1 = nn.Identity()
-        self.mod2 = nn.ReLU()
-
-    def forward(self, x):
-        x = self.mod1(x)
-        x = self.mod2(x)
-        return x
-
-
-class ModelWithSubModules(torch.nn.Module):
-    def __init__(self):
-        super(ModelWithSubModules, self).__init__()
         self.qconfig = default_qconfig
-        self.mod1 = SubModule()
-        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.mod1 = torch.nn.Conv2d(3, 3, 3, bias=False).to(dtype=torch.float)
+        self.mod2 = nn.ReLU()
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
 
     def forward(self, x):
         x = self.quant(x)
         x = self.mod1(x)
-        x = self.conv(x)
+        x = self.mod2(x)
         x = self.dequant(x)
+        return x
+
+
+class ModelWithSubModules(torch.nn.Module):
+    def __init__(self):
+        super(ModelWithSubModules, self).__init__()
+        self.mod1 = SubModule()
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.mod1(x)
+        x = self.conv(x)
         return x
 
 
@@ -227,6 +228,31 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             compare_and_validate_results(model, q_model, module_swap_list, linear_data)
 
     @override_qengines
+    def test_compare_model_stub_partial(self):
+        r"""Compare the output of static quantized linear layer and its float shadow module"""
+
+        qengine = torch.backends.quantized.engine
+        # TODO: Rebase on top of PR to remove compare and validate results here
+
+        def compare_and_validate_results(float_model, q_model, module_swap_list, data):
+            ob_dict = compare_model_stub(float_model, q_model, module_swap_list, data)
+            self.assertEqual(len(ob_dict), 1)
+            for k, v in ob_dict.items():
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v["quantized"]):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+
+        linear_data = self.calib_data[0][0]
+        module_swap_list = [nn.Linear]
+        model_list = [AnnotatedTwoLayerLinearModel()]
+        for model in model_list:
+            model.eval()
+            if hasattr(model, "fuse_model"):
+                model.fuse_model()
+            q_model = quantize(model, test_only_eval_fn, [self.calib_data])
+            compare_and_validate_results(model, q_model, module_swap_list, linear_data)
+
+    @override_qengines
     def test_compare_model_stub_submodule_static(self):
         r"""Compare the output of static quantized submodule and its float shadow module"""
 
@@ -234,17 +260,15 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
 
         model = ModelWithSubModules().eval()
         q_model = quantize(model, test_only_eval_fn, [self.img_data_2d])
-        module_swap_list = [SubModule]
+        module_swap_list = [SubModule, nn.Conv2d]
         ob_dict = compare_model_stub(
             model, q_model, module_swap_list, self.img_data_2d[0][0]
         )
+        # Since conv is not quantized, we do not insert a shadow module
+        # mod1 contains a linear that is quantized, so we insert a shadow module
         self.assertTrue(isinstance(q_model.mod1, Shadow))
         self.assertFalse(isinstance(q_model.conv, Shadow))
-        for k, v in ob_dict.items():
-            for i, val in enumerate(v["quantized"]):
-                torch.testing.assert_allclose(
-                    v["float"][i], v["quantized"][i].dequantize()
-                )
+
 
     @override_qengines
     def test_compare_model_stub_functional_static(self):

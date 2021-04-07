@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/thread_pool.h>
+#include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
@@ -60,6 +61,7 @@ struct RecvWork {
 class TORCH_API ProcessGroupAgent : public RpcAgent {
  public:
   ProcessGroupAgent(
+      const c10::intrusive_ptr<::c10d::Store>& store,
       std::string workerName,
       c10::intrusive_ptr<::c10d::ProcessGroup> pg,
       int numSendRecvThreads,
@@ -72,7 +74,7 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
 
   std::vector<WorkerInfo> getWorkerInfos() const override;
 
-  void join() override;
+  void join(bool shutdown = false) override;
 
   void sync() override;
 
@@ -148,7 +150,6 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
     FutureInfo() = delete;
   };
 
-  void collectNames();
   // handle a SendWork request. This serializes the payload inside the work
   // object, and sends the message to the receiver using the underlying
   // ProcessGroup.

@@ -76,9 +76,9 @@ class Linear(Module):
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = Parameter(torch.Tensor(out_features, in_features))
+        self.weight = Parameter(torch.empty(out_features, in_features))
         if bias:
-            self.bias = Parameter(torch.Tensor(out_features))
+            self.bias = Parameter(torch.empty(out_features))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -157,10 +157,10 @@ class Bilinear(Module):
         self.in1_features = in1_features
         self.in2_features = in2_features
         self.out_features = out_features
-        self.weight = Parameter(torch.Tensor(out_features, in1_features, in2_features))
+        self.weight = Parameter(torch.empty(out_features, in1_features, in2_features))
 
         if bias:
-            self.bias = Parameter(torch.Tensor(out_features))
+            self.bias = Parameter(torch.empty(out_features))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -181,11 +181,12 @@ class Bilinear(Module):
 
 
 class LazyLinear(LazyModuleMixin, Linear):
-    r"""A :class:`torch.nn.Linear` module with lazy initialization.
+    r"""A :class:`torch.nn.Linear` module where `in_features` is inferred.
 
     In this module, the `weight` and `bias` are of :class:`torch.nn.UninitializedParameter`
-    class. They will be initialized  after the first call to ``forward`` is done and the 
-    module will become a regular :class:`torch.nn.Linear` module.
+    class. They will be initialized after the first call to ``forward`` is done and the
+    module will become a regular :class:`torch.nn.Linear` module. The ``in_features`` argument
+    of the :class:`Linear` is inferred from the ``input.shape[-1]``.
 
     Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
     on lazy modules and their limitations.
@@ -210,10 +211,16 @@ class LazyLinear(LazyModuleMixin, Linear):
 
     cls_to_become = Linear  # type: ignore[assignment]
     weight: UninitializedParameter
+    bias: UninitializedParameter  # type: ignore[assignment]
 
     def __init__(self, out_features: int, bias: bool = True) -> None:
-        super().__init__(0, out_features, bias)
-        self.weight = UninitializedParameter()    
+        # bias is hardcoded to False to avoid creating tensor
+        # that will soon be overwritten.
+        super().__init__(0, 0, False)
+        self.weight = UninitializedParameter()
+        self.out_features = out_features
+        if bias:
+            self.bias = UninitializedParameter()
 
     def reset_parameters(self) -> None:
         if not self.has_uninitialized_params() and self.in_features != 0:
@@ -224,5 +231,7 @@ class LazyLinear(LazyModuleMixin, Linear):
             with torch.no_grad():
                 self.in_features = input.shape[-1]
                 self.weight.materialize((self.out_features, self.in_features))  # type: ignore
+                if self.bias is not None:
+                    self.bias.materialize((self.out_features,))  # type: ignore
                 self.reset_parameters()
 # TODO: PartialLinear - maybe in sparse?

@@ -43,6 +43,7 @@ void repeatCopy(
     CUDAContext* context) {
     initRecurrentInput_kernel<float><<<repeat_n, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
         n, src, dst);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 template <>
 void repeatCopy(
@@ -53,6 +54,7 @@ void repeatCopy(
     CUDAContext* context) {
     initRecurrentInput_kernel<at::Half><<<repeat_n, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
         n, src, dst);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 }; // namespace detail

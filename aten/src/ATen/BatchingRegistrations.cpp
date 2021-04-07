@@ -187,19 +187,19 @@ std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int6
   return result;
 }
 
-Tensor clamp_batching_rule(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+Tensor clamp_batching_rule(const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto result = at::clamp(self_physical.tensor(), min, max);
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor clamp_min_batching_rule(const Tensor& self, Scalar min) {
+Tensor clamp_min_batching_rule(const Tensor& self, const Scalar& min) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto result = at::clamp_min(self_physical.tensor(), min);
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor clamp_max_batching_rule(const Tensor& self, Scalar max) {
+Tensor clamp_max_batching_rule(const Tensor& self, const Scalar& max) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto result = at::clamp_max(self_physical.tensor(), max);
   return self_physical.getPhysicalToLogicalMap().apply(result);
@@ -233,7 +233,7 @@ Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor& fill_inplace_scalar_batching_rule(Tensor& self, Scalar value) {
+Tensor& fill_inplace_scalar_batching_rule(Tensor& self, const Scalar& value) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   self_physical.tensor().fill_(value);
   return self;
@@ -300,7 +300,7 @@ Tensor trace_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes)
   auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
   // Batched Diagonal View
   auto grad_input_diag = at::diagonal(grad_input, /*offset*/0, /*dim1*/-2, /*dim2*/-1);
-  // Append a dimension of size one to the grad output 
+  // Append a dimension of size one to the grad output
   auto grad_physical_tensor = grad_physical.tensor().unsqueeze(-1);
   grad_input_diag.copy_(grad_physical_tensor);
   return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
@@ -708,7 +708,7 @@ Tensor unwrap_and_call_method(const Tensor& input, ExtraArgs... extra_args) {
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
 
-Tensor pow_scalar_Tensor_batching_rule(Scalar other, const Tensor& self) {
+Tensor pow_scalar_Tensor_batching_rule(const Scalar& other, const Tensor& self) {
   auto* self_batched = unsafeGetBatchedImpl(self);
   auto output_physical = at::pow(other, self_batched->value());
   auto old_bdims = self_batched->bdims();
@@ -1120,30 +1120,36 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 #undef TO_BATCHING_RULE
   m.impl("clone", clone_batching_rule);
 
-  using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, Scalar);
+  using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, const Scalar&);
   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
-  using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
+  using TensorScalarType = Tensor (*)(const Tensor&, const Scalar&);
 
 #define BINARY_POINTWISE(op) \
   m.impl(#op".Tensor", binary_pointwise_batching_rule<TensorTensorType, at::op>); \
-  m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
+  m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, const Scalar&>);
 #define BINARY_POINTWISE_VA(op, ...) \
   { \
     using Binop = Tensor (*)(const Tensor&, const Tensor&, __VA_ARGS__); \
-    using Unop = Tensor (*)(const Tensor&, Scalar, __VA_ARGS__); \
+    using Unop = Tensor (*)(const Tensor&, const Scalar&, __VA_ARGS__); \
     m.impl(#op".Tensor", binary_pointwise_batching_rule<Binop, at::op, __VA_ARGS__>); \
-    m.impl(#op".Scalar", unwrap_and_call<Unop, at::op, Scalar, __VA_ARGS__>); \
+    m.impl(#op".Scalar", unwrap_and_call<Unop, at::op, const Scalar&, __VA_ARGS__>); \
   }
 
-  BINARY_POINTWISE_VA(add, Scalar);
-  BINARY_POINTWISE_VA(sub, Scalar);
-  BINARY_POINTWISE_VA(rsub, Scalar);
+  BINARY_POINTWISE_VA(add, const Scalar&);
+  BINARY_POINTWISE_VA(sub, const Scalar&);
+  BINARY_POINTWISE_VA(rsub, const Scalar&);
   BINARY_POINTWISE(mul);
   BINARY_POINTWISE(div);
+  {
+    using Binop = Tensor (*)(const Tensor&, const Tensor&, c10::optional<std::string>);
+    using Unop = Tensor (*)(const Tensor&, const Scalar&, c10::optional<std::string>);
+    m.impl("div.Tensor_mode", binary_pointwise_batching_rule<Binop, at::div, c10::optional<std::string>>);
+    m.impl("div.Scalar_mode", unwrap_and_call<Unop, at::div, const Scalar&, c10::optional<std::string>>);
+  }
 
   // at::pow has three out-of-place overloads
   m.impl("pow.Tensor_Tensor", binary_pointwise_batching_rule<TensorTensorType, at::pow>);
-  m.impl("pow.Tensor_Scalar", unwrap_and_call<TensorScalarType, at::pow, Scalar>);
+  m.impl("pow.Tensor_Scalar", unwrap_and_call<TensorScalarType, at::pow, const Scalar&>);
   m.impl("pow.Scalar", pow_scalar_Tensor_batching_rule);
 
   m.impl("sigmoid_backward", binary_pointwise_batching_rule<TensorTensorType, at::sigmoid_backward>);
@@ -1152,15 +1158,15 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
       binary_pointwise_batching_rule<
           TensorTensorScalarType,
           at::threshold_backward,
-          Scalar>);
+          const Scalar&>);
 
   // for at::result_type, call the native::result_type implementation.
   // We don't have to do anything special because native::result_type operates
   // on the logical shape of the tensors.
   m.impl("result_type.Tensor", static_cast<ScalarType (*)(const Tensor&, const Tensor&)>(native::result_type));
-  m.impl("result_type.Scalar", static_cast<ScalarType (*)(const Tensor&, Scalar)>(native::result_type));
-  m.impl("result_type.Scalar_Tensor", static_cast<ScalarType (*)(Scalar, const Tensor&)>(native::result_type));
-  m.impl("result_type.Scalar_Scalar", static_cast<ScalarType (*)(Scalar, Scalar)>(native::result_type));
+  m.impl("result_type.Scalar", static_cast<ScalarType (*)(const Tensor&, const Scalar&)>(native::result_type));
+  m.impl("result_type.Scalar_Tensor", static_cast<ScalarType (*)(const Scalar&, const Tensor&)>(native::result_type));
+  m.impl("result_type.Scalar_Scalar", static_cast<ScalarType (*)(const Scalar&, const Scalar&)>(native::result_type));
 
 #undef BINARY_POINTWISE_VA
 #undef BINARY_POINTWISE
@@ -1201,7 +1207,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // Comparison ops
 #define COMPARISON_POINTWISE(op) \
   m.impl(#op".Tensor", comparison_pointwise_batching_rule<TensorTensorType, at::op>); \
-  m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
+  m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, const Scalar&>);
 
   COMPARISON_POINTWISE(eq);
   COMPARISON_POINTWISE(gt);

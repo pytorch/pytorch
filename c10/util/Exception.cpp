@@ -82,6 +82,20 @@ void torchCheckFail(const char *func, const char *file, uint32_t line, const std
   throw ::c10::Error({func, file, line}, msg);
 }
 
+void torchCheckFail(const char *func, const char *file, uint32_t line, const char* msg) {
+  throw ::c10::Error({func, file, line}, msg);
+}
+
+void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, const char* userMsg) {
+  torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
+}
+
+// This should never be called. It is provided in case of compilers
+// that don't do any dead code stripping in debug builds.
+void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, const std::string& userMsg) {
+  torchCheckFail(func, file, line, c10::str(condMsg, userMsg));
+}
+
 } // namespace detail
 
 namespace Warning {
@@ -125,6 +139,16 @@ void set_warning_handler(WarningHandler* handler) noexcept(true) {
 
 WarningHandler* get_warning_handler() noexcept(true) {
   return ThreadWarningHandler::get_handler();
+}
+
+bool warn_always = false;
+
+void set_warnAlways(bool setting) noexcept(true) {
+    warn_always = setting;
+}
+
+bool get_warnAlways() noexcept(true) {
+    return warn_always;
 }
 
 } // namespace Warning

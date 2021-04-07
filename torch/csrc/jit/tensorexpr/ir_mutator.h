@@ -38,9 +38,7 @@ class Broadcast;
 class IfThenElse;
 class ExprHandle;
 class Expr;
-class BaseCallNode;
 class Intrinsics;
-class FunctionCall;
 class Allocate;
 class Free;
 class Let;
@@ -54,6 +52,7 @@ class MinTerm;
 class ReduceOp;
 class AtomicAdd;
 class SyncThreads;
+class ExternalCall;
 
 class TORCH_API IRMutator {
  public:
@@ -83,16 +82,7 @@ class TORCH_API IRMutator {
   virtual const Expr* mutate(const Load* v);
   virtual const Expr* mutate(const Broadcast* v);
   virtual const Expr* mutate(const IfThenElse* v);
-
-  // BaseCallNode is the base class for all call nodes.
-  // For any visitors that only needs the common behavior, only override this
-  // function is enough. This is because all derived class handlers will call
-  // this function by default.
-  // Override the derived class handler only if the logic is more specific to
-  // that.
-  virtual const Expr* mutate(const BaseCallNode* v);
   virtual const Expr* mutate(const Intrinsics* v);
-  virtual const Expr* mutate(const FunctionCall* v);
 
   virtual const Expr* mutate(const Term* v);
   virtual const Expr* mutate(const Polynomial* v);
@@ -107,16 +97,12 @@ class TORCH_API IRMutator {
   virtual Stmt* mutate(const Store* v);
   virtual Stmt* mutate(const AtomicAdd* v);
   virtual Stmt* mutate(const SyncThreads* v);
+  virtual Stmt* mutate(const ExternalCall* v);
 
   virtual Stmt* mutate(const Allocate* v);
   virtual Stmt* mutate(const Free* v);
   virtual Stmt* mutate(const Let* v);
   virtual Stmt* mutate(const Cond* v);
-
- protected:
-  const Expr* DefaultMutator(
-      const BaseCallNode* v,
-      std::vector<const Expr*>& params);
 };
 
 } // namespace tensorexpr
