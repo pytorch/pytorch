@@ -6351,12 +6351,14 @@
     CUDA: foreach_tensor_mul_scalar_kernel_cuda_
 
 - func: _foreach_div.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalar_kernel_slow
     CUDA: foreach_tensor_div_scalar_kernel_cuda
 
 - func: _foreach_div_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalar_kernel_slow_
@@ -6403,12 +6405,14 @@
     CUDA: foreach_tensor_mul_list_kernel_cuda_
 
 - func: _foreach_div.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_list_kernel_slow
     CUDA: foreach_tensor_div_list_kernel_cuda
 
 - func: _foreach_div_.List(Tensor(a!)[] self, Tensor[] other) -> ()
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_list_kernel_slow_
@@ -6439,12 +6443,14 @@
     CUDA: foreach_tensor_sub_scalarlist_kernel_cuda_
 
 - func: _foreach_div.ScalarList(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalarlist_kernel_slow
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda
 
 - func: _foreach_div_.ScalarList(Tensor(a!)[] self, Scalar[] scalars) -> ()
+  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalarlist_kernel_slow_
