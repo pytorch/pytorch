@@ -603,19 +603,19 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
         return (input, )
 
 def sample_inputs_addcmul(op_info, device, dtype, requires_grad, **kwargs):
-    test_cases =[((S, S), (S, S), (S, S)),
-                 ((S, S), (S, 1), (1, S)),
-                 ((1,), (S, S, 1), (1, S)),
-                 ((S, S), (S, S), (S, S)),
-                 ((S, S), (S, 1), (1, S)),
-                 ((1,), (S, S, 1), (1, S)),
-                 ((), (), ()),
-                 ((S, S), (), ()),
-                 ((), (S, S, 1), (1, S)),
-                 ((), (), ()),
-                 ((S, S), (), ()),
-                 ((), (S, S, 1), (1, S)),
-                 ]
+    test_cases = [((S, S), (S, S), (S, S)),
+                  ((S, S), (S, 1), (1, S)),
+                  ((1,), (S, S, 1), (1, S)),
+                  ((S, S), (S, S), (S, S)),
+                  ((S, S), (S, 1), (1, S)),
+                  ((1,), (S, S, 1), (1, S)),
+                  ((), (), ()),
+                  ((S, S), (), ()),
+                  ((), (S, S, 1), (1, S)),
+                  ((), (), ()),
+                  ((S, S), (), ()),
+                  ((), (S, S, 1), (1, S)),
+                  ]
 
     sample_inputs = []
     for input_args in test_cases:
