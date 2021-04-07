@@ -204,9 +204,9 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     }
   };
   return readArchiveAndTensors(
-      /*archive_name=*/ archive_name,
-      /*pickle_prefix=*/ pickle_dir_prefix_,
-      /*tensor_prefi =*/ tensor_dir_prefix_,
+      /*archive_name=*/archive_name,
+      /*pickle_prefix=*/pickle_dir_prefix_,
+      /*tensor_prefi =*/tensor_dir_prefix_,
       type_resolver,
       obj_loader,
       device_,
