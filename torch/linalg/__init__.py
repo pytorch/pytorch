@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import sys
 
 import torch
@@ -147,7 +148,7 @@ Examples::
 """)
 
 det = _add_docstr(_linalg.linalg_det, r"""
-linalg.det(input) -> Tensor
+linalg.det(input, *, out=None) -> Tensor
 
 Computes the determinant of a square matrix :attr:`input`, or of each square matrix
 in a batched :attr:`input`.
@@ -167,6 +168,9 @@ Args:
     input (Tensor): the input matrix of size `(n, n)` or the batch of matrices of size
                     `(*, n, n)` where `*` is one or more batch dimensions.
 
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default is ``None``.
+
 Example::
 
     >>> a = torch.randn(3, 3)
@@ -175,6 +179,12 @@ Example::
             [ 0.9701,  0.7346, -1.8044],
             [-0.2337,  0.0557,  0.6929]])
     >>> torch.linalg.det(a)
+    tensor(0.0934)
+
+    >>> out = torch.empty(0)
+    >>> torch.linalg.det(a, out=out)
+    tensor(0.0934)
+    >>> out
     tensor(0.0934)
 
     >>> a = torch.randn(3, 2, 2)
@@ -233,6 +243,102 @@ Example::
     tensor(nan)
     >>> torch.linalg.slogdet(A)
     torch.return_types.linalg_slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
+""")
+
+eig = _add_docstr(_linalg.linalg_eig, r"""
+linalg.eig(input, *, out=None) -> (Tensor, Tensor)
+
+Computes the eigenvalues and eigenvectors of a square
+matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
+
+For a single matrix :attr:`input`, the tensor of eigenvalues `w` and the tensor of eigenvectors
+`V` decompose the :attr:`input` such that `input = V diag(w) V⁻¹`, where `V⁻¹` is the inverse of `V`.
+
+The eigenvalues are not necessarily sorted.
+For real-valued input the resulting eigenvalues and eigenvectors will always be of complex type.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The eigenvalues and eigenvectors are computed using LAPACK's and MAGMA's `geev` routine.
+
+.. note:: The eigenvectors of matrices are not unique, so any eigenvector multiplied by a constant remains
+          a valid eigenvector. This function may compute different eigenvector representations on
+          different device types. Usually the difference is only in the sign of the eigenvector.
+
+.. note:: See :func:`torch.linalg.eigvals` for a related function that computes only eigenvalues.
+          However, that function is not differentiable.
+
+.. warning:: Differentiation support for this function is not implemented yet.
+
+Args:
+    input (Tensor): the `n \times n` matrix or the batch of such matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+
+Keyword args:
+    out (tuple, optional): tuple of two tensors to write the output to. Default is `None`.
+
+Returns:
+    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
+
+        - **eigenvalues** (*Tensor*): Shape `(*, n)`.
+        - **eigenvectors** (*Tensor*): Shape `(*, n, n)`.
+
+Examples::
+
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a
+    tensor([[ 0.9828+0.3889j, -0.4617+0.3010j],
+            [ 0.1662-0.7435j, -0.6139+0.0562j]], dtype=torch.complex128)
+    >>> w, v = torch.linalg.eig(a)
+    >>> w
+    tensor([ 1.1226+0.5738j, -0.7537-0.1286j], dtype=torch.complex128)
+    >>> v
+    tensor([[ 0.9218+0.0000j,  0.1882-0.2220j],
+            [-0.0270-0.3867j,  0.9567+0.0000j]], dtype=torch.complex128)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(w.diag_embed(), v.inverse())), a)
+    True
+
+    >>> a = torch.randn(3, 2, 2, dtype=torch.float64)
+    >>> w, v = torch.linalg.eig(a)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(w.diag_embed(), v.inverse())).real, a)
+    True
+""")
+
+eigvals = _add_docstr(_linalg.linalg_eigvals, r"""
+linalg.eigvals(input, *, out=None) -> Tensor
+
+Computes the eigenvalues of a square
+matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
+
+The eigenvalues are not necessarily sorted.
+For real-valued input the resulting eigenvalues will always be of complex type.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The eigenvalues are computed using LAPACK's and MAGMA's `geev` routine.
+
+.. note:: See :func:`torch.linalg.eig` for a related function that computes both eigenvalues and eigenvectors.
+
+Args:
+    input (Tensor): the `n \times n` matrix or the batch of such matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+
+Keyword args:
+    out (Tensor, optional): tensor to write the output to. Default is `None`.
+
+Examples::
+
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a
+    tensor([[ 0.9828+0.3889j, -0.4617+0.3010j],
+            [ 0.1662-0.7435j, -0.6139+0.0562j]], dtype=torch.complex128)
+    >>> w = torch.linalg.eigvals(a)
+    >>> w
+    tensor([ 1.1226+0.5738j, -0.7537-0.1286j], dtype=torch.complex128)
 """)
 
 eigh = _add_docstr(_linalg.linalg_eigh, r"""
@@ -519,6 +625,49 @@ Example::
     tensor(5.7220e-06)
 """)
 
+matrix_power = _add_docstr(_linalg.linalg_matrix_power, r"""
+matrix_power(input, n, *, out=None) -> Tensor
+
+Raises the square matrix :attr:`input`, or each square matrix in a batched
+:attr:`input`, to the integer power :attr:`n`.
+
+If :attr:`n` is 0, the identity matrix (or batch of identity matrices) of the same shape
+as :attr:`input` is returned. If :attr:`n` is negative, the inverse of each matrix
+(if invertible) is computed and then raised to the integer power ``abs(n)``.
+
+Args:
+    input (Tensor): the input matrix of size `(n, n)` or the batch of matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+    n (int): the exponent to raise the :attr:`input` matrix to
+
+Keyword args:
+    out (Tensor, optional): tensor to write the output to.
+
+Example:
+
+    >>> a = torch.randn(3, 3)
+    >>> a
+    tensor([[-0.2270,  0.6663, -1.3515],
+            [-0.9838, -0.4002, -1.9313],
+            [-0.7886, -0.0450,  0.0528]])
+    >>> torch.linalg.matrix_power(a, 0)
+    tensor([[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]])
+    >>> torch.linalg.matrix_power(a, 3)
+    tensor([[ 1.0756,  0.4980,  0.0100],
+            [-1.6617,  1.4994, -1.9980],
+            [-0.4509,  0.2731,  0.8001]])
+    >>> torch.linalg.matrix_power(a.expand(2, -1, -1), -2)
+    tensor([[[ 0.2640,  0.4571, -0.5511],
+            [-1.0163,  0.3491, -1.5292],
+            [-0.4899,  0.0822,  0.2773]],
+
+            [[ 0.2640,  0.4571, -0.5511],
+            [-1.0163,  0.3491, -1.5292],
+            [-0.4899,  0.0822,  0.2773]]])
+""")
+
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
 matrix_rank(input, tol=None, hermitian=False, *, out=None) -> Tensor
 
@@ -651,6 +800,72 @@ Examples::
     tensor(5.4345)
     >>> LA.vector_norm(b, ord=3.5)
     tensor(5.4345)
+""")
+
+multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
+linalg.multi_dot(tensors, *, out=None)
+
+Efficiently multiplies two or more matrices given by :attr:`tensors` by ordering the
+multiplications so that the fewest arithmetic operations are performed.
+
+Every tensor in :attr:`tensors` must be 2D, except for the first and last which
+may be 1D. If the first tensor is a 1D vector of size `n` it is treated as a row vector
+of size `(1, n)`, similarly if the last tensor is a 1D vector of size `n` it is treated
+as a column vector of size `(n, 1)`.
+
+If the first tensor has size `(a, b)` and the last tensor has size `(c, d)` the
+output will have size `(a, d)`. However, if either tensor is 1D then the implied
+dimension of size `1` as described above is squeezed from the output. e.g. for tensors
+of size `(b)` and `(c, d)` the output will have size `(d)`.
+
+.. warning:: This function does not broadcast.
+
+.. note:: This function is implemented by chaining :func:`torch.mm` calls after
+          computing the optimal matrix multiplication order.
+
+.. note:: This function is similar to NumPy's `multi_dot` except that the first and last
+          tensors must be either 1D or 2D whereas NumPy allows them to be nD.
+
+.. note:: The cost of multiplying two matrices with shapes `(a, b)` and `(b, c)` is
+          `a * b * c`. Given matrices `A`, `B` and `C` each with shapes `(10, 100)`,
+          `(100, 5)` and `(5, 50)` respectively, we can calculate the cost of different
+          multiplication orders as follows:
+
+          .. math::
+
+            cost((AB)C) = 10*100*5 + 10*5*50 = 5000 + 2500 = 7500
+            cost(A(BC)) = 10*100*50 + 100*5*50 = 50000 + 25000 = 75000
+
+          In this case, multiplying A and B first followed by C is 10 times faster.
+
+Args:
+    tensors (sequence of Tensors): two or more tensors to multiply. The first and last
+        tensors may be 1D or 2D. Every other tensor must be 2D.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> from torch.linalg import multi_dot
+
+    >>> multi_dot([torch.tensor([1, 2]), torch.tensor([2, 3])])
+    tensor(8)
+    >>> multi_dot([torch.tensor([[1, 2]]), torch.tensor([2, 3])])
+    tensor([8])
+    >>> multi_dot([torch.tensor([[1, 2]]), torch.tensor([[2], [3]])])
+    tensor([[8]])
+
+    >>> a = torch.arange(2 * 3).view(2, 3)
+    >>> b = torch.arange(3 * 2).view(3, 2)
+    >>> c = torch.arange(2 * 2).view(2, 2)
+    >>> multi_dot((a, b, c))
+    tensor([[ 26,  49],
+            [ 80, 148]])
+
+    >>> multi_dot((a.to(torch.float), torch.empty(3, 0), torch.empty(0, 2)))
+    tensor([[0., 0.],
+            [0., 0.]])
 """)
 
 norm = _add_docstr(_linalg.linalg_norm, r"""
@@ -786,61 +1001,71 @@ svd = _add_docstr(_linalg.linalg_svd, r"""
 linalg.svd(input, full_matrices=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition of either a matrix or batch of
-matrices :attr:`input`." The singular value decomposition is represented as a
-namedtuple ``(U, S, Vh)``, such that :math:`input = U \mathbin{@} diag(S) \times
-Vh`. If :attr:`input` is a batch of tensors, then ``U``, ``S``, and ``Vh`` are
+matrices :attr:`input`. The singular value decomposition is represented as a
+namedtuple `(U, S, Vh)`, such that :attr:`input` `= U diag(S) Vh`.
+If :attr:`input` is a batch of matrices, then `U`, `S`, and `Vh` are
 also batched with the same batch dimensions as :attr:`input`.
 
-If :attr:`full_matrices` is ``False`` (default), the method returns the reduced singular
-value decomposition i.e., if the last two dimensions of :attr:`input` are
-``m`` and ``n``, then the returned `U` and `V` matrices will contain only
-:math:`min(n, m)` orthonormal columns.
+If :attr:`full_matrices` is `False`, the method returns the reduced singular
+value decomposition. In this case, if the last two dimensions of :attr:`input` are
+`m` and `n`, then the returned `U` and `Vh` matrices will contain only
+`min(n, m)` orthonormal columns.
 
-If :attr:`compute_uv` is ``False``, the returned `U` and `Vh` will be empy
+If :attr:`compute_uv` is `False`, the returned `U` and `Vh` will be empty
 tensors with no elements and the same device as :attr:`input`. The
 :attr:`full_matrices` argument has no effect when :attr:`compute_uv` is False.
 
-The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
+The dtypes of `U` and `Vh` are the same as :attr:`input`'s. `S` will
 always be real-valued, even if :attr:`input` is complex.
 
-.. note:: Unlike NumPy's ``linalg.svd``, this always returns a namedtuple of
-          three tensors, even when :attr:`compute_uv=False`. This behavior may
+.. note:: Unlike NumPy's `linalg.svd`, :func:`torch.linalg.svd` always returns a namedtuple
+          of three tensors, even when :attr:`compute_uv` is `False`. This behavior may
           change in a future PyTorch release.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
-          then the singular values of each matrix in the batch is returned in descending order.
+          then the singular values of each matrix in the batch are returned in descending order.
 
-.. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
-          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the cuSOLVER routines
-          `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later, and uses the MAGMA routine `gesdd`
-          on earlier versions of CUDA.
+.. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is `True`.
 
-.. note:: The returned matrix `U` will be transposed, i.e. with strides
-          :code:`U.contiguous().transpose(-2, -1).stride()`.
+.. note:: When :attr:`full_matrices` is `True`, the gradients on `U[..., :, min(m, n):]`
+          and `Vh[..., min(m, n):, :]` will be ignored in the backwards pass, as those vectors
+          can be arbitrary bases of the corresponding subspaces.
 
-.. note:: Gradients computed using `U` and `Vh` may be unstable if
-          :attr:`input` is not full rank or has non-unique singular values.
+.. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `?gesdd`
+          (a divide-and-conquer algorithm) instead of `?gesvd` for speed. Analogously,
+          on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched` on CUDA 10.1.243
+          and later, and MAGMA's routine `gesdd` on earlier versions of CUDA.
 
-.. note:: When :attr:`full_matrices` = ``True``, the gradients on :code:`U[..., :, min(m, n):]`
-          and :code:`V[..., :, min(m, n):]` will be ignored in backward as those vectors
-          can be arbitrary bases of the subspaces.
+.. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
+          be represented as a column-major matrix (i.e. Fortran-contiguous).
 
-.. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
+.. warning:: The gradients with respect to `U` and `Vh` will only be finite when the input does not
+             have zero nor repeated singular values.
 
-.. note:: Since `U` and `V` of an SVD is not unique, each vector can be multiplied by
-          an arbitrary phase factor :math:`e^{i \phi}` while the SVD result is still correct.
-          Different platforms, like Numpy, or inputs on different device types, may produce different
-          `U` and `V` tensors.
+.. warning:: If the distance between any two singular values is close to zero, the gradients with respect to
+             `U` and `Vh` will be numerically unstable, as they depends on
+             :math:`\frac{1}{\min_{i \neq j} \sigma_i^2 - \sigma_j^2}`. The same happens when the matrix
+             has small singular values, as these gradients also depend on `S⁻¹`.
+
+.. warning:: For complex-valued :attr:`input` the singular value decomposition is not unique,
+             as `U` and `V` may be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.
+             The same happens when :attr:`input` has repeated singular values, where one may multiply
+             the columns of the spanning subspace in `U` and `V` by a rotation matrix
+             and `the resulting vectors will span the same subspace`_.
+             Different platforms, like NumPy, or inputs on different device types,
+             may produce different `U` and `Vh` tensors.
+
 
 Args:
-    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
-                    batch dimensions consisting of :math:`m \times n` matrices.
+    input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
+                    batch dimensions consisting of `(m, n)` matrices.
     full_matrices (bool, optional): controls whether to compute the full or reduced decomposition, and
-                                    consequently the shape of returned ``U`` and ``V``. Defaults to True.
-    compute_uv (bool, optional): whether to compute `U` and `V` or not. Defaults to True.
-    out (tuple, optional): a tuple of three tensors to use for the outputs. If compute_uv=False,
-                           the 1st and 3rd arguments must be tensors, but they are ignored. E.g. you can
-                           pass `(torch.tensor([]), out_S, torch.tensor([]))`
+                                    consequently, the shape of returned `U` and `Vh`. Default: `True`.
+    compute_uv (bool, optional): controls whether to compute `U` and `Vh`. Default: `True`.
+    out (tuple, optional): a tuple of three tensors to use for the outputs.
+                           If :attr:`compute_uv` is `False`, the 1st and 3rd arguments must be tensors,
+                           but they are ignored.  For example, you can pass
+                           ``(torch.tensor([]), out_S, torch.tensor([]))``
 
 Example::
 
@@ -873,6 +1098,9 @@ Example::
     >>> u, s, vh = torch.linalg.svd(a_big, full_matrices=False)
     >>> torch.dist(a_big, u @ torch.diag_embed(s) @ vh)
     tensor(3.0957e-06)
+
+.. _the resulting vectors will span the same subspace:
+       (https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD)
 """)
 
 cond = _add_docstr(_linalg.linalg_cond, r"""

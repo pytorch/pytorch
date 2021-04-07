@@ -22,6 +22,7 @@
 #include <c10/core/Backend.h>
 #include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 
 #include <stdexcept>
@@ -189,7 +190,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
   }
 
   PyObject** items = PySequence_Fast_ITEMS(seq.get());
-  for (int64_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     recursive_store(data, sizes, strides, dim + 1, scalarType, elementSize, items[i]);
     data += strides[dim] * elementSize;
   }
@@ -469,6 +470,11 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
   if (isSparse(dispatchKeyToBackend(dispatch_key))) {
     return legacy_sparse_tensor_ctor(dispatch_key, scalar_type, args, kwargs);
   }
+
+  TORCH_WARN_ONCE(
+      "Legacy tensor constructor is deprecated. "
+      "Use: torch.tensor(...) for creating tensors from tensor-like objects; "
+      "or torch.empty(...) for creating an uninitialized tensor with specific sizes.");
 
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);

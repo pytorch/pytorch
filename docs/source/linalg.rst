@@ -20,9 +20,13 @@ Functions
 .. autofunction:: cond
 .. autofunction:: det
 .. autofunction:: slogdet
+.. autofunction:: eig
+.. autofunction:: eigvals
 .. autofunction:: eigh
 .. autofunction:: eigvalsh
+.. autofunction:: matrix_power
 .. autofunction:: matrix_rank
+.. autofunction:: multi_dot
 .. autofunction:: norm
 .. autofunction:: vector_norm
 .. autofunction:: pinv
