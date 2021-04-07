@@ -51,9 +51,9 @@ def cached():
 
 
 class ParametrizationList(ModuleList):
-    r"""A sequential container that holds and manages the ``original`` parameter of
-    a parametrized :class:`~nn.Parameter` or buffer. It is the type of
-    ``module.parametrizations[tensor_name]`` when ``tensor_name`` has been parametrized
+    r"""A sequential container that holds and manages the ``original`` parameter (or buffer) of
+    a parametrized :class:`torch.nn.Module`. It is the type of
+    ``module.parametrizations[tensor_name]`` when ``module[tensor_name]`` has been parametrized
     with :func:`register_parametrization`
 
     .. note ::
@@ -85,23 +85,19 @@ class ParametrizationList(ModuleList):
             value (Tensor): Value to which initialize the module
 
         Raises:
-            RuntimeError: if any of the parametrizations do not implement a ```right_inverse`` method
+            RuntimeError: if any of the parametrizations do not implement a ``right_inverse`` method
         """
-        # See https://github.com/pytorch/pytorch/issues/53103
-        for module in reversed(self):  # type: ignore
-            if not hasattr(module, "right_inverse"):
-                raise RuntimeError(
-                    "The parametrization '{}' does not implement a 'right_inverse' method. "
-                    "Assigning to a parametrized tensor is only possible when all the parametrizations "
-                    "implement a 'right_inverse' method.".format(
-                        module.__class__.__name__
-                    )
-                )
-
         with torch.no_grad():
             # See https://github.com/pytorch/pytorch/issues/53103
             for module in reversed(self):  # type: ignore
-                value = module.right_inverse(value)
+                if hasattr(module, "right_inverse"):
+                    value = module.right_inverse(value)
+                else:
+                    raise RuntimeError(
+                        "The parametrization '{}' does not implement a 'right_inverse' method. "
+                        "Assigning to a parametrized tensor is only possible when all the parametrizations "
+                        "implement a 'right_inverse' method.".format(module.__class__.__name__)
+                    )
             self.original.copy_(value)
 
     def forward(self) -> Tensor:
@@ -188,7 +184,7 @@ def register_parametrization(
     When accessing ``module[tensor_name]``, the module will return the
     parametrized version ``parametrization(module[tensor_name])``. The backward
     pass will differentiate through the ``parametrization`` and if the original
-    tensor is a :class:``~Parameter``, it will be updated accordingly by the optimizer.
+    tensor is a :class:``torch.nn.Parameter``, it will be updated accordingly by the optimizer.
     The first time that a module registers a parametrization, this function will add an attribute
     ``parametrizations`` to the module of type :class:`~ParametrizationList`.
     The list of parametrizations on a tensor will be accessible under
@@ -208,6 +204,25 @@ def register_parametrization(
     If this method is implemented, it will be possible to assign to the parametrized tensor.
     This may be used to initialize the tensor:
 
+    In most situations, ``right_inverse`` will be a function such that
+    ``forward(right_inverse(X)) == X`` (see
+    `right inverse <https://en.wikipedia.org/wiki/Inverse_function#Right_inverses>`_).
+    Sometimes, when the parametrization is not surjective, it may be reasonable
+    to relax this, as we did with ``Symmetric`` in the example above.
+
+    Args:
+        module (nn.Module): module on which to register the parametrization
+        tensor_name (str): name of the parameter, buffer on which to register
+            the parametrization
+        parametrization (nn.Module): the parametrization to register
+
+    Returns:
+        Module: module
+
+    Raises:
+        ValueError: if the module does not have a parameter or a buffer named ``tensor_name``
+
+    Examples:
         >>> import torch
         >>> import torch.nn.utils.parametrize as P
         >>>
@@ -227,24 +242,6 @@ def register_parametrization(
         >>> m.weight = A  # Initialize the weight to be the symmetric matrix A
         >>> print(torch.allclose(m.weight, A))
         True
-
-    In most situations, ``right_inverse`` will be a function such that
-    ``forward(right_inverse(X)) == X`` (see
-    `right inverse <https://en.wikipedia.org/wiki/Inverse_function#Right_inverses>`_).
-    Sometimes, when the parametrization is not surjective, it may be reasonable
-    to relax this, as we did with ``Symmetric`` in the example above.
-
-    Args:
-        module (nn.Module): module on which to register the parametrization
-        tensor_name (str): name of the parameter, buffer on which to register
-            the parametrization
-        parametrization (nn.Module): the parametrization to register
-
-    Returns:
-        Module: module
-
-    Raises:
-        ValueError: if the module does not have a parameter or a buffer named ``tensor_name``
     """
     if is_parametrized(module, tensor_name):
         # Just add the new parametrization to the parametrization list
