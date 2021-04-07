@@ -640,5 +640,13 @@ TEST(IValueTest, getSubValues) {
   }
 }
 
+TEST(IValueTest, ScalarBool) {
+  Scalar expected(true);
+  IValue v(expected);
+  Scalar actual = v.toScalar();
+  EXPECT_TRUE(actual.isBoolean());
+  EXPECT_TRUE(actual.toBool());
+}
+
 // TODO(gmagogsfm): Add type conversion test?
 } // namespace c10
