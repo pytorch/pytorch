@@ -49,6 +49,28 @@ TEST(RunTimeTest, LoadAndForward) {
   ASSERT_EQ(result, expected_result);
 }
 
+TEST(RunTimeTest, Delegate) {
+  std::string filePath(__FILE__);
+  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  // "delegate_test.ptl" is generated from test/cpp/jit/test_backend.cpp,
+  // BackendTest.TestCompiler. This test is on target runtime. It has
+  // model running capability, but no compilation and serialization.
+  // The mobile model delegated to the "backend_with_compiler_demo" backend
+  // The model is from the jit code:
+  //  Module m("m");
+  //  m.define(R"(
+  //    def forward(self, x, h):
+  //        return x + h
+  //  )");
+  testModelFile.append("delegate_test.ptl");
+  auto mlm = _load_for_mobile(testModelFile);
+  std::vector<IValue> inputs;
+  inputs.emplace_back(2.0 * at::ones({}));
+  inputs.emplace_back(1.0 * at::ones({}));
+
+  auto mres = mlm.forward(inputs);
+  AT_ASSERT(mres.toTensor().equal(3 * at::ones({})));
+}
 } // namespace mobile
 } // namespace jit
 } // namespace torch
