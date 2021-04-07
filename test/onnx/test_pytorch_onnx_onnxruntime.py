@@ -4271,6 +4271,18 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    def test_list_append_tuple(self):
+        class List(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                image_sizes_list = torch.jit.annotate(List[Tuple[int, int]], [])
+                image_sizes_list.append((x.size(0), x.size(1)))
+                image_sizes_list.append((x.size(2), x.size(3)))
+                return torch.zeros(image_sizes_list[1])        
+        
+        x = torch.randn(2, 3, 4, 5)
+        self.run_test(List(), (x,))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_pop(self):
         class ListModel(torch.nn.Module):

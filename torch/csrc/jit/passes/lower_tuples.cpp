@@ -186,10 +186,32 @@ static void VisitNode(Node* n, Node* insert_point) {
   }
 }
 
+static void RemoveGetItem(Block* block) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      RemoveGetItem(child_block);
+    }
+    if (it->kind() == aten::__getitem__ && it->input(0)->node()->kind() == prim::ListConstruct 
+        && it->input(0)->node()->inputs().size() > 0
+        && it->input(0)->node()->input(0)->node()->kind() ==  prim::TupleConstruct) {
+      auto list_node = it->input(0)->node();
+      auto getitem_node = *it;
+      auto const_node = getitem_node->input(1)->node();
+      auto index = toIValue(getitem_node->input(1))->toInt();
+      getitem_node->replaceAllUsesWith(list_node->input(index)->node());
+      list_node->removeAllInputs();
+      getitem_node->removeAllInputs();
+      list_node->destroy();
+      it.destroyCurrent();
+    }
+  }
+}
+
 static void LowerAllTuples(Block* block) {
   // tuples in parameter lists of a block behave exactly the same as
   // _outputs_ of normal instructions, since the param_node represents the
   // parameters as outputs, we can handle it by simply visiting the node
+  RemoveGetItem(block);
   VisitNode(block->param_node(), *block->nodes().begin());
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {

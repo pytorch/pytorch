@@ -131,7 +131,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
-    torch._C._jit_pass_lower_all_tuples(graph)
+    #torch._C._jit_pass_lower_all_tuples(graph)
 
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
@@ -154,7 +154,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
     if operator_export_type != OperatorExportTypes.RAW:
         torch._C._jit_pass_peephole(graph, True)
-        torch._C._jit_pass_lower_all_tuples(graph)
+        #torch._C._jit_pass_lower_all_tuples(graph)
         # in _jit_pass_onnx, symbolic functions are called for each node for conversion.
         # However, there are nodes that cannot be converted without additional context.
         # For example, the number of outputs from split (and whether it is static or dynamic) is unknown
@@ -162,6 +162,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         # This pass does a preprocess, and prepares the nodes such that enough context can be received
         # by the symbolic function.
         torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
+        torch._C._jit_pass_lower_all_tuples(graph)
         torch._C._jit_pass_onnx_preprocess(graph)
 
         # onnx does not support tuples, so try to remove them
