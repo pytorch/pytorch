@@ -3893,8 +3893,13 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_trace),
     OpInfo('inner',
-           dtypes=all_types_and_complex(),
-           dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+           # Copied from addmm
+           dtypes=floating_types(),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           # BFloat16 support on CUDA requires CUDA 11 and SM53
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
+                                           *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfROCM=floating_types_and(torch.half),
            supports_out=True,
            sample_inputs_func=sample_inputs_inner,
            skips=(SkipInfo('TestCommon', 'test_out', dtypes=[torch.float32]),)),
