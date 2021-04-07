@@ -101,7 +101,7 @@ class _RemoteModule(nn.Module):
         ``def forward_async(input: Tensor) -> Future[Tensor]:``.
 
         Args:
-            remote_device (str): Device on the destination worker where we‘d like to place this module.
+            remote_device (str): Device on the destination worker where we'd like to place this module.
                 The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
                 E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".
                 In addition, the device field can be optional and the default value is "cpu".
@@ -355,7 +355,7 @@ class RemoteModule(_RemoteModule):
         | ``def forward_async(input: Tensor) -> Future[Tensor]:``
 
     Args:
-        remote_device (str): Device on the destination worker where we‘d like to place this module.
+        remote_device (str): Device on the destination worker where we'd like to place this module.
             The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
             E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".
             In addition, the device field can be optional and the default value is "cpu".
