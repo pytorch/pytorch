@@ -4059,14 +4059,27 @@ op_db: List[OpInfo] = [
                    sample_inputs_func=sample_inputs_logit,
                    safe_casts_outputs=True),
     OpInfo('dot',
-           dtypes=all_types_and_complex_and(torch.float16),
+           dtypes=floating_and_complex_types_and(torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           skips=(
+               # dot does not handle correctly out= dtypes
+               # https://github.com/pytorch/pytorch/issues/55561
+               SkipInfo('TestCommon', 'test_out'),
+           ),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot),
     OpInfo('vdot',
            dtypes=all_types_and_complex_and(torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           skips=(
+               # vdot does not handle correctly out= dtypes
+               # https://github.com/pytorch/pytorch/issues/55561
+               SkipInfo('TestCommon', 'test_out'),
+           ),
            sample_inputs_func=sample_inputs_dot_vdot),
     OpInfo('bmm',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16),
            assert_autodiffed=True,
            skips=(
                # bmm does not correctly warn when resizing out= inputs
@@ -4077,14 +4090,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16),
            skips=(
                # bmm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
                SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16,)),
                # mv calls into addmv which doesn't fully support float16
                # RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
-               SkipInfo('TestOpInfo', 'test_supported_dtypes', dtypes=(torch.float16,)),
-               ),
+               SkipInfo('TestOpInfo', 'test_supported_dtypes', dtypes=(torch.float16,)),),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_mv),
 ]
