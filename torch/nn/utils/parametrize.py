@@ -14,12 +14,15 @@ _cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
 def cached():
     r"""Context manager that enables the caching system within parametrizations
     registered with :func:`register_parametrization`.
+
     The value of the parametrized objects is computed and cached the first time
     they are required when this context manager is active. The cached values are
     discarded when leaving the context manager.
+
     This is useful when using a parametrized parameter more than once in the forward pass.
     An example of this is when parametrizing the recurrent kernel of an RNN or when
     sharing weights.
+
     The simplest way to activate the cache is by wrapping the forward pass of the neural network
 
     .. code-block:: python
@@ -77,6 +80,7 @@ class ParametrizationList(ModuleList):
 
     def set_original_(self, value: Tensor) -> None:
         r"""This method is called when assigning to a parametrized tensor.
+
         It calls the methods ``right_inverse`` (see :func:`register_parametrization`)
         of the parametrizations in the inverse order that they have been registered.
         Then, it assigns the result to ``self.original``.
@@ -181,21 +185,28 @@ def register_parametrization(
     module: Module, tensor_name: str, parametrization: Module
 ) -> Module:
     r"""Adds a parametrization to a tensor in a module.
+
     When accessing ``module[tensor_name]``, the module will return the
-    parametrized version ``parametrization(module[tensor_name])``. The backward
-    pass will differentiate through the ``parametrization`` and if the original
-    tensor is a :class:`torch.nn.Parameter`, it will be updated accordingly by the optimizer.
+    parametrized version ``parametrization(module[tensor_name])``. If the original
+    tensor requires a gradient, the backward pass will differentiate through the
+    :attr:`parametrization`, and the optimizer will update it accordingly
+
     The first time that a module registers a parametrization, this function will add an attribute
     ``parametrizations`` to the module of type :class:`~ParametrizationList`.
+
     The list of parametrizations on a tensor will be accessible under
     ``module.parametrizations[tensor_name]``.
+
     The original tensor will be accessible under
     ``module.parametrizations[tensor_name].original``.
-    Parametrizations may be composed by registering several parametrizations
+
+    Parametrizations may be concatenated by registering several parametrizations
     on the same attribute.
+
     Parametrized parameters and buffers have a built-in caching system that can be activated
     using :func:`cached`.
-    A ``parametrization`` may optionally implement a method with signature
+
+    A :attr:`parametrization` may optionally implement a method with signature
 
     .. code-block:: python
 
@@ -208,7 +219,7 @@ def register_parametrization(
     ``forward(right_inverse(X)) == X`` (see
     `right inverse <https://en.wikipedia.org/wiki/Inverse_function#Right_inverses>`_).
     Sometimes, when the parametrization is not surjective, it may be reasonable
-    to relax this, as we did with ``Symmetric`` in the example above.
+    to relax this, as shown in the example below.
 
     Args:
         module (nn.Module): module on which to register the parametrization
