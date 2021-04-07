@@ -10,15 +10,20 @@
 namespace {
 
 template<typename scalar_t>
-__global__ void sort_gather_kernel(const scalar_t *in, scalar_t *out, const int64_t *index, int nsegments, int nsort) {
+__global__ void sort_postprocess_kernel(const scalar_t *in, scalar_t *out, int64_t *index, const int2 *i_s_ptr, int nsegments, int nsort) {
   CUDA_KERNEL_LOOP(i, nsegments * nsort) {
     int segment = i / nsort;
     int j = i % nsort;
+
     int offset = segment * nsort;
     const scalar_t *in_ = in + offset;
     scalar_t *out_ = out + offset;
-    const int64_t *index_ = index + offset;
-    out_[j] = in_[index_[j]];
+    int64_t *index_ = index + offset;
+    const int2 *i_s_ptr_ = i_s_ptr + offset;
+
+    int idx = i_s_ptr_[j].y;
+    index_[j] = idx;
+    out_[j] = in_[idx];
   }
 }
 
@@ -165,10 +170,10 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
 
       auto int_options = indices.options().dtype(kInt);
       auto indices_and_segment = at::empty({nsegments, nsort, 2}, int_options);
-      indices_and_segment.select(-1, 0).copy_(  // reverse indices
-        at::arange(nsort, int_options).view({1, nsort}).expand({nsegments, nsort}));
-      indices_and_segment.select(-1, 1).copy_(  // segment id
+      indices_and_segment.select(-1, 0).copy_(  // segment id
         at::arange(nsegments, int_options).view({nsegments, 1}).expand({nsegments, nsort}));
+      indices_and_segment.select(-1, 1).copy_(  // reverse indices
+        at::arange(nsort, int_options).view({1, nsort}).expand({nsegments, nsort}));
 
       auto i_s_ptr = reinterpret_cast<int2 *>(indices_and_segment.data_ptr<int>());
       auto indices_and_segment2 = at::empty_like(indices_and_segment);
@@ -178,16 +183,14 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
         self_ptr, nullptr, i_s_ptr, i_s_ptr2,
         n, descending);
 
-      auto sorted_indices = indices_and_segment2.select(-1, 0).to(kLong);
-      auto segment_id = indices_and_segment2.select(-1, 1).contiguous();
+      TORCH_INTERNAL_ASSERT(segment_bits <= 32);
 
-      at::cuda::cub::sort_pairs<int, int64_t>(
-        segment_id.data_ptr<int>(), nullptr,
-        sorted_indices.data_ptr<int64_t>(), indices_ptr,
+      at::cuda::cub::sort_keys<int64_t>(
+        reinterpret_cast<int64_t *>(i_s_ptr2), reinterpret_cast<int64_t *>(i_s_ptr),
         n, false, 0, segment_bits);
 
-      sort_gather_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
-        self_ptr, values_ptr, indices_ptr, nsegments, nsort);
+      sort_postprocess_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
+        self_ptr, values_ptr, indices_ptr, i_s_ptr, nsegments, nsort);
 
       remaining -= n;
       self_ptr += n;
