@@ -1114,6 +1114,75 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad):
                   for input_tensor, args in args)
     return inputs
 
+# Missing to test the nondeterminism of the operation
+# https://github.com/pytorch/pytorch/issues/53352
+def sample_inputs_put(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    make_idx = partial(make_tensor, low=0, dtype=torch.int64, device=device, requires_grad=False)
+
+    S = 3
+
+    def gen_inputs():
+        # Generic inputs
+        tgt_gen = (make_arg((S, S), discontiguous=not ctg) for ctg in (True, False))
+        src_gen = (make_arg((S,), discontiguous=not ctg) for ctg in (True, False))
+        idx = torch.randperm(S * S, device=device, dtype=torch.int64)[:S]
+        idx_nonctg = torch.repeat_interleave(idx, 2, dim=-1)[::2]
+        idx_neg = -idx - 1
+        idx_list = [idx, idx_nonctg, idx_neg]
+        for tgt, idx, src, acc in product(tgt_gen, idx_list, src_gen, (True, False)):
+            yield SampleInput(input=tgt, args=(idx, src, acc))
+
+        # Scalar cases
+        scalar_sizes = [(), (1,)]
+        tgt_gen = (make_arg(size) for size in scalar_sizes)
+        idx_gen = (make_idx(size, high=1) for size in scalar_sizes)
+        src_gen = (make_arg(size) for size in scalar_sizes)
+        for tgt, idx, src, acc in product(tgt_gen, idx_gen, src_gen, (True, False)):
+            yield SampleInput(input=tgt, args=(idx, src, acc))
+
+        # Empty cases
+        tgt_sizes = [(0,), (), (1,), (3, 2)]
+        tgt_gen = (make_arg(size) for size in tgt_sizes)
+        idx = make_idx((0,), high=1)
+        src = make_arg((0,))
+        for tgt, acc in product(tgt, (True, False)):
+            yield SampleInput(input=tgt, args=(idx, src, acc))
+
+    return list(gen_inputs())
+
+def sample_inputs_take(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    make_idx = partial(make_tensor, low=0, dtype=torch.int64, device=device, requires_grad=False)
+
+    S = 3
+
+    def gen_inputs():
+        # Generic inputs: take S elements out of S * S
+        src_gen = (make_arg((S, S), discontiguous=not ctg) for ctg in (True, False))
+        idx = make_idx((S,), high=S * S)
+        idx_nonctg = make_idx((S,), high=S * S, discontiguous=True)
+        idx_neg = -idx - 1
+        idx_list = [idx, idx_nonctg, idx_neg]
+        for src, idx in product(src_gen, idx_list):
+            yield SampleInput(input=src, args=(idx,))
+
+        # Scalar cases
+        scalar_sizes = [(), (1,)]
+        src_gen = (make_arg(size) for size in scalar_sizes)
+        idx_gen = (make_idx(size, high=1) for size in scalar_sizes)
+        for src, idx in product(src_gen, idx_gen):
+            yield SampleInput(input=src, args=(idx,))
+
+        # Empty cases
+        src_sizes = [(0,), (), (1,), (3, 2)]
+        src_gen = (make_arg(size) for size in src_sizes)
+        idx = make_idx((0,), high=1)
+        for src in src_gen:
+            yield SampleInput(input=src, args=(idx,))
+
+    return list(gen_inputs())
+
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
     return (
         SampleInput(
@@ -2362,9 +2431,7 @@ op_db: List[OpInfo] = [
                #   doesn't work on all platforms
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes', dtypes=(torch.bfloat16,)),
                # TODO: remove redundant method_tests() entries
-               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
-               # addmm does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out')),
+               SkipInfo('TestOpInfo', 'test_duplicate_method_tests')),
            sample_inputs_func=sample_inputs_addmm),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -2380,30 +2447,18 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addr),
     OpInfo('amax',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_amax_amin,
-           skips=(
-               # amax does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           sample_inputs_func=sample_inputs_amax_amin,),
     OpInfo('amin',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           sample_inputs_func=sample_inputs_amax_amin,
-           skips=(
-               # amin does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           sample_inputs_func=sample_inputs_amax_amin),
     OpInfo('argmax',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_argmax_argmin,
-           skips=(
-               # argmax does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           sample_inputs_func=sample_inputs_argmax_argmin,),
     OpInfo('argmin',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_argmax_argmin,
-           skips=(
-               # argmin does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           sample_inputs_func=sample_inputs_argmax_argmin,),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
                    ref=np.arcsin,
@@ -2624,7 +2679,7 @@ op_db: List[OpInfo] = [
                # "cumsum_out_{cpu,cuda}" not implemented for 'Bool'
                SkipInfo('TestOpInfo', 'test_supported_dtypes',
                         dtypes=(torch.bool,)),
-               # cumsum does not correctly warn when resizing out= inputs
+               # cumsum does not handle correctly out= dtypes
                SkipInfo('TestCommon', 'test_out'),
            ),
            sample_inputs_func=sample_inputs_cumulative_ops),
@@ -2635,7 +2690,7 @@ op_db: List[OpInfo] = [
                # "cumprod_out_{cpu, cuda}" not implemented for 'Bool'
                SkipInfo('TestOpInfo', 'test_supported_dtypes',
                         dtypes=(torch.bool,)),
-               # cumprod does not correctly warn when resizing out= inputs
+               # cumprod does not handle correctly out= dtypes
                SkipInfo('TestCommon', 'test_out',
                         dtypes=[torch.float32]),
            ),
@@ -2711,10 +2766,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-           sample_inputs_func=sample_inputs_diag,
-           skips=(
-               # diag does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           sample_inputs_func=sample_inputs_diag),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -2920,6 +2972,20 @@ op_db: List[OpInfo] = [
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
            ),
+    OpInfo('linalg.eig',
+           aten_name='linalg_eig',
+           op=torch.linalg.eig,
+           dtypes=floating_and_complex_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_linalg_invertible,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+    OpInfo('linalg.eigvals',
+           aten_name='linalg_eigvals',
+           op=torch.linalg.eigvals,
+           dtypes=floating_and_complex_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_linalg_invertible,
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.eigh',
            aten_name='linalg_eigh',
            dtypes=floating_and_complex_types(),
@@ -2974,7 +3040,7 @@ op_db: List[OpInfo] = [
                # "pow" not implemented for 'BFloat16' or 'half'
                SkipInfo('TestOpInfo', 'test_supported_backward',
                         dtypes=(torch.bfloat16, torch.float16)),
-               # linalg.norm does not correctly warn when resizing out= inputs
+               # linalg.norm does not fail when out= has a different dtype to input
                SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('linalg.qr',
@@ -3122,12 +3188,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_masked_select,
-           supports_out=True,
-           skips=(
-               # masked_select does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           sample_inputs_func=sample_inputs_masked_select),
     OpInfo('max',
            op=torch.max,
            variant_test_name='binary',
@@ -3216,7 +3277,7 @@ op_db: List[OpInfo] = [
            skips=(
                # "cumprod_cuda" not implemented for 'BFloat16'
                SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
-               # prod does not correctly warn when resizing out= inputs
+               # prod does not support the (Tensor, *, out) overload
                SkipInfo('TestCommon', 'test_out',
                         dtypes=[torch.float32]),
            ),
@@ -3353,11 +3414,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bfloat16, torch.half),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16, torch.half),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
-                   supports_autograd=False,
-                   skips=(
-                       # signbit does not correctly warn when resizing out= inputs
-                       SkipInfo('TestCommon', 'test_out'),
-                   )),
+                   supports_autograd=False,),
     OpInfo('solve',
            op=torch.solve,
            dtypes=floating_and_complex_types(),
@@ -3691,10 +3748,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index_copy),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           skips=(
-               # index_select does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
-           ),
            sample_inputs_func=sample_inputs_index_select),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -3725,6 +3778,15 @@ op_db: List[OpInfo] = [
                # sort does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('put',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           check_batched_gradgrad=False,  # vmap complains of the sizes
+           sample_inputs_func=sample_inputs_put),
+    OpInfo('take',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           check_batched_grad=False,  # vmap complains of the sizes
+           sample_inputs_func=sample_inputs_take),
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
@@ -4592,10 +4654,6 @@ def method_tests():
         ('topk', (), (1, 0), 'dim_scalar', (), [1]),
         ('topk', (), (1, 0, True), 'dim_desc_scalar', (), [1]),
         ('topk', (), (1, 0, True, True), 'dim_desc_sort_scalar', (), [1]),
-        ('take', (S, S, S), (torch.LongTensor([[-3, 2], [20, 2]]),)),
-        ('take', (S, S, S), (torch.tensor(0, dtype=torch.int64),), 'scalar_index'),
-        ('take', (), (torch.LongTensor([0]),), 'scalar_data'),
-        ('take', (), (torch.tensor(0, dtype=torch.int64),), 'scalar_both'),
         ('where', (M, M), (mask_not_all_zeros((M, M)), (M, M)), '', (True,)),
         ('where', (M, 1, M), (mask_not_all_zeros((M, M)), (M, M, 1)), 'broadcast_all', (True,)),
         ('where', (), (bernoulli_scalar(), ()), 'scalar', (True,)),
