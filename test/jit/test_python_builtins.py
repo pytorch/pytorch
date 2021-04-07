@@ -149,7 +149,7 @@ class TestPythonBuiltinOP(JitTestCase):
         exec(code_str, globals(), scope)
         cu = torch.jit.CompilationUnit(code_str)
         self.assertEqual(cu.func(*inputs), scope[fn_name](*inputs))
-        
+
     def test_stepped_tuple_slicing(self):
         def check_slicing_tuple(slicing, tuple_type, tuple):
             template = dedent("""
@@ -246,7 +246,7 @@ class TestPythonBuiltinOP(JitTestCase):
         # dynamic expression usage
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
-        
+
     def test_advancedindex(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
