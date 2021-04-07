@@ -53,6 +53,10 @@ try:
 except ImportError:
     _GLOO_AVAILABLE = False
 
+
+logger = logging.getLogger(__name__)
+
+
 # Some reduce ops are not supported by complex numbers and will result in an error.
 # We currently provide complex support to the distributed API by viewing
 # complex tensors as real (torch.view_as_real), meaning that calling
@@ -188,7 +192,7 @@ def _store_based_barrier(rank, store, timeout):
     """
     store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _group_count)
     store.add(store_key, 1)
-    logging.info('Added key: {} to store for rank: {}'.format(store_key, rank))
+    logger.info('Added key: {} to store for rank: {}'.format(store_key, rank))
 
     # Now wait for all workers to check in with the store.
     world_size = get_world_size()
@@ -206,7 +210,7 @@ def _store_based_barrier(rank, store, timeout):
 
         # Print status periodically to keep track.
         if timedelta(seconds=(time.time() - log_time)) > timedelta(seconds=10):
-            logging.info(
+            logger.info(
                 "Waiting in store based barrier to initialize process group for "
                 "rank: {}, key: {} (world_size={}, worker_count={}, timeout={})".format(
                     rank, store_key, world_size, worker_count, timeout))
