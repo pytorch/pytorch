@@ -1048,15 +1048,15 @@
 
 - func: cos(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: cos
+  structured_delegate: cos.out
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: cos_
+  structured_delegate: cos.out
 
 - func: cos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: cos_out
 
