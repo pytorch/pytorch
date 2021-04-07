@@ -22,14 +22,16 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // If an inference tensor was saved for backward in an autograd session and
     // then you reenter inference mode and make an inplace update to the tensor
     // without bumping version_counter, it'll lead to silent wrong result when
-    // you do backward() for the previous autograd session. (It should error out!)
+    // you do backward() for the previous autograd session.  Technically we don't
+    // have to check here since it'll fail when querying `current_version` on
+    // the inference tensor, but we can give a much better error message here.
     //
     // Note in the documentation we say "inference tensor cannot participate
-    // in autograd" which is more restrictive than the invariant.  In practice the check is
-    // more permissive and only error out when an inference tensor is saved for
-    // backward.  Whether a tensor is saved for backward is determined by derivative
-    // formula and thus varies op by op, so by saying "no inference tensor in autograd"
-    // it's easier for users to follow.
+    // in autograd" which is more restrictive than the invariant.  In practice
+    // the check is more permissive and only error out when an inference tensor
+    // is saved for backward.  Whether a tensor is saved for backward is determined
+    // by derivative formula and thus varies op by op, so by saying "no inference
+    // tensor in autograd" it's easier for users to understand and follow.
     TORCH_CHECK(!variable.unsafeGetTensorImpl()->is_inference_tensor(),
       "Inference tensors cannot be saved for backward. To work around "
       "you can make a clone to get a normal tensor and use it in autograd.")

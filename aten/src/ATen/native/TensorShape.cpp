@@ -754,16 +754,16 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
 // We currently do not support per-channel quant for unfold, diagonal, expand, permute.
 // TODO: Make this an aten function and replace as_strided_qtensorimpl once that is done.
 Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, QuantizerPtr quantizer) {
-  auto result = detail::make_view_tensor<QTensorImpl>(
-      Storage(self.storage()), self.key_set(), self.dtype(), quantizer);
+  auto result = detail::make_tensor<QTensorImpl>(
+      Storage(self.storage()), self.key_set(), self.dtype(), quantizer, c10::TensorImpl::VIEW);
   setStrided(result, size, stride, self.storage_offset());
   return result;
 }
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto result = detail::make_view_tensor<TensorImpl>(
-      Storage(self.storage()), self.key_set(), self.dtype());
+  auto result = detail::make_tensor<TensorImpl>(
+      Storage(self.storage()), self.key_set(), self.dtype(), c10::TensorImpl::VIEW);
   setStrided(result, size, stride, storage_offset);
   return result;
 }
@@ -774,8 +774,8 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   TORCH_CHECK(
       quantizer->qscheme() == QScheme::PER_TENSOR_AFFINE,
       "Setting strides is possible only on uniformly quantized tensor");
-  auto result = detail::make_view_tensor<QTensorImpl>(
-      Storage(self.storage()), self.key_set(), self.dtype(), quantizer);
+  auto result = detail::make_tensor<QTensorImpl>(
+      Storage(self.storage()), self.key_set(), self.dtype(), quantizer, c10::TensorImpl::VIEW);
   setStrided(result, size, stride, storage_offset);
   return result;
 }
@@ -1016,12 +1016,12 @@ Tensor alias_with_sizes_and_strides(
     const Vec& strides) {
   Tensor self_;
   if (self.is_quantized()) {
-    self_ = detail::make_view_tensor<QTensorImpl>(
-      Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer());
+    self_ = detail::make_tensor<QTensorImpl>(
+      Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer(), c10::TensorImpl::VIEW);
     setStrided(self_, sizes, strides, self.storage_offset());
   } else {
-    self_ = detail::make_view_tensor<TensorImpl>(
-      Storage(self.storage()), self.key_set(), self.dtype());
+    self_ = detail::make_tensor<TensorImpl>(
+      Storage(self.storage()), self.key_set(), self.dtype(), c10::TensorImpl::VIEW);
     setStrided(self_, sizes, strides, self.storage_offset());
   }
   namedinference::propagate_names(self_, self);

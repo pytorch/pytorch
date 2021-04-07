@@ -232,6 +232,9 @@ struct C10_API VariableVersion {
   enum Disabled { DISABLED };
   // It's okay to return true even for inference tensor which
   // doesn't have version counter enabled.
+  // We want to be permissive here since in many cases (e.g. make_variable)
+  // we can std::move a TensorImpl if there's no other uses which saves us
+  // an additional TensorImpl allocation.
   bool unique() const {
     return version_counter_ ? 1 == version_counter_.use_count() : true;
   }
@@ -258,19 +261,21 @@ struct C10_API VariableVersion {
   //   we just ban inplace update to inference tensor since we can't tell
   //   if an inference tensor is a view created in InferenceMode.
   //
-  //   Note that views of `inference_tensor` created in InferenceMode has proper
+  //   Note that views of normal tensor created in InferenceMode has proper
   //   ViewMeta so that they're aware of the grad_fn correctly.
   //
-  // 2. Inplace update to inference tensor in inference tensor is doesn't bump
+  // 2. Inplace update to inference tensor in inference tensor doesn't bump
   //    version counter.
   //    * It either doesn't call bump() by skipping InplaceOrView kernel,
   //      - e.g. inference_tensor.add_(1)
   //    * or bump() is a no-op for inference tensor.
   //      - e.g. inference_tensor.add_(normal_tensor)
   void bump() {
+    // TODO: Replace the link to the documentation once it's available.
     TORCH_CHECK(version_counter_ || InferenceMode::is_enabled(),
       "Inplace update to inference tensor outside InferenceMode is not allowed."
-      "You can make a clone to get a normal tensor before doing inplace update.");
+      "You can make a clone to get a normal tensor before doing inplace update."
+      "See https://github.com/pytorch/rfcs/pull/17 for more details.");
     if (version_counter_) {
       ++version_counter_->version_;
     }
@@ -279,8 +284,7 @@ struct C10_API VariableVersion {
   // Inference tensor doesn't have version counter so it shouldn't be
   // accessed.
   uint32_t current_version() const {
-    TORCH_CHECK(version_counter_,
-      "Accessing version_counter of inference tensor is not allowed.");
+    TORCH_CHECK(version_counter_, "Inference tensor do not track version counter.");
     return version_counter_->version_;
   }
 };
@@ -373,6 +377,13 @@ struct C10_API VariableVersion {
  */
 struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
+  // Note [Enum ImplType]
+  // This enum is temporary. In the followup refactor we should
+  // think about how to specialize TensorImpl creation for view
+  // tensors. Currently we only special case its key_set_ but
+  // there's also potential to share version_counter_ directly
+  // without creating first and then override in as_view.
+  enum ImplType { VIEW };
 
   /**
    * Construct a 1-dim 0-size tensor backed by the given storage.
@@ -380,7 +391,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(
       Storage&& storage,
       DispatchKeySet,
-      const caffe2::TypeMeta data_type, bool is_view=false);
+      const caffe2::TypeMeta data_type);
+
+  // See Note [Enum ImplType]
+  TensorImpl(
+      Storage&& storage,
+      DispatchKeySet,
+      const caffe2::TypeMeta data_type, ImplType);
 
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
@@ -405,7 +422,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // storage.  Still, we pass it in separately because it's easier to write
   // the initializer list if we're not worried about storage being moved out
   // from under us.
-  TensorImpl(Storage&& storage, DispatchKeySet, const caffe2::TypeMeta data_type, c10::optional<c10::Device>, bool is_view=false);
+  TensorImpl(Storage&& storage, DispatchKeySet, const caffe2::TypeMeta data_type, c10::optional<c10::Device>);
 
  public:
   TensorImpl(const TensorImpl&) = delete;

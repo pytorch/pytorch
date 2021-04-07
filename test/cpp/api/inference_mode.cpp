@@ -86,7 +86,7 @@ TEST(InferenceModeTest, TestExistingAutogradSession) {
     InferenceMode guard;
     inplace_op(a);
   }
-  // perform backward should trigger error since `a`'s version has been bumped.
+  // Performing backward should trigger error since `a`'s version has been bumped.
   ASSERT_THROWS_WITH(out.backward(torch::ones_like(out)),
     "one of the variables needed for gradient computation has been modified by an inplace operation")
 }
@@ -122,6 +122,7 @@ TEST(InferenceModeTest, TestInferenceTensorInInferenceModeViewOp) {
     ASSERT_TRUE(is_inference_tensor(view_out));
     // Note this is different from NoGradMode but makes sense.
     ASSERT_FALSE(view_out.requires_grad());
+    ASSERT_FALSE(view_out.is_view());
   }
 }
 
@@ -466,13 +467,18 @@ TEST(InferenceModeTest, TestAccessVersionCounter) {
     InferenceMode guard;
     t = torch::ones({1, 2, 3});
     ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->version_counter().current_version(),
-      "Accessing version_counter of inference tensor is not allowed.");
+      "Inference tensor do not track version counter.");
     t.unsafeGetTensorImpl()->bump_version();
   }
   ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->version_counter().current_version(),
-    "Accessing version_counter of inference tensor is not allowed.");
+    "Inference tensor do not track version counter.");
   ASSERT_THROWS_WITH(t.unsafeGetTensorImpl()->bump_version(),
     "Inplace update to inference tensor outside InferenceMode is not allowed.");
+  // Suggested workaround
+  torch::Tensor c = t.clone();
+  uint32_t v = c.unsafeGetTensorImpl()->version_counter().current_version();
+  c.unsafeGetTensorImpl()->bump_version();
+  ASSERT_EQ(c.unsafeGetTensorImpl()->version_counter().current_version(), v + 1);
 }
 
 TEST(InferenceModeTest, TestInplaceUpdateInferenceTensorWithNormalTensor) {
@@ -481,10 +487,17 @@ TEST(InferenceModeTest, TestInplaceUpdateInferenceTensorWithNormalTensor) {
   {
     InferenceMode guard;
     t = torch::ones({1, 2, 3});
+    // Testing both copy_ from VariableTypeManual and add_ from generated code.
+    s.copy_(t);
     s.add_(t);
     t.add_(s);
+    t.copy_(s);
   }
   s.copy_(t);
+  s.add_(t);
   ASSERT_THROWS_WITH(t.copy_(s),
+    "Inplace update to inference tensor outside InferenceMode is not allowed");
+
+  ASSERT_THROWS_WITH(t.add_(s),
     "Inplace update to inference tensor outside InferenceMode is not allowed");
 }
