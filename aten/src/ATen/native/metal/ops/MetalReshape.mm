@@ -2,6 +2,8 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 
@@ -25,12 +27,35 @@ Tensor view(const Tensor& input, IntArrayRef size) {
       "not compatible with input tensor's size and stride (at least one dimension"
       " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
-
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   MetalTensorImplStorage mt{inferred_size, stride_value};
-  mt.texture()->setCommandBuffer(commandBuffer);
-  mt.texture()->copyFromTexture(X);
+  mt.texture()->allocateTemporaryTextureStorage(inferred_size, commandBuffer);
+  MPSImage* Y = mt.texture()->image();
+  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+      specializedPipelineState:@"reshape"
+                     Constants:@[
+                       @(Y.height),
+                       @(Y.width),
+                       @(Y.featureChannels),
+                       @(Y.numberOfImages),
+                       @(X.height),
+                       @(X.width),
+                       @(X.featureChannels),
+                       @(X.numberOfImages),
+                     ]];
+  id<MTLComputeCommandEncoder> encoder =
+      [commandBuffer.buffer computeCommandEncoder];
+  [encoder setComputePipelineState:state];
+  [encoder setTexture:[X texture] atIndex:0];
+  [encoder setTexture:[Y texture] atIndex:1];
+  const auto& launchParams =
+      mpscnn::spatialPointwiseKernelLaunchParams(state, Y);
+  [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
+          threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
+  [encoder endEncoding];
+  [X markRead];
+  [Y markRead];
   auto output = makeTensor(std::move(mt), input.options());
   return output;
 }

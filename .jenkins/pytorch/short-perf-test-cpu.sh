@@ -20,7 +20,8 @@ aws configure set default.s3.multipart_threshold 5GB
 
 if [[ "$COMMIT_SOURCE" == master ]]; then
     # Get current master commit hash
-    export MASTER_COMMIT_ID=$(git log --format="%H" -n 1)
+    MASTER_COMMIT_ID=$(git log --format="%H" -n 1)
+    export MASTER_COMMIT_ID
 fi
 
 # Find the master commit to test against
@@ -28,23 +29,27 @@ git remote add upstream https://github.com/pytorch/pytorch.git
 git fetch upstream
 IFS=$'\n'
 while IFS='' read -r commit_id; do
-    if aws s3 ls s3://ossci-perf-test/pytorch/cpu_runtime/${commit_id}.json; then
+    if aws s3 ls s3://ossci-perf-test/pytorch/cpu_runtime/"${commit_id}".json; then
         LATEST_TESTED_COMMIT=${commit_id}
         break
     fi
 done < <(git rev-list upstream/master)
-aws s3 cp s3://ossci-perf-test/pytorch/cpu_runtime/${LATEST_TESTED_COMMIT}.json cpu_runtime.json
+aws s3 cp s3://ossci-perf-test/pytorch/cpu_runtime/"${LATEST_TESTED_COMMIT}".json cpu_runtime.json
 
 if [[ "$COMMIT_SOURCE" == master ]]; then
     # Prepare new baseline file
     cp cpu_runtime.json new_cpu_runtime.json
-    python update_commit_hash.py new_cpu_runtime.json ${MASTER_COMMIT_ID}
+    python update_commit_hash.py new_cpu_runtime.json "${MASTER_COMMIT_ID}"
 fi
 
 # Include tests
+# shellcheck source=./perf_test/test_cpu_speed_mini_sequence_labeler.sh
 . ./test_cpu_speed_mini_sequence_labeler.sh
+# shellcheck source=./perf_test/test_cpu_speed_mnist.sh
 . ./test_cpu_speed_mnist.sh
+# shellcheck source=./perf_test/test_cpu_speed_torch.sh
 . ./test_cpu_speed_torch.sh
+# shellcheck source=./perf_test/test_cpu_speed_torch_tensor.sh
 . ./test_cpu_speed_torch_tensor.sh
 
 # Run tests
@@ -64,5 +69,5 @@ run_test test_cpu_speed_mnist 20 ${TEST_MODE}
 if [[ "$COMMIT_SOURCE" == master ]]; then
     # This could cause race condition if we are testing the same master commit twice,
     # but the chance of them executing this line at the same time is low.
-    aws s3 cp new_cpu_runtime.json s3://ossci-perf-test/pytorch/cpu_runtime/${MASTER_COMMIT_ID}.json --acl public-read
+    aws s3 cp new_cpu_runtime.json s3://ossci-perf-test/pytorch/cpu_runtime/"${MASTER_COMMIT_ID}".json --acl public-read
 fi

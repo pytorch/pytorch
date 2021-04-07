@@ -12,7 +12,6 @@ namespace at {
 namespace native {
 namespace metal {
 
-// API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
   TORCH_CHECK(input.is_metal());
   MPSImage* X = imageFromTensor(input);
