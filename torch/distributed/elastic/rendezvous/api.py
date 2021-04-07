@@ -95,7 +95,7 @@ class RendezvousHandler(abc.ABC):
     def num_nodes_waiting(self) -> int:
         """
         Returns number of workers who *arrived late* at
-        the rendezvous barrier, hence weren’t included in the current worker
+        the rendezvous barrier, hence weren't included in the current worker
         group.
 
         Callers should periodically call this method to check whether
