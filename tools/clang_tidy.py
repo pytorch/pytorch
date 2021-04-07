@@ -31,6 +31,8 @@ try:
 except ImportError:
     from pipes import quote
 
+from typing import Dict, Iterable, List, Set
+
 Patterns = collections.namedtuple("Patterns", "positive, negative")
 
 
@@ -41,27 +43,27 @@ DEFAULT_FILE_PATTERN = re.compile(r".*\.c(c|pp)?")
 
 # @@ -start,count +start,count @@
 CHUNK_PATTERN = r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@"
+CLANG_WARNING_PATTERN=re.compile("([^:]+):(\d+):\d+:\s+warning:.*\[([a-z\-,]+)\]")
 
 
 # Set from command line arguments in main().
 VERBOSE = False
 
 
-def run_shell_command(arguments):
+def run_shell_command(arguments: List[str]) -> str:
     """Executes a shell command."""
     if VERBOSE:
         print(" ".join(arguments))
     try:
         output = subprocess.check_output(arguments).decode().strip()
-    except subprocess.CalledProcessError:
-        _, error, _ = sys.exc_info()
+    except subprocess.CalledProcessError as error:
         error_output = error.output.decode().strip()
-        raise RuntimeError("Error executing {}: {}".format(" ".join(arguments), error_output))
+        raise RuntimeError(f"Error executing {' '.join(arguments)}: {error_output}")
 
     return output
 
 
-def split_negative_from_positive_patterns(patterns):
+def split_negative_from_positive_patterns(patterns: Iterable[str]) -> Patterns:
     """Separates negative patterns (that start with a dash) from positive patterns"""
     positive, negative = [], []
     for pattern in patterns:
@@ -73,7 +75,7 @@ def split_negative_from_positive_patterns(patterns):
     return Patterns(positive, negative)
 
 
-def get_file_patterns(globs, regexes):
+def get_file_patterns(globs, regexes) -> Patterns:
     """Returns a list of compiled regex objects from globs and regex pattern strings."""
     # fnmatch.translate converts a glob into a regular expression.
     # https://docs.python.org/2/library/fnmatch.html#fnmatch.translate
@@ -91,7 +93,7 @@ def get_file_patterns(globs, regexes):
     return Patterns(positive_patterns, negative_patterns)
 
 
-def filter_files(files, file_patterns):
+def filter_files(files: Iterable[str], file_patterns: Patterns) -> Iterable[str]:
     """Returns all files that match any of the patterns."""
     if VERBOSE:
         print("Filtering with these file patterns: {}".format(file_patterns))
@@ -163,7 +165,7 @@ def run_shell_commands_in_parallel(commands):
         os.unlink(f.name)
 
 
-def run_clang_tidy(options, line_filters, files):
+def run_clang_tidy(options, line_filters, files) -> str:
     """Executes the actual clang-tidy command in the shell."""
     command = [options.clang_tidy_exe, "-p", options.compile_commands_dir]
     if not options.config_file and os.path.exists(".clang-tidy"):
@@ -195,6 +197,42 @@ def run_clang_tidy(options, line_filters, files):
         raise RuntimeError(message.format(output))
 
     return output
+
+
+def extract_warnings(output: str, base_dir:str = ".") -> Dict[str, Dict[int, Set[str]]]:
+    rc = {}
+    for line in output.split("\n"):
+        p = CLANG_WARNING_PATTERN.match(line)
+        if p is None:
+            continue
+        if os.path.isabs(p.group(1)):
+            path = os.path.abspath(p.group(1))
+        else:
+            path = os.path.abspath(os.path.join(base_dir, p.group(1)))
+        line = int(p.group(2))
+        warnings = set(p.group(3).split(","))
+        if path not in rc:
+            rc[path] = {}
+        if line not in rc[path]:
+            rc[path][line] = set()
+        rc[path][line].update(warnings)
+    return rc
+
+
+def apply_nolint(fname: str, warnings: Dict[int, Set[str]]) -> None:
+    with open(fname, encoding="utf-8") as f:
+        lines=f.readlines()
+
+    line_offset = -1  # As in .cpp files lines are numbered starting from 1
+    for line_no in sorted(warnings.keys()):
+        nolint_diagnostics = ','.join(warnings[line_no])
+        line_no += line_offset
+        indent = ' '*(len(lines[line_no])-len(lines[line_no].lstrip(' ')))
+        lines.insert(line_no, f'{indent}// NOLINTNEXTLINE({nolint_diagnostics})\n')
+        line_offset += 1
+
+    with open(fname, mode="w") as f:
+        f.write("".join(lines))
 
 
 def parse_options():
@@ -262,13 +300,15 @@ def parse_options():
         action="store_true",
         help="Run clang tidy in parallel per-file (requires ninja to be installed).",
     )
+    parser.add_argument("-s", "--suppress-diagnostics", action="store_true",
+            help="Add NOLINT to suppress clang-tidy violations")
     parser.add_argument(
         "extra_args", nargs="*", help="Extra arguments to forward to clang-tidy"
     )
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     options = parse_options()
 
     # This flag is pervasive enough to set it globally. It makes the code
@@ -294,10 +334,14 @@ def main():
     if options.diff:
         line_filters = [get_changed_lines(options.diff, f) for f in files]
 
-    pwd = os.getcwd() + "/"
     clang_tidy_output = run_clang_tidy(options, line_filters, files)
-    formatted_output = []
+    if options.suppress_diagnostics:
+        warnings = extract_warnings(clang_tidy_output, base_dir = options.compile_commands_dir)
+        for fname in warnings.keys():
+            print(f"Applying fixes to {fname}")
+            apply_nolint(fname, warnings[fname])
 
+    pwd = os.getcwd() + "/"
     for line in clang_tidy_output.splitlines():
         if line.startswith(pwd):
             print(line[len(pwd):])
