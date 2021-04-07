@@ -484,7 +484,7 @@ Tensor& VariableHooks::requires_grad_(const Tensor& self, bool _requires_grad) c
       autograd::utils::requires_grad_leaf_error(_requires_grad)
     );
   }
-  return const_cast<Tensor&>(self).set_requires_grad(_requires_grad);
+  return const_cast<Tensor&>(self.set_requires_grad(_requires_grad));
 }
 
 // Backward View Variables
