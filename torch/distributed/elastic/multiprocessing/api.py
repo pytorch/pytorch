@@ -17,6 +17,7 @@ import time
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from enum import IntFlag
+from multiprocessing import synchronize
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Union
 
 import torch.multiprocessing as mp
@@ -271,7 +272,7 @@ def _wrap(
     stdout_redirects: Dict[int, str],  # redirect file for stdout (to console if None)
     stderr_redirects: Dict[int, str],  # redirect file for stderr (to console if None)
     ret_vals: Dict[int, mp.SimpleQueue],
-    queue_finished_reading_event: mp.Event,
+    queue_finished_reading_event: synchronize.Event,
 ) -> None:
     # get the per-rank params up front so we fail fast if no mapping is found
     args_ = args[local_rank]
@@ -370,7 +371,7 @@ class MultiprocessContext(PContext):
             # torch.mp.ProcessContext Throws an Exception if some/all of
             # worker processes failed
             # timeout < 0 checks worker status and return immediately
-            # Join will never return success since we use mp.Event to wait
+            # Join will never return success since we use synchronize.Event to wait
             # for all processes to finish.
             self._pc.join(-1)
 

@@ -543,7 +543,7 @@ c10::IValue BytecodeDeserializer::readArchive(
 
     // In version 4+, the tensor root_key in bytecode will include the parent
     // path. The example tensor format is: torch._utils._rebuild_tensor_v2(
-    //     pers.obj(('storage', torch.FloatStorage, 'bytecode/17', 'cpu',
+    //     pers.obj(('storage', torch.FloatStorage, 'constants/17', 'cpu',
     //     22736),), 0, (1, 464, 7, 7), (22736, 49, 7, 1), False,
     //     collections.OrderedDict())
     ss << name;

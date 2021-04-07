@@ -23,7 +23,19 @@ static inline void print(const Tensor & t, int64_t linesize=80) {
 }
 
 static inline std::ostream& operator<<(std::ostream & out, Scalar s) {
-  return out << (s.isFloatingPoint() ? s.toDouble() : s.toLong());
+  if (s.isFloatingPoint()) {
+    return out << s.toDouble();
+  }
+  if (s.isComplex()) {
+    return out << s.toComplexDouble();
+  }
+  if (s.isBoolean()) {
+    return out << (s.toBool() ? "true" : "false");
+  }
+  if (s.isIntegral(false)) {
+    return out << s.toLong();
+  }
+  throw std::logic_error("Unknown type in Scalar");
 }
 
 }
