@@ -60,8 +60,8 @@ AT_FORALL_OPERATORS(DEFINE_COMPARATOR)
 #undef AT_FORALL_OPERATORS
 #undef DEFINE_COMPARATOR
 
-const Tensor& quantized_resize_cpu_(
-    const Tensor& self,
+Tensor& quantized_resize_cpu_(
+    Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   TORCH_CHECK(

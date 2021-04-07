@@ -158,9 +158,9 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   return self;
 }
 
-const Tensor& resize_(
+Tensor& resize_(
     c10::DispatchKeySet ks,
-    const Tensor& self,
+    Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
@@ -180,9 +180,9 @@ const Tensor& resize_(
   return self;
 }
 
-const Tensor& resize_as_(
+Tensor& resize_as_(
     c10::DispatchKeySet ks,
-    const Tensor& self,
+    Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);

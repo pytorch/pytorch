@@ -1,6 +1,5 @@
 from tools.codegen.model import *
 from tools.codegen.api.types import *
-from tools.codegen import local
 from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
@@ -74,7 +73,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
-            if mutable and not local.use_const_ref_for_mutable_tensors():
+            if mutable:
                 return MutRefCType(BaseCType('Tensor', binds))
             else:
                 return ConstRefCType(BaseCType('Tensor', binds))
@@ -84,7 +83,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
             raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
-            if mutable and not local.use_const_ref_for_mutable_tensors():
+            if mutable:
                 return MutRefCType(BaseCType('Tensor', binds))  # TODO: fix this discrepancy
             else:
                 return ConstRefCType(OptionalCType(BaseCType('Tensor', binds)))
@@ -129,10 +128,7 @@ def returntype_type(t: Type, *, mutable: bool) -> str:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
-                if local.use_const_ref_for_mutable_tensors():
-                    return 'const Tensor &'
-                else:
-                    return 'Tensor &'
+                return 'Tensor &'
             else:
                 return 'Tensor'
         elif t.name == BaseTy.Scalar:

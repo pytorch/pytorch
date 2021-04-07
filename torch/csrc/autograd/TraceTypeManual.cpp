@@ -45,8 +45,8 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   return self;
 }
 
-const Tensor& resize_(
-    const Tensor& self,
+Tensor& resize_(
+    Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   if (torch::jit::tracer::isTracing()) {
@@ -62,8 +62,8 @@ const Tensor& resize_(
   return self;
 }
 
-const Tensor& resize_as_(
-    const Tensor& self,
+Tensor& resize_as_(
+    Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
   if (torch::jit::tracer::isTracing()) {

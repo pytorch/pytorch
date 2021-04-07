@@ -1,6 +1,6 @@
 import threading
 from contextlib import contextmanager
-from typing import Optional, Iterator
+from typing import Iterator
 
 # Simple dynamic scoping implementation.  The name "parametrize" comes
 # from Racket.
@@ -15,21 +15,10 @@ from typing import Optional, Iterator
 # DON'T add a new entry here.
 
 class Locals(threading.local):
-    use_const_ref_for_mutable_tensors: Optional[bool] = None
+    pass
 
 _locals = Locals()
 
-def use_const_ref_for_mutable_tensors() -> bool:
-    assert _locals.use_const_ref_for_mutable_tensors is not None, \
-        "need to initialize local.use_const_ref_for_mutable_tensors with " \
-        "local.parametrize"
-    return _locals.use_const_ref_for_mutable_tensors
-
 @contextmanager
-def parametrize(*, use_const_ref_for_mutable_tensors: bool) -> Iterator[None]:
-    old_use_const_ref_for_mutable_tensors = _locals.use_const_ref_for_mutable_tensors
-    try:
-        _locals.use_const_ref_for_mutable_tensors = use_const_ref_for_mutable_tensors
-        yield
-    finally:
-        _locals.use_const_ref_for_mutable_tensors = old_use_const_ref_for_mutable_tensors
+def parametrize() -> Iterator[None]:
+    yield
