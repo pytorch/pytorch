@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/serialization/type_name_uniquer.h>
 #include <torch/csrc/onnx/onnx.h>
 
 #include <ostream>
@@ -52,6 +54,46 @@ TORCH_API std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto);
 
 TORCH_API void check_onnx_proto(const std::string& proto_string);
+
+// Base serializer to hold shared serialization logic for original TS
+// format and unified serialization format 
+class ScriptModuleSerializerBase {
+ public:
+  explicit ScriptModuleSerializerBase(
+      caffe2::serialize::PyTorchStreamWriter& export_writer
+    ) : writer_(export_writer) {}
+    virtual void writeFiles(const std::string& code_dir);
+  
+  virtual ~ScriptModuleSerializerBase() = default;
+  
+ protected:
+  void convertNamedType(const c10::NamedTypePtr& class_type);
+  void convertTypes(const at::NamedTypePtr &root_type);
+
+  caffe2::serialize::PyTorchStreamWriter& writer_;
+  std::vector<at::IValue> constant_table_;
+  std::unordered_set<c10::NamedTypePtr> converted_types_;
+  PrintDepsTable class_deps_;
+  TypeNameUniquer type_name_uniquer_;
+  // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
+  // created
+  OrderedDict<std::string, PythonPrint> file_streams_;
+};
+
+// Implementation of ScriptModuleSerializerBase to export unified format 
+class ScriptModuleSerializerUniversal : public ScriptModuleSerializerBase {
+ public:
+   explicit ScriptModuleSerializerUniversal(caffe2::serialize::PyTorchStreamWriter& export_writer)
+     : ScriptModuleSerializerBase(export_writer) {}
+
+  uint64_t serialize(Module& module, const std::string& ts_id, uint64_t starting_tensor_id);
+  void writeFiles();
+  uint64_t writeArchive(
+      const std::string& archive_name, 
+      const IValue& value,
+      const std::string& pickle_dir_ext,
+      uint64_t next_tensor_id);
+}; 
 
 // For testing purposes
 TORCH_API std::string pretty_print_onnx(

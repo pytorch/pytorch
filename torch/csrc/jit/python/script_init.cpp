@@ -22,7 +22,6 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/serialization/export_universal.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
@@ -949,7 +948,7 @@ void initJitScriptBindings(PyObject* module) {
 
   // Used by torch.Package to save TS objects in unified format
   py::class_<ScriptModuleSerializerUniversal>(m, "TorchScriptSerializer")
-      .def(py::init<caffe2::serialize::PyTorchStreamWriter&, py::object>())
+      .def(py::init<caffe2::serialize::PyTorchStreamWriter&>())
       .def("serialize", &ScriptModuleSerializerUniversal::serialize)
       .def("write_files", &ScriptModuleSerializerUniversal::writeFiles);
 
