@@ -2,9 +2,9 @@ import collections
 
 import torch
 import torch.nn as nn
+import torch.quantization.quantize_fx as quantize_fx
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-from torch.fx.symbolic_trace import Tracer
 from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
     get_base_name_to_sets_of_related_ops,
@@ -94,7 +94,7 @@ prev_node_name={self.prev_node_name}, ref_node_name={self.ref_node_name},
 results_type={self.results_type}, index_within_arg={self.index_within_arg})"""
 
 
-class NSTracer(Tracer):
+class NSTracer(quantize_fx.QuantizationTracer):
     """
     Just like a regular tracer, but treats observers and fake_quantize
     modules as leaf modules.
@@ -163,7 +163,11 @@ def extract_weights(
     type_a_related_to_b = \
         get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
-    tracer_a, tracer_b = NSTracer(), NSTracer()
+    # TODO(future PR): expose these
+    skipped_module_names: List[str] = []
+    skipped_module_classes: List[Callable] = []
+    tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
+    tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
     return _extract_weights_impl(model_name_a, gm_a, model_name_b, gm_b)
@@ -233,7 +237,11 @@ def add_loggers(
     logger_cls: Callable,
     should_log_inputs : bool = False,
 ) -> Tuple[nn.Module, nn.Module]:
-    tracer_a, tracer_b = NSTracer(), NSTracer()
+    # TODO(future PR): expose these
+    skipped_module_names: List[str] = []
+    skipped_module_classes: List[Callable] = []
+    tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
+    tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
     return _add_loggers_impl(
@@ -330,7 +338,11 @@ def add_shadow_loggers(
     Same thing as add_loggers, but for an `a_shadows_b` model.
     TODO(future PR): real docblock
     """
-    tracer_a, tracer_b = NSTracer(), NSTracer()
+    # TODO(future PR): expose these
+    skipped_module_names: List[str] = []
+    skipped_module_classes: List[Callable] = []
+    tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
+    tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
     return _add_shadow_loggers_impl(
