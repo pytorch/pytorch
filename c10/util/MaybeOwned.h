@@ -117,7 +117,7 @@ class MaybeOwned final {
   }
 
   ~MaybeOwned() {
-    if (!isBorrowed_) {
+    if (C10_UNLIKELY(!isBorrowed_)) {
       own_.~T();
     }
   }
