@@ -12,12 +12,6 @@
 #undef CUB_NS_POSTFIX
 #undef CUB_NS_PREFIX
 
-namespace at { namespace native {
-
-namespace cub = at::cuda::detail::cub;
-
-}}
-
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
@@ -35,6 +29,12 @@ namespace cub = at::cuda::detail::cub;
 #define NO_ROCM(x)
 #else
 #define NO_ROCM(x) x
+
+namespace at { namespace native {
+
+namespace cub = at::cuda::detail::cub;
+
+}}
 #endif
 
 namespace at {

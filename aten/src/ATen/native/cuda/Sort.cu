@@ -163,27 +163,26 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(const Tensor & self, c10::opt
       int64_t nsegments = n / nsort;
       int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
 
-      auto indices_and_segment = at::empty({nsegments, nsort, 2}, indices.options());
+      auto int_options = indices.options().dtype(kInt);
+      auto indices_and_segment = at::empty({nsegments, nsort, 2}, int_options);
       indices_and_segment.select(-1, 0).copy_(  // reverse indices
-        at::arange(nsort, indices.options()).view({1, nsort}).expand({nsegments, nsort}));
+        at::arange(nsort, int_options).view({1, nsort}).expand({nsegments, nsort}));
       indices_and_segment.select(-1, 1).copy_(  // segment id
-        at::arange(nsegments, indices.options()).view({nsegments, 1}).expand({nsegments, nsort}));
+        at::arange(nsegments, int_options).view({nsegments, 1}).expand({nsegments, nsort}));
 
-      using long2 = at::detail::Array<int64_t, 2>;
-
-      long2 *i_s_ptr = reinterpret_cast<long2 *>(indices_and_segment.data_ptr<int64_t>());
+      auto i_s_ptr = reinterpret_cast<int2 *>(indices_and_segment.data_ptr<int>());
       auto indices_and_segment2 = at::empty_like(indices_and_segment);
-      long2 *i_s_ptr2 = reinterpret_cast<long2 *>(indices_and_segment2.data_ptr<int64_t>());
+      auto i_s_ptr2 = reinterpret_cast<int2 *>(indices_and_segment2.data_ptr<int>());
 
-      at::cuda::cub::sort_pairs<scalar_t, long2>(
+      at::cuda::cub::sort_pairs<scalar_t, int2>(
         self_ptr, nullptr, i_s_ptr, i_s_ptr2,
         n, descending);
 
-      auto sorted_indices = indices_and_segment2.select(-1, 0).contiguous();
+      auto sorted_indices = indices_and_segment2.select(-1, 0).to(kLong);
       auto segment_id = indices_and_segment2.select(-1, 1).contiguous();
 
-      at::cuda::cub::sort_pairs<int64_t, int64_t>(
-        segment_id.data_ptr<int64_t>(), nullptr,
+      at::cuda::cub::sort_pairs<int, int64_t>(
+        segment_id.data_ptr<int>(), nullptr,
         sorted_indices.data_ptr<int64_t>(), indices_ptr,
         n, false, 0, segment_bits);
 
