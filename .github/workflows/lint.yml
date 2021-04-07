@@ -43,7 +43,7 @@ jobs:
           .jenkins/run-shellcheck.sh
       - name: Ensure correct trailing newlines
         run: |
-          (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
+          (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
         run: |
           (! git grep -I -no ' $' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above files have trailing spaces; please remove them"; false))
@@ -67,6 +67,9 @@ jobs:
         run: |
           set -eux
           python torch/testing/check_kernel_launches.py |& tee ${GITHUB_WORKSPACE}/cuda_kernel_launch_checks.txt
+      - name: Ensure no direct cub include
+        run: |
+          (! git grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/CubUtils.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/CubUtils.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
 
   toc:
     runs-on: ubuntu-18.04
@@ -136,8 +139,6 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-        with:
-          fetch-depth: 0 # deep clone, to allow us to use git merge-base
       - name: Prepare output dir with HEAD commit SHA
         run: |
           mkdir clang-tidy-output
@@ -166,8 +167,6 @@ jobs:
           git remote add upstream https://github.com/pytorch/pytorch
           git fetch upstream "$GITHUB_BASE_REF"
           BASE_SHA=${{ github.event.pull_request.base.sha }}
-          HEAD_SHA=${{ github.event.pull_request.head.sha }}
-          MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
 
           if [[ ! -d build ]]; then
             git submodule update --init --recursive
@@ -199,7 +198,7 @@ jobs:
           python tools/clang_tidy.py                               \
             --verbose                                              \
             --paths torch/csrc/                                    \
-            --diff "$MERGE_BASE"                                   \
+            --diff "$BASE_SHA"                                   \
             -g"-torch/csrc/jit/passes/onnx/helper.cpp"             \
             -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp"\
             -g"-torch/csrc/jit/serialization/onnx.cpp"             \
