@@ -1339,6 +1339,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4).to(torch.int32)
         self.run_test(FloatingPoint(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_prim_min(self):
         @torch.jit.script
         def list_append(boxes: List[torch.Tensor]):
@@ -1354,6 +1355,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.rand(5, 5)
         self.run_test(Min(), (x,))
+
+        class M(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                i = 3
+                return min(x[i], i)
+
+        x = torch.arange(6, dtype=torch.int64)
+        self.run_test(M(), (x,))
 
     def test_arithmetic(self):
         class ArithmeticModule(torch.nn.Module):
