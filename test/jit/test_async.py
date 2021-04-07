@@ -322,7 +322,9 @@ class TestAsync(JitTestCase):
 
         # two futures with a different error
         x = torch.rand(3, 4, 5)
-        with self.assertRaisesRegexWithHighlight(Exception, 'expects a tensor with <= 2 dimensions', 'torch.jit._fork(wait_script, x'):
+        with self.assertRaisesRegexWithHighlight(Exception,
+                                                 'expects a tensor with <= 2 dimensions',
+                                                 'torch.jit._fork(wait_script, x'):
             wait_script_nest(x)
 
     def test_async_grad_guard_with_grad(self):
@@ -397,8 +399,8 @@ class TestAsync(JitTestCase):
             return my_list[0]
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, 'did not have observable data dependence with trace inputs; '
-                                                  'this probably indicates your program cannot be understood '
-                                                  'by the tracer.', ''):
+                                                 'this probably indicates your program cannot be understood '
+                                                 'by the tracer.', ''):
             traced = torch.jit.trace(fn, (torch.rand(3, 4),), check_trace=False)
 
     def test_trace_fork_wait_inline(self):
