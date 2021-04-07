@@ -53,14 +53,17 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
         'torch.nn.functional.conv1d': set([
             F.conv1d,
             toq.conv1d,
+            toq.conv1d_relu,
         ]),
         'torch.nn.functional.conv2d': set([
             F.conv2d,
             toq.conv2d,
+            toq.conv2d_relu,
         ]),
         'torch.nn.functional.conv3d': set([
             F.conv3d,
             toq.conv3d,
+            toq.conv3d_relu,
         ]),
         # linear modules
         'torch.nn.Linear': set([
@@ -172,10 +175,17 @@ def get_reversed_fusions() -> Set[Tuple[NSFusionType, int]]:
     # TODO(future PR): remove the custom syntax for defining fusion patterns
     # and reuse either quantization's syntax or something else.
     return set([
+        # linear functionals
         ((F.relu, F.linear), 0),
+        # conv functionals
+        ((F.relu, F.conv1d), 0),
+        ((F.relu, F.conv2d), 0),
+        ((F.relu, F.conv3d), 0),
+        # conv modules
         ((nn.ReLU, nn.Conv1d), 0),
         ((nn.ReLU, nn.Conv2d), 0),
         ((nn.ReLU, nn.Conv3d), 0),
+        # linear modules
         ((nn.ReLU, nn.Linear), 0),
         # linear-relu fp16 emulation:
         # fp16_to_fp32 -> linear -> relu -> fp32_to_fp16

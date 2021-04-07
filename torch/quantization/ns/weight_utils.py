@@ -72,7 +72,9 @@ def get_conv_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
         weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore
         return weight.detach()
     else:
-        assert node.target in (toq.conv1d, toq.conv2d, toq.conv3d)
+        assert node.target in (
+            toq.conv1d, toq.conv2d, toq.conv3d, toq.conv1d_relu,
+            toq.conv2d_relu, toq.conv3d_relu)
         # qconv state is arg 1
         qconv_state_node = node.args[1]
         assert isinstance(qconv_state_node, Node)
