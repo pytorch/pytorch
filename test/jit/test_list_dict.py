@@ -2,12 +2,14 @@ import os
 import sys
 import inspect
 import unittest
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from textwrap import dedent
 from collections import OrderedDict
 
 from torch import Tensor
 import torch
+import torch.nn as nn
+import types
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
