@@ -33,6 +33,7 @@ void castIndicesToInts(std::vector<const Expr*>& indices) {
 Load::Load(
     Dtype dtype,
     const Buf* buf,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::vector<const Expr*>& indices,
     const Expr* mask)
     : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {

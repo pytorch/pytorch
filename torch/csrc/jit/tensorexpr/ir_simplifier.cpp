@@ -1198,6 +1198,7 @@ bool simplifyNestedMinMax(
           rhs_opterm->variables().size() == 2) {
         auto rhs_v1 = rhs_opterm->variables()[0];
         auto rhs_v2 = rhs_opterm->variables()[1];
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         const Expr* new_op_lhs;
         if (isOperandInMinMaxTerm<OtherOpTerm>(
                 lhs_opterm, rhs_v1, hasher, &new_op_lhs)) {
@@ -1243,6 +1244,7 @@ const Expr* PolynomialTransformer::mutate(const Max* v) {
   }
 
   // Max(Min(x, y), Min(x, z)) => Min(x, Max(y, z))
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const Expr* new_op;
   if (simplifyNestedMinMax<MaxTerm, MinTerm>(
           lhs_new, rhs_new, v->propagate_nans(), hasher_, &new_op)) {
@@ -1273,6 +1275,7 @@ const Expr* PolynomialTransformer::mutate(const Min* v) {
   }
 
   // Min(Max(x, y), Max(x, z)) => Max(x, Min(y, z))
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const Expr* new_op;
   if (simplifyNestedMinMax<MinTerm, MaxTerm>(
           lhs_new, rhs_new, v->propagate_nans(), hasher_, &new_op)) {
@@ -1888,6 +1891,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
   // any further.
   while (!mods.empty() && repeat) {
     repeat = false;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     for (int i = mods.size() - 1; i >= 0; i--) {
       const Term* m = mods[i];
       const Mod* mod = dynamic_cast<const Mod*>(m->variables()[0]);
@@ -1895,6 +1899,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
       const Expr* mod_lhs = IRSimplifier::simplify(mod->lhs());
       const Expr* mod_rhs = IRSimplifier::simplify(mod->rhs());
       bool merged = false;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       for (int j = mod_rounds.size() - 1; j >= 0; j--) {
         const Term* mr = mod_rounds[j];
         auto a = isModRound(mr);
@@ -1932,6 +1937,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
         continue;
       }
 
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       for (int k = rounds.size() - 1; k >= 0; k--) {
         const Term* r = rounds[k];
         const RoundOff* roundoff =
@@ -2011,6 +2017,7 @@ const Term* IRSimplifierBase::factorizePolynomial(const Polynomial* poly) {
   std::vector<const Term*> newPolyTerms;
   for (auto* t : variables) {
     // New term with the scalar divided by the GCD.
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     newPolyTerms.push_back(new Term(
         poly->hasher(), evaluateOp(new Div(t->scalar(), GCD)), t->variables()));
   }
@@ -2134,6 +2141,7 @@ const Expr* TermExpander::mutate(const MaxTerm* v) {
     }
     return v->scalar();
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const Expr* max;
   if (v->scalar()) {
     max = new Max(variables[0], v->scalar(), v->propagate_nans());
@@ -2156,6 +2164,7 @@ const Expr* TermExpander::mutate(const MinTerm* v) {
     }
     return v->scalar();
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const Expr* min;
   if (v->scalar()) {
     min = new Min(variables[0], v->scalar(), v->propagate_nans());
