@@ -3,9 +3,11 @@
 import argparse
 import json
 import re
+import subprocess
 from bisect import bisect_right
-from typing import (Callable, Generic, List, Optional, Pattern, Sequence,
-                    TypeVar, cast)
+from collections import defaultdict
+from typing import (Callable, DefaultDict, Generic, List, Optional, Pattern,
+                    Sequence, TypeVar, cast)
 
 from typing_extensions import TypedDict
 
@@ -103,7 +105,7 @@ class Annotation(TypedDict):
     errorDesc: str
 
 
-def parse(regex: Pattern[str], line: str) -> Optional[Annotation]:
+def parse_annotation(regex: Pattern[str], line: str) -> Optional[Annotation]:
     m = re.match(regex, line)
     if m:
         try:
@@ -122,13 +124,33 @@ def parse(regex: Pattern[str], line: str) -> Optional[Annotation]:
         return None
 
 
-def translate_all(regex: Pattern[str], lines: List[str]) -> List[Annotation]:
-    annotations = []
+def translate_all(
+    *,
+    lines: List[str],
+    regex: Pattern[str],
+    commit: str
+) -> List[Annotation]:
+    ann_dict: DefaultDict[str, List[Annotation]] = defaultdict(list)
     for line in lines:
-        annotation = parse(regex, line)
+        annotation = parse_annotation(regex, line)
         if annotation:
-            annotations.append(annotation)
-    return annotations
+            ann_dict[annotation['filename']].append(annotation)
+    ann_list = []
+    for filename, annotations in ann_dict.items():
+        raw_diff = subprocess.check_output(
+            ['git', 'diff-index', '--unified=0', commit, filename],
+            encoding='utf-8',
+        )
+        if raw_diff.strip():
+            diff = parse_diff(raw_diff)
+            for annotation in annotations:
+                translated = translate(diff, annotation['lineNumber'])
+                if translated:
+                    # mutation... spooky
+                    annotation['filename'] = diff['old_filename']
+                    annotation['lineNumber'] = translated
+                    ann_list.append(annotation)
+    return ann_list
 
 
 def main() -> None:
@@ -139,7 +161,11 @@ def main() -> None:
     args = parser.parse_args()
     with open(args.file, 'r') as f:
         lines = f.readlines()
-    print(json.dumps(translate_all(args.regex, lines)))
+    print(json.dumps(translate_all(
+        lines=lines,
+        regex=args.regex,
+        commit=args.commit
+    )))
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 import re
 import unittest
 
-from tools.translate_annotations import parse_diff, translate, translate_all
+from tools.translate_annotations import parse_annotation, parse_diff, translate
 
 example_regex = r'^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)'
 
@@ -125,31 +125,27 @@ class TestTranslateAnnotations(unittest.TestCase):
         self.assertEqual(translate(diff, 11), 14)
         self.assertEqual(translate(diff, 12), 15)
 
-    def test_foo(self) -> None:
+    def test_parse_annotation(self) -> None:
+        regex = re.compile(example_regex)
         self.assertEqual(
-            translate_all(
-                re.compile(example_regex),
-                [
-                    'README.md:1:3: R100 make a better title',
-                    'README.md:2:1: R200 give a better description',
-                ],
-            ),
-            [
-                {
-                    'filename': 'README.md',
-                    'lineNumber': 1,
-                    'columnNumber': 3,
-                    'errorCode': 'R100',
-                    'errorDesc': 'make a better title',
-                },
-                {
-                    'filename': 'README.md',
-                    'lineNumber': 2,
-                    'columnNumber': 1,
-                    'errorCode': 'R200',
-                    'errorDesc': 'give a better description',
-                },
-            ],
+            parse_annotation(regex, 'README.md:1:3: R100 make a better title'),
+            {
+                'filename': 'README.md',
+                'lineNumber': 1,
+                'columnNumber': 3,
+                'errorCode': 'R100',
+                'errorDesc': 'make a better title',
+            },
+        )
+        self.assertEqual(
+            parse_annotation(regex, 'README.md:2:1: R200 improve description'),
+            {
+                'filename': 'README.md',
+                'lineNumber': 2,
+                'columnNumber': 1,
+                'errorCode': 'R200',
+                'errorDesc': 'improve description',
+            },
         )
 
 
