@@ -8069,6 +8069,7 @@ def setup_rnn_tests():
     # sanity check that a representative example does exist
     TestONNXRuntime.test_gru_trilayer_forward_with_initial_state_without_sequence_lengths_with_dropout
 
+
     # make sure no one accidentally disables all the tests without
     # noticing
     if test_count != 192:
