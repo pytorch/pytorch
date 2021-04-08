@@ -167,13 +167,15 @@ void ListenThread::run() {
 
     // if connection is closed gracefully by master, peeked data will return 0
     char data;
-    int ret = recv(fds[1].fd, &data, 1, MSG_PEEK);
+    LOG(ERROR) << "recv";
+    int ret = recv(fds[0].fd, &data, 1, MSG_PEEK);
+    LOG(ERROR) << ret;
     if (ret == 0) {
       continue;
     }
 
     // valid request, perform callback logic
-    callbackHandler(fds[1].fd);
+    callbackHandler(fds[0].fd);
   }
 }
 #else
@@ -349,9 +351,10 @@ void TCPStoreDaemon::setHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   std::vector<uint8_t> newData = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> oldData;
-  if (tcpStore_.find(key) != tcpStore_.end()) {
-    oldData = tcpStore_.at(key);
-  }
+  auto it = tcpStore_.find(key);
+  if (it != tcpStore_.end()) {
+    oldData = it->second;
+  } 
   tcpStore_[key] = newData;
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
@@ -385,10 +388,11 @@ void TCPStoreDaemon::addHandler(int socket) {
   int64_t addVal = tcputil::recvValue<int64_t>(socket);
 
   std::vector<uint8_t> oldData;
-  if (tcpStore_.find(key) != tcpStore_.end()) {
-    oldData = tcpStore_[key];
-    auto buf = reinterpret_cast<const char*>(tcpStore_[key].data());
-    auto len = tcpStore_[key].size();
+  auto it = tcpStore_.find(key);
+  if (it != tcpStore_.end()) {
+    oldData = it->second;
+    auto buf = reinterpret_cast<const char*>(it->second.data());
+    auto len = it->second.size();
     addVal += std::stoll(std::string(buf, len));
   }
   auto addValStr = std::to_string(addVal);
