@@ -862,8 +862,10 @@ class expectedAlertNondeterministic:
     def __call__(self, fn):
         @wraps(fn)
         def efail_fn(slf, device, *args, **kwargs):
-            if self.device_type is None or self.device_type == slf.device_type:
-                with DeterministicGuard(True):
+            with DeterministicGuard(True):
+                # If a nondeterministic error is expected for this case,
+                # check that it is raised
+                if self.device_type is None or self.device_type == slf.device_type:
                     try:
                         if self.fn_has_device_arg:
                             fn(slf, device, *args, **kwargs)
@@ -879,10 +881,20 @@ class expectedAlertNondeterministic:
                     else:
                         slf.fail('expected a non-deterministic error, but it was not raised')
 
-            if self.fn_has_device_arg:
-                return fn(slf, device, *args, **kwargs)
-            else:
-                return fn(slf, *args, **kwargs)
+                # If a nondeterministic error is not expected for this case,
+                # make sure that it is not raised
+                try:
+                    if self.fn_has_device_arg:
+                        return fn(slf, device, *args, **kwargs)
+                    else:
+                        return fn(slf, *args, **kwargs)
+                except RuntimeError as e:
+                    if 'does not have a deterministic implementation' in str(e):
+                        slf.fail(
+                            'did not expect non-deterministic error message, '
+                            + 'but got this: "' + str(e) + '"')
+                    # Reraise exceptions unrelated to nondeterminism
+                    raise
 
         @wraps(fn)
         def efail_fn_no_device(slf, *args, **kwargs):

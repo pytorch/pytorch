@@ -2941,6 +2941,413 @@ class TestTorchDeviceType(TestCase):
             with self.assertWarnsOnceRegex(UserWarning, "torch.use_deterministic_algorithms is in beta"):
                 torch.use_deterministic_algorithms(True)
 
+    # This test checks that each nondeterministic function throws an error as
+    # described in the documentation for torch.use_deterministic_algorithms
+    @onlyOnCPUAndCUDA
+    def test_use_deterministic_algorithms_errors(self, device):
+
+        # Add new test cases to this list any time a nondeterministic error is
+        # added to an operation. Each entry has the following fields:
+        #
+        # name                  Name of test case
+        #
+        # operation             Operation that should throw nondeterministic error
+        #
+        # constructor           Function to construct args and kwargs
+        #
+        # error_device          Device that should throw the error.
+        #                       Set to None if all devices should throw an error.
+        #
+        # caller_name_forward   Name of function shown in error for forward pass.
+        #                       Set to None if the forward should not throw an error.
+        #
+        # caller_name_backward  Name of function shown in error for backward pass.
+        #                       Set to None if the backward should not throw an error.
+        nondeterministic_operations = [
+            (
+                'AvgPool3d_backward',
+                torch.nn.AvgPool3d.__call__,
+                lambda: (
+                    [
+                        torch.nn.AvgPool3d(3),
+                        torch.randn(2, 3, 3, 3, requires_grad=True, device=device),
+                    ],
+                    {}),
+                'cuda', None, 'avg_pool3d_backward_cuda'
+            ),
+            (
+                'AdaptiveAvgPool2d_backward',
+                torch.nn.AdaptiveAvgPool2d.__call__,
+                lambda: (
+                    [
+                        torch.nn.AdaptiveAvgPool2d(3),
+                        torch.randn(2, 3, 3, requires_grad=True, device=device),
+                    ],
+                    {}),
+                'cuda', None, 'adaptive_avg_pool2d_backward_cuda'
+            ),
+            (
+                'AdaptiveAvgPool3d_backward',
+                torch.nn.AdaptiveAvgPool3d.__call__,
+                lambda: (
+                    [
+                        torch.nn.AdaptiveAvgPool3d(3),
+                        torch.randn(2, 3, 3, 3, requires_grad=True, device=device),
+                    ],
+                    {}),
+                'cuda', None, 'adaptive_avg_pool3d_backward_cuda'
+            ),
+            (
+                'MaxPool3d_backward',
+                torch.nn.MaxPool3d.__call__,
+                lambda: (
+                    [
+                        torch.nn.MaxPool3d(3),
+                        torch.randn(2, 3, 3, 3, requires_grad=True, device=device),
+                    ],
+                    {}),
+                'cuda', None, 'max_pool3d_with_indices_backward_cuda'
+            ),
+            (
+                'AdaptiveMaxPool2d_backward',
+                torch.nn.AdaptiveMaxPool2d.__call__,
+                lambda: (
+                    [
+                        torch.nn.AdaptiveMaxPool2d(3),
+                        torch.randn(2, 3, 3, requires_grad=True, device=device),
+                    ],
+                    {}),
+                'cuda', None, 'adaptive_max_pool2d_backward_cuda'
+            ),
+            (
+                'FractionalMaxPool2d_backward',
+                torch.nn.FractionalMaxPool2d.__call__,
+                lambda: (
+                    [
+                        torch.nn.FractionalMaxPool2d(2, output_ratio=0.5),
+                        torch.randn(2, 3, 3, 3, requires_grad=True, device=device),
+                    ],
+                    {}),
+                'cuda', None, 'fractional_max_pool2d_backward_cuda'
+            ),
+            (
+                'FractionalMaxPool3d_backward',
+                torch.nn.FractionalMaxPool3d.__call__,
+                lambda: (
+                    [
+                        torch.nn.FractionalMaxPool3d(2, output_ratio=0.5),
+                        torch.randn(2, 3, 3, 3, 3, requires_grad=True, device=device),
+                    ],
+                    {}),
+                'cuda', None, 'fractional_max_pool3d_backward_cuda'
+            ),
+            (
+                'interpolate_linear_backward',
+                torch.nn.functional.interpolate,
+                lambda: (
+                    [
+                        torch.randn(1, 2, 4, device=device, requires_grad=True),
+                    ],
+                    dict(
+                        size=12,
+                        mode='linear',
+                        align_corners=False
+                    )
+                ),
+                'cuda', None, 'upsample_linear1d_backward_out_cuda'
+            ),
+            (
+                'interpolate_bilinear_backward',
+                torch.nn.functional.interpolate,
+                lambda: (
+                    [
+                        torch.randn(1, 2, 4, 4, device=device, requires_grad=True),
+                    ],
+                    dict(
+                        size=12,
+                        mode='bilinear',
+                        align_corners=False
+                    )
+                ),
+                'cuda', None, 'upsample_bilinear2d_backward_out_cuda'
+            ),
+            (
+                'interpolate_bicubic_backward',
+                torch.nn.functional.interpolate,
+                lambda: (
+                    [
+                        torch.randn(1, 2, 4, 4, device=device, requires_grad=True),
+                    ],
+                    dict(
+                        size=12,
+                        mode='bicubic',
+                        align_corners=False
+                    )
+                ),
+                'cuda', None, 'upsample_bicubic2d_backward_out_cuda'
+            ),
+            (
+                'interpolate_trilinear_backward',
+                torch.nn.functional.interpolate,
+                lambda: (
+                    [
+                        torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True),
+                    ],
+                    dict(
+                        size=12,
+                        mode='trilinear',
+                        align_corners=False
+                    )
+                ),
+                'cuda', None, 'upsample_trilinear3d_backward_out_cuda'
+            ),
+            (
+                'ReflectionPad1d_backward',
+                torch.nn.ReflectionPad1d.__call__,
+                lambda: (
+                    [
+                        torch.nn.ReflectionPad1d((1, 2)),
+                        torch.randn(2, 3, 8, device=device, requires_grad=True)
+                    ],
+                    {}),
+                'cuda', None, 'reflection_pad1d_backward_cuda'
+            ),
+            (
+                'ReflectionPad2d_backward',
+                torch.nn.ReflectionPad2d.__call__,
+                lambda: (
+                    [
+                        torch.nn.ReflectionPad2d((1, 2, 3, 4)),
+                        torch.randn(2, 3, 8, 8, device=device, requires_grad=True)
+                    ],
+                    {}),
+                'cuda', None, 'reflection_pad2d_backward_cuda'
+            ),
+            (
+                'ReplicationPad1d_backward',
+                torch.nn.ReplicationPad1d.__call__,
+                lambda: (
+                    [
+                        torch.nn.ReplicationPad1d((1, 2)),
+                        torch.randn(2, 3, 4, device=device, requires_grad=True)
+                    ],
+                    {}),
+                'cuda', None, 'replication_pad1d_backward_cuda'
+            ),
+            (
+                'ReplicationPad2d_backward',
+                torch.nn.ReplicationPad2d.__call__,
+                lambda: (
+                    [
+                        torch.nn.ReplicationPad2d((1, 2, 3, 4)),
+                        torch.randn(2, 3, 4, 4, device=device, requires_grad=True)
+                    ],
+                    {}),
+                'cuda', None, 'replication_pad2d_backward_cuda'
+            ),
+            (
+                'ReplicationPad3d_backward',
+                torch.nn.ReplicationPad3d.__call__,
+                lambda: (
+                    [
+                        torch.nn.ReplicationPad3d((1, 2, 3, 4, 5, 6)),
+                        torch.randn(2, 3, 4, 4, 4, device=device, requires_grad=True)
+                    ],
+                    {}),
+                'cuda', None, 'replication_pad3d_backward_cuda'
+            ),
+            (
+                # TODO: Documentation incorrectly claims that the backward
+                # has the error, but it's actuall the forward. Should fix
+                # it in this PR
+                'NLLLoss',
+                torch.nn.NLLLoss.__call__,
+                lambda: (
+                    [
+                        torch.nn.NLLLoss(),
+                        torch.randn(2, 3, 5, 5, device=device),
+                        torch.rand(2, 5, 5, device=device).mul(3).floor().long()
+                    ],
+                    {}),
+                'cuda', 'SpatialClassNLLCriterion_updateOutput', None
+            ),
+            (
+                'CTCLoss_backward',
+                torch.nn.CTCLoss.__call__,
+                lambda: (
+                    [
+                        torch.nn.CTCLoss(),
+                        torch.randn(50, 3, 15, requires_grad=True, device=device).log_softmax(2),
+                        torch.randint(0, 14, (3, 30), device=device, dtype=torch.long),
+                        [50, 50, 50],
+                        [30, 25, 20]
+                    ],
+                    {}),
+                'cuda', None, 'ctc_loss_backward_gpu'
+            ),
+            (
+                'EmbeddingBag_backward',
+                torch.nn.EmbeddingBag.__call__,
+                lambda: (
+                    [
+                        torch.nn.EmbeddingBag(
+                            4, 3, None, 2., False, 'max',
+                            _weight=torch.randn(4, 3, device=device, requires_grad=True)
+                        ),
+                        torch.empty(2, 3, dtype=torch.long, device=device).random_(4)
+                    ],
+                    {}),
+                'cuda', None, 'embedding_bag_backward_cuda_max'
+            ),
+            (
+                'scatter_add_',
+                torch.Tensor.scatter_add_,
+                lambda: (
+                    [
+                        torch.randn(10, device=device),
+                        0,
+                        torch.tensor([3], device=device),
+                        torch.randn(1, device=device)
+                    ],
+                    {}),
+                'cuda', 'scatter_add_cuda_kernel', None
+            ),
+            (
+                'index_add_',
+                torch.Tensor.index_add_,
+                lambda: (
+                    [
+                        torch.randn(10, device=device),
+                        0,
+                        torch.tensor([3], device=device),
+                        torch.randn(1, device=device)
+                    ],
+                    {}),
+                'cuda', 'index_add_cuda_', None
+            ),
+            (
+                'index_copy',
+                torch.Tensor.index_copy,
+                lambda: (
+                    [
+                        torch.randn(10, device=device),
+                        0,
+                        torch.tensor([3], device=device),
+                        torch.randn(1, device=device)
+                    ],
+                    {}),
+                None, 'index_copy', None
+            ),
+            (
+                'index_put_',
+                torch.Tensor.index_put_,
+                lambda: (
+                    [
+                        torch.randn(10, device=device),
+                        (torch.tensor([0], device=device),),
+                        torch.randn(1, device=device)
+                    ],
+                    dict(accumulate=False)),
+                None, 'index_put_ with accumulate=False', None
+            ),
+            (
+                'put_',
+                torch.Tensor.put_,
+                lambda: (
+                    [
+                        torch.randn(10, device=device),
+                        torch.tensor(0, device=device),
+                        torch.randn(1, device=device)
+                    ],
+                    dict(accumulate=False)),
+                None, 'put_', None
+            ),
+            (
+                'put__accumulate',
+                torch.Tensor.put_,
+                lambda: (
+                    [
+                        torch.randn(10, device=device),
+                        torch.tensor(0, device=device),
+                        torch.randn(1, device=device)
+                    ],
+                    dict(accumulate=True)),
+                'cuda', 'put_', None
+            ),
+            (
+                'index_select_backward',
+                torch.index_select,
+                lambda: (
+                    [
+                        torch.randn(10, device=device, requires_grad=True),
+                        0,
+                        torch.tensor([3], device=device)
+                    ],
+                    {}),
+                'cuda', None, 'index_add_cuda_'
+            ),
+            (
+                'repeat_interleave_backward',
+                torch.repeat_interleave,
+                lambda: ([torch.randn(2, 2, device=device, requires_grad=True), 2], {}),
+                'cuda', None, 'index_add_cuda_'
+            ),
+            (
+                'histc',
+                torch.histc,
+                lambda: ([torch.tensor([], device=device)], dict(min=0, max=3)),
+                'cuda', '_histc_cuda', None
+            ),
+            (
+                'bincount',
+                torch.bincount,
+                lambda: ([torch.tensor([], device=device, dtype=torch.long)], {}),
+                'cuda', '_bincount_cuda', None
+            ),
+            (
+                'kthvalue',
+                torch.kthvalue,
+                lambda: ([torch.randn(10, device=device), 4], {}),
+                'cuda', 'kthvalue CUDA', None
+            ),
+            (
+                'median_indices',
+                torch.median,
+                lambda: ([torch.randn(10, device=device), 0], {}),
+                'cuda', 'median CUDA with indices output', None
+            ),
+            (
+                'gather_backward',
+                torch.gather,
+                lambda: (
+                    [
+                        torch.randn(3, 3, device=device, requires_grad=True),
+                        0,
+                        torch.tensor([[0]], device=device)
+                    ],
+                    {}),
+                'cuda', None, 'scatter_add_cuda_kernel'
+            ),
+        ]
+
+        for name, operation, constructor, error_device, caller_name_forward, caller_name_backward in nondeterministic_operations:
+            def forward_func(slf, *args, **kwargs):
+                return operation(*args, **kwargs)
+
+            args, kwargs = constructor()
+
+            if caller_name_forward is not None:
+                expectedAlertNondeterministic(caller_name_forward, error_device)(forward_func)(self, *args, **kwargs)
+
+            if caller_name_backward is not None:
+                res = forward_func(self, *args, **kwargs)
+                grad = torch.ones_like(res)
+
+                def backward_func(slf, device):
+                    res.backward(grad)
+
+                expectedAlertNondeterministic(caller_name_backward, error_device)(backward_func)(self, device)
+
     @onlyCPU
     def test_set_deterministic_deprecated_warning(self, device):
         with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
