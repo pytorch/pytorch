@@ -57,7 +57,7 @@ jobs:
           fi
       - if: steps.unzip.outputs.exists == '0' # i.e. true
         name: Add annotations
-        uses: pytorch/add-annotations-github-action@3ab7d7345209f5299d53303f7aaca7d3bc09e250 # TODO
+        uses: pytorch/add-annotations-github-action@master
         with:
           check_name: ${{ matrix.name }}
           linter_output_path: annotations.json
