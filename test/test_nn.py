@@ -14765,13 +14765,13 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.half, torch.float)
     def test_conv_cudnn_ndhwc(self, device, dtype):
         def helper(n, c, d, h, w, out_channels, kernel_size, groups):
-            input = torch.randint(-3, 3, (n, c, d, h, w), dtype=dtype, device=device)\
+            input = torch.randint(-2, 2, (n, c, d, h, w), dtype=dtype, device=device)\
                 .to(memory_format=torch.channels_last_3d)
             input.requires_grad_()
             conv = nn.Conv3d(c, out_channels, kernel_size, groups=groups)\
                 .to(device='cuda', dtype=dtype, memory_format=torch.channels_last_3d)
             for p in conv.parameters():
-                p.data = torch.randint_like(p, -3, 3)
+                p.data = torch.randint_like(p, -2, 2)
 
             # use FP64 channels-first conv as reference
             ref_input = input.detach().clone().contiguous().double().requires_grad_()
@@ -14783,7 +14783,7 @@ class TestNNDeviceType(NNTestCase):
             out = conv(input)
             ref_out = ref_conv(ref_input)
 
-            grad = torch.randint_like(out, -3, 3)
+            grad = torch.randint_like(out, -2, 2)
             ref_grad = grad.detach().clone().double().contiguous()
 
             out.backward(grad)
@@ -14804,8 +14804,8 @@ class TestNNDeviceType(NNTestCase):
 
         helper(2, 8, 4, 4, 4, out_channels=4, kernel_size=3, groups=1)
         helper(2, 8, 4, 4, 4, out_channels=8, kernel_size=3, groups=8)
-        helper(1, 16, 24, 24, 24, out_channels=16, kernel_size=3, groups=1)
-        helper(1, 16, 24, 24, 24, out_channels=16, kernel_size=3, groups=16)
+        helper(1, 16, 18, 18, 18, out_channels=16, kernel_size=3, groups=1)
+        helper(1, 16, 18, 18, 18, out_channels=16, kernel_size=3, groups=16)
 
     def _run_conv(self, layer, device, inp, grad, ref_conv, ref_input, ref_out,
                   input_format, weight_format, grad_format, output_format):
