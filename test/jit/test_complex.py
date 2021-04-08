@@ -64,7 +64,7 @@ class TestComplex(JitTestCase):
     def test_complex_constants_and_ops(self):
         vals = ([0.0, 1.0, 2.2, -1.0, -0.0, -2.2, 1, 0, 2]
                 + [10.0 ** i for i in range(2)] + [-(10.0 ** i) for i in range(2)])
-        complex_vals = tuple((x + y * 1j) for x, y in product(vals, vals))
+        complex_vals = tuple(complex(x, y) for x, y in product(vals, vals))
 
         funcs_template = dedent('''
             def func(a: complex):
@@ -95,8 +95,7 @@ class TestComplex(JitTestCase):
                     if isinstance(res_python, Exception):
                         continue
 
-                    msg = ("Failed on {func_name} with input {a}. Python: {res_python}, Script: {res_script}"
-                           .format(func_name=func_name, a=a, res_python=res_python, res_script=res_script))
+                    msg = f"Failed on {func_name} with input {a}. Python: {res_python}, Script: {res_script}"
                     self.assertEqual(res_python, res_script, msg=msg)
 
         unary_ops = ['log', 'log10', 'sqrt', 'exp', 'sin', 'cos', 'asin', 'acos', 'atan', 'sinh', 'cosh',
