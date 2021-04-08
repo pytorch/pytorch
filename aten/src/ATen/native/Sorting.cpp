@@ -449,6 +449,17 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
   return out;
 }
 
+void _fill_indices(Tensor& indices, int64_t dim) {
+  auto dim_size = indices.size(dim);
+  auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
+  auto idx_dim_sizes = std::vector<int64_t>(indices.dim(), 1);
+  auto idx_dim_strides = std::vector<int64_t>(indices.dim(), 0);
+  idx_dim_sizes[dim] = dim_size;
+  idx_dim_strides[dim] = 1;
+  auto idx_dim_restrided = idx_dim.as_strided(idx_dim_sizes, idx_dim_strides);
+  indices.copy_(idx_dim_restrided);
+}
+
 } // namespace
 
 
@@ -828,7 +839,7 @@ Tensor nanmedian_cpu(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/true);
 }
 
-std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(const Tensor& self,
+std::tuple<Tensor&, Tensor&> sort_out_stable(const Tensor& self,
     c10::optional<bool> stable,
     int64_t dim,
     bool descending,
@@ -843,22 +854,25 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(const Tensor& self,
     return std::forward_as_tuple(values, indices);
   }
 
+  dim = maybe_wrap_dim(dim, values.dim());
+  _fill_indices(indices, dim);
+
   TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
-  sort_stub(kCPU, values, indices, dim, descending, stable.value());
+  sort_stub(self.device().type(), values, indices, dim, descending, stable.value());
 
   return std::forward_as_tuple(values, indices);
 }
 
-std::tuple<Tensor&, Tensor&> sort_out_cpu(const Tensor& self,
+std::tuple<Tensor&, Tensor&> sort_out(const Tensor& self,
     int64_t dim,
     bool descending,
     Tensor& values,
     Tensor& indices) {
-  return at::native::sort_out_cpu_stable(
+  return at::native::sort_out_stable(
       self, /*stable=*/false, dim, descending, values, indices);
 }
 
-std::tuple<Tensor, Tensor> sort_cpu_stable(
+std::tuple<Tensor, Tensor> sort_stable(
     const Tensor& self,
     c10::optional<bool> stable,
     int64_t dim,
@@ -866,14 +880,14 @@ std::tuple<Tensor, Tensor> sort_cpu_stable(
   TORCH_CHECK(!self.is_complex(), "sort(): input tensor must be of non-complex type");
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return at::native::sort_out_cpu_stable(self, stable, dim, descending, values, indices);
+  return at::native::sort_out_stable(self, stable, dim, descending, values, indices);
 }
 
-std::tuple<Tensor, Tensor> sort_cpu(
+std::tuple<Tensor, Tensor> sort(
     const Tensor& self,
     int64_t dim,
     bool descending) {
-  return sort_cpu_stable(self, /*stable=*/false, dim, descending);
+  return sort_stable(self, /*stable=*/false, dim, descending);
 }
 
 Tensor& msort_out(const Tensor& self, Tensor& values) {

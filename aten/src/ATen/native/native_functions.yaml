@@ -6065,26 +6065,22 @@
 
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
-    CPU: sort_out_cpu
-    CUDA: legacy::cuda::_th_sort_out
+    CPU, CUDA: sort_out
 
 - func: sort.values_stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
-    CPU: sort_out_cpu_stable
-    CUDA: legacy::cuda::_th_sort_out_stable
+    CPU, CUDA: sort_out_stable
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
   dispatch:
-    CPU: sort_cpu
-    CUDA: legacy::cuda::_th_sort
+    CPU, CUDA: sort
     QuantizedCPU: sort_quantized_cpu
 
 - func: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
   dispatch:
-    CPU: sort_cpu_stable
-    CUDA: legacy::cuda::_th_sort_stable
+    CPU, CUDA: sort_stable
     QuantizedCPU: sort_quantized_cpu_stable
 
 - func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)

@@ -12,17 +12,6 @@ namespace at { namespace native {
 
 namespace {
 
-void _fill_indices(Tensor& indices, int64_t dim) {
-  auto dim_size = indices.size(dim);
-  auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
-  auto idx_dim_sizes = std::vector<int64_t>(indices.dim(), 1);
-  auto idx_dim_strides = std::vector<int64_t>(indices.dim(), 0);
-  idx_dim_sizes[dim] = dim_size;
-  idx_dim_strides[dim] = 1;
-  auto idx_dim_restrided = idx_dim.as_strided(idx_dim_sizes, idx_dim_strides);
-  indices.copy_(idx_dim_restrided);
-}
-
 template <typename func_t>
 void _dim_apply(
     Tensor& values,
@@ -98,8 +87,6 @@ static void sort_kernel(
     int64_t dim,
     bool descending,
     bool stable) {
-  dim = maybe_wrap_dim(dim, values.dim());
-  _fill_indices(indices, dim);
   _dim_apply(
     values, indices, dim,
     "sort_cpu", [&](

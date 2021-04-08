@@ -17,7 +17,6 @@ SIZE = 100
 class TestSortAndSelect(TestCase):
 
     def assertIsOrdered(self, order, x, mxx, ixx, task):
-        SIZE = 4
         if order == 'descending':
             def check_order(a, b):
                 # `a != a` because we put NaNs
@@ -32,20 +31,20 @@ class TestSortAndSelect(TestCase):
             error('unknown order "{}", must be "ascending" or "descending"'.format(order))
 
         are_ordered = True
-        for j, k in product(range(SIZE), range(1, SIZE)):
-            self.assertTrue(check_order(mxx[j][k - 1], mxx[j][k]),
-                            'torch.sort ({}) values unordered for {}'.format(order, task))
+        for j in range(x.size(0)):
+            for k in range(1, x.size(1)):
+                self.assertTrue(check_order(mxx[j][k - 1], mxx[j][k]),
+                                'torch.sort ({}) values unordered for {}'.format(order, task))
 
         seen = set()
         indicesCorrect = True
-        size = x.size(x.dim() - 1)
-        for k in range(size):
+        for k in range(x.size(0)):
             seen.clear()
-            for j in range(size):
+            for j in range(x.size(1)):
                 self.assertEqual(x[k][ixx[k][j]], mxx[k][j],
                                  msg='torch.sort ({}) indices wrong for {}'.format(order, task))
                 seen.add(ixx[k][j])
-            self.assertEqual(len(seen), size)
+            self.assertEqual(len(seen), x.size(1))
 
     def test_sort(self, device):
         SIZE = 4
@@ -190,6 +189,37 @@ class TestSortAndSelect(TestCase):
             sample_numpy = sample.numpy()
             idx_numpy = np.argsort(sample_numpy, axis=dim, kind='stable')
             self.assertEqual(idx_torch, idx_numpy)
+
+    def test_thrust_sort(self, device):
+        SIZE = 2049
+        x = torch.randn(1, SIZE, device=device)
+        res1val, res1ind = torch.sort(x)
+
+        res2val = torch.tensor((), device=device)
+        res2ind = torch.tensor((), device=device, dtype=torch.long)
+        torch.sort(x, out=(res2val, res2ind))
+        self.assertEqual(res1val, res2val, atol=0, rtol=0)
+        self.assertEqual(res1ind, res2ind, atol=0, rtol=0)
+        self.assertEqual(torch.argsort(x), res1ind)
+        self.assertEqual(x.argsort(), res1ind)
+
+        self.assertIsOrdered('ascending', x, res2val, res2ind, 'random')
+
+        # DESCENDING SORT
+        x = torch.randn(1, SIZE, device=device)
+        res1val, res1ind = torch.sort(x, x.dim() - 1, True)
+
+        # Test use of result tensor
+        res2val = torch.tensor((), device=device)
+        res2ind = torch.tensor((), device=device, dtype=torch.long)
+        torch.sort(x, x.dim() - 1, True, out=(res2val, res2ind))
+        self.assertEqual(res1val, res2val, atol=0, rtol=0)
+        self.assertEqual(res1ind, res2ind, atol=0, rtol=0)
+        self.assertEqual(torch.argsort(x, x.dim() - 1, True), res1ind)
+        self.assertEqual(x.argsort(x.dim() - 1, True), res1ind)
+
+        # Test sorting of random numbers
+        self.assertIsOrdered('descending', x, res2val, res2ind, 'random')
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_msort(self, device, dtype):
