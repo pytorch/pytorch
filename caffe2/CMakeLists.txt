@@ -579,7 +579,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
+      ${TORCH_SRC_DIR}/csrc/utils/crash_handler.cpp
     )
+
     # Disable legacy import of building without Caffe2 support
     if(BUILD_CAFFE2)
       list(APPEND TORCH_SRCS
@@ -953,9 +955,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
       ${TORCH_ROOT}/aten/src
       ${CMAKE_CURRENT_BINARY_DIR}/aten/src
+      
       ${CMAKE_BINARY_DIR}/aten/src)
-    target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
-  endif()
+      target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
+      endif()
 
   set(ATen_CPU_INCLUDE
     ${TORCH_ROOT}/aten/src
@@ -966,6 +969,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 if(USE_TBB)
   list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
   target_link_libraries(torch_cpu PUBLIC tbb)
+endif()
+
+
+find_library(BREAKPAD_LIB breakpad_client)
+find_path(BREAKPAD_INCLUDE_DIR breakpad)
+if(NOT BREAKPAD_LIB OR NOT BREAKPAD_INCLUDE_DIR)
+  message(STATUS "breakpad library not found")
+else()
+  target_link_libraries(torch_cpu PRIVATE ${BREAKPAD_LIB})
+  add_compile_definitions(ADD_BREAKPAD_SIGNAL_HANDLER)
+  target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
 endif()
 
 
