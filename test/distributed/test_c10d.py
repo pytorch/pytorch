@@ -2788,7 +2788,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             )
             unused_index = 2
             unused_index_str = f"Parameter at index {unused_index}"
-            unused_fqn = None
             model = ddp_model.module
             for module_name, module in model.named_modules():
                 if module == model.fc3:
@@ -2796,6 +2795,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                         recurse=False
                     ):
                         unused_fqn = f"{module_name}.{parameter_name}"
+                        # Only one such parameter in model.fc3, since bias=False
+                        break
 
             if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
                 unused_index_str += f" with name {unused_fqn}"

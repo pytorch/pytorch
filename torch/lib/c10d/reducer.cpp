@@ -1476,20 +1476,10 @@ void Reducer::ensure_prior_reduction_finished() {
     // Collect unmarked parameter indices, additionally, in debug mode retrieve
     // parameter names.
     auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
+    // We should have some unmarked parameter indices, otherwise we would not
+    // have run into this error branch.
+    TORCH_INTERNAL_ASSERT(unmarked_param_indices.size() > 0);
     const std::string unmarkedParamIndices = c10::Join(", ", unmarked_param_indices);
-    std::string unmarkedParamInfo;
-    if (ddp_debug_level_ != DistributedDebugLevel::OFF) {
-      // Retrieve set of parameter names that did not receive gradient.
-      auto unmarkedParams = getUnmarkedParamsForIteration();
-      if (unmarkedParams.size() > 0) {
-        for (const auto& s : unmarkedParams) {
-          LOG(INFO) << "[Rank " << process_group_->getRank() << "] "
-                    << "Parameter: " << s
-                    << " did not get gradient in backwards pass.";
-        }
-        unmarkedParamInfo = c10::Join(", ", unmarkedParams);
-      }
-    }
 
     std::string kBaseErrorMsg =
         "Expected to have finished reduction in the prior iteration before "
@@ -1546,6 +1536,15 @@ void Reducer::ensure_prior_reduction_finished() {
         "about which particular parameters did not receive gradient on this rank "
         "as part of this error";
     } else {
+      // Retrieve set of parameter names that did not receive gradient.
+      auto unmarkedParams = getUnmarkedParamsForIteration();
+      TORCH_INTERNAL_ASSERT(unmarkedParams.size() > 0);
+      for (const auto& s : unmarkedParams) {
+        LOG(INFO) << "[Rank " << process_group_->getRank() << "] "
+                  << "Parameter: " << s
+                  << " did not get gradient in backwards pass.";
+      }
+      const std::string unmarkedParamInfo = c10::Join(", ", unmarkedParams);
       // In debug mode, log param names and indices that went unused.
       kBaseErrorMsg +=
         c10::str(
@@ -1556,8 +1555,6 @@ void Reducer::ensure_prior_reduction_finished() {
           unmarkedParamInfo
         );
       kBaseErrorMsg += unmarked_param_indices_info;
-      // TODO: we can validate that no parameter here is part of unused_parameters_,
-      // otherwise this is a bug in DDP unused parameter detection.
     }
     TORCH_CHECK(false, kBaseErrorMsg);
   }
