@@ -796,7 +796,7 @@ Tensor mean_cpu_gpu(const Tensor &self, optional<ScalarType> dtype) {
 }
 
 Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  ScalarType dtype = toValueType(get_dtype_from_self(self, opt_dtype, true));
+  ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
   Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::mean_out_cpu_gpu(self, dim, keepdim, dtype, result);
 }
