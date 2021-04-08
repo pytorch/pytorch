@@ -4803,7 +4803,7 @@ a")
 
                 a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
                 func(2, a, profile_and_replay=True).backward()
-    
+
     def _check_code(self, code_str, fn_name, inputs):
         scope = {}
         exec(code_str, globals(), scope)
