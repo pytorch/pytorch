@@ -16,6 +16,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Registry.h>
 #include <c10/util/typeid.h>
+#include <c10/core/Stream.h>
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
