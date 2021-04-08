@@ -156,7 +156,10 @@ if is_available():
             logger.warning(
                 "RPC was initialized with the PROCESS_GROUP backend which is "
                 "deprecated and slated to be removed and superseded by the TENSORPIPE "
-                "backend. It is recommended to migrate to the TENSORPIPE backend."
+                "backend. It is recommended to migrate to the TENSORPIPE backend. "
+                "PyTorch v1.9 will be the last release that carries PROCESS_GROUP "
+                "RPC backend. If you have concerns or suggestions please comment in "
+                "https://github.com/pytorch/pytorch/issues/55615"
             )
 
         if rpc_backend_options is None:
