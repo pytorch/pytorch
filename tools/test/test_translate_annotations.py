@@ -11,7 +11,7 @@ example_regex = r'^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): 
 # $ git clone -b 1.0.2 https://github.com/cscorley/whatthepatch.git
 # $ cd whatthepatch/tests/casefiles
 # $ git diff --no-index --unified=0 lao tzu
-example_diff = '''
+lao_tzu_diff = '''
 diff --git a/lao b/tzu
 index 635ef2c..5af88a8 100644
 --- a/lao
@@ -29,13 +29,26 @@ index 635ef2c..5af88a8 100644
 +The door of all subtleties!
 '''.lstrip()
 
+sparser_diff = '''
+diff --git a/foo.txt b/bar.txt
+index 4563fd8..6fae323 100644
+--- a/foo.txt
++++ b/bar.txt
+@@ -4,3 +4,2 @@ lines
+-lines
+-lines
+-lines
++A change!!
++Wow
+'''.lstrip()
+
 
 class TestTranslateAnnotations(unittest.TestCase):
     maxDiff = None
 
     def test_parse_diff(self) -> None:
         self.assertEqual(
-            parse_diff(example_diff),
+            parse_diff(lao_tzu_diff),
             {
                 'old_filename': 'lao',
                 'hunks': [
@@ -62,7 +75,7 @@ class TestTranslateAnnotations(unittest.TestCase):
         )
 
     def test_translate_lao_tzu(self) -> None:
-        diff = parse_diff(example_diff)
+        diff = parse_diff(lao_tzu_diff)
         self.assertEqual(translate(diff, -1), None)  # out of bounds
         self.assertEqual(translate(diff, 0), None)  # we start at 1
         self.assertEqual(translate(diff, 1), 3)
@@ -91,6 +104,21 @@ class TestTranslateAnnotations(unittest.TestCase):
         self.assertEqual(translate(diff, 4), 4)
         self.assertEqual(translate(diff, 5), 5)
         # etc
+
+    def test_translate_sparser(self) -> None:
+        diff = parse_diff(sparser_diff)
+        self.assertEqual(translate(diff, -1), None)
+        self.assertEqual(translate(diff, 0), None)
+        self.assertEqual(translate(diff, 1), 1)
+        self.assertEqual(translate(diff, 2), 2)
+        self.assertEqual(translate(diff, 3), 3)
+        self.assertEqual(translate(diff, 4), None)
+        self.assertEqual(translate(diff, 5), None)
+        self.assertEqual(translate(diff, 6), 7)
+        self.assertEqual(translate(diff, 7), 8)
+        self.assertEqual(translate(diff, 8), 9)
+        self.assertEqual(translate(diff, 9), 10)
+        self.assertEqual(translate(diff, 10), 11)
 
     def test_foo(self) -> None:
         self.assertEqual(
