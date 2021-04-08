@@ -150,6 +150,25 @@ class TestPythonBuiltinOP(JitTestCase):
         cu = torch.jit.CompilationUnit(code_str)
         self.assertEqual(cu.func(*inputs), scope[fn_name](*inputs))
 
+    def test_stepped_tuple_slicing(self):
+        def check_slicing_tuple(slicing, tuple_type, tuple):
+            template = dedent("""
+            def func(x):
+                # type: ({}) -> Any
+                return x{}
+            """)
+            self._check_code(template.format(tuple_type, slicing), "func", [tuple])
+
+        check_slicing_tuple("[-3:3:2]", "Tuple[int, int, int]", (0, 1, 2))
+        check_slicing_tuple("[::55]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[:4:4]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[::-1]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[7:5:2]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[5:7:-2]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[::-2]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[:4:-3]", "Tuple[int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5))
+        check_slicing_tuple("[3::-2]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+
     def test_index(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
@@ -227,6 +246,124 @@ class TestPythonBuiltinOP(JitTestCase):
         # dynamic expression usage
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
+
+    def test_advancedindex(self):
+        def consec(size, start=0):
+            numel = torch.tensor(size).prod().item()
+            return torch.arange(numel).view(size)
+
+        def check_indexing(indexing, tensor, **kwargs):
+            indices_dict = kwargs
+
+            template = dedent("""
+            def func(x{formals}):
+                return x{expr}
+            """)
+
+            formals = []
+            values = []
+            for formal, value in indices_dict.items():
+                formals.append(formal)
+                values.append(value)
+
+            formals = ''.join(map(', {}'.format, formals))
+            inputs = [tensor] + values
+            self._check_code(template.format(formals=formals, expr=indexing),
+                             "func", inputs)
+
+        # Indexing with tensor (basic)
+        check_indexing('[i]', consec((3, 3)), i=torch.tensor([0]))
+        check_indexing('[i]', consec((3, 3)), i=torch.tensor(1))
+        check_indexing('[i]', consec((3, 3)), i=torch.tensor([-2]))
+        check_indexing('[i]', consec((3, 3), 2), i=torch.tensor([0, 0]))
+        check_indexing('[i]', consec((3, 3, 2, 2)), i=torch.tensor([0, -2, 1]))
+
+        # NB: indexing with tensors and indexing with sequences can be implemented
+        # in a very similar way (sequences are converted to tensors), so only one
+        # case needs to be tested extensively.
+        # XXX: When we can index with sequences, replace these cases with
+        # sequence indexing expressions; those are much easier to read.
+
+        # Misc sequence advanced indexing
+        inp = consec((4, 8, 5))
+        to_check = [
+            # [[0, 1, 3]]
+            ['[i]', {'i': [0, 1, 3]}],
+            # [[0, 2], [1, 3]]
+            ['[i, j]', {'i': [0, 2], 'j': [1, 3]}],
+            # [[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
+            ['[i, j]', {'i': [[0, 1], [0, 1]], 'j': [[0, 1], [0, 1]]}],
+            # [[0, 2], [1, 3], [1, 1]]
+            ['[i, j, k]', {'i': [0, 2], 'j': [1, 3], 'k': [1, 1]}],
+            # [[0, 2], 1, [1, 1]]
+            ['[i, j, k]', {'i': [0, 2], 'j': 1, 'k': [1, 1]}],
+            # [:, :, [0, 3, 4]]
+            ['[:, :, i]', {'i': [0, 3, 4]}],
+            # [:, [2, 4, 5, 7], 2:4]
+            ['[:, i, 2:4]', {'i': [0, 2, 3]}],
+            # [[2, 3], :, :]
+            ['[i, :, :]', {'i': [2, 3]}],
+            # [:, [0, 2, 3], [1, 3, 4]]
+            ['[:, i, j]', {'i': [0, 2, 3], 'j': [1, 3, 4]}],
+            # [:, [0], [1, 2, 4]]
+            ['[:, i, j]', {'i': [0], 'j': [1, 2, 4]}],
+            # [:, [0, 1, 3], [4]]
+            ['[:, i, j]', {'i': [0, 1, 3], 'j': [4]}],
+            # [:, [[0, 1], [1, 0]], [[2, 3]]]
+            ['[:, i, j]', {'i': [[0, 1], [1, 0]], 'j': [[2, 3]]}],
+            # [:, [[0, 1], [2, 3]], [[0]]]
+            ['[:, i, j]', {'i': [[0, 1], [2, 3]], 'j': [[0]]}],
+            # [:, [[5, 6]], [[0, 3], [4, 4]]]
+            ['[:, i, j]', {'i': [[5, 6]], 'j': [[0, 3], [4, 4]]}],
+            # [[0, 2, 3], [1, 3, 4], :]
+            ['[i, j, :]', {'i': [0, 2, 3], 'j': [1, 3, 4]}],
+            # [0, [1, 2, 4], :]
+            ['[i, j, :]', {'i': 0, 'j': [1, 2, 4]}],
+            # [[0, 1, 3], 4, :]
+            ['[i, j, :]', {'i': [0, 1, 3], 'j': 4}],
+            # [[[0, 1], [1, 0]], [[2, 1], [3, 5]], :]
+            ['[i, j, :]', {'i': [[0, 1], [1, 0]], 'j': [[2, 1], [3, 5]]}],
+            # [[[0, 1], [1, 0]], [[2, 3]], :]
+            ['[i, j, :]', {'i': [[0, 1], [1, 0]], 'j': [[2, 3]]}],
+            # [[[0, 1], [2, 3]], [[0]], :]
+            ['[i, j, :]', {'i': [[0, 1], [2, 3]], 'j': [[0]]}],
+            # [[[2, 1]], [[0, 3], [4, 4]], :]
+            ['[i, j, :]', {'i': [[2, 1]], 'j': [[0, 3], [4, 4]]}],
+            # [[[2]], [[0, 3], [4, 1]], 0:2]
+            ['[i, j, 0:2]', {'i': [[2]], 'j': [[0, 3], [4, 1]]}],
+        ]
+
+        for expr, argdict in to_check:
+            tensordict = {k: torch.tensor(v) for (k, v) in argdict.items()}
+            check_indexing(expr, inp, **tensordict)
+
+    def test_adv_indexing_list(self):
+        # indexing with list is equivalent to indexing with tensor
+        def func1(x):
+            return x[[0, 1, 5]]
+
+        def func2(x):
+            return x[[0, 1], [0, 1]]
+
+        def func3(x):
+            return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
+
+        def func4(x):
+            ls = [0]
+            ls.append(1)
+            ls.append(2)
+            return x[ls]
+
+        def func5(x):
+            ls = [0.1, 1.2, 2.3]
+            return x[ls]
+
+        input = torch.rand((6, 2))
+        self.checkScript(func1, (input,))
+        self.checkScript(func2, (input,))
+        self.checkScript(func3, (input,))
+        self.checkScript(func4, (input,))
+        self.checkScript(func5, (input,))
 
     def test_index_ellipses(self):
         vals = [":", 1, None]
