@@ -2541,45 +2541,46 @@ def generate_tests(test_cls, constructor_arg_db):
     }
     # these modules currently cannot be symbolically traced (yet)
     UNTRACEABLE_MODULES = {
-        torch.nn.AdaptiveLogSoftmaxWithLoss,
-        torch.nn.BatchNorm1d,
-        torch.nn.BatchNorm2d,
-        torch.nn.BatchNorm3d,
-        torch.nn.ConvTranspose1d,
-        torch.nn.ConvTranspose2d,
-        torch.nn.ConvTranspose3d,
-        torch.nn.CrossMapLRN2d,
-        torch.nn.GRU,
-        torch.nn.InstanceNorm1d,
-        torch.nn.InstanceNorm2d,
-        torch.nn.InstanceNorm3d,
-        torch.nn.LSTM,
-        torch.nn.LSTMCell,
-        torch.nn.LazyBatchNorm1d,
-        torch.nn.LazyBatchNorm2d,
-        torch.nn.LazyBatchNorm3d,
-        torch.nn.LazyConvTranspose1d,
-        torch.nn.LazyConvTranspose2d,
-        torch.nn.LazyConvTranspose3d,
-        torch.nn.RNN,
-        torch.nn.Softmax2d,
-        torch.nn.SyncBatchNorm,
-        torch.nn.Transformer,
-        torch.nn.TripletMarginWithDistanceLoss,
-        torch.nn.qat.Conv2d,
-        torch.nn.qat.Conv3d,
-        torch.nn.qat.Linear,
-        torch.nn.quantizable.LSTM,
-        torch.nn.quantizable.LSTMCell,
-        torch.nn.quantizable.MultiheadAttention,
-        torch.nn.quantized.Conv1d,
-        torch.nn.quantized.Conv2d,
-        torch.nn.quantized.Conv3d,
-        torch.nn.quantized.ConvTranspose1d,
-        torch.nn.quantized.ConvTranspose2d,
-        torch.nn.quantized.ConvTranspose3d,
-        torch.nn.quantized.ELU,
-        torch.nn.quantized.Hardswish,
+        torch.nn.AdaptiveLogSoftmaxWithLoss,  # control flow
+        torch.nn.BatchNorm1d,  # control flow
+        torch.nn.BatchNorm2d,  # control flow
+        torch.nn.BatchNorm3d,  # control flow
+        torch.nn.ConvTranspose1d,  # uses 'len'
+        torch.nn.ConvTranspose2d,  # uses 'len'
+        torch.nn.ConvTranspose3d,  # uses 'len'
+        torch.nn.CrossMapLRN2d,  # control flow
+        torch.nn.GRU,  # control flow
+        torch.nn.InstanceNorm1d,  # control flow
+        torch.nn.InstanceNorm2d,  # control flow
+        torch.nn.InstanceNorm3d,  # control flow
+        torch.nn.LSTM,  # control flow
+        torch.nn.LSTMCell,  # "lstm_cell(): argument 'hx' (position 2) must be tuple of Tensors, not Proxy"
+        torch.nn.LazyBatchNorm1d,  # control flow
+        torch.nn.LazyBatchNorm2d,  # control flow
+        torch.nn.LazyBatchNorm3d,  # control flow
+        torch.nn.LazyConvTranspose1d,  # uses 'len'
+        torch.nn.LazyConvTranspose2d,  # uses 'len'
+        torch.nn.LazyConvTranspose3d,  # uses 'len'
+        torch.nn.RNN,  # asserts isinstance(input, Tensor)
+        torch.nn.Softmax2d,  # control flow
+        torch.nn.SyncBatchNorm,  # control flow
+        torch.nn.Transformer,  # control flow
+        torch.nn.TripletMarginWithDistanceLoss,  # NotImplementedError: argument of type:
+                                                 # <class 'torch.nn.modules.distance.PairwiseDistance'>
+        torch.nn.qat.Conv2d,  # control flow
+        torch.nn.qat.Conv3d,  # control flow
+        torch.nn.qat.Linear,  # control flow
+        torch.nn.quantizable.LSTM,  # 'Proxy' object does not support item assignment
+        torch.nn.quantizable.LSTMCell,  # control flow
+        torch.nn.quantizable.MultiheadAttention,  # control flow
+        torch.nn.quantized.Conv1d,  # uses 'len'
+        torch.nn.quantized.Conv2d,  # uses 'len'
+        torch.nn.quantized.Conv3d,  # uses 'len'
+        torch.nn.quantized.ConvTranspose1d,  # uses 'len'
+        torch.nn.quantized.ConvTranspose2d,  # uses 'len'
+        torch.nn.quantized.ConvTranspose3d,  # uses 'len'
+        torch.nn.quantized.ELU,  # control flow
+        torch.nn.quantized.Hardswish,  # control flow
     }
     for namespace in NAMESPACES:
         # the "nn" in "torch.nn"
