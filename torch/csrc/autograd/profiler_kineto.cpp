@@ -331,7 +331,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     at::removeCallback(state_ptr->callbackHandle());
   }
 
-  state_ptr->mark("__stop_profile");
+  state_ptr->mark("__stop_profile", false);
 
   state_ptr->cpu_trace->span.endTime = getTimeUs();
 

@@ -37,11 +37,14 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
+
 def _forward_from_src(src: str, globals: Dict[str, Any]):
     # avoid mutating the passed in dict
-    globals = globals.copy()
-    exec_with_source(src, globals)
-    return globals['forward']
+    globals_copy = globals.copy()
+    exec_with_source(src, globals_copy)
+    forward_fn = globals_copy['forward']
+    del globals_copy['forward']
+    return forward_fn
 
 
 def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
@@ -485,7 +488,7 @@ class {module_name}(torch.nn.Module):
             # constiuent substrings of the error message
             tb_repr = traceback.format_exc()
             custom_msg = ("Call using an FX-traced Module, "
-                          f"line {err_lineno} of the traced Module’s "
+                          f"line {err_lineno} of the traced Module's "
                           "generated forward function:")
             before_err = "".join(all_src_lines[err_lineno - 2 : err_lineno])
             marker = "~" * err_line_len + "~~~ <--- HERE"
