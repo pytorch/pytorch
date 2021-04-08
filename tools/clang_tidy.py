@@ -43,7 +43,7 @@ DEFAULT_FILE_PATTERN = re.compile(r".*\.c(c|pp)?")
 
 # @@ -start,count +start,count @@
 CHUNK_PATTERN = r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@"
-CLANG_WARNING_PATTERN=re.compile("([^:]+):(\d+):\d+:\s+warning:.*\[([a-z\-,]+)\]")
+CLANG_WARNING_PATTERN = re.compile(r"([^:]+):(\d+):\d+:\s+warning:.*\[([a-z\-,]+)\]")
 
 
 # Set from command line arguments in main().
@@ -156,13 +156,9 @@ def run_shell_commands_in_parallel(commands):
                      for i, command in enumerate(commands)]
 
     file_contents = ninja_template.format(build_rules='\n'.join(build_entries)).encode()
-    f = tempfile.NamedTemporaryFile(delete=False)
-    try:
+    with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(file_contents)
-        f.close()
         return run_shell_command(['ninja', '-f', f.name])
-    finally:
-        os.unlink(f.name)
 
 
 def run_clang_tidy(options, line_filters, files) -> str:
@@ -199,7 +195,7 @@ def run_clang_tidy(options, line_filters, files) -> str:
     return output
 
 
-def extract_warnings(output: str, base_dir:str = ".") -> Dict[str, Dict[int, Set[str]]]:
+def extract_warnings(output: str, base_dir: str = ".") -> Dict[str, Dict[int, Set[str]]]:
     rc = {}
     for line in output.split("\n"):
         p = CLANG_WARNING_PATTERN.match(line)
@@ -221,13 +217,13 @@ def extract_warnings(output: str, base_dir:str = ".") -> Dict[str, Dict[int, Set
 
 def apply_nolint(fname: str, warnings: Dict[int, Set[str]]) -> None:
     with open(fname, encoding="utf-8") as f:
-        lines=f.readlines()
+        lines = f.readlines()
 
     line_offset = -1  # As in .cpp files lines are numbered starting from 1
     for line_no in sorted(warnings.keys()):
         nolint_diagnostics = ','.join(warnings[line_no])
         line_no += line_offset
-        indent = ' '*(len(lines[line_no])-len(lines[line_no].lstrip(' ')))
+        indent = ' ' * (len(lines[line_no]) - len(lines[line_no].lstrip(' ')))
         lines.insert(line_no, f'{indent}// NOLINTNEXTLINE({nolint_diagnostics})\n')
         line_offset += 1
 
@@ -301,7 +297,7 @@ def parse_options():
         help="Run clang tidy in parallel per-file (requires ninja to be installed).",
     )
     parser.add_argument("-s", "--suppress-diagnostics", action="store_true",
-            help="Add NOLINT to suppress clang-tidy violations")
+                        help="Add NOLINT to suppress clang-tidy violations")
     parser.add_argument(
         "extra_args", nargs="*", help="Extra arguments to forward to clang-tidy"
     )
@@ -336,7 +332,7 @@ def main() -> None:
 
     clang_tidy_output = run_clang_tidy(options, line_filters, files)
     if options.suppress_diagnostics:
-        warnings = extract_warnings(clang_tidy_output, base_dir = options.compile_commands_dir)
+        warnings = extract_warnings(clang_tidy_output, base_dir=options.compile_commands_dir)
         for fname in warnings.keys():
             print(f"Applying fixes to {fname}")
             apply_nolint(fname, warnings[fname])
