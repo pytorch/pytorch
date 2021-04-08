@@ -197,6 +197,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    BREAKPAD=yes
     ;;
   pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9)
     CUDA_VERSION=10.2

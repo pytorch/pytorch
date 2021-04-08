@@ -9,3 +9,5 @@ git clone https://chromium.googlesource.com/linux-syscall-support src/third_part
 ./configure
 make
 make install
+cd ..
+rm -rf breakpad
