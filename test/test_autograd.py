@@ -7069,7 +7069,7 @@ class TestAutogradDeviceType(TestCase):
             i = i.to(torch.long)
 
             inp = torch.randn(v_size, requires_grad=True)
-            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True, device=device, 
+            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True, device=device,
                                          dtype=torch.double)[0]
 
             def fn(v):
