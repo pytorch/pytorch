@@ -1,12 +1,15 @@
 import os
 import sys
 import inspect
-from typing import Any, Dict, List, Optional, Tuple
+import unittest
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from textwrap import dedent
 from collections import OrderedDict
 
 from torch import Tensor
 import torch
+import torch.nn as nn
+import types
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
@@ -1322,6 +1325,12 @@ class TestList(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Can not create ListType with None type"):
             x = torch._C.ListType(None)
 
+    def test_list_unification_hint(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected a List type hint"):
+            @torch.jit.script
+            def x():
+                b : int = [2, 3]
+                return b
 
 
 class TestDict(JitTestCase):
@@ -1726,3 +1735,225 @@ class TestDict(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
             m = torch.jit.script(annotated_fn)
+
+    def test_dict_preserves_order(self):
+        def dict_ordering():
+            a : Dict[int, int] = {}
+            for i in range(1000):
+                a[i] = i + 1
+            return a
+
+        self.checkScript(dict_ordering, ())
+        di = torch.jit.script(dict_ordering)()
+        res = list(di.items())
+        for i in range(1000):
+            key, value = res[i]
+            self.assertTrue(key == i and value == i + 1)
+
+    def test_optional_dict_construct(self):
+        class M(torch.nn.Module):
+            def use(self, buffer: Dict[str, Optional[torch.Tensor]]):
+                return buffer["prev_key"]
+
+            def forward(self, x):
+                prev_key = torch.rand(2, 3)
+                next_key = torch.rand(2, 3)
+                saved_state: Dict[str, Optional[torch.Tensor]] = {
+                    "prev_key": prev_key,
+                    "next_key": next_key,
+                }
+
+                return self.use(saved_state)
+
+        self.checkModule(M(), (torch.rand(2, 2),))
+
+
+class TestNamedTuple(JitTestCase):
+    def test_named_tuple(self):
+        class FeatureVector(NamedTuple):
+            float_features: float
+            sequence_features: List[float]
+            time_since_first: float
+
+        @torch.jit.script
+        def foo(x) -> float:
+            fv = FeatureVector(3.0, [3.0], 3.0)  # noqa
+            rv = fv.float_features
+            for val in fv.sequence_features:
+                rv += val
+            rv *= fv.time_since_first
+            return rv
+
+        self.assertEqual(foo(torch.rand(3, 4)), 18.0)
+
+    def test_named_tuple_constant(self):
+        class Tup(NamedTuple):
+            a: int
+            b: int
+
+        @torch.jit.script
+        def foo():
+            return Tup(1, 2)
+
+        self.assertEqual(foo(), Tup(1, 2))
+
+    def test_return_named_tuple(self):
+        class FeatureVector(NamedTuple):
+            float_features: float
+            sequence_features: List[float]
+            time_since_first: float
+
+        @torch.jit.script
+        def foo(x):
+            fv = FeatureVector(3.0, [3.0], 3.0)
+            return fv
+
+        out = foo(torch.rand(3, 4))
+        out = foo(torch.rand(3, 4))
+        self.assertEqual(out.float_features, 3.0)
+        self.assertEqual(out.sequence_features, [3.0])
+        self.assertEqual(out.time_since_first, 3.0)
+
+    def test_named_tuple_as_attr(self):
+        class Config(NamedTuple):
+            size: int
+
+        class MyMod(nn.Module):
+            configs: Dict[int, Config]
+
+            def __init__(self, configs):
+                super().__init__()
+                self.configs = configs
+
+            def forward(self, x):
+                for _id, config in self.configs.items():
+                    x += config.size
+                return x
+
+        s = torch.jit.script(MyMod({0: Config(size=16)}))
+
+    def test_named_tuple_resolution(self):
+        class TheType(NamedTuple):
+            t: int
+
+        class MyModule(types.ModuleType):
+            def __init__(self):
+                super(MyModule, self).__init__('MyModule')
+
+            def __getattr__(self, attr):
+                return TheType
+
+        some_module = MyModule()
+
+        def fn() -> some_module.Type:
+            return some_module.Type(1)
+
+        self.checkScript(fn, [])
+
+    def test_named_tuple_slice_unpack(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        @torch.jit.script
+        def foo(a : int, b : float, c : List[int]):
+            tup = MyCoolNamedTuple(a, b, c)  # noqa
+            my_a, my_b, my_c = tup
+            return tup[:1], my_a, my_c
+
+        self.assertEqual(foo(3, 3.5, [6]), ((3,), 3, [6]))
+
+    def test_named_tuple_lower(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        @torch.jit.script
+        def foo(a : int):
+            tup = MyCoolNamedTuple(a, 3.14, [9])  # noqa
+            return tup
+
+        FileCheck().check('TupleConstruct').run(foo.graph)
+        torch._C._jit_pass_lower_all_tuples(foo.graph)
+        FileCheck().check_not('TupleConstruct').run(foo.graph)
+
+    def test_named_tuple_type_annotation(self):
+        global MyCoolNamedTuple  # see [local resolution in python]
+
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        @torch.jit.script
+        def foo(x : MyCoolNamedTuple) -> MyCoolNamedTuple:
+            return x
+
+        mnt = MyCoolNamedTuple(42, 420.0, [666])
+        self.assertEqual(foo(mnt), mnt)
+
+    def test_named_tuple_wrong_types(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        with self.assertRaisesRegex(RuntimeError, "Expected a value of type 'int' for argument 'a'"
+                                                  " but instead found type 'str'"):
+            @torch.jit.script
+            def foo():
+                tup = MyCoolNamedTuple('foo', 'bar', 'baz')  # noqa
+                return tup
+
+    def test_named_tuple_kwarg_construct(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        @torch.jit.script
+        def foo():
+            tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)  # noqa
+            return tup
+
+        tup = foo()
+        self.assertEqual(tup.a, 9)
+        self.assertEqual(tup.b, 3.5)
+        self.assertEqual(tup.c, [1, 2, 3])
+
+    def test_named_tuple_default_error(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int] = [3, 4, 5]
+
+        with self.assertRaisesRegex(RuntimeError, 'Default values are currently not supported'):
+            @torch.jit.script
+            def foo():
+                tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)  # noqa
+                return tup
+
+    @unittest.skipIf(True, "broken while these tests were not in CI")
+    def test_named_tuple_serialization(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                return MyCoolNamedTuple(3, 3.5, [3, 4, 5])
+
+        mm = MyMod()
+        mm.save('foo.zip')
+        torch.testing._internal.jit_utils.clear_class_registry()
+        loaded = torch.jit.load('foo.zip')
+
+        out = mm()
+        out_loaded = loaded()
+
+        for name in ['a', 'b', 'c']:
+            self.assertEqual(getattr(out_loaded, name), getattr(out, name))
