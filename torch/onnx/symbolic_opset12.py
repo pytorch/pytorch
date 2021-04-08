@@ -225,7 +225,7 @@ def tensordot(g, input_a, input_b, dims_a, dims_b, out=None):
     if dim_count_b is None:
         raise RuntimeError('Unsupported: ONNX export of tensordot for tensor(input_b) of unknown rank.')
 
-    dims_a = [(dims_a[i] + dim_count_a) 
+    dims_a = [(dims_a[i] + dim_count_a)
               if (dims_a[i] < 0)
               else dims_a[i]
               for i in range(len(dims_a))]
@@ -249,7 +249,7 @@ def tensordot(g, input_a, input_b, dims_a, dims_b, out=None):
     intput_shape = g.op("Shape", output_a)
     slices = sym_help._slice_helper(g, intput_shape, axes=[0], starts=[-1], ends=[maxsize])
     shape_sizes = [g.op("Constant", value_t=torch.tensor([-1], dtype=torch.long)), slices]
-    output_a = _reshape_from_tensor(g, new_input_a, shape_sizes)    
+    output_a = _reshape_from_tensor(g, new_input_a, shape_sizes)
 
     input_shape = g.op("Shape", new_input_b)
     left_sizes_b = sym_help._slice_helper(g, input_shape, axes=[0], starts=[len(dims_b)], ends=[maxsize])
