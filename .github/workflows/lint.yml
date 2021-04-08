@@ -116,6 +116,7 @@ jobs:
       - name: Run flake8
         run: |
           set -eux
+          pip install typing-extensions # for tools/translate_annotations.py
           pip install -r requirements-flake8.txt
           flake8 --version
           flake8 | tee ${GITHUB_WORKSPACE}/flake8-output.txt
