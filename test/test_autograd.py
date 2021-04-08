@@ -3980,9 +3980,11 @@ class TestAutograd(TestCase):
         def fn(sparse):
             return torch.sparse.sum(sparse)
 
-        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True)
+        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True),
+                  check_sparse_nnz=True, check_batched_grad=False)
         with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
-            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
+            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True),
+                      check_sparse_nnz=False, check_batched_grad=False)
 
     def test_gradcheck_nondeterministic(self):
         class NonDetFunc(Function):
@@ -5280,7 +5282,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'bmm', 'mv', 'ger', 'diagonal', 'fill_', 'sub',
                 'mean', 'inverse', 'linalg.tensorinv', 'matrix_exp',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split',
-                'baddbmm', 'addbmm', 'addmv'] + complex_list_filter + separate_complex_tests
+                'baddbmm', 'addmv'] + complex_list_filter + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
