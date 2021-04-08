@@ -23,9 +23,21 @@ def _create_expr_c10d_handler(params: RendezvousParameters) -> RendezvousHandler
     return create_handler(backend.store, backend, params)
 
 
+def _create_expr_etcd_handler(params: RendezvousParameters) -> RendezvousHandler:
+    from .etcd_rendezvous_backend import create_backend
+    from .etcd_store import EtcdStore
+
+    backend = create_backend(params)
+
+    store = EtcdStore(backend.client, "/torch/elastic/store")
+
+    return create_handler(store, backend, params)
+
+
 def _register_default_handlers() -> None:
     handler_registry.register("etcd", _create_etcd_handler)
     handler_registry.register("c10d-experimental", _create_expr_c10d_handler)
+    handler_registry.register("etcd-experimental", _create_expr_etcd_handler)
 
 
 # The legacy function kept for backwards compatibility.
