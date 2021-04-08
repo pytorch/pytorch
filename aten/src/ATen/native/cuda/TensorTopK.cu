@@ -219,7 +219,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   }
 
 #define RUN_T(INDEX_T)                                                  \
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "topk_out_cuda", [&] {								      \
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "topk_out_cuda", [&] {								      \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> inputInfo =           \
       at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(input);          \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> topKInfo =            \
@@ -302,12 +302,8 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
     // and so for the double word types,
     // we get "too many resources requested for launch" in the 2048 case
-#if CUDA_VERSION >= 8000
 #if defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_LONG)
     int maxSliceSize = 1024;
-#else
-    int maxSliceSize = 2048;
-#endif
 #else
     int maxSliceSize = 2048;
 #endif
