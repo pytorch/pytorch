@@ -318,10 +318,12 @@ public:
   Vec256<BFloat16> i0e() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    __at_align32__ float tmp1[size() / 2], tmp2[size() / 2];
+    auto sz = size();
+    __at_align32__ float tmp1[sz / 2], tmp2[sz / 2];
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
-    for (int64_t i = 0; i < size() / 2; i++) {
+
+    for (decltype(sz) i = 0; i < sz / 2; i++) {
       tmp1[i] = calc_i0e(tmp1[i]);
       tmp2[i] = calc_i0e(tmp2[i]);
     }
