@@ -33,8 +33,7 @@ class HasRand : public IRVisitor {
 template <typename Node>
 class NodeFinder : public IRVisitor {
  public:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual void visit(const Node* v) override {
+  void visit(const Node* v) override {
     nodes.push_back((Node*)v);
     IRVisitor::visit(v);
   }
@@ -56,8 +55,7 @@ class NodeFinder : public IRVisitor {
 
 class VarFinder : public IRVisitor {
  public:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual void visit(const Var* v) override {
+  void visit(const Var* v) override {
     vars_.insert(v);
     IRVisitor::visit(v);
   }
