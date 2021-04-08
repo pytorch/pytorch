@@ -3048,8 +3048,28 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_macos_arm64_build:
+          name: binary_macos_arm64_wheel_3_9_cpu_nightly_build
+          build_environment: "wheel 3.9 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_macos_arm64_build:
           name: binary_macos_arm64_conda_3_8_cpu_nightly_build
           build_environment: "conda 3.8 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_macos_arm64_build:
+          name: binary_macos_arm64_conda_3_9_cpu_nightly_build
+          build_environment: "conda 3.9 cpu"
           filters:
             branches:
               only:
@@ -6312,10 +6332,38 @@ workflows:
           package_type: wheel
           upload_subfolder: cpu
       - binary_upload:
+          name: binary_macos_arm64_wheel_3_9_cpu_nightly_upload
+          context: org-member
+          requires:
+            - binary_macos_arm64_wheel_3_9_cpu_nightly_build
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: wheel
+          upload_subfolder: cpu
+      - binary_upload:
           name: binary_macos_arm64_conda_3_8_cpu_nightly_upload
           context: org-member
           requires:
             - binary_macos_arm64_conda_3_8_cpu_nightly_build
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cpu
+      - binary_upload:
+          name: binary_macos_arm64_conda_3_9_cpu_nightly_upload
+          context: org-member
+          requires:
+            - binary_macos_arm64_conda_3_9_cpu_nightly_build
           filters:
             branches:
               only:
@@ -6953,6 +7001,9 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-bionic-rocm4.0.1-py3.6"
           image_name: "pytorch-linux-bionic-rocm4.0.1-py3.6"
+      - docker_build_job:
+          name: "docker-pytorch-linux-bionic-rocm4.1-py3.6"
+          image_name: "pytorch-linux-bionic-rocm4.1-py3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           requires:

@@ -32,7 +32,7 @@ Tensor at_op##_quantized_cpu(const Tensor& self, const Scalar& other) { \
 Tensor& at_op##_out_quantized_cpu(const Tensor& self, \
                                 const Tensor& other, Tensor& out) { \
   /* We infer size to make sure the tensors are compatible. */\
-  infer_size(self.sizes(), other.sizes()); \
+  infer_size_dimvector(self.sizes(), other.sizes()); \
   TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \
               "The 'out' tensor must have dtype 'torch.bool'"); \
   auto self_dq = self.dequantize(); \
@@ -41,7 +41,7 @@ Tensor& at_op##_out_quantized_cpu(const Tensor& self, \
 } \
 Tensor at_op##_quantized_cpu(const Tensor& self, const Tensor& other) { \
   /* We infer size to make sure the tensors are compatible. */\
-  infer_size(self.sizes(), other.sizes()); \
+  infer_size_dimvector(self.sizes(), other.sizes()); \
   auto self_dq = self.dequantize(); \
   auto other_dq = other.dequantize(); \
   return at:: at_op(self_dq, other_dq); \

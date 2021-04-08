@@ -344,7 +344,7 @@ The ``__torch_function__`` method takes four arguments: ``func``, a reference
 to the torch API function that is being overridden, ``types``, the list of
 types of Tensor-likes that implement ``__torch_function__``, ``args``, the
 tuple of arguments passed to the function, and ``kwargs``, the dict of keyword
-arguments passed to the function. It uses a global dispatch stable named
+arguments passed to the function. It uses a global dispatch table named
 ``HANDLED_FUNCTIONS`` to store custom implementations. The keys of this
 dictionary are functions in the ``torch`` namespace and the values are
 implementations for ``ScalarTensor``.

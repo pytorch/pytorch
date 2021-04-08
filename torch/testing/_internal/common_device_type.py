@@ -241,10 +241,10 @@ class DeviceTypeTestBase(TestCase):
             # Constructs the test's name
             test_name = _construct_test_name(name, op, cls.device_type, dtype)
 
-            # wraps instantiated test with op decorators
+            # Wraps instantiated test with op decorators
             # NOTE: test_wrapper exists because we don't want to apply
             #   op-specific decorators to the original test.
-            #   Test-sepcific decorators are applied to the original test,
+            #   Test-specific decorators are applied to the original test,
             #   however.
             if op is not None:
                 try:
@@ -408,7 +408,7 @@ def get_device_type_test_bases():
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
-            # skip if sanitizer is enabled
+            # Skip if sanitizer is enabled
             if not TEST_WITH_ASAN and not TEST_WITH_TSAN and not TEST_WITH_UBSAN:
                 test_bases.append(CUDATestBase)
         else:
@@ -486,6 +486,10 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
             continue
         if only_for is not None and base.device_type not in only_for:
             continue
+        # Special-case for ROCm testing -- only test for 'cuda' i.e. ROCm device by default
+        # The except_for and only_for cases were already checked above. At this point we only need to check 'cuda'.
+        if TEST_WITH_ROCM and base.device_type != 'cuda':
+            continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
@@ -537,7 +541,7 @@ class OpDTypes(Enum):
 #   <test_name>(self, device, dtype, op)
 # For example:
 # @ops(unary_ufuncs)
-# test_numerics(self, device, dtype, op):
+# def test_numerics(self, device, dtype, op):
 #   <test_code>
 class ops(object):
     def __init__(self, op_list, *, dtypes: OpDTypes = OpDTypes.basic,
