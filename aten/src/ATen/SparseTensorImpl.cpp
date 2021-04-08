@@ -51,6 +51,7 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
 
   is_non_overlapping_and_dense_ = false;
   set_storage_access_should_throw();
+  set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
 }
 
 void SparseTensorImpl::release_resources() {
@@ -61,9 +62,6 @@ void SparseTensorImpl::release_resources() {
 
 IntArrayRef SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
-}
-bool SparseTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
-  AT_ERROR("sparse tensors do not have is_contiguous");
 }
 int64_t SparseTensorImpl::stride(int64_t d) const {
   AT_ERROR("sparse tensors do not have strides");
