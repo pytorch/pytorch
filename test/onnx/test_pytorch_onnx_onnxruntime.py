@@ -7950,7 +7950,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(module, (x, win_length))
 
     @skipIfUnsupportedMinOpsetVersion(12)
-    @disableScriptTest()    
+    @disableScriptTest()
     def test_tensordot_dim_count(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -7975,7 +7975,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(12)
-    @disableScriptTest()    
+    @disableScriptTest()
     def test_tensordot_dynamic_dim(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
