@@ -42,14 +42,13 @@ class TORCH_API AccessInfo {
       AccessType type,
       const Stmt* stmt,
       const Var* var,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       IndexBounds bounds)
       : id_(id),
         type_(type),
         stmt_(stmt),
         expr_(nullptr),
         var_(var),
-        bounds_(bounds) {}
+        bounds_(std::move(bounds)) {}
 
   AccessInfo(
       size_t id,
@@ -57,14 +56,13 @@ class TORCH_API AccessInfo {
       const Expr* expr,
       const Stmt* stmt,
       const Var* var,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       IndexBounds bounds)
       : id_(id),
         type_(type),
         stmt_(stmt),
         expr_(expr),
         var_(var),
-        bounds_(bounds) {}
+        bounds_(std::move(bounds)) {}
 
   // Id is a unique int representing the order this access occured in the graph.
   size_t id() const {
@@ -184,8 +182,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
       const std::vector<BufHandle>& inputs,
       const std::vector<BufHandle>& outputs);
 
-  // NOLINTNEXTLINE(modernize-use-equals-default,modernize-use-override)
-  virtual ~MemDependencyChecker() {}
+  ~MemDependencyChecker() override = default;
 
   // Whether or not to allow loop execution order to influence dependency
   // calculation. If the loop may later be parallelized you don't want this.
@@ -273,8 +270,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
 
   // An internal struct holding the accesses found within a scope Block.
   struct Scope {
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    Scope(Block* b, std::shared_ptr<Scope> p) : block(b), parent(p) {}
+    Scope(Block* b, std::shared_ptr<Scope> p) : block(b), parent(std::move(p)) {}
 
     Block* block;
     std::shared_ptr<Scope> parent;

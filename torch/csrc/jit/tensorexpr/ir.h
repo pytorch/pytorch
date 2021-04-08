@@ -441,7 +441,7 @@ class TORCH_API Load : public ExprNode<Load> {
   Load(
       Dtype dtype,
       const Buf* base_handle,
-      const std::vector<const Expr*>& indices,
+      std::vector<const Expr*> indices,
       const Expr* mask);
   Load(
       const Buf* base_handle,

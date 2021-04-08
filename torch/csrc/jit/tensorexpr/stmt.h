@@ -775,13 +775,10 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
 
   ExternalCall(
       const Buf* buf,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      const std::string& func_name,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      const std::vector<const Buf*>& buf_args,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      const std::vector<const Expr*>& args)
-      : buf_(buf), func_name_(func_name), buf_args_(buf_args), args_(args) {}
+      std::string func_name,
+      std::vector<const Buf*> buf_args,
+      std::vector<const Expr*> args)
+      : buf_(buf), func_name_(std::move(func_name)), buf_args_(std::move(buf_args)), args_(std::move(args)) {}
 
  private:
   const Buf* buf_;

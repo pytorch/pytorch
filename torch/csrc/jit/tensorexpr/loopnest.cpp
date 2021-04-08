@@ -32,9 +32,8 @@ LoopNest::LoopNest(const LoopNest& other)
 
 LoopNest::LoopNest(
     Stmt* stmt,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    const std::unordered_set<const Buf*>& output_bufs)
-    : root_stmt_(stmt), output_bufs_(output_bufs) {
+    std::unordered_set<const Buf*> output_bufs)
+    : root_stmt_(stmt), output_bufs_(std::move(output_bufs)) {
   verify(root_stmt_);
 }
 

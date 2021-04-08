@@ -406,8 +406,7 @@ class MinTerm : public ExprNode<MinTerm> {
 // Stmt simplification should occur in both modes.
 class TORCH_API IRSimplifierBase : public IRMutator {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default,modernize-use-override)
-  virtual ~IRSimplifierBase() {}
+  ~IRSimplifierBase() override = default;
 
   Stmt* mutate(const Block* v) override;
 
