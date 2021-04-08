@@ -1194,6 +1194,9 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
+    class ScalarComparison(Exception):
+        pass
+
     # Compares x and y
     # TODO: default exact_device to True
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
@@ -1204,16 +1207,20 @@ class TestCase(expecttest.TestCase):
 
         # Tensor x Number and Number x Tensor comparisons
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
+            raise self.ScalarComparison
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
+            raise self.ScalarComparison
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         # Tensor x np.bool
         elif isinstance(x, torch.Tensor) and isinstance(y, np.bool_):
+            raise self.ScalarComparison
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(y, torch.Tensor) and isinstance(x, np.bool_):
+            raise self.ScalarComparison
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
 
@@ -1333,6 +1340,7 @@ class TestCase(expecttest.TestCase):
 
         # Scalar x Scalar
         elif isinstance(x, Number) and isinstance(y, Number):
+            raise self.ScalarComparison
             result, debug_msg_scalars = self._compareScalars(x, y, rtol=rtol, atol=atol,
                                                              equal_nan=equal_nan)
             if not result:
