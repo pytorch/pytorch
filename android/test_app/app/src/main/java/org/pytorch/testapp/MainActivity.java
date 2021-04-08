@@ -17,16 +17,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.FloatBuffer;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-
-import java.util.Map;
-import java.util.HashMap;
-
 import org.pytorch.Device;
 import org.pytorch.IValue;
 import org.pytorch.MemoryFormat;
@@ -140,14 +130,11 @@ public class MainActivity extends AppCompatActivity {
           Tensor.fromBlob(
               mInputTensorBuffer, BuildConfig.INPUT_TENSOR_SHAPE, MemoryFormat.CHANNELS_LAST);
       PyTorchAndroid.setNumThreads(1);
-			Map<String, String> map = new HashMap<>();
-      mModule = Module.load(assetFilePath(this, BuildConfig.MODULE_ASSET_NAME), map, Device.CPU);
-			android.util.Log.i("XXX", "map:" + map);
-			android.util.Log.i("XXX", "map.size():" + map.size());
-      //    BuildConfig.USE_VULKAN_DEVICE
-      //        ? PyTorchAndroid.loadModuleFromAsset(
-      //            getAssets(), BuildConfig.MODULE_ASSET_NAME, Device.VULKAN)
-      //        : PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
+      mModule =
+          BuildConfig.USE_VULKAN_DEVICE
+              ? PyTorchAndroid.loadModuleFromAsset(
+                  getAssets(), BuildConfig.MODULE_ASSET_NAME, Device.VULKAN)
+              : PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
     }
 
     final long startTime = SystemClock.elapsedRealtime();
