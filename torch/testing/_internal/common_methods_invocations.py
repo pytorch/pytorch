@@ -3893,7 +3893,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_trace),
     OpInfo('inner',
-           # Copied from addmm
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
            # BFloat16 support on CUDA requires CUDA 11 and SM53
