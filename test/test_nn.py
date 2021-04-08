@@ -12123,91 +12123,91 @@ class TestNNDeviceType(NNTestCase):
             # forward faces
             front_padding = out[:, :, :pf, pt:-pbt, pl:-pr]
             self.assertEqual(front_padding,
-                             x[:, :, 1:(pf+1), :, :].flip([2]))
+                             x[:, :, 1:(pf + 1), :, :].flip([2]))
             back_padding = out[:, :, -pbk:, pt:-pbt, pl:-pr]
             self.assertEqual(back_padding,
-                             x[:, :, -(pbk+1):-1, :, :].flip([2]))
+                             x[:, :, -(pbk + 1):-1, :, :].flip([2]))
             left_padding = out[:, :, pf:-pbk, pt:-pbt, :pl]
             self.assertEqual(left_padding,
-                             x[:, :, :, :, 1:(pl+1)].flip([4]))
+                             x[:, :, :, :, 1:(pl + 1)].flip([4]))
             right_padding = out[:, :, pf:-pbk, pt:-pbt, -pr:]
             self.assertEqual(right_padding,
-                             x[:, :, :, :, -(pr+1):-1].flip([4]))
+                             x[:, :, :, :, -(pr + 1):-1].flip([4]))
             top_padding = out[:, :, pf:-pbk, :pt, pl:-pr]
             self.assertEqual(top_padding,
-                             x[:, :, :, 1:(pt+1), :].flip([3]))
+                             x[:, :, :, 1:(pt + 1), :].flip([3]))
             bottom_padding = out[:, :, pf:-pbk, -pbt:, pl:-pr]
             self.assertEqual(bottom_padding,
-                             x[:, :, :, -(pbt+1):-1, :].flip([3]))
+                             x[:, :, :, -(pbt + 1):-1, :].flip([3]))
 
             # forward edges
             front_left_padding = out[:, :, :pf, pt:-pbt, :pl]
             self.assertEqual(front_left_padding,
-                             x[:, :, 1:(pf+1), :, 1:(pl+1)].flip([2, 4]))
+                             x[:, :, 1:(pf + 1), :, 1:(pl + 1)].flip([2, 4]))
             front_right_padding = out[:, :, :pf, pt:-pbt, -pr:]
             self.assertEqual(front_right_padding,
-                             x[:, :, 1:(pf+1), :, -(pr+1):-1].flip([2, 4]))
+                             x[:, :, 1:(pf + 1), :, -(pr + 1):-1].flip([2, 4]))
             back_left_padding = out[:, :, -pbk:, pt:-pbt, :pl]
             self.assertEqual(back_left_padding,
-                             x[:, :, -(pbk+1):-1, :, 1:(pl+1)].flip([2, 4]))
+                             x[:, :, -(pbk + 1):-1, :, 1:(pl + 1)].flip([2, 4]))
             back_right_padding = out[:, :, -pbk:, pt:-pbt, -pr:]
             self.assertEqual(back_right_padding,
-                             x[:, :, -(pbk+1):-1, :, -(pr+1):-1].flip([2, 4]))
+                             x[:, :, -(pbk + 1):-1, :, -(pr + 1):-1].flip([2, 4]))
             front_top_padding = out[:, :, :pf, :pt, pl:-pr]
             self.assertEqual(front_top_padding,
-                             x[:, :, 1:(pf+1), 1:(pt+1), :].flip([2, 3]))
+                             x[:, :, 1:(pf + 1), 1:(pt + 1), :].flip([2, 3]))
             front_bottom_padding = out[:, :, :pf, -pbt:, pl:-pr]
             self.assertEqual(front_bottom_padding,
-                             x[:, :, 1:(pf+1), -(pbt+1):-1, :].flip([2, 3]))
+                             x[:, :, 1:(pf + 1), -(pbt + 1):-1, :].flip([2, 3]))
             back_top_padding = out[:, :, -pbk:, :pt, pl:-pr]
             self.assertEqual(back_top_padding,
-                             x[:, :, -(pbk+1):-1, 1:(pt+1), :].flip([2, 3]))
+                             x[:, :, -(pbk + 1):-1, 1:(pt + 1), :].flip([2, 3]))
             back_bottom_padding = out[:, :, -pbk:, -pbt:, pl:-pr]
             self.assertEqual(back_bottom_padding,
-                             x[:, :, -(pbk+1):-1, -(pbt+1):-1, :].flip([2, 3]))
+                             x[:, :, -(pbk + 1):-1, -(pbt + 1):-1, :].flip([2, 3]))
 
             # forward corners
             flt_padding = out[:, :, :pf, :pt, :pl]
             self.assertEqual(flt_padding,
-                             x[:, :, 1:(pf+1), 1:(pt+1), 1:(pl+1)].flip([2, 3, 4]))
+                             x[:, :, 1:(pf + 1), 1:(pt + 1), 1:(pl + 1)].flip([2, 3, 4]))
             frt_padding = out[:, :, :pf, :pt, -pr:]
             self.assertEqual(frt_padding,
-                             x[:, :, 1:(pf+1), 1:(pt+1), -(pr+1):-1].flip([2, 3, 4]))
+                             x[:, :, 1:(pf + 1), 1:(pt + 1), -(pr + 1):-1].flip([2, 3, 4]))
             flbt_padding = out[:, :, :pf, -pbt:, :pl]
             self.assertEqual(flbt_padding,
-                             x[:, :, 1:(pf+1), -(pbt+1):-1, 1:(pl+1)].flip([2, 3, 4]))
+                             x[:, :, 1:(pf + 1), -(pbt + 1):-1, 1:(pl + 1)].flip([2, 3, 4]))
             frbt_padding = out[:, :, :pf, -pbt:, -pr:]
             self.assertEqual(frbt_padding,
-                             x[:, :, 1:(pf+1), -(pbt+1):-1, -(pr+1):-1].flip([2, 3, 4]))
+                             x[:, :, 1:(pf + 1), -(pbt + 1):-1, -(pr + 1):-1].flip([2, 3, 4]))
             bklt_padding = out[:, :, -pbk:, :pt, :pl]
             self.assertEqual(bklt_padding,
-                             x[:, :, -(pbk+1):-1, 1:(pt+1), 1:(pl+1)].flip([2, 3, 4]))
+                             x[:, :, -(pbk + 1):-1, 1:(pt + 1), 1:(pl + 1)].flip([2, 3, 4]))
             bkrt_padding = out[:, :, -pbk:, :pt, -pr:]
             self.assertEqual(bkrt_padding,
-                             x[:, :, -(pbk+1):-1, 1:(pt+1), -(pr+1):-1].flip([2, 3, 4]))
+                             x[:, :, -(pbk + 1):-1, 1:(pt + 1), -(pr + 1):-1].flip([2, 3, 4]))
             bklbt_padding = out[:, :, -pbk:, -pbt:, :pl]
             self.assertEqual(bklbt_padding,
-                             x[:, :, -(pbk+1):-1, -(pbt+1):-1, 1:(pl+1)].flip([2, 3, 4]))
+                             x[:, :, -(pbk + 1):-1, -(pbt + 1):-1, 1:(pl + 1)].flip([2, 3, 4]))
             bkrbt_padding = out[:, :, -pbk:, -pbt:, -pr:]
             self.assertEqual(bkrbt_padding,
-                             x[:, :, -(pbk+1):-1, -(pbt+1):-1, -(pr+1):-1].flip([2, 3, 4]))
+                             x[:, :, -(pbk + 1):-1, -(pbt + 1):-1, -(pr + 1):-1].flip([2, 3, 4]))
 
             # backward
             g = torch.randn_like(out)
             out.backward(g)
             x_grad = torch.empty_like(g).copy_(g)
             # folding front
-            x_grad[:, :, pf+1:2*pf+1, :, :] += x_grad[:, :, :pf, :, :].flip([2])
+            x_grad[:, :, (pf + 1):(2 * pf + 1), :, :] += x_grad[:, :, :pf, :, :].flip([2])
             # folding back
-            x_grad[:, :, -(2*pbk+1):-(pbk+1), :, :] += x_grad[:, :, -pbk:, :, :].flip([2])
+            x_grad[:, :, -(2 * pbk + 1):-(pbk + 1), :, :] += x_grad[:, :, -pbk:, :, :].flip([2])
             # folding top
-            x_grad[:, :, :, pt+1:2*pt+1, :] += x_grad[:, :, :, :pt, :].flip([3])
+            x_grad[:, :, :, (pt + 1):(2 * pt + 1), :] += x_grad[:, :, :, :pt, :].flip([3])
             # folding bottom
-            x_grad[:, :, :, -(2*pbt+1):-(pbt+1), :] += x_grad[:, :, :, -pbt:, :].flip([3])
+            x_grad[:, :, :, -(2 * pbt + 1):-(pbt + 1), :] += x_grad[:, :, :, -pbt:, :].flip([3])
             # folding left
-            x_grad[:, :, :, :, pl+1:2*pl+1] += x_grad[:, :, :, :, :pl].flip([4])
+            x_grad[:, :, :, :, (pl + 1):(2 * pl + 1)] += x_grad[:, :, :, :, :pl].flip([4])
             # folding right
-            x_grad[:, :, :, :, -(2*pr+1):-(pr+1)] += x_grad[:, :, :, :, -pr:].flip([4])
+            x_grad[:, :, :, :, -(2 * pr + 1):-(pr + 1)] += x_grad[:, :, :, :, -pr:].flip([4])
             self.assertEqual(x.grad, x_grad[:, :, pf:-pbk, pt:-pbt, pl:-pr],
                              atol=1e-5, rtol=0)
 

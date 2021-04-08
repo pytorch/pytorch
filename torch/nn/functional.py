@@ -4679,8 +4679,8 @@ def _pad_reflective(input: Tensor, padding: List[int]) -> Tensor:
     for i in range(input.dim() - 2):
         for j in range(2):
             if padding[-2 * (i + 1) + j] >= input.shape[i + 2]:
-                raise RuntimeError(error_msg.format(padding[2 * i],
-                                                    padding[2 * i + 1],
+                raise RuntimeError(error_msg.format(padding[-2 * (i + 1)],
+                                                    padding[-2 * i - 1],
                                                     i + 2,
                                                     input.dim()))
     pad_positive = [(i if i > 0 else 0) for i in padding]
