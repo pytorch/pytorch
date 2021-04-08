@@ -86,9 +86,13 @@ TORCH_API Tensor uniform_(Tensor tensor, double low = 0, double high = 1);
 /// No gradient will be recorded for this operation.
 TORCH_API Tensor kaiming_normal_(
     Tensor tensor,
-    double a = 0,
+    [[deprecated("Use gain parameter in combination with"
+      "`torch::nn::init::calculate_gain` instead.")]] double a = 0,
     FanModeType mode = torch::kFanIn,
-    NonlinearityType nonlinearity = torch::kLeakyReLU);
+    [[deprecated("Use gain parameter in combination with"
+      "`torch::nn::init::calculate_gain` instead.")]]
+    NonlinearityType nonlinearity = torch::kLeakyReLU,
+    double gain = M_SQRT2);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Delving deep into rectifiers: Surpassing human-level
@@ -97,9 +101,13 @@ TORCH_API Tensor kaiming_normal_(
 /// No gradient will be recorded for this operation.
 TORCH_API Tensor kaiming_uniform_(
     Tensor tensor,
-    double a = 0,
+    [[deprecated("Use gain parameter in combination with"
+      "`torch::nn::init::calculate_gain` instead.")]] double a = 0,
     FanModeType mode = torch::kFanIn,
-    NonlinearityType nonlinearity = torch::kLeakyReLU);
+    [[deprecated("Use gain parameter in combination with"
+      "`torch::nn::init::calculate_gain` instead.")]]
+    NonlinearityType nonlinearity = torch::kLeakyReLU,
+    double gain = M_SQRT2);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Understanding the difficulty of training deep feedforward

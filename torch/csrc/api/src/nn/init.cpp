@@ -37,12 +37,10 @@ struct Fan {
 
 double calculate_kaiming_std(
     Tensor tensor,
-    double a,
     FanModeType mode,
-    NonlinearityType nonlinearity) {
+    double gain) {
   NoGradGuard guard;
   Fan fan(tensor);
-  const auto gain = calculate_gain(nonlinearity, a);
   double std = 0.0;
 
   if (c10::get_if<enumtype::kFanIn>(&mode)) {
@@ -180,9 +178,15 @@ Tensor kaiming_uniform_(
     Tensor tensor,
     double a,
     FanModeType mode,
-    NonlinearityType nonlinearity) {
+    NonlinearityType nonlinearity,
+    double gain) {
   NoGradGuard guard;
-  auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
+  if (!c10::get_if<enumtype::kLeakyReLU>(&nonlinearity))
+    gain = calculate_gain(nonlinearity, a);
+  else if (a != 0)
+    gain = calculate_gain(torch::kLeakyReLU, a);
+
+  auto std = calculate_kaiming_std(tensor, mode, gain);
   // Calculate uniform bounds from standard deviation
   const auto bound = std::sqrt(3.0) * std;
   return tensor.uniform_(-bound, bound);
@@ -192,10 +196,15 @@ Tensor kaiming_normal_(
     Tensor tensor,
     double a,
     FanModeType mode,
-    NonlinearityType nonlinearity) {
+    NonlinearityType nonlinearity,
+    double gain) {
   NoGradGuard guard;
+  if (!c10::get_if<enumtype::kLeakyReLU>(&nonlinearity))
+    gain = calculate_gain(nonlinearity, a);
+  else if (a != 0)
+    gain = calculate_gain(torch::kLeakyReLU, a);
 
-  auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
+  auto std = calculate_kaiming_std(tensor, mode, gain);
   return tensor.normal_(0, std);
 }
 
