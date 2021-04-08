@@ -1,6 +1,7 @@
 from io import BytesIO
 
 from torch.package import (
+    Importer,
     OrderedImporter,
     PackageExporter,
     PackageImporter,
@@ -83,6 +84,32 @@ class TestImporter(PackageTestCase):
             ordered_importer_package_first.import_module("package_a"),
             importer.import_module("package_a"),
         )
+
+    def test_ordered_importer_whichmodule(self):
+        """OrderedImporter's implementation of whichmodule should try each
+        underlying importer's whichmodule in order.
+        """
+
+        class DummyImporter(Importer):
+            def __init__(self, whichmodule_return):
+                self._whichmodule_return = whichmodule_return
+
+            def import_module(self, module_name):
+                raise NotImplementedError()
+
+            def whichmodule(self, obj, name):
+                return self._whichmodule_return
+
+        class DummyClass:
+            pass
+
+        dummy_importer_foo = DummyImporter("foo")
+        dummy_importer_bar = DummyImporter("bar")
+        foo_then_bar = OrderedImporter(dummy_importer_foo, dummy_importer_bar)
+        self.assertEqual(foo_then_bar.whichmodule(DummyClass(), ""), "foo")
+
+        bar_then_foo = OrderedImporter(dummy_importer_bar, dummy_importer_foo)
+        self.assertEqual(bar_then_foo.whichmodule(DummyClass(), ""), "bar")
 
 
 if __name__ == "__main__":
