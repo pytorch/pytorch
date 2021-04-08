@@ -498,6 +498,7 @@ filegroup(
         "aten/src/ATen/native/cuda/Repeat.cu.cc",
         "aten/src/ATen/native/cuda/ReplicationPadding.cu.cc",
         "aten/src/ATen/native/cuda/Resize.cu.cc",
+        "aten/src/ATen/native/cuda/SegmentReduce.cu.cc",
         "aten/src/ATen/native/cuda/SoftMax.cu.cc",
         "aten/src/ATen/native/cuda/SortingKthValue.cu.cc",
         "aten/src/ATen/native/cuda/SparseMM.cu.cc",
