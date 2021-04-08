@@ -227,6 +227,29 @@ inline C10_HOST_DEVICE BFloat16 operator/(int64_t a, BFloat16 b) {
   return static_cast<BFloat16>(a) / b;
 }
 
+// Overloading < and > operators, because std::max abd std::min use them.
+// BFloat16 is implicitly converted during comparison with floating types,
+// so overloading isn't required for them.
+template<typename dtype, std::enable_if_t<!(std::is_floating_point<dtype>::value), bool>>
+inline C10_HOST_DEVICE bool operator>(BFloat16& lhs, dtype& rhs) {
+  return float(lhs) > float(rhs);
+}
+
+template<typename dtype, std::enable_if_t<!(std::is_floating_point<dtype>::value), bool>>
+inline C10_HOST_DEVICE bool operator<(BFloat16& lhs, dtype& rhs) {
+  return float(lhs) < float(rhs);
+}
+
+template<typename dtype, std::enable_if_t<!(std::is_floating_point<dtype>::value), bool>>
+inline C10_HOST_DEVICE bool operator>(dtype& lhs, BFloat16& rhs) {
+  return float(lhs) > float(rhs);
+}
+
+template<typename dtype, std::enable_if_t<!(std::is_floating_point<dtype>::value), bool>>
+inline C10_HOST_DEVICE bool operator<(dtype& lhs, BFloat16& rhs) {
+  return float(lhs) < float(rhs);
+}
+
 } // namespace c10
 
 namespace std {
