@@ -161,7 +161,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          fetch-depth: 2 # to allow us to use github.event.pull_request.head.sha
+          fetch-depth: 0 # to allow tools/clang_tidy.py to do its thing
       - name: Prepare output dir with HEAD commit SHA
         run: |
           mkdir clang-tidy-output
