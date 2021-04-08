@@ -8,7 +8,14 @@
 #include <c10/util/Flags.h>
 #include <stdexcept>
 
-C10_DEFINE_bool(torch_jit_enable_cpu_fusion, false, "enable cpu fusion");
+C10_DEFINE_bool(
+    torch_jit_enable_cpu_fusion,
+#ifdef FBCODE_CAFFE2
+    true,
+#else
+    false,
+#endif
+    "enable cpu fusion");
 
 namespace torch {
 namespace jit {
