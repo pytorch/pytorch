@@ -148,8 +148,14 @@ void ListenThread::run() {
   while (!finished) {
     // Check control and exit early if triggered
     int res;
+    LOG(ERROR) << "poll()";
     SYSCHECK_ERR_RETURN_NEG1(
         res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count()))
+    LOG(ERROR) << res;
+    if (res == SOCKET_ERROR) {
+      int err = WSAGetLastError();
+      LOG(ERROR) << err;
+    }
     if (res == 0) {
       auto rv = WaitForSingleObject(ghStopEvent_, 0);
       if (rv != WAIT_TIMEOUT) {
@@ -215,6 +221,23 @@ TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket)
   LOG(ERROR) << "finish TCPStoreDaemon()";
 }
 
+void TCPStoreDaemon::cleanUpSockets(std::unordered_map<std::string, std::vector<int>>& socketMap, int fd) {
+  for (auto it = socketMap.begin(); it != socketMap.end();) {
+    for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
+      if (*vecIt == fd) {
+        vecIt = it->second.erase(vecIt);
+      } else {
+        ++vecIt;
+      }
+    }
+    if (it->second.size() == 0) {
+      it = socketMap.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
 void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {
   // Skipping the fds[0] and fds[1],
   // fds[0] is master's listening socket
@@ -238,34 +261,8 @@ void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {
       tcputil::closeSocket(fds[fdIdx].fd);
 
       // Remove all the tracking state of the close FD
-      for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
-        for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
-          if (*vecIt == fds[fdIdx].fd) {
-            vecIt = it->second.erase(vecIt);
-          } else {
-            ++vecIt;
-          }
-        }
-        if (it->second.size() == 0) {
-          it = waitingSockets_.erase(it);
-        } else {
-          ++it;
-        }
-      }
-      for (auto it = watchedSockets_.begin(); it != watchedSockets_.end();) {
-        for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
-          if (*vecIt == fds[fdIdx].fd) {
-            vecIt = it->second.erase(vecIt);
-          } else {
-            ++vecIt;
-          }
-        }
-        if (it->second.size() == 0) {
-          it = watchedSockets_.erase(it);
-        } else {
-          ++it;
-        }
-      }
+      cleanUpSockets(waitingSockets_, fds[fdIdx].fd);
+      cleanUpSockets(watchedSockets_, fds[fdIdx].fd);
       for (auto it = keysAwaited_.begin(); it != keysAwaited_.end();) {
         if (it->first == fds[fdIdx].fd) {
           it = keysAwaited_.erase(it);

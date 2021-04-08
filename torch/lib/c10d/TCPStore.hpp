@@ -70,6 +70,9 @@ class TCPStoreDaemon : public BackgroundThread {
   std::unordered_map<int, size_t> keysAwaited_;
   // From key -> the list of sockets waiting on it
   std::unordered_map<std::string, std::vector<int>> watchedSockets_;
+
+private:
+  void cleanUpSockets(std::unordered_map<std::string, std::vector<int>>& socketMap, int fd);
 };
 
 // Listener thread runs on all processes

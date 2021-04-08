@@ -212,7 +212,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   // Check number of callbacks executed equal to number of key change operations
   EXPECT_EQ(keyChangeOperationCount, numCallbacksExecuted);
 
-  // Test the correctness of new_value and 
+  // Test the correctness of new_value and old_value
   std::function<void(std::string, std::string)> checkCallback1 =
     [](const std::string& old_value, const std::string& new_value) {
           EXPECT_EQ("val1", old_value);
