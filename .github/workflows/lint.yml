@@ -122,7 +122,10 @@ jobs:
           pip install -r requirements-flake8.txt
           flake8 --version
           flake8 | tee ${GITHUB_WORKSPACE}/flake8-output.txt
-
+          cp flake8-output.txt flake8-output/annotations.json
+      - name: Translate annotations
+        if: github.event_name == 'pull_request'
+        run: |
           tools/translate_annotations.py \
             --file=flake8-output.txt \
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
