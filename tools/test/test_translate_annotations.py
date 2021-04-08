@@ -31,7 +31,7 @@ index 635ef2c..5af88a8 100644
 
 sparser_diff = '''
 diff --git a/foo.txt b/bar.txt
-index 4563fd8..6fae323 100644
+index 27a6dad..6fae323 100644
 --- a/foo.txt
 +++ b/bar.txt
 @@ -4,3 +4,2 @@ lines
@@ -40,6 +40,9 @@ index 4563fd8..6fae323 100644
 -lines
 +A change!!
 +Wow
+@@ -10,2 +8,0 @@ more lines
+-even more
+-even more
 '''.lstrip()
 
 
@@ -116,9 +119,11 @@ class TestTranslateAnnotations(unittest.TestCase):
         self.assertEqual(translate(diff, 5), None)
         self.assertEqual(translate(diff, 6), 7)
         self.assertEqual(translate(diff, 7), 8)
-        self.assertEqual(translate(diff, 8), 9)
-        self.assertEqual(translate(diff, 9), 10)
-        self.assertEqual(translate(diff, 10), 11)
+        self.assertEqual(translate(diff, 8), 9)  # don't get caught here
+        self.assertEqual(translate(diff, 9), 12)
+        self.assertEqual(translate(diff, 10), 13)
+        self.assertEqual(translate(diff, 11), 14)
+        self.assertEqual(translate(diff, 12), 15)
 
     def test_foo(self) -> None:
         self.assertEqual(

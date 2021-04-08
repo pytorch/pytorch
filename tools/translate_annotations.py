@@ -81,10 +81,17 @@ def translate(diff: Diff, line_number: int) -> Optional[int]:
 
     keyified = KeyifyList(hunks, lambda hunk: hunk['new_start'])
     i = bisect_right(cast(Sequence[int], keyified), line_number)
-    if i < 1:
-        return line_number
 
-    hunk = hunks[i - 1]
+    while True:
+        if i < 1:
+            return line_number
+
+        hunk = hunks[i - 1]
+
+        if line_number > hunk['new_start'] or hunk['new_count'] > 0:
+            break
+        i -= 1
+
     d = line_number - (hunk['new_start'] + (hunk['new_count'] or 1))
     return None if d < 0 else hunk['old_start'] + (hunk['old_count'] or 1) + d
 
