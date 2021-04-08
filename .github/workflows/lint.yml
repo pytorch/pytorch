@@ -135,8 +135,10 @@ jobs:
           tools/translate_annotations.py \
             --file=flake8-output.txt \
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
-            --commit=${{ github.event.pull_request.head.sha }} \
+            --commit="$HEAD_SHA" \
             > flake8-output/annotations.json
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
@@ -244,10 +246,11 @@ jobs:
           tools/translate_annotations.py \
             --file=clang-tidy-output.txt \
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
-            --commit=${{ github.event.pull_request.head.sha }} \
+            --commit="$HEAD_SHA" \
             > clang-tidy-output/annotations.json
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
