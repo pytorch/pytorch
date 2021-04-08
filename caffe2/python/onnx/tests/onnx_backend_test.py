@@ -142,6 +142,16 @@ backend_test.exclude('(test_if_.*'  # added support for sequence type inputs
                      '|test_unsqueeze_.*'  # axes is now an input (not attr)
                      '|test_MaxPool1d_stride_padding_dilation_.*'
                      '|test_MaxPool2d_stride_padding_dilation_.*'
+                     '|test_add_uint8_.*' # skip in opset 14
+                     '|test_conv_with_autopad_same_.*' # skip in opset 14
+                     '|test_div_uint8_.*' # skip in opset 14
+                     '|test_hardswish_.*' # skip in opset 14
+                     '|test_identity_sequence_.*' # skip in opset 14
+                     '|test_mul_uint8_.*' # skip in opset 14
+                     '|test_reshape_allowzero_reordered_.*' # skip in opset 14
+                     '|test_sub_uint8_.*' # skip in opset 14
+                     '|test_tril_.*' # skip in opset 14
+                     '|test_triu_.*' # skip in opset 14   
                      ')')
 
 # Skip vgg to speed up CI
