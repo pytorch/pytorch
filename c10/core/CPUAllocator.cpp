@@ -45,8 +45,9 @@ void* alloc_cpu(size_t nbytes) {
   // We might have clowny upstream code that tries to alloc a negative number
   // of bytes. Let's catch it early.
   CAFFE_ENFORCE(
-    ((ptrdiff_t)nbytes) >= 0,
-    "alloc_cpu() seems to have been called with negative number: ", nbytes);
+      ((ptrdiff_t)nbytes) >= 0,
+      "alloc_cpu() seems to have been called with negative number: ",
+      nbytes);
 
   void* data;
 #ifdef __ANDROID__
@@ -71,14 +72,14 @@ void* alloc_cpu(size_t nbytes) {
       data,
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
       nbytes,
-      " bytes. Buy new RAM!");
+      " bytes.");
 
   // move data to a thread's NUMA node
   NUMAMove(data, nbytes, GetCurrentNUMANode());
   CHECK(
       !FLAGS_caffe2_cpu_allocator_do_zero_fill ||
       !FLAGS_caffe2_cpu_allocator_do_junk_fill)
-    << "Cannot request both zero-fill and junk-fill at the same time";
+      << "Cannot request both zero-fill and junk-fill at the same time";
   if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
     memset(data, 0, nbytes);
   } else if (FLAGS_caffe2_cpu_allocator_do_junk_fill) {
@@ -291,18 +292,42 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
       allocated = allocated_;
       nbytes = it->second;
       size_table_.erase(it);
+    } else {
+      C10_LOG_EVERY_MS(WARNING, 1000)
+          << "Memory block of unknown size was allocated before the profiling started, "
+          << "profiler results will not include the deallocation event";
     }
   }
   if (nbytes == 0) {
     return;
   }
   if (FLAGS_caffe2_report_cpu_memory_usage) {
-    LOG(INFO) << "C10 deleted " << nbytes << " bytes, total alloc "
-              << allocated << " bytes.";
+    LOG(INFO) << "C10 deleted " << nbytes << " bytes, total alloc " << allocated
+              << " bytes.";
   }
   if (profile_memory) {
-    reportMemoryUsageToProfiler(ptr, -nbytes, c10::Device(c10::DeviceType::CPU));
+    reportMemoryUsageToProfiler(
+        ptr, -nbytes, c10::Device(c10::DeviceType::CPU));
   }
+}
+
+C10_API at::Allocator* cpu_caching_alloc = nullptr;
+C10_API uint8_t cpu_caching_alloc_priority = 0;
+
+void SetCPUCachingAllocator(Allocator* alloc, uint8_t priority) {
+  if (priority >= cpu_caching_alloc_priority) {
+    cpu_caching_alloc = alloc;
+    cpu_caching_alloc_priority = priority;
+  }
+}
+
+Allocator* GetCPUCachingAllocator() {
+  if (cpu_caching_alloc == nullptr) {
+    VLOG(1)
+        << "There is not caching allocator registered for CPU, use the default allocator instead.";
+    return GetAllocator(DeviceType::CPU);
+  }
+  return cpu_caching_alloc;
 }
 
 } // namespace c10

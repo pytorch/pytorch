@@ -38,8 +38,8 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
       const std::vector<int64_t>& padding,
       const std::vector<int64_t>& dilation,
       int64_t groups,
-      c10::optional<Scalar> output_min,
-      c10::optional<Scalar> output_max)
+      const c10::optional<Scalar>& output_min,
+      const c10::optional<Scalar>& output_max)
       : weight(std::move(weight)),
         bias(std::move(bias)),
         stride(stride),

@@ -44,6 +44,10 @@ Tensor qnnpack_sigmoid(
     std::numeric_limits<uint8_t>::max() /* output max */,
     0 /* flags */,
     &sigmoid_op);
+
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+      qnnpack_uniq_ptr(sigmoid_op);
+
   TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
                         "failed to create QNNPACK sigmoid operator");
   qy = at::_empty_affine_quantized(

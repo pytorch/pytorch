@@ -47,10 +47,10 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_param: "2_0"
+            dim_value: 6
           }
           dim {
-            dim_param: "2_1"
+            dim_value: 10
           }
         }
       }

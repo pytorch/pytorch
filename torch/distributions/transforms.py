@@ -1,24 +1,30 @@
+import functools
 import math
 import numbers
+import operator
 import weakref
+from typing import List
 
 import torch
 import torch.nn.functional as F
 from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
-                                       lazy_property)
+                                       lazy_property, tril_matrix_to_vec,
+                                       vec_to_tril_matrix)
 from torch.nn.functional import pad
 from torch.nn.functional import softplus
-from typing import List
 
 __all__ = [
     'AbsTransform',
     'AffineTransform',
     'CatTransform',
     'ComposeTransform',
+    'CorrCholeskyTransform',
     'ExpTransform',
+    'IndependentTransform',
     'LowerCholeskyTransform',
     'PowerTransform',
+    'ReshapeTransform',
     'SigmoidTransform',
     'TanhTransform',
     'SoftmaxTransform',
@@ -72,14 +78,10 @@ class Transform(object):
         sign (int or Tensor): For bijective univariate transforms, this
             should be +1 or -1 depending on whether transform is monotone
             increasing or decreasing.
-        event_dim (int): Number of dimensions that are correlated together in
-            the transform ``event_shape``. This should be 0 for pointwise
-            transforms, 1 for transforms that act jointly on vectors, 2 for
-            transforms that act jointly on matrices, etc.
     """
     bijective = False
+    domain: constraints.Constraint
     codomain: constraints.Constraint
-    event_dim = 0
 
     def __init__(self, cache_size=0):
         self._cache_size = cache_size
@@ -91,6 +93,12 @@ class Transform(object):
         else:
             raise ValueError('cache_size must be 0 or 1')
         super(Transform, self).__init__()
+
+    @property
+    def event_dim(self):
+        if self.domain.event_dim == self.codomain.event_dim:
+            return self.domain.event_dim
+        raise ValueError("Please use either .domain.event_dim or .codomain.event_dim")
 
     @property
     def inv(self):
@@ -175,22 +183,36 @@ class Transform(object):
     def __repr__(self):
         return self.__class__.__name__ + '()'
 
+    def forward_shape(self, shape):
+        """
+        Infers the shape of the forward computation, given the input shape.
+        Defaults to preserving shape.
+        """
+        return shape
+
+    def inverse_shape(self, shape):
+        """
+        Infers the shapes of the inverse computation, given the output shape.
+        Defaults to preserving shape.
+        """
+        return shape
+
 
 class _InverseTransform(Transform):
     """
     Inverts a single :class:`Transform`.
     This class is private; please instead use the ``Transform.inv`` property.
     """
-    def __init__(self, transform):
+    def __init__(self, transform: Transform):
         super(_InverseTransform, self).__init__(cache_size=transform._cache_size)
-        self._inv = transform
+        self._inv: Transform = transform
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False)
     def domain(self):
         assert self._inv is not None
         return self._inv.codomain
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False)
     def codomain(self):
         assert self._inv is not None
         return self._inv.domain
@@ -206,11 +228,6 @@ class _InverseTransform(Transform):
         return self._inv.sign
 
     @property
-    def event_dim(self):
-        assert self._inv is not None
-        return self._inv.event_dim
-
-    @property
     def inv(self):
         return self._inv
 
@@ -224,6 +241,9 @@ class _InverseTransform(Transform):
         assert self._inv is not None
         return self._inv == other._inv
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}({repr(self._inv)})"
+
     def __call__(self, x):
         assert self._inv is not None
         return self._inv._inv_call(x)
@@ -231,6 +251,12 @@ class _InverseTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         assert self._inv is not None
         return -self._inv.log_abs_det_jacobian(y, x)
+
+    def forward_shape(self, shape):
+        return self._inv.inverse_shape(shape)
+
+    def inverse_shape(self, shape):
+        return self._inv.forward_shape(shape)
 
 
 class ComposeTransform(Transform):
@@ -243,7 +269,7 @@ class ComposeTransform(Transform):
         cache_size (int): Size of cache. If zero, no caching is done. If one,
             the latest single value is cached. Only 0 and 1 are supported.
     """
-    def __init__(self, parts, cache_size=0):
+    def __init__(self, parts: List[Transform], cache_size=0):
         if cache_size:
             parts = [part.with_cache(cache_size) for part in parts]
         super(ComposeTransform, self).__init__(cache_size=cache_size)
@@ -254,17 +280,35 @@ class ComposeTransform(Transform):
             return False
         return self.parts == other.parts
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False)
     def domain(self):
         if not self.parts:
             return constraints.real
-        return self.parts[0].domain
+        domain = self.parts[0].domain
+        # Adjust event_dim to be maximum among all parts.
+        event_dim = self.parts[-1].codomain.event_dim
+        for part in reversed(self.parts):
+            event_dim += part.domain.event_dim - part.codomain.event_dim
+            event_dim = max(event_dim, part.domain.event_dim)
+        assert event_dim >= domain.event_dim
+        if event_dim > domain.event_dim:
+            domain = constraints.independent(domain, event_dim - domain.event_dim)
+        return domain
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False)
     def codomain(self):
         if not self.parts:
             return constraints.real
-        return self.parts[-1].codomain
+        codomain = self.parts[-1].codomain
+        # Adjust event_dim to be maximum among all parts.
+        event_dim = self.parts[0].domain.event_dim
+        for part in self.parts:
+            event_dim += part.codomain.event_dim - part.domain.event_dim
+            event_dim = max(event_dim, part.codomain.event_dim)
+        assert event_dim >= codomain.event_dim
+        if event_dim > codomain.event_dim:
+            codomain = constraints.independent(codomain, event_dim - codomain.event_dim)
+        return codomain
 
     @lazy_property
     def bijective(self):
@@ -276,10 +320,6 @@ class ComposeTransform(Transform):
         for p in self.parts:
             sign = sign * p.sign
         return sign
-
-    @lazy_property
-    def event_dim(self):
-        return max(p.event_dim for p in self.parts) if self.parts else 0
 
     @property
     def inv(self):
@@ -305,16 +345,30 @@ class ComposeTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         if not self.parts:
             return torch.zeros_like(x)
-        result = 0
+
+        # Compute intermediates. This will be free if parts[:-1] are all cached.
+        xs = [x]
         for part in self.parts[:-1]:
-            y_tmp = part(x)
-            result = result + _sum_rightmost(part.log_abs_det_jacobian(x, y_tmp),
-                                             self.event_dim - part.event_dim)
-            x = y_tmp
-        part = self.parts[-1]
-        result = result + _sum_rightmost(part.log_abs_det_jacobian(x, y),
-                                         self.event_dim - part.event_dim)
-        return result
+            xs.append(part(xs[-1]))
+        xs.append(y)
+
+        terms = []
+        event_dim = self.domain.event_dim
+        for part, x, y in zip(self.parts, xs[:-1], xs[1:]):
+            terms.append(_sum_rightmost(part.log_abs_det_jacobian(x, y),
+                                        event_dim - part.domain.event_dim))
+            event_dim += part.codomain.event_dim - part.domain.event_dim
+        return functools.reduce(operator.add, terms)
+
+    def forward_shape(self, shape):
+        for part in self.parts:
+            shape = part.forward_shape(shape)
+        return shape
+
+    def inverse_shape(self, shape):
+        for part in reversed(self.parts):
+            shape = part.inverse_shape(shape)
+        return shape
 
     def __repr__(self):
         fmt_string = self.__class__.__name__ + '(\n    '
@@ -324,6 +378,136 @@ class ComposeTransform(Transform):
 
 
 identity_transform = ComposeTransform([])
+
+
+class IndependentTransform(Transform):
+    """
+    Wrapper around another transform to treat
+    ``reinterpreted_batch_ndims``-many extra of the right most dimensions as
+    dependent. This has no effect on the forward or backward transforms, but
+    does sum out ``reinterpreted_batch_ndims``-many of the rightmost dimensions
+    in :meth:`log_abs_det_jacobian`.
+
+    Args:
+        base_transform (:class:`Transform`): A base transform.
+        reinterpreted_batch_ndims (int): The number of extra rightmost
+            dimensions to treat as dependent.
+    """
+    def __init__(self, base_transform, reinterpreted_batch_ndims, cache_size=0):
+        super().__init__(cache_size=cache_size)
+        self.base_transform = base_transform.with_cache(cache_size)
+        self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
+
+    def with_cache(self, cache_size=1):
+        if self._cache_size == cache_size:
+            return self
+        return IndependentTransform(self.base_transform,
+                                    self.reinterpreted_batch_ndims,
+                                    cache_size=cache_size)
+
+    @constraints.dependent_property(is_discrete=False)
+    def domain(self):
+        return constraints.independent(self.base_transform.domain,
+                                       self.reinterpreted_batch_ndims)
+
+    @constraints.dependent_property(is_discrete=False)
+    def codomain(self):
+        return constraints.independent(self.base_transform.codomain,
+                                       self.reinterpreted_batch_ndims)
+
+    @property
+    def bijective(self):
+        return self.base_transform.bijective
+
+    @property
+    def sign(self):
+        return self.base_transform.sign
+
+    def _call(self, x):
+        if x.dim() < self.domain.event_dim:
+            raise ValueError("Too few dimensions on input")
+        return self.base_transform(x)
+
+    def _inverse(self, y):
+        if y.dim() < self.codomain.event_dim:
+            raise ValueError("Too few dimensions on input")
+        return self.base_transform.inv(y)
+
+    def log_abs_det_jacobian(self, x, y):
+        result = self.base_transform.log_abs_det_jacobian(x, y)
+        result = _sum_rightmost(result, self.reinterpreted_batch_ndims)
+        return result
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({repr(self.base_transform)}, {self.reinterpreted_batch_ndims})"
+
+    def forward_shape(self, shape):
+        return self.base_transform.forward_shape(shape)
+
+    def inverse_shape(self, shape):
+        return self.base_transform.inverse_shape(shape)
+
+
+class ReshapeTransform(Transform):
+    """
+    Unit Jacobian transform to reshape the rightmost part of a tensor.
+
+    Note that ``in_shape`` and ``out_shape`` must have the same number of
+    elements, just as for :meth:`torch.Tensor.reshape`.
+
+    Arguments:
+        in_shape (torch.Size): The input event shape.
+        out_shape (torch.Size): The output event shape.
+    """
+    bijective = True
+
+    def __init__(self, in_shape, out_shape, cache_size=0):
+        self.in_shape = torch.Size(in_shape)
+        self.out_shape = torch.Size(out_shape)
+        if self.in_shape.numel() != self.out_shape.numel():
+            raise ValueError("in_shape, out_shape have different numbers of elements")
+        super().__init__(cache_size=cache_size)
+
+    @constraints.dependent_property
+    def domain(self):
+        return constraints.independent(constraints.real, len(self.in_shape))
+
+    @constraints.dependent_property
+    def codomain(self):
+        return constraints.independent(constraints.real, len(self.out_shape))
+
+    def with_cache(self, cache_size=1):
+        if self._cache_size == cache_size:
+            return self
+        return ReshapeTransform(self.in_shape, self.out_shape, cache_size=cache_size)
+
+    def _call(self, x):
+        batch_shape = x.shape[:x.dim() - len(self.in_shape)]
+        return x.reshape(batch_shape + self.out_shape)
+
+    def _inverse(self, y):
+        batch_shape = y.shape[:y.dim() - len(self.out_shape)]
+        return y.reshape(batch_shape + self.in_shape)
+
+    def log_abs_det_jacobian(self, x, y):
+        batch_shape = x.shape[:x.dim() - len(self.in_shape)]
+        return x.new_zeros(batch_shape)
+
+    def forward_shape(self, shape):
+        if len(shape) < len(self.in_shape):
+            raise ValueError("Too few dimensions on input")
+        cut = len(shape) - len(self.in_shape)
+        if shape[cut:] != self.in_shape:
+            raise ValueError("Shape mismatch: expected {} but got {}".format(shape[cut:], self.in_shape))
+        return shape[:cut] + self.out_shape
+
+    def inverse_shape(self, shape):
+        if len(shape) < len(self.out_shape):
+            raise ValueError("Too few dimensions on input")
+        cut = len(shape) - len(self.out_shape)
+        if shape[cut:] != self.out_shape:
+            raise ValueError("Shape mismatch: expected {} but got {}".format(shape[cut:], self.out_shape))
+        return shape[:cut] + self.in_shape
 
 
 class ExpTransform(Transform):
@@ -379,6 +563,12 @@ class PowerTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         return (self.exponent * y / x).abs().log()
+
+    def forward_shape(self, shape):
+        return torch.broadcast_shapes(shape, getattr(self.exponent, "shape", ()))
+
+    def inverse_shape(self, shape):
+        return torch.broadcast_shapes(shape, getattr(self.exponent, "shape", ()))
 
 
 def _clipped_sigmoid(x):
@@ -474,15 +664,29 @@ class AffineTransform(Transform):
             for univariate random variables, 1 for distributions over vectors,
             2 for distributions over matrices, etc.
     """
-    domain = constraints.real
-    codomain = constraints.real
     bijective = True
 
     def __init__(self, loc, scale, event_dim=0, cache_size=0):
         super(AffineTransform, self).__init__(cache_size=cache_size)
         self.loc = loc
         self.scale = scale
-        self.event_dim = event_dim
+        self._event_dim = event_dim
+
+    @property
+    def event_dim(self):
+        return self._event_dim
+
+    @constraints.dependent_property(is_discrete=False)
+    def domain(self):
+        if self.event_dim == 0:
+            return constraints.real
+        return constraints.independent(constraints.real, self.event_dim)
+
+    @constraints.dependent_property(is_discrete=False)
+    def codomain(self):
+        if self.event_dim == 0:
+            return constraints.real
+        return constraints.independent(constraints.real, self.event_dim)
 
     def with_cache(self, cache_size=1):
         if self._cache_size == cache_size:
@@ -534,6 +738,98 @@ class AffineTransform(Transform):
             shape = shape[:-self.event_dim]
         return result.expand(shape)
 
+    def forward_shape(self, shape):
+        return torch.broadcast_shapes(shape,
+                                      getattr(self.loc, "shape", ()),
+                                      getattr(self.scale, "shape", ()))
+
+    def inverse_shape(self, shape):
+        return torch.broadcast_shapes(shape,
+                                      getattr(self.loc, "shape", ()),
+                                      getattr(self.scale, "shape", ()))
+
+
+class CorrCholeskyTransform(Transform):
+    r"""
+    Transforms an uncontrained real vector :math:`x` with length :math:`D*(D-1)/2` into the
+    Cholesky factor of a D-dimension correlation matrix. This Cholesky factor is a lower
+    triangular matrix with positive diagonals and unit Euclidean norm for each row.
+    The transform is processed as follows:
+
+        1. First we convert x into a lower triangular matrix in row order.
+        2. For each row :math:`X_i` of the lower triangular part, we apply a *signed* version of
+           class :class:`StickBreakingTransform` to transform :math:`X_i` into a
+           unit Euclidean length vector using the following steps:
+           - Scales into the interval :math:`(-1, 1)` domain: :math:`r_i = \tanh(X_i)`.
+           - Transforms into an unsigned domain: :math:`z_i = r_i^2`.
+           - Applies :math:`s_i = StickBreakingTransform(z_i)`.
+           - Transforms back into signed domain: :math:`y_i = sign(r_i) * \sqrt{s_i}`.
+    """
+    domain = constraints.real_vector
+    codomain = constraints.corr_cholesky
+    bijective = True
+
+    def _call(self, x):
+        x = torch.tanh(x)
+        eps = torch.finfo(x.dtype).eps
+        x = x.clamp(min=-1 + eps, max=1 - eps)
+        r = vec_to_tril_matrix(x, diag=-1)
+        # apply stick-breaking on the squared values
+        # Note that y = sign(r) * sqrt(z * z1m_cumprod)
+        #             = (sign(r) * sqrt(z)) * sqrt(z1m_cumprod) = r * sqrt(z1m_cumprod)
+        z = r ** 2
+        z1m_cumprod_sqrt = (1 - z).sqrt().cumprod(-1)
+        # Diagonal elements must be 1.
+        r = r + torch.eye(r.shape[-1], dtype=r.dtype, device=r.device)
+        y = r * pad(z1m_cumprod_sqrt[..., :-1], [1, 0], value=1)
+        return y
+
+    def _inverse(self, y):
+        # inverse stick-breaking
+        # See: https://mc-stan.org/docs/2_18/reference-manual/cholesky-factors-of-correlation-matrices-1.html
+        y_cumsum = 1 - torch.cumsum(y * y, dim=-1)
+        y_cumsum_shifted = pad(y_cumsum[..., :-1], [1, 0], value=1)
+        y_vec = tril_matrix_to_vec(y, diag=-1)
+        y_cumsum_vec = tril_matrix_to_vec(y_cumsum_shifted, diag=-1)
+        t = y_vec / (y_cumsum_vec).sqrt()
+        # inverse of tanh
+        x = ((1 + t) / (1 - t)).log() / 2
+        return x
+
+    def log_abs_det_jacobian(self, x, y, intermediates=None):
+        # Because domain and codomain are two spaces with different dimensions, determinant of
+        # Jacobian is not well-defined. We return `log_abs_det_jacobian` of `x` and the
+        # flattened lower triangular part of `y`.
+
+        # See: https://mc-stan.org/docs/2_18/reference-manual/cholesky-factors-of-correlation-matrices-1.html
+        y1m_cumsum = 1 - (y * y).cumsum(dim=-1)
+        # by taking diagonal=-2, we don't need to shift z_cumprod to the right
+        # also works for 2 x 2 matrix
+        y1m_cumsum_tril = tril_matrix_to_vec(y1m_cumsum, diag=-2)
+        stick_breaking_logdet = 0.5 * (y1m_cumsum_tril).log().sum(-1)
+        tanh_logdet = -2 * (x + softplus(-2 * x) - math.log(2.)).sum(dim=-1)
+        return stick_breaking_logdet + tanh_logdet
+
+    def forward_shape(self, shape):
+        # Reshape from (..., N) to (..., D, D).
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        N = shape[-1]
+        D = round((0.25 + 2 * N) ** 0.5 + 0.5)
+        if D * (D - 1) // 2 != N:
+            raise ValueError("Input is not a flattend lower-diagonal number")
+        return shape[:-1] + (D, D)
+
+    def inverse_shape(self, shape):
+        # Reshape from (..., D, D) to (..., N).
+        if len(shape) < 2:
+            raise ValueError("Too few dimensions on input")
+        if shape[-2] != shape[-1]:
+            raise ValueError("Input is not square")
+        D = shape[-1]
+        N = D * (D - 1) // 2
+        return shape[:-2] + (N,)
+
 
 class SoftmaxTransform(Transform):
     r"""
@@ -544,9 +840,8 @@ class SoftmaxTransform(Transform):
     coordinate-wise (except for the final normalization), and thus is
     appropriate for coordinate-wise optimization algorithms.
     """
-    domain = constraints.real
+    domain = constraints.real_vector
     codomain = constraints.simplex
-    event_dim = 1
 
     def __eq__(self, other):
         return isinstance(other, SoftmaxTransform)
@@ -559,6 +854,16 @@ class SoftmaxTransform(Transform):
     def _inverse(self, y):
         probs = y
         return probs.log()
+
+    def forward_shape(self, shape):
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        return shape
+
+    def inverse_shape(self, shape):
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        return shape
 
 
 class StickBreakingTransform(Transform):
@@ -574,10 +879,9 @@ class StickBreakingTransform(Transform):
     This is bijective and appropriate for use in HMC; however it mixes
     coordinates together and is less appropriate for optimization.
     """
-    domain = constraints.real
+    domain = constraints.real_vector
     codomain = constraints.simplex
     bijective = True
-    event_dim = 1
 
     def __eq__(self, other):
         return isinstance(other, StickBreakingTransform)
@@ -606,6 +910,16 @@ class StickBreakingTransform(Transform):
         detJ = (-x + F.logsigmoid(x) + y[..., :-1].log()).sum(-1)
         return detJ
 
+    def forward_shape(self, shape):
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        return shape[:-1] + (shape[-1] + 1,)
+
+    def inverse_shape(self, shape):
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        return shape[:-1] + (shape[-1] - 1,)
+
 
 class LowerCholeskyTransform(Transform):
     """
@@ -615,9 +929,8 @@ class LowerCholeskyTransform(Transform):
     This is useful for parameterizing positive definite matrices in terms of
     their Cholesky factorization.
     """
-    domain = constraints.real
+    domain = constraints.independent(constraints.real, 2)
     codomain = constraints.lower_cholesky
-    event_dim = 2
 
     def __eq__(self, other):
         return isinstance(other, LowerCholeskyTransform)
@@ -654,6 +967,10 @@ class CatTransform(Transform):
         self.lengths = list(lengths)
         assert len(self.lengths) == len(self.transforms)
         self.dim = dim
+
+    @lazy_property
+    def event_dim(self):
+        return max(t.event_dim for t in self.transforms)
 
     @lazy_property
     def length(self):
@@ -696,9 +1013,20 @@ class CatTransform(Transform):
         for trans, length in zip(self.transforms, self.lengths):
             xslice = x.narrow(self.dim, start, length)
             yslice = y.narrow(self.dim, start, length)
-            logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
+            logdetjac = trans.log_abs_det_jacobian(xslice, yslice)
+            if trans.event_dim < self.event_dim:
+                logdetjac = _sum_rightmost(logdetjac, self.event_dim - trans.event_dim)
+            logdetjacs.append(logdetjac)
             start = start + length  # avoid += for jit compat
-        return torch.cat(logdetjacs, dim=self.dim)
+        # Decide whether to concatenate or sum.
+        dim = self.dim
+        if dim >= 0:
+            dim = dim - x.dim()
+        dim = dim + self.event_dim
+        if dim < 0:
+            return torch.cat(logdetjacs, dim=dim)
+        else:
+            return sum(logdetjacs)
 
     @property
     def bijective(self):

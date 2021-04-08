@@ -3,9 +3,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 import unittest
-import itertools
 
-from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
+from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
 
 from torch.testing._internal.te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
@@ -26,6 +25,10 @@ class BaseTestClass(JitTestCase):
         torch._C._jit_set_texpr_fuser_enabled(True)
         self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
+
+        self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
@@ -35,6 +38,7 @@ class BaseTestClass(JitTestCase):
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -421,11 +425,11 @@ class TestTensorExprFuser(BaseTestClass):
         traced = torch.jit.trace(
             easy,
             (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8),
-             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)),
+             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)),
         )
 
         a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
-        b = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)
+        b = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
         x = warmup_and_run_forward(traced, a, b)
         self.assertLastGraphAllFused()
         np.testing.assert_allclose((a.numpy() + b.numpy()) * b.numpy(), x.numpy())
@@ -860,6 +864,10 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.relu(torch.add(x, y))
             return c
 
+        def test_hardtanh(x, y):
+            c = F.hardtanh(torch.add(x, y), -1.0, 1.0)
+            return c
+
         def test_threshold(x, y):
             c = F.threshold(torch.add(x, y), 0.5, 10)
             return c
@@ -895,6 +903,7 @@ class TestTensorExprFuser(BaseTestClass):
             test_threshold,
             test_relu,
             test_tanh,
+            test_hardtanh,
             test_sigmoid,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
@@ -1011,21 +1020,6 @@ class TestTensorExprFuser(BaseTestClass):
         self.assertLastGraphAllFused()
         y = run_remainder(nans, a)
         np.testing.assert_allclose(x.numpy(), y.numpy())
-
-    def test_remainder_types(self):
-        def do_mod(x, y):
-            return x % y
-
-        inputs = [torch.rand(10, dtype=torch.float),
-                  torch.randint(1, 1000, (10,), dtype=torch.int32),
-                  torch.randint(1, 1000, (10,), dtype=torch.int16)
-                  ]
-
-        scripted = torch.jit.script(do_mod)
-        for (a, b) in itertools.product(inputs, repeat=2):
-            x = warmup_and_run_forward(scripted, a, b)
-            self.assertLastGraphAllFused()
-            np.testing.assert_allclose(x, do_mod(a, b), rtol=1e-04, atol=1e-04)
 
     def test_multioutput(self):
         def easy(x):
@@ -1177,13 +1171,11 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_scalar(self):
         @torch.jit.script
-        def test_float(x, y, z, a, b):
-            # type: (Tensor, Tensor, Tensor, float, float) -> Tensor
+        def test_float(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, a: float, b: float) -> torch.Tensor:
             return torch.add(torch.add(x, y, alpha=a), z, alpha=b)
 
         @torch.jit.script
-        def test_int(x, y, z, a, b):
-            # type: (Tensor, Tensor, Tensor, int, int) -> Tensor
+        def test_int(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, a: int, b: int) -> torch.Tensor:
             return torch.add(torch.add(x, y, alpha=a), z, alpha=b)
 
         for test in (test_float, test_int):
@@ -1200,8 +1192,7 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_loop(self):
         @torch.jit.script
-        def test(x, y, z):
-            # type: (Tensor, Tensor, int) -> Tensor
+        def test(x: torch.Tensor, y: torch.Tensor, z: int) -> torch.Tensor:
             b = y
             for i in range(0, z):
                 a = x + y
@@ -1505,6 +1496,39 @@ class TestTensorExprFuser(BaseTestClass):
         torch._C._jit_set_te_generate_block_code(val)
         torch._C._jit_texpr_set_fallback_allowed(fall_bk)
 
+    def test_strided_output_preserved(self):
+        def foo(a, b):
+            return a + b - a
+
+        # smaller, easier to debug example
+        x = torch.arange(6)
+        x = torch.as_strided(x, (2, 3), (1, 2))
+        total = 0
+        for i in range(2):
+            for j in range(3):
+                x[i, j] = total
+                total += 1
+        foo_script = torch.jit.script(foo)
+        foo_script(x, x)
+        foo_script(x, x)
+        out_s = foo_script(x, x)
+        out_eager = foo(x, x)
+        self.assertEqual(out_s, out_eager)
+        self.assertEqual(out_s.stride(), out_eager.stride())
+        self.assertLastGraphAllFused()
+
+        # more dims
+        N, C, H, W, = 2, 3, 4, 5
+        x = torch.rand(N, C, H, W).to(memory_format=torch.channels_last)
+        foo_script = torch.jit.script(foo)
+        foo_script(x, x)
+        foo_script(x, x)
+        out_s = foo_script(x, x)
+        out_eager = foo(x, x)
+        self.assertEqual(out_s, out_eager)
+        self.assertEqual(out_s.stride(), out_eager.stride())
+        self.assertLastGraphAllFused()
+
     def test_alias_analysis_module(self):
         class AliasModule(nn.Module):
             def __init__(self):
@@ -1611,6 +1635,24 @@ class TestTensorExprFuser(BaseTestClass):
 
         torch.testing.assert_allclose(ref, test)
 
+    def test_multiple_outputs(self):
+        for device in self.devices:
+            # A bug reported internally similar to the one reported in #48533
+            def foo(a, b, c):
+                t_next = c + 1
+                t5 = t_next * b
+                t6 = torch.unsqueeze(t_next, 1)
+                t7 = a * t6
+                return (t7, t5, t_next)
+
+            a = torch.rand(20, 20, dtype=torch.float32, device=device)
+            b = torch.rand(20 * 29, dtype=torch.float32, device=device).as_strided([20], [29])
+            c = torch.ones(20, dtype=torch.int64, device=device)
+            traced = torch.jit.trace(foo, (a, b, c))
+            ref = foo(a, b, c)
+            exp = traced(a, b, c)
+            exp = traced(a, b, c)
+            self.assertEqual(ref, exp)
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

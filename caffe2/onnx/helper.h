@@ -14,7 +14,7 @@ using ::ONNX_NAMESPACE::AttributeProto;
 using ::ONNX_NAMESPACE::NodeProto;
 
 // \brief This class generates unique dummy names
-class CAFFE2_API DummyName {
+class TORCH_API DummyName {
  public:
   std::string NewDummyName();
 
@@ -98,7 +98,7 @@ template <class T>
   return ret;
 }
 
-CAFFE2_API NodeProto MakeNode(
+TORCH_API NodeProto MakeNode(
     const std::string& type,
     const std::vector<std::string>& inputs,
     const std::vector<std::string>& outputs,

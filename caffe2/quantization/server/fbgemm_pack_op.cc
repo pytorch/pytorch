@@ -207,6 +207,13 @@ void QuantizeConvBias(
         bias.data<int32_t>(), bias.data<int32_t>() + bias.numel());
   } else {
     const float* bdata = bias.data<float>();
+    vector<float> bdata_local;
+    if (use_fp16) {
+      bdata_local.resize(bias.numel());
+      fbgemm::RoundToFloat16(
+              bdata, bdata_local.data(), bias.numel(), false /* FLAGS_caffe2_fbgemm_fake_fp16_clamp */);
+      bdata = bdata_local.data();
+    }
     b_quantized.resize(bias.numel());
     for (int g = 0; g < filter_qparams.size(); ++g) {
       int i_begin = g * (M / filter_qparams.size());
@@ -848,6 +855,8 @@ REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
 REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
     (TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>()),
     Int8ConvDNNLowpPackedWeightBlobShapeFunctions);
+
+REGISTER_CPU_OPERATOR(Int8FCPackWeight, FullyConnectedDNNLowPPackWeightOp);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCPackWeight,

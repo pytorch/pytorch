@@ -8,11 +8,11 @@ namespace at {
 struct DynamicLibrary {
   AT_DISALLOW_COPY_AND_ASSIGN(DynamicLibrary);
 
-  CAFFE2_API DynamicLibrary(const char* name);
+  TORCH_API DynamicLibrary(const char* name, const char* alt_name = nullptr);
 
-  CAFFE2_API void* sym(const char* name);
+  TORCH_API void* sym(const char* name);
 
-  CAFFE2_API ~DynamicLibrary();
+  TORCH_API ~DynamicLibrary();
 
  private:
   void* handle = nullptr;

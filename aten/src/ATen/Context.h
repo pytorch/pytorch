@@ -21,7 +21,7 @@ namespace at {
 
 class Tensor;
 
-class CAFFE2_API Context {
+class TORCH_API Context {
  public:
   Context();
 
@@ -73,6 +73,9 @@ class CAFFE2_API Context {
   bool hasXLA() const {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
+  bool hasMLC() const {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::MLC);
+  }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
   THCState* lazyInitCUDA() {
@@ -120,11 +123,11 @@ class CAFFE2_API Context {
   //
   // * Include this comment: "See Note [Enabling Deterministic Operations]"
   //
-  // * Check the value of `at::globalContext().deterministic()` to toggle between
-  //   nondeterministic and deterministic implementations.
+  // * Check the value of `at::globalContext().deterministicAlgorithms()` to toggle
+  //   between nondeterministic and deterministic implementations.
   //
   // * Have an entry in the list of PyTorch operations that toggle between nondeterministic
-  //   and deterministic implementations, in the docstring of `set_deterministic()`
+  //   and deterministic implementations, in the docstring of `use_deterministic_algorithms()`
   //   in torch/__init__.py
   //
   // `example_func()` below shows an example of toggling between nondeterministic and
@@ -132,15 +135,15 @@ class CAFFE2_API Context {
   //
   //    void example_func() {
   //      // See Note [Enabling Deterministic Operations]
-  //      if (at::globalContext().deterministic()) {
+  //      if (at::globalContext().deterministicAlgorithms()) {
   //        example_func_deterministic();
   //      } else {
   //        example_func_nondeterministic();
   //      }
   //    }
 
-  bool deterministic() const;
-  void setDeterministic(bool);
+  bool deterministicAlgorithms() const;
+  void setDeterministicAlgorithms(bool);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -151,16 +154,18 @@ class CAFFE2_API Context {
   //
   // * Include a comment explaining why the operation is nondeterministic.
   //
-  // * Throw an error when `Context::deterministic()` is true. Most of the time, this
-  //   should be accomplished by calling `at::globalContext().alertNotDeterminstic()`.
-  //   However, if the nondeterministic behavior is caused by the CuBLAS workspace
+  // * Throw an error when `Context::deterministicAlgorithms()` is true. Most
+  //   of the time, this should be accomplished by calling
+  //   `at::globalContext().alertNotDeterminstic()`.  However, if the
+  //   nondeterministic behavior is caused by the CuBLAS workspace
   //   configuration in CUDA >= 10.2,
-  //   `at::globalContext().alertCuBLASConfigNotDeterministic()` should
-  //   be called instead (in this case, a comment explaining why the operation is
-  //   nondeterministic is not necessary). See below for details on these methods.
+  //   `at::globalContext().alertCuBLASConfigNotDeterministic()` should be
+  //   called instead (in this case, a comment explaining why the operation is
+  //   nondeterministic is not necessary). See below for details on these
+  //   methods.
   //
   // * Have an entry in the list of nondeterministic PyTorch operations in the
-  //   docstring of `set_deterministic()` in torch/__init__.py
+  //   docstring of `use_deterministic_algorithms()` in torch/__init__.py
   //
   // `example_func()` below shows an example of the comments and error-throwing code
   // for a nondeterministic operation:
@@ -172,10 +177,10 @@ class CAFFE2_API Context {
   //      ...
   //    }
 
-  // Throws an error if `Context::deterministic()` is true
+  // Throws an error if `Context::deterministicAlgorithms()` is true
   void alertNotDeterministic(c10::string_view const& caller);
 
-  // Throws an error if `Context::deterministic()` is true, CUDA >= 10.2, and
+  // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA >= 10.2, and
   // CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or ":4096:8". For more details:
   // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
   void alertCuBLASConfigNotDeterministic();
@@ -194,6 +199,12 @@ class CAFFE2_API Context {
   void setReleaseWeightsWhenPrepacking(bool e);
   bool releaseWeightsWhenPrepacking() const;
 
+  void setDisplayVmapFallbackWarnings(bool enabled);
+  bool areVmapFallbackWarningsEnabled() const;
+
+  void setDefaultMobileCPUAllocator();
+  void unsetDefaultMobileCPUAllocator();
+
  private:
   void initCUDAIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {
@@ -210,7 +221,7 @@ class CAFFE2_API Context {
   std::once_flag thh_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
-  bool _deterministic = false;
+  bool _deterministic_algorithms = false;
   bool benchmark_cudnn = false;
   bool allow_tf32_cudnn = true;
   bool allow_tf32_cublas = true;
@@ -220,18 +231,21 @@ class CAFFE2_API Context {
   #else
   bool release_original_weights = false;
   #endif
+  bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
+
+  Allocator* prev_allocator_ptr_{nullptr};
 };
 
-CAFFE2_API Context& globalContext();
+TORCH_API Context& globalContext();
 
 static inline void init() {
   globalContext();
 }
 
-CAFFE2_API Allocator* getCPUAllocator();
+TORCH_API Allocator* getCPUAllocator();
 
 static inline DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
@@ -263,6 +277,10 @@ static inline bool hasHIP() {
 
 static inline bool hasXLA() {
   return globalContext().hasXLA();
+}
+
+static inline bool hasMLC() {
+  return globalContext().hasMLC();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.

@@ -10,7 +10,8 @@ namespace at { struct TensorIterator; }
 namespace at { namespace native {
 
 using unary_fn = void(*)(TensorIterator&);
-using unary_fn_with_scalar = void(*)(TensorIterator&, Scalar a);
+using unary_fn_with_scalar = void(*)(TensorIterator&, const Scalar& a);
+using structured_unary_fn = void(*)(TensorIteratorBase&);
 
 DECLARE_DISPATCH(unary_fn, abs_stub);
 DECLARE_DISPATCH(unary_fn, angle_stub);
@@ -31,6 +32,7 @@ DECLARE_DISPATCH(unary_fn_with_scalar, clamp_min_stub);
 DECLARE_DISPATCH(unary_fn, cos_stub);
 DECLARE_DISPATCH(unary_fn, cosh_stub);
 DECLARE_DISPATCH(unary_fn, digamma_stub);
+DECLARE_DISPATCH(unary_fn, entr_stub);
 DECLARE_DISPATCH(unary_fn, erf_stub);
 DECLARE_DISPATCH(unary_fn, erfc_stub);
 DECLARE_DISPATCH(unary_fn, erfinv_stub);
@@ -39,6 +41,7 @@ DECLARE_DISPATCH(unary_fn, exp2_stub);
 DECLARE_DISPATCH(unary_fn, expm1_stub);
 DECLARE_DISPATCH(unary_fn, floor_stub);
 DECLARE_DISPATCH(unary_fn, frac_stub);
+DECLARE_DISPATCH(unary_fn, frexp_stub);
 DECLARE_DISPATCH(unary_fn, i0_stub);
 DECLARE_DISPATCH(unary_fn, log_stub);
 DECLARE_DISPATCH(unary_fn, log10_stub);
@@ -54,7 +57,8 @@ DECLARE_DISPATCH(unary_fn_with_scalar, logit_stub);
 DECLARE_DISPATCH(unary_fn, sign_stub);
 DECLARE_DISPATCH(unary_fn, signbit_stub);
 DECLARE_DISPATCH(unary_fn, sgn_stub);
-DECLARE_DISPATCH(unary_fn, sin_stub);
+DECLARE_DISPATCH(structured_unary_fn, sin_stub);
+DECLARE_DISPATCH(structured_unary_fn, sinc_stub);
 DECLARE_DISPATCH(unary_fn, sinh_stub);
 DECLARE_DISPATCH(unary_fn, sqrt_stub);
 DECLARE_DISPATCH(unary_fn, tan_stub);
@@ -75,8 +79,10 @@ DECLARE_DISPATCH(void(*)(TensorIterator&, const uint64_t, const int64_t, c10::op
 DECLARE_DISPATCH(void(*)(TensorIterator&, c10::optional<Generator>), random_full_64_bits_range_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, c10::optional<Generator>), random_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t), polygamma_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar a, Scalar b), clamp_stub);
-DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, int64_t, bool, c10::optional<Generator>), multinomial_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar& a, const Scalar& b), clamp_stub);
+DECLARE_DISPATCH(
+    void (*)(Tensor&, const Tensor&, int64_t, c10::optional<Generator>),
+    multinomial_with_replacement_stub);
 DECLARE_DISPATCH(
     void (*)(
         TensorIterator&,

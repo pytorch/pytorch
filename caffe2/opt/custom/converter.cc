@@ -12,7 +12,7 @@ class BatchMatMulConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::BatchMatMul>();
+        std::make_unique<repr::BatchMatMul>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::BatchMatMul>(nnOp.get());
@@ -46,7 +46,7 @@ class MulConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::Mul>();
+        std::make_unique<repr::Mul>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::Mul>(nnOp.get());
@@ -67,7 +67,7 @@ class AddConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::Add>();
+        std::make_unique<repr::Add>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::Add>(nnOp.get());
@@ -88,7 +88,7 @@ class CastConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::Cast>();
+        std::make_unique<repr::Cast>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::Cast>(nnOp.get());
@@ -106,7 +106,7 @@ class ReplaceNaNConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::ReplaceNaN>();
+        std::make_unique<repr::ReplaceNaN>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::ReplaceNaN>(nnOp.get());
@@ -127,7 +127,7 @@ class ConcatAddMulReplaceNaNClipConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::ConcatAddMulReplaceNaNClip>();
+        std::make_unique<repr::ConcatAddMulReplaceNaNClip>();
     auto argMap = getArgumentsFromOperator(op);
 
     auto c = dyn_cast<repr::ConcatAddMulReplaceNaNClip>(nnOp.get());
@@ -165,7 +165,7 @@ class SliceConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::Slice>();
+        std::make_unique<repr::Slice>();
     const caffe2::ArgumentHelper args(op);
 
     auto c = dyn_cast<repr::Slice>(nnOp.get());
@@ -199,7 +199,7 @@ class ClipRangesGatherSigridHashConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::ClipRangesGatherSigridHash>();
+        std::make_unique<repr::ClipRangesGatherSigridHash>();
     const caffe2::ArgumentHelper args(op);
 
     auto c = dyn_cast<repr::ClipRangesGatherSigridHash>(nnOp.get());
@@ -252,7 +252,7 @@ class ClipRangesGatherSigridHashV2Converter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::ClipRangesGatherSigridHashV2>();
+        std::make_unique<repr::ClipRangesGatherSigridHashV2>();
     const caffe2::ArgumentHelper args(op);
 
     auto c = dyn_cast<repr::ClipRangesGatherSigridHashV2>(nnOp.get());
@@ -299,7 +299,7 @@ class ClipRangesConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::ClipRanges>();
+        std::make_unique<repr::ClipRanges>();
     const caffe2::ArgumentHelper args(op);
     auto c = dyn_cast<repr::ClipRanges>(nnOp.get());
     c->setMaxLength(args.GetSingleArgument<int64_t>("max_length", 0));
@@ -325,7 +325,7 @@ class SigridHashConverter : public Converter {
   std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       const OperatorDef& op) override {
     std::unique_ptr<repr::NeuralNetOperator> nnOp =
-        util::make_unique<repr::SigridHash>();
+        std::make_unique<repr::SigridHash>();
     const caffe2::ArgumentHelper args(op);
     auto c = dyn_cast<repr::SigridHash>(nnOp.get());
     c->setSalt(args.GetSingleArgument<int64_t>("salt", 0));

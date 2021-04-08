@@ -222,7 +222,7 @@ The short version:
   the gradients are computed under the assumption that the function is a part of a larger real-valued
   loss function :math:`g(input)=L`. The gradient computed is :math:`\frac{\partial L}{\partial z^*}`
   (note the conjugation of z), the negative of which is precisely the direction of steepest descent
-  used in Gradient Descent algorithm.. Thus, all the existing optimizers work out of
+  used in Gradient Descent algorithm. Thus, all the existing optimizers work out of
   the box with complex parameters.
 - This convention matches TensorFlow's convention for complex
   differentiation, but is different from JAX (which computes
@@ -240,13 +240,20 @@ What are complex derivatives?
 
 The mathematical definition of complex-differentiability takes the
 limit definition of a derivative and generalizes it to operate on
-complex numbers. For a function :math:`f: ℂ → ℂ`, we can write:
+complex numbers. Consider a function :math:`f: ℂ → ℂ`,
+
+    .. math::
+        `f(z=x+yj) = u(x, y) + v(x, y)j`
+
+where :math:`u` and :math:`v` are two variable real valued functions.
+
+Using the derivative definition, we can write:
 
     .. math::
         f'(z) = \lim_{h \to 0, h \in C} \frac{f(z+h) - f(z)}{h}
 
 In order for this limit to exist, not only must :math:`u` and :math:`v` must be
-real differentiable (as above), but :math:`f` must also satisfy the Cauchy-Riemann `equations
+real differentiable, but :math:`f` must also satisfy the Cauchy-Riemann `equations
 <https://en.wikipedia.org/wiki/Cauchy%E2%80%93Riemann_equations>`_.  In
 other words: the limit computed for real and imaginary steps (:math:`h`)
 must be equal. This is a more restrictive condition.
@@ -302,8 +309,8 @@ From the above equations, we get:
 
     .. math::
         \begin{aligned}
-            \frac{\partial }{\partial z} &= 1/2 * (\frac{\partial }{\partial x} - 1j * \frac{\partial z}{\partial y})   \\
-            \frac{\partial }{\partial z^*} &= 1/2 * (\frac{\partial }{\partial x} + 1j * \frac{\partial z}{\partial y})
+            \frac{\partial }{\partial z} &= 1/2 * (\frac{\partial }{\partial x} - 1j * \frac{\partial }{\partial y})   \\
+            \frac{\partial }{\partial z^*} &= 1/2 * (\frac{\partial }{\partial x} + 1j * \frac{\partial }{\partial y})
         \end{aligned}
 
 which is the classic definition of Wirtinger calculus that you would find on `Wikipedia <https://en.wikipedia.org/wiki/Wirtinger_derivatives>`_.
@@ -336,8 +343,8 @@ How do these equations translate into complex space :math:`ℂ`?
 
     .. math::
         \begin{aligned}
-            z_{n+1} &= x_n - (s/2) * \frac{\partial L}{\partial x} + 1j * (y_n - (s/2) * \frac{\partial L}{\partial y})
-                    &= z_n - s * 1/2 * (\frac{\partial L}{\partial x} + j \frac{\partial L}{\partial y})
+            z_{n+1} &= x_n - (s/2) * \frac{\partial L}{\partial x} + 1j * (y_n - (s/2) * \frac{\partial L}{\partial y}) \\
+                    &= z_n - s * 1/2 * (\frac{\partial L}{\partial x} + j \frac{\partial L}{\partial y}) \\
                     &= z_n - s * \frac{\partial L}{\partial z^*}
         \end{aligned}
 
@@ -397,8 +404,8 @@ Solving the above equations for :math:`\frac{\partial L}{\partial u}` and :math:
 
     .. math::
         \begin{aligned}
-            \frac{\partial L}{\partial u} = 1/2 * (\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}) \\
-            \frac{\partial L}{\partial v} = -1/2j * (\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*})
+            \frac{\partial L}{\partial u} = \frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*} \\
+            \frac{\partial L}{\partial v} = -1j * (\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*})
         \end{aligned}
         :label: [3]
 
@@ -406,8 +413,8 @@ Substituting :eq:`[3]` in :eq:`[1]`, we get:
 
     .. math::
         \begin{aligned}
-            \frac{\partial L}{\partial z^*} &= 1/2 * (\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}) * \frac{\partial u}{\partial z^*} - 1/2j * (\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}) * \frac{\partial v}{\partial z^*}  \\
-                                            &= \frac{\partial L}{\partial s} * 1/2 * (\frac{\partial u}{\partial z^*} + \frac{\partial v}{\partial z^*} j) + \frac{\partial L}{\partial s^*} * 1/2 * (\frac{\partial u}{\partial z^*} - \frac{\partial v}{\partial z^*} j)  \\
+            \frac{\partial L}{\partial z^*} &= (\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}) * \frac{\partial u}{\partial z^*} - 1j * (\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}) * \frac{\partial v}{\partial z^*}  \\
+                                            &= \frac{\partial L}{\partial s} * (\frac{\partial u}{\partial z^*} + \frac{\partial v}{\partial z^*} j) + \frac{\partial L}{\partial s^*} * (\frac{\partial u}{\partial z^*} - \frac{\partial v}{\partial z^*} j)  \\
                                             &= \frac{\partial L}{\partial s^*} * \frac{\partial (u + vj)}{\partial z^*} + \frac{\partial L}{\partial s} * \frac{\partial (u + vj)^*}{\partial z^*}  \\
                                             &= \frac{\partial L}{\partial s} * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial s^*}{\partial z^*}    \\
         \end{aligned}

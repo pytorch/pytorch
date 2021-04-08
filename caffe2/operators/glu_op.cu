@@ -36,6 +36,7 @@ void GluOp<float, CUDAContext>::ComputeGlu(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(M, split_dim_size, N, x_data, y_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(Glu, GluOp<float, CUDAContext>);

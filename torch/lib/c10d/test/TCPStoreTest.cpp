@@ -44,6 +44,13 @@ void testHelper(const std::string& prefix = "") {
     // helper thread, and the init key to coordinate workers.
     EXPECT_EQ(numKeys, 5);
 
+    // Check compareSet, does not check return value
+    c10d::test::compareSet(
+        *serverStore, "key0", "wrongCurrentValue", "newValue");
+    c10d::test::check(*serverStore, "key0", "value0");
+    c10d::test::compareSet(*serverStore, "key0", "value0", "newValue");
+    c10d::test::check(*serverStore, "key0", "newValue");
+
     auto delSuccess = serverStore->deleteKey("key0");
     // Ensure that the key was successfully deleted
     EXPECT_TRUE(delSuccess);
@@ -77,7 +84,7 @@ void testHelper(const std::string& prefix = "") {
 
   for (auto i = 0; i < numThreads; i++) {
     threads.push_back(
-        std::thread([&sem1, &sem2, &clientStores, i, &expectedCounterRes] {
+        std::thread([&sem1, &sem2, &clientStores, i, &expectedCounterRes, &numIterations, &numThreads] {
           for (auto j = 0; j < numIterations; j++) {
             clientStores[i]->add("counter", 1);
           }

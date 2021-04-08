@@ -832,7 +832,7 @@ SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(
 
   // If we have to grow to have enough elements, destroy the current elements.
   // This allows us to avoid copying them during the grow.
-  // FIXME: don't do this if they're efficiently moveable.
+  // FIXME: don't do this if they're efficiently movable.
   if (this->capacity() < RHSSize) {
     // Destroy current elements.
     this->destroy_range(this->begin(), this->end());

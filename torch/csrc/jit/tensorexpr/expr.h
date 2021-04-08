@@ -29,28 +29,20 @@ enum IRNodeType {
   kRshift,
   kXor,
   kCompareSelect,
-  kLet,
   kCast,
-  kBroadcast,
-  kRamp,
-  kPolynomial,
-  kTerm,
-  kRoundOff,
-  kMaxTerm,
-  kMinTerm,
-  kNone,
-  kExtra
+  kBitCast,
+  kOther,
 };
 
 // The common base between all expression node.
-class Expr : public KernelScopedObject {
+class TORCH_API Expr : public KernelScopedObject {
  public:
-  explicit Expr(Dtype dtype, IRNodeType expr_type = kNone)
+  explicit Expr(Dtype dtype, IRNodeType expr_type = kOther)
       : dtype_(dtype), expr_type_(expr_type) {}
   Dtype dtype() const {
     return dtype_;
   }
-  TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
+  virtual void accept(IRVisitor* visitor) const = 0;
   virtual const Expr* accept_mutator(IRMutator* mutator) const = 0;
 
   IRNodeType expr_type() const {
@@ -143,7 +135,7 @@ class TORCH_API ExprHandle {
 // The underlying representation node to a Var.
 // Currently, each Var object represents a unique variable, even though the
 // names might be the same. We should consider add a unique_name as well.
-class Var : public ExprNode<Var> {
+class TORCH_API Var : public ExprNode<Var> {
  public:
   static ExprHandle make(const std::string& name_hint, Dtype dtype) {
     return ExprHandle(new Var(name_hint, dtype));
@@ -182,11 +174,18 @@ class TORCH_API Buf : public ExprNode<Buf> {
 
   Buf(const std::string& name_hint,
       const std::vector<const Expr*>& dims,
-      Dtype dtype)
-      : Buf(new Var(name_hint, kHandle), dims, dtype) {}
+      Dtype dtype,
+      const Expr* initializer = nullptr)
+      : Buf(new Var(name_hint, kHandle), dims, dtype, initializer) {}
 
-  Buf(const Var* var, const std::vector<const Expr*>& dims, Dtype dtype)
-      : ExprNodeBase(dtype, kPrimitive), base_handle_(var), dims_(dims) {
+  Buf(const Var* var,
+      const std::vector<const Expr*>& dims,
+      Dtype dtype,
+      const Expr* initializer = nullptr)
+      : ExprNodeBase(dtype, kPrimitive),
+        base_handle_(var),
+        dims_(dims),
+        initializer_(initializer) {
     TORCH_CHECK(var);
   }
 
@@ -206,9 +205,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
     dims_ = dims;
   };
 
+  const Expr* initializer() const {
+    return initializer_;
+  };
+
  private:
   const Var* base_handle_;
   std::vector<const Expr*> dims_;
+  const Expr* initializer_;
 };
 
 class TORCH_API BufHandle : public ExprHandle {
@@ -218,10 +222,18 @@ class TORCH_API BufHandle : public ExprHandle {
       const std::vector<ExprHandle>& dims,
       Dtype dtype)
       : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
+
   explicit BufHandle(const Buf* node) : ExprHandle(node) {}
   const Buf* node() const {
     return static_cast<const Buf*>(ExprHandle::node());
   }
+
+  template <typename... Ts>
+  inline ExprHandle load(const Ts&... ts) const;
+
+  template <typename T>
+  inline ExprHandle load(const std::vector<T>& args) const;
+
   bool operator==(const BufHandle& other) const {
     return this->node() == other.node();
   }
@@ -240,7 +252,7 @@ class TORCH_API BufHandle : public ExprHandle {
 // An expression to construct the underlying variable node.
 // Note: do not store any info here, since it is often possible to slice this
 // object. For example: VarHandle x('x'); ExprHandle x2 = x;
-class VarHandle : public ExprHandle {
+class TORCH_API VarHandle : public ExprHandle {
  public:
   VarHandle() : ExprHandle(nullptr) {}
   explicit VarHandle(Dtype dtype) : ExprHandle(Var::make(dtype)) {}
@@ -287,8 +299,12 @@ TORCH_API ExprHandle tanh(const ExprHandle& v);
 TORCH_API ExprHandle sigmoid(const ExprHandle& v);
 TORCH_API ExprHandle exp(const ExprHandle& v);
 TORCH_API ExprHandle expm1(const ExprHandle& v);
-TORCH_API ExprHandle fabs(const ExprHandle& v);
+TORCH_API ExprHandle abs(const ExprHandle& v);
 TORCH_API ExprHandle log(const ExprHandle& v);
+TORCH_API ExprHandle fast_tanh(const ExprHandle& v);
+TORCH_API ExprHandle fast_sigmoid(const ExprHandle& v);
+TORCH_API ExprHandle fast_log(const ExprHandle& v);
+TORCH_API ExprHandle log_vml(const ExprHandle& v);
 TORCH_API ExprHandle log2(const ExprHandle& v);
 TORCH_API ExprHandle log10(const ExprHandle& v);
 TORCH_API ExprHandle log1p(const ExprHandle& v);
@@ -306,6 +322,8 @@ TORCH_API ExprHandle atan2(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle pow(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle fmod(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2);
+TORCH_API ExprHandle isnan(const ExprHandle& v1);
+TORCH_API ExprHandle Relu(const ExprHandle& v1);
 
 TORCH_API ExprHandle
 ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);

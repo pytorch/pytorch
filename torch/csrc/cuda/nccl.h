@@ -60,7 +60,7 @@ enum class ncclDataType {
 // Don't use them outside of these files.
 namespace detail {
 
-TORCH_CUDA_API void throw_nccl_error(ncclResult status);
+TORCH_CUDA_CPP_API void throw_nccl_error(ncclResult status);
 
 static inline void NCCL_CHECK(ncclResult status) {
   if (status != ncclResult::Success) {
@@ -68,13 +68,14 @@ static inline void NCCL_CHECK(ncclResult status) {
   }
 }
 
-TORCH_CUDA_API at::ArrayRef<ncclComm_t> get_communicators(at::TensorList inputs);
-TORCH_CUDA_API void check_inputs(
+TORCH_CUDA_CPP_API at::ArrayRef<ncclComm_t> get_communicators(
+    at::TensorList inputs);
+TORCH_CUDA_CPP_API void check_inputs(
     at::TensorList inputs,
     at::TensorList outputs,
     int input_multiplier,
     int output_multiplier);
-TORCH_CUDA_API void check_inputs(
+TORCH_CUDA_CPP_API void check_inputs(
     at::TensorList inputs,
     const at::Tensor& output,
     int root,
@@ -86,22 +87,23 @@ TORCH_CUDA_API void check_inputs(
 using comm_list = std::vector<ncclComm_t>;
 using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
 
-TORCH_CUDA_API std::uint64_t version();
+TORCH_CUDA_CPP_API std::uint64_t version();
 
 bool is_available(at::TensorList tensors);
 
-TORCH_CUDA_API void get_unique_id(ncclUniqueId& id);
-TORCH_CUDA_API ncclComm_t comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank);
-TORCH_CUDA_API void comm_destroy(ncclComm_t comm);
+TORCH_CUDA_CPP_API void get_unique_id(ncclUniqueId& id);
+TORCH_CUDA_CPP_API ncclComm_t
+comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank);
+TORCH_CUDA_CPP_API void comm_destroy(ncclComm_t comm);
 
-TORCH_CUDA_API void broadcast(
+TORCH_CUDA_CPP_API void broadcast(
     at::TensorList tensors,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
 size_t get_max_count();
 
-TORCH_CUDA_API void reduce(
+TORCH_CUDA_CPP_API void reduce(
     const std::vector<at::Tensor>& inputs,
     at::Tensor& output,
     int32_t root = 0,
@@ -109,47 +111,65 @@ TORCH_CUDA_API void reduce(
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
-TORCH_CUDA_API void reduce(
+TORCH_CUDA_CPP_API void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root = 0,
     int32_t op = static_cast<int>(ncclRedOp::Sum),
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
-TORCH_CUDA_API void all_reduce(
+TORCH_CUDA_CPP_API void all_reduce(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     int32_t op = static_cast<int>(ncclRedOp::Sum),
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
-TORCH_CUDA_API void reduce_scatter(
+TORCH_CUDA_CPP_API void reduce_scatter(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     int32_t op = static_cast<int>(ncclRedOp::Sum),
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
-TORCH_CUDA_API void all_gather(
+TORCH_CUDA_CPP_API void all_gather(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
-TORCH_CUDA_API void all2all(
+TORCH_CUDA_CPP_API void all2all_single_equal_split(
     at::Tensor& input,
     at::Tensor& output,
     int size,
     ncclComm_t comm,
     at::cuda::CUDAStream& stream);
 
-TORCH_CUDA_API void send(
+TORCH_CUDA_CPP_API void all2all_single_unequal_split(
+    void* sendbuff,
+    const size_t* sendcounts,
+    const size_t* senddispls,
+    void* recvbuff,
+    const size_t* recvcounts,
+    const size_t* recvdispls,
+    size_t size,
+    c10::ScalarType type,
+    ncclComm_t comm,
+    at::cuda::CUDAStream& stream);
+
+TORCH_CUDA_CPP_API void all2all(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    ncclComm_t _comm,
+    at::cuda::CUDAStream& stream);
+
+TORCH_CUDA_CPP_API void send(
     const at::Tensor& input,
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
     int dst);
 
-TORCH_CUDA_API void recv(
+TORCH_CUDA_CPP_API void recv(
     at::Tensor& output,
     ncclComm_t comm,
     at::cuda::CUDAStream stream,

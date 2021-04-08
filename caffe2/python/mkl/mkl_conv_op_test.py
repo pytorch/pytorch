@@ -5,7 +5,7 @@
 
 import unittest
 import hypothesis.strategies as st
-from hypothesis import given, settings
+from hypothesis import given
 import numpy as np
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu

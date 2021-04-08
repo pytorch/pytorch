@@ -34,6 +34,7 @@ class MyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
     ) -> Tuple[str, int, Tensor]:
+        # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
 
@@ -42,6 +43,7 @@ class RemoteMyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
     ) -> Tuple[str, int, Tensor]:
+        # pyre-ignore[7]: Pyre and torch.jit.interface don't mix well
         pass
 
     def forward_async(
@@ -217,6 +219,21 @@ class RemoteModuleTest(RpcAgentTestFixture):
             self.assertEqual(len(param_rrefs), 1)
             self.assertTrue(torch.equal(param_rrefs[0].to_here(), _PARAM_VAL))
 
+    @dist_utils.dist_init
+    def test_get_module_rref(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        # Only test Python nn.Module, because script module methods don't support ``get_module_rref``.
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            rref = remote_module.get_module_rref()
+            self.assertEqual(rref, remote_module.module_rref)
+            for param in rref.to_here().parameters():
+                self.assertTrue(torch.equal(param, _PARAM_VAL))
+
     @skip_if_lt_x_gpu(1)
     @dist_utils.dist_init
     def test_valid_device(self):
@@ -242,8 +259,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu, xla, vulkan"
-            " device type at start of device string",
+            r"Expected one of .+ device type at start of device string",
         ):
             list(
                 self._create_remote_module_iter(
@@ -266,16 +282,6 @@ class RemoteModuleTest(RpcAgentTestFixture):
             list(
                 self._create_remote_module_iter(
                     "{}/cpu2".format(dst_worker_name),
-                    modes=[ModuleCreationMode.MODULE_CTOR],
-                )
-            )
-
-        with self.assertRaisesRegex(
-            RuntimeError, r"CPU device index must be -1 or zero, got 2"
-        ):
-            list(
-                self._create_remote_module_iter(
-                    "{}/cpu:2".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
             )

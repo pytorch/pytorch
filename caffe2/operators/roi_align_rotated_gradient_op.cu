@@ -231,6 +231,7 @@ C10_EXPORT bool RoIAlignRotatedGradientOp<float, CUDAContext>::RunOnDevice() {
             dX->mutable_data<float>(),
             R.data<float>(),
             aligned_);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

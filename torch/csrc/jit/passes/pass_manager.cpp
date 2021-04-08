@@ -61,7 +61,7 @@ void clearAllPrePasses() {
 
 // LEGACY CALL
 RegisterPostPass::RegisterPostPass(GraphPass p) {
-  registerPass(p);
+  registerPass(std::move(p));
 }
 
 } // namespace jit

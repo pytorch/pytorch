@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/autograd/forward_grad.h>
 
 #include <ATen/ATen.h>
 
@@ -23,6 +24,12 @@ class TORCH_API SavedVariable {
   SavedVariable(const c10::optional<Variable>& variable, bool is_output, bool is_inplace_view=false);
   SavedVariable(SavedVariable&&) = default;
   SavedVariable& operator=(SavedVariable&&) = default;
+  ~SavedVariable() {
+    if (fw_grad_) {
+      // See note [ Using ForwardGrad ]
+      fw_grad_->clear();
+    }
+  }
 
   /// Reconstructs the saved variable. Pass `saved_for` as the gradient
   /// function if constructing the `SavedVariable` with it would have caused a
@@ -39,6 +46,11 @@ class TORCH_API SavedVariable {
 
  private:
   at::Tensor data_;
+
+  // This field is used to store the forward AD gradients associated with
+  // the saved Tensor. Note that this shared_ptr must never be shared with
+  // either the saved Tensor or the unpacked Tensor. See note [ Using ForwardGrad ]
+  std::shared_ptr<ForwardGrad> fw_grad_;
 
   // The gradient function associated with this node. If has_grad_fn
   // is false, then this is a leaf node. Note that the grad_fn is not saved if

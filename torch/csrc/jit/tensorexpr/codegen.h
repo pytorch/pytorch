@@ -57,14 +57,23 @@ class TORCH_API CodeGen {
   }
 
   // This function returns the generated code as
-  // a string. Currently only implemented for Block.
-  // TODO. Rename this, as we can return other than string
-  // and implement for other backends.
-  virtual std::string getCodeText() {
+  // a string.
+  virtual std::string getCodeText(const std::string& attr = "") {
     return ("");
   }
 
   virtual void call(const std::vector<CallArg>& args) = 0;
+
+  virtual at::Tensor empty_strided(
+      c10::IntArrayRef size,
+      c10::IntArrayRef stride,
+      c10::optional<c10::ScalarType> dtype_opt,
+      c10::optional<c10::Layout> layout_opt,
+      c10::optional<c10::Device> device_opt,
+      c10::optional<bool> pin_memory_opt) {
+    return at::empty_strided(
+        size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  }
 
   const std::string& kernel_func_name() const {
     return kernel_func_name_;
@@ -82,9 +91,11 @@ class CodeGen::BufferArg {
   BufferArg(const Placeholder& buffer)
       : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
   BufferArg(Tensor* tensor)
-      : var_(tensor->buf()->base_handle()), dtype_(tensor->body()->dtype()) {}
+      : var_(tensor->buf()->base_handle()), dtype_(tensor->buf()->dtype()) {}
   BufferArg(const VarHandle& var)
       : var_(var.node()), dtype_(var.dtype()), isVar_(true) {}
+  BufferArg(const BufHandle& buf)
+      : var_(buf.node()->base_handle()), dtype_(buf.node()->dtype()) {}
 
   const Var* var() const {
     return var_;

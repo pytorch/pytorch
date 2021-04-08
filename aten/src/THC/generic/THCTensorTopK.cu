@@ -3,6 +3,7 @@
 #else
 
 #include <c10/macros/Macros.h>
+#include <c10/cuda/CUDAException.h>
 
 void THCTensor_(topk)(THCState* state,
                       THCTensor *topK,
@@ -37,8 +38,8 @@ void THCTensor_(topk)(THCState* state,
   // is provided to the kernel for the arguments.
 
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
-  gatherTopK<scalar_t, INDEX_T, DIM, DIR>                                   \
-    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(             \
+  gatherTopK<scalar_t, INDEX_T, DIM, DIR>                               \
+    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(            \
       inputInfo,                                                        \
       static_cast<INDEX_T>(sliceSize),                                  \
       static_cast<INDEX_T>(k),                                          \
@@ -50,7 +51,8 @@ void THCTensor_(topk)(THCState* state,
       static_cast<INDEX_T>(topKSlices),                                 \
       static_cast<INDEX_T>(topKInfo.strides[collapseTopKDim]),          \
       indicesInfo,                                                      \
-      static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]))
+      static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]));   \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define RUN_DIR(INDEX_T, DIM)                   \
   if (dir) {                                    \
@@ -71,10 +73,10 @@ void THCTensor_(topk)(THCState* state,
   }
 
 #define RUN_T(INDEX_T)                                                  \
-  TensorInfo<scalar_t, INDEX_T> inputInfo =                                 \
-    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, input);              \
-  TensorInfo<scalar_t, INDEX_T> topKInfo =                                  \
-    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, topK);               \
+  TensorInfo<scalar_t, INDEX_T> inputInfo =                             \
+    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, input);          \
+  TensorInfo<scalar_t, INDEX_T> topKInfo =                              \
+    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, topK);           \
   TensorInfo<int64_t, INDEX_T> indicesInfo =                            \
     getTensorInfo<int64_t, THCudaLongTensor, INDEX_T>(state, indices);  \
                                                                         \

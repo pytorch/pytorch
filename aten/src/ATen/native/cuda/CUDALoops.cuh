@@ -101,9 +101,11 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
   switch (vec_size) {
   case 4:
     vectorized_elementwise_kernel<4, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     break;
   case 2:
     vectorized_elementwise_kernel<2, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     break;
   case 1: {
     auto input_calc = TrivialOffsetCalculator<traits::arity>();
@@ -111,12 +113,12 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
     auto loader = memory::LoadWithoutCast();
     auto storer = memory::StoreWithoutCast();
     unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, input_calc, output_calc, loader, storer);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     break;
   }
   default:
     TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
@@ -127,11 +129,11 @@ static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t da
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc, l, s);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename func_t>
-void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
+void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
   constexpr int ntensors = traits::arity + 1;

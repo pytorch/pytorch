@@ -679,7 +679,6 @@ struct CudaGraphFuser {
   // Builds up expressions that compute shapes of all intermediates (and
   // outputs) of the fusion group, based on the sizes of inputs. You should run
   // DCE to remove those that you end up not using.
-  /*
   std::unordered_map<Value*, Value*> buildShapeExpressions(Node* fusion_group) {
     WithInsertPoint insert_guard{fusion_group->next()};
     std::unordered_map<Value*, Value*> shape_of;
@@ -738,6 +737,38 @@ struct CudaGraphFuser {
         shape_of.emplace(outputs.at(outputs.size() - 1), last_size);
         continue;
       }
+      // extended shape expression support to reduction operations
+      // TODO: `aten::sum` is too flexible, we should restrict for a better
+      // match
+      if (n->kind() == aten::sum) {
+        // TODO: expand support to wire non-constant inputs, this is currently
+        // blocked by profiling executor not capable of profiling scalar inputs.
+        TORCH_INTERNAL_ASSERT(
+            n->input(1)->node()->kind() == prim::Constant &&
+                n->input(2)->node()->kind() == prim::Constant,
+            "only supports reduction axes and keepdim being constant");
+
+        // hmmm, do I need to setInsertPoint...
+        Node* in1_const =
+            graph->createClone(n->input(1)->node(), [](Value*) -> Value* {
+              throw std::runtime_error("unexpected input");
+            });
+        graph->insertNode(in1_const);
+        Node* in2_const =
+            graph->createClone(n->input(2)->node(), [](Value*) -> Value* {
+              throw std::runtime_error("unexpected input");
+            });
+        graph->insertNode(in2_const);
+
+        std::vector<Value*> inputs = {
+            shape_of.at(n->input(0)), in1_const->output(), in2_const->output()};
+        Node* size_node =
+            graph->insertNode(graph->create(prim::ReductionSizes, inputs, 1));
+        Value* size = size_node->output(0);
+        size->setType(ListType::ofInts());
+        shape_of.emplace(n->output(), size);
+        continue;
+      }
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
         return v->type()->isSubtypeOf(TensorType::get());
       });
@@ -755,6 +786,8 @@ struct CudaGraphFuser {
       return;
     auto subgraph = fusion_group->g(attr::Subgraph);
 
+    // TODO: failure in buildShapeExpressions should not break fusion execution,
+    // we can add a try/catch here to bailout from removeOutputsUsedOnlyInSize.
     auto shape_of = buildShapeExpressions(fusion_group);
     auto outputs = fusion_group->outputs().vec();
     auto soutputs = subgraph->outputs().vec();
@@ -776,7 +809,6 @@ struct CudaGraphFuser {
       }
     }
   }
-  */
 
   void refreshAliasDb() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
@@ -837,9 +869,9 @@ struct CudaGraphFuser {
     //}
 
     // Remove outputs that have been added only because we need their size
-    // for (Node* n : block_->nodes()) {
-    //  removeOutputsUsedOnlyInSize(n);
-    //}
+    for (Node* n : block_->nodes()) {
+      removeOutputsUsedOnlyInSize(n);
+    }
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {

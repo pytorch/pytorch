@@ -22,6 +22,14 @@ FP16_ENGINES = ["SIMD_Q_FP16", "SIMD_Q_STOC_FP16", "SIMD_Q_STOC_MKL_FP16"]
 
 logger = logging.getLogger(__name__)
 
+def reset_optimizer_instance_count():
+    """
+    This function clears the _optimizer_instance_count. And keeps it
+    empty. This functionality is needed in some situations where
+    optimizer instance count might not reset even though the workplace is reset.
+    """
+    _optimizer_instance_count.clear()
+
 
 class Optimizer(object):
     def __init__(self):
@@ -571,6 +579,7 @@ class AdagradOptimizer(Optimizer):
         output_effective_lr_and_update=False,
         pruning_options=None,
         swa_options=None,
+        ema_options=None,
         weight_scale=None,
         counter_halflife=-1,
         **kwargs
@@ -596,6 +605,7 @@ class AdagradOptimizer(Optimizer):
 
         self._process_pruning_options(pruning_options)
         self._process_swa_options(swa_options)
+        self._process_ema_options(ema_options)
 
     def _process_swa_options(self, swa_options):
         self.swa_enabled = True if swa_options else False
@@ -605,6 +615,14 @@ class AdagradOptimizer(Optimizer):
             self.swa_feedback_start_it = swa_options.get("swa_feedback_start_it", None)
             self.swa_feedback_step = swa_options.get("swa_feedback_step", None)
             self.swa_feedback_end_it = swa_options.get("swa_feedback_end_it", None)
+
+    def _process_ema_options(self, ema_options):
+        self.ema_enabled = True if ema_options else False
+        if self.ema_enabled:
+            self.ema_start = ema_options.get("ema_start", None)
+            self.ema_end = ema_options.get("ema_end", None)
+            self.ema_step = ema_options.get("ema_step", None)
+            self.ema_alpha = ema_options.get("ema_alpha", None)
 
     def _process_pruning_options(self, pruning_options):
         self.use_mask = False
@@ -1045,6 +1063,22 @@ class AdagradOptimizer(Optimizer):
                         feedback_step=self.swa_feedback_step,
                         feedback_end=self.swa_feedback_end_it,
                     )
+
+        if self.ema_enabled:
+            param_ema = str(param) + "_ema"
+            if not param_init_net.BlobIsDefined(param_ema):
+                param_init_net.ConstantFill([param], param_ema, value=0.0)
+                self._aux_params.local.append(param_ema)
+
+            net.EMA(
+                [param, param_ema, lr_iteration],
+                [param, param_ema],
+                ema_start=self.ema_start,
+                ema_end=self.ema_end,
+                ema_step=self.ema_step,
+                ema_alpha=self.ema_alpha,
+            )
+
         if self.weight_scale:
             net.WeightScale(
                 [param, lr_iteration],
@@ -1586,6 +1620,75 @@ class AdamOptimizer(Optimizer):
         self.alpha *= scale
         return
 
+class DecayAdagradOptimizer(Optimizer):
+    def __init__(
+        self,
+        alpha=0.01,
+        beta1=0.0,
+        beta2=0.999,
+        epsilon=0.1,
+        weight_decay=0.0,
+        bias_correction_first=True,
+        policy="fixed",
+        engine="",
+        **kwargs
+    ):
+        super(DecayAdagradOptimizer, self).__init__()
+        self.alpha = alpha
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.epsilon = epsilon
+        self.weight_decay = weight_decay
+        self.bias_correction_first = bias_correction_first
+        self.policy = policy
+        self.engine = engine
+        self.init_kwargs = kwargs
+
+    def _run(self, net, param_init_net, param_info):
+        param = param_info.blob
+        grad = param_info.grad
+
+        if self.alpha <= 0:
+            return
+
+        lr, iteration = self.build_lr(
+            net,
+            param_init_net,
+            base_learning_rate=self.alpha,
+            policy=self.policy,
+            **(self.init_kwargs)
+        )
+
+        if isinstance(grad, core.GradientSlice):
+            # hack for position weighted.
+            param_squared_sum = param_init_net.ConstantFill([param], param + "_squared_sum", value=0.0)
+            self._aux_params.local.append(param_squared_sum)
+            output_blobs = [param, param_squared_sum]
+            net.SparseAdagrad(
+                [param, param_squared_sum, grad.indices, grad.values, lr],
+                output_blobs,
+                epsilon=self.epsilon,
+            )
+        else:
+            m1 = param_init_net.ConstantFill([param], param + "_first_mo1ment", value=0.0)
+            m2 = param_init_net.ConstantFill([param], param + "_second_moment", value=0.0)
+            self._aux_params.shared.append(iteration)
+            self._aux_params.local.append(m1)
+            self._aux_params.local.append(m2)
+            output_blobs = [param, m1, m2]
+            net.DecayAdagrad(
+                [param, m1, m2, grad, lr, iteration],
+                output_blobs,
+                beta1=self.beta1,
+                beta2=self.beta2,
+                epsilon=self.epsilon,
+                weight_decay=self.weight_decay,
+                bias_correction_first=self.bias_correction_first,
+            )
+
+    def scale_learning_rate(self, scale):
+        self.alpha *= scale
+        return
 
 class YellowFinOptimizer(Optimizer):
     """YellowFin: An automatic tuner for momentum SGD
@@ -2052,6 +2155,20 @@ def build_adam(
         allow_lr_injection=allow_lr_injection,
     )
 
+def build_decay_adagrad(
+    model,
+    base_learning_rate,
+    max_gradient_norm=None,
+    allow_lr_injection=False,
+    **kwargs
+):
+    decay_adagrad_optimizer = DecayAdagradOptimizer(alpha=base_learning_rate, **kwargs)
+    return _build(
+        model,
+        decay_adagrad_optimizer,
+        max_gradient_norm=max_gradient_norm,
+        allow_lr_injection=allow_lr_injection,
+    )
 
 def build_yellowfin(model, base_learning_rate=0.1, **kwargs):
     yellowfin_optimizer = YellowFinOptimizer(alpha=base_learning_rate, **kwargs)

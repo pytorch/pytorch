@@ -137,10 +137,10 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_param: "10_0"
+            dim_value: 3
           }
           dim {
-            dim_param: "10_1"
+            dim_value: 4
           }
         }
       }

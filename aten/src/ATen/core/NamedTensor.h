@@ -19,7 +19,7 @@ namespace at {
 //
 // This class has an important invariant: there must be at least ONE
 // non-wildcard
-struct CAFFE2_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
+struct TORCH_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
   // This enum is to remind people that the invariant on constructors is that
   // the list of dimnames must have at least one non-wildcard
   enum HAS_NON_WILDCARD {
@@ -69,7 +69,7 @@ struct CAFFE2_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
 
 // When NamesMode is disabled, then all operations ignore tensors' names fields.
 // Concretely speaking, all tensors are treated as having nullopt names.
-struct CAFFE2_API NamesMode {
+struct TORCH_API NamesMode {
   static bool is_enabled();
   static void set_enabled(bool enabled);
 };
@@ -77,7 +77,7 @@ struct CAFFE2_API NamesMode {
 
 // A RAII, thread local (!) guard that enables or disables names upon
 // construction, and sets it back to the original value upon destruction.
-struct CAFFE2_API NoNamesGuard {
+struct TORCH_API NoNamesGuard {
   NoNamesGuard() : prev_mode(NamesMode::is_enabled()), initialized(true) {
     NamesMode::set_enabled(false);
   }
@@ -99,8 +99,8 @@ void check_names_valid_for(const Tensor& tensor, DimnameList names);
 void check_names_valid_for(size_t tensor_dim, DimnameList names);
 
 // Sets the names of `tensor` to be `names`.
-CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, c10::optional<DimnameList> names);
-CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
+TORCH_API Tensor& internal_set_names_inplace(Tensor& tensor, c10::optional<DimnameList> names);
+TORCH_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
 
 constexpr size_t kMaxNamedTensorDim = 64;
 
@@ -110,8 +110,8 @@ namespace impl {
 
 // Some helper functions on TensorImpl. Useful for working with names in TH.
 // XXX: Ideally these would exist as methods on TensorImpl
-CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, c10::optional<DimnameList> names, bool validate_names);
-CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
+TORCH_API void internal_set_names_inplace(TensorImpl* impl, c10::optional<DimnameList> names, bool validate_names);
+TORCH_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
 
 void check_names_valid_for(TensorImpl* impl, DimnameList names);
 
@@ -119,19 +119,19 @@ void check_names_valid_for(TensorImpl* impl, DimnameList names);
 // Returns false if the tensor's names don't exist (were not allocated),
 // or if all names are 'None'.
 // We treat not-allocated-names the same as allocated names that are all 'None'.
-CAFFE2_API bool has_names(const TensorImpl* impl);
+TORCH_API bool has_names(const TensorImpl* impl);
 
 // Returns the names of the tensor's dimensions.
 // Unnamed tensors are treated as having 'None' in all dimension; this method
 // would return a DimnameList of all 'None's for an unnamed tensor.
-CAFFE2_API DimnameList get_names(const TensorImpl* impl);
+TORCH_API DimnameList get_names(const TensorImpl* impl);
 
 // This is more of an implementation detail; one should use impl::get_names /
 // Tensor::names() whenever possible because it provides a cleaner API.
 // Returns the names of the tensor if they have been allocated; returns nullopt
 // instead if the haven't been. The names of a tensor are not allocated if a
 // tensor is constructed with names=None.
-CAFFE2_API c10::optional<DimnameList> get_opt_names(const TensorImpl* impl);
+TORCH_API c10::optional<DimnameList> get_opt_names(const TensorImpl* impl);
 
 
 } // namespace impl

@@ -4,6 +4,13 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
+#include <ATen/ScalarOps.h>
+
+// TODO: try to remove this
+// There is some back story, see https://github.com/pytorch/pytorch/issues/48684
+#include <ATen/NativeFunctions.h>
+
+#include <ATen/core/List.h>
 
 namespace at {
 namespace indexing {
@@ -15,10 +22,10 @@ enum class TensorIndexType { None, Ellipsis, Integer, Boolean, Slice, Tensor };
 
 constexpr c10::nullopt_t None = c10::nullopt;
 
-struct CAFFE2_API EllipsisIndexType final { EllipsisIndexType() {} };
-CAFFE2_API extern const EllipsisIndexType Ellipsis;
+struct TORCH_API EllipsisIndexType final { EllipsisIndexType() {} };
+TORCH_API extern const EllipsisIndexType Ellipsis;
 
-struct CAFFE2_API Slice final {
+struct TORCH_API Slice final {
  public:
   // This mirrors `__PySlice_Unpack` in torch/csrc/utils/python_compat.h
   Slice(
@@ -68,7 +75,7 @@ struct CAFFE2_API Slice final {
   int64_t step_;
 };
 
-CAFFE2_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 
 // `at::indexing::TensorIndex` is used for converting C++ tensor indices such as
 // `{None, "...", Ellipsis, 0, true, Slice(1, None, 2), torch::tensor({1, 2})}`
@@ -95,7 +102,7 @@ CAFFE2_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 // `:3:2`                  | `Slice(None, 3, 2)`
 // `1:3:2`                 | `Slice(1, 3, 2)`
 // `torch.tensor([1, 2])`) | `torch::tensor({1, 2})`
-struct CAFFE2_API TensorIndex final {
+struct TORCH_API TensorIndex final {
   // Case 1: `at::indexing::None`
   TensorIndex(c10::nullopt_t) : type_(TensorIndexType::None) {}
 
@@ -170,8 +177,8 @@ struct CAFFE2_API TensorIndex final {
   TensorIndexType type_;
 };
 
-CAFFE2_API std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index);
-CAFFE2_API std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices);
 
 namespace impl {
 static inline Tensor applySlice(
@@ -222,9 +229,9 @@ static inline Tensor applySelect(
 static inline Tensor boolToIndexingTensorCPUOrCUDA(const Tensor& self, bool value) {
   // booleans add a dimension of size 1. true indexes this dimension as if 0:, false as empty.
   if (value) {
-    return at::native::zeros({1}, {}, self.options().dtype(kLong));
+    return at::empty({1}, {}, self.options().dtype(kLong)).fill_(0.);
   } else {
-    return at::native::empty({0}, {}, self.options().dtype(kLong));
+    return at::empty({0}, {}, self.options().dtype(kLong));
   }
 }
 
@@ -245,11 +252,7 @@ static inline Tensor boolToIndexingTensor(const Tensor& self, bool value, const 
   }
 }
 
-static inline Tensor scalarToTensorCPUOrCUDA(Scalar v, const TensorOptions& options) {
-  return at::native::scalar_tensor(v, options);
-}
-
-static inline Tensor scalarToTensorNonNativeDeviceType(Scalar v, const TensorOptions& options) {
+static inline Tensor scalarToTensorNonNativeDeviceType(const Scalar& v, const TensorOptions& options) {
   return at::scalar_tensor(v, options);
 }
 
@@ -260,14 +263,15 @@ static inline void recordTensorIndex(const Tensor& tensor, std::vector<Tensor>& 
   (*dim_ptr)++;
 };
 
-static inline std::vector<Tensor> typeConvertIndices(const Tensor& self, std::vector<Tensor>&& indices) {
-  std::vector<Tensor> converted_inds(indices.size());
+static inline c10::List<c10::optional<Tensor>> typeConvertIndices(const Tensor& self, std::vector<Tensor>&& indices) {
+  c10::List<c10::optional<Tensor>> converted_inds;
+  converted_inds.reserve(indices.size());
   for (size_t i = 0; i < indices.size(); ++i) {
     const auto &ind = indices[i];
     if (ind.defined()) {
-      converted_inds[i] = ind.to(ind.options().device(self.device()));
+      converted_inds.push_back(ind.to(ind.options().device(self.device())));
     } else {
-      converted_inds[i] = std::move(indices[i]);
+      converted_inds.push_back(std::move(indices[i]));
     }
   }
   return converted_inds;
@@ -315,9 +319,9 @@ static inline int64_t count_specified_dimensions(const ArrayRef<TensorIndex>& in
 //
 // The rest of the functions are in `at::indexing::impl` namespace, signifying
 // that they shouldn't be used from Python indexing implementation.
-static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options, const at::Device& self_device) {
-  if (self_device == at::kCPU || self_device == at::kCUDA) {
-    return impl::scalarToTensorCPUOrCUDA(v, options);
+static inline Tensor scalarToTensor(const Scalar& v, const TensorOptions& options, const at::Device& self_device) {
+  if (self_device == at::kCPU) {
+    return at::detail::scalar_tensor_static(v, options.dtype_opt()->toScalarType(), self_device);
   } else {
     return impl::scalarToTensorNonNativeDeviceType(v, options);
   }

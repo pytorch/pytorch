@@ -1,7 +1,6 @@
 from tools.codegen.model import *
 from tools.codegen.api.types import *
-import tools.codegen.local as local
-from typing import Optional, Sequence, Union, Callable, List
+from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
@@ -14,108 +13,117 @@ from typing import Optional, Sequence, Union, Callable, List
 #     for the C++ API; it makes calling kwarg factory functions
 #     pleasant)
 #
-#   - for 'use_c10_dispatcher: full' functions, optional tensors are
-#     represented explicitly using c10::optional
-#
 #   - defaulting lives here (in fact, the dispatcher is completely
 #     oblivious of defaults!)
 #
 # BTW: policy on name collisions: we try not to have types with
 # collisions, but functions are fair game to collide
 
-def name(func: FunctionSchema) -> str:
+def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False) -> str:
     name = str(func.name.name)
     if func.is_out_fn():
-        name += '_out'
+        if faithful_name_for_out_overloads:
+            name += '_outf'
+        else:
+            name += '_out'
+
     return name
 
 # Translation of "value types" in JIT schema to C++ API type.  Value
 # types look the same no matter if they are argument types or return
 # types.  Returns None if the type in question is not a value type.
-def valuetype_type(t: Type) -> Optional[str]:
+def valuetype_type(t: Type, *, binds: ArgName) -> Optional[CType]:
     if isinstance(t, BaseType):
-        if t.name == BaseTy.Tensor:
+        if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:
             return None
         elif t.name == BaseTy.int:
-            return 'int64_t'
+            return BaseCType('int64_t', binds)
         elif t.name == BaseTy.float:
-            return 'double'
+            return BaseCType('double', binds)
         elif t.name == BaseTy.str:
-            return 'std::string'
+            return BaseCType('std::string', binds)
         elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
                         BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
                         BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
                         BaseTy.Dimname, BaseTy.Stream, BaseTy.ConstQuantizerPtr]:
             # These C++ names line up with their schema names
-            return t.name.name
+            return BaseCType(t.name.name, binds)
         else:
             raise AssertionError(f"unsupported type: {t}")
     elif isinstance(t, OptionalType):
-        elem = valuetype_type(t.elem)
+        elem = valuetype_type(t.elem, binds=binds)
         if elem is None:
             return None
-        return f"c10::optional<{elem}>"
+        return OptionalCType(elem)
     elif isinstance(t, ListType):
         if str(t.elem) == 'bool':
             assert t.size is not None
-            return f"std::array<bool,{t.size}>"
+            return BaseCType(f"std::array<bool,{t.size}>", binds)
         else:
             return None
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 # Translation of types occuring in JIT arguments to a C++ argument type.
-def argumenttype_type(t: Type, *, mutable: bool) -> str:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
     # If it's a value type, do the value type translation
-    r = valuetype_type(t)
+    r = valuetype_type(t, binds=binds)
     if r is not None:
         return r
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
-                return 'Tensor &'
+                return MutRefCType(BaseCType('Tensor', binds))
             else:
-                return 'const Tensor &'
+                return ConstRefCType(BaseCType('Tensor', binds))
+        elif t.name == BaseTy.Scalar:
+            return ConstRefCType(BaseCType('Scalar', binds))
         else:
             raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
             if mutable:
-                return 'Tensor &'  # TODO: fix this discrepancy
+                return MutRefCType(BaseCType('Tensor', binds))  # TODO: fix this discrepancy
             else:
-                if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                    return 'const c10::optional<Tensor>&'
-                else:
-                    return 'const Tensor &'
-        elem = argumenttype_type(t.elem, mutable=mutable)
-        return f"c10::optional<{elem}>"
+                return ConstRefCType(OptionalCType(BaseCType('Tensor', binds)))
+        elif str(t.elem) == 'Scalar':
+            return ConstRefCType(OptionalCType(BaseCType('Scalar', binds)))
+        elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
+        return OptionalCType(elem)
     elif isinstance(t, ListType):
         # TODO: remove these special cases, ArrayRef fallthrough works fine
+        # NB: CType throws away ArrayRef structure because it is not currently
+        # relevant in translation.  When it becomes relevant, need to add back
         if str(t.elem) == 'int':
-            return "IntArrayRef"
+            return BaseCType("IntArrayRef", binds)
         elif str(t.elem) == 'Tensor':
-            return "TensorList"
+            return BaseCType("TensorList", binds)
+        elif str(t.elem) == 'Scalar':
+            return BaseCType("ArrayRef<Scalar>", binds)
         elif str(t.elem) == 'Dimname':
-            return "DimnameList"
-        # TODO: do something reasonable about lists of optional tensors
-        elif (not local.use_c10_dispatcher().dispatcher_uses_new_style()) and str(t.elem) == 'Tensor?':
-            return "TensorList"
-        elem = argumenttype_type(t.elem, mutable=mutable)
+            return BaseCType("DimnameList", binds)
+        elif str(t.elem) == 'Tensor?':
+            return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
+        elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         # TODO: explicitly qualify namespace here
-        return f"ArrayRef<{elem}>"
+        return BaseCType(f"ArrayRef<{elem.cpp_type()}>", binds)
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 # Translate a JIT argument into its C++ type
-def argument_type(a: Argument) -> str:
-    return argumenttype_type(a.type, mutable=a.is_write)
+def argument_type(a: Argument, *, binds: ArgName) -> CType:
+    return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
 # Translation of a (non-multi) return type from JIT to C++
+# NB: if need translations on return types, make this return CType too.  Need to
+# take care; ArgName is misnomer now, and inputs are permitted to conflict with outputs
+# so need to make sure you don't have trouble
 def returntype_type(t: Type, *, mutable: bool) -> str:
-    r = valuetype_type(t)
+    # placeholder is ignored
+    r = valuetype_type(t, binds="__placeholder__")
     if r is not None:
-        return r
+        return r.cpp_type()
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
@@ -123,6 +131,8 @@ def returntype_type(t: Type, *, mutable: bool) -> str:
                 return 'Tensor &'
             else:
                 return 'Tensor'
+        elif t.name == BaseTy.Scalar:
+            return 'Scalar'
     elif isinstance(t, ListType):
         elem = returntype_type(t.elem, mutable=mutable)
         assert t.size is None, f"fixed size list returns not supported: {t}"
@@ -157,7 +167,7 @@ def return_names(f: NativeFunction) -> Sequence[str]:
         # corresponding output function (r.name will get recorded
         # in field_name later.)
         elif f.func.is_out_fn():
-            name = f.func.out_arguments[i].name
+            name = f.func.arguments.out[i].name
         # If the return argument is explicitly named...
         elif r.name:
             name_conflict = any(r.name == a.name for a in f.func.schema_order_arguments())
@@ -225,93 +235,73 @@ def default_expr(d: str, t: Type) -> str:
 
 # Convert an argument into its C++ API form
 
-def argument_not_this(
-    a: Union[Argument, TensorOptionsArguments],
-) -> CppArgument:
+def argument(
+    a: Union[Argument, TensorOptionsArguments, SelfArgument],
+    *, cpp_no_default_args: Set[str], method: bool, faithful: bool,
+    has_tensor_options: bool
+) -> List[Binding]:
+    def sub_argument(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> List[Binding]:
+        return argument(
+            a, cpp_no_default_args=cpp_no_default_args, method=method, faithful=faithful,
+            has_tensor_options=has_tensor_options)
+
     if isinstance(a, Argument):
-        return CppArgument(
-            type=argument_type(a),
+        binds: ArgName
+        if a.name == "memory_format" and has_tensor_options:
+            binds = SpecialArgName.possibly_redundant_memory_format
+        else:
+            binds = a.name
+        default: Optional[str] = None
+        if a.name not in cpp_no_default_args and a.default is not None:
+            default = default_expr(a.default, a.type)
+        return [Binding(
+            ctype=argument_type(a, binds=binds),
             name=a.name,
-            default=default_expr(a.default, a.type) if a.default is not None else None,
-            argument=a,
-        )
-    elif isinstance(a, TensorOptionsArguments):
-        default = None
-        if all(x.default == "None" for x in a.all()):
-            default = '{}'
-        elif a.dtype.default == "long":
-            default = 'at::kLong'  # TODO: this is wrong
-        return CppArgument(
-            type='const TensorOptions &',
-            name='options',
             default=default,
             argument=a,
-        )
+        )]
+    elif isinstance(a, TensorOptionsArguments):
+        if faithful:
+            return sub_argument(a.dtype) + sub_argument(a.layout) + \
+                sub_argument(a.device) + sub_argument(a.pin_memory)
+        else:
+            default = None
+            # Enforced by NativeFunction.__post_init__
+            assert 'options' not in cpp_no_default_args
+            if all(x.default == "None" for x in a.all()):
+                default = '{}'
+            elif a.dtype.default == "long":
+                default = 'at::kLong'  # TODO: this is wrong
+            return [Binding(
+                ctype=BaseCType('TensorOptions', 'options'),
+                name='options',
+                default=default,
+                argument=a,
+            )]
+    elif isinstance(a, SelfArgument):
+        if method:
+            # Caller is responsible for installing implicit this in context!
+            return []
+        else:
+            return sub_argument(a.argument)
     else:
         assert_never(a)
 
-def argument(
-    a: Union[Argument, TensorOptionsArguments, ThisArgument],
-) -> Union[CppSingleArgumentPack, CppThisArgumentPack]:
-    if isinstance(a, ThisArgument):
-        return CppThisArgumentPack(argument=a, type=argument_type(a.argument))
+def arguments(
+    arguments: Arguments,
+    *, faithful: bool, method: bool, cpp_no_default_args: Set[str]
+) -> List[Binding]:
+    args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
+    if faithful:
+        args.extend(arguments.non_out)
+        args.extend(arguments.out)
     else:
-        return CppSingleArgumentPack(argument_not_this(a))
-
-def argument_faithful(
-    a: Union[Argument, TensorOptionsArguments, ThisArgument],
-) -> CppArgumentPack:
-    if isinstance(a, TensorOptionsArguments):
-        return CppTensorOptionsArgumentPack(
-            argument=a,
-            dtype=argument_not_this(a.dtype),
-            layout=argument_not_this(a.layout),
-            device=argument_not_this(a.device),
-            pin_memory=argument_not_this(a.pin_memory),
-        )
-    else:
-        return argument(a)
-
-# NB: this unconditionally groups arguments
-def group_arguments(
-    func: FunctionSchema, *, method: bool
-) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
-    args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
-
-    args.extend(func.out_arguments)
-
-    if method:
-        args.extend(ThisArgument(a) if a.name == "self" else a for a in func.arguments)
-    else:
-        args.extend(func.arguments)
-
-    # group up arguments for tensor options
-
-    def pred(name: str, ty: Type) -> Callable[[Argument], bool]:
-        return lambda a: a.name == name and a.type in [ty, OptionalType(ty)]
-    predicates = [  # order matters
-        pred('dtype', Type.parse('ScalarType')),
-        pred('layout', Type.parse('Layout')),
-        pred('device', Type.parse('Device')),
-        pred('pin_memory', Type.parse('bool')),
+        args.extend(arguments.out)
+        args.extend(arguments.non_out)
+    return [
+        r.no_default() if faithful else r for a in args
+        for r in argument(
+            a, faithful=faithful, method=method,
+            has_tensor_options=arguments.tensor_options is not None,
+            cpp_no_default_args=cpp_no_default_args)
     ]
-
-    i = 0
-    while i < len(func.kwarg_only_arguments):
-        # If there is enough space...
-        if i <= len(func.kwarg_only_arguments) - len(predicates):
-            # And the next len(predicates) arguments look like TensorOptions arguments
-            if all(p(a) for p, a in zip(predicates, func.kwarg_only_arguments[i : i + len(predicates)])):
-                # Group them together as one argument
-                args.append(TensorOptionsArguments(
-                    dtype=func.kwarg_only_arguments[i],
-                    layout=func.kwarg_only_arguments[i + 1],
-                    device=func.kwarg_only_arguments[i + 2],
-                    pin_memory=func.kwarg_only_arguments[i + 3],
-                ))
-                i += len(predicates)
-                continue
-        args.append(func.kwarg_only_arguments[i])
-        i += 1
-
-    return args

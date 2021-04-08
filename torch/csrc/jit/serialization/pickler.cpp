@@ -49,6 +49,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushTuple(ivalue);
   } else if (ivalue.isDouble()) {
     pushDouble(ivalue.toDouble());
+  } else if (ivalue.isComplexDouble()) {
+    pushComplexDouble(ivalue);
   } else if (ivalue.isInt()) {
     pushInt(ivalue.toInt());
   } else if (ivalue.isBool()) {
@@ -90,11 +92,11 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
     auto type = obj->type();
-    if (memorized_class_types_ != nullptr) {
-      // Memorize every class type the Pickler encountered
+    if (memoized_class_types_ != nullptr) {
+      // memoize every class type the Pickler encountered
       // This is used to make sure we capture all the run-time types
       // and serialize them properly for class/interface polymorphism
-      memorized_class_types_->emplace_back(type);
+      memoized_class_types_->emplace_back(type);
     }
     auto type_name = type->name().value();
     if (type_renamer_) {
@@ -121,8 +123,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isCapsule()) {
     std::stringstream err;
     err << "Cannot serialize custom bound C++ class";
-    if (memorized_class_types_ && memorized_class_types_->size()) {
-      if (auto qualname = memorized_class_types_->back()->name()) {
+    if (memoized_class_types_ && memoized_class_types_->size()) {
+      if (auto qualname = memoized_class_types_->back()->name()) {
         err << " " << qualname->qualifiedName();
       }
     }
@@ -354,7 +356,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   //
   // The format here is the same one used by `torch.save()`. The code for the
   // format can be found in `torch/serialization.py`.
-  auto tensor = ivalue.toTensor();
+  auto& tensor = ivalue.toTensor();
   bool quantized = tensor.is_quantized();
   // The arguments to this function are:
   //    storage, storage_offset, size, stride, requires_grad, backward_hooks
@@ -463,6 +465,14 @@ void Pickler::pushDouble(double value) {
   push<PickleOpCode>(PickleOpCode::BINFLOAT);
   // Python pickle format is big endian, swap.
   push<double>(swapDouble(value));
+}
+void Pickler::pushComplexDouble(const IValue& value) {
+  c10::complex<double> d = value.toComplexDouble();
+  pushGlobal("builtins", "complex");
+  pushIValue(d.real());
+  pushIValue(d.imag());
+  push<PickleOpCode>(PickleOpCode::TUPLE2);
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushLong(const std::string& data) {
@@ -603,7 +613,7 @@ WriteableTensorData getWriteableTensorData(
   result.tensor_ = tensor;
   result.size_ = tensor.storage().nbytes();
   // TODO HIP support
-  if (tensor.storage().device_type() == DeviceType::CUDA && to_cpu) {
+  if (tensor.storage().device_type() != DeviceType::CPU && to_cpu) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.

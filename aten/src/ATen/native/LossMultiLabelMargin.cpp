@@ -2,6 +2,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/LossMulti.h>
 
 namespace at {
 namespace native {
@@ -39,6 +40,7 @@ inline scalar_t multilabel_margin_loss_forward_inner_sum_cpu(
       }
     }
   }
+
   return sum;
 }
 
@@ -100,34 +102,32 @@ static void multilabel_margin_loss_forward_out_cpu_template(
     Tensor& is_target,
     int64_t reduction) {
   auto target_arg = TensorArg(target, "target", 2);
-
-  const auto ndims = input.dim();
-
-  TORCH_CHECK(
-      input.numel() > 0 && ndims <= 2,
-      "non-empty vector or matrix expected, got size: ",
-      input.sizes());
-
   int64_t nframe, dim;
+  const int64_t ndims = input.dim();
   if (ndims <= 1) {
     nframe = 1;
     dim = ndims == 0 ? 1 : input.size(0);
-    TORCH_CHECK(
-        target.numel() > 0 && target.dim() <= 1 && target.numel() == dim,
-        "inconsistent size ",
-        target.sizes(),
-        " for ",
-        target_arg);
-  } else {
+  }
+  else {
     nframe = input.size(0);
     dim = input.size(1);
-    TORCH_CHECK(
-        target.numel() > 0 && target.dim() == 2 && target.size(0) == nframe &&
-            target.size(1) == dim,
-        "inconsistent size ",
-        target.sizes(),
-        " for ",
-        target_arg);
+  }
+  multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
+
+  // special case target.dim() <= 1: produce scalar output for scalar inputs
+  // even if reduction == Reduction::None
+  if (reduction != Reduction::None || target.dim() <= 1) {
+    output.resize_({});
+  } else {
+    output.resize_({nframe});
+  }
+
+  is_target.resize_as_(target);
+  TORCH_CHECK(is_target.is_contiguous(), "is_target must be contiguous");
+  is_target.zero_();
+
+  if (input.numel() == 0) {
+    return;
   }
 
   TORCH_CHECK(
@@ -137,18 +137,6 @@ static void multilabel_margin_loss_forward_out_cpu_template(
 
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
-
-  is_target.resize_as_(target);
-  TORCH_CHECK(is_target.is_contiguous(), "is_target must be contiguous");
-  is_target.zero_();
-
-  // special case target.dim() <= 1: produce scalar output for scalar inputs
-  // even if reduction == Reduction::None
-  if (reduction != Reduction::None || target.dim() <= 1) {
-    output.resize_({});
-  } else {
-    output.resize_({nframe});
-  }
 
   AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "multilabel_margin_loss_forward_out_frame", [&] {
@@ -232,39 +220,22 @@ static void multilabel_margin_loss_backward_out_cpu_template(
     const Tensor& target,
     int64_t reduction,
     const Tensor& is_target) {
+  int64_t nframe, dim;
   CheckedFrom c = "multilabel_margin_loss_backward_cpu_template";
   auto target_arg = TensorArg(target, "target", 3);
   auto is_target_arg = TensorArg(is_target, "is_target", 5);
+  const int64_t ndims = input.dim();
 
-  const auto ndims = input.dim();
-
-  TORCH_CHECK(
-      input.numel() > 0 && ndims <= 2,
-      "non-empty vector or matrix expected, got size: ",
-      input.sizes());
-
-  int64_t nframe, dim;
-  if (ndims <= 1) {
-    nframe = 1;
-    dim = ndims == 0 ? 1 : input.size(0);
-    TORCH_CHECK(
-        target.numel() > 0 && target.dim() <= 1 && target.numel() == dim,
-        "inconsistent size ",
-        target.sizes(),
-        " for ",
-        target_arg);
-  } else {
-    nframe = input.size(0);
-    dim = input.size(1);
-    TORCH_CHECK(
-        target.numel() > 0 && target.dim() == 2 && target.size(0) == nframe &&
-            target.size(1) == dim,
-        "inconsistent size ",
-        target.sizes(),
-        " for ",
-        target_arg);
-  }
+  multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
   checkSameSize(c, target_arg, is_target_arg);
+
+  grad_input.resize_as_(input);
+  if (grad_input.numel() == 0) {
+    return;
+  }
+
+  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
+  grad_input.zero_();
 
   TORCH_CHECK(
       target.min().item<int64_t>() >= -1, target_arg, " is out of range");
@@ -274,10 +245,6 @@ static void multilabel_margin_loss_backward_out_cpu_template(
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
   auto is_target_contiguous = is_target.contiguous();
-
-  grad_input.resize_as_(input);
-  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  grad_input.zero_();
 
   AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "multilabel_margin_loss_backward_out_frame", [&] {
@@ -295,12 +262,11 @@ static void multilabel_margin_loss_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> multilabel_margin_loss_forward_out_cpu(
-    Tensor& output,
-    Tensor& is_target,
-    const Tensor& self,
+std::tuple<Tensor&, Tensor&> multilabel_margin_loss_forward_out_cpu(const Tensor& self,
     const Tensor& target,
-    int64_t reduction) {
+    int64_t reduction,
+    Tensor& output,
+    Tensor& is_target) {
   multilabel_margin_loss_forward_out_cpu_template(
       self, target, output, is_target, reduction);
   return std::tuple<Tensor&, Tensor&>(output, is_target);
@@ -312,18 +278,17 @@ std::tuple<Tensor, Tensor> multilabel_margin_loss_forward_cpu(
     int64_t reduction) {
   auto output = at::empty({0}, self.options());
   auto is_target = at::empty({0}, self.options());
-  multilabel_margin_loss_forward_out_cpu(
-      output, is_target, self, target, reduction);
+  at::native::multilabel_margin_loss_forward_out_cpu(
+      self, target, reduction, output, is_target);
   return std::make_tuple(output, is_target);
 }
 
-Tensor& multilabel_margin_loss_backward_cpu_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
+Tensor& multilabel_margin_loss_backward_cpu_out(const Tensor& grad_output,
     const Tensor& self,
     const Tensor& target,
     int64_t reduction,
-    const Tensor& is_target) {
+    const Tensor& is_target,
+    Tensor& grad_input) {
   multilabel_margin_loss_backward_out_cpu_template(
       grad_input, grad_output, self, target, reduction, is_target);
   return grad_input;
@@ -336,12 +301,12 @@ Tensor multilabel_margin_loss_backward_cpu(
     int64_t reduction,
     const Tensor& is_target) {
   auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  multilabel_margin_loss_backward_cpu_out(
-      grad_input, grad_output, self, target, reduction, is_target);
+  at::native::multilabel_margin_loss_backward_cpu_out(
+      grad_output, self, target, reduction, is_target, grad_input);
   return grad_input;
 }
 
-Tensor & multilabel_margin_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
+Tensor & multilabel_margin_loss_out(const Tensor & self, const Tensor & target, int64_t reduction, Tensor & output) {
   Tensor is_target = at::empty({0}, self.options());
   return std::get<0>(at::multilabel_margin_loss_forward_out(output, is_target, self, target, reduction));
 }

@@ -1,11 +1,17 @@
 # Table of Contents
 
+<!-- toc -->
+
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
-  - [Nightly Checkout & Pull](#nightly-checkout--pull)
+  - [Tips and Debugging](#tips-and-debugging)
+- [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
-  - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
+  - [Python Unit Testing](#python-unit-testing)
+  - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
+  - [Running `mypy`](#running-mypy)
+  - [C++ Unit Testing](#c-unit-testing)
 - [Writing documentation](#writing-documentation)
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
@@ -23,6 +29,7 @@
     - [Use CCache](#use-ccache)
     - [Use a faster linker](#use-a-faster-linker)
   - [C++ frontend development tips](#c-frontend-development-tips)
+  - [GDB integration](#gdb-integration)
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
@@ -35,6 +42,9 @@
   - [Why no leak detection?](#why-no-leak-detection)
 - [Caffe2 notes](#caffe2-notes)
 - [CI failure tips](#ci-failure-tips)
+  - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+
+<!-- tocstop -->
 
 ## Contributing to PyTorch
 
@@ -148,6 +158,29 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
   ```bash
   ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
   ```
+* If you run into issue running `git submodule update --init --recursive`. Please try the following:
+  - If you encountered error such as
+    ```
+    error: Submodule 'third_party/pybind11' could not be updated
+    ```
+    check whether your Git local or global config file contains any `submodule.*` settings. If yes, remove them and try again.
+    (please reference [this doc](https://git-scm.com/docs/git-config#Documentation/git-config.txt-submoduleltnamegturl) for more info).
+
+  - If you encountered error such as
+    ```
+    fatal: unable to access 'https://github.com/pybind11/pybind11.git': could not load PEM client certificate ...
+    ```
+    this is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
+    `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate valid date by running
+    ```
+    openssl x509 -noout -in <cert_file> -dates
+    ```
+
+  - If you encountered error that some third_party modules are not checkout correctly, such as
+    ```
+    Could not find .../pytorch/third_party/pybind11/CMakeLists.txt
+    ```
+    remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
 
 ## Nightly Checkout & Pull
 
@@ -266,30 +299,91 @@ into the repo directory.
 
 ## Unit testing
 
-`hypothesis` is required to run the tests, `mypy` is an optional dependency,
-and `pytest` may help run tests more selectively. All these packages can be
-installed with `conda` or `pip`.
+### Python Unit Testing
 
-PyTorch's testing is located under `test/`. Run the entire test suite with
+All PyTorch test suites are located in the `test` folder and start with
+`test_`. Run the entire test
+suite with
 
 ```bash
 python test/run_test.py
 ```
 
-or run individual test files, like `python test/test_nn.py`, for individual test suites.
+or run individual test suites using the command `python test/FILENAME.py`,
+where `FILENAME` represents the file containing the test suite you wish
+to run.
 
-### Better local unit tests with pytest
-We don't officially support `pytest`, but it works well with our `unittest` tests and offers
-a number of useful features for local developing. Install it via `pip install pytest`.
+For example, to run all the TorchScript JIT tests (located at
+`test/test_jit.py`), you would run:
 
-If you want to just run tests that contain a specific substring, you can use the `-k` flag:
+```bash
+python test/test_jit.py
+```
+
+You can narrow down what you're testing even further by specifying the
+name of an individual test with `TESTCLASSNAME.TESTNAME`. Here,
+`TESTNAME` is the name of the test you want to run, and `TESTCLASSNAME`
+is the name of the class in which it is defined.
+
+Going off the above example, let's say you want to run
+`test_Sequential`, which is defined as part of the `TestJit` class
+in `test/test_jit.py`. Your command would be:
+
+```bash
+python test/test_jit.py TestJit.test_Sequential
+```
+
+The `hypothesis` library must be installed to run the tests. `mypy` is
+an optional dependency, and `pytest` may help run tests more selectively.
+All these packages can be installed with `conda` or `pip`.
+
+### Better local unit tests with `pytest`
+We don't officially support `pytest`, but it works well with our
+`unittest` tests and offers a number of useful features for local
+developing. Install it via `pip install pytest`.
+
+If you want to just run tests that contain a specific substring, you can
+use the `-k` flag:
 
 ```bash
 pytest test/test_nn.py -k Loss -v
 ```
 
-The above is an example of testing a change to Loss functions: this command runs tests such as
-`TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
+The above is an example of testing a change to all Loss functions: this
+command runs tests such as `TestNN.test_BCELoss` and
+`TestNN.test_MSELoss` and can be useful to save keystrokes.
+
+### Running `mypy`
+
+`mypy` is an optional static type checker for Python. We have multiple `mypy`
+configs for the PyTorch codebase, so you can run them all using this command:
+
+```bash
+for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+```
+
+See [Guide for adding type annotations to
+PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
+for more information on how to set up `mypy` and tackle type annotation
+tasks.
+
+### C++ Unit Testing
+
+PyTorch offers a series of tests located in the `test/cpp` folder.
+These tests are written in C++ and use the Google Test testing framework.
+After compiling PyTorch from source, the test runner binaries will be
+written to the `build/bin` folder. The command to run one of these tests
+is `./build/bin/FILENAME --gtest_filter=TESTSUITE.TESTNAME`, where
+`TESTNAME` is the name of the test you'd like to run and `TESTSUITE` is
+the suite that test is defined in.
+
+For example, if you wanted to run the test ` MayContainAlias`, which
+is part of the test suite `ContainerAliasingTest` in the file
+`test/cpp/jit/test_alias_analysis.cpp`, the command would be:
+
+```bash
+./build/bin/test_jit --gtest_filter=ContainerAliasingTest.UnionAliasing
+```
 
 ## Writing documentation
 
@@ -674,7 +768,7 @@ ccache -M 25Gi
 ```
 
 To check this is working, do two clean builds of pytorch in a row. The second
-build should be substantially and noticeably faster than the first build.
+build should be substantially and noticeably faster than the first build. If this doesn't seem to be the case, check that each of the symlinks above actually link to your installation of `ccache`. For example, if you followed the first option and installed `ccache` from source on a Linux machine, running `readlink -e $(which g++)` should return `~/ccache/bin/ccache`.
 
 
 #### Use a faster linker
@@ -697,6 +791,68 @@ When compiling PyTorch from source, the test runner binary will be written to
 framework, which you can read up about to learn how to configure the test runner. When
 submitting a new feature, we care very much that you write appropriate tests.
 Please follow the lead of the other tests to see how to write a new test case.
+
+### GDB integration
+
+If you are debugging pytorch inside GDB, you might be interested in
+[pytorch-gdb](tools/gdb/pytorch-gdb.py). This script introduces some
+pytorch-specific commands which you can use from the GDB prompt. In
+particular, `torch-tensor-repr` prints a human-readable repr of an at::Tensor
+object. Example of usage:
+
+```
+$ gdb python
+GNU gdb (Ubuntu 9.2-0ubuntu1~20.04) 9.2
+[...]
+(gdb) # insert a breakpoint when we call .neg()
+(gdb) break at::native:neg
+No source file named at::native.
+Make breakpoint pending on future shared library load? (y or [n]) y
+Breakpoint 1 (at::native:neg) pending.
+
+(gdb) run
+[...]
+>>> import torch
+>>> t = torch.tensor([1, 2, 3, 4], dtype=torch.float64)
+>>> t
+tensor([1., 2., 3., 4.], dtype=torch.float64)
+>>> t.neg()
+
+Breakpoint 1, at::native::neg (self=...) at [...]/pytorch/aten/src/ATen/native/UnaryOps.cpp:520
+520     Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
+(gdb) # the default repr of 'self' is not very useful
+(gdb) p self
+$1 = (const at::Tensor &) @0x7ffff72ed780: {impl_ = {target_ = 0x5555559df6e0}}
+(gdb) torch-tensor-repr self
+Python-level repr of self:
+tensor([1., 2., 3., 4.], dtype=torch.float64)
+```
+
+GDB tries to automatically load `pytorch-gdb` thanks to the
+[.gdbinit](.gdbinit) at the root of the pytorch repo. Howevever, auto-loadings is disabled by default, because of security reasons:
+
+```
+$ gdb
+warning: File "/path/to/pytorch/.gdbinit" auto-loading has been declined by your `auto-load safe-path' set to "$debugdir:$datadir/auto-load".
+To enable execution of this file add
+        add-auto-load-safe-path /path/to/pytorch/.gdbinit
+line to your configuration file "/home/YOUR-USERNAME/.gdbinit".
+To completely disable this security protection add
+        set auto-load safe-path /
+line to your configuration file "/home/YOUR-USERNAME/.gdbinit".
+For more information about this security protection see the
+"Auto-loading safe path" section in the GDB manual.  E.g., run from the shell:
+        info "(gdb)Auto-loading safe path"
+(gdb)
+```
+
+As gdb itself suggests, the best way to enable auto-loading of `pytorch-gdb`
+is to add the following line to your `~/.gdbinit` (i.e., the `.gdbinit` file
+which is in your home directory, **not** `/path/to/pytorch/.gdbinit`):
+```
+add-auto-load-safe-path /path/to/pytorch/.gdbinit
+```
+
 
 ## CUDA development tips
 
@@ -754,7 +910,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
 1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
    mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
    `__declspec(dllimport)`. We have codified this pattern into a set of macros
-   which follow the convention `*_API`, e.g., `CAFFE2_API` inside Caffe2 and ATen.
+   which follow the convention `*_API`, e.g., `TORCH_API` inside Caffe2, Aten and Torch.
    (Every separate shared library needs a unique macro name, because symbol visibility
    is on a per shared library basis. See c10/macros/Macros.h for more details.)
 
@@ -891,7 +1047,7 @@ which is in PyTorch's `requirements.txt`.
 ## Pre-commit tidy/linting hook
 
 We use clang-tidy and flake8 (installed with flake8-bugbear,
-flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
+flake8-comprehensions, flake8-pyi, and others) to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
@@ -902,6 +1058,16 @@ performing these checks, before a commit is created:
 You'll need to install an appropriately configured flake8; see
 [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
 for documentation on how to do this.
+
+If you haven't set up the pre-commit hook and have already committed files and
+CI reports `flake8` errors, you can run the check locally in your PR branch with:
+
+  ```bash
+  flake8 $(git diff --name-only $(git merge-base --fork-point master))
+  ```
+
+fix the code so that no errors are reported when you re-run the above check again,
+and then commit the fix.
 
 ## Building PyTorch with ASAN
 
@@ -1027,8 +1193,9 @@ Once you submit a PR or push a new commit to a branch that is in
 an active PR, CI jobs will be run automatically. Some of these may
 fail and you will need to find out why, by looking at the logs.
 
-Fairly often, a CI failure might be unrelated to your changes. In this
-case, you can usually ignore the failure.
+Fairly often, a CI failure might be unrelated to your changes. In this case, you
+can usually ignore the failure. See [the following
+subsection](#which-commit-is-used-in-ci) for more details.
 
 Some failures might be related to specific hardware or environment
 configurations. In this case, if the job is run by CircleCI, you can
@@ -1055,3 +1222,60 @@ following steps:
 4. Now you can find the pytorch working directory, which could be
    `~/workspace` or `~/project`, and run commands locally to debug
    the failure.
+
+For certain Windows failures, it may be useful to have a full [Remote
+Desktop](https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/remote-desktop-clients) connection. See detailed instructions [here](https://github.com/pytorch/pytorch/wiki/Debugging-Windows-with-Remote-Desktop-or-CDB-(CLI-windbg)-on-CircleCI)
+for how to set that up after rerunning the job.
+
+### Which commit is used in CI?
+
+For CI run on `master`, this repository is checked out for a given `master`
+commit, and CI is run on that commit (there isn't really any other choice). For
+PRs, however, it's a bit more complicated. Consider this commit graph, where
+`master` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
+commit `B`:
+
+```
+       o---o---B (refs/pull/42/head)
+      /         \
+     /           C (refs/pull/42/merge)
+    /           /
+---o---o---o---A (refs/heads/master)
+```
+
+There are two possible choices for which commit to use:
+
+1. Checkout commit `B`, the head of the PR (manually committed by the PR
+   author).
+2. Checkout commit `C`, the hypothetical result of what would happen if the PR
+   were merged into `master` (automatically generated by GitHub).
+
+This choice depends on several factors; here is the decision tree as of
+2021-03-30:
+
+- For CI jobs on CircleCI:
+  - If the name of the job (or one of its ancestors in the workflow DAG)
+    contains "xla" or "gcc5", choice **2** is used. This includes the following
+    jobs:
+    - pytorch_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_cpp_doc_build
+      - pytorch_doc_test
+      - pytorch_linux_backward_compatibility_check_test
+      - pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
+      - pytorch_linux_xenial_py3_6_gcc5_4_test
+      - pytorch_python_doc_build
+    - pytorch_xla_linux_bionic_py3_6_clang9_build
+      - pytorch_xla_linux_bionic_py3_6_clang9_test
+  - Otherwise, choice **1** is used.
+- For CI jobs on GitHub Actions:
+  - If the PR was created using [`ghstack`](https://github.com/ezyang/ghstack),
+    choice **1** is used.
+  - Otherwise, choice **2** is used.
+
+This is important to be aware of, because if you see a CI failure on your PR and
+choice **2** is being used for that CI job, it is possible that the failure is
+nondeterministically caused by a commit that does not exist in the ancestry of
+your PR branch. If you happen to have write access to this repo, you can choose
+to use `ghstack` to eliminate this nondeterminism for GitHub Actions jobs on
+your PRs, but it will still be present for the select CircleCI jobs listed
+above.

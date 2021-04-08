@@ -25,10 +25,13 @@ c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
 // so we first use the Alias Db to collect the set of list values
 // which we shouldn't optimize.
 struct PeepholeOptimizeListIdiomsImpl {
-  PeepholeOptimizeListIdiomsImpl(const std::shared_ptr<Graph>& graph)
-      : graph_(graph), aliasDb_(torch::make_unique<AliasDb>(graph_)) {
+  PeepholeOptimizeListIdiomsImpl(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)),
+        aliasDb_(torch::make_unique<AliasDb>(graph_)) {}
+
+  bool run() {
     collectMutatedLists(graph_->block());
-    run(graph_->block());
+    return runBlock(graph_->block());
   }
 
  private:
@@ -52,10 +55,11 @@ struct PeepholeOptimizeListIdiomsImpl {
     }
   }
 
-  void run(Block* block) {
+  bool runBlock(Block* block) {
+    bool changed = false;
     for (Node* node : block->nodes()) {
       for (Block* b : node->blocks()) {
-        run(b);
+        changed |= runBlock(b);
       }
 
       // only optimizing list ops
@@ -76,6 +80,7 @@ struct PeepholeOptimizeListIdiomsImpl {
           WithInsertPoint guard(node);
           node->output()->replaceAllUsesWith(graph_->insertConstant(
               static_cast<int64_t>(first_input->node()->inputs().size())));
+          changed = true;
         }
       } else if (node->kind() == aten::__getitem__) {
         auto list_creation_node = first_input->node();
@@ -85,11 +90,54 @@ struct PeepholeOptimizeListIdiomsImpl {
             if (auto norm_index = normalizeIndex(index->toInt(), list_size)) {
               node->output()->replaceAllUsesWith(
                   list_creation_node->inputs().at(*norm_index));
+              changed = true;
             }
           }
         }
+      } else if (node->kind() == prim::ListUnpack) {
+        auto list_creation_node = first_input->node();
+        if (list_creation_node->kind() == prim::ListConstruct) {
+          // if sizes are unequal it's a runtime error
+          if (list_creation_node->inputs().size() != node->outputs().size()) {
+            continue;
+          }
+          for (size_t i = 0; i < node->outputs().size(); ++i) {
+            node->output(i)->replaceAllUsesWith(
+                list_creation_node->inputs().at(i));
+            changed = true;
+          }
+        }
+      } else if (node->kind() == aten::add) {
+        if (node->inputs().size() != 2) {
+          continue;
+        }
+        auto second_input = node->inputs().at(1);
+        // already checked first, need to check second
+        if (mutated_lists_.count(second_input)) {
+          continue;
+        }
+        if (first_input->node()->kind() != prim::ListConstruct ||
+            second_input->node()->kind() != prim::ListConstruct) {
+          continue;
+        }
+        WithInsertPoint guard(node);
+        auto list_construct =
+            graph_->insertNode(graph_->create(prim::ListConstruct));
+        list_construct->output()->setType(node->output()->type());
+        for (Value* v : first_input->node()->inputs()) {
+          list_construct->addInput(v);
+        }
+        for (Value* v : second_input->node()->inputs()) {
+          list_construct->addInput(v);
+        }
+        node->output()->replaceAllUsesWith(list_construct->output());
+        if (mutated_lists_.count(node->output())) {
+          mutated_lists_.insert(list_construct->output());
+        }
+        changed = true;
       }
     }
+    return changed;
   }
 
   std::unordered_set<Value*> mutated_lists_;
@@ -97,8 +145,9 @@ struct PeepholeOptimizeListIdiomsImpl {
   std::unique_ptr<AliasDb> aliasDb_;
 };
 
-void PeepholeOptimizeListIdioms(const std::shared_ptr<Graph>& graph) {
+bool PeepholeOptimizeListIdioms(const std::shared_ptr<Graph>& graph) {
   PeepholeOptimizeListIdiomsImpl opt(graph);
+  return opt.run();
 }
 
 } // namespace jit

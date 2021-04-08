@@ -45,6 +45,7 @@ bool ModOp<CUDAContext>::DoRunWithType() {
         0,
         context_.cuda_stream()>>>(
         N, divisor_, data_ptr, output_ptr);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     ModOpSimpleKernel<<<
         CAFFE_GET_BLOCKS(N),
@@ -52,6 +53,7 @@ bool ModOp<CUDAContext>::DoRunWithType() {
         0,
         context_.cuda_stream()>>>(
         N, divisor_, data_ptr, output_ptr);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   return true;

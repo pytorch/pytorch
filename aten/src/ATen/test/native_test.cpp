@@ -42,25 +42,63 @@ void TestChunk(TensorOptions T, Tensor& t) {
   ASSERT_EQUAL(at::cat(chunkMethod, 0), t);
 }
 
-void TestStack(TensorOptions T, Tensor& t) {
-  auto x = rand({2, 3, 4});
-  auto y = rand({2, 3, 4});
-  auto z = rand({2, 3, 4});
-  for (int64_t dim = 0; dim < 4; ++dim) {
-    auto res = at::stack({x, y, z}, dim);
-    auto res_neg = at::stack({x, y, z}, dim - 4);
-    std::vector<int64_t> expected_size;
-    expected_size.insert(
-        expected_size.end(), x.sizes().begin(), x.sizes().begin() + dim);
-    expected_size.insert(expected_size.end(), 3);
-    expected_size.insert(
-        expected_size.end(), x.sizes().begin() + dim, x.sizes().end());
+typedef Tensor StackFunc (TensorList, int64_t);
 
-    ASSERT_EQUAL(res, res_neg);
-    ASSERT_TRUE(res.sizes().equals(expected_size));
-    ASSERT_EQUAL(res.select(dim, 0), x);
-    ASSERT_EQUAL(res.select(dim, 1), y);
-    ASSERT_EQUAL(res.select(dim, 2), z);
+// helper function for TestStack
+void _test_stack(TensorList inputs, int64_t dim, StackFunc stack_func) {
+  auto const &x = inputs[0];
+
+  auto res = stack_func(inputs, dim);
+  auto res_neg = stack_func(inputs, dim - x.dim() - 1);
+  std::vector<int64_t> expected_size;
+  expected_size.insert(
+      expected_size.end(), x.sizes().begin(), x.sizes().begin() + dim);
+  expected_size.insert(expected_size.end(), inputs.size());
+  expected_size.insert(
+      expected_size.end(), x.sizes().begin() + dim, x.sizes().end());
+
+  ASSERT_EQUAL(res, res_neg);
+  ASSERT_TRUE(res.sizes().equals(expected_size));
+
+  int d = 0;
+  for (auto& t : inputs) {
+    ASSERT_EQUAL(res.select(dim, d), t);
+    d++;
+  }
+}
+
+void TestStack(TensorOptions T, Tensor& t) {
+  { // at::stack
+    auto x = rand({2, 3, 4});
+    auto y = rand({2, 3, 4});
+    auto z = rand({2, 3, 4});
+
+    auto inputs = {x, y, z};
+    for (int64_t dim = 0; dim < 4; ++dim) {
+      _test_stack(inputs, dim, at::stack);
+    }
+  }
+
+  { // at::native::_stack
+    auto x = rand({2, 3, 4});
+    auto y = rand({2, 3, 4});
+    auto z = rand({2, 3, 4});
+
+    auto inputs = {x, y, z};
+    for (int64_t dim = 0; dim < 4; ++dim) {
+      _test_stack(inputs, dim, at::native::_stack);
+    }
+  }
+
+  { // at::native::_stack_cpu
+    auto x = rand({2, 3, 4});
+    auto y = rand({2, 3, 4});
+    auto z = rand({2, 3, 4});
+
+    auto inputs = {x, y, z};
+    for (int64_t dim = 0; dim < 4; ++dim) {
+      _test_stack(inputs, dim, at::native::_stack_cpu);
+    }
   }
 }
 

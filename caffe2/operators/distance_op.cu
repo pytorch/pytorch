@@ -59,6 +59,8 @@ bool SquaredL2DistanceOp<float, CUDAContext>::RunOnDevice() {
       X.data<float>(),
       Y.data<float>(),
       distance->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -113,6 +115,7 @@ bool SquaredL2DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
           dDistance.data<float>(),
           dX->data<float>(),
           dX->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // The gradient of the other side is basically the negative.
   math::Scale<float, float, CUDAContext>(
@@ -173,6 +176,7 @@ bool L1DistanceOp<float, CUDAContext>::RunOnDevice() {
       X.data<float>(),
       Y.data<float>(),
       distance->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
@@ -240,6 +244,7 @@ bool L1DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
       dDistance.data<float>(),
       dX->template mutable_data<float>(),
       dY->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
@@ -325,16 +330,22 @@ bool CosineSimilarityOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, X_data, X_data, x2);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   DotProductKernel<<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, Y_data, Y_data, y2);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   DotProductKernel<<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, X_data, Y_data, result_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   math::Maximum<float, CUDAContext>(N, kEps, x2, x2, &context_);
   math::Maximum<float, CUDAContext>(N, kEps, y2, y2, &context_);
   math::Mul(N, x2, y2, scale, &context_);
@@ -384,6 +395,8 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, X_data, X_data, xn);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   math::Maximum<float, CUDAContext>(N, kEps, xn, xn, &context_);
   math::Sqrt<float, CUDAContext>(N, xn, xn, &context_);
   // ||y||
@@ -392,6 +405,8 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, Y_data, Y_data, yn);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   math::Maximum<float, CUDAContext>(N, kEps, yn, yn, &context_);
   math::Sqrt<float, CUDAContext>(N, yn, yn, &context_);
   // ||x|| * || y ||
@@ -402,6 +417,8 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, X_data, Y_data, xy);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   math::Div<float, CUDAContext>(N, dCos_data, xyn, scale, &context_);
   // dX
   BatchedMul<float><<<
@@ -409,32 +426,43 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, Y_data, scale, dX_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   Scale2AxpyScale<float><<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, scale, xy, xn, axpy_scale);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   BatchedAxpy<float><<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, axpy_scale, X_data, dX_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   // dY
   BatchedMul<float><<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, X_data, scale, dY_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   Scale2AxpyScale<float><<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, scale, xy, yn, axpy_scale);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   BatchedAxpy<float><<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, axpy_scale, Y_data, dY_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
@@ -467,6 +495,7 @@ bool DotProductOp<float, CUDAContext>::RunOnDevice() {
       X.data<float>(),
       Y.data<float>(),
       result->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
@@ -524,6 +553,8 @@ bool DotProductGradientOp<float, CUDAContext>::RunOnDevice() {
       dDot.data<float>(),
       dX->template mutable_data<float>(),
       dY->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

@@ -44,8 +44,11 @@ class TorchTensorEngine(object):
     def sum(self, data, dims):
         return torch.sum(data, dims)
 
-    def softmax(self, data, dim=None):
-        return torch.nn.functional.softmax(data, dim)
+    def softmax(self, data, dim=None, dtype=None):
+        return torch.nn.functional.softmax(data, dim, dtype)
+
+    def cat(self, inputs, dim=0):
+        return torch.cat(inputs, dim=dim)
 
     def max_pool2d(self, data, kernel_size, stride=1):
         return torch.nn.functional.max_pool2d(data, kernel_size, stride=stride)

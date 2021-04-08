@@ -7,8 +7,8 @@
 namespace caffe2 {
 namespace opt {
 
-CAFFE2_API void addNNPACK(nom::repr::NNModule* nn, bool low_memory = false);
-CAFFE2_API void fuseNNPACKConvRelu(nom::repr::NNModule* nn);
+TORCH_API void addNNPACK(nom::repr::NNModule* nn, bool low_memory = false);
+TORCH_API void fuseNNPACKConvRelu(nom::repr::NNModule* nn);
 
 } // namespace opt
 } // namespace caffe2

@@ -5,44 +5,26 @@
 namespace c10 {
 namespace impl {
 
-C10_DEFINE_bool(disable_variable_dispatch, false, "This flag forcibly disables the Variable code paths from executing, which currently breaks profiling in the process.");
-
-namespace {
-
-/// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
-/// thread_local is not supported.
-#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
-
-// NB: POD, zero initialized!
+// NB: POD, must be zero initialized!
+// Note [TLS Initialization]
+// We wanted raw_local_dispatch_key_set to be initialized with non-zero state
+// e.g. BackendSelect and InplaceOrView in included set.  But certain Windows compiler (e.g the one
+// used in ARVR tests) only allow TLS to be zero-initialized.
+// To preserve the invariant that raw TLS storage of the default state is zero,
+// we obtain the actual include keyset by XORing raw_local_dispatch_key_set.included_
+// with c10::default_included_set.  This logic is encapsulated in struct
+// PODLocalDispatchKeySet.
 thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
-#else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-
-static PODLocalDispatchKeySet raw_local_dispatch_key_set;
-
-#endif
-
-} // anonymous namespace
-
+#if defined(_MSC_VER) || defined(C10_ANDROID)
 LocalDispatchKeySet tls_local_dispatch_key_set() {
-  // Hack until variable performance is fixed
-  //
-  // ezyang: I'm pretty unhappy about this implementation, it looks wrong
-  // to me, as it seems to be performing a mutation on
-  // raw_local_dispatch_key_set.  I can't conveniently test the correct
-  // version though...
-  if (FLAGS_disable_variable_dispatch) {
-    raw_local_dispatch_key_set.set_excluded(
-      raw_local_dispatch_key_set.excluded() | autograd_dispatch_keyset);
-  }
   return raw_local_dispatch_key_set;
 }
+#endif // defined(_MSC_VER) || defined(C10_ANDROID)
 
 void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
-  raw_local_dispatch_key_set = PODLocalDispatchKeySet {
-    key_set.included_.raw_repr(),
-    key_set.excluded_.raw_repr()
-  };
+  raw_local_dispatch_key_set.set_included(key_set.included_);
+  raw_local_dispatch_key_set.set_excluded(key_set.excluded_);
 }
 
 // An RAII guard could snapshot and restore the entire state (entire DispatchKeySet) as
@@ -125,4 +107,11 @@ void tls_set_dispatch_key_included(DispatchKey x, bool desired_state) {
   }
 }
 
+bool tls_is_dispatch_keyset_excluded(DispatchKeySet ks) {
+  return raw_local_dispatch_key_set.excluded().isSupersetOf(ks);
+}
+
+bool tls_is_dispatch_keyset_included(DispatchKeySet ks) {
+  return raw_local_dispatch_key_set.included().isSupersetOf(ks);
+}
 }} // namespace c10::impl

@@ -67,6 +67,8 @@ struct TanhFakeIdealFp16Functor {
 namespace fake_fp16 {
 
 at::Half CalcSigmoidByLUT(at::Half x);
+at::Half CalcSwishByLUT(at::Half x);
+at::Half CalcSwishByLUTCubic(at::Half x);
 at::Half CalcTanhByLUT(at::Half input);
 
 } // namespace fake_fp16

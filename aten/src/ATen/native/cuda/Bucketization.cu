@@ -86,7 +86,7 @@ void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Ten
 
   searchsorted_cuda_kernel<<<grid, block, 0, stream>>>(
     data_out, data_in, data_bd, idim_in, idim_bd, numel_in, right, boundaries.dim() == 1);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, bool out_int32, bool right) {
@@ -104,7 +104,7 @@ void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, boo
 
 }
 
-Tensor& searchsorted_out_cuda(Tensor& result, const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right) {
+Tensor& searchsorted_out_cuda(const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right, Tensor& result) {
   searchsorted_pre_check(sorted_sequence, self, result, out_int32);
   if (result.numel() == 0) {
     result.resize_(self.sizes());
@@ -126,21 +126,22 @@ Tensor& searchsorted_out_cuda(Tensor& result, const Tensor& sorted_sequence, con
   return result;
 }
 
+// We need this function to force the linking against torch_cuda_cu on Windows.
 Tensor searchsorted_cuda(const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
-  searchsorted_out_cuda(result, sorted_sequence, self, out_int32, right);
+  at::native::searchsorted_out_cuda(sorted_sequence, self, out_int32, right, result);
   return result;
 }
 
-Tensor searchsorted_cuda(const Tensor& sorted_sequence, Scalar self, bool out_int32, bool right) {
+Tensor searchsorted_cuda(const Tensor& sorted_sequence, const Scalar& self, bool out_int32, bool right) {
   return searchsorted_cuda(sorted_sequence, searchsorted_scalar_tensor(self, sorted_sequence.device()), out_int32, right);
 }
 
-Tensor& bucketize_out_cuda(Tensor& result, const Tensor& self, const Tensor& boundaries, bool out_int32, bool right) {
+Tensor& bucketize_out_cuda(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
   TORCH_CHECK(boundaries.dim() == 1, "boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  searchsorted_out_cuda(result, boundaries, self, out_int32, right);
+  at::native::searchsorted_out_cuda(boundaries, self, out_int32, right, result);
   return result;
 }
 
@@ -148,11 +149,11 @@ Tensor bucketize_cuda(const Tensor& self, const Tensor& boundaries, bool out_int
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
-  bucketize_out_cuda(result, self, boundaries, out_int32, right);
+  at::native::bucketize_out_cuda(self, boundaries, out_int32, right, result);
   return result;
 }
 
-Tensor bucketize_cuda(Scalar self, const Tensor& boundaries, bool out_int32, bool right) {
+Tensor bucketize_cuda(const Scalar& self, const Tensor& boundaries, bool out_int32, bool right) {
   return bucketize_cuda(searchsorted_scalar_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 

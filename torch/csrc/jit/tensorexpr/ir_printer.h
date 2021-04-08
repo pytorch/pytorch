@@ -41,8 +41,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const Load* v) override;
   void visit(const Broadcast* v) override;
   void visit(const IfThenElse* v) override;
-  void visit(const BaseCallNode* v) override;
-  void visit(const FunctionCall* v) override;
+  void visit(const Intrinsics* v) override;
   void visit(const Term* v) override;
   void visit(const Polynomial* v) override;
   void visit(const RoundOff* v) override;
@@ -52,6 +51,7 @@ class TORCH_API IRPrinter : public IRVisitor {
 
   void visit(const AtomicAdd* v) override;
   void visit(const SyncThreads* v) override;
+  void visit(const ExternalCall* v) override;
   void visit(const Store* v) override;
   void visit(const For* v) override;
   void visit(const Cond* v) override;

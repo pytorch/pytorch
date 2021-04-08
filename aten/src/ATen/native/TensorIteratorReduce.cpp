@@ -2,18 +2,22 @@
 #include <ATen/Parallel.h>
 #include <algorithm>
 #include <memory>
+#include <ATen/Functions.h>
+#include <ATen/TensorOperators.h>
+
+#include <c10/util/irange.h>
 
 /// Contains the implementation of parallel reductions in TensorIterator.
 
 namespace at {
 
-using loop2d_t = TensorIterator::loop2d_t;
+using loop2d_t = TensorIteratorBase::loop2d_t;
 
-static bool use_two_pass_reduction(TensorIterator& iter);
-static void two_pass_reduction(TensorIterator& iter, loop2d_t loop);
-static void parallel_dim_reduction(TensorIterator& iter, loop2d_t loop);
+static bool use_two_pass_reduction(TensorIteratorBase& iter);
+static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop);
+static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop);
 
-void TensorIterator::parallel_reduce(loop2d_t loop) {
+void TensorIteratorBase::parallel_reduce(loop2d_t loop) {
   TORCH_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
   int64_t numel = this->numel();
   if (numel < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
@@ -26,11 +30,11 @@ void TensorIterator::parallel_reduce(loop2d_t loop) {
   }
 }
 
-static bool use_two_pass_reduction(TensorIterator& iter) {
+static bool use_two_pass_reduction(TensorIteratorBase& iter) {
   return iter.output(0).numel() == 1;
 }
 
-static void two_pass_reduction(TensorIterator& iter, loop2d_t loop) {
+static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop) {
   int max_threads = at::get_num_threads();
 
   auto dst = iter.output(0);
@@ -65,7 +69,7 @@ static void two_pass_reduction(TensorIterator& iter, loop2d_t loop) {
 
 /// Chooses a dimension over which to parallelize. Prefers the outer-most
 /// dimension thats larger than the number of available threads.
-static int find_split_dim(TensorIterator& iter) {
+static int find_split_dim(TensorIteratorBase& iter) {
   int num_threads = at::get_num_threads();
   auto shape = iter.shape();
 
@@ -84,7 +88,7 @@ static int find_split_dim(TensorIterator& iter) {
 }
 
 static std::tuple<int64_t, int64_t>
-round_columns(TensorIterator& iter, int dim, int multiple, int64_t begin, int64_t end) {
+round_columns(TensorIteratorBase& iter, int dim, int multiple, int64_t begin, int64_t end) {
   begin = begin - (begin % multiple);
   if (end != iter.shape()[dim]) {
     // only round the 'end' column down if it's not the final column
@@ -93,7 +97,7 @@ round_columns(TensorIterator& iter, int dim, int multiple, int64_t begin, int64_
   return std::make_tuple(begin, end);
 }
 
-static void parallel_dim_reduction(TensorIterator& iter, loop2d_t loop) {
+static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop) {
   AT_ASSERT(iter.ndim() >= 1);
   int dim = find_split_dim(iter);
   int64_t cols = iter.shape()[dim];
@@ -116,7 +120,7 @@ static void parallel_dim_reduction(TensorIterator& iter, loop2d_t loop) {
   });
 }
 
-void TensorIterator::foreach_reduced_elt(loop_subiter_t loop, bool parallelize) {
+void TensorIteratorBase::foreach_reduced_elt(loop_subiter_t loop, bool parallelize) {
   AT_ASSERT(ninputs() == 1);
   AT_ASSERT(noutputs() >= 1);
 
@@ -134,7 +138,7 @@ void TensorIterator::foreach_reduced_elt(loop_subiter_t loop, bool parallelize) 
     auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);
 
     int64_t non_reduced_numel = 1;
-    for (int i = 0; i < non_reduced_shape.size(); ++i) {
+    for (const auto i : c10::irange(non_reduced_shape.size())) {
       non_reduced_numel *= non_reduced_shape[i];
     }
     DimCounter dims {non_reduced_shape, {0, non_reduced_numel}};
@@ -153,7 +157,7 @@ void TensorIterator::foreach_reduced_elt(loop_subiter_t loop, bool parallelize) 
         return;
       }
 
-      auto sub_iter = *this;
+      TensorIterator sub_iter(*this);
 
       sub_iter.narrow(dim, begin, end - begin);
       // On some broken setups, `#ifdef _OPENMP` is true,

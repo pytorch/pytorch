@@ -1,6 +1,5 @@
 import warnings
-from collections import OrderedDict
-from torch._six import container_abcs
+from collections import OrderedDict, abc as container_abcs
 from itertools import islice
 import operator
 
@@ -8,10 +7,12 @@ import torch
 from .module import Module
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
+from typing import Any, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
 
+if TYPE_CHECKING:
+    from torch.nn import Parameter
 
-T = TypeVar('T')
+T = TypeVar('T', bound=Module)
 
 
 class Container(Module):
@@ -27,12 +28,32 @@ class Container(Module):
 
 class Sequential(Module):
     r"""A sequential container.
-    Modules will be added to it in the order they are passed in the constructor.
-    Alternatively, an ordered dict of modules can also be passed in.
+    Modules will be added to it in the order they are passed in the
+    constructor. Alternatively, an ``OrderedDict`` of modules can be
+    passed in. The ``forward()`` method of ``Sequential`` accepts any
+    input and forwards it to the first module it contains. It then
+    "chains" outputs to inputs sequentially for each subsequent module,
+    finally returning the output of the last module.
 
-    To make it easier to understand, here is a small example::
+    The value a ``Sequential`` provides over manually calling a sequence
+    of modules is that it allows treating the whole container as a
+    single module, such that performing a transformation on the
+    ``Sequential`` applies to each of the modules it stores (which are
+    each a registered submodule of the ``Sequential``).
 
-        # Example of using Sequential
+    What's the difference between a ``Sequential`` and a
+    :class:`torch.nn.ModuleList`? A ``ModuleList`` is exactly what it
+    sounds like--a list for storing ``Module`` s! On the other hand,
+    the layers in a ``Sequential`` are connected in a cascading way.
+
+    Example::
+
+        # Using Sequential to create a small model. When `model` is run,
+        # input will first be passed to `Conv2d(1,20,5)`. The output of
+        # `Conv2d(1,20,5)` will be used as the input to the first
+        # `ReLU`; the output of the first `ReLU` will become the input
+        # for `Conv2d(20,64,5)`. Finally, the output of
+        # `Conv2d(20,64,5)` will be used as input to the second `ReLU`
         model = nn.Sequential(
                   nn.Conv2d(1,20,5),
                   nn.ReLU(),
@@ -40,7 +61,8 @@ class Sequential(Module):
                   nn.ReLU()
                 )
 
-        # Example of using Sequential with OrderedDict
+        # Using Sequential with OrderedDict. This is functionally the
+        # same as the above code
         model = nn.Sequential(OrderedDict([
                   ('conv1', nn.Conv2d(1,20,5)),
                   ('relu1', nn.ReLU()),
@@ -57,7 +79,7 @@ class Sequential(Module):
     def __init__(self, arg: 'OrderedDict[str, Module]') -> None:
         ...
 
-    def __init__(self, *args: Any):
+    def __init__(self, *args):
         super(Sequential, self).__init__()
         if len(args) == 1 and isinstance(args[0], OrderedDict):
             for key, module in args[0].items():
@@ -66,7 +88,7 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
-    def _get_item_by_idx(self, iterator, idx):
+    def _get_item_by_idx(self, iterator, idx) -> T:
         """Get the idx-th item of the iterator"""
         size = len(self)
         idx = operator.index(idx)
@@ -76,14 +98,14 @@ class Sequential(Module):
         return next(islice(iterator, idx, None))
 
     @_copy_to_script_wrapper
-    def __getitem__(self: T, idx) -> T:
+    def __getitem__(self, idx) -> Union['Sequential', T]:
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
             return self._get_item_by_idx(self._modules.values(), idx)
 
     def __setitem__(self, idx: int, module: Module) -> None:
-        key = self._get_item_by_idx(self._modules.keys(), idx)
+        key: str = self._get_item_by_idx(self._modules.keys(), idx)
         return setattr(self, key, module)
 
     def __delitem__(self, idx: Union[slice, int]) -> None:
@@ -125,7 +147,7 @@ class ModuleList(Module):
     modules it contains are properly registered, and will be visible by all
     :class:`~torch.nn.Module` methods.
 
-    Arguments:
+    Args:
         modules (iterable, optional): an iterable of modules to add
 
     Example::
@@ -185,7 +207,7 @@ class ModuleList(Module):
     def __iter__(self) -> Iterator[Module]:
         return iter(self._modules.values())
 
-    def __iadd__(self: T, modules: Iterable[Module]) -> T:
+    def __iadd__(self, modules: Iterable[Module]) -> 'ModuleList':
         return self.extend(modules)
 
     @_copy_to_script_wrapper
@@ -197,7 +219,7 @@ class ModuleList(Module):
     def insert(self, index: int, module: Module) -> None:
         r"""Insert a given module before a given index in the list.
 
-        Arguments:
+        Args:
             index (int): index to insert.
             module (nn.Module): module to insert
         """
@@ -205,19 +227,19 @@ class ModuleList(Module):
             self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
 
-    def append(self: T, module: Module) -> T:
+    def append(self, module: Module) -> 'ModuleList':
         r"""Appends a given module to the end of the list.
 
-        Arguments:
+        Args:
             module (nn.Module): module to append
         """
         self.add_module(str(len(self)), module)
         return self
 
-    def extend(self: T, modules: Iterable[Module]) -> T:
+    def extend(self, modules: Iterable[Module]) -> 'ModuleList':
         r"""Appends modules from a Python iterable to the end of the list.
 
-        Arguments:
+        Args:
             modules (iterable): iterable of modules to append
         """
         if not isinstance(modules, container_abcs.Iterable):
@@ -243,16 +265,16 @@ class ModuleDict(Module):
 
     * the order of insertion, and
 
-    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged 
+    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged
       ``OrderedDict``, ``dict`` (started from Python 3.6) or another
-      :class:`~torch.nn.ModuleDict` (the argument to 
+      :class:`~torch.nn.ModuleDict` (the argument to
       :meth:`~torch.nn.ModuleDict.update`).
 
     Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
     types (e.g., Python's plain ``dict`` before Python version 3.6) does not
     preserve the order of the merged mapping.
 
-    Arguments:
+    Args:
         modules (iterable, optional): a mapping (dictionary) of (string: module)
             or an iterable of key-value pairs of type (string, module)
 
@@ -311,7 +333,7 @@ class ModuleDict(Module):
     def pop(self, key: str) -> Module:
         r"""Remove key from the ModuleDict and return its module.
 
-        Arguments:
+        Args:
             key (string): key to pop from the ModuleDict
         """
         v = self[key]
@@ -344,7 +366,7 @@ class ModuleDict(Module):
             If :attr:`modules` is an ``OrderedDict``, a :class:`~torch.nn.ModuleDict`, or
             an iterable of key-value pairs, the order of new elements in it is preserved.
 
-        Arguments:
+        Args:
             modules (iterable): a mapping (dictionary) from string to :class:`~torch.nn.Module`,
                 or an iterable of key-value pairs of type (string, :class:`~torch.nn.Module`)
         """
@@ -357,6 +379,7 @@ class ModuleDict(Module):
             for key, module in modules.items():
                 self[key] = module
         else:
+            # modules here can be a list with two items
             for j, m in enumerate(modules):
                 if not isinstance(m, container_abcs.Iterable):
                     raise TypeError("ModuleDict update sequence element "
@@ -366,7 +389,9 @@ class ModuleDict(Module):
                     raise ValueError("ModuleDict update sequence element "
                                      "#" + str(j) + " has length " + str(len(m)) +
                                      "; 2 is required")
-                self[m[0]] = m[1]
+                # modules can be Mapping (what it's typed at), or a list: [(name1, module1), (name2, module2)]
+                # that's too cumbersome to type correctly with overloads, so we add an ignore here
+                self[m[0]] = m[1]  # type: ignore[assignment]
 
     def forward(self):
         raise NotImplementedError()
@@ -379,7 +404,7 @@ class ParameterList(Module):
     list, but parameters it contains are properly registered, and will be
     visible by all :class:`~torch.nn.Module` methods.
 
-    Arguments:
+    Args:
         parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter` to add
 
     Example::
@@ -401,6 +426,11 @@ class ParameterList(Module):
         self._initialized = True
         if parameters is not None:
             self += parameters
+
+    def __setstate__(self, state):
+        state['_initialized'] = False
+        super(ParameterList, self).__setstate__(state)
+        self._initialized = True
 
     def _get_abs_string_index(self, idx):
         """Get the absolute index for the list of modules"""
@@ -431,8 +461,9 @@ class ParameterList(Module):
         return self.register_parameter(str(idx), param)
 
     def __setattr__(self, key: Any, value: Any) -> None:
-        if getattr(self, "_initialized", False) and not isinstance(value, torch.nn.Parameter):
-            warnings.warn("Setting attributes on ParameterList is not supported.")
+        if getattr(self, "_initialized", False):
+            if not hasattr(self, key) and not isinstance(value, torch.nn.Parameter):
+                warnings.warn("Setting attributes on ParameterList is not supported.")
         super(ParameterList, self).__setattr__(key, value)
 
     def __len__(self) -> int:
@@ -441,7 +472,7 @@ class ParameterList(Module):
     def __iter__(self) -> Iterator['Parameter']:
         return iter(self._parameters.values())
 
-    def __iadd__(self: T, parameters: Iterable['Parameter']) -> T:
+    def __iadd__(self, parameters: Iterable['Parameter']) -> 'ParameterList':
         return self.extend(parameters)
 
     def __dir__(self):
@@ -449,19 +480,19 @@ class ParameterList(Module):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
-    def append(self: T, parameter: 'Parameter') -> T:
+    def append(self, parameter: 'Parameter') -> 'ParameterList':
         """Appends a given parameter at the end of the list.
 
-        Arguments:
+        Args:
             parameter (nn.Parameter): parameter to append
         """
         self.register_parameter(str(len(self)), parameter)
         return self
 
-    def extend(self: T, parameters: Iterable['Parameter']) -> T:
+    def extend(self, parameters: Iterable['Parameter']) -> 'ParameterList':
         """Appends parameters from a Python iterable to the end of the list.
 
-        Arguments:
+        Args:
             parameters (iterable): iterable of parameters to append
         """
         if not isinstance(parameters, container_abcs.Iterable):
@@ -512,7 +543,7 @@ class ParameterDict(Module):
     types (e.g., Python's plain ``dict``) does not preserve the order of the
     merged mapping.
 
-    Arguments:
+    Args:
         parameters (iterable, optional): a mapping (dictionary) of
             (string : :class:`~torch.nn.Parameter`) or an iterable of key-value pairs
             of type (string, :class:`~torch.nn.Parameter`)
@@ -538,6 +569,11 @@ class ParameterDict(Module):
         if parameters is not None:
             self.update(parameters)
 
+    def __setstate__(self, state):
+        state['_initialized'] = False
+        super(ParameterDict, self).__setstate__(state)
+        self._initialized = True
+
     def __getitem__(self, key: str) -> 'Parameter':
         return self._parameters[key]
 
@@ -548,8 +584,9 @@ class ParameterDict(Module):
         del self._parameters[key]
 
     def __setattr__(self, key: Any, value: Any) -> None:
-        if getattr(self, "_initialized", False) and not isinstance(value, torch.nn.Parameter):
-            warnings.warn("Setting attributes on ParameterDict is not supported.")
+        if getattr(self, "_initialized", False):
+            if not hasattr(self, key) and not isinstance(value, torch.nn.Parameter):
+                warnings.warn("Setting attributes on ParameterDict is not supported.")
         super(ParameterDict, self).__setattr__(key, value)
 
     def __len__(self) -> int:
@@ -569,7 +606,7 @@ class ParameterDict(Module):
     def pop(self, key: str) -> 'Parameter':
         r"""Remove key from the ParameterDict and return its parameter.
 
-        Arguments:
+        Args:
             key (string): key to pop from the ParameterDict
         """
         v = self[key]
@@ -599,7 +636,7 @@ class ParameterDict(Module):
             If :attr:`parameters` is an ``OrderedDict``, a :class:`~torch.nn.ParameterDict`, or
             an iterable of key-value pairs, the order of new elements in it is preserved.
 
-        Arguments:
+        Args:
             parameters (iterable): a mapping (dictionary) from string to
                 :class:`~torch.nn.Parameter`, or an iterable of
                 key-value pairs of type (string, :class:`~torch.nn.Parameter`)
@@ -625,7 +662,8 @@ class ParameterDict(Module):
                     raise ValueError("ParameterDict update sequence element "
                                      "#" + str(j) + " has length " + str(len(p)) +
                                      "; 2 is required")
-                self[p[0]] = p[1]
+                # parameters as length-2 list too cumbersome to type, see ModuleDict.update comment
+                self[p[0]] = p[1]  # type: ignore[assignment]
 
     def extra_repr(self) -> str:
         child_lines = []

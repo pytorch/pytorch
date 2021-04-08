@@ -5,7 +5,7 @@ import datetime
 
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep, workspace
+from caffe2.python import core, workspace
 
 
 def benchmark_sparse_lengths_sum(

@@ -30,7 +30,7 @@ namespace caffe2 {
  * A function to generate a random number seed that is unique in a best-effort
  * basis, using an ever-incrementing seed and the current time.
  */
-CAFFE2_API uint32_t RandomNumberSeed();
+TORCH_API uint32_t RandomNumberSeed();
 
 /**
  * The CPU Context, representing the bare minimum of what a Context class in
@@ -44,7 +44,7 @@ CAFFE2_API uint32_t RandomNumberSeed();
  * computation it has.
  *
  */
-class CAFFE2_API CPUContext final : public BaseContext {
+class TORCH_API CPUContext final : public BaseContext {
  public:
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   typedef at::CPUGeneratorImpl rand_gen_type;

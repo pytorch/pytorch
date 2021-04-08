@@ -15,7 +15,6 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 
 #ifdef USE_CUDA
-#include <THC/THCTensorRandom.h>
 #include <ATen/CUDAGeneratorImpl.h>
 #endif
 
@@ -78,45 +77,32 @@ static PyObject * THPGenerator_getState(PyObject *_self, PyObject *noargs)
 {
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
-  Variable var = torch::empty({0}, at::device(at::kCPU).dtype(at::kByte));
-  if (self->cdata.device().type() == at::kCPU) {
-    THByteTensor_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
-  } else {
-#ifdef USE_CUDA
-    TORCH_INTERNAL_ASSERT(self->cdata.device().type() == at::kCUDA);
-    THCRandom_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
-#else
-    TORCH_INTERNAL_ASSERT(false, "PyTorch not compiled with CUDA");
-#endif
-  }
-  return THPVariable_Wrap(std::move(var));
+  auto& gen = ((THPGenerator*)_self)->cdata;
+
+  // See Note [Acquire lock when using random generators]
+  std::lock_guard<std::mutex> lock(gen.mutex());
+  auto state_tensor = gen.get_state();
+
+  return THPVariable_Wrap(std::move(state_tensor));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPGenerator_setState(PyObject *_self, PyObject *_new_state)
 {
   using namespace torch::autograd;
-  auto self = (THPGenerator*)_self;
+
   HANDLE_TH_ERRORS
   if (!THPVariable_Check(_new_state)) {
     throw torch::TypeError("expected a torch.ByteTensor, but got %s", Py_TYPE(_new_state)->tp_name);
   }
-  auto& tensor = ((THPVariable*)_new_state)->cdata;
-  if (tensor.layout() != kStrided || tensor.device().type() != kCPU || tensor.scalar_type() != kByte) {
-    auto type_name = torch::utils::options_to_string(tensor.options());
-    throw torch::TypeError("expected a torch.ByteTensor, but got %s", type_name.c_str());
-  }
-  if (self->cdata.device().type() == at::kCPU) {
-    THByteTensor_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
-  } else {
-#ifdef USE_CUDA
-    TORCH_INTERNAL_ASSERT(self->cdata.device().type() == at::kCUDA);
-    THCRandom_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
-#else
-    TORCH_INTERNAL_ASSERT(false, "PyTorch not compiled with CUDA");
-#endif
-  }
+  auto self = (THPGenerator*)_self;
+  auto& gen = self->cdata;
+  auto& new_state_tensor = ((THPVariable*)_new_state)->cdata;
+
+  // See Note [Acquire lock when using random generators]
+  std::lock_guard<std::mutex> lock(gen.mutex());
+  gen.set_state(new_state_tensor);
+
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS

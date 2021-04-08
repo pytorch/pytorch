@@ -46,16 +46,25 @@ class PYBIND11_EXPORT PyRRef {
 
   // create a proxy on this RRef, which can be used to launch RPC on the owner
   // of this RRef to run functions on the object referenced by this RRef.
-  py::object createRRefProxy(const RRefProxyType& mode) const;
+  py::object createRRefProxy(
+      const RRefProxyType& mode,
+      float timeoutSeconds = rpc::kUnsetRpcTimeout) const;
 
-  // get the type of the data object referenced by this RRef.
-  py::object getRRefType();
+  // get the type of the data object referenced by this RRef. Timeout argument
+  // is only used in the first invocation of this function as an argument to the
+  // RPC to the owner node of the RRef.
+  py::object getRRefType(
+      float timeout = rpc::kUnsetRpcTimeout,
+      bool blocking = true);
 
   // Run the backward pass with the RRef as the root.
   void backward(int64_t autogradContextId, bool retainGraph);
 
   // Helper static function to run backward on a given rref.
-  static void backward(int64_t autogradContextId, bool retainGraph, const c10::intrusive_ptr<RRef>& rref);
+  static void backward(
+      int64_t autogradContextId,
+      bool retainGraph,
+      const c10::intrusive_ptr<RRef>& rref);
 
  private:
   c10::intrusive_ptr<RRef> rref_;

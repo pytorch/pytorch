@@ -31,6 +31,11 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
     data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2", data2.data(), data2.size());
+
+  const std::vector<std::string>& written_records = writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records[0], "key1");
+  ASSERT_EQ(written_records[1], "key2");
+
   writer.writeEndOfFile();
 
   std::string the_file = oss.str();

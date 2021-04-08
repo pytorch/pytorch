@@ -114,6 +114,7 @@ void SumReduceDimsOp<CUDAContext, true, false>::Compute(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context_.cuda_stream()>>>(rows, cols, in_data, lengths_data, out_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // ReduceBackSum: rowwise sum
@@ -130,6 +131,7 @@ void SumReduceDimsOp<CUDAContext, false, false>::Compute(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context_.cuda_stream()>>>(rows, cols, in_data, lengths_data, out_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // ReduceFrontSumGradient
@@ -146,6 +148,7 @@ void SumReduceDimsGradientOp<CUDAContext, true, false>::Compute(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context_.cuda_stream()>>>(rows, cols, dYdata, lengths_data, dXdata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // ReduceBackSumGradient
@@ -162,6 +165,7 @@ void SumReduceDimsGradientOp<CUDAContext, false, false>::Compute(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context_.cuda_stream()>>>(rows, cols, dYdata, lengths_data, dXdata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(
@@ -196,6 +200,7 @@ void SumReduceDimsOp<CUDAContext, true, true>::Compute(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context_.cuda_stream()>>>(rows, cols, in_data, lengths_data, out_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // ReduceBackMean: rowwise mean
@@ -212,6 +217,7 @@ void SumReduceDimsOp<CUDAContext, false, true>::Compute(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context_.cuda_stream()>>>(rows, cols, in_data, lengths_data, out_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // ReduceFrontMeanGradient
@@ -228,6 +234,7 @@ void SumReduceDimsGradientOp<CUDAContext, true, true>::Compute(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context_.cuda_stream()>>>(rows, cols, dYdata, lengths_data, dXdata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // ReduceBackMeanGradient
@@ -244,6 +251,7 @@ void SumReduceDimsGradientOp<CUDAContext, false, true>::Compute(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context_.cuda_stream()>>>(rows, cols, dYdata, lengths_data, dXdata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(

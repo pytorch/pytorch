@@ -88,7 +88,7 @@ std::unordered_set<int> ParseNetPositionList(const std::string& str) {
   return net_position_list;
 }
 
-std::unordered_set<std::string> ParseBlackListOps(const std::string& str) {
+std::unordered_set<std::string> ParseBlockListOps(const std::string& str) {
   std::unordered_set<std::string> ops;
   if (str.empty()) {
     return ops;
@@ -107,13 +107,16 @@ void onnxifi(
     const std::vector<std::string>& input_names,
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
-    const std::unordered_set<int>& blacklist,
-    const ShapeInfoMap& shape_hints,
+    const std::unordered_set<int>& blocklist,
+    const ShapeInfoMap& shape_hints_max_bs,
     bool use_onnx,
     size_t max_batch_size,
     size_t max_seq_size,
     bool load_model_by_blob,
-    bool predictor_net_ssa_rewritten) {
+    bool predictor_net_ssa_rewritten,
+    const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs,
+    const c10::optional<std::string> &blacklist_ops,
+    const c10::optional<size_t> &min_ops) {
   // Split SparseLengthsSumSparse so that we can lower the SparseLengthsSum part
   splitSparseLengthsSumSparse(net, *ws);
 
@@ -137,14 +140,15 @@ void onnxifi(
   opts.bound_shape_spec.max_seq_size = max_seq_size;
   opts.debug = FLAGS_onnxifi_debug_mode;
   opts.adjust_batch = FLAGS_onnxifi_adjust_batch;
-  opts.min_ops = FLAGS_onnxifi_min_ops;
+  opts.min_ops = min_ops.value_or(FLAGS_onnxifi_min_ops);
   opts.load_model_by_blob = load_model_by_blob;
   opts.enforce_fp32_inputs_into_fp16 = FLAGS_enforce_fp32_inputs_into_fp16;
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
   opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
   opts.timeout = FLAGS_onnxifi_timeout_ms;
+  opts.shape_hints_per_bs = shape_hints_per_bs;
 
-  ShapeInfoMap more_shape_hints = shape_hints;
+  ShapeInfoMap more_shape_hints = shape_hints_max_bs;
   if (!FLAGS_onnxifi_shape_hints.empty()) {
     parseShapeInfoMapFromString(FLAGS_onnxifi_shape_hints, more_shape_hints);
   }
@@ -152,19 +156,19 @@ void onnxifi(
   // Before applying backlist, make sure the ops in the net all have an net_pos;
   caffe2::BackendTransformerBase::annotateOpIndex(net);
 
-  // Parse the blacklist
-  auto more_blacklist = ParseNetPositionList(FLAGS_onnxifi_blacklist);
-  for (const auto& b : blacklist) {
-    more_blacklist.emplace(b);
+  // Parse the blocklist
+  auto more_blocklist = ParseNetPositionList(FLAGS_onnxifi_blacklist);
+  for (const auto& b : blocklist) {
+    more_blocklist.emplace(b);
   }
 
   // ONNX mode will change the op order so it doesn't apply here
   if (!opts.use_onnx) {
-    auto blacklisted_ops = ParseBlackListOps(FLAGS_onnxifi_blacklist_ops);
+    auto blocklisted_ops = ParseBlockListOps(blacklist_ops.value_or(FLAGS_onnxifi_blacklist_ops));
     for (const auto& op : net->op()) {
-      if (blacklisted_ops.count(op.type())) {
+      if (blocklisted_ops.count(op.type())) {
         ArgumentHelper helper(op);
-        more_blacklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
+        more_blocklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
       }
     }
   }
@@ -177,7 +181,7 @@ void onnxifi(
   // 1. for specified op, we find its input and outputs.
   // 2. for each input and output, we create a new copy op and attach it as an
   // input to the copy.
-  // 3. we blacklist these new copy operators from onnxification. This forces
+  // 3. we blocklist these new copy operators from onnxification. This forces
   // these intermediate tensors to also become outputs of the onnxifi op.
   // 4. we put the right arguments on the copy ops so TensorObserver can print
   // out the values.
@@ -211,11 +215,11 @@ void onnxifi(
     AddArgument(kNetPos, pos, &copy_op);
     AddArgument("observe_input_tensors", 1, &copy_op);
     net->add_op()->CopyFrom(copy_op);
-    more_blacklist.emplace(pos);
+    more_blocklist.emplace(pos);
   }
 
   OnnxifiTransformer ts(opts);
-  ts.transform(ws, net, weight_names, more_shape_hints, more_blacklist);
+  ts.transform(ws, net, weight_names, more_shape_hints, more_blocklist);
 
   // Cleanup the input from the workspace
   for (const auto& i : input_names) {

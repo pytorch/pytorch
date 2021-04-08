@@ -20,6 +20,10 @@ const char* AccessToString(AccessType a) {
       return "Call";
     case AccessType::AtomicAdd:
       return "AtomicAdd";
+    case AccessType::Alloc:
+      return "Alloc";
+    case AccessType::Free:
+      return "Free";
     default:
       break;
   }
@@ -58,10 +62,6 @@ std::vector<const Expr*> AccessInfo::getIndices() const {
   if (expr_) {
     if (auto* load = dynamic_cast<const Load*>(expr_)) {
       indices = load->indices();
-    } else if (auto* call = dynamic_cast<const FunctionCall*>(expr_)) {
-      indices = call->params();
-    } else if (auto* reduce = dynamic_cast<const ReduceOp*>(expr_)) {
-      indices = reduce->output_args();
     }
   } else {
     if (auto* store = dynamic_cast<const Store*>(stmt_)) {
@@ -135,6 +135,8 @@ bool AccessInfo::isWrite() const {
     case AccessType::Input:
     case AccessType::Store:
     case AccessType::AtomicAdd:
+    case AccessType::Alloc:
+    case AccessType::Free:
       return true;
     default:
       break;
@@ -173,7 +175,8 @@ void AccessInfo::print() const {
 }
 
 void AccessInfo::dumpDOT(std::ostream& os) const {
-  if (type_ == AccessType::Input || type_ == AccessType::Output) {
+  if (type_ == AccessType::Input || type_ == AccessType::Output ||
+      type_ == AccessType::Alloc) {
     os << "n" << id_ << " [\n";
     os << "label = \"" << AccessToString(type_) << "\\n " << *var_ << "[";
     if (bounds_.size() > 0) {
@@ -233,6 +236,9 @@ const char* AccessInfo::AccessTypeColour() const {
       return "dodgerblue";
     case AccessType::Call:
       return "violet";
+    case AccessType::Alloc:
+    case AccessType::Free:
+      return "sandybrown";
     default:
       break;
   }
@@ -568,47 +574,6 @@ void MemDependencyChecker::visit(const Load* v) {
   currentScope_->accesses_.push_back(load);
 }
 
-void MemDependencyChecker::visit(const FunctionCall* v) {
-  // This is essentially the same as Load.
-  auto paramScope =
-      std::make_shared<Scope>(currentScope_->block, currentScope_);
-  currentScope_ = paramScope;
-
-  for (const Expr* param : v->params()) {
-    param->accept(this);
-  }
-
-  const Var* var = v->tensor()->buf()->base_handle();
-  auto call = std::make_shared<AccessInfo>(
-      nextAccess_++,
-      AccessType::Call,
-      v,
-      lastStmt_,
-      var,
-      getIndicesBounds(v->params()));
-
-  // If there were loads in the parameters, this call depends on them, also
-  // merge.
-  if (!paramScope->accesses_.empty()) {
-    for (auto& access : paramScope->accesses_) {
-      call->addDependency(access);
-      access->addDependent(call);
-    }
-    mergeScope(paramScope, paramScope->parent, false);
-  }
-
-  currentScope_ = paramScope->parent;
-
-  stmtToAccess_.emplace(lastStmt_, call);
-  exprToAccess_.emplace(v, call);
-
-  // Intentionally using operator[], we want it to be created if it does not
-  // exist.
-  auto& writeHistory = currentScope_->openWrites_[var];
-  updateWriteHistory(writeHistory, call, call->id());
-  currentScope_->accesses_.push_back(call);
-}
-
 // This check determines if two accesses within a loop are "safe" from loop-self
 // dependence. This function does not consider overlap in bound range, but
 // rather the stride of the bound relative to the loop variable. This is the
@@ -619,6 +584,10 @@ bool executionSafetyCheck(
     const std::vector<const Expr*>& aStrides,
     const std::vector<const Expr*>& oStrides,
     bool parallelized) {
+  if (aStrides.empty() || oStrides.empty()) {
+    return false;
+  }
+  TORCH_INTERNAL_ASSERT(info->bounds().size() == other->bounds().size());
   for (size_t b = 0; b < info->bounds().size(); ++b) {
     const Expr* aIndexStride = aStrides[b];
     const Expr* oIndexStride = oStrides[b];
@@ -829,11 +798,24 @@ void MemDependencyChecker::visit(const For* v) {
   bool parallelized = v->loop_options().is_gpu_block_index() ||
       v->loop_options().is_gpu_thread_index();
 
+  // Store buffers allocated at this scope.
+  std::unordered_set<const Var*> local_intermediates;
+
   // Scanning from the top of the loop, we look for accesses which may depend
   // on a previous or parallel loop iteration.
   for (size_t a = 0; a < currentScope_->accesses_.size(); ++a) {
     auto& info = currentScope_->accesses_[a];
+    if (info->type() == AccessType::Alloc) {
+      local_intermediates.insert(info->var());
+      continue;
+    }
+
     if (!info->isRead()) {
+      continue;
+    }
+
+    // Vars that don't carry outside this scope can't have loop self dependence.
+    if (local_intermediates.count(info->var())) {
       continue;
     }
 
@@ -1124,6 +1106,58 @@ void MemDependencyChecker::visit(const AtomicAdd* v) {
   throw std::runtime_error("MemDependencyChecker AtomicAdd unimplemented");
 }
 
+void MemDependencyChecker::visit(const Allocate* v) {
+  const Stmt* last = lastStmt_;
+  lastStmt_ = v;
+
+  IRVisitor::visit(v);
+
+  const Var* var = v->buffer_var();
+  IndexBounds bounds;
+  // TODO: remove the "buf_flat_size" process below and extend the buf bound
+  // check to support N-d indices access and 1-d index access.
+  // "Allocate" stmt is based on "Buf" which supports N-d indices access and 1-d
+  // index access. Currently the write bound check in memory analysis cannot
+  // identify 1-d index access for N-d bufs. Thus we flatten N-d bufs here to
+  // avoid failing the bound check. But this is not the correct approach and
+  // should be fixed.
+  const Expr* flat_size = buf_flat_size(v->buf());
+  flat_size = IRSimplifier::simplify(new Sub(flat_size, new IntImm(1)));
+  bounds.push_back({new IntImm(0), flat_size});
+
+  auto info = std::make_shared<AccessInfo>(
+      nextAccess_++, AccessType::Alloc, nullptr, var, bounds);
+
+  intermediates_[var] = info;
+
+  auto& history = currentScope_->openWrites_[var];
+  history.emplace_back(std::make_pair(info->bounds(), info));
+  currentScope_->accesses_.push_back(info);
+
+  lastStmt_ = last;
+}
+
+void MemDependencyChecker::visit(const Free* v) {
+  const Stmt* last = lastStmt_;
+  lastStmt_ = v;
+
+  IRVisitor::visit(v);
+
+  const Var* var = v->buffer_var();
+  auto it = intermediates_.find(var);
+  TORCH_INTERNAL_ASSERT(it != intermediates_.end());
+
+  IndexBounds bounds = it->second->bounds();
+  auto info = std::make_shared<AccessInfo>(
+      nextAccess_++, AccessType::Free, nullptr, var, bounds);
+
+  auto& history = currentScope_->openWrites_[var];
+  updateWriteHistory(history, info, info->id());
+  currentScope_->accesses_.push_back(info);
+
+  lastStmt_ = last;
+}
+
 void MemDependencyChecker::updateWriteHistory(
     std::list<BoundRelationship>& writeHistory,
     const std::shared_ptr<AccessInfo>& info,
@@ -1177,9 +1211,10 @@ void MemDependencyChecker::updateWriteHistory(
 
       // Add all new slices.
       for (auto& b : newBounds) {
-        it = writeHistory.insert(it, std::make_pair(b, other));
+        writeHistory.insert(it, std::make_pair(b, other));
       }
-      it++;
+      // No need to increment the iterator since it has been updated after
+      // `erase` above.
     }
   }
 

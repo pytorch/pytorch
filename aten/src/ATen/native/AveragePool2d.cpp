@@ -96,7 +96,7 @@ void avg_pool2d_out_cpu_template(
           Tensor &output,
           const Tensor &input_,
           IntArrayRef kernel_size,
-          IntArrayRef stride, 
+          IntArrayRef stride,
           IntArrayRef padding,
           bool ceil_mode,
           bool count_include_pad,
@@ -119,9 +119,6 @@ void avg_pool2d_out_cpu_template(
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
-  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-    "non-empty 2D or 3D (batch mode) tensor expected for input");
-
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
     "divisor must be not zero");
 
@@ -139,7 +136,7 @@ void avg_pool2d_out_cpu_template(
     kH, kW, dH, dW, padH, padW, 1, 1,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth);
+    outputHeight, outputWidth, input_.suggest_memory_format());
 
   if (input_.ndimension() == 3) {
     output.resize_({nInputPlane, outputHeight, outputWidth});
@@ -276,11 +273,7 @@ Tensor& avg_pool2d_backward_out_cpu_template(
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-
   const int64_t ndim = input.ndimension();
-
-  TORCH_CHECK((ndim == 3 || ndim == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
 
@@ -299,7 +292,8 @@ Tensor& avg_pool2d_backward_out_cpu_template(
     kH, kW, dH, dW, padH, padW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth);
+    outputHeight, outputWidth,
+    input.suggest_memory_format());
 
   /* get contiguous gradOutput */
   const Tensor gradOutput = gradOutput_.contiguous();
@@ -335,15 +329,14 @@ Tensor& avg_pool2d_backward_out_cpu_template(
 
 } // namespace
 
-Tensor& avg_pool2d_out_cpu(
-  Tensor& output,
-  const Tensor& input,
+Tensor& avg_pool2d_out_cpu(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& output)
 {
   avg_pool2d_out_cpu_template(
    output,
@@ -379,16 +372,15 @@ Tensor avg_pool2d_cpu(
   return output;
 }
 
-Tensor& avg_pool2d_backward_out_cpu(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& avg_pool2d_backward_out_cpu(const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& gradInput)
 {
   avg_pool2d_backward_out_cpu_template(
     gradInput,

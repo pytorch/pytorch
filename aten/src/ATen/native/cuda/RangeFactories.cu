@@ -39,8 +39,10 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   using scalar_t = typename function_traits<func_t>::result_type;
   if (N <= std::numeric_limits<int>::max()) {
     elementwise_kernel_with_index<int><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     elementwise_kernel_with_index<int64_t><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -49,7 +51,7 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
 namespace at {
 namespace native {
 
-Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps) {
+Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, Tensor& result) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -105,11 +107,10 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optiona
     result.copy_(r);
   }
 
-  AT_CUDA_CHECK(cudaGetLastError());
   return result;
 }
 
-Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps, double base) {
+Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base, Tensor& result) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -129,7 +130,11 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optiona
   if (steps == 0) {
     // skip
   } else if (steps == 1) {
-    r.fill_(std::pow(base, start.to<double>()));
+    if (isComplexType(r.scalar_type())){
+      r.fill_(std::pow(base, start.to<c10::complex<double>>()));
+    } else {
+      r.fill_(std::pow(base, start.to<double>()));
+    }
   } else if (isIntegralType(r.scalar_type(), 0)) {
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "logspace_cuda", [&]() {
       float scalar_base = static_cast<float>(base); // Use float to avoid promotion to double
@@ -145,7 +150,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optiona
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, r.scalar_type(), "logspace_cuda", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, r.scalar_type(), "logspace_cuda", [&]() {
       scalar_t scalar_base = static_cast<scalar_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
@@ -164,11 +169,10 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optiona
     result.copy_(r);
   }
 
-  AT_CUDA_CHECK(cudaGetLastError());
   return result;
 }
 
-Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "range_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
@@ -201,11 +205,10 @@ Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 
   });
 
-  AT_CUDA_CHECK(cudaGetLastError());
   return result;
 }
 
-Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "arange_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
@@ -263,7 +266,6 @@ Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     }
   });
 
-  AT_CUDA_CHECK(cudaGetLastError());
   return result;
 }
 

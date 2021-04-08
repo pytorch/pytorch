@@ -28,6 +28,13 @@ class Store : public torch::CustomClassHolder {
       const std::string& key,
       const std::vector<uint8_t>& value) = 0;
 
+  virtual std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& currentValue,
+      const std::vector<uint8_t>& newValue) {
+    TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+  }
+
   virtual std::vector<uint8_t> get(const std::string& key) = 0;
 
   virtual int64_t add(const std::string& key, int64_t value) = 0;
@@ -44,7 +51,9 @@ class Store : public torch::CustomClassHolder {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) = 0;
 
-  void setTimeout(const std::chrono::milliseconds& timeout);
+  virtual const std::chrono::milliseconds& getTimeout() const noexcept;
+
+  virtual void setTimeout(const std::chrono::milliseconds& timeout);
 
  protected:
   std::chrono::milliseconds timeout_;

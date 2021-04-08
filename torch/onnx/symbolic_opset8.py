@@ -4,7 +4,8 @@ import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _block_list_in_opset, _try_get_scalar_type
-from torch.onnx.symbolic_opset9 import _cast_Float
+from torch.onnx.symbolic_opset9 import _cast_Float  # type: ignore
+from torch.onnx.symbolic_opset7 import div  # noqa: F401
 
 import warnings
 
@@ -41,7 +42,9 @@ import warnings
 block_listed_operators = [
     "nonzero", "where", "scatter", "scatter_add", "erf", "sign", "isnan", "gather",
     "arange", "masked_fill",
-    "index_fill", "index_copy"
+    "index_fill", "index_copy", "repeat_interleave",
+    "isnan",
+    "any", "all"
 ]
 
 for block_listed_op in block_listed_operators:
@@ -148,10 +151,9 @@ def matmul(g, self, other):
 
 
 def prelu(g, self, weight):
-    if self.isCompleteTensor():
-        self_sizes = self.type().sizes()
-        if self_sizes and len(self_sizes) > 2:
-            weight = g.op("Unsqueeze", weight, axes_i=list(range(1, len(self_sizes) - 1)))
+    self_rank = sym_help._get_tensor_rank(self)
+    if self_rank is not None and self_rank > 2:
+        weight = g.op("Unsqueeze", weight, axes_i=list(range(1, self_rank - 1)))
     if _try_get_scalar_type(self):
         old_type, self, weight = _try_cast_integer_to_float(g, self, weight)
         return _cast_to_type(g, g.op("PRelu", self, weight), old_type)
@@ -267,7 +269,7 @@ def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False, mem
 def repeat(g, self, repeats):
     if not sym_help._is_value(repeats):
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
-    if sym_help._is_packed_list(repeats):  
+    if sym_help._is_packed_list(repeats):
         repeat_size_len = len(sym_help._unpack_list(repeats))
     else:
         const_repeats = sym_help._maybe_get_const(repeats, 'is')

@@ -210,3 +210,49 @@ class TestRegularizer(LayersTestCase):
         l2_norm = np.sum(np.square(weight))
         result = l1_norm * l1 * 0.1 + l2_norm * l2 * 0.1
         npt.assert_almost_equal(result, workspace.blobs[output], decimal=2)
+
+    @given(
+        row_dim=st.integers(5, 10),
+        norm=st.floats(min_value=1.0, max_value=4.0),
+        data_strategy=st.data(),
+    )
+    def test_fp16_max_norm(self, row_dim, norm, data_strategy):
+        weight = np.random.rand(row_dim, 5).astype(np.float16)
+        grad = np.random.rand(row_dim, 5).astype(np.float16)
+
+        # generate indices that will be updated
+        indices = data_strategy.draw(
+            hu.tensor(
+                dtype=np.int64,
+                min_dim=1,
+                max_dim=1,
+                elements=st.sampled_from(np.arange(weight.shape[0])),
+            )
+        )
+        indices = np.unique(indices)
+
+        # compute expected result
+        result = weight.copy()
+        # prevent dived by zero
+        eps = 1e-12
+        norms = np.sqrt(np.sum(result[indices, ] ** 2, axis=1, keepdims=True))
+        # if the norms are smaller than max_norm, then it doesn't need update
+        desired = np.clip(norms, 0, norm)
+        # apply max norm
+        result[indices, ] *= desired / (eps + norms)
+
+        weight_blob = core.BlobReference("weight_blob")
+        workspace.FeedBlob(weight_blob, weight)
+        grad_blob = core.BlobReference("grad_blob")
+        workspace.FeedBlob(grad_blob, grad)
+        indices_blob = core.BlobReference("indices")
+        workspace.FeedBlob(indices_blob, indices)
+        grad_blob_slice = core.GradientSlice(indices=indices_blob, values=grad_blob)
+        train_init_net, train_net = self.get_training_nets()
+        reg = regularizer.MaxNorm(norm, dtype='fp16')
+        reg(
+            train_net, train_init_net, weight_blob, grad_blob_slice, by=RegularizationBy.AFTER_OPTIMIZER
+        )
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+        npt.assert_almost_equal(result, workspace.FetchBlob('weight_blob'), decimal=2)

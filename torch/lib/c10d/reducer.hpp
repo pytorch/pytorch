@@ -1,15 +1,18 @@
 #pragma once
 
 #include <atomic>
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAEvent.h>
+#endif
 #include <memory>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
 
-#include <c10d/comm.hpp>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/comm.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -19,6 +22,8 @@ namespace c10d {
 
 constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
 constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
+// Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
+constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
 class Reducer {
  public:
@@ -27,7 +32,7 @@ class Reducer {
   // buckets, each of which is specified as a list of indices into the
   // variables list for **a single replica** (i.e. `variables[0]`).
   explicit Reducer(
-      std::vector<std::vector<torch::autograd::Variable>> replicas,
+      std::vector<std::vector<at::Tensor>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
@@ -48,7 +53,11 @@ class Reducer {
   // If they don't, and wish to accumulate gradients before reducing them,
   // a call to this function can simply be omitted.
   void prepare_for_backward(
-      const std::vector<torch::autograd::Variable>& outputs);
+      const std::vector<at::Tensor>& outputs);
+
+  // Called at the begginning of forward() inside DistributedDataParallel,
+  // right now it caputures the starting time of forward in each iteration.
+  void prepare_for_forward();
 
   // Returns the relative time in nanoseconds when gradients were ready,
   // with respect to the time `prepare_for_backward` was called. The outer
@@ -60,7 +69,7 @@ class Reducer {
   // Registers a hook to the reducer. The hook is `CommHookInterface`
   // type to allow both Python and CPP hooks. This function can only
   // be called once before calling backward.
- // Cannot combine with the call of `register_builtin_comm_hook`.
+  // Cannot combine with the call of `register_builtin_comm_hook`.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
 
   // Registers a built-in C++ comm hook to the reducer. This function can only
@@ -105,6 +114,15 @@ class Reducer {
   // index has been used.
   std::vector<at::Tensor> get_local_used_maps_on_device() const;
 
+  // Saves thread local state to be used by autograd engine callbacks.
+  void save_thread_local_state();
+
+  // An function for users to set sample_rate of collecting
+  // runtime stats. The time stats will be recorded for the
+  // first 10 iterations, after 10 iteratons time stats will be
+  // recorded once every "sample_rate" training iterations.
+  void set_ddp_runtime_logging_sample_rate(int sample_rate);
+
  protected:
   // Forward declaration.
   struct Bucket;
@@ -124,14 +142,14 @@ class Reducer {
   void push_rebuilt_params(const VariableIndex& index);
 
   mutable std::mutex mutex_;
-  std::vector<std::vector<torch::autograd::Variable>> replicas_;
-  c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
+  const std::vector<std::vector<at::Tensor>> replicas_;
+  const c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
   std::vector<std::vector<bool>> expect_sparse_gradients_;
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Node*, std::vector<VariableIndex>>
-      gradAccToVariablesMap_;
+  std::unordered_map<torch::autograd::Node*, VariableIndex>
+      gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
@@ -161,10 +179,6 @@ class Reducer {
   // Work handle for allreduce on local_used_maps_
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
-  void verify_replicas_within_process();
-
-  void verify_replica0_across_processes();
-
   void mark_variable_ready_dense(VariableIndex index);
 
   void mark_variable_ready_sparse(VariableIndex index);
@@ -190,7 +204,7 @@ class Reducer {
   using GradCallback =
       torch::distributed::autograd::DistAutogradContext::GradCallback;
   void runGradCallbackForVariable(
-      torch::autograd::Variable& variable,
+      at::Tensor& variable,
       GradCallback&& cb);
 
   // A bucket replica represents [1..N] gradients to be reduced,
@@ -213,7 +227,7 @@ class Reducer {
     // `bucket_views_in[i].copy_(grad)` and
     // `grad.copy_(bucket_views_out[i])`
     // provide convenient ways to move grad data in/out of contents.
-    // The reason we keep to states for bucket_views is that if DDP
+    // The reason we keep two states for bucket_views is that if DDP
     // communication hook was registered, `bucket_views_out` could be
     // re-initialized with the value of hook's `future_work`. We still need to
     // keep a separate view reference to replica's original contents for
@@ -224,9 +238,10 @@ class Reducer {
     // Variables that contribute to this bucket replica. Use refcounted value
     // here so that we can easily unflatten the bucket contents into the
     // participating variables after reduction has completed.
-    std::vector<torch::autograd::Variable> variables;
+    std::vector<at::Tensor> variables;
 
-    // Per-variable offset/length into the flat bucket contents tensor and grad bucket.
+    // Per-variable offset/length into the flat bucket contents tensor and grad
+    // bucket.
     std::vector<size_t> offsets;
     std::vector<size_t> lengths;
 
@@ -258,7 +273,7 @@ class Reducer {
   // If gradient_as_bucket_view_ is false, after allreduce buckets,
   // copy bucket results back to grads.
   void copy_bucket_to_grad(
-      torch::autograd::Variable& variable,
+      at::Tensor& variable,
       Reducer::BucketReplica& replica,
       size_t intra_bucket_index,
       bool global_unused);
@@ -316,11 +331,60 @@ class Reducer {
   // Map the index of a variable to its location in the bucket structure.
   std::vector<VariableLocator> variable_locators_;
 
+  // track the number of iterations to synchronize grads in training so far.
+  long num_iterations_;
+  // track the number of buckets that have been ready for
+  // communication calls like allReduce or communication hooks.
+  int num_buckets_ready_;
+
+  // CPU timestamp to record event start and end time.
+  struct CPUTimer {
+    // The timestamp of forward call start time in each iteration.
+    int64_t forward_start_time;
+    // The timestamp of backward computation start and end time in each
+    // iteration.
+    int64_t backward_compute_start_time;
+    int64_t backward_compute_end_time;
+    // The timestamp of first communication call start time in each iteration.
+    int64_t backward_comm_start_time;
+    // The timestamp of last communication call end time in each iteration.
+    int64_t backward_comm_end_time;
+  };
+
+  CPUTimer cpu_timer_{};
+
+#ifdef USE_CUDA
+  // GPU events to record event start and end time.
+  struct GPUTimer {
+    at::cuda::CUDAEvent forward_start = at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_compute_start =
+        at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_compute_end =
+        at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_comm_start =
+        at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_comm_end =
+        at::cuda::CUDAEvent(cudaEventDefault);
+  };
+  GPUTimer gpu_timer_;
+#endif
+
   // We collect the relative timestamp of every gradient being ready
   // when executing autograd. This can be used to derive a timeline of
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
-  int64_t backward_stats_base_;
   std::vector<std::vector<int64_t>> backward_stats_;
+
+  bool should_collect_runtime_stats();
+  void record_forward_compute_start_time();
+  void record_backward_compute_start_time();
+  void record_backward_compute_end_time();
+  void record_backward_comm_start_time();
+  void record_backward_comm_end_time();
+
+  int get_ddp_runtime_logging_sample_rate();
+  int ddp_runtime_logging_sample_rate_ = kDDPRuntimeLoggingSampleRate;
+
+  bool is_multi_device_module_ = false;
 
   // Following variables are to help build dynamic bucket order
   bool has_rebuilt_bucket_;
@@ -358,6 +422,9 @@ class Reducer {
  private:
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
+  // Current thread local state
+  at::ThreadLocalState thread_local_state_;
+  friend class Logger;
 };
 
 // This is equivalent to take_tensors but returns indices into the
@@ -372,4 +439,15 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<bool>& expect_sparse_gradient = {},
     const std::vector<int64_t>& tensor_indices = {});
 
+// Verify model replicas in this process are the same with respect to no. of
+// params, requires grad, and matching dtype/size/layout.
+void verify_replicas_within_process(
+    std::vector<std::vector<at::Tensor>> model_replicas,
+    std::vector<std::vector<bool>> expect_sparse_gradients);
+
+// Verify models across all processes are the same as model on rank 0 with
+// respect to no. of params and matching dtype/size/layout.
+void verify_replica0_across_processes(
+    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
+    std::vector<std::vector<at::Tensor>> model_replicas);
 } // namespace c10d

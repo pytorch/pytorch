@@ -230,7 +230,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     return exp, ssi, sei
 
 
-def scalar(name, scalar, collections=None):
+def scalar(name, scalar, collections=None, new_style=False):
     """Outputs a `Summary` protocol buffer containing a single scalar value.
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
@@ -239,15 +239,30 @@ def scalar(name, scalar, collections=None):
       tensor: A real numeric Tensor containing a single value.
       collections: Optional list of graph collections keys. The new summary op is
         added to these collections. Defaults to `[GraphKeys.SUMMARIES]`.
+      new_style: Whether to use new style (tensor field) or old style (simple_value
+        field). New style could lead to faster data loading.
     Returns:
       A scalar `Tensor` of type `string`. Which contains a `Summary` protobuf.
     Raises:
       ValueError: If tensor has the wrong shape or type.
     """
     scalar = make_np(scalar)
-    assert(scalar.squeeze().ndim == 0), 'scalar should be 0D'
+    assert scalar.squeeze().ndim == 0, "scalar should be 0D"
     scalar = float(scalar)
-    return Summary(value=[Summary.Value(tag=name, simple_value=scalar)])
+    if new_style:
+        plugin_data = SummaryMetadata.PluginData(plugin_name="scalars")
+        smd = SummaryMetadata(plugin_data=plugin_data)
+        return Summary(
+            value=[
+                Summary.Value(
+                    tag=name,
+                    tensor=TensorProto(float_val=[scalar], dtype="DT_FLOAT"),
+                    metadata=smd,
+                )
+            ]
+        )
+    else:
+        return Summary(value=[Summary.Value(tag=name, simple_value=scalar)])
 
 
 def histogram_raw(name, min, max, num, sum, sum_squares, bucket_limits, bucket_counts):
@@ -589,7 +604,7 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
 
     # Compute bins of true positives and false positives.
     bucket_indices = np.int32(np.floor(predictions * (num_thresholds - 1)))
-    float_labels = labels.astype(np.float)
+    float_labels = labels.astype(np.float64)
     histogram_range = (0, num_thresholds - 1)
     tp_buckets, _ = np.histogram(
         bucket_indices,

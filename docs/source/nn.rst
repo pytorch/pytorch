@@ -4,7 +4,7 @@
 torch.nn
 ===================================
 
-These are the basic building block for graphs
+These are the basic building blocks for graphs:
 
 .. contents:: torch.nn
     :depth: 2
@@ -38,6 +38,17 @@ Containers
     ParameterList
     ParameterDict
 
+Global Hooks For Module
+
+.. currentmodule:: torch.nn.modules.module
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    register_module_forward_pre_hook
+    register_module_forward_hook
+    register_module_backward_hook
+
 .. currentmodule:: torch
 
 Convolution Layers
@@ -54,6 +65,12 @@ Convolution Layers
     nn.ConvTranspose1d
     nn.ConvTranspose2d
     nn.ConvTranspose3d
+    nn.LazyConv1d
+    nn.LazyConv2d
+    nn.LazyConv3d
+    nn.LazyConvTranspose1d
+    nn.LazyConvTranspose2d
+    nn.LazyConvTranspose3d
     nn.Unfold
     nn.Fold
 
@@ -75,6 +92,7 @@ Pooling layers
     nn.AvgPool2d
     nn.AvgPool3d
     nn.FractionalMaxPool2d
+    nn.FractionalMaxPool3d
     nn.LPPool1d
     nn.LPPool2d
     nn.AdaptiveMaxPool1d
@@ -159,6 +177,9 @@ Normalization Layers
     nn.BatchNorm1d
     nn.BatchNorm2d
     nn.BatchNorm3d
+    nn.LazyBatchNorm1d
+    nn.LazyBatchNorm2d
+    nn.LazyBatchNorm3d
     nn.GroupNorm
     nn.SyncBatchNorm
     nn.InstanceNorm1d
@@ -259,12 +280,14 @@ Loss Functions
     nn.CTCLoss
     nn.NLLLoss
     nn.PoissonNLLLoss
+    nn.GaussianNLLLoss
     nn.KLDivLoss
     nn.BCELoss
     nn.BCEWithLogitsLoss
     nn.MarginRankingLoss
     nn.HingeEmbeddingLoss
     nn.MultiLabelMarginLoss
+    nn.HuberLoss
     nn.SmoothL1Loss
     nn.SoftMarginLoss
     nn.MultiLabelSoftMarginLoss
@@ -282,6 +305,7 @@ Vision Layers
     :template: classtemplate.rst
 
     nn.PixelShuffle
+    nn.PixelUnshuffle
     nn.Upsample
     nn.UpsamplingNearest2d
     nn.UpsamplingBilinear2d
@@ -325,8 +349,18 @@ From the ``torch.nn.utils`` module
 .. autosummary::
     :toctree: generated
     :nosignatures:
+
+    parametrize.register_parametrization
+    parametrize.remove_parametrizations
+    parametrize.cached
+    parametrize.is_parametrized
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
     :template: classtemplate.rst
 
+    parametrize.ParametrizationList
     prune.BasePruningMethod
 
 .. autosummary::
@@ -366,6 +400,11 @@ Utility functions in other modules
     nn.utils.rnn.pad_packed_sequence
     nn.utils.rnn.pad_sequence
     nn.utils.rnn.pack_sequence
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
     nn.Flatten
     nn.Unflatten

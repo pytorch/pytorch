@@ -112,8 +112,8 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
     child_pytrees, context = flatten_fn(pytree)
 
     # Recursively flatten the children
-    result = []
-    children_specs = []
+    result : List[Any] = []
+    children_specs : List['TreeSpec'] = []
     for child in child_pytrees:
         flat, child_spec = tree_flatten(child)
         result += flat
@@ -178,11 +178,12 @@ def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[A
         return None
 
     # Recursively flatten the children
-    result = []
+    result : List[Any] = []
     for child, child_spec in zip(child_pytrees, spec.children_specs):
         flat = _broadcast_to_and_flatten(child, child_spec)
-        if flat is None:
+        if flat is not None:
+            result += flat
+        else:
             return None
-        result += flat
 
     return result

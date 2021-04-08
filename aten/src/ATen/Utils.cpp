@@ -1,8 +1,11 @@
-#include <ATen/Utils.h>
 #include <ATen/Context.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Functions.h>
-#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
+
+
 #include <stdarg.h>
 #include <cstdlib>
 #include <stdexcept>
@@ -27,10 +30,10 @@ Tensor empty_cpu(
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
-  Device device = device_or_default(device_opt);
 
-  TORCH_CHECK(device.type() == DeviceType::CPU);
-  check_size_nonnegative(size);
+  auto device = device_or_default(device_opt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::CPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
   bool pin_memory = pinned_memory_or_default(pin_memory_opt);
   c10::Allocator* allocator;
@@ -39,9 +42,26 @@ Tensor empty_cpu(
   } else {
     allocator = at::getCPUAllocator();
   }
+  auto dtype = dtype_or_default(dtype_opt);
 
-  int64_t nelements = prod_intlist(size);
-  caffe2::TypeMeta dtype = scalarTypeToTypeMeta(dtype_or_default(dtype_opt));
+  return empty_generic(size, allocator, at::DispatchKey::CPU, dtype, device, memory_format_opt);
+}
+
+Tensor empty_generic(
+  IntArrayRef size,
+  c10::Allocator* allocator,
+  // technically this can be inferred from the device, but usually the
+  // correct setting is obvious from the call site so just make callers
+  // pass it in
+  c10::DispatchKey dispatch_key,
+  ScalarType scalar_type,
+  Device device,
+  c10::optional<c10::MemoryFormat> memory_format_opt) {
+
+  check_size_nonnegative(size);
+
+  int64_t nelements = c10::multiply_integers(size);
+  caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
   int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
@@ -51,14 +71,18 @@ Tensor empty_cpu(
       /*resizeable=*/true);
 
   auto tensor = detail::make_tensor<TensorImpl>(
-      std::move(storage_impl), at::DispatchKey::CPU, dtype);
+      std::move(storage_impl), dispatch_key, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  auto memory_format = memory_format_opt.value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  if (memory_format_opt.has_value()) {
+    // Restriding a just-created empty contiguous tensor does nothing.
+    if (*memory_format_opt != MemoryFormat::Contiguous) {
+      tensor.unsafeGetTensorImpl()->empty_tensor_restride(*memory_format_opt);
+    }
+  }
 
   return tensor;
 }

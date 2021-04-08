@@ -26,9 +26,9 @@ Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::op
   return get_tensor(scalarTypeToTypeMeta(dtype_or_default(dtype)), size);
 }
 
-Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
+Tensor& add_out_override(const Tensor & a, const Tensor & b , const Scalar& c, Tensor & out) {
   test_int = 1;
-  return get_tensor(a.dtype(), a.sizes());
+  return out;
 }
 
 Tensor fake_convolution(
@@ -53,10 +53,10 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
 }
 
 TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
-  m.impl_UNBOXED("empty.memory_format",                empty_override);
-  m.impl_UNBOXED("add.Tensor",                         add_override);
-  m.impl_UNBOXED("convolution_overrideable",           fake_convolution);
-  m.impl_UNBOXED("convolution_backward_overrideable",  fake_convolution_backward);
+  m.impl("empty.memory_format",                empty_override);
+  m.impl("add.out",                            add_out_override);
+  m.impl("convolution_overrideable",           fake_convolution);
+  m.impl("convolution_backward_overrideable",  fake_convolution_backward);
 }
 
 // TODO: Extend this to exercise multi-device setting.  In that case,

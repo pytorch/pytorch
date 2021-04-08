@@ -12,7 +12,6 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-
 struct Resource final {
   class Pool;
 
@@ -21,15 +20,6 @@ struct Resource final {
   //
 
   struct Memory final {
-    /*
-      Barrier
-    */
-
-    struct Barrier final {
-      VkAccessFlags src;
-      VkAccessFlags dst;
-    };
-
     /*
       Descriptor
     */
@@ -40,13 +30,24 @@ struct Resource final {
       VkMemoryPropertyFlags /* optional */ preferred;
     };
 
-    VmaAllocator allocator;
-    VmaAllocation allocation;
+    /*
+      Barrier
+    */
+
+    struct Barrier final {
+      VkAccessFlags src;
+      VkAccessFlags dst;
+    };
+
+    /*
+      Access
+    */
 
     struct Access final {
       typedef uint8_t Flags;
 
       enum Type : Flags {
+        None = 0u << 0u,
         Read = 1u << 0u,
         Write = 1u << 1u,
       };
@@ -73,6 +74,9 @@ struct Resource final {
         Access::Flags kAccess,
         typename Pointer = Access::Pointer<Type, kAccess>>
     Handle<Pointer> map() &;
+
+    VmaAllocator allocator;
+    VmaAllocation allocation;
 
    private:
     // Intentionally disabed to ensure memory access is always properly
@@ -164,7 +168,7 @@ struct Resource final {
 
         typedef Sampler::Descriptor Descriptor;
         typedef VK_DELETER(Sampler) Deleter;
-        typedef Handle<VkSampler, Deleter> Handle;
+        typedef api::Handle<VkSampler, Deleter> Handle;
 
         struct Hasher {
           size_t operator()(const Descriptor& descriptor) const;
@@ -262,7 +266,22 @@ struct Resource final {
 
   class Pool final {
    public:
-    explicit Pool(const GPU& gpu);
+    class Policy {
+     public:
+      virtual ~Policy() = default;
+
+      static std::unique_ptr<Policy> linear(
+          VkDeviceSize block_size = VMA_DEFAULT_LARGE_HEAP_BLOCK_SIZE,
+          uint32_t min_block_count = 1u,
+          uint32_t max_block_count = UINT32_MAX);
+
+      virtual void enact(
+          VmaAllocator allocator,
+          const VkMemoryRequirements& memory_requirements,
+          VmaAllocationCreateInfo& allocation_create_info) = 0;
+    };
+
+    explicit Pool(const GPU& gpu, std::unique_ptr<Policy> = {});
     Pool(const Pool&) = delete;
     Pool& operator=(const Pool&) = delete;
     Pool(Pool&&);
@@ -284,6 +303,8 @@ struct Resource final {
    private:
     friend struct Fence;
 
+    void invalidate();
+
    private:
     struct Configuration final {
       static constexpr uint32_t kReserve = 256u;
@@ -291,6 +312,10 @@ struct Resource final {
 
     VkDevice device_;
     Handle<VmaAllocator, void(*)(VmaAllocator)> allocator_;
+
+    struct {
+      std::unique_ptr<Policy> policy;
+    } memory_;
 
     struct {
       std::vector<Handle<Buffer, void(*)(const Buffer&)>> pool;
@@ -309,7 +334,7 @@ struct Resource final {
   } pool;
 
   explicit Resource(const GPU& gpu)
-    : pool(gpu) {
+    : pool(gpu, Pool::Policy::linear()) {
   }
 };
 
@@ -334,17 +359,19 @@ class Resource::Memory::Scope final {
 
 template<typename, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const & {
-  void* map(const Memory& memory);
+  // Forward declaration
+  void* map(const Memory&, Access::Flags);
 
   return Handle<Pointer>{
-    reinterpret_cast<Pointer>(map(*this)),
+    reinterpret_cast<Pointer>(map(*this, Access::Read)),
     Scope(allocator, allocation, Access::Read),
   };
 }
 
 template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
-  void* map(const Memory& memory);
+  // Forward declaration
+  void* map(const Memory&, Access::Flags);
 
   static_assert(
       (kAccess == Access::Read) ||
@@ -353,7 +380,7 @@ inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
       "Invalid memory access!");
 
   return Handle<Pointer>{
-    reinterpret_cast<Pointer>(map(*this)),
+    reinterpret_cast<Pointer>(map(*this, kAccess)),
     Scope(allocator, allocation, kAccess),
   };
 }
@@ -369,10 +396,11 @@ inline Resource::Buffer::operator bool() const {
 inline bool operator==(
     const Resource::Image::Sampler::Descriptor& _1,
     const Resource::Image::Sampler::Descriptor& _2) {
-    return (_1.filter == _2.filter) &&
-           (_1.mipmap_mode == _2.mipmap_mode) &&
-           (_1.address_mode == _2.address_mode) &&
-           (_1.border == _2.border);
+    static_assert(
+      std::is_trivially_copyable<Resource::Image::Sampler::Descriptor>::value,
+      "This implementation is no longer valid!");
+
+  return (0 == memcmp(&_1, &_2, sizeof(Resource::Image::Sampler::Descriptor)));
 }
 
 inline size_t Resource::Image::Sampler::Factory::Hasher::operator()(

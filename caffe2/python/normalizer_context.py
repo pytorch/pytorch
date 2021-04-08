@@ -10,8 +10,7 @@ from caffe2.python.modifier_context import (
     ModifierContext, UseModifierBase)
 
 
-@context.define_context(allow_default=True)
-class NormalizerContext(ModifierContext):
+class NormalizerContext(ModifierContext, context.DefaultManaged):
     """
     provide context to allow param_info to have different normalizers
     """

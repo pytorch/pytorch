@@ -4,7 +4,6 @@
 
 
 import unittest
-import sys
 import hypothesis.strategies as st
 from hypothesis import given, settings
 import numpy as np

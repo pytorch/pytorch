@@ -1,5 +1,5 @@
-import math
 import torch
+from . import _functional as F
 from .optimizer import Optimizer
 
 
@@ -9,7 +9,7 @@ class AdamW(Optimizer):
     The original Adam algorithm was proposed in `Adam: A Method for Stochastic Optimization`_.
     The AdamW variant was proposed in `Decoupled Weight Decay Regularization`_.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-3)
@@ -55,7 +55,7 @@ class AdamW(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
@@ -65,18 +65,23 @@ class AdamW(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
+            params_with_grad = []
+            grads = []
+            exp_avgs = []
+            exp_avg_sqs = []
+            state_sums = []
+            max_exp_avg_sqs = []
+            state_steps = []
+            amsgrad = group['amsgrad']
+            beta1, beta2 = group['betas']
+
             for p in group['params']:
                 if p.grad is None:
                     continue
-
-                # Perform stepweight decay
-                p.mul_(1 - group['lr'] * group['weight_decay'])
-
-                # Perform optimization step
-                grad = p.grad
-                if grad.is_sparse:
+                params_with_grad.append(p)
+                if p.grad.is_sparse:
                     raise RuntimeError('AdamW does not support sparse gradients')
-                amsgrad = group['amsgrad']
+                grads.append(p.grad)
 
                 state = self.state[p]
 
@@ -91,28 +96,28 @@ class AdamW(Optimizer):
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
-                if amsgrad:
-                    max_exp_avg_sq = state['max_exp_avg_sq']
-                beta1, beta2 = group['betas']
+                exp_avgs.append(state['exp_avg'])
+                exp_avg_sqs.append(state['exp_avg_sq'])
 
+                if amsgrad:
+                    max_exp_avg_sqs.append(state['max_exp_avg_sq'])
+
+                # update the steps for each param group update
                 state['step'] += 1
-                bias_correction1 = 1 - beta1 ** state['step']
-                bias_correction2 = 1 - beta2 ** state['step']
+                # record the step after step update
+                state_steps.append(state['step'])
 
-                # Decay the first and second moment running average coefficient
-                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-                if amsgrad:
-                    # Maintains the maximum of all 2nd moment running avg. till now
-                    torch.maximum(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
-                    # Use the max. for normalizing running avg. of gradient
-                    denom = (max_exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
-                else:
-                    denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
-
-                step_size = group['lr'] / bias_correction1
-
-                p.addcdiv_(exp_avg, denom, value=-step_size)
+            F.adamw(params_with_grad,
+                    grads,
+                    exp_avgs,
+                    exp_avg_sqs,
+                    max_exp_avg_sqs,
+                    state_steps,
+                    amsgrad,
+                    beta1,
+                    beta2,
+                    group['lr'],
+                    group['weight_decay'],
+                    group['eps'])
 
         return loss

@@ -75,9 +75,10 @@ TEST(Conv, Conv2D) {
 
   at::Tensor result = at::empty_like(ref);
   te::SimpleIREvaluator cg(s, {inputB, filterB, conv});
-  cg.call({input.data_ptr<float>(),
-           filter.data_ptr<float>(),
-           result.data_ptr<float>()});
+  cg.call(
+      {input.data_ptr<float>(),
+       filter.data_ptr<float>(),
+       result.data_ptr<float>()});
 
   ASSERT_TRUE(at::allclose(ref, result, 1e-3, 1e-3));
 }

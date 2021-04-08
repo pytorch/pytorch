@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/nn/modules/adaptive.h>
 #include <torch/nn/options/activation.h>
 #include <torch/nn/options/linear.h>
@@ -37,7 +38,7 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
   head = this->register_module("head", Linear(LinearOptions(options.in_features(), head_size).bias(options.head_bias())));
   tail = this->register_module("tail", ModuleList());
 
-  for (int64_t i = 0; i < n_clusters; i++) {
+  for(const auto i : c10::irange(n_clusters)) {
     int64_t hsz = options.in_features() / static_cast<int64_t>(std::pow(options.div_value(), (i + 1)));
     int64_t osz = cutoffs[i + 1] - cutoffs[i];
 
@@ -159,7 +160,7 @@ Tensor AdaptiveLogSoftmaxWithLossImpl::predict(const Tensor& input) {
 }
 
 void AdaptiveLogSoftmaxWithLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::AdaptiveLogSoftmaxWithLoss"; 
+  stream << "torch::nn::AdaptiveLogSoftmaxWithLoss";
 }
 
 } // namespace nn

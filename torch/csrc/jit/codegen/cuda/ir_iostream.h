@@ -16,7 +16,7 @@ namespace cuda {
 //! This class is intended for debug printing, so it attempts
 //! to handle invalid states as well.
 //!
-class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
+class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
  public:
   explicit IrPrinter(std::ostream& os) : os_(os) {}
 
@@ -107,12 +107,12 @@ class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
   int indent_size_ = 0;
 };
 
-TORCH_CUDA_API std::ostream& operator<<(
+TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream& os,
     const Statement* stmt);
 
-TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion* f);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion& f);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream& os, Fusion* f);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream& os, Fusion& f);
 
 // TODO(kir): catch accidental << printing of Kernel IR nodes
 // (use kir::toString(node) instead)

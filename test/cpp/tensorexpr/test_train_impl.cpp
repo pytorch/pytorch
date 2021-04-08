@@ -303,8 +303,9 @@ REGISTER_METHOD(
     },
     [](const std::vector<VTensor*>& inputs,
        const std::vector<VTensor*>& ginputs) -> std::vector<VTensor*> {
-      return {call("mul", {ginputs[0], inputs[1]})[0],
-              call("mul", {ginputs[0], inputs[0]})[0]};
+      return {
+          call("mul", {ginputs[0], inputs[1]})[0],
+          call("mul", {ginputs[0], inputs[0]})[0]};
     },
     [](const std::vector<VTensor*>& inputs)
         -> std::vector<std::vector<std::string>> {
@@ -329,8 +330,9 @@ REGISTER_METHOD(
        const std::vector<VTensor*>& ginputs) -> std::vector<VTensor*> {
       auto b_2 = call("mul", {inputs[1], inputs[1]})[0];
       auto a_div_b_2 = call("div", {inputs[0], b_2})[0];
-      return {call("div", {ginputs[0], inputs[1]})[0],
-              call("mul", {ginputs[0], call("neg", {a_div_b_2})[0]})[0]};
+      return {
+          call("div", {ginputs[0], inputs[1]})[0],
+          call("mul", {ginputs[0], call("neg", {a_div_b_2})[0]})[0]};
     },
     [](const std::vector<VTensor*>& inputs)
         -> std::vector<std::vector<std::string>> {
@@ -503,6 +505,10 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
   }
 
   std::vector<Tensor*> toutputs;
+  std::vector<Tensor*> t_all;
+  for (auto& vtensor : graph.vtensors) {
+    t_all.emplace_back(bindings.at(&vtensor));
+  }
   if (outputs.size() == 0) {
     for (auto& vtensor : graph.vtensors) {
       if (vtensor.consumers.size() == 0) {
@@ -515,7 +521,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
     }
   }
 
-  LoopNest l(toutputs);
+  LoopNest l(toutputs, t_all);
   l.prepareForCodegen();
   Stmt* s = l.root_stmt();
   return std::make_tuple(s, inputs, bindings, vbindings);

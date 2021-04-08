@@ -1,11 +1,11 @@
+#include <c10/util/accumulate.h>
+#include "caffe2/core/logging.h"
 #include "caffe2/utils/math/utils.h"
 
 #include <algorithm>
 #include <functional>
 #include <numeric>
 #include <vector>
-
-#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 namespace math {
@@ -183,12 +183,10 @@ bool IsRowwiseBroadcastBinaryOp(
   }
   const int pivot = std::max(A_pivot, B_pivot);
   if (A_pivot > B_pivot) {
-    *rows = std::accumulate(
-        B_dims + B_pivot, B_dims + pivot, 1, std::multiplies<int>());
+    *rows = c10::multiply_integers(B_dims + B_pivot, B_dims + pivot);
     *broadcast_1st = true;
   } else {
-    *rows = std::accumulate(
-        A_dims + A_pivot, A_dims + pivot, 1, std::multiplies<int>());
+    *rows = c10::multiply_integers(A_dims + A_pivot, A_dims + pivot);
     *broadcast_1st = false;
   }
   *cols = 1;
@@ -224,12 +222,10 @@ bool IsColwiseBroadcastBinaryOp(
   ++B_pivot;
   const int pivot = std::min(A_pivot, B_pivot);
   if (A_pivot < B_pivot) {
-    *cols = std::accumulate(
-        B_dims + pivot, B_dims + B_pivot, 1, std::multiplies<int>());
+    *cols = c10::multiply_integers(B_dims + pivot, B_dims + B_pivot);
     *broadcast_1st = true;
   } else {
-    *cols = std::accumulate(
-        A_dims + pivot, A_dims + A_pivot, 1, std::multiplies<int>());
+    *cols = c10::multiply_integers(A_dims + pivot, A_dims + A_pivot);
     *broadcast_1st = false;
   }
   *rows = 1;
@@ -271,16 +267,12 @@ bool IsBothEndsBroadcastBinaryOp(
     return false;
   }
   if (A_pre > B_pre && A_nxt < B_nxt) {
-    *pre = std::accumulate(
-        B_dims + B_pre, B_dims + A_pre, 1, std::multiplies<int>());
-    *nxt = std::accumulate(
-        B_dims + A_nxt, B_dims + B_nxt, 1, std::multiplies<int>());
+    *pre = c10::multiply_integers(B_dims + B_pre, B_dims + A_pre);
+    *nxt = c10::multiply_integers(B_dims + A_nxt, B_dims + B_nxt);
     *broadcast_1st = true;
   } else if (A_pre < B_pre && A_nxt > B_nxt) {
-    *pre = std::accumulate(
-        A_dims + A_pre, A_dims + B_pre, 1, std::multiplies<int>());
-    *nxt = std::accumulate(
-        A_dims + B_nxt, A_dims + A_nxt, 1, std::multiplies<int>());
+    *pre = c10::multiply_integers(A_dims + A_pre, A_dims + B_pre);
+    *nxt = c10::multiply_integers(A_dims + B_nxt, A_dims + A_nxt);
     *broadcast_1st = false;
   } else {
     return false;

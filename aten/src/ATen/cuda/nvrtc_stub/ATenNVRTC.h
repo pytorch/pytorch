@@ -29,7 +29,7 @@ namespace at { namespace cuda {
 
 #ifndef __HIP_PLATFORM_HCC__
 
-#define AT_FORALL_NVRTC(_)                       \
+#define AT_FORALL_NVRTC_BASE(_)                  \
   _(nvrtcVersion)                                \
   _(nvrtcAddNameExpression)                      \
   _(nvrtcCreateProgram)                          \
@@ -53,6 +53,16 @@ namespace at { namespace cuda {
   _(cuLinkCreate)                                \
   _(cuLinkAddData)                               \
   _(cuLinkComplete)
+
+#if CUDA_VERSION >= 11010
+#define AT_FORALL_NVRTC(_) \
+  AT_FORALL_NVRTC_BASE(_)  \
+  _(nvrtcGetCUBINSize)     \
+  _(nvrtcGetCUBIN)
+#else
+#define AT_FORALL_NVRTC(_) \
+  AT_FORALL_NVRTC_BASE(_)
+#endif
 
 #else
 
@@ -105,6 +115,5 @@ extern "C" typedef struct NVRTC {
 #undef CREATE_MEMBER
 } NVRTC;
 
-extern "C" TORCH_CUDA_API NVRTC* load_nvrtc();
-
+extern "C" TORCH_CUDA_CPP_API NVRTC* load_nvrtc();
 }} // at::cuda

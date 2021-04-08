@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/codegen/fuser/cpu/fused_kernel.h>
+
+#include <ATen/DynamicLibrary.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
@@ -19,22 +21,22 @@ namespace cpu {
 
 #ifdef _MSC_VER
 static const std::string getTempPath() {
-  char lpTempPathBuffer[MAX_PATH];
+  wchar_t lpTempPathBuffer[MAX_PATH];
 
-  DWORD dwRetVal = GetTempPath(
+  DWORD dwRetVal = GetTempPathW(
       MAX_PATH, // length of the buffer
       lpTempPathBuffer); // buffer for path
 
   TORCH_CHECK(dwRetVal < MAX_PATH && dwRetVal != 0, "GetTempPath failed.");
 
-  return std::string(lpTempPathBuffer);
+  return std::string(c10::u16u8(lpTempPathBuffer));
 }
 static const std::string temp_dir = getTempPath();
 static const std::string so_template = temp_dir + "pytorch_fuserXXXXXX.dll";
 static const std::string cpp_template = temp_dir + "pytorch_fuserXXXXXX.cpp";
 static const std::string check_exists_string =
     "where \"${program}\" > nul 2> nul";
-static std::vector<std::string> env_list;
+static std::vector<std::wstring> env_list;
 constexpr int so_suffix_len = 4;
 constexpr int cpp_suffix_len = 4;
 #else
@@ -45,60 +47,66 @@ constexpr int so_suffix_len = 3;
 constexpr int cpp_suffix_len = 4;
 #endif
 
+intptr_t run(const std::string& cmd);
+
 static bool programExists(const std::string& program) {
   TemplateEnv env;
   env.s("program", program);
   std::string cmd = format(check_exists_string, env);
+#ifdef _MSC_VER
+  return (run(cmd.c_str()) == 0);
+#else
   return (system(cmd.c_str()) == 0);
+#endif
 }
 
 #ifdef _MSC_VER
-c10::optional<std::string> exec(const std::string& cmd) {
-  std::array<char, 128> buffer;
-  std::string result;
+c10::optional<std::wstring> exec(const std::wstring& cmd) {
+  std::array<wchar_t, 128> buffer;
+  std::wstring result;
   std::unique_ptr<FILE, decltype(&_pclose)> pipe(
-      _popen(cmd.c_str(), "r"), _pclose);
+      _wpopen(cmd.c_str(), L"r"), _pclose);
   if (!pipe) {
     return c10::nullopt;
   }
-  while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
+  while (fgetws(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
          nullptr) {
     result += buffer.data();
   }
   return result;
 }
 
-inline std::string& rtrim(std::string& s, const char* t = " \t\n\r\f\v") {
+inline std::wstring& rtrim(std::wstring& s, const wchar_t* t = L" \t\n\r\f\v") {
   s.erase(s.find_last_not_of(t) + 1);
   return s;
 }
 
 void activate() {
-  char* root = nullptr;
-  std::string cmd;
-  c10::optional<std::string> exec_out;
-  std::string path;
-  std::string vcruntime_plat;
-  std::string envvars;
+  wchar_t* root = nullptr;
+  std::wstring cmd;
+  c10::optional<std::wstring> exec_out;
+  std::wstring path;
+  std::wstring vcruntime_plat;
+  std::wstring envvars;
 
   // Checking whether the environment is already activated
-  if (getenv("VSCMD_ARG_TGT_ARCH")) {
+  if (_wgetenv(L"VSCMD_ARG_TGT_ARCH")) {
     return;
   }
 
   // Getting `ProgramFiles` through environment variable queries
-  root = getenv("ProgramFiles(x86)");
+  root = _wgetenv(L"ProgramFiles(x86)");
   if (!root) {
-    root = getenv("ProgramFiles");
+    root = _wgetenv(L"ProgramFiles");
   }
   if (!root) {
     return;
   }
 
   // Getting VS 2017 installation path through `vswhere`
-  cmd = "\"" + std::string(root) +
-      "\\Microsoft Visual Studio\\Installer\\vswhere.exe\""
-      " -latest -prerelease -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath";
+  cmd = L"\"" + std::wstring(root) +
+      L"\\Microsoft Visual Studio\\Installer\\vswhere.exe\""
+      L" -latest -prerelease -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath";
   exec_out = exec(cmd);
   if (!exec_out) {
     return;
@@ -107,25 +115,25 @@ void activate() {
   rtrim(path);
 
   // Checking whether the activation script `vcvarsall.bat` exists
-  path += "\\VC\\Auxiliary\\Build";
-  struct stat st;
-  if (stat(path.c_str(), &st) == -1 || !(st.st_mode & _S_IFDIR)) {
+  path += L"\\VC\\Auxiliary\\Build";
+  struct _stati64 st;
+  if (_wstati64(path.c_str(), &st) == -1 || !(st.st_mode & _S_IFDIR)) {
     return;
   }
-  path += "\\vcvarsall.bat";
-  if (_access(path.c_str(), 0) == -1) {
+  path += L"\\vcvarsall.bat";
+  if (_waccess(path.c_str(), 0) == -1) {
     return;
   }
 
   // Determining current platform
   if (sizeof(void*) == 8) {
-    vcruntime_plat = "x64";
+    vcruntime_plat = L"x64";
   } else {
-    vcruntime_plat = "x86";
+    vcruntime_plat = L"x86";
   }
 
   // Getting environment variables after activating VS development shell
-  cmd = "\"" + path + "\" " + vcruntime_plat + ">NUL && set";
+  cmd = L"\"" + path + L"\" " + vcruntime_plat + L">NUL && set";
   exec_out = exec(cmd);
   if (!exec_out) {
     return;
@@ -133,25 +141,26 @@ void activate() {
   envvars = *exec_out;
 
   // Setting environment variables to the current environment
-  std::istringstream f(envvars);
-  std::string envvar;
-  while (getline(f, envvar, '\n')) {
+  std::wistringstream f(envvars);
+  std::wstring envvar;
+  while (getline(f, envvar, L'\n')) {
     env_list.push_back(envvar);
   }
 }
 
 intptr_t run(const std::string& cmd) {
   // Getting the path of `cmd.exe`
-  char* comspec = getenv("COMSPEC");
+  wchar_t* comspec = _wgetenv(L"COMSPEC");
   if (!comspec) {
-    comspec = "C:\\Windows\\System32\\cmd.exe";
+    comspec = L"C:\\Windows\\System32\\cmd.exe";
   }
   // Constructing the command line
-  const char* a[] = {"/c", cmd.c_str(), nullptr};
+  auto wCmd = c10::u8u16(cmd);
+  const wchar_t* a[] = {L"/c", wCmd.c_str(), nullptr};
   // Constructing the env array
   // If `env_list` is not empty, then add char pointers ending with nullptr.
   // Otherwise, it will be nullptr, which implies the default env.
-  std::vector<const char*> e;
+  std::vector<const wchar_t*> e;
   if (!env_list.empty()) {
     for (auto& s : env_list) {
       e.push_back(s.c_str());
@@ -159,7 +168,7 @@ intptr_t run(const std::string& cmd) {
     e.push_back(nullptr);
   }
   // Running the command
-  intptr_t r = _spawnve(_P_WAIT, comspec, a, e.data());
+  intptr_t r = _wspawnve(_P_WAIT, comspec, a, e.data());
   return r;
 }
 #endif
@@ -188,11 +197,20 @@ struct CompilerConfig {
 #ifdef _MSC_VER
   std::string cxx = "cl";
   const std::string openmp_flags = "/openmp";
+#elif defined(__clang__)
+  std::string cxx = "clang++";
+  const std::string openmp_flags = "-fopenmp";
 #else
   std::string cxx = "g++";
   const std::string openmp_flags = "-fopenmp";
 #endif
+// Set openmp to true only if PyTorch is compiled with OpenMP support
+// OpenMP is typically not availabel on MacOS platform
+#if defined(_OPENMP)
   bool openmp = true;
+#else
+  bool openmp = false;
+#endif
 };
 
 static CompilerConfig& getConfig() {

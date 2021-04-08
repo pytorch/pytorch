@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
+
 #include <algorithm>
 #include <iostream>
 #include <numeric>
@@ -53,8 +56,7 @@ void test(DeprecatedTypeProperties &T) {
     ASSERT_EQ((size_t)t.ndimension(), s->size());
     ASSERT_TRUE(t.sizes().equals(*s));
     ASSERT_EQ(t.strides().size(), s->size());
-    auto numel =
-        std::accumulate(s->begin(), s->end(), 1, std::multiplies<int64_t>());
+    const auto numel = c10::multiply_integers(s->begin(), s->end());
     ASSERT_EQ(t.numel(), numel);
     // verify we can output
     std::stringstream ss;
@@ -161,108 +163,120 @@ void test(DeprecatedTypeProperties &T) {
         }
       }
       // forced size functions (resize_, resize_as, set_)
-      {// resize_
-       {auto lhs = ones(*lhs_it, T);
-      auto rhs = ones(*rhs_it, T);
-      lhs.resize_(*rhs_it);
-      require_equal_size_dim(lhs, rhs);
-    }
-    // resize_as_
-    {
-      auto lhs = ones(*lhs_it, T);
-      auto rhs = ones(*rhs_it, T);
-      lhs.resize_as_(rhs);
-      require_equal_size_dim(lhs, rhs);
-    }
-    // set_
-    {
+      // resize_
       {
-        // with tensor
+        {
+         auto lhs = ones(*lhs_it, T);
+         auto rhs = ones(*rhs_it, T);
+         lhs.resize_(*rhs_it);
+         require_equal_size_dim(lhs, rhs);
+        }
+        // resize_as_
+        {
+          auto lhs = ones(*lhs_it, T);
+          auto rhs = ones(*rhs_it, T);
+          lhs.resize_as_(rhs);
+          require_equal_size_dim(lhs, rhs);
+        }
+        // set_
+        {
+          {
+            // with tensor
+            auto lhs = ones(*lhs_it, T);
+            auto rhs = ones(*rhs_it, T);
+            lhs.set_(rhs);
+            require_equal_size_dim(lhs, rhs);
+          }
+          {
+            // with storage
+            auto lhs = ones(*lhs_it, T);
+            auto rhs = ones(*rhs_it, T);
+            lhs.set_(rhs.storage());
+            // should not be dim 0 because an empty storage is dim 1; all other
+            // storages aren't scalars
+            ASSERT_NE(lhs.dim(), 0);
+          }
+          {
+            // with storage, offset, sizes, strides
+            auto lhs = ones(*lhs_it, T);
+            auto rhs = ones(*rhs_it, T);
+            lhs.set_(rhs.storage(), rhs.storage_offset(), rhs.sizes(), rhs.strides());
+            require_equal_size_dim(lhs, rhs);
+          }
+        }
+      }
+
+      // view
+      {
         auto lhs = ones(*lhs_it, T);
         auto rhs = ones(*rhs_it, T);
-        lhs.set_(rhs);
-        require_equal_size_dim(lhs, rhs);
+        auto rhs_size = *rhs_it;
+        TRY_CATCH_ELSE(auto result = lhs.view(rhs_size),
+                       ASSERT_NE(lhs.numel(), rhs.numel()),
+                       ASSERT_EQ(lhs.numel(), rhs.numel());
+                       require_equal_size_dim(result, rhs););
       }
+
+      // take
       {
-        // with storage
+        auto lhs = ones(*lhs_it, T);
+        auto rhs = zeros(*rhs_it, T).toType(ScalarType::Long);
+        TRY_CATCH_ELSE(auto result = lhs.take(rhs),
+                       ASSERT_EQ(lhs.numel(), 0); ASSERT_NE(rhs.numel(), 0),
+                       require_equal_size_dim(result, rhs));
+      }
+
+      // put
+      {
+        auto lhs = ones(*lhs_it, T);
+        auto rhs1 = zeros(*rhs_it, T).toType(ScalarType::Long);
+        auto rhs2 = zeros(*rhs_it, T);
+        TRY_CATCH_ELSE(auto result = lhs.put(rhs1, rhs2),
+                       ASSERT_EQ(lhs.numel(), 0); ASSERT_NE(rhs1.numel(), 0),
+                       require_equal_size_dim(result, lhs));
+      }
+
+      // ger
+      {
         auto lhs = ones(*lhs_it, T);
         auto rhs = ones(*rhs_it, T);
-        lhs.set_(rhs.storage());
-        // should not be dim 0 because an empty storage is dim 1; all other
-        // storages aren't scalars
-        ASSERT_NE(lhs.dim(), 0);
+        TRY_CATCH_ELSE(auto result = lhs.ger(rhs),
+                       ASSERT_TRUE(
+                           (lhs.numel() == 0 || rhs.numel() == 0 ||
+                            lhs.dim() != 1 || rhs.dim() != 1)),
+                       [&]() {
+                         int64_t dim0 = lhs.dim() == 0 ? 1 : lhs.size(0);
+                         int64_t dim1 = rhs.dim() == 0 ? 1 : rhs.size(0);
+                         require_equal_size_dim(
+                             result, at::empty({dim0, dim1}, result.options()));
+                       }(););
       }
+
+      // expand
       {
-        // with storage, offset, sizes, strides
         auto lhs = ones(*lhs_it, T);
+        auto lhs_size = *lhs_it;
         auto rhs = ones(*rhs_it, T);
-        lhs.set_(rhs.storage(), rhs.storage_offset(), rhs.sizes(), rhs.strides());
-        require_equal_size_dim(lhs, rhs);
+        auto rhs_size = *rhs_it;
+        bool should_pass = should_expand(lhs_size, rhs_size);
+        TRY_CATCH_ELSE(auto result = lhs.expand(rhs_size),
+                       ASSERT_FALSE(should_pass),
+                       ASSERT_TRUE(should_pass);
+                       require_equal_size_dim(result, rhs););
+
+        // in-place functions (would be good if we can also do a non-broadcasting
+        // one, b/c broadcasting functions will always end up operating on tensors
+        // of same size; is there an example of this outside of assign_ ?)
+        {
+          bool should_pass_inplace = should_expand(rhs_size, lhs_size);
+          TRY_CATCH_ELSE(lhs.add_(rhs),
+                         ASSERT_FALSE(should_pass_inplace),
+                         ASSERT_TRUE(should_pass_inplace);
+                         require_equal_size_dim(lhs, ones(*lhs_it, T)););
+        }
       }
     }
   }
-
-  // view
-  {
-    auto lhs = ones(*lhs_it, T);
-    auto rhs = ones(*rhs_it, T);
-    auto rhs_size = *rhs_it;
-    TRY_CATCH_ELSE(auto result = lhs.view(rhs_size),
-                   ASSERT_NE(lhs.numel(), rhs.numel()),
-                   ASSERT_EQ(lhs.numel(), rhs.numel());
-                   require_equal_size_dim(result, rhs););
-  }
-
-  // take
-  {
-    auto lhs = ones(*lhs_it, T);
-    auto rhs = zeros(*rhs_it, T).toType(ScalarType::Long);
-    TRY_CATCH_ELSE(auto result = lhs.take(rhs), ASSERT_EQ(lhs.numel(), 0);
-                   ASSERT_NE(rhs.numel(), 0),
-                   require_equal_size_dim(result, rhs));
-  }
-
-  // ger
-  {
-    auto lhs = ones(*lhs_it, T);
-    auto rhs = ones(*rhs_it, T);
-    TRY_CATCH_ELSE(auto result = lhs.ger(rhs),
-                   ASSERT_TRUE(
-                       (lhs.numel() == 0 || rhs.numel() == 0 ||
-                        lhs.dim() != 1 || rhs.dim() != 1)),
-                   [&]() {
-                     int64_t dim0 = lhs.dim() == 0 ? 1 : lhs.size(0);
-                     int64_t dim1 = rhs.dim() == 0 ? 1 : rhs.size(0);
-                     require_equal_size_dim(
-                         result, at::empty({dim0, dim1}, result.options()));
-                   }(););
-  }
-
-  // expand
-  {
-    auto lhs = ones(*lhs_it, T);
-    auto lhs_size = *lhs_it;
-    auto rhs = ones(*rhs_it, T);
-    auto rhs_size = *rhs_it;
-    bool should_pass = should_expand(lhs_size, rhs_size);
-    TRY_CATCH_ELSE(auto result = lhs.expand(rhs_size),
-                   ASSERT_FALSE(should_pass),
-                   ASSERT_TRUE(should_pass);
-                   require_equal_size_dim(result, rhs););
-
-    // in-place functions (would be good if we can also do a non-broadcasting
-    // one, b/c broadcasting functions will always end up operating on tensors
-    // of same size; is there an example of this outside of assign_ ?)
-    {
-      bool should_pass_inplace = should_expand(rhs_size, lhs_size);
-      TRY_CATCH_ELSE(lhs.add_(rhs),
-                     ASSERT_FALSE(should_pass_inplace),
-                     ASSERT_TRUE(should_pass_inplace);
-                     require_equal_size_dim(lhs, ones(*lhs_it, T)););
-    }
-  }
-}
-}
 }
 
 TEST(TestScalarTensor, TestScalarTensorCPU) {

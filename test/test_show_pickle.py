@@ -4,9 +4,9 @@ import tempfile
 import torch
 import torch.utils.show_pickle
 
-from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 
-class TestShowPickle(unittest.TestCase):
+class TestShowPickle(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Can't re-open temp file on Windows")
     def test_scripted_model(self):
@@ -31,4 +31,4 @@ class TestShowPickle(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

@@ -1,9 +1,9 @@
 import torch
-from collections import defaultdict
-from torch._six import container_abcs
+from collections import defaultdict, abc
 import warnings
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+from .common import amp_definitely_not_available
 
 
 class _MultiDeviceReplicator(object):
@@ -11,7 +11,7 @@ class _MultiDeviceReplicator(object):
     Lazily serves copies of a tensor to requested devices.  Copies are cached per-device.
     """
     def __init__(self, master_tensor: torch.Tensor) -> None:
-        assert master_tensor.is_cuda
+        assert master_tensor.is_cuda or master_tensor.device.type == 'xla'
         self.master = master_tensor
         self._per_device_tensors: Dict[torch.device, torch.Tensor] = {}
 
@@ -94,7 +94,7 @@ class GradScaler(object):
     value calibrates.  ``scaler.step`` will skip the underlying ``optimizer.step()`` for these
     iterations.  After that, step skipping should occur rarely (once every few hundred or thousand iterations).
 
-    Arguments:
+    Args:
         init_scale (float, optional, default=2.**16):  Initial scale factor.
         growth_factor (float, optional, default=2.0):  Factor by which the scale is multiplied during
             :meth:`update` if no inf/NaN gradients occur for ``growth_interval`` consecutive iterations.
@@ -111,7 +111,7 @@ class GradScaler(object):
                  backoff_factor=0.5,
                  growth_interval=2000,
                  enabled=True):
-        if enabled and not torch.cuda.is_available():
+        if enabled and amp_definitely_not_available():
             warnings.warn("torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling.")
             self._enabled = False
         else:
@@ -150,7 +150,7 @@ class GradScaler(object):
         Returns scaled outputs.  If this instance of :class:`GradScaler` is not enabled, outputs are returned
         unmodified.
 
-        Arguments:
+        Args:
             outputs (Tensor or iterable of Tensors):  Outputs to scale.
         """
         if not self._enabled:
@@ -158,7 +158,7 @@ class GradScaler(object):
 
         # Short-circuit for the common case.
         if isinstance(outputs, torch.Tensor):
-            assert outputs.is_cuda
+            assert outputs.is_cuda or outputs.device.type == 'xla'
             if self._scale is None:
                 self._lazy_init_scale_growth_tracker(outputs.device)
             assert self._scale is not None
@@ -169,14 +169,14 @@ class GradScaler(object):
 
         def apply_scale(val):
             if isinstance(val, torch.Tensor):
-                assert val.is_cuda
+                assert val.is_cuda or val.device.type == 'xla'
                 if len(stash) == 0:
                     if self._scale is None:
                         self._lazy_init_scale_growth_tracker(val.device)
                     assert self._scale is not None
                     stash.append(_MultiDeviceReplicator(self._scale))
                 return val * stash[0].get(val.device)
-            elif isinstance(val, container_abcs.Iterable):
+            elif isinstance(val, abc.Iterable):
                 iterable = map(apply_scale, val)
                 if isinstance(val, list) or isinstance(val, tuple):
                     return type(val)(iterable)
@@ -245,7 +245,7 @@ class GradScaler(object):
             scaler.step(optimizer)
             scaler.update()
 
-        Arguments:
+        Args:
             optimizer (torch.optim.Optimizer):  Optimizer that owns the gradients to be unscaled.
 
         .. note::
@@ -279,6 +279,12 @@ class GradScaler(object):
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(optimizer, inv_scale, found_inf, False)
         optimizer_state["stage"] = OptState.UNSCALED
 
+    def _maybe_opt_step(self, optimizer, optimizer_state, *args, **kwargs):
+        retval = None
+        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+            retval = optimizer.step(*args, **kwargs)
+        return retval
+
     def step(self, optimizer, *args, **kwargs):
         """
         :meth:`step` carries out the following two operations:
@@ -292,7 +298,7 @@ class GradScaler(object):
 
         Returns the return value of ``optimizer.step(*args, **kwargs)``.
 
-        Arguments:
+        Args:
             optimizer (torch.optim.Optimizer):  Optimizer that applies the gradients.
             args:  Any arguments.
             kwargs:  Any keyword arguments.
@@ -329,8 +335,7 @@ class GradScaler(object):
 
         assert len(optimizer_state["found_inf_per_device"]) > 0, "No inf checks were recorded for this optimizer."
 
-        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
-            retval = optimizer.step(*args, **kwargs)
+        retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
 
         optimizer_state["stage"] = OptState.STEPPED
 
@@ -346,7 +351,7 @@ class GradScaler(object):
 
         Passing ``new_scale`` sets the scale directly.
 
-        Arguments:
+        Args:
             new_scale (float or :class:`torch.cuda.FloatTensor`, optional, default=None):  New scale factor.
 
         .. warning::
@@ -415,7 +420,7 @@ class GradScaler(object):
 
     def set_growth_factor(self, new_factor):
         r"""
-        Arguments:
+        Args:
             new_scale (float):  Value to use as the new scale growth factor.
         """
         self._growth_factor = new_factor
@@ -428,7 +433,7 @@ class GradScaler(object):
 
     def set_backoff_factor(self, new_factor):
         r"""
-        Arguments:
+        Args:
             new_scale (float):  Value to use as the new scale backoff factor.
         """
         self._backoff_factor = new_factor
@@ -441,7 +446,7 @@ class GradScaler(object):
 
     def set_growth_interval(self, new_interval):
         r"""
-        Arguments:
+        Args:
             new_interval (int):  Value to use as the new growth interval.
         """
         self._growth_interval = new_interval
@@ -484,7 +489,7 @@ class GradScaler(object):
         r"""
         Loads the scaler state.  If this instance is disabled, :meth:`load_state_dict` is a no-op.
 
-        Arguments:
+        Args:
            state_dict(dict): scaler state.  Should be an object returned from a call to :meth:`state_dict`.
         """
         if not self._enabled:

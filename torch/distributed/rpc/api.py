@@ -7,6 +7,7 @@ import threading
 from typing import Generic, TypeVar, Set, Any
 
 import torch
+from torch.futures import Future
 
 from torch._C._distributed_rpc import (
     PyRRef,
@@ -273,7 +274,7 @@ def shutdown(graceful=True):
         :meth:`~torch.distributed.rpc.rpc_async`, ``future.wait()`` should not
         be called after ``shutdown()``.
 
-    Arguments:
+    Args:
         graceful (bool): Whether to do a graceful shutdown or not. If True,
                          this will 1) wait until there is no pending system
                          messages for ``UserRRefs`` and delete them; 2) block
@@ -309,7 +310,7 @@ def shutdown(graceful=True):
     if graceful:
         _wait_all_workers()
         _delete_all_user_and_unforked_owner_rrefs()
-        _get_current_rpc_agent().join()
+        _get_current_rpc_agent().join(shutdown=True)
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)
@@ -337,7 +338,7 @@ def get_worker_info(worker_name=None):
     Use this :class:`~torch.distributed.rpc.WorkerInfo` to avoid passing an
     expensive string on every invocation.
 
-    Arguments:
+    Args:
         worker_name (str): the string name of a worker. If ``None``, return the
                            the id of the current worker. (default ``None``)
 
@@ -346,7 +347,7 @@ def get_worker_info(worker_name=None):
         ``worker_name`` or :class:`~torch.distributed.rpc.WorkerInfo` of the
         current worker if ``worker_name`` is ``None``.
     """
-    if worker_name:
+    if worker_name is not None:
         return _get_current_rpc_agent().get_worker_info(worker_name)
     else:
         return _get_current_rpc_agent().get_worker_info()
@@ -361,16 +362,31 @@ def _to_worker_info(to):
         raise ValueError("Cannot get WorkerInfo from name {}".format(to))
 
 
-def _rref_typeof_on_owner(rref):
-    return type(rref.local_value())
+def _rref_typeof_on_owner(rref, blocking=True):
+    rref_type = type(rref.local_value())
+    if blocking:
+        return rref_type
+    else:
+        # Wrap result into a completed Future. This is so that if blocking=`False`
+        # is specified, we return a future regardless of if this call is on user
+        # or owner.
+        future = Future[type]()
+        future.set_result(rref_type)
+        return future
 
 
-def _rref_typeof_on_user(rref):
-    return rpc_sync(
+def _rref_typeof_on_user(rref, timeout=UNSET_RPC_TIMEOUT, blocking=True):
+    fut = rpc_async(
         rref.owner(),
         _rref_typeof_on_owner,
-        args=(rref,)
+        args=(rref,),
+        timeout=timeout
     )
+    if blocking:
+        return fut.wait()
+    else:
+        return fut
+
 
 
 T = TypeVar("T")
@@ -381,7 +397,7 @@ try:
     # Combine the implementation class and the type class.
     class RRef(PyRRef, Generic[T]):
         pass
-except TypeError as exc:
+except TypeError:
     # TypeError: metaclass conflict: the metaclass of a derived class
     # must be a (non-strict) subclass of the metaclasses of all its bases
     # Mypy doesn't understand __class__ (mypy bug #4177)
@@ -446,7 +462,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     :class:`~torch.distributed.rpc.RRef` is only destructed when globally there
     are no living references to it.
 
-    Arguments:
+    Args:
         to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
@@ -703,7 +719,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     messages are sent and received in parallel to execution of Python code. This
     method is thread-safe.
 
-    Arguments:
+    Args:
         to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
@@ -782,7 +798,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     method is thread-safe. This method will immediately return a
     :class:`~torch.futures.Future` that can be awaited on.
 
-    Arguments:
+    Args:
         to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated

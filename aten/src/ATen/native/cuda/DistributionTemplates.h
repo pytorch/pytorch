@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/core/DistributionsHelper.h>
 
@@ -62,16 +63,17 @@ std::tuple<uint64_t, dim3, dim3> calc_execution_policy(int64_t total_elements) {
 template<typename accscalar_t, int unroll_factor, typename dist_t, typename transform_t>
 C10_LAUNCH_BOUNDS_2(block_size_bound, grid_size_bound)
 __global__ void distribution_elementwise_grid_stride_kernel(int numel,
-                                                            std::pair<uint64_t, uint64_t> seeds,
+                                                            PhiloxCudaState philox_args,
                                                             const dist_t dist_func,
                                                             const transform_t transform_func) {
+  auto seeds = at::cuda::philox::unpack(philox_args);
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(
-      seeds.first,
-      idx,
-      seeds.second,
-      &state);
+  curand_init(std::get<0>(seeds),
+              idx,
+              std::get<1>(seeds),
+              &state);
+
   int rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
       blockDim.x * gridDim.x * unroll_factor;
   for(int linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
@@ -123,11 +125,11 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
   auto counter_offset = std::get<0>(execution_policy);
   auto grid = std::get<1>(execution_policy);
   auto block = std::get<2>(execution_policy);
-  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
+    rng_engine_inputs = gen->philox_cuda_state(counter_offset);
   }
 
   if (!iter.can_use_32bit_indexing()) {
@@ -153,6 +155,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
         *out = transform_func(rand);
       }
     );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     auto offset_calc = make_offset_calculator<1>(iter);
     distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
@@ -165,8 +168,8 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
         *out = transform_func(rand);
       }
     );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 // Binary kernel
@@ -174,12 +177,14 @@ template <typename func_t, typename inp_offset_calc_t, typename out_offset_calc_
 __global__ void distribution_binary_elementwise_kernel(
     int numel,
     func_t f,
-    std::pair<uint64_t, uint64_t> seeds,
+    PhiloxCudaState philox_args,
     typename function_traits<func_t>::result_type *output_data,
     const typename function_traits<func_t>::template arg<1>::type *input_data_1,
     const typename function_traits<func_t>::template arg<2>::type *input_data_2,
     inp_offset_calc_t inp_calc,
     out_offset_calc_t out_calc) {
+  auto seeds = at::cuda::philox::unpack(philox_args);
+
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
 
@@ -190,7 +195,10 @@ __global__ void distribution_binary_elementwise_kernel(
   int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
 
   curandStatePhilox4_32_10_t state;
-  curand_init(seeds.first, blockIdx.x * blockDim.x + threadIdx.x, seeds.second, &state);
+  curand_init(std::get<0>(seeds),
+              blockIdx.x * blockDim.x + threadIdx.x,
+              std::get<1>(seeds),
+              &state);
 
   // load data into registers
   int thread_idx = threadIdx.x;
@@ -222,7 +230,7 @@ __global__ void distribution_binary_elementwise_kernel(
 }
 
 template <typename func_t>
-void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64_t> seeds, const func_t &f) {
+void distribution_binary_kernel(TensorIterator &iter, PhiloxCudaState philox_args, const func_t &f) {
   static_assert(std::is_same<typename function_traits<func_t>::template arg<0>::type, curandStatePhilox4_32_10_t&>::value, "the first argument of functor must be curandStatePhilox4_32_10_t");
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
@@ -230,7 +238,7 @@ void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      distribution_binary_kernel(sub_iter, seeds, f);
+      distribution_binary_kernel(sub_iter, philox_args, f);
     }
     return;
   }
@@ -251,12 +259,14 @@ void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64
 
   if (iter.is_contiguous()) {
     distribution_binary_elementwise_kernel<<<grid,num_threads, 0, stream>>>(
-        numel, f, seeds, output_data, input_data_1, input_data_2,
+        numel, f, philox_args, output_data, input_data_1, input_data_2,
         TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<1>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     distribution_binary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
-        numel, f, seeds, output_data, input_data_1, input_data_2,
+        numel, f, philox_args, output_data, input_data_1, input_data_2,
         make_input_offset_calculator<2>(iter), make_output_offset_calculator(iter));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -523,12 +533,6 @@ void exponential_kernel(TensorIterator& iter, double lambda_, RNG gen) {
     auto lambda = static_cast<accscalar_t>(lambda_);
     // define lambda for exponential transformation
     auto exponential_func = [lambda] __device__ (accscalar_t rand) {
-      // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
-      // Hence, squash the 1 to just below 1.
-      // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
-      if(rand == static_cast<accscalar_t>(1.0)) {
-        rand = ::nextafter(static_cast<accscalar_t>(1.0), static_cast<accscalar_t>(0.0));
-      }
       return static_cast<scalar_t>(transformation::exponential<accscalar_t>(rand, lambda));
     };
     uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, exponential_func);
@@ -570,20 +574,17 @@ struct CauchyKernel {
 template<typename scalar_t, typename prob_t>
 void bernoulli_tensor_cuda_kernel(
     at::Tensor& ret, const at::Tensor& p,
-    std::pair<uint64_t, uint64_t> seeds) {
-  // The template argument `4` below indicates that we want to operate on four
-  // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
-  at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4>(
-      ret, p,
-      [seeds] __device__(
+    PhiloxCudaState philox_args) {
+  auto functor = [philox_args] __device__(
           int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
           const prob_t& p1, const prob_t& p2, const prob_t& p3, const prob_t& p4) {
+        auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
-        curand_init(
-            seeds.first,
-            blockIdx.x * blockDim.x + threadIdx.x,
-            seeds.second,
-            &state);
+        curand_init(std::get<0>(seeds),
+                    blockIdx.x * blockDim.x + threadIdx.x,
+                    std::get<1>(seeds),
+                    &state);
+
         // See Note [Register spilling in curand call for CUDA < 10]
         float4 rand = curand_uniform4(&state);
         switch (n) {
@@ -607,17 +608,21 @@ void bernoulli_tensor_cuda_kernel(
             v1 = static_cast<scalar_t>(rand.x <= p1);
           }
         }
-      }
-    );
+      };
+  // The template argument `4` below indicates that we want to operate on four
+  // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
+  at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4, decltype(functor),
+                               /*max_threads_per_block=*/512,
+                               /*min_blocks_per_sm==*/2>(ret, p, functor);
 }
 
 template<typename RNG>
 void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
-  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_engine_inputs(10);
+    rng_engine_inputs = gen->philox_cuda_state(10);
   }
   auto p = std::get<0>(expand_inplace(self, p_.to(kCUDA)));
   AT_DISPATCH_ALL_TYPES_AND3(

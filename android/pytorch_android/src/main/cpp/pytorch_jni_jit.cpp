@@ -90,13 +90,13 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 #endif
 
 #ifdef TRACE_ENABLED
-  static bool onFunctionEnter(
+  static std::unique_ptr<at::ObserverContext> onFunctionEnter(
       const at::RecordFunction& fn) {
     Trace::beginSection(fn.name().str());
-    return true;
+    return nullptr;
   }
 
-  static void onFunctionExit(const at::RecordFunction&) {
+  static void onFunctionExit(const at::RecordFunction&, at::ObserverContext*) {
     Trace::endSection();
   }
 #endif

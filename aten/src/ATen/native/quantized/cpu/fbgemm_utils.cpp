@@ -1,21 +1,17 @@
 #include <ATen/ATen.h>
-#include <ATen/native/TensorFactories.h>
-
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
+#include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
-
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
-
+#include <c10/util/accumulate.h>
 #include <torch/custom_class.h>
-
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
 
 torch::class_<LinearPackedParamsBase> register_linear_params();
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
@@ -143,7 +139,7 @@ Tensor MakeStridedQTensorCPU(
   AT_ASSERT(options.device().is_cpu());
   at::native::check_size_nonnegative(sizes);
   auto* allocator = at::getCPUAllocator();
-  const int64_t nelements = at::prod_intlist(sizes);
+  const int64_t nelements = c10::multiply_integers(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
@@ -237,8 +233,8 @@ template <>
 Tensor TransposeConvTensorUnpackConversion<2>(const Tensor& src, int groups) {
   // OC IC/G HW -> IC OC/G HW logically
   auto oc_g_ic_g_hw_tensors = src.chunk(groups);
-  auto fused_tensor =
-      at::cat(oc_g_ic_g_hw_tensors, 1).set_quantizer_(src.quantizer());
+  auto fused_tensor = at::cat(oc_g_ic_g_hw_tensors, 1);
+  set_quantizer_(fused_tensor, src.quantizer());
   return fused_tensor.permute({1, 0, 2, 3});
 }
 
@@ -284,8 +280,8 @@ template <>
 Tensor TransposeConvTensorUnpackConversion<3>(const Tensor& src, int groups) {
   // OC IC/G DHW -> IC OC/G DHW logically
   auto oc_g_ic_g_hw_tensors = src.chunk(groups);
-  auto fused_tensor =
-      at::cat(oc_g_ic_g_hw_tensors, 1).set_quantizer_(src.quantizer());
+  auto fused_tensor = at::cat(oc_g_ic_g_hw_tensors, 1);
+  set_quantizer_(fused_tensor, src.quantizer());
   return fused_tensor.permute({1, 0, 2, 3, 4});
 }
 
@@ -302,8 +298,8 @@ Tensor ConvertConvWeightsToChannelLastTensor<2>(
         for (auto& tensor : ic_g_oc_g_hw_tensors) {
           tensor = tensor.unsqueeze(0);
         }
-        auto fused_tensor =
-            at::cat(ic_g_oc_g_hw_tensors).set_quantizer_(src.quantizer());
+        auto fused_tensor = at::cat(ic_g_oc_g_hw_tensors);
+        set_quantizer_(fused_tensor, src.quantizer());
         return fused_tensor.permute({0, 2, 3, 4, 1})
             .contiguous(c10::MemoryFormat::Contiguous);
       }()
@@ -357,7 +353,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
 #endif // USE_FBGEMM
 
     template <int kSpatialDim = 2>
-    CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>>
+    TORCH_API torch::class_<ConvPackedParamsBase<kSpatialDim>>
     register_conv_params() {
   static auto register_conv_params =
     torch::class_<ConvPackedParamsBase<kSpatialDim>>(
@@ -397,9 +393,9 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
 }
 
 template
-CAFFE2_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
+TORCH_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
 template
-CAFFE2_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+TORCH_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
 
 torch::class_<LinearPackedParamsBase> register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;

@@ -2,9 +2,11 @@ import itertools
 from typing import Optional, List, Sequence, Union
 
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe
+from tools.codegen.context import with_native_function
+from tools.codegen.utils import mapMaybe
+from tools.codegen.gen import parse_native_yaml, FileManager
 from tools.codegen.model import *
 
 # Note [Manual Backend kernels]
@@ -25,7 +27,7 @@ MANUAL_BACKEND = set([
 # For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
 MANUAL_AUTOGRAD_AND_TRACER = set([
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', '_fw_primal',
 ])
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
@@ -41,7 +43,7 @@ MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_BACKEND | MANUAL_AUTOGRAD_AND_TRACER
 DONT_RECORD_TRACE = {
     'convolution', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d',
     'conv_transpose2d', 'conv_transpose3d', 'lstm_cell', 'gru_cell',
-    'rnn_tanh_cell', 'rnn_relu_cell', 'linear',
+    'rnn_tanh_cell', 'rnn_relu_cell',
     # FIXME: figure out a better way when we support sparse tensors in jit
     '_coalesced',
 }
@@ -112,40 +114,34 @@ def format_trace_inputs(f: NativeFunction) -> str:
             ]
         else:
             name = arg.name
-            # XXX: For arg that have type of Tensor?[], tracer will pass allow_undefined to addInputs
             if str(arg.type) == 'Tensor?[]':
-                return [f'jit::tracer::addInputs(node, "{name}", {name}, true);']
+                return [f'jit::tracer::addInputs(node, "{name}", {name});']
             else:
                 return [ADD_TRACE_INPUT.substitute(name=name, input=name)]
 
-    args: List[Union[Argument, TensorOptionsArguments]] = []
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        args = list(f.func.schema_order_arguments())
-    else:
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False)
-        args = [cpp_args.argument for cpp_args in sig_group.signature.arguments()]
+    args: List[Union[Argument, TensorOptionsArguments]] = list(f.func.schema_order_arguments())
 
     if f.func.is_out_fn():
-        # *_out functions take the result as a first argument, but they are the
-        # last argument in the JIT schema.
+        # *_out functions take the result as a separate argument, but we don't want to
+        # trace that argument directly. Instead, we trace its TensorOptions.
+        # So first, we need to remove the out argument from the list of arguments to trace.
         # TODO: byte-for-byte compatible with old codegen behavior - it's incorrect to assume
         # there is only one output argument.
-        args = args[1:]
+        args = args[:-1]
 
     trace_inputs = itertools.chain.from_iterable(dispatch_trace_input(arg) for arg in args)
 
     if f.func.is_out_fn():
         # for *_out functions, handle the result argument differently for inplace/outplace.
         # For inplace: just add the input to the end to confirm with the JIT schema
-        name = f.func.out_arguments[0].name  # TODO: old codegen behavior - should fix
+        name = f.func.arguments.out[0].name  # TODO: old codegen behavior - should fix
         inplace = ADD_TRACE_INPUT.substitute(name=name, input=name)
 
         # for outplace: do nothing, except if the function is a factory.
         # Factories are a bit special because their out-of-place overloads
         # take an extra TensorOptions argument, which is missing in the _out function
         has_tensor_return = any(r.type.is_tensor_like() for r in f.func.returns)
-        has_tensor_input_arg = any(a.type.is_tensor_like()
-                                   for a in itertools.chain(f.func.arguments, f.func.kwarg_only_arguments))
+        has_tensor_input_arg = any(a.type.is_tensor_like() for a in f.func.arguments.flat_non_out)
         is_factory_method = f.category_override == 'factory' or (has_tensor_return and not has_tensor_input_arg)
 
         # HACK: preserve old codegen behavior - the old codegen set the `is_factory_method`
@@ -251,7 +247,7 @@ def format_prerecord_trace(f: NativeFunction) -> str:
         add_trace_inputs=format_trace_inputs(f) + additional_inputs,
         inplace_guard=INPLACE_GUARD.substitute(
             name=cpp.name(f.func),
-            mutable_input=f.func.out_arguments[0].name if f.func.out_arguments else 'self',
+            mutable_input=f.func.arguments.out[0].name if f.func.arguments.out else 'self',
         ) if is_inplace else '',
     )
 
@@ -269,7 +265,7 @@ def format_postrecord_trace(f: NativeFunction) -> str:
     # For outplacing ops, *_out overloads require special handling to move the
     # output *argument* to a return value
     if f.func.is_out_fn():
-        output_names_outplace = [arg.name for arg in f.func.out_arguments]
+        output_names_outplace = [arg.name for arg in f.func.arguments.out]
         output_names_inplace = cpp.return_names(f)
 
         # Code size optimization: the common case is that the return value is
@@ -316,12 +312,7 @@ def get_return_value(f: NativeFunction) -> str:
         return f'std::make_tuple({moved})'
 
 TRACE_DISPATCH = CodeTemplate("""\
-static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-    .typed<${arg_types}>();
-${assign_return_values}c10::Dispatcher::singleton()
-    .redispatch<${ret_and_arg_types}>(${redispatch_args});
-""")
+${assign_return_values}at::redispatch::${api_name}(${unpacked_args});""")
 
 def emit_trace_body(f: NativeFunction) -> List[str]:
     trace_body: List[str] = []
@@ -332,19 +323,26 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    ret_and_arg_types = ', '.join([dispatcher_sig._returns_type] + [a.type for a in dispatcher_exprs])
-    redispatch_args = ', '.join(['op', 'c10::DispatchKey::Tracer'] + [a.expr for a in dispatcher_exprs])
+    # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
+    # See Note [Plumbing Keys Through The Dispatcher] for details.
+    dispatch_key_set = 'ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Tracer)'
+    redispatch_args = ', '.join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     assign_return_values = f'{tie_return_values(f)} = ' \
                            if f.func.kind() == SchemaKind.functional and f.func.returns else ''
 
+    # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
+    # We could probably work harder to ensure that the fast variants are called instead, but the perf benefit would be minimal.
+    sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
+    if sig_group.faithful_signature is not None:
+        api_name = sig_group.faithful_signature.name()
+    else:
+        api_name = sig_group.signature.name()
+
     trace_body.append(TRACE_DISPATCH.substitute(
-        operator_name=f.func.name.name,
-        overload_name=f.func.name.overload_name,
-        arg_types=dispatcher_sig.type(),
         assign_return_values=assign_return_values,
-        ret_and_arg_types=ret_and_arg_types,
-        redispatch_args=redispatch_args,
+        api_name=api_name,
+        unpacked_args=redispatch_args,
     ))
 
     trace_body.append(format_postrecord_trace(f))
@@ -369,11 +367,13 @@ def method_definition(f: NativeFunction) -> Optional[str]:
     if cpp.name(f.func) in MANUAL_TRACER:
         return None
 
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        formals = ', '.join(f'{cpp.argument_type(a)} {a.name}' for a in f.func.schema_order_arguments())
-    else:
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False)
-        formals = ', '.join(f'{a.type} {a.name}' for a in sig_group.signature.arguments())
+    formals = ', '.join(
+        # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
+        # See Note [Plumbing Keys Through The Dispatcher] for details.
+        ['c10::DispatchKeySet ks'] +
+        [f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+            for a in f.func.schema_order_arguments()]
+    )
 
     return METHOD_DEFINITION.substitute(
         return_type=cpp.returns_type(f.func.returns),
@@ -388,27 +388,16 @@ m.impl("${name}",
 );
 """)
 
-UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED("${name}", &${class_type}::${type_wrapper_name});
-""")
-
 @with_native_function
 def method_registration(f: NativeFunction) -> Optional[str]:
     if cpp.name(f.func) in MANUAL_TRACER:
         return None
 
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        return WRAPPER_REGISTRATION.substitute(
-            name=f.func.name,
-            type_wrapper_name=type_wrapper_name(f),
-            class_type='TraceType',
-        )
-    else:
-        return UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-            name=f.func.name,
-            type_wrapper_name=type_wrapper_name(f),
-            class_type='TraceType',
-        )
+    return WRAPPER_REGISTRATION.substitute(
+        name=f.func.name,
+        type_wrapper_name=type_wrapper_name(f),
+        class_type='TraceType',
+    )
 
 def gen_trace_type_shard(
     fm: FileManager, native_functions: Sequence[NativeFunction], suffix: str

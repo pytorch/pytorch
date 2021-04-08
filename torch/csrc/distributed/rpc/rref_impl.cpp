@@ -1,10 +1,10 @@
-#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <ATen/record_function.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -14,13 +14,13 @@ namespace {
 std::string getTypeStr(const c10::TypePtr& type) {
   switch (type->kind()) {
     case c10::TypeKind::FunctionType:
-      return type->cast<c10::FunctionType>()->name()->qualifiedName();
+      return type->castRaw<c10::FunctionType>()->name()->qualifiedName();
     case c10::TypeKind::TupleType:
-      return type->cast<c10::TupleType>()->name()->qualifiedName();
+      return type->castRaw<c10::TupleType>()->name()->qualifiedName();
     case c10::TypeKind::ClassType:
-      return type->cast<c10::ClassType>()->name()->qualifiedName();
+      return type->castRaw<c10::ClassType>()->name()->qualifiedName();
     case c10::TypeKind::InterfaceType:
-      return type->cast<c10::InterfaceType>()->name()->qualifiedName();
+      return type->castRaw<c10::InterfaceType>()->name()->qualifiedName();
     default:
       return type->annotation_str();
   }
@@ -65,23 +65,21 @@ RRefForkData RRef::fork() const {
       getTypeStr(type_));
 }
 
-void RRef::handleError(
-    RPCErrorType errorType,
-    const FutureMessage& futMessage) {
+void RRef::handleError(RPCErrorType errorType, const JitFuture& jitFuture) {
   static std::unordered_map<
       RPCErrorType,
-      std::function<void(const FutureMessage& fm)>,
+      std::function<void(const JitFuture& jitFuture)>,
       std::hash<int>>
       errorHandlers = {
           {RPCErrorType::TIMEOUT,
-           [this](const FutureMessage& /* unused */) { setTimedOut(); }},
+           [this](const JitFuture& /* unused */) { setTimedOut(); }},
           {RPCErrorType::INTENTIONAL_FAILURE,
-           [this](const FutureMessage& /* unused */) { setTimedOut(); }},
-          {RPCErrorType::UNKNOWN_ERROR, [](const FutureMessage& fm) {
+           [this](const JitFuture& /* unused */) { setTimedOut(); }},
+          {RPCErrorType::UNKNOWN_ERROR, [](const JitFuture& jitFuture) {
              // Default error handler
-             RRefContext::handleException(fm);
+             RRefContext::handleException(jitFuture);
            }}};
-  errorHandlers.find(errorType)->second(futMessage);
+  errorHandlers.find(errorType)->second(jitFuture);
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////
@@ -170,7 +168,7 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   // toHere is profiled as a blocking call, and does not execute operations on
   // the remote node. Hence, don't wrap it with a profiling message since we
   // don't need the profiler to be enabled remotely.
-  auto futureResponse = autograd::sendMessageWithAutograd(
+  auto jitFuture = autograd::sendMessageWithAutograd(
       *agent,
       agent->getWorkerInfo(ownerId_),
       std::move(msgToSend),
@@ -181,9 +179,10 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   // TODO: we should ideally be able to interrupt this blocking wait if we check
   // getTimedOut() and it is true
   // (https://github.com/pytorch/pytorch/issues/39411).
-  const Message& message = futureResponse->wait();
-  MessageType msgType = message.type();
-  auto response = deserializeResponse(message, msgType);
+  jitFuture->waitAndThrow();
+  auto messagePtr = jitFuture->constValue().toCustomClass<Message>();
+  MessageType msgType = messagePtr->type();
+  auto response = deserializeResponse(*messagePtr, msgType);
   TORCH_INTERNAL_ASSERT(
       msgType == MessageType::SCRIPT_RREF_FETCH_RET ||
           msgType == MessageType::PYTHON_RREF_FETCH_RET,

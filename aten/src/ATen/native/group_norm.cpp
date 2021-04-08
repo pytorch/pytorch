@@ -1,4 +1,11 @@
+#include <ATen/AccumulateType.h>
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/CPUApplyUtils.h>
 #include <ATen/native/group_norm.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <c10/util/accumulate.h>
 
 #include <array>
 #include <functional>
@@ -6,26 +13,28 @@
 #include <tuple>
 #include <vector>
 
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
 
 namespace at {
 namespace native {
 
 std::tuple<Tensor, Tensor, Tensor> native_group_norm(
-    const Tensor& X,
-    const Tensor& gamma /* optional */,
-    const Tensor& beta /* optional */,
+    const Tensor& X, const c10::optional<Tensor>& gamma_opt /* optional */, const c10::optional<Tensor>& beta_opt /* optional */,
     int64_t N,
     int64_t C,
     int64_t HxW,
     int64_t group,
     double eps) {
-  Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& gamma = c10::value_or_else(gamma_opt, [] {return Tensor();});
+  const Tensor& beta = c10::value_or_else(beta_opt, [] {return Tensor();});
+
+  Tensor Y = at::native::empty_like(
+      X,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mean = at::empty({N, group}, X.options());
   Tensor rstd = at::empty({N, group}, X.options());
   GroupNormKernel(
@@ -37,24 +46,44 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     const Tensor& dY,
     const Tensor& X,
     const Tensor& mean,
-    const Tensor& rstd,
-    const Tensor& gamma,
+    const Tensor& rstd, const c10::optional<Tensor>& gamma_opt,
     int64_t N,
     int64_t C,
     int64_t HxW,
     int64_t group,
     std::array<bool, 3> grad_input_mask) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& gamma = c10::value_or_else(gamma_opt, [] {return Tensor();});
+
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;
   if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dX = at::native::empty_like(
+        X,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dgamma = at::native::empty_like(
+        gamma,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dbeta = at::native::empty_like(
+        gamma,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   GroupNormBackwardKernel(
       X.device().type(),
@@ -75,11 +104,13 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
 
 Tensor group_norm(
     const Tensor& input,
-    int64_t num_groups,
-    const Tensor& weight /* optional */,
-    const Tensor& bias /* optional */,
+    int64_t num_groups, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enabled, deprecated */) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   const int64_t N = input.size(0);
   const int64_t C = input.size(1);
   TORCH_CHECK(
@@ -107,7 +138,7 @@ Tensor group_norm(
 
   const auto input_shape = input.sizes();
   const int64_t HxW =
-      prod_intlist(input_shape.cbegin() + 2, input_shape.cend());
+      c10::multiply_integers(input_shape.cbegin() + 2, input_shape.cend());
 
   const Tensor kEmpty;
   const auto& X = input.is_contiguous() ? input : input.contiguous();
@@ -124,14 +155,16 @@ DEFINE_DISPATCH(GroupNormBackwardKernel);
 
 // Ported from pytorch/xla repo
 std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
-    const at::Tensor& input,
-    const at::Tensor& weight,
-    const at::Tensor& bias,
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     int64_t N,
     int64_t C,
     int64_t HxW,
     int64_t group,
     double eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   auto input_shape = input.sizes();
   at::Tensor input_reshaped = input.view({1, N * group, N ? -1 : 1});
   auto outputs = at::native_batch_norm(

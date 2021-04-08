@@ -19,7 +19,7 @@ TEST(TestUndefined, UndefinedTest) {
   ASSERT_EQ(std::string("UndefinedType"), und.toString());
 
   ASSERT_ANY_THROW(und.strides());
-  ASSERT_ANY_THROW(und.dim());
+  ASSERT_EQ(und.dim(), 1);
   ASSERT_ANY_THROW([]() { return Tensor(); }() = Scalar(5));
   ASSERT_ANY_THROW(und.add(und));
   ASSERT_ANY_THROW(und.add(ft));

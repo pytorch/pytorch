@@ -11,8 +11,12 @@ namespace at {
 namespace native {
 namespace {
 
-template<typename scalar_t>
-void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, c10::optional<Generator> generator) {
+template <typename scalar_t>
+void multinomial_with_replacement_apply(
+    Tensor& result,
+    const Tensor& self,
+    const int64_t n_sample,
+    c10::optional<Generator> generator) {
   auto gen = get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
@@ -43,9 +47,9 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
     for (int64_t j = 0; j < n_categories; j++) {
       val = self_ptr[i * self_stride_0 + j * self_stride_1];
       TORCH_CHECK(val >= 0, "invalid multinomial distribution (encountering probability entry < 0)");
-// NB: std::isfinite doesn't bode well with clang for half datatypes,
+// NB: std::isfinite doesn't bode well with libc++ for half datatypes,
 // so we manually cast it to a double and perform the check.
-#if defined(__clang__)
+#if defined(_LIBCPP_VERSION)
       TORCH_CHECK(std::isfinite(static_cast<double>(val)),
                   "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
 #else
@@ -61,8 +65,6 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
     }
 
     TORCH_CHECK(sum > 0, "invalid multinomial distribution (sum of probabilities <= 0)");
-    TORCH_CHECK(with_replacement || (n_categories - n_zeros >= n_sample),
-        "invalid multinomial distribution (with replacement=False, not enough non-negative category to sample)");
 
     /* normalize cumulative probability distribution so that last val is 1
     i.e. doesn't assume original self row sums to one */
@@ -100,45 +102,23 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
 
       /* store in result tensor (will be incremented for lua compat by wrapper) */
       result_ptr[i * result_dist_stride_0 + j * result_dist_stride_1] = sample_idx;
-
-      /* Once a sample is drawn, it cannot be drawn again. ie sample without replacement */
-      if (!with_replacement && j < n_sample - 1) {
-        /* update cumulative distribution so that sample cannot be drawn again */
-        scalar_t diff;
-        scalar_t new_val = 0;
-        scalar_t sum;
-
-        if (sample_idx != 0) {
-          new_val = cum_dist_ptr[(sample_idx - 1) * cum_dist_stride_0];
-        }
-        /* marginal cumulative mass (i.e. original probability) of sample */
-        diff = cum_dist_ptr[sample_idx * cum_dist_stride_0] - new_val;
-        /* new sum of marginals is not one anymore... */
-        sum = 1.0 - diff;
-        for (int64_t k = 0; k < n_categories; k++) {
-          new_val = cum_dist_ptr[k * cum_dist_stride_0];
-          if (k >= sample_idx) {
-            /* remove sampled probability mass from later cumulative probabilities */
-            new_val -= diff;
-          }
-          /* make total marginals sum to one */
-          new_val /= sum;
-          cum_dist_ptr[k * cum_dist_stride_0] = new_val;
-        }
-      }
     }
   }
 }
 
-static void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, c10::optional<Generator> gen) {
+static void multinomial_with_replacement_kernel_impl(
+    Tensor& result,
+    const Tensor& self,
+    const int64_t n_sample,
+    c10::optional<Generator> gen) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "multinomial", [&] {
-    multinomial_apply<scalar_t>(result, self, n_sample, with_replacement, gen);
+    multinomial_with_replacement_apply<scalar_t>(result, self, n_sample, gen);
   });
 }
-
 }
 
-REGISTER_DISPATCH(multinomial_stub, &multinomial_kernel_impl);
-
+REGISTER_DISPATCH(
+    multinomial_with_replacement_stub,
+    &multinomial_with_replacement_kernel_impl);
 }
 }

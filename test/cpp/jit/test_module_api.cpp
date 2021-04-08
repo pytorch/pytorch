@@ -3,9 +3,11 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/testing/file_check.h>
 #include <torch/torch.h>
 
 namespace torch {
@@ -41,6 +43,44 @@ static void import_libs(
       [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
       /*version=*/2);
   si.loadType(QualifiedName(class_name));
+}
+
+TEST(ModuleAPITest, MethodRunAsync) {
+  // Module m("m");
+  // m.define(R"(
+  //   def forward(self):
+  //     r1 = torch.jit.fork(torch.mm, torch.rand(100,100),torch.rand(100,100))
+  //     r2 = torch.jit.fork(torch.mm, torch.rand(100,100),torch.rand(100,100))
+  //     return r1.wait() + r2.wait()
+  // )");
+  std::string filePath(__FILE__);
+  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  // borrow model file from TEST(GraphExecutorTest, runAsync_executor)
+  testModelFile.append("test_interpreter_async.pt");
+  auto m = load(testModelFile);
+
+  auto counter = 0;
+  std::mutex mtx;
+
+  auto launcher = [&](std::function<void()> f) {
+    mtx.lock();
+    ++counter;
+    mtx.unlock();
+    at::launch(move(f));
+  };
+
+  auto method = m.get_method("forward");
+
+  std::vector<IValue> stack;
+  auto kwargs = std::unordered_map<std::string, at::IValue>();
+  auto future = method.run_async(stack, kwargs, launcher);
+
+  future->wait();
+
+  // expect 2 forks and 2 wait callbacks being excuted on provided taskLauncher
+  // but ivalue::Future would be marked completed and release wait before
+  // finishing all callbacks
+  ASSERT_GE(counter, 2);
 }
 
 TEST(ModuleAPITest, Clone) {
@@ -301,6 +341,20 @@ TEST(ModuleAPITest, Define) {
   )");
   auto result = m.run_method("add_it", torch::ones({}));
   AT_ASSERT(result.toTensor().item<float>() == 6);
+}
+
+TEST(ModuleAPITest, Freezing) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def forward(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  m.eval();
+  auto frozen_mod = torch::jit::freeze(m);
+  auto forward_g = frozen_mod.get_method("forward").graph();
+  testing::FileCheck().check_not("GetAttr")->run(*forward_g);
+  ;
 }
 
 TEST(ModuleAPITest, To_CUDA) {

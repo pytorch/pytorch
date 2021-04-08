@@ -6,6 +6,7 @@
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <cmath>
 #include <functional>
@@ -45,6 +46,14 @@ void LBFGSOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, tolerance_change);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(int64_t, history_size);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(std::string, line_search_fn);
+}
+
+double LBFGSOptions::get_lr() const {
+  return lr();
+}
+
+void LBFGSOptions::set_lr(const double lr) {
+  this->lr(lr);
 }
 
 template <typename T>
@@ -474,7 +483,7 @@ Tensor LBFGS::step(LossClosure closure) {
       // r/d is the final direction
       auto r = torch::mul(q, H_diag);
       d = r;
-      for (int64_t i = 0; i < num_old; i++) {
+      for(const auto i : c10::irange(num_old)) {
         auto be_i = old_dirs.at(i).dot(r) * ro.at(i);
         r.add_(old_stps.at(i), val((*al).at(i) - be_i));
       }

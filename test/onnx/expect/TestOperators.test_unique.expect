@@ -51,7 +51,7 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_param: "1_0"
+            dim_param: "Unique1_dim_0"
           }
           dim {
             dim_value: 3
@@ -73,7 +73,7 @@ graph {
         elem_type: 7
         shape {
           dim {
-            dim_param: "4_0"
+            dim_param: "Unique4_dim_0"
           }
         }
       }

@@ -322,10 +322,10 @@ def pytorch_install(url):
 
 def _site_packages(dirname, platform):
     if platform.startswith("win"):
-        os.path.join(pytdir.name, "Lib", "site-packages")
+        template = os.path.join(dirname, "Lib", "site-packages")
     else:
         template = os.path.join(dirname, "lib", "python*.*", "site-packages")
-        spdir = glob.glob(template)[0]
+    spdir = glob.glob(template)[0]
     return spdir
 
 
@@ -431,6 +431,7 @@ def _get_listing(source_dir, target_dir, platform):
         raise RuntimeError(f"Platform {platform!r} not recognized")
     listing.extend(_find_missing_pyi(source_dir, target_dir))
     listing.append(os.path.join(source_dir, "version.py"))
+    listing.append(os.path.join(source_dir, "testing", "_internal", "generated"))
     listing.append(os.path.join(source_dir, "bin"))
     listing.append(os.path.join(source_dir, "include"))
     return listing

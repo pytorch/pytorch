@@ -346,7 +346,7 @@ void max_pool2d_with_indices_out_cuda_template(
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth);
+    outputHeight, outputWidth, memory_format);
 
   Tensor input = input_.contiguous(memory_format);
 
@@ -413,7 +413,7 @@ void max_pool2d_with_indices_out_cuda_template(
                   in_stride_h, in_stride_w,
                   kernel_stride_C, kernel_size_C,
                   output_data, indices_data);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         case MemoryFormat::Contiguous: {
@@ -425,7 +425,7 @@ void max_pool2d_with_indices_out_cuda_template(
                   nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                   kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                   output_data, indices_data);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
@@ -513,7 +513,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth,
+    outputHeight, outputWidth, memory_format,
     /*cuda=*/ true);
 
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
@@ -583,7 +583,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
                   in_stride_h, in_stride_w,
                   kernel_stride_C, kernel_size_C,
                   gradInput_data);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         case MemoryFormat::Contiguous: {
@@ -607,7 +607,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
                   nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                   kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                   gradInput_data);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
@@ -618,15 +618,14 @@ void max_pool2d_with_indices_backward_out_cuda_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> max_pool2d_with_indices_out_cuda(
-  Tensor& output,
-  Tensor& indices,
-  const Tensor& input,
+std::tuple<Tensor&, Tensor&> max_pool2d_with_indices_out_cuda(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
-  bool ceil_mode)
+  bool ceil_mode,
+  Tensor& output,
+  Tensor& indices)
 {
   max_pool2d_with_indices_out_cuda_template(
     output,
@@ -669,16 +668,15 @@ std::tuple<Tensor, Tensor> max_pool2d_with_indices_cuda(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& max_pool2d_with_indices_backward_out_cuda(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& max_pool2d_with_indices_backward_out_cuda(const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
   bool ceil_mode,
-  const Tensor& indices)
+  const Tensor& indices,
+  Tensor& gradInput)
 {
   max_pool2d_with_indices_backward_out_cuda_template(
     gradInput,

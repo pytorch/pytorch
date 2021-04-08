@@ -8,41 +8,34 @@ namespace vulkan {
 namespace api {
 namespace utils {
 
-inline int64_t align_down(
-    const int64_t number,
-    const int64_t multiple) {
+//
+// Alignment
+//
+
+template<typename Type>
+inline constexpr Type align_down(
+    const Type number,
+    const Type multiple) {
   return (number / multiple) * multiple;
 }
 
-inline int64_t align_up(
-    const int64_t number,
-    const int64_t multiple) {
+template<typename Type>
+inline constexpr Type align_up(
+    const Type number,
+    const Type multiple) {
   return align_down(number + multiple - 1, multiple);
 }
 
-inline int64_t div_up(
-    const int64_t numerator,
-    const int64_t denominator) {
+template<typename Type>
+inline constexpr Type div_up(
+    const Type numerator,
+    const Type denominator) {
   return (numerator + denominator - 1) / denominator;
 }
 
-inline VkFormat convert(const caffe2::TypeMeta dtype) {
-  switch (c10::typeMetaToScalarType(dtype)) {
-    case kFloat:
-#ifdef VULKAN_FP16_INFERENCE
-      return VK_FORMAT_R16G16B16A16_SFLOAT;
-#else
-      return VK_FORMAT_R32G32B32A32_SFLOAT;
-#endif /* VULKAN_FP16_INFERENCE */
-
-    default:
-      TORCH_CHECK(
-        false,
-        "Vulkan tensor format not supported!");
-  }
-
-  return VK_FORMAT_UNDEFINED;
-}
+//
+// Cast
+//
 
 namespace detail {
 
@@ -78,6 +71,37 @@ template <
 inline constexpr To safe_downcast(const From v) {
   return detail::safe_downcast<To, From>(v);
 }
+
+//
+// Vector
+//
+
+namespace detail {
+
+template<typename Type, uint32_t N>
+struct vec final {
+  Type data[N];
+};
+
+} // namespace detail
+
+template<uint32_t N>
+using ivec = detail::vec<int32_t, N>;
+using ivec2 = ivec<2u>;
+using ivec3 = ivec<3u>;
+using ivec4 = ivec<4u>;
+
+template<uint32_t N>
+using uvec = detail::vec<uint32_t, N>;
+using uvec2 = uvec<2u>;
+using uvec3 = uvec<3u>;
+using uvec4 = uvec<4u>;
+
+template<uint32_t N>
+using vec = detail::vec<float, N>;
+using vec2 = vec<2u>;
+using vec3 = vec<3u>;
+using vec4 = vec<4u>;
 
 } // namespace utils
 } // namespace api

@@ -10,9 +10,6 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 
-import unittest
-import os
-
 
 class TestReduceFrontSum(hu.HypothesisTestCase):
     @given(batch_size=st.integers(1, 3),

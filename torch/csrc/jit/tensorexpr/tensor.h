@@ -12,89 +12,32 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Tensor : KernelScopedObject {
+class TORCH_API Tensor : KernelScopedObject {
  public:
-  Tensor(
-      const std::string& name,
-      const std::vector<const Expr*>& dims,
-      const std::vector<const Var*>& args,
-      const Expr* body)
-      // TODO: Function should not create buffers, they should be created
-      // manually before constructing a function.
-      : buf_(new Buf(name, dims, body->dtype())), args_(args), body_(body) {}
-
-  Tensor(Buf* buf, const std::vector<const Var*>& args, const Expr* body)
-      : buf_(buf), args_(args), body_(body) {}
+  Tensor(const Buf* buf, const std::vector<const Var*>& args, const Expr* body)
+      : buf_(buf) {
+    stmt_ = constructStmt(args, body, {}, {});
+  }
 
   Tensor(
-      Buf* buf,
+      const Buf* buf,
       const std::vector<const Var*>& args,
       const std::vector<const Expr*>& reduce_dims,
       const std::vector<const Var*>& reduce_args,
       const Expr* body)
-      : buf_(buf),
-        args_(args),
-        body_(body),
-        reduce_dims_(reduce_dims),
-        reduce_args_(reduce_args) {}
-
-  // Wrappers over accessors to fields of the underlying function
-  const Expr* body() const {
-    return body_;
+      : buf_(buf) {
+    stmt_ = constructStmt(args, body, reduce_dims, reduce_args);
   }
+
+  Tensor(const Buf* buf, Stmt* stmt) : buf_(buf), stmt_(stmt) {}
+
   const Buf* buf() const {
     return buf_;
   }
-  size_t ndim() const {
-    return buf()->ndim();
-  }
-  const Expr* dim(size_t index) const {
-    if (index >= ndim()) {
-      throw out_of_range_index();
-    }
-    return buf()->dim(index);
-  }
-  std::vector<const Expr*> dims() const {
-    return buf()->dims();
-  }
-  const Var* arg(size_t index) const {
-    if (index >= ndim()) {
-      throw out_of_range_index();
-    }
-    return args_[index];
-  }
-  const std::vector<const Var*>& args() const {
-    return args_;
-  }
-  size_t reduce_ndim() const {
-    return reduce_dims_.size();
-  }
-  std::vector<const Expr*> reduce_dims() const {
-    return reduce_dims_;
-  }
-  std::vector<const Var*> reduce_args() const {
-    return reduce_args_;
-  }
-  const Expr* reduce_dim(size_t index) const {
-    if (index >= reduce_ndim()) {
-      throw out_of_range_index();
-    }
-    return reduce_dims_[index];
-  }
-  const Var* reduce_arg(size_t index) const {
-    if (index >= reduce_ndim()) {
-      throw out_of_range_index();
-    }
-    return reduce_args_[index];
-  }
 
-  void initializeTo(const Expr* initializer) {
-    initializer_ = initializer;
+  Stmt* stmt() const {
+    return stmt_;
   }
-  const Expr* initializer() const {
-    return initializer_;
-  }
-  Stmt* ElementStmt();
 
   template <typename... Ts>
   inline ExprHandle operator()(const Ts&... ts);
@@ -104,17 +47,20 @@ class Tensor : KernelScopedObject {
   inline ExprHandle call(const Ts&... ts);
 
  private:
-  const Buf* buf_;
-  std::vector<const Var*> args_;
-  const Expr* body_;
-  std::vector<const Expr*> reduce_dims_;
-  std::vector<const Var*> reduce_args_;
+  Stmt* constructStmt(
+      const std::vector<const Var*>& args,
+      const Expr* body,
+      const std::vector<const Expr*>& reduce_dims,
+      const std::vector<const Var*>& reduce_args) const;
 
-  const Expr* initializer_{nullptr};
+  const Buf* buf_;
+  Stmt* stmt_;
 };
 
 class Placeholder {
  public:
+  Placeholder() = default;
+
   Placeholder(const BufHandle& data) : data_(data.node()) {
     if (data_->base_handle()->dtype() != kHandle) {
       throw malformed_input("Placeholder dtype must be Handle");
@@ -130,6 +76,7 @@ class Placeholder {
     }
     strides_ = ExprHandleVectorToExprVector(stride_handles);
   }
+
   Placeholder(
       const std::string& name,
       const Dtype& dtype,
@@ -138,6 +85,9 @@ class Placeholder {
 
   const Buf* data() const {
     return data_;
+  }
+  BufHandle handle() const {
+    return BufHandle(data());
   }
   Dtype dtype() const {
     return data_->dtype();
@@ -157,6 +107,8 @@ class Placeholder {
 
   template <typename T>
   inline ExprHandle load(const std::vector<T>& args) const;
+
+  inline ExprHandle load(const std::vector<ExprHandle>& args) const;
 
   inline ExprHandle loadWithMask(
       const std::vector<ExprHandle>& args,
@@ -226,11 +178,12 @@ inline void unpack_dim_args(
 }
 
 // Handle reductions over a Reducer and a body_func which produces values.
-template <typename BodyFunc>
+template <typename InitFunc, typename BodyFunc>
 Tensor* Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
+    const InitFunc& init_func,
     const BodyFunc& body_func,
     const std::vector<DimArg>& reduce_args) {
   std::vector<const Expr*> dims;
@@ -248,13 +201,30 @@ Tensor* Reduce(
   ExprHandle body =
       Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(all_vars));
   std::vector<const Expr*> output_args(vars.begin(), vars.end());
-  Buf* func_result = new Buf(func_name, dims, body.dtype());
+  const Expr* init_expr = new Cast(
+      body.dtype(), init_func(VarVectorToVarHandleVector(vars)).node());
+  Buf* func_result = new Buf(func_name, dims, body.dtype(), init_expr);
   const ReduceOp* reduce_op =
       reducer(func_result, body, output_args, reduce_vars);
   Tensor* t =
       new Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
-  t->initializeTo(new Cast(body.dtype(), reducer.initializer()));
   return t;
+}
+
+template <typename BodyFunc>
+Tensor* Reduce(
+    const std::string& func_name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    const BodyFunc& body_func,
+    const std::vector<DimArg>& reduce_args) {
+  return Reduce(
+      func_name,
+      dim_args,
+      reducer,
+      [&](ParameterList p) { return ExprHandle(reducer.initializer()); },
+      body_func,
+      reduce_args);
 }
 
 // Overload which allows inline lambda functions for the body_func.
@@ -276,6 +246,13 @@ TORCH_API Tensor* Reduce(
     const Placeholder& buffer,
     const std::vector<DimArg>& reduce_args);
 
+TORCH_API Tensor* Reduce(
+    const std::string& name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    const BufHandle& buffer,
+    const std::vector<DimArg>& reduce_args);
+
 // Overload for the common case of all dimensions of a prevously Computed
 // Tensor.
 TORCH_API Tensor* Reduce(
@@ -285,58 +262,22 @@ TORCH_API Tensor* Reduce(
     Tensor* tensor,
     const std::vector<DimArg>& reduce_args);
 
-class FunctionCall : public CallNode<FunctionCall> {
- public:
-  using BaseClass = CallNode<FunctionCall>;
-  static ExprHandle make(
-      Tensor* tensor,
-      const std::vector<ExprHandle>& params) {
-    std::vector<const Expr*> params_nodes(params.size());
-    for (size_t i = 0; i < params.size(); i++) {
-      params_nodes[i] = params[i].node();
-    }
-    return ExprHandle(new FunctionCall(tensor, params_nodes));
-  }
-
-  const Tensor* tensor() const {
-    return tensor_;
-  }
-  Tensor* tensor() {
-    return tensor_;
-  }
-
-  FunctionCall(Tensor* tensor, const std::vector<const Expr*>& params)
-      : BaseClass(tensor->body()->dtype(), kFunctionCall, params),
-        tensor_(tensor) {}
-
- private:
-  const Expr* DefaultMutator(
-      const std::vector<const Expr*>& new_params) const override {
-    return new FunctionCall(tensor_, new_params);
-  }
-
-  std::string func_name() const override {
-    return tensor_->buf()->name_hint();
-  }
-
-  Tensor* tensor_;
-};
 template <typename... Ts>
 inline ExprHandle Tensor::operator()(const Ts&... ts) {
   std::vector<ExprHandle> params({ExprHandle(ts)...});
-  return FunctionCall::make(this, std::move(params));
+  return Load::make(BufHandle(this->buf()), params);
 }
 
 template <typename... Ts>
 inline ExprHandle Tensor::call(const Ts&... ts) {
   std::vector<ExprHandle> params({ExprHandle(ts)...});
-  return FunctionCall::make(this, std::move(params));
+  return Load::make(BufHandle(this->buf()), params);
 }
 
 template <typename T>
 inline ExprHandle Tensor::call(const std::vector<T>& args) {
   std::vector<ExprHandle> params(args.begin(), args.end());
-  return FunctionCall::make(this, params);
+  return Load::make(BufHandle(this->buf()), params);
 }
 
 template <typename... Ts>
@@ -351,6 +292,22 @@ inline ExprHandle Placeholder::load(const std::vector<T>& args) const {
   std::vector<ExprHandle> params(args.begin(), args.end());
   return ExprHandle(
       new Load(data(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+}
+
+inline ExprHandle Placeholder::load(const std::vector<ExprHandle>& args) const {
+  return this->template load<ExprHandle>(args);
+}
+
+template <typename... Ts>
+inline ExprHandle BufHandle::load(const Ts&... ts) const {
+  std::vector<ExprHandle> params({ExprHandle(ts)...});
+  return Load::make(*this, params);
+}
+
+template <typename T>
+inline ExprHandle BufHandle::load(const std::vector<T>& args) const {
+  std::vector<ExprHandle> params(args.begin(), args.end());
+  return Load::make(*this, params);
 }
 
 } // namespace tensorexpr

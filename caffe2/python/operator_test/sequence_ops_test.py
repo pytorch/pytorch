@@ -11,7 +11,6 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 import unittest
-import os
 
 
 def _gen_test_add_padding(with_pad_data=True,

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
+
 #include <torch/csrc/jit/jit_log.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -47,9 +48,12 @@ class AttributePropagator {
       return false;
     };
 
-    // forward is preserved by default.
-    auto method = module_.get_method("forward");
-    preservedMethods_.insert(&method.function());
+    // forward is preserved by default, but
+    // not all modules have a forward function defined
+    if (module_.find_method("forward")) {
+      auto method = module_.get_method("forward");
+      preservedMethods_.insert(&method.function());
+    }
 
     for (auto name : preservedAttrs) {
       TORCH_CHECK(checkName(name), "Unknown name: " + name);
@@ -155,7 +159,7 @@ class AttributePropagator {
       Module& attrModule,
       std::shared_ptr<Graph>& graph) {
     if (!input->type()->cast<InterfaceType>() &&
-        !input->type()->expect<ClassType>()->is_module()) {
+        !input->type()->expectRef<ClassType>().is_module()) {
       return false;
     }
 
@@ -219,11 +223,11 @@ class AttributePropagator {
           blocks.push(sub_block);
         }
 
-        // Modules with prim::ModuleDictIndex cannot be frozen because they
+        // Modules with prim::ModuleContainerIndex cannot be frozen because they
         // return InterfaceTypes.
         TORCH_CHECK(
-            n->kind() != prim::ModuleDictIndex,
-            "Freezing modules containing prim::ModuleDictIndex is not supported");
+            n->kind() != prim::ModuleContainerIndex,
+            "Freezing modules containing prim::ModuleContainerIndex is not supported");
 
         if (n->kind() == prim::SetAttr || n->kind() == prim::GetAttr) {
           // By default if interface attributes are present then fail freezing.
@@ -289,11 +293,11 @@ class AttributePropagator {
 
   IValue overrideGradient(IValue attr) {
     if (attr.isTensor()) {
-      auto t = attr.toTensor();
+      auto& t = attr.toTensor();
       if (t.requires_grad()) {
-        t = t.detach();
-        t.set_requires_grad(false);
-        attr = IValue(t);
+        auto detached = t.detach();
+        detached.set_requires_grad(false);
+        attr = IValue(std::move(detached));
       }
     } else if (attr.isTuple()) {
       auto tuple = std::move(attr).toTuple();
@@ -424,7 +428,7 @@ class AttributePropagator {
           if (!findConstantAttr(input, name, attrModule, graph)) {
             GRAPH_DEBUG(
                 input->type()->cast<InterfaceType>() ||
-                        input->type()->expect<ClassType>()->is_module()
+                        input->type()->expectRef<ClassType>().is_module()
                     ? "attribute: " + name + " is mutable."
                     : "");
             continue;
@@ -442,7 +446,9 @@ class AttributePropagator {
             if (!isEval || preserveParameters_) {
               auto type = attrModule.type();
               auto slot = *type->findAttributeSlot(name);
-              if (type->is_parameter(slot) || type->is_buffer(slot)) {
+              if (type->is_parameter(slot) || type->is_buffer(slot) ||
+                  (attr.isObject() &&
+                   !attr.toObjectRef().type()->is_module())) {
                 continue;
               } else {
                 attr = overrideGradient(attr);
@@ -749,12 +755,14 @@ Module freeze_module(
     std::vector<std::string> preservedAttrs,
     bool freezeInterfaces,
     bool preserveParameters) {
-  Method method = module.get_method("forward");
-  // Check that module does not return itself.
-  for (auto& output : method.graph()->outputs()) {
-    TORCH_CHECK(
-        output->type() != module.type(),
-        "attempted to freeze a module that return itself");
+  if (module.find_method("forward")) {
+    Method method = module.get_method("forward");
+    // Check that module does not return itself.
+    for (auto& output : method.graph()->outputs()) {
+      TORCH_CHECK(
+          output->type() != module.type(),
+          "attempted to freeze a module that return itself");
+    }
   }
 
   auto moduleClone = module.clone(true);

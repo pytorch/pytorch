@@ -26,7 +26,7 @@
  * What are the cons?
  *    There are some cons that were observed where use of caching allocator led to
  *    worse performance on some platforms. Reason being that the caching mechanism
- *    used by this allocator left us worse off compared to the corresonding platform's
+ *    used by this allocator left us worse off compared to the corresponding platform's
  *    tuned memory allocator. In that case it seemed better to not use this allocator.
  *    Note there are some ideas to fix this in the works.
  *
@@ -54,13 +54,16 @@ class C10_API CPUCachingAllocator {
    * No speculative allocation for any future allocations.
    */
   private:
+    inline void* allocate_and_cache(const size_t bytes);
+    void free_cached();
+  protected:
     // Invariants.
     // 1. If memory is ever allocated via this allocator then
     //    the pointer will exist in allocation_map_, unless the allocator
     //    returned the memory to OS via free_cached.
     //  1.1. Therefore even when the said memory is "freed" via this
     //       allocator (and thus cached), it will continue to stay
-    //       in allocaiton_map_. Furthermore it will also exist in
+    //       in allocation_map_. Furthermore it will also exist in
     //       available_map_. Thus an allocated memory pointer can be in both
     //       allocation_map_ and available_map_ simultaneously.
     // 2. Memory pointer maybe removed from allocation_map_, when it
@@ -71,9 +74,6 @@ class C10_API CPUCachingAllocator {
     // As a result of above invariants, allocated memory ptr cannot be in
     // available_map_ unless it is in allocation_map_ as well.
     ska::flat_hash_map<size_t, c10::SmallVector<void*, 16>> available_map_;
-    inline void* allocate_and_cache(const size_t bytes);
-    void free_cached();
-  protected:
     static ska::flat_hash_map<void*, size_t> allocation_map_;
     // Since allocation_map, which is a global instance, is mutated/read via
     // all public APIs we need a global mutex.

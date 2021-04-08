@@ -27,7 +27,6 @@ dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
 
 op_engine = 'GLOO'
 
-
 class TemporaryDirectory:
     def __enter__(self):
         self.tmpdir = tempfile.mkdtemp()

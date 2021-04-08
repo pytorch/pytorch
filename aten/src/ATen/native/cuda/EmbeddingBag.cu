@@ -244,9 +244,9 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
               scalar_t, index_t><<<grid, block, 0, stream>>>(
               max_indices.data_ptr<index_t>(), grad.data_ptr<scalar_t>(),
               grad_weight.data_ptr<scalar_t>(), stride, numBags);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
-        });
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
+  });
 
   return grad_weight;
 }
@@ -257,9 +257,11 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
-                   const int64_t mode, bool sparse,
-                   const Tensor& per_sample_weights,
+                   const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+
   return _embedding_bag_cuda(
       weight,
       indices,
@@ -276,9 +278,11 @@ _embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
-                   const int64_t mode, bool sparse,
-                   const Tensor& per_sample_weights,
+                   const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag_cuda", indices_arg, {kLong, kInt});
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
@@ -325,18 +329,16 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
 #endif
   int grid = 1024;
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "embedding_bag_cuda", [&] {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "embedding_bag_cuda", [&] {
-      AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_cuda", [&] () {
-        EmbeddingBag_updateOutputKernel<scalar_t, index_t><<<grid, block, 0, stream>>>(
-            indices.data_ptr<index_t>(), offsets.data_ptr<index_t>(),
-            weight.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-            offset2bag.data_ptr<index_t>(), numIndices, numBags, featureSize,
-            weight.stride(0), weight.stride(1), mode, bag_size.data_ptr<index_t>(),
-            mode == MODE_MAX ? max_indices.data_ptr<index_t>() : NULL,
-            per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
-            per_sample_weights.defined() ? per_sample_weights.stride(0) : 0);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
-      });
+    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_cuda", [&] () {
+      EmbeddingBag_updateOutputKernel<scalar_t, index_t><<<grid, block, 0, stream>>>(
+          indices.data_ptr<index_t>(), offsets.data_ptr<index_t>(),
+          weight.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+          offset2bag.data_ptr<index_t>(), numIndices, numBags, featureSize,
+          weight.stride(0), weight.stride(1), mode, bag_size.data_ptr<index_t>(),
+          mode == MODE_MAX ? max_indices.data_ptr<index_t>() : NULL,
+          per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
+          per_sample_weights.defined() ? per_sample_weights.stride(0) : 0);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   });
 
@@ -349,8 +351,10 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    const Tensor &bag_size_,
                                    const Tensor &max_indices,
                                    int64_t num_weights,
-                                   bool scale_grad_by_freq, int64_t mode,
-                                   const Tensor& per_sample_weights) {
+                                   bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_embedding_bag_dense_backward_cuda");
@@ -449,7 +453,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
   AT_ASSERT(weight.dim() == 2);
   AT_ASSERT(weight.size(1) == embedding_features);
 
-  const int threads_per_block = 1024;
+  const int threads_per_block = 512;
   const int warps_per_block = threads_per_block / C10_WARP_SIZE;
 
   dim3 block(threads_per_block);
@@ -475,7 +479,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
             num_samples,
             embedding_features,
             output.data_ptr<scalar_t>());
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
     }
   );

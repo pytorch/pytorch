@@ -1,43 +1,46 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
-// The stubs in here are only used for static dispatch.
-// Dynamic dispatch doesn't ever see those but directly goes to the kernels in VariableTypeManual.cpp.
-// TODO Since the plan is to remove static dispatch, we should then also remove this file here.
+// The stubs in here are used by dynamic dispatch. It just redirects everything
+// to the Tensor method we manually bind in TensorBody.h.
 
 namespace at {
 namespace native {
 
-void _backward(const Tensor& self, TensorList inputs, const Tensor& gradient, c10::optional<bool> keep_graph, bool create_graph) {
-  AT_ERROR("backward is not implemented for Tensor");
+void _backward(const Tensor& self, TensorList inputs, const c10::optional<Tensor>& gradient_opt, c10::optional<bool> keep_graph, bool create_graph) {
+  return self._backward(inputs, gradient_opt, keep_graph, create_graph);
 }
 
 void set_data(Tensor& self, const Tensor& new_data) {
-  AT_ERROR("set_data is not implemented for Tensor");
+  return self.set_data(new_data);
 }
 
 Tensor data(const Tensor& self) {
-  AT_ERROR("data is not implemented for Tensor");
+  return self.data();
 }
 
 bool is_leaf(const Tensor& self) {
-  AT_ERROR("is_leaf is not implemented for Tensor");
+  return self.is_leaf();
 }
 
 int64_t output_nr(const Tensor& self) {
-  AT_ERROR("output_nr is not implemented for Tensor");
+  return self.output_nr();
 }
 
 int64_t _version(const Tensor& self) {
-  AT_ERROR("version is not implemented for Tensor");
+  return self._version();
 }
 
 Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
-  AT_ERROR("requires_grad_ is not implemented for Tensor");
+  return self.requires_grad_(_requires_grad);
 }
 
 void retain_grad(Tensor& self) {
-  AT_ERROR("retain_grad is not implemented for Tensor");
+  return self.retain_grad();
+}
+
+Tensor _fw_primal(const Tensor& self, int64_t level) {
+  AT_ERROR("_fw_primal is not implemented for Tensor");
 }
 
 } // namespace native

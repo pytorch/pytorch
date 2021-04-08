@@ -22,7 +22,7 @@ def range_push(msg):
     Pushes a range onto a stack of nested range span.  Returns zero-based
     depth of the range that is started.
 
-    Arguments:
+    Args:
         msg (string): ASCII message to associate with range
     """
     return _nvtx.rangePushA(msg)
@@ -40,7 +40,7 @@ def mark(msg):
     """
     Describe an instantaneous event that occurred at some point.
 
-    Arguments:
+    Args:
         msg (string): ASCII message to associate with the event.
     """
     return _nvtx.markA(msg)
@@ -53,7 +53,7 @@ def range(msg, *args, **kwargs):
     of its scope, and pops it at the end. If extra arguments are given,
     they are passed as arguments to msg.format().
 
-    Arguments:
+    Args:
         msg (string): message to associate with the range
     """
     range_push(msg.format(*args, **kwargs))

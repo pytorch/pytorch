@@ -5,11 +5,12 @@ LIBUV_COMMON_SRCS = [
     "third_party/libuv/src/fs-poll.c",
     "third_party/libuv/src/idna.c",
     "third_party/libuv/src/inet.c",
+    "third_party/libuv/src/random.c",
     "third_party/libuv/src/strscpy.c",
     "third_party/libuv/src/threadpool.c",
     "third_party/libuv/src/timer.c",
-    "third_party/libuv/src/uv-data-getter-setters.c",
     "third_party/libuv/src/uv-common.c",
+    "third_party/libuv/src/uv-data-getter-setters.c",
     "third_party/libuv/src/version.c",
 ]
 
@@ -25,6 +26,7 @@ LIBUV_POSIX_SRCS = [
     "third_party/libuv/src/unix/pipe.c",
     "third_party/libuv/src/unix/poll.c",
     "third_party/libuv/src/unix/process.c",
+    "third_party/libuv/src/unix/random-devurandom.c",
     "third_party/libuv/src/unix/signal.c",
     "third_party/libuv/src/unix/stream.c",
     "third_party/libuv/src/unix/tcp.c",
@@ -34,11 +36,13 @@ LIBUV_POSIX_SRCS = [
 ]
 
 LIBUV_LINUX_SRCS = LIBUV_POSIX_SRCS + [
+    "third_party/libuv/src/unix/proctitle.c",
     "third_party/libuv/src/unix/linux-core.c",
     "third_party/libuv/src/unix/linux-inotify.c",
     "third_party/libuv/src/unix/linux-syscalls.c",
     "third_party/libuv/src/unix/procfs-exepath.c",
-    "third_party/libuv/src/unix/sysinfo-loadavg.c",
+    "third_party/libuv/src/unix/random-getrandom.c",
+    "third_party/libuv/src/unix/random-sysctl-linux.c",
 ]
 
 cc_library(
@@ -74,6 +78,7 @@ header_template_rule(
         "#cmakedefine01 TENSORPIPE_HAS_SHM_TRANSPORT": "",
         "#cmakedefine01 TENSORPIPE_HAS_CMA_CHANNEL": "",
         "#cmakedefine01 TENSORPIPE_HAS_CUDA_IPC_CHANNEL": "",
+        "#cmakedefine01 TENSORPIPE_HAS_CUDA_GDR_CHANNEL": "",
         "#cmakedefine01 TENSORPIPE_HAS_IBV_TRANSPORT": "",
         "#cmakedefine01 TENSORPIPE_SUPPORTS_CUDA": "",
     },
@@ -93,7 +98,13 @@ TENSORPIPE_HEADERS = glob([
 TENSORPIPE_BASE_SRCS = glob([
     "tensorpipe/*.cc",
     "tensorpipe/channel/*.cc",
-    "tensorpipe/common/*.cc",
+    "tensorpipe/common/address.cc",
+    "tensorpipe/common/epoll_loop.cc",
+    "tensorpipe/common/error.cc",
+    "tensorpipe/common/fd.cc",
+    "tensorpipe/common/ibv.cc",
+    "tensorpipe/common/socket.cc",
+    "tensorpipe/common/system.cc",
     "tensorpipe/core/*.cc",
     "tensorpipe/transport/*.cc",
     "tensorpipe/util/*/*.cc",
@@ -107,7 +118,10 @@ TENSORPIPE_SRCS = TENSORPIPE_BASE_SRCS + glob([
 ])
 
 TENSORPIPE_SRCS_CUDA = TENSORPIPE_SRCS + glob([
+    "tensorpipe/common/cuda_loop.cc",
+    "tensorpipe/channel/cuda_basic/*.cc",
     "tensorpipe/channel/cuda_ipc/*.cc",
+    "tensorpipe/channel/cuda_xth/*.cc",
 ])
 
 cc_library(

@@ -5,13 +5,12 @@
 
 
 
-import six
+import functools
 
 from caffe2.python import context
 
 
-@context.define_context(allow_default=True)
-class TagContext(object):
+class TagContext(context.DefaultManaged):
     """
     Scope driven way to provide tags to the layers.
     """
@@ -61,7 +60,7 @@ class Tags(object):
     COMPONENT = 'component:'
     PIPELINE = 'pipeline:'
     """
-    Indicate it's a dense layer or dense param init, 
+    Indicate it's a dense layer or dense param init,
     but we use hogwild across multiple trainers
     """
     HOGWILD_DENSE = "hogwild_dense"
@@ -105,16 +104,19 @@ class Tags(object):
         TagContext.current().remove_tags(self.tags)
 
     def __call__(self, func):
-        @six.wraps(func)
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             with self:
                 return func(*args, **kwargs)
         return wrapper
 
 
+# pyre-fixme[16]: Tags has no attribute `TRAIN_ONLY`
 Tags.TRAIN_ONLY = [Tags.EXCLUDE_FROM_PREDICTION, Tags.EXCLUDE_FROM_EVAL,
                    Tags.EXCLUDE_FROM_ACCUMULATE_PRED]
+# pyre-fixme[16]: Tags has no attribute `EVAL_ONLY`
 Tags.EVAL_ONLY = [Tags.EXCLUDE_FROM_PREDICTION, Tags.EXCLUDE_FROM_TRAIN,
                   Tags.EXCLUDE_FROM_ACCUMULATE_PRED]
+# pyre-fixme[16]: Tags has no attribute `PREDICTION_ONLY`
 Tags.PREDICTION_ONLY = [Tags.EXCLUDE_FROM_TRAIN, Tags.EXCLUDE_FROM_EVAL,
                         Tags.EXCLUDE_FROM_ACCUMULATE_PRED]

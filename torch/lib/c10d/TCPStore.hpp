@@ -5,7 +5,12 @@
 #include <unordered_map>
 
 #include <c10d/Store.hpp>
-#include <c10d/Utils.hpp>
+
+#ifdef _WIN32
+#include <c10d/WinSockUtils.hpp>
+#else
+#include <c10d/UnixSockUtils.hpp>
+#endif
 
 namespace c10d {
 
@@ -20,9 +25,11 @@ class TCPStoreDaemon {
   void run();
   void stop();
 
+  void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
 
   void setHandler(int socket);
+  void compareSetHandler(int socket);
   void addHandler(int socket);
   void getHandler(int socket) const;
   void checkHandler(int socket) const;
@@ -33,6 +40,9 @@ class TCPStoreDaemon {
   bool checkKeys(const std::vector<std::string>& keys) const;
   void wakeupWaitingClients(const std::string& key);
 
+  void initStopSignal();
+  void closeStopSignal();
+
   std::thread daemonThread_;
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
   // From key -> the list of sockets waiting on it
@@ -42,7 +52,13 @@ class TCPStoreDaemon {
 
   std::vector<int> sockets_;
   int storeListenSocket_;
+#ifdef _WIN32
+  const std::chrono::milliseconds checkTimeout_
+      = std::chrono::milliseconds(10);
+  HANDLE ghStopEvent_;
+#else
   std::vector<int> controlPipeFd_{-1, -1};
+#endif
 };
 
 class TCPStore : public Store {
@@ -50,7 +66,7 @@ class TCPStore : public Store {
   explicit TCPStore(
       const std::string& masterAddr,
       PortType masterPort,
-      int numWorkers,
+      c10::optional<int> numWorkers = c10::nullopt_t(-1),
       bool isServer = false,
       const std::chrono::milliseconds& timeout = kDefaultTimeout,
       bool waitWorkers = true);
@@ -58,6 +74,11 @@ class TCPStore : public Store {
   virtual ~TCPStore();
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
+
+  std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& currentValue,
+      const std::vector<uint8_t>& newValue) override;
 
   std::vector<uint8_t> get(const std::string& key) override;
 
@@ -78,8 +99,11 @@ class TCPStore : public Store {
   // Waits for all workers to join.
   void waitForWorkers();
 
+  // Returns the hostname used by the TCPStore.
+  const std::string& getHost() const noexcept;
+
   // Returns the port used by the TCPStore.
-  PortType getPort();
+  PortType getPort() const noexcept;
 
  protected:
   int64_t addHelper_(const std::string& key, int64_t value);
@@ -95,7 +119,7 @@ class TCPStore : public Store {
   std::string tcpStoreAddr_;
   PortType tcpStorePort_;
 
-  int numWorkers_;
+  c10::optional<int> numWorkers_;
   const std::string initKey_;
   const std::string regularPrefix_;
 

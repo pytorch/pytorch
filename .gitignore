@@ -10,9 +10,12 @@
 
 .coverage
 coverage.xml
+.dmypy.json
 .gradle
 .hypothesis
 .mypy_cache
+**/.pytorch-test-times
+**/.pytorch-slow-tests
 */*.pyc
 */*.so*
 */**/__pycache__
@@ -37,10 +40,12 @@ docs/cpp/source/html/
 docs/cpp/source/latex/
 docs/source/generated/
 log
+test-reports/
 test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
 test/custom_operator/model.pt
+test/jit_hooks/*.pt
 test/data/legacy_modules.t7
 test/data/*.pt
 test/backward_compatibility/nightly_schemas.txt
@@ -48,9 +53,10 @@ dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
-test/test-reports/
 third_party/build/
 tools/shared/_utils_internal.py
+tools/fast_nvcc/wrap_nvcc.sh
+tools/fast_nvcc/tmp/
 torch.egg-info/
 torch/_C/__init__.pyi
 torch/_C/_nn.pyi
@@ -61,7 +67,12 @@ torch/csrc/autograd/generated/*
 # Listed manually because some files in this directory are not generated
 torch/testing/_internal/generated/annotated_fn_args.py
 torch/testing/_internal/data/*.pt
+torch/csrc/api/include/torch/version.h
 torch/csrc/cudnn/cuDNN.cpp
+torch/csrc/deploy/example/generated
+torch/csrc/deploy/interpreter/cpython
+torch/csrc/deploy/interpreter/frozen
+torch/csrc/deploy/interpreter/third_party/typing_extensions.py
 torch/csrc/generated
 torch/csrc/generic/TensorMethods.cpp
 torch/csrc/jit/generated/*
@@ -76,6 +87,7 @@ torch/lib/*.exe*
 torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/*.lib
+torch/lib/*.pdb
 torch/lib/*.so*
 torch/lib/protobuf*.pc
 torch/lib/build
@@ -93,11 +105,14 @@ torch/lib64
 torch/include/
 torch/share/
 torch/test/
+torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
+torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml
 env
 .circleci/scripts/COMMIT_MSG
+scripts/release_notes/*.json
 
 # IPython notebook checkpoints
 .ipynb_checkpoints
@@ -160,6 +175,9 @@ docs/source/scripts/activation_images/
 *.swp
 *~
 
+# NFS handle files
+**/.nfs*
+
 # Sublime Text settings
 *.sublime-workspace
 *.sublime-project
@@ -190,6 +208,7 @@ build_ios
 /build_*
 .build_debug/*
 .build_release/*
+.build_profile/*
 distribute/*
 *.testbin
 *.bin
@@ -223,6 +242,7 @@ caffe2/version.py
 # setup.py intermediates
 .eggs
 caffe2.egg-info
+MANIFEST
 
 # Atom/Watchman required file
 .watchmanconfig

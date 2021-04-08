@@ -145,6 +145,8 @@ bool IntegralImageOp<float, CUDAContext>::RunOnDevice() {
       chans,
       X.data<float>(),
       Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   // Integral image over columns of the integral image over rows
   const int col_pass_size = X.dim32(0) * chans * cols_out;
   ColPassKernel<<<
@@ -157,6 +159,8 @@ bool IntegralImageOp<float, CUDAContext>::RunOnDevice() {
       cols_out,
       chans,
       Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -192,6 +196,8 @@ bool IntegralImageGradientOp<float, CUDAContext>::RunOnDevice() {
       chans,
       dY.data<float>(),
       row_pass_buffer_.mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   // Integral image over columns of the integral image over rows
   const int col_pass_size = X.dim32(0) * chans * cols_out;
   ColPassGradientKernel<<<
@@ -205,6 +211,8 @@ bool IntegralImageGradientOp<float, CUDAContext>::RunOnDevice() {
       chans,
       row_pass_buffer_.data<float>(),
       dX->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

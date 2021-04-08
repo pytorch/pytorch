@@ -1,27 +1,63 @@
 #pragma once
 
-#include <ATen/ATen.h>  // TODO: improve
-// #include <ATen/NativeFunctions.h>
+#include <ATen/DimVector.h>
+#include <c10/core/TensorOptions.h>
+#include <ATen/core/Dimname.h>
 
 namespace at {
 
-struct TensorMeta {
-  DimVector sizes;
-  // TODO: DimVector strides;
-  TensorOptions options;
+class Tensor;
 
-  TensorMeta(IntArrayRef _sizes, TensorOptions _options)
-    : sizes(_sizes), options(_options) {}
+namespace impl {
+
+// Use this to define the prototype for a meta function.  There are two
+// versions; one that takes one argument (just the operator name), or FUNC2
+// variant that takes two arguments (operator name and overload name).
+//
+// Example usage:
+//
+//    TORCH_META_FUNC2(add, Tensor) (
+//      const Tensor& self, const Tensor& other
+//    ) {
+//      ... compute sizes and options ...
+//      set_output(sizes, options);
+//    }
+//
+#define TORCH_META_FUNC(name) void name::meta
+#define TORCH_META_FUNC2(name, overload) void name##_##overload::meta
+
+// Use this to define the prototype for an implementation.  This takes only
+// one argument, which is the name of the dispatch key entry you're
+// implementing.
+//
+// Example usage:
+//
+//    TORCH_IMPL_FUNC(add_cpu) (
+//      Tensor& result, const Tensor& self, const Tensor& other
+//    ) {
+//      ... do the actual implementation ...
+//    }
+//
+#define TORCH_IMPL_FUNC(name) void structured_##name::impl
+
+// Base class for all structured kernel classes.  The set_output virtual
+// method is varied depending whether or not the operator is
+// functional/out/inplace, and could also be specialized for CPU/CUDA/etc
+// (although presently it isn't).
+//
+// A notable subclass of this interface is TensorIteratorBase.
+struct TORCH_API MetaBase {
+  virtual void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) = 0;
+  virtual const Tensor& maybe_get_output(int64_t output_idx) = 0;
+  void set_output(IntArrayRef sizes, TensorOptions options) {
+    set_output(0, sizes, {}, options, {});
+  }
+  // Returns a reference to an undefined tensor if there is no presupplied
+  // output
+  const Tensor& maybe_get_output() { return maybe_get_output(0); }
+  virtual ~MetaBase() {}
 };
 
-inline Tensor tensor_from_meta(const TensorMeta& meta) {
-  // TODO: eliminate indirection
-  return at::empty(meta.sizes, meta.options);
-}
-
-// Analogous to self.new_empty(sizes)
-inline TensorMeta new_meta(const Tensor& self, IntArrayRef sizes) {
-  return TensorMeta(sizes, self.options());
-}
+} // namespace impl
 
 } // namespace at

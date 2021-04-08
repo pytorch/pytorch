@@ -1,11 +1,52 @@
-// WARNING! WARNING! WARNING!
-// This file is a temporary hack to enable development of pytorch quantization
-//
-// It's a stub for wrapping arbitrary cpp types in TorchScript. Proper
-// implementation (under development) is to use TorchScript custom types.
-// In the meantime, we abuse ByteTensor with custom deleter for this purpose.
-//
-// Template argument <T> has to be registered with CAFFE_KNOWN_TYPE mechanism.
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+
+// YOU ARE IN THE WRONG PLACE! TURN BACK NOW!
+
+// This code was a temporary hack to enable embedding arbitrary C++ structures
+// into Tensors. THIS IS UNSAFE AND IS NOT SUPPORTED. IF YOU USE THIS CODE,
+// IT __WILL__ BREAK.
+
+// This code has been superseded by custom classes:
+// https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html
+
+// Please use custom classes and **DO NOT ADD MORE CALLSITES TO THINGS DEFINED
+// IN THIS FILE**.
+
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
+// STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
 
 #include <ATen/ATen.h>
 #include <ATen/TracerMode.h>
@@ -14,6 +55,8 @@ namespace at {
 namespace cpp_custom_type_hack {
 
 template <typename T>
+[[deprecated("Use custom classes instead: "
+  "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]]
 bool isa(const Tensor& packed) {
   return (packed.scalar_type() == kByte) &&
       (packed.storage().data_ptr().get_deleter() ==
@@ -21,6 +64,8 @@ bool isa(const Tensor& packed) {
 }
 
 template <typename T>
+[[deprecated("Use custom classes instead: "
+  "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]]
 T& cast(const Tensor& packed) {
   TORCH_CHECK(
       packed.scalar_type() == kByte, "Expected temporary cpp type wrapper");
@@ -33,6 +78,8 @@ T& cast(const Tensor& packed) {
 }
 
 template <typename T>
+[[deprecated("Use custom classes instead: "
+  "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]]
 Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   // None of this should trace, so turn off Tracer dispatching
   at::AutoNonVariableTypeMode guard;  // TODO: remove
@@ -48,7 +95,7 @@ Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   // size doesn't really matter, but we can align it to the actual size
   // returning variables because one likely want to use this hack from python
   auto retval = at::empty({sizeof(T)}, options.device(kCPU).dtype(at::kByte));
-  retval.storage().set_data_ptr(std::move(at_ptr));
+  retval.storage().set_data_ptr_noswap(std::move(at_ptr));
   return retval;
 }
 

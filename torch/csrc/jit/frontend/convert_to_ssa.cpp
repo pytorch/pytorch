@@ -158,7 +158,7 @@ struct ControlFlowLoadStores {
         case prim::Store: {
           environment_stack->setVar(n->s(attr::name), n->input()->type());
         } break;
-        case prim::ListComprehensionScope: {
+        case prim::ComprehensionScope: {
           addControlFlowLoadStores(n->blocks().at(0));
         } break;
       }
@@ -183,8 +183,8 @@ struct ControlFlowLoadStores {
   std::shared_ptr<TypeEnvironment> environment_stack = nullptr;
 };
 
-// Given a graph where outputs have been added to control flow nodes, and
-// loads and stores are represented in the graph, erases the Loads & Stores.
+// Given a graph where 1) outputs have been added to control flow nodes and
+// 2) loads and stores are represented in the graph, erase the Loads & Stores.
 struct EraseLoadStores {
   void eraseBlockLoadStores(Block* block) {
     pushFrame(block);
@@ -205,7 +205,7 @@ struct EraseLoadStores {
           n->output()->replaceAllUsesWith(var);
           n->destroy();
         } break;
-        case prim::ListComprehensionScope: {
+        case prim::ComprehensionScope: {
           // writes within a local variable scope do not leak into
           // the rest of the graph
           auto body = n->blocks().at(0);

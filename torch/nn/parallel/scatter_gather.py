@@ -54,8 +54,8 @@ def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
 
 def gather(outputs, target_device, dim=0):
     r"""
-    Gathers tensors from different GPUs on a specified device
-      (-1 means the CPU).
+    Gathers tensors from different GPUs on a specified device.
+    Use 'cpu' for CPU to avoid a deprecation warning.
     """
     def gather_map(outputs):
         out = outputs[0]
@@ -68,6 +68,8 @@ def gather(outputs, target_device, dim=0):
                 raise ValueError('All dicts must have the same number of keys')
             return type(out)(((k, gather_map([d[k] for d in outputs]))
                               for k in out))
+        if is_namedtuple(out):
+            return type(out)._make(map(gather_map, zip(*outputs)))
         return type(out)(map(gather_map, zip(*outputs)))
 
     # Recursive function calls like this create reference cycles.

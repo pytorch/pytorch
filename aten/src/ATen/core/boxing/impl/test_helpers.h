@@ -55,6 +55,11 @@ inline Result callOpUnboxedWithDispatchKey(const c10::OperatorHandle& op, c10::D
   return op.typed<Result(Args...)>().callWithDispatchKey(dispatchKey, std::forward<Args>(args)...);
 }
 
+template<class Result, class... Args>
+inline Result callOpUnboxedWithPrecomputedDispatchKeySet(const c10::OperatorHandle& op, c10::DispatchKeySet ks, Args... args) {
+  return op.typed<Result(Args...)>().redispatch(ks, std::forward<Args>(args)...);
+}
+
 inline void expectDoesntFindKernel(const char* op_name, c10::DispatchKey dispatch_key) {
   auto op = c10::Dispatcher::singleton().findSchema({op_name, ""});
   EXPECT_ANY_THROW(

@@ -88,8 +88,8 @@ class AutocastTestLists(object):
             ("conv3d", conv_args_fp32[2]),
             ("conv_tbc", conv_args_fp32[0] + bias_fp32),
             ("conv_transpose1d", conv_args_fp32[0]),
-            ("conv_transpose2d", conv_args_fp32[1], TEST_WITH_ROCM),
-            ("conv_transpose3d", conv_args_fp32[2], TEST_WITH_ROCM),
+            ("conv_transpose2d", conv_args_fp32[1]),
+            ("conv_transpose3d", conv_args_fp32[2]),
             ("convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1)),
             # deprecated cudnn_convolutions with bias
             ("cudnn_convolution", conv_args_fp32[1] + bias_fp32 + ((0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
@@ -195,6 +195,14 @@ class AutocastTestLists(object):
             ("stack", (pointwise0_fp16 + pointwise1_fp32,)),
             ("tensordot", (torch.randn((2, 2, 2), dtype=torch.float32, device=dev),
                            torch.randn((2, 2, 2), dtype=torch.float16, device=dev))),
+            ("scatter_add", (torch.zeros(2, 2, 2, dtype=torch.float32, device=dev),
+                             0,
+                             torch.randint(0, 2, (2, 2, 2), device=dev),
+                             torch.randn((2, 2, 2), dtype=torch.float16, device=dev))),
+            ("scatter_add", (torch.zeros(2, 2, 2, dtype=torch.float16, device=dev),
+                             0,
+                             torch.randint(0, 2, (2, 2, 2), device=dev),
+                             torch.randn((2, 2, 2), dtype=torch.float32, device=dev))),
         ]
         self.nn_fp16 = [
             ("linear", mat0_fp32 + mat1_fp32 + mat2_fp32),
@@ -212,6 +220,9 @@ class AutocastTestLists(object):
             ("multilabel_margin_loss", mat0_fp16 + (torch.ones((n, n), device=dev, dtype=torch.long),)),
             ("soft_margin_loss", mat0_fp16 + (torch.ones((n, n), device=dev, dtype=torch.long),)),
             ("multi_margin_loss", mat0_fp16 + (torch.ones((n,), device=dev, dtype=torch.long),)),
+        ]
+        self.linalg_fp16 = [
+            ("linalg_multi_dot", (mat0_fp32 + mat1_fp32 + mat2_fp32,)),
         ]
         self.methods_fp16 = [
             ("__matmul__", mat0_fp32 + mat1_fp32)

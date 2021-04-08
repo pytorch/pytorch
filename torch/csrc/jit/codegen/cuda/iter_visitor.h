@@ -30,7 +30,7 @@ namespace cuda {
  * TODO: We may want to have ordering of outputs to inputs. I'm not sure why we
  * would want this, but seems like it would be a reasonable request.
  */
-class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
+class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  public:
   virtual ~IterVisitor() = default;
 
@@ -68,8 +68,8 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
 
   virtual std::vector<Statement*> next(Expr* expr) {
     FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
-    std::vector<Statement*> next_stmts{expr->inputs().begin(),
-                                       expr->inputs().end()};
+    std::vector<Statement*> next_stmts{
+        expr->inputs().begin(), expr->inputs().end()};
     return next_stmts;
   }
 
@@ -147,7 +147,7 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
  * outputs to guarentee that we will traverse all outputs of all exprs during
  * the backward traversal.
  */
-class TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
+class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
  public:
   virtual ~BackwardVisitor() = default;
 
@@ -207,7 +207,7 @@ class TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
       bool traverseAllPaths = false);
 };
 
-class TORCH_CUDA_API DependencyCheck {
+class TORCH_CUDA_CU_API DependencyCheck {
  public:
   // Returns if "dependency" is a dependency of "of".
   static bool isDependencyOf(Val* dependency, Val* of);

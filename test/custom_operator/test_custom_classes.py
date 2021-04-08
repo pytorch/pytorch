@@ -5,6 +5,9 @@ import torch.jit as jit
 import glob
 import os
 
+from torch.testing._internal.common_utils import TestCase, run_tests
+
+
 def get_custom_class_library_path():
     library_filename = glob.glob("build/*custom_class*")
     assert (len(library_filename) == 1)
@@ -18,7 +21,7 @@ def test_equality(f, cmp_key):
     obj2 = jit.script(f)()
     return (cmp_key(obj1), cmp_key(obj2))
 
-class TestCustomOperators(unittest.TestCase):
+class TestCustomOperators(TestCase):
     def setUp(self):
         ops.load_library(get_custom_class_library_path())
 
@@ -77,4 +80,4 @@ class TestCustomOperators(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

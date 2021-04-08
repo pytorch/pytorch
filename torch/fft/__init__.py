@@ -49,7 +49,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.arange(4)
     >>> t
     tensor([0, 1, 2, 3])
@@ -87,7 +86,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.tensor([ 6.+0.j, -2.+2.j, -2.+0.j, -2.-2.j])
     >>> torch.fft.ifft(t)
     tensor([0.+0.j, 1.+0.j, 2.+0.j, 3.+0.j])
@@ -133,7 +131,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
     >>> fft2 = torch.fft.fft2(t)
 
@@ -177,7 +174,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
     >>> ifft2 = torch.fft.ifft2(t)
 
@@ -229,9 +225,8 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
-    >>> fftn = torch.fft.fftn(t)
+    >>> fftn = torch.fft.fftn(x)
 
     The discrete Fourier transform is separable, so :func:`~torch.fft.fftn`
     here is equivalent to two one-dimensional :func:`~torch.fft.fft` calls:
@@ -272,9 +267,8 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
-    >>> ifftn = torch.fft.ifftn(t)
+    >>> ifftn = torch.fft.ifftn(x)
 
     The discrete Fourier transform is separable, so :func:`~torch.fft.ifftn`
     here is equivalent to two one-dimensional :func:`~torch.fft.ifft` calls:
@@ -314,7 +308,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.arange(4)
     >>> t
     tensor([0, 1, 2, 3])
@@ -376,7 +369,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.arange(5)
     >>> t
     tensor([0, 1, 2, 3, 4])
@@ -433,7 +425,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.rand(10, 10)
     >>> rfft2 = torch.fft.rfft2(t)
     >>> rfft2.size()
@@ -506,7 +497,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.rand(10, 9)
     >>> T = torch.fft.rfft2(t)
 
@@ -564,7 +554,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.rand(10, 10)
     >>> rfftn = torch.fft.rfftn(t)
     >>> rfftn.size()
@@ -636,7 +625,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.rand(10, 9)
     >>> T = torch.fft.rfftn(t)
 
@@ -714,7 +702,6 @@ Example:
     Taking a real-valued frequency signal and bringing it into the time domain
     gives Hermitian symmetric output:
 
-    >>> import torch.fft
     >>> t = torch.arange(5)
     >>> t
     tensor([0, 1, 2, 3, 4])
@@ -769,7 +756,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.arange(5)
     >>> t
     tensor([0, 1, 2, 3, 4])
@@ -817,7 +803,6 @@ Keyword Args:
 
 Example:
 
-    >>> import torch.fft
     >>> torch.fft.fftfreq(5)
     tensor([ 0.0000,  0.2000,  0.4000, -0.4000, -0.2000])
 
@@ -861,7 +846,6 @@ Keyword Args:
 
 Example:
 
-    >>> import torch.fft
     >>> torch.fft.rfftfreq(5)
     tensor([ 0.0000,  0.2000,  0.4000])
 
@@ -880,6 +864,10 @@ fftshift(input, dim=None) -> Tensor
 
 Reorders n-dimensional FFT data, as provided by :func:`~torch.fft.fftn`, to have
 negative frequency terms first.
+
+This performs a periodic shift of n-dimensional data such that the origin
+``(0, ..., 0)`` is moved to the center of the tensor. Specifically, to
+``input.shape[dim] // 2`` in each selected dimension.
 
 Note:
     By convention, the FFT returns positive frequency terms first, followed by
@@ -903,13 +891,12 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> f = torch.fft.fftfreq(4)
     >>> f
-    tensor([ 0.0000,  0.2500,  -0.5000, -0.2500])
+    tensor([ 0.0000,  0.2500, -0.5000, -0.2500])
 
-    >>> torch.fftshift(f)
-    tensor([-0.5000, -0.2500, 0.0000, 0.2500])
+    >>> torch.fft.fftshift(f)
+    tensor([-0.5000, -0.2500,  0.0000,  0.2500])
 
     Also notice that the Nyquist frequency term at ``f[2]`` was moved to the
     beginning of the tensor.
@@ -931,6 +918,28 @@ Example:
             [-1.9000, -0.9000,  0.1000,  1.1000,  2.1000],
             [-1.8000, -0.8000,  0.2000,  1.2000,  2.2000]])
 
+    :func:`~torch.fft.fftshift` can also be useful for spatial data. If our
+    data is defined on a centered grid (``[-(N//2), (N-1)//2]``) then we can
+    use the standard FFT defined on an uncentered grid (``[0, N)``) by first
+    applying an :func:`~torch.fft.ifftshift`.
+
+    >>> x_centered = torch.arange(-5, 5)
+    >>> x_uncentered = torch.fft.ifftshift(x_centered)
+    >>> fft_uncentered = torch.fft.fft(x_uncentered)
+
+    Similarly, we can convert the frequency domain components to centered
+    convention by applying :func:`~torch.fft.fftshift`.
+
+    >>> fft_centered = torch.fft.fftshift(fft_uncentered)
+
+    The inverse transform, from centered Fourier space back to centered spatial
+    data, can be performed by applying the inverse shifts in reverse order:
+
+    >>> x_centered_2 = torch.fft.fftshift(torch.fft.ifft(torch.fft.ifftshift(fft_centered)))
+    >>> torch.allclose(x_centered.to(torch.complex64), x_centered_2)
+    True
+
+
 """)
 
 ifftshift = _add_docstr(_fft.fft_ifftshift, r"""
@@ -947,7 +956,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> f = torch.fft.fftfreq(5)
     >>> f
     tensor([ 0.0000,  0.2000,  0.4000, -0.4000, -0.2000])

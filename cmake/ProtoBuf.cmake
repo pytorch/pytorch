@@ -39,7 +39,7 @@ macro(custom_protobuf_find)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
   if(MSVC)
-    foreach(flag_var 
+    foreach(flag_var
         CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
         CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
       if(${flag_var} MATCHES "/Z[iI7]")
@@ -172,8 +172,8 @@ function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
     list(APPEND ${hdrs_var} "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h")
     list(APPEND ${python_var} "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}_pb2.py")
 
-    # Add CAFFE2_API prefix to protobuf classes and methods in all cases
-    set(DLLEXPORT_STR "dllexport_decl=CAFFE2_API:")
+    # Add TORCH_API prefix to protobuf classes and methods in all cases
+    set(DLLEXPORT_STR "dllexport_decl=TORCH_API:")
 
     # Note: the following depends on PROTOBUF_PROTOC_EXECUTABLE. This
     # is done to make sure protoc is built before attempting to
