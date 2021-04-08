@@ -3262,7 +3262,15 @@ class TestSparse(TestCase):
 
             # cpp implementation
             r2 = torch.sparse.mm(a, b)
-            self.assertEqual(r1, r2)
+            if a.is_cuda:
+                if r1._nnz() != r2._nnz(): 
+                    # Note: This is because  cusparseXcsrgemm2Nnz ROCm function doesn't return
+                    # the same nnz as CUDA version
+                    self.assertEqual(r1.to_dense(), r2.to_dense())
+                else:
+                    self.assertEqual(r1, r2)
+            else:
+                self.assertEqual(r1, r2)
 
             a.requires_grad_(True)
             b.requires_grad_(True)
@@ -3271,11 +3279,14 @@ class TestSparse(TestCase):
             def fn(D1, D2):
                 return torch.sparse.mm(D1, D2).to_dense()
 
-            # For cuda, `nondet_tol` is set with `1e-5`
-            # This is because cuSparse sometimes returns approximate zero values like `~e-323`
-            # TODO: Check this cuSparse issue.
-            # This happens when you do chain multiplication `torch.sparse.mm` operations
-            gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
+            if a.is_cuda:
+                # For cuda, `nondet_tol` is set with `1e-5`
+                # This is because cuSparse sometimes returns approximate zero values like `~e-323`
+                # TODO: Check this cuSparse issue.
+                # This happens when you do chain multiplication `torch.sparse.mm` operations
+                gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
+            else:
+                gradcheck(fn, (a, b), check_sparse_nnz=True)
             grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
         def test_error_cases():
