@@ -192,7 +192,9 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 # add/mul scalar
                 first_arg = self.binary_op_node.args[0]
                 cache_for_no_tensor_check: Dict[Node, bool] = dict()
-                if isinstance(first_arg, Node) and (not all_node_args_have_no_tensors(first_arg, quantizer.modules, cache_for_no_tensor_check)):
+                if isinstance(first_arg, Node) and (
+                        not all_node_args_have_no_tensors(
+                            first_arg, quantizer.modules, cache_for_no_tensor_check)):
                     quantized_index = 0
                 else:
                     quantized_index = 1
