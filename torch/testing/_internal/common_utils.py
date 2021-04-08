@@ -1194,6 +1194,9 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
+    class NonNumericComparison(Exception):
+        pass
+
     # Compares x and y
     # TODO: default exact_device to True
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
@@ -1295,10 +1298,12 @@ class TestCase(expecttest.TestCase):
                     debug_msg = "Tensors failed to compare as equal!" + debug_msg_generic
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
+            raise self.NonNumericComparison
             debug_msg = ("Attempted to compare [string] types: "
                          f"Expected: {repr(x)}; Actual: {repr(y)}.")
             super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         elif type(x) == set and type(y) == set:
+            raise self.NonNumericComparison
             debug_msg = ("Attempted to compare [set] types: "
                          f"Expected: {x}; Actual: {y}.")
             super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
@@ -1317,6 +1322,7 @@ class TestCase(expecttest.TestCase):
                                  atol=atol, rtol=rtol, msg=msg,
                                  exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(x, type) and isinstance(y, type):
+            raise self.NonNumericComparison
             # See TestTorch.test_assert_equal_generic_meta
             debug_msg = ("Attempted to compare [type] types: "
                          f"Expected: {x}; Actual: {y}.")
@@ -1329,6 +1335,7 @@ class TestCase(expecttest.TestCase):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, msg=msg,
                                  exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(x, bool) and isinstance(y, bool):
+            raise self.NonNumericComparison
             super().assertTrue(x == y, msg=msg)
 
         # Scalar x Scalar
