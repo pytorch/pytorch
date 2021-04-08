@@ -186,7 +186,6 @@ class TestRNGExtension(common.TestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-@unittest.skipIf(IS_WINDOWS, "MSVC have bug compiling this")
 class TestTorchLibrary(common.TestCase):
 
     def test_torch_library(self):
