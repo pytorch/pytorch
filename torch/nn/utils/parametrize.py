@@ -14,12 +14,15 @@ _cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
 def cached():
     r"""Context manager that enables the caching system within parametrizations
     registered with :func:`register_parametrization`.
+
     The value of the parametrized objects is computed and cached the first time
     they are required when this context manager is active. The cached values are
     discarded when leaving the context manager.
+
     This is useful when using a parametrized parameter more than once in the forward pass.
     An example of this is when parametrizing the recurrent kernel of an RNN or when
     sharing weights.
+
     The simplest way to activate the cache is by wrapping the forward pass of the neural network
 
     .. code-block:: python
@@ -51,10 +54,10 @@ def cached():
 
 
 class ParametrizationList(ModuleList):
-    r"""A sequential container that holds and manages the ``original`` parameter of
-    a parametrized :class:`~nn.Parameter` or buffer. It is the type of
-    ``module.parametrizations[tensor_name]`` when ``tensor_name`` has been parametrized
-    with :func:`register_parametrization`
+    r"""A sequential container that holds and manages the ``original`` parameter or buffer of
+    a parametrized :class:`torch.nn.Module`. It is the type of
+    ``module.parametrizations[tensor_name]`` when ``module[tensor_name]`` has been parametrized
+    with :func:`register_parametrization`.
 
     .. note ::
         This class is used internally by :func:`register_parametrization`. It is documented
@@ -77,6 +80,7 @@ class ParametrizationList(ModuleList):
 
     def set_original_(self, value: Tensor) -> None:
         r"""This method is called when assigning to a parametrized tensor.
+
         It calls the methods ``right_inverse`` (see :func:`register_parametrization`)
         of the parametrizations in the inverse order that they have been registered.
         Then, it assigns the result to ``self.original``.
@@ -85,23 +89,19 @@ class ParametrizationList(ModuleList):
             value (Tensor): Value to which initialize the module
 
         Raises:
-            RuntimeError: if any of the parametrizations do not implement a ```right_inverse`` method
+            RuntimeError: if any of the parametrizations do not implement a ``right_inverse`` method
         """
-        # See https://github.com/pytorch/pytorch/issues/53103
-        for module in reversed(self):  # type: ignore
-            if not hasattr(module, "right_inverse"):
-                raise RuntimeError(
-                    "The parametrization '{}' does not implement a 'right_inverse' method. "
-                    "Assigning to a parametrized tensor is only possible when all the parametrizations "
-                    "implement a 'right_inverse' method.".format(
-                        module.__class__.__name__
-                    )
-                )
-
         with torch.no_grad():
             # See https://github.com/pytorch/pytorch/issues/53103
             for module in reversed(self):  # type: ignore
-                value = module.right_inverse(value)
+                if hasattr(module, "right_inverse"):
+                    value = module.right_inverse(value)
+                else:
+                    raise RuntimeError(
+                        "The parametrization '{}' does not implement a 'right_inverse' method. "
+                        "Assigning to a parametrized tensor is only possible when all the parametrizations "
+                        "implement a 'right_inverse' method.".format(module.__class__.__name__)
+                    )
             self.original.copy_(value)
 
     def forward(self) -> Tensor:
@@ -119,6 +119,7 @@ class ParametrizationList(ModuleList):
 
 def _inject_new_class(module: Module) -> None:
     r"""Sets up the parametrization mechanism used by parametrizations.
+
     This works by substituting the class of the module by a class
     that extends it to be able to inject a property
 
@@ -148,8 +149,9 @@ def _inject_new_class(module: Module) -> None:
 
 def _inject_property(module: Module, tensor_name: str) -> None:
     r"""Injects a property into module[tensor_name].
+
     It assumes that the class in the module has already been modified from its
-    original one using _inject_new_class and that the tensor under `tensor_name`
+    original one using _inject_new_class and that the tensor under :attr:`tensor_name`
     has already been moved out
 
     Args:
@@ -185,29 +187,55 @@ def register_parametrization(
     module: Module, tensor_name: str, parametrization: Module
 ) -> Module:
     r"""Adds a parametrization to a tensor in a module.
-    When accessing ``module[tensor_name]``, the module will return the
-    parametrized version ``parametrization(module[tensor_name])``. The backward
-    pass will differentiate through the ``parametrization`` and if the original
-    tensor is a :class:``~Parameter``, it will be updated accordingly by the optimizer.
+
+    Assume that ``tensor_name="weight"`` for simplicity. When accessing ``module.weight``,
+    the module will return the parametrized version ``parametrization(module.weight)``.
+    If the original tensor requires a gradient, the backward pass will differentiate
+    through the :attr:`parametrization`, and the optimizer will update the tensor accordingly.
+
     The first time that a module registers a parametrization, this function will add an attribute
     ``parametrizations`` to the module of type :class:`~ParametrizationList`.
+
     The list of parametrizations on a tensor will be accessible under
-    ``module.parametrizations[tensor_name]``.
+    ``module.parametrizations.weight``.
+
     The original tensor will be accessible under
-    ``module.parametrizations[tensor_name].original``.
-    Parametrizations may be composed by registering several parametrizations
+    ``module.parametrizations.weight.original``.
+
+    Parametrizations may be concatenated by registering several parametrizations
     on the same attribute.
-    Parametrized parameters and buffers have a built-in caching system that can be activated
-    using :func:`cached`.
-    A ``parametrization`` may optionally implement a method with signature
+
+    Parametrized parameters and buffers have an inbuilt caching system that can be activated
+    using the context manager :func:`cached`.
+
+    A :attr:`parametrization` may optionally implement a method with signature
 
     .. code-block:: python
 
         def right_inverse(self, X: Tensor) -> Tensor
 
-    If this method is implemented, it will be possible to assign to the parametrized tensor.
-    This may be used to initialize the tensor:
+    If :attr:`parametrization` implements this method, it will be possible to assign
+    to the parametrized tensor. This may be used to initialize the tensor, as shown in the example.
 
+    In most situations, ``right_inverse`` will be a function such that
+    ``forward(right_inverse(X)) == X`` (see
+    `right inverse <https://en.wikipedia.org/wiki/Inverse_function#Right_inverses>`_).
+    Sometimes, when the parametrization is not surjective, it may be reasonable
+    to relax this, as shown in the example below.
+
+    Args:
+        module (nn.Module): module on which to register the parametrization
+        tensor_name (str): name of the parameter or buffer on which to register
+            the parametrization
+        parametrization (nn.Module): the parametrization to register
+
+    Returns:
+        Module: module
+
+    Raises:
+        ValueError: if the module does not have a parameter or a buffer named :attr:`tensor_name`
+
+    Examples:
         >>> import torch
         >>> import torch.nn.utils.parametrize as P
         >>>
@@ -227,24 +255,6 @@ def register_parametrization(
         >>> m.weight = A  # Initialize the weight to be the symmetric matrix A
         >>> print(torch.allclose(m.weight, A))
         True
-
-    In most situations, ``right_inverse`` will be a function such that
-    ``forward(right_inverse(X)) == X`` (see
-    `right inverse <https://en.wikipedia.org/wiki/Inverse_function#Right_inverses>`_).
-    Sometimes, when the parametrization is not surjective, it may be reasonable
-    to relax this, as we did with ``Symmetric`` in the example above.
-
-    Args:
-        module (nn.Module): module on which to register the parametrization
-        tensor_name (str): name of the parameter, buffer on which to register
-            the parametrization
-        parametrization (nn.Module): the parametrization to register
-
-    Returns:
-        Module: module
-
-    Raises:
-        ValueError: if the module does not have a parameter or a buffer named ``tensor_name``
     """
     if is_parametrized(module, tensor_name):
         # Just add the new parametrization to the parametrization list
@@ -255,7 +265,7 @@ def register_parametrization(
         original = getattr(module, tensor_name)
         # Delete the previous parameter or buffer
         delattr(module, tensor_name)
-        # If this is the first parametrization of a buffer or parameter of the module,
+        # If this is the first parametrization registered on the module,
         # we prepare the module to inject the property
         if not is_parametrized(module):
             # Change the class
@@ -270,7 +280,7 @@ def register_parametrization(
         )
     else:
         raise ValueError(
-            "Module '{}' does not have a parameter, a buffer, nor a "
+            "Module '{}' does not have a parameter, a buffer, or a "
             "parametrized element with name '{}'".format(module, tensor_name)
         )
     return module
@@ -278,8 +288,9 @@ def register_parametrization(
 
 def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
     r"""Returns ``True`` if module has an active parametrization.
-    If the argument ``name`` is specified, it returns ``True`` if
-    ``module[name]`` is parametrized.
+
+    If the argument :attr:`tensor_name` is specified, returns ``True`` if
+    ``module[tensor_name]`` is parametrized.
 
     Args:
         module (nn.Module): module to query
@@ -310,7 +321,7 @@ def remove_parametrizations(
     Args:
         module (nn.Module): module from which remove the parametrization
         tensor_name (str): name of the parametrization to be removed
-        leave_parametrized (bool, optional): leave the attribute ``tensor_name`` parametrized.
+        leave_parametrized (bool, optional): leave the attribute :attr:`tensor_name` parametrized.
             Default: ``True``
 
     Returns:
@@ -318,7 +329,8 @@ def remove_parametrizations(
 
     Raises:
         ValueError: if ``module[tensor_name]`` is not parametrized
-        ValueError: if ``leave_parametrized=True`` and the parametrization changes the ``dtype`` of the tensor
+        ValueError: if ``leave_parametrized=True`` and the parametrization changes the size or dtype
+            of the tensor
     """
 
     if not is_parametrized(module, tensor_name):
@@ -336,7 +348,8 @@ def remove_parametrizations(
         # We do this so that the parameter does not to change the id()
         # This way the user does not need to update the optimizer
         if t.dtype == original.dtype:
-            original.set_(t)
+            with torch.no_grad():
+                original.set_(t)
         else:
             raise ValueError(
                 "The parametrization changes the dtype of the tensor from {} to {}. "

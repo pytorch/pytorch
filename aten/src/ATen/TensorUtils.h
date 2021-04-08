@@ -14,11 +14,13 @@ namespace at {
 // which do NO argument checking by default.
 
 struct TORCH_API TensorArg {
-  Tensor tensor;
+  const Tensor& tensor;
   const char* name;
   int pos; // 1-indexed
-  TensorArg(Tensor tensor, const char* name, int pos)
-    : tensor(std::move(tensor)), name(name), pos(pos) {}
+  TensorArg(const Tensor& tensor, const char* name, int pos)
+    : tensor(tensor), name(name), pos(pos) {}
+  // Try to mitigate any possibility of dangling reference to temporaries.
+  TensorArg(Tensor&& tensor, const char* name, int pos) = delete;
   const Tensor* operator->() const { return &tensor; }
   const Tensor& operator*() const { return tensor; }
 };
