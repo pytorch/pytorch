@@ -14,10 +14,11 @@ import collections.abc
 from typing import List, Sequence, Tuple, Dict, Any, Union
 
 from torch.testing import \
-    (make_non_contiguous, _dispatch_dtypes, floating_types, floating_types_and,
+    (make_non_contiguous, floating_types, floating_types_and,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex,
      integral_types_and)
+from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoMkl,
@@ -3914,6 +3915,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_trace),
     UnaryUfuncInfo('sigmoid',
+                   aliases=('special.expit', ),
                    ref=reference_sigmoid if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
@@ -4031,6 +4033,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
                    domain=(0, 1),
+                   aliases=('special.logit', ),
                    decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                   torch.float16: 5e-1}),),
                    dtypes=all_types_and(torch.half),
