@@ -54,6 +54,14 @@ class ShapeProp(torch.fx.Interpreter):
             n.meta['shape'] = result.shape
             n.meta['dtype'] = result.dtype
             n.meta['stride'] = result.stride()
+            n.meta['is_quantized'] = result.is_quantized
+
+            if n.meta['is_quantized']:
+                n.meta['qscheme'] = result.qscheme()
+
+                if n.meta['qscheme'] in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
+                    n.meta['q_scale'] = result.q_scale()
+                    n.meta['q_zero_point'] = result.q_zero_point()
 
         return result
 
