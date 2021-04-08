@@ -606,7 +606,8 @@ class ScriptModuleSerializer {
         bytecode_version);
 
     use_tensors_archive_table_ = true;
-    for (auto current_bytecode_version = caffe2::serialize::kProducedBytecodeVersion;
+    for (auto current_bytecode_version =
+             caffe2::serialize::kProducedBytecodeVersion;
          current_bytecode_version > bytecode_version;
          current_bytecode_version--) {
       backPortByteCode(current_bytecode_version);
