@@ -74,12 +74,12 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
 
 void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, bool out_int32, bool right) {
   if (!out_int32) {
-    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cpu", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "searchsorted_out_cpu", [&] {
       searchsorted_cpu_contiguous<scalar_t, int64_t>(result, input, boundaries, right);
     });
   }
   else {
-    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "searchsorted_out_cpu", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "searchsorted_out_cpu", [&] {
       searchsorted_cpu_contiguous<scalar_t, int>(result, input, boundaries, right);
     });
   }
