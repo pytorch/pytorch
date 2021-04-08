@@ -16,7 +16,7 @@ class Placeholder;
 // The common base between all statement node.
 class TORCH_API Stmt : public KernelScopedObject {
  public:
-  Stmt()  = default;
+  Stmt() = default;
   virtual void accept(IRVisitor* visitor) const = 0;
   virtual Stmt* accept_mutator(IRMutator* mutator) = 0;
 
@@ -635,7 +635,10 @@ class TORCH_API For : public StmtNode<For> {
       const Expr* stop,
       Stmt* body,
       LoopOptions loop_options)
-      : var_(var), start_(start), stop_(stop), loop_options_(std::move(loop_options)) {
+      : var_(var),
+        start_(start),
+        stop_(stop),
+        loop_options_(std::move(loop_options)) {
     if (!var) {
       throw malformed_input("invalid Var in For loop", var);
     } else if (!start) {
@@ -692,10 +695,7 @@ class TORCH_API For : public StmtNode<For> {
 // TODO: make IR nodes extensible.
 class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
-  AtomicAdd(
-      const Buf* buf,
-      std::vector<const Expr*> indices,
-      const Expr* value)
+  AtomicAdd(const Buf* buf, std::vector<const Expr*> indices, const Expr* value)
       : buf_(buf), indices_(std::move(indices)), value_(value) {}
 
   const Var* base_handle() const {

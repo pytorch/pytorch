@@ -175,7 +175,6 @@ class RegisterCodeGenList {
       const std::string& kernel_func_name)>;
 
   TORCH_API StmtFactoryMethod FindStmtFactoryMethod(const std::string& name);
-
   RegisterCodeGenList(const RegisterCodeGenList&) = delete;
   RegisterCodeGenList& operator=(const RegisterCodeGenList&) = delete;
  private:

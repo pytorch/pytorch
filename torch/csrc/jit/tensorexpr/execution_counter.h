@@ -59,6 +59,7 @@ class ExecutionTriggerList {
 
   ExecutionTriggerList(const ExecutionTriggerList&) = delete;
   ExecutionTriggerList& operator=(const ExecutionTriggerList&) = delete;
+
  private:
   friend class ExecutionTrigger;
 
