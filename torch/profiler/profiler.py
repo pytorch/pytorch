@@ -111,7 +111,7 @@ class profile(object):
 
         After profiling, result files can be found in the specified directory. Use the command:
 
-        ``tensorboard --log_dir=dir_name``
+        ``tensorboard --logdir dir_name``
 
         to see the results in TensorBoard.
         For more information, see `Pytorch Profiler <https://github.com/pytorch/kineto/tree/master/tb_plugin>`__
