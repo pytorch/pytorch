@@ -1191,6 +1191,17 @@ const std::vector<std::string> functions = {
             return result, backward
     )",
     R"(
+        def AD_adaptive_avg_pool3d_backward(grad,
+                                            self,
+                                            output_size: List[int]):
+            if output_size[0] == 1 and output_size[1] == 1 and output_size[2] == 1:
+                self_size = self.size()
+                grad_self = grad.expand(self.size()) / (self_size[-1] * self_size[-2] * self_size[-3])
+            else:
+                grad_self = torch._adaptive_avg_pool3d_backward(grad, self)
+
+            return grad_self
+
         def AD_adaptive_avg_pool2d_backward(grad,
                                             self,
                                             output_size: List[int]):
@@ -1228,7 +1239,7 @@ const std::vector<std::string> functions = {
         def adaptive_avg_pool3d(self,
                                 output_size: List[int]):
             def backward(grad_output):
-                grad_self = torch.adaptive_avg_pool3d_backward(grad_output, self)
+                grad_self = AD_adaptive_avg_pool3d_backward(grad_output, self, output_size)
                 return grad_self, None
 
             return torch.adaptive_avg_pool3d(self, output_size), backward
