@@ -142,6 +142,7 @@ def get_and_check_clang_format(verbose=False):
             # Err on the side of caution and try to delete the downloaded binary.
             try:
                 os.unlink(CLANG_FORMAT_PATH)
+                print("The binary has been deleted just to be safe")
             except OSError as e:
                 print("Failed to delete binary: {}".format(str(e)))
                 print("Delete this binary as soon as possible and do not execute it!")
