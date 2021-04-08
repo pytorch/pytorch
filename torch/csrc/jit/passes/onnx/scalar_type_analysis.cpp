@@ -301,21 +301,19 @@ static void RecoverScalarTypeForOutput(
 }
 
 static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
+  TORCH_INTERNAL_ASSERT(n->outputs().size() == 1);
+  TORCH_INTERNAL_ASSERT(n->output()->type()->cast<TensorType>() != nullptr);
   auto output_scalar_type =
-      n->output()->type()->castRaw<TensorType>()->scalarType().value();
+      n->output()->type()->cast<TensorType>()->scalarType().value();
   for (size_t i = 0; i < n->inputs().size(); ++i) {
+    TORCH_INTERNAL_ASSERT(n->input(i)->type()->cast<TensorType>() != nullptr);
     auto input_tensor_type =
         n->input(i)->type()->cast<TensorType>()->scalarType().value();
-    if (input_tensor_type == output_scalar_type) {
-      break;
-    }
-    TORCH_INTERNAL_ASSERT(
-        i == n->inputs().size() - 1,
-        "output node type should at least equal to one of input");
+    TORCH_INTERNAL_ASSERT(output_scalar_type == input_tensor_type);
   }
 
   // The LowPrecision problem will be fixed in ONNX opset 14
-  if (opset_version <= ONNX_OPSET_14) {
+  if (opset_version < ONNX_OPSET_14) {
     auto expected_scalar_type_cast =
         LowPrecisionCastForStandardOps(n, output_scalar_type);
     UpdateScalarTypeForInputs(n, *expected_scalar_type_cast);
