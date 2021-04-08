@@ -227,6 +227,32 @@ class TestSparse(TestCase):
             _test_coalesce(t)  # this tests correctness
 
     @dtypes(torch.double)
+    def test_coalesce_reference_cycle(self, device, dtype):
+        # Test coalesce doesn't create autograd graph cycles (gh-52253)
+
+        # Sanity check that the helper class works as expected
+        t = torch.rand(2)
+        t_ref = torch._C._WeakTensorRef(t)
+        self.assertFalse(t_ref.expired())
+
+        del t
+        self.assertTrue(t_ref.expired())
+
+        def test_sparse_sum():
+            i = torch.tensor([[0], [4]], dtype=torch.long, device=device)
+            v = torch.tensor([[[-0.4567, -1.8797, 0.0380, 1.4316]]],
+                             dtype=dtype, device=device)
+            S = torch.sparse_coo_tensor(i, v)
+            S = S.coalesce()
+            S.requires_grad_(True)
+            S2 = S.coalesce()
+            self.assertTrue(S2.is_coalesced())
+            return torch._C._WeakTensorRef(S2)
+
+        ref = test_sparse_sum()
+        self.assertTrue(ref.expired())
+
+    @dtypes(torch.double)
     def test_ctor_size_checks(self, device, dtype):
         indices = self.index_tensor([
             [0, 0, 0],
@@ -1393,7 +1419,6 @@ class TestSparse(TestCase):
             with self.assertRaisesRegex(err, msg):
                 x.norm(**kwargs)
 
-    @onlyCPU
     @coalescedonoff
     @dtypes(torch.double)
     def test_sparse_sum(self, device, dtype, coalesced):
@@ -3129,7 +3154,6 @@ class TestSparse(TestCase):
         test_op(4, 100, [3, 4, 2, 3, 5, 2], coalesced)
 
     @coalescedonoff
-    @onlyCPU
     @dtypes(torch.double)
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
