@@ -699,7 +699,7 @@ RegisterOperators logging_operators(
              tracer::recordSourceLocation(node);
              graph->insertNode(node);
            }
-           auto output = autograd::profiler::getTime();
+           auto output = autograd::profiler::getTime(/*allow_monotonic=*/true);
            push(stack, output);
            if (jit::tracer::isTracing()) {
              jit::tracer::addOutput(node, output);

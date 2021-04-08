@@ -47,7 +47,6 @@ TESTS = [
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
-    'test_dataset',
     'test_datapipe',
     'distributed/test_data_parallel',
     'distributed/test_distributed_fork',
@@ -1017,7 +1016,8 @@ def export_S3_test_times(test_times_filename: str, test_times: Dict[str, float])
         print(f'Overwriting existent file: {test_times_filename}')
     with open(test_times_filename, 'w+') as file:
         job_times_json = get_job_times_json(test_times)
-        json.dump(job_times_json, file)
+        json.dump(job_times_json, file, indent='    ', separators=(',', ': '))
+        file.write('\n')
 
 def main():
     options = parse_args()

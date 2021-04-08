@@ -521,17 +521,22 @@ SparseTensor& copy_sparse_(
   return self._coalesced_(src.is_coalesced());
 }
 
-SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
-  AT_ASSERT(self.defined());
-  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
-  AT_ASSERT(self.is_sparse());
-
+SparseTensor coalesce(const SparseTensor& self) {
+  // See NOTE: [ coalesce autograd ]
   if (self.is_coalesced()) {
     return self;
   }
-  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is
-  // false, we should keep the original tensor intact and do coalesce on a copy
-  // of the tensor
+  return at::_coalesce(self);
+}
+
+SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
+  AT_ASSERT(self.defined());
+  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
+  AT_ASSERT(self.is_sparse());
+  TORCH_INTERNAL_ASSERT(!self.is_coalesced());
+
+  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
+  // we should keep the original tensor intact and do coalesce on a copy of the tensor
   if (self._nnz() < 2) {
     SparseTensor dst = self.clone();
     dst._coalesced_(true);
