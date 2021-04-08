@@ -3,6 +3,11 @@
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
 
+#include <c10/macros/cmake_macros.h>
+#ifdef C10_USE_JEMALLOC
+#include <jemalloc/jemalloc.h>
+#endif
+
 // TODO: rename flags to C10
 C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
@@ -50,7 +55,17 @@ void* alloc_cpu(size_t nbytes) {
       nbytes);
 
   void* data;
-#ifdef __ANDROID__
+#ifdef C10_USE_JEMALLOC
+  int err = je_posix_memalign(&data, gAlignment, nbytes);
+  TORCH_CHECK(err == 0,
+      "DefaultCPUAllocator: can't allocate memory: you tried to allocate ",
+      nbytes,
+      " bytes. Error code ",
+      err,
+      " (",
+      strerror(err),
+      ")");
+#elif defined(__ANDROID__)
   data = memalign(gAlignment, nbytes);
 #elif defined(_MSC_VER)
   data = _aligned_malloc(nbytes, gAlignment);
@@ -90,7 +105,9 @@ void* alloc_cpu(size_t nbytes) {
 }
 
 void free_cpu(void* data) {
-#ifdef _MSC_VER
+#ifdef C10_USE_JEMALLOC
+  je_free(data);
+#elif defined(_MSC_VER)
   _aligned_free(data);
 #else
   free(data);

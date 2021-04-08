@@ -595,6 +595,15 @@ if(USE_GLOG)
   endif()
 endif()
 
+if(USE_JEMALLOC)
+  include(${CMAKE_CURRENT_LIST_DIR}/External/jemalloc.cmake)
+  if(NOT TARGET jemalloc::jemalloc)
+    message(WARNING
+        "jemalloc is not available. Torch will build without jemalloc."
+        "Suppress this warning with -DUSE_JEMALLOC=OFF")
+    caffe2_update_option(USE_JEMALLOC OFF)
+  endif()
+endif()
 
 # ---[ Googletest and benchmark
 if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)

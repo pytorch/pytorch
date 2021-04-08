@@ -7,6 +7,7 @@
 #cmakedefine C10_BUILD_SHARED_LIBS
 #cmakedefine C10_USE_GLOG
 #cmakedefine C10_USE_GFLAGS
+#cmakedefine C10_USE_JEMALLOC
 #cmakedefine C10_USE_NUMA
 #cmakedefine C10_USE_MSVC_STATIC_RUNTIME
 

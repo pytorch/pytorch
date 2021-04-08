@@ -15,6 +15,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ---[ Configure macro file.
 set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
 set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
+set(C10_USE_JEMALLOC ${USE_JEMALLOC}) # used in cmake_macros.h.in
 set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 set(C10_USE_NUMA ${USE_NUMA})
 set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
@@ -58,6 +59,10 @@ endif()
 
 if(${USE_GLOG})
     target_link_libraries(c10 PUBLIC glog::glog)
+endif()
+
+if(USE_JEMALLOC)
+    target_link_libraries(c10 PRIVATE jemalloc::jemalloc)
 endif()
 
 find_package(Backtrace)

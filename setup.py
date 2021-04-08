@@ -337,7 +337,7 @@ def check_submodules():
             print('Please run:\n\tgit submodule update --init --recursive')
             sys.exit(1)
     for folder in folders:
-        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE"])
+        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE", "README"])
     check_for_files(os.path.join(third_party_path, 'fbgemm', 'third_party',
                                  'asmjit'), ['CMakeLists.txt'])
     check_for_files(os.path.join(third_party_path, 'onnx', 'third_party',
