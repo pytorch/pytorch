@@ -200,6 +200,8 @@ namespace c10 {
   _(aten, linalg_det)                \
   _(aten, matrix_power)              \
   _(aten, linalg_matrix_power)       \
+  _(aten, chain_matmul)              \
+  _(aten, linalg_multi_dot)          \
   _(aten, linalg_norm)               \
   _(aten, linalg_vector_norm)        \
   _(aten, append)                    \
@@ -319,6 +321,14 @@ namespace c10 {
   _(aten, special_erfc)              \
   _(aten, erfinv)                    \
   _(aten, special_erfinv)            \
+  _(aten, logit)                     \
+  _(aten, special_logit)             \
+  _(aten, sigmoid)                   \
+  _(aten, special_expit)             \
+  _(aten, expm1)                     \
+  _(aten, special_expm1)             \
+  _(aten, exp2)                      \
+  _(aten, special_exp2)              \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
