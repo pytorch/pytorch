@@ -31,7 +31,7 @@ try:
 except ImportError:
     from pipes import quote
 
-from typing import Any, Dict, Iterable, List, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Set, Union
 
 Patterns = collections.namedtuple("Patterns", "positive, negative")
 
@@ -161,7 +161,7 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
         return run_shell_command(['ninja', '-f', f.name])
 
 
-def run_clang_tidy(options:Any, line_filters: Any, files: Iterable[str]) -> str:
+def run_clang_tidy(options: Any, line_filters: Any, files: Iterable[str]) -> str:
     """Executes the actual clang-tidy command in the shell."""
     command = [options.clang_tidy_exe, "-p", options.compile_commands_dir]
     if not options.config_file and os.path.exists(".clang-tidy"):
