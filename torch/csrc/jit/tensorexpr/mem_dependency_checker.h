@@ -42,6 +42,7 @@ class TORCH_API AccessInfo {
       AccessType type,
       const Stmt* stmt,
       const Var* var,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       IndexBounds bounds)
       : id_(id),
         type_(type),
@@ -56,6 +57,7 @@ class TORCH_API AccessInfo {
       const Expr* expr,
       const Stmt* stmt,
       const Var* var,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       IndexBounds bounds)
       : id_(id),
         type_(type),
@@ -182,6 +184,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
       const std::vector<BufHandle>& inputs,
       const std::vector<BufHandle>& outputs);
 
+  // NOLINTNEXTLINE(modernize-use-equals-default,modernize-use-override)
   virtual ~MemDependencyChecker() {}
 
   // Whether or not to allow loop execution order to influence dependency
@@ -270,6 +273,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
 
   // An internal struct holding the accesses found within a scope Block.
   struct Scope {
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     Scope(Block* b, std::shared_ptr<Scope> p) : block(b), parent(p) {}
 
     Block* block;

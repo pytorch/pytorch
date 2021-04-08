@@ -18,7 +18,9 @@ struct THPVariable {
     PyObject* backward_hooks = nullptr;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THP_API PyObject *THPVariableClass;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THP_API PyObject *ParameterClass;
 
 bool THPVariable_initModule(PyObject *module);

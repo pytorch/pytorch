@@ -406,6 +406,7 @@ class MinTerm : public ExprNode<MinTerm> {
 // Stmt simplification should occur in both modes.
 class TORCH_API IRSimplifierBase : public IRMutator {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default,modernize-use-override)
   virtual ~IRSimplifierBase() {}
 
   Stmt* mutate(const Block* v) override;
@@ -422,6 +423,7 @@ class TORCH_API IRSimplifierBase : public IRMutator {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   HashProvider hasher_;
 };
 

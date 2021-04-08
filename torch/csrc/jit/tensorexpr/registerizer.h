@@ -45,12 +45,14 @@ class Scope;
  buffer, including the number of loads and stores and the lowest common parent
  Block.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class AccessInfo {
  public:
   AccessInfo() = default;
   AccessInfo(
       SimplifierHashType h,
       const Buf* b,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::vector<const Expr*>& i,
       size_t accessOrder)
       : hash_(h),
@@ -217,6 +219,7 @@ using AccessHashMap =
 // Represents a scope block and holds all accesses contained within it.
 class Scope {
  public:
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   Scope(const Block* b, std::shared_ptr<Scope> parent, size_t conditionId = 0)
       : block_(b), parent_(parent), conditionId_(conditionId) {}
 
@@ -316,6 +319,7 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
  public:
   RegisterizerAnalysis()
       : currentScope_(std::make_shared<Scope>(nullptr, nullptr, 0)) {}
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~RegisterizerAnalysis() {}
 
   void visit(const For* v) override;

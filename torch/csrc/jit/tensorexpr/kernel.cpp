@@ -17,11 +17,17 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int te_cuda_pointwise_loop_levels = -1;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int te_cuda_pointwise_block_count = -1;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int te_cuda_pointwise_block_size = -1;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool fallback_allowed = false;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool te_generate_block_code = false;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool te_must_use_llvm_on_cpu = true;
 static bool cat_wo_conditionals = false; // NOLINT
 
@@ -367,6 +373,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       if (dim < 0) {
         dim = dim + shape.size() + 1;
       }
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (dim < 0 || dim > shape.size()) {
         throw std::runtime_error("Invalid 'dim' input in aten::unsqueeze");
       }
@@ -1098,6 +1105,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
                 tensorOrConstant(n->input(0), indices), // input
                 tensorOrConstant(n->input(3), {c}), // mean
                 tensorOrConstant(n->input(4), {c}), // var
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 constant(n->input(7)) // eps
             };
             if (hasWeight) {
@@ -1119,6 +1127,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
               weight = inputs[4];
             }
             if (hasBias) {
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               bias = inputs[5];
             }
 
@@ -1644,7 +1653,9 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
       int blockSize = getTECudaPointwiseBlockSize();
 
       if (loopLevels == 2) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* outer;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner;
         const int kDefaultBlockSize = 512;
         if (blockSize < 0) {
@@ -1654,9 +1665,13 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
         l.setGPUBlockIndex(outer, 0);
         l.setGPUThreadIndex(inner, 0);
       } else if (loopLevels == 3) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* outer;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner1;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         For* inner2;
         // TODO: change the number of microprocessors
         const int kDefaultBlockCount = 1280;
@@ -1782,6 +1797,7 @@ void TensorExprKernel::genInputDebugNames() {
     std::string sanitized_name = sanitizeName(input->debugName());
     // we could get fancier here, but name conflict is extremely unlikely
     while (name_set.count(sanitized_name)) {
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       sanitized_name = sanitized_name + "_";
     }
     value_to_name[input] = sanitized_name;
@@ -1912,6 +1928,7 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   BufHandle w = BufHandle(tensors_.at(n->input(1))->buf());
   BufHandle b = BufHandle(tensors_.at(n->input(2))->buf());
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int sH, sW;
   auto strides_iv = *toIValue(n->input(3));
   if (strides_iv.isIntList()) {
@@ -1920,6 +1937,7 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   } else {
     sH = sW = strides_iv.toInt();
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int pH, pW;
   auto padding_iv = *toIValue(n->input(4));
   if (padding_iv.isIntList()) {
@@ -1928,7 +1946,9 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   } else {
     pH = pW = padding_iv.toInt();
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int dH, dW;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto dil_iv = *toIValue(n->input(5));
   if (dil_iv.isIntList()) {
     dH = dil_iv.toIntList()[0];
@@ -1936,6 +1956,7 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   } else {
     dH = dW = dil_iv.toInt();
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int groups = toIValue(n->input(6))->toInt();
 
   // Once we have a performant TE representation for conv2d, we could use it
