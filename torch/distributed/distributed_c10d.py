@@ -544,7 +544,8 @@ def init_process_group(backend,
         # default devices and messes up NCCL internal state.
         _store_based_barrier(rank, store, timeout)
         # Set sequence numbers for gloo and nccl process groups.
-        default_pg._set_sequence_number_for_group()
+        if get_backend(default_pg) in [Backend.GLOO, Backend.NCCL]:
+            default_pg._set_sequence_number_for_group()
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -2652,6 +2653,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         # default devices and messes up NCCL internal state.
         _store_based_barrier(global_rank, default_store, timeout)
         # Set sequence numbers for gloo and nccl process groups.
-        pg._set_sequence_number_for_group()
+        if get_backend(pg) in [Backend.GLOO, Backend.NCCL]:
+            pg._set_sequence_number_for_group()
 
     return pg
