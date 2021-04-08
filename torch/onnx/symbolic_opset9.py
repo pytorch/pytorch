@@ -113,14 +113,14 @@ def div(g, self, other, *args):
 
 @parse_args('v', 'v', 's')
 def _div_rounding_mode(g, self, other, rounding_mode):
-    if rounding_mode == 'true':
+    if rounding_mode is None:
         return true_divide(g, self, other)
     elif rounding_mode == 'floor':
         return _floor_divide(g, self, other)
     elif rounding_mode == 'trunc':
         return _trunc_divide(g, self, other)
     else:
-        raise RuntimeError(f'Unsupported rounding mode: "{rounding_mode}". Expected "true", "floor" or "trunc"')
+        raise RuntimeError(f'Unsupported rounding mode: "{rounding_mode}". Expected None, "floor" or "trunc"')
 
 
 def _trunc_divide(g, self, other):
@@ -1866,6 +1866,12 @@ def hardswish(g, self):
     hardtanh_ = g.op("Div", hardtanh_, g.op('Constant', value_t=torch.tensor(6, dtype=torch.float)))
     return g.op("Mul", self, hardtanh_)
 
+
+@parse_args('v')
+def hardsigmoid(g, self):
+    return g.op('HardSigmoid', self, alpha_f=1 / 6)
+
+
 def alias(g, self):
     return self
 
@@ -2999,3 +3005,18 @@ def __range_length(g, lo, hi, step):
     sub = g.op("Sub", hi, lo)
     div = g.op("Ceil", true_divide(g, sub, step))
     return g.op("Cast", div, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+
+
+def linear(g, input, weight, bias):
+    rank = sym_help._get_tensor_rank(input)
+    weight = t(g, weight)
+    if rank == 2 and not bias.node().mustBeNone():
+        alpha = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        beta = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        output = addmm(g, bias, input, weight, alpha, beta)
+    else:
+        output = matmul(g, input, weight)
+        if not bias.node().mustBeNone():
+            output = add(g, bias, output)
+
+    return output
