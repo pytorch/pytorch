@@ -7,7 +7,9 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
+#ifdef USE_CUDA_NOT_ROCM
 #include <ATen/cuda/CUDAEvent.h>
+#endif
 
 #include <atomic>
 
@@ -409,8 +411,15 @@ class TORCH_API OwnerRRef final : public RRef {
   // otherwise does nothing.
   void blockAllStreams(std::shared_ptr<LazyStreamContext> ctx);
  private:
+
+ #ifdef USE_CUDA_NOT_ROCM
   // a storage for CUDA events for synchronization.
   std::vector<at::cuda::CUDAEvent> cudaEvents_;
+#else
+  // if CUDA is not available we still need a dummy field
+  // to prevent segfaults because of different class size
+  std::vector<int> cudaEvents_;
+#endif
 
 };
 
