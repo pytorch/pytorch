@@ -3,6 +3,7 @@ from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_na
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
 from dataclasses import dataclass
 from contextlib import contextmanager
+import copy
 import torch
 import keyword
 import re
@@ -12,7 +13,7 @@ import warnings
 
 
 if TYPE_CHECKING:
-    from .graph_module import GraphModule
+    from .graph_module import GraphModule  # noqa
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -671,7 +672,9 @@ class Graph:
         kwargs = map_arg(node.kwargs, arg_transform)
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
-        return self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node = self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node.meta = copy.copy(node.meta)
+        return result_node
 
     def output(self, result: 'Argument', type_expr: Optional[Any] = None):
         """
@@ -851,9 +854,9 @@ class Graph:
 
 
         def emit_node(node : Node):
+            maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
-                maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
                 maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
@@ -863,7 +866,7 @@ class Graph:
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
                 body.append(
-                    f'{repr(node)} = {_format_target(repr(node.args[0]), node.target)}'
+                    f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.target)}'
                     f'({_format_args(node.args[1:], node.kwargs)})')
                 return
             elif node.op == 'call_function':
@@ -871,7 +874,8 @@ class Graph:
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
-                    body.append(f'{repr(node)} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
+                    body.append(f'{repr(node)}{maybe_type_annotation} = '
+                                f'{magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
                     return
                 qualified_name = _get_qualified_name(node.target)
                 global_name = add_global(qualified_name, node.target)
@@ -880,17 +884,18 @@ class Graph:
                    isinstance(node.args[1], str) and \
                    node.args[1].isidentifier():
                     # pretty print attribute access
-                    body.append(f'{repr(node)} = {_format_target(repr(node.args[0]), node.args[1])}')
+                    body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
-                body.append(f'{repr(node)} = {global_name}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
-                body.append(f'{repr(node)} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{repr(node)}{maybe_type_annotation} = '
+                            f'{_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
-                body.append(f'{repr(node)} = {_format_target(root_module, node.target)}')
+                body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(root_module, node.target)}')
                 return
             elif node.op == 'output':
                 if node.type is not None:
@@ -1003,6 +1008,50 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
                             seen_qualname = '.'.join(target_atoms[:i])
                             raise RuntimeError(f'Node {node} target {node.target} references nonexistent attribute '
                                                f'{atom} of {seen_qualname}')
+
+    def eliminate_dead_code(self):
+        """
+        Remove all dead code from the graph, based on each node's number of
+        users, and whether the nodes have any side effects The graph must be
+        topologically sorted before calling.
+
+        Returns:
+          bool: Whether the graph was changed as a result of the pass.
+
+        Example:
+
+        Before dead code is eliminated, `a` from `a = x + 1` below has no users
+        and thus can be eliminated from the graph without having an effect.
+
+        .. code-block:: python
+
+            def forward(self, x):
+                a = x + 1
+                return x + self.attr_1
+
+        After dead code is eliminated, `a = x + 1` has been removed, and the rest
+        of `forward` remains.
+
+        .. code-block:: python
+
+            def forward(self, x):
+                return x + self.attr_1
+
+        """
+        # Lint the graph first to make sure its topologically sorted, otherwise
+        # DCE below will not behave as expected.
+        self.lint()
+
+        # Reverse iterate so that when we remove a node, any nodes used as an
+        # input to that node have an updated user count that no longer reflects
+        # the removed node.
+        changed = False
+        for node in reversed(self.nodes):
+            if not node.is_impure() and len(node.users) == 0:
+                self.erase_node(node)
+                changed = True
+
+        return changed
 
 
 reflectable_magic_methods = {

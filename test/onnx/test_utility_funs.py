@@ -23,7 +23,6 @@ skip = unittest.skip
 
 class TestUtilityFuns(TestCase):
     opset_version = 9
-    use_new_jit_passes = False
 
     def setUp(self):
         torch.manual_seed(0)
@@ -41,8 +40,7 @@ class TestUtilityFuns(TestCase):
                                      _disable_torch_constant_prop=True,
                                      operator_export_type=operator_export_type,
                                      training=training,
-                                     example_outputs=example_outputs,
-                                     use_new_jit_passes=self.use_new_jit_passes)
+                                     example_outputs=example_outputs)
 
     def test_is_in_onnx_export(self):
         test_self = self
@@ -859,20 +857,17 @@ TestUtilityFuns_opset13 = type(str("TestUtilityFuns_opset13"),
 # opset 11 tests
 TestUtilityFuns_opset11_new_jit_API = type(str("TestUtilityFuns_opset11_new_jit_API"),
                                            (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=11,
-                                           use_new_jit_passes=True))
+                                           dict(TestUtilityFuns.__dict__, opset_version=11))
 
 # opset 12 tests
 TestUtilityFuns_opset12_new_jit_API = type(str("TestUtilityFuns_opset12_new_jit_API"),
                                            (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=12,
-                                           use_new_jit_passes=True))
+                                           dict(TestUtilityFuns.__dict__, opset_version=12))
 
 # opset 13 tests
 TestUtilityFuns_opset13_new_jit_API = type(str("TestUtilityFuns_opset13_new_jit_API"),
                                            (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=13,
-                                           use_new_jit_passes=True))
+                                           dict(TestUtilityFuns.__dict__, opset_version=13))
 
 
 if __name__ == '__main__':

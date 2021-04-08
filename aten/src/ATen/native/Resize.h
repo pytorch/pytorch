@@ -16,7 +16,10 @@ namespace at { namespace native {
 // Issues a warning if the output tensor has one or more elements and
 //   needs resizing
 // NOTE: In the future the warning will become an error
-TORCH_API void resize_output(Tensor& output, IntArrayRef shape);
+// Returns a bool saying whether or not the resize actually happened or not
+TORCH_API bool resize_output(Tensor& output, IntArrayRef shape);
+
+TORCH_API bool resize_output_cpu(Tensor& output, IntArrayRef shape);
 
 // These functions are called by native::resize_ as well as (legacy) TH resize.
 // They are not in TH/THTensor.cpp because the at namespace is easier
@@ -32,9 +35,15 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size)
     return;
   }
   if (!THTensor_getStoragePtr(self)) {
+#ifndef NDEBUG
     caffe2::TypeMeta dtype = self->dtype();
+#endif
     THTensor_stealAndSetStoragePtr(self, THStorage_new());
-    TORCH_INTERNAL_ASSERT(dtype == self->dtype());
+#ifndef NDEBUG
+    // THTensor_stealAndSetStoragePtr guarantees this. Leave debug
+    // assert in case of code changes.
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dtype == self->dtype());
+#endif
   }
   uint64_t new_size_bytes =
       (new_size + self->storage_offset()) * self->dtype().itemsize();
@@ -75,7 +84,7 @@ static inline void checkInBoundsForStorage(
     const caffe2::TypeMeta data_type,
     const Storage& new_storage) {
   int64_t storage_size_bytes =
-      detail::computeStorageNbytes(size, stride, data_type.itemsize());
+      at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
   int64_t storage_offset_bytes = storage_offset * data_type.itemsize();
   if (storage_size_bytes == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
@@ -94,7 +103,7 @@ static inline void checkInBoundsForStorage(
       ", and itemsize ",
       data_type.itemsize(),
       " requiring a storage size of ",
-      storage_size_bytes,
+      storage_size_bytes + storage_offset_bytes,
       " are out of bounds for storage of size ",
       new_storage_size_bytes);
 }

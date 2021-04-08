@@ -36,14 +36,43 @@ def _should_compress(
     num_rows, num_cols, matrix_approximation_rank, min_compression_rate
 ):
     """
-    Returns whether a 2D tensor described as number of rows and columns is worth compressing,
-    i.e., ``min_compression_rate`` < uncompressed size / compressed size, where
+    Returns a recommendation as to whether the 2D tensor described by the arguments is worth compressing,
+    including statistics describing the expected savings from compression.  We consider a tensor worth
+    compressing when ``min_compression_rate`` < uncompressed size / compressed size, where
     uncompressed size = ``num_rows`` * ``num_cols``,
     and compressed size = (``num_rows`` + ``num_cols``) * ``matrix_approximation_rank``.
-    """
+
+    The result of this function is a tuple of the form (compression_recommendation, uncompressed_el_count, compressed_el_count), where:
+
+    compresion_recommendation is true if the tensor is worth compressing, and false otherwise (see above);
+
+    uncompressed_el_count is the uncompressed element count, i.e. ``num_rows`` * ``num_cols``; and,
+
+    compress_el_count is the element count after compression, i.e. (``num_rows`` + ``num_cols``) * ``matrix_approximation_rank``.
+    """  # noqa
+    uncompressed_size = num_rows * num_cols
+    compressed_size = (num_rows + num_cols) * matrix_approximation_rank
     return (
-        num_rows + num_cols
-    ) * matrix_approximation_rank * min_compression_rate < num_rows * num_cols
+        compressed_size * min_compression_rate < uncompressed_size,
+        uncompressed_size,
+        compressed_size,
+    )
+
+
+def _report_compression_stats(bucket, state):
+    """
+    Report compression stats at the frequency of `compression_stats_logging_frequency` specified in PowerSGD state.
+    """
+    if (
+        bucket.is_the_last_bucket_to_allreduce()
+        and state.iter >= state.next_stats_report
+    ):
+        stats = state.compression_stats()
+        logging.info(
+            "Compression stats: iter {}, total before compression {}, total after compression {}, "
+            "rate {}".format(state.iter, stats[1], stats[2], stats[0])
+        )
+        state.next_stats_report = state.iter + state.compression_stats_logging_frequency
 
 
 class PowerSGDState(object):
@@ -60,11 +89,13 @@ class PowerSGDState(object):
 
     To tune ``matrix_approximation_rank``, we suggest to start from 1 and increase by factors of 2 (like an expoential grid search, 1, 2, 4, ...), until a satisfactory accuracy is reached. Typically only a small value 1-4 is used. For some NLP tasks (as shown in Appendix D of the original paper), this value has been increased to 32.
 
-    2. ``start_powerSGD_iter`` defers PowerSGD compression util step ``start_powerSGD_iter``, and vanilla allreduce runs prior to step ``start_powerSGD_iter``. This hybrid scheme of **vanilla allreduce + PowerSGD** can effectively improve the accuracy, even a relatively small ``matrix_approximation_rank`` is used. This is because that, the beginning of training phase is usually very sensitive to inaccurate gradients, and compressing gradients too early may make the training quickly take a suboptimal trajectory, which can result in an irrecoverable impact on the accuracy.
+    2. ``start_powerSGD_iter`` defers PowerSGD compression until step ``start_powerSGD_iter``, and vanilla allreduce runs prior to step ``start_powerSGD_iter``. This hybrid scheme of **vanilla allreduce + PowerSGD** can effectively improve the accuracy, even a relatively small ``matrix_approximation_rank`` is used. This is because that, the beginning of training phase is usually very sensitive to inaccurate gradients, and compressing gradients too early may make the training quickly take a suboptimal trajectory, which can result in an irrecoverable impact on the accuracy.
 
-    To tune ``start_powerSGD_iter``, we suggest to start with 10% of total training steps, and increase it until a satisfactory accuracy is reached.
+    To tune ``start_powerSGD_iter``, we suggest to start with 10% of total training steps, and increase it until a satisfactory accuracy is reached. If there is a warm-up stage in the training, ``start_powerSGD_iter`` typically should be no less than the number of warm-up steps.
 
     3. ``min_compression_rate`` is the minimum compression rate required when a layer is compressed. Due to the computation overheads incurred by the compression, a tensor is worth compressing only if there can be sufficient saving in bandwidth, where `` (num_rows + num_cols) * matrix_approximation_rank * min_compression_rate < num_rows * num_cols``. If the specified compression rate threshold cannot be satisfied, the tensor will be directly allreduced without compression.
+
+    Compression statistics are logged every ``compression_stats_logging_frequency`` iterations once PowerSGD compression starts.
 
     .. warning ::
         If error feedback or warm-up is enabled, the minimum value of ``start_powerSGD_iter`` allowed in DDP is 2.
@@ -87,26 +118,35 @@ class PowerSGDState(object):
         "p_memory_dict",
         "q_memory_dict",
         "iter",
+        # The fields below are for recording compression stats.
+        "total_numel_before_compression",
+        "total_numel_after_compression",
+        "compression_stats_logging_frequency",
+        "next_stats_report",
     ]
 
     def __init__(
         self,
         process_group,
         matrix_approximation_rank=1,
-        start_powerSGD_iter=10,
+        start_powerSGD_iter=1_000,
         min_compression_rate=2,
         use_error_feedback=True,
         warm_start=True,
         random_seed=0,
+        compression_stats_logging_frequency=10_000,
     ):
         logging.info(
             "PowerSGD config: matrix_approximation_rank = {}; start_powerSGD_iter = {}; "
-            "min_compression_rate = {}; use_error_feedback = {}; warm_start = {};".format(
+            "min_compression_rate = {}; use_error_feedback = {}; warm_start = {}; "
+            "random_seed = {}; compression_stats_logging_frequency = {}".format(
                 matrix_approximation_rank,
                 start_powerSGD_iter,
                 min_compression_rate,
                 use_error_feedback,
                 warm_start,
+                random_seed,
+                compression_stats_logging_frequency,
             )
         )
 
@@ -158,6 +198,15 @@ class PowerSGDState(object):
         self.q_memory_dict = {}
         # Iteration/step in the training loop.
         self.iter = 0
+        # Compression stats accumulators
+        self.total_numel_before_compression = 0
+        self.total_numel_after_compression = 0
+        # We'll report compression stats every 'compression_stats_logging_frequency' iterations
+        # Note that we always report compression stats at least once.
+        self.compression_stats_logging_frequency = max(
+            1, compression_stats_logging_frequency
+        )
+        self.next_stats_report = 0
 
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
@@ -169,6 +218,27 @@ class PowerSGDState(object):
             logging.info(
                 "Start to apply PowerSGD after {} iterations.".format(self.iter)
             )
+
+    def compression_stats(self):
+        r"""
+        Returns the latest compression statistics as a tuple of the form (compress_rate, numel_before_compression, numel_after_compression), where:
+
+        compress_rate is the effective compression rate i.e. (number of elements before compression) / (number of elements after compression);
+
+        numel_before_compression is the total number of elements before compression was applied; and,
+
+        numel_after_compression is the total number of elements after compression was applied.
+        """  # noqa
+        compress_rate = (
+            self.total_numel_before_compression / self.total_numel_after_compression
+            if self.total_numel_after_compression > 0
+            else 0
+        )
+        return (
+            compress_rate,
+            self.total_numel_before_compression,
+            self.total_numel_after_compression,
+        )
 
 
 def powerSGD_hook(
@@ -234,7 +304,7 @@ def powerSGD_hook(
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensors()[0]
+    input_tensor = bucket.get_tensor()
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
@@ -279,14 +349,20 @@ def powerSGD_hook(
         matrix = tensor.view(tensor.shape[0], -1)
         n, m = matrix.shape
         matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
-        if _should_compress(
+        compress_test = _should_compress(
             n, m, matrix_approximation_rank, state.min_compression_rate
-        ):
+        )
+        state.total_numel_before_compression += compress_test[1]
+        if compress_test[0]:
             tensors_to_compress.append(matrix)
             total_Ps_size += n * matrix_approximation_rank
             total_Qs_size += m * matrix_approximation_rank
+            state.total_numel_after_compression += compress_test[2]
         else:
             uncompressed_tensors.append(tensor)
+            state.total_numel_after_compression += compress_test[1]
+
+    _report_compression_stats(bucket, state)
 
     # Step II: Handle uncompressed tensors.
     # Allocate contiguous memory for these tensors to allreduce efficiently.
@@ -377,7 +453,9 @@ def powerSGD_hook(
         uncompressed_tensors_memory = fut.value()[0].div_(world_size)
         idx = 0
         for tensor in uncompressed_tensors:
-            tensor.copy_(uncompressed_tensors_memory[idx : idx + tensor.numel()].view_as(tensor))
+            tensor.copy_(
+                uncompressed_tensors_memory[idx : idx + tensor.numel()].view_as(tensor)
+            )
             idx += tensor.numel()
 
         # Since these Ps will be orthogonalized later, no need to divide them by world size.
@@ -500,7 +578,7 @@ def batched_powerSGD_hook(
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensors()[0]
+    input_tensor = bucket.get_tensor()
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
@@ -510,12 +588,18 @@ def batched_powerSGD_hook(
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
     total_length = input_tensor.shape[0]
+    state.total_numel_before_compression += total_length
 
     # View the input tensor as a 2D square-shape tensor, and pad 0s if necessary.
     square_side_length = math.ceil(math.sqrt(total_length))
+    state.total_numel_after_compression += (
+        square_side_length * state.matrix_approximation_rank * 2
+    )
     padded_total_length = square_side_length ** 2
     input_tensor.resize_(padded_total_length)
     input_tensor[total_length:padded_total_length].fill_(0)
+
+    _report_compression_stats(bucket, state)
 
     # Incorporate the error from the previous state into the gradients.
     bucket_index = bucket.get_index()
@@ -624,6 +708,8 @@ def batched_powerSGD_hook(
         if state.use_error_feedback:
             # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
+        # Removing this seemingly unnecessary sync somehow may cause faliures.
+        # See: https://github.com/pytorch/pytorch/pull/54838
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)
         if not state.warm_start:

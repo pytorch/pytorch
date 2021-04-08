@@ -4,7 +4,7 @@ Complex Numbers
 ===============
 
 Complex numbers are numbers that can be expressed in the form :math:`a + bj`, where a and b are real numbers,
-and *j* is a solution of the equation :math:`x^2 = −1`. Complex numbers frequently occur in mathematics and
+and *j* is a solution of the equation :math:`x^2 = -1`. Complex numbers frequently occur in mathematics and
 engineering, especially in signal processing. Traditionally many users and libraries (e.g., TorchAudio) have
 handled complex numbers by representing the data in float tensors with shape :math:`(..., 2)` where the last
 dimension contains the real and imaginary values.

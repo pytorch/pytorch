@@ -1,3 +1,4 @@
+import collections
 import json
 import os
 import re
@@ -100,6 +101,7 @@ def load_callgrind_artifacts() -> Tuple[benchmark_utils.CallgrindStats, benchmar
         baseline_exclusive_stats=baseline_exclusive,
         stmt_inclusive_stats=to_function_counts(artifacts["ones_no_data_inclusive"], True),
         stmt_exclusive_stats=to_function_counts(artifacts["ones_no_data_exclusive"], False),
+        stmt_callgrind_out=None,
     )
 
     stats_with_data = benchmark_utils.CallgrindStats(
@@ -110,6 +112,7 @@ def load_callgrind_artifacts() -> Tuple[benchmark_utils.CallgrindStats, benchmar
         baseline_exclusive_stats=baseline_exclusive,
         stmt_inclusive_stats=to_function_counts(artifacts["ones_with_data_inclusive"], True),
         stmt_exclusive_stats=to_function_counts(artifacts["ones_with_data_exclusive"], False),
+        stmt_callgrind_out=None,
     )
 
     return stats_no_data, stats_with_data
@@ -165,10 +168,28 @@ class TestBenchmarkUtils(TestCase):
 
     @slowTest
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    def test_timer_tiny_fast_snippet(self):
+        timer = benchmark_utils.Timer(
+            'auto x = 1;',
+            timer=timeit.default_timer,
+            language=benchmark_utils.Language.CPP,
+        )
+        median = timer.blocked_autorange().median
+        self.assertIsInstance(median, float)
+
+    @slowTest
+    @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
     def test_cpp_timer(self):
         timer = benchmark_utils.Timer(
-            "torch::Tensor y = x + 1;",
+            """
+                #ifndef TIMER_GLOBAL_CHECK
+                static_assert(false);
+                #endif
+
+                torch::Tensor y = x + 1;
+            """,
             setup="torch::Tensor x = torch::empty({1});",
+            global_setup="#define TIMER_GLOBAL_CHECK",
             timer=timeit.default_timer,
             language=benchmark_utils.Language.CPP,
         )
@@ -495,12 +516,25 @@ class TestBenchmarkUtils(TestCase):
             }
         )
 
-        # Don't collect baseline to speed up unit test by ~30 seconds.
-        stats = timer.collect_callgrind(number=1000, collect_baseline=False)
+        stats = timer.collect_callgrind(number=1000)
         counts = stats.counts(denoise=False)
 
         self.assertIsInstance(counts, int)
         self.assertGreater(counts, 0)
+
+        # There is some jitter with the allocator, so we use a simpler task to
+        # test reproducibility.
+        timer = benchmark_utils.Timer(
+            "x += 1",
+            setup="x = torch.ones((1,))",
+        )
+
+        stats = timer.collect_callgrind(number=1000, repeats=20)
+        assert isinstance(stats, tuple)
+
+        # Check that the repeats are at least somewhat repeatable. (within 10 instructions per iter)
+        counts = collections.Counter([s.counts(denoise=True) // 10_000 * 10_000 for s in stats])
+        self.assertGreater(max(counts.values()), 1, f"Every instruction count total was unique: {counts}")
 
         from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import wrapper_singleton
         self.assertIsNone(
@@ -534,12 +568,20 @@ class TestBenchmarkUtils(TestCase):
                 s.counts(denoise=True), s.counts(denoise=False),
                 "De-noising should not apply to C++.")
 
+        stats = timer.collect_callgrind(number=1000, repeats=20)
+        assert isinstance(stats, tuple)
+
+        # NB: Unlike the example above, there is no expectation that all
+        #     repeats will be identical.
+        counts = collections.Counter([s.counts(denoise=True) // 10_000 * 10_000 for s in stats])
+        self.assertGreater(max(counts.values()), 1, repr(counts))
+
     def test_manipulate_callgrind_stats(self):
         stats_no_data, stats_with_data = load_callgrind_artifacts()
 
         # Mock `torch.set_printoptions(linewidth=160)`
         wide_linewidth = benchmark_utils.FunctionCounts(
-            stats_no_data.stats(inclusive=False)._data, False, 160)
+            stats_no_data.stats(inclusive=False)._data, False, _linewidth=160)
 
         for l in repr(wide_linewidth).splitlines(keepends=False):
             self.assertLessEqual(len(l), 160)
@@ -590,45 +632,45 @@ class TestBenchmarkUtils(TestCase):
               192000  build/../c10/core/Device.h:c10:: ... epos/pytorch/torch/lib/libc10.so]
               169855  ???:_int_malloc [/usr/lib64/libc-2.28.so]
               154000  build/../c10/core/TensorOptions. ... ytorch/torch/lib/libtorch_cpu.so]
-              147167  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
+              148561  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
               135000  ???:malloc [/usr/lib64/libc-2.28.so]
                  ...
-                 -62  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
-                 -63  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
-                 -70  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
-                 -74  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
-                 -85  /home/test_user/miniconda3/envs/ ... rch/torch/lib/libtorch_python.so]
-                 -95  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
-                -104  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
-                -134  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
-                -180  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
+                2000  /usr/include/c++/8/ext/new_allocator.h:torch::PythonArgs::intlist(int)
+                2000  /usr/include/c++/8/bits/stl_vect ... *, _object*, _object*, _object**)
+                2000  /usr/include/c++/8/bits/stl_vect ... rningHandler::~PyWarningHandler()
+                2000  /usr/include/c++/8/bits/stl_vect ... ject*, _object*, _object**, bool)
+                2000  /usr/include/c++/8/bits/stl_algobase.h:torch::PythonArgs::intlist(int)
+                2000  /usr/include/c++/8/bits/shared_p ... ad_accumulator(at::Tensor const&)
+                2000  /usr/include/c++/8/bits/move.h:c ... te<c10::AutogradMetaInterface> >)
+                2000  /usr/include/c++/8/bits/atomic_b ... DispatchKey&&, caffe2::TypeMeta&)
+                2000  /usr/include/c++/8/array:at::Ten ... , at::Tensor&, c10::Scalar) const
 
-            Total: 8863284""",
+            Total: 8869966""",
         )
 
         self.regularizeAndAssertExpectedInline(
             stats_no_data.stats(inclusive=True),
             """\
             <torch.utils.benchmark.utils.valgrind_wrapper.timer_interface.FunctionCounts object at 0xXXXXXXXXXXXX>
-              8952420  ???:0x0000000000001050 [/usr/lib64/ld-2.28.so]
-              8952420  ???:(below main) [/usr/lib64/libc-2.28.so]
-              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8959166  ???:0x0000000000001050 [/usr/lib64/ld-2.28.so]
+              8959166  ???:(below main) [/usr/lib64/libc-2.28.so]
+              8959166  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8959166  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8959166  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8959166  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8959166  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8959166  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8959166  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
                   ...
-                 -195  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-                 -196  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-                 -207  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-                 -261  /home/test_user/miniconda3/envs/ ... ch/torch/lib/libtorch_python.so]
-                 -561  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-                 -789  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-                 -881  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-                -1196  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
-                -1206  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]""",
+                92821  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+                91000  build/../torch/csrc/tensor/pytho ... ch/torch/lib/libtorch_python.so]
+                91000  /data/users/test_user/repos/pyto ... nsors::get_default_scalar_type()
+                90090  ???:pthread_mutex_lock [/usr/lib64/libpthread-2.28.so]
+                90000  build/../c10/core/TensorImpl.h:c ... ch/torch/lib/libtorch_python.so]
+                90000  build/../aten/src/ATen/record_fu ... torch/torch/lib/libtorch_cpu.so]
+                90000  /data/users/test_user/repos/pyto ... uard(c10::optional<c10::Device>)
+                90000  /data/users/test_user/repos/pyto ... ersionCounter::~VersionCounter()
+                88000  /data/users/test_user/repos/pyto ... ratorKernel*, at::Tensor const&)""",
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -642,20 +684,20 @@ class TestBenchmarkUtils(TestCase):
               192000  build/../c10/core/Device.h:c10::Device::validate() [/data/users/test_user/repos/pytorch/torch/lib/libc10.so]
               169855  ???:_int_malloc [/usr/lib64/libc-2.28.so]
               154000  build/../c10/core/TensorOptions.h:c10::TensorOptions::merge_in(c10::Tens ... ns) const [/data/users/test_user/repos/pytorch/torch/lib/libtorch_cpu.so]
-              147167  /tmp/build/80754af9/python_1599604603603/work/Python/ceval.c:_PyEval_EvalFrameDefault [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
+              148561  /tmp/build/80754af9/python_1599604603603/work/Python/ceval.c:_PyEval_EvalFrameDefault [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
               135000  ???:malloc [/usr/lib64/libc-2.28.so]
                  ...
-                 -62  /tmp/build/80754af9/python_1599604603603/work/Objects/abstract.c:PyNumber_Subtract [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
-                 -63  /tmp/build/80754af9/python_1599604603603/work/Objects/longobject.c:long_richcompare [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
-                 -70  /tmp/build/80754af9/python_1599604603603/work/Objects/abstract.c:_PyObject_FastCallDict [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
-                 -74  /tmp/build/80754af9/python_1599604603603/work/Python/pytime.c:_PyTime_FromSecondsObject [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
-                 -85  /home/test_user/miniconda3/envs/throwaway/include/pybind11/pybind11.h:py ... ject*) [/data/users/test_user/repos/pytorch/torch/lib/libtorch_python.so]
-                 -95  /tmp/build/80754af9/python_1599604603603/work/Objects/rangeobject.c:rangeiter_next [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
-                -104  /tmp/build/80754af9/python_1599604603603/work/Objects/object.c:PyObject_RichCompare [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
-                -134  /tmp/build/80754af9/python_1599604603603/work/Objects/rangeobject.c:range_new [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
-                -180  /tmp/build/80754af9/python_1599604603603/work/Objects/longobject.c:PyLong_FromLong [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
+                2000  /usr/include/c++/8/ext/new_allocator.h:torch::PythonArgs::intlist(int)
+                2000  /usr/include/c++/8/bits/stl_vector.h:torch::PythonArgParser::raw_parse(_object*, _object*, _object*, _object**)
+                2000  /usr/include/c++/8/bits/stl_vector.h:torch::PyWarningHandler::~PyWarningHandler()
+                2000  /usr/include/c++/8/bits/stl_vector.h:torch::FunctionSignature::parse(_object*, _object*, _object*, _object**, bool)
+                2000  /usr/include/c++/8/bits/stl_algobase.h:torch::PythonArgs::intlist(int)
+                2000  /usr/include/c++/8/bits/shared_ptr_base.h:torch::autograd::impl::try_get_grad_accumulator(at::Tensor const&)
+                2000  /usr/include/c++/8/bits/move.h:c10::TensorImpl::set_autograd_meta(std::u ... AutogradMetaInterface, std::default_delete<c10::AutogradMetaInterface> >)
+                2000  /usr/include/c++/8/bits/atomic_base.h:at::Tensor at::detail::make_tensor ... t_null_type<c10::StorageImpl> >&&, c10::DispatchKey&&, caffe2::TypeMeta&)
+                2000  /usr/include/c++/8/array:at::Tensor& c10::Dispatcher::callWithDispatchKe ... , c10::Scalar)> const&, c10::DispatchKey, at::Tensor&, c10::Scalar) const
 
-            Total: 8863284"""  # noqa
+            Total: 8869966"""  # noqa
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -669,20 +711,20 @@ class TestBenchmarkUtils(TestCase):
               192000  build/../c10/core/Device.h:c10::Device::validate()
               169855  ???:_int_malloc
               154000  build/../c10/core/TensorOptions. ... erge_in(c10::TensorOptions) const
-              147167  Python/ceval.c:_PyEval_EvalFrameDefault
+              148561  Python/ceval.c:_PyEval_EvalFrameDefault
               135000  ???:malloc
                  ...
-                 -62  Objects/abstract.c:PyNumber_Subtract
-                 -63  Objects/longobject.c:long_richcompare
-                 -70  Objects/abstract.c:_PyObject_FastCallDict
-                 -74  Python/pytime.c:_PyTime_FromSecondsObject
-                 -85  /home/test_user/miniconda3/envs/ ... her(_object*, _object*, _object*)
-                 -95  Objects/rangeobject.c:rangeiter_next
-                -104  Objects/object.c:PyObject_RichCompare
-                -134  Objects/rangeobject.c:range_new
-                -180  Objects/longobject.c:PyLong_FromLong
+                2000  /usr/include/c++/8/ext/new_allocator.h:torch::PythonArgs::intlist(int)
+                2000  /usr/include/c++/8/bits/stl_vect ... *, _object*, _object*, _object**)
+                2000  /usr/include/c++/8/bits/stl_vect ... rningHandler::~PyWarningHandler()
+                2000  /usr/include/c++/8/bits/stl_vect ... ject*, _object*, _object**, bool)
+                2000  /usr/include/c++/8/bits/stl_algobase.h:torch::PythonArgs::intlist(int)
+                2000  /usr/include/c++/8/bits/shared_p ... ad_accumulator(at::Tensor const&)
+                2000  /usr/include/c++/8/bits/move.h:c ... te<c10::AutogradMetaInterface> >)
+                2000  /usr/include/c++/8/bits/atomic_b ... DispatchKey&&, caffe2::TypeMeta&)
+                2000  /usr/include/c++/8/array:at::Ten ... , at::Tensor&, c10::Scalar) const
 
-            Total: 8863284""",
+            Total: 8869966""",
         )
 
         self.regularizeAndAssertExpectedInline(
