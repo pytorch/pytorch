@@ -2618,7 +2618,7 @@ TEST(LoopNest, OuterLoopVectorization) {
       });
   LoopNest l({tensor});
 
-  l.vectorize(l.getLoopStmtsFor(tensor)[0]);
+  l.vectorize(l.getAllLoopNestsWritingToBuf(tensor->buf())[0][0]);
 
   Stmt* root_stmt = l.root_stmt();
   Block* outer_block = dynamic_cast<Block*>(root_stmt);
@@ -2645,7 +2645,7 @@ std::string constantUpperBoundLoopIR(int upper_bound_val) {
   Tensor* A = Compute(
       "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
   LoopNest l({A});
-  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(A->buf())[0];
   Stmt* unrolled = nullptr;
   LoopNest::unroll(loops[0], &unrolled);
   std::ostringstream oss;
@@ -2675,7 +2675,7 @@ TEST(LoopNest, UnrollOuter) {
       {{outer_bound, "x"}, {inner_bound, "y"}},
       [&](const VarHandle& x, const VarHandle& y) { return x + y; });
   LoopNest l({A});
-  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(A->buf())[0];
   Stmt* unrolled = nullptr;
   LoopNest::unroll(loops[0], &unrolled);
   checkIR(unrolled, R"IR(
@@ -2699,7 +2699,7 @@ TEST(LoopNest, UnrollInner) {
       {{outer_bound, "x"}, {inner_bound, "y"}},
       [&](const VarHandle& x, const VarHandle& y) { return x + y; });
   LoopNest l({A});
-  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(A->buf())[0];
   Stmt* unrolled = nullptr;
   LoopNest::unroll(
       static_cast<For*>(loops[0]->body()->stmts().front()), &unrolled);
@@ -2789,7 +2789,7 @@ TEST(LoopNest, NoUnroll) {
   Tensor* A = Compute(
       "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
   LoopNest l({A});
-  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(A->buf())[0];
   Stmt* unrolled = nullptr;
   ASSERT_THROWS_WITH(
       LoopNest::unroll(loops[0], &unrolled), "non-constant loop");
@@ -3348,7 +3348,7 @@ TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
   Placeholder b(BufHandle("b", {m, n}, kFloat));
   Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}});
   LoopNest loop({c});
-  auto loops = loop.getLoopStmtsFor(c);
+  auto loops = loop.getAllLoopNestsWritingToBuf(c->buf())[0];
   For* flattened;
   bool success = LoopNest::flatten(loops, &flattened);
   ASSERT_FALSE(success);
@@ -3440,7 +3440,7 @@ TEST(LoopNest, CacheReadsSimple) {
       });
 
   LoopNest l({B, C}, {A, B, C});
-  Stmt* j_loop = l.getLoopStmtsFor(B)[1];
+  Stmt* j_loop = l.getAllLoopNestsWritingToBuf(B->buf())[0][1];
   l.cacheAccesses(A->buf(), "A_local", j_loop);
 
   l.prepareForCodegen();
@@ -3508,7 +3508,7 @@ TEST(LoopNest, CacheReadsOuter) {
       });
 
   LoopNest l({B, C}, {A, B, C});
-  Stmt* i_loop = l.getLoopStmtsFor(B)[0];
+  Stmt* i_loop = l.getAllLoopNestsWritingToBuf(B->buf())[0][0];
   l.cacheAccesses(A->buf(), "A_local", i_loop);
 
   l.prepareForCodegen();
@@ -3556,7 +3556,7 @@ TEST(LoopNest, CacheReadsInternal) {
       });
 
   LoopNest l({B, C}, {A, B, C});
-  Stmt* j_loop = l.getLoopStmtsFor(B)[1];
+  Stmt* j_loop = l.getAllLoopNestsWritingToBuf(B->buf())[0][1];
   l.cacheAccesses(A->buf(), "A_local", j_loop);
   l.prepareForCodegen();
   Stmt* result = IRSimplifier::simplify(l.root_stmt());
@@ -3651,7 +3651,7 @@ TEST(LoopNest, CacheWritesSimple) {
       });
 
   LoopNest l({B, C}, {A, B, C});
-  Stmt* a_loop = l.getLoopStmtsFor(A)[1];
+  Stmt* a_loop = l.getAllLoopNestsWritingToBuf(A->buf())[0][1];
   l.cacheAccesses(A->buf(), "A_local", a_loop);
 
   l.prepareForCodegen();
@@ -3925,10 +3925,9 @@ static std::pair<std::unique_ptr<Placeholder>, Tensor*> colReduce(
 
 static Stmt* splitTailReorder(Tensor* b) {
   constexpr int kVectorWidth = 8;
-  For *outer, *inner, *tail;
   LoopNest nest({b});
-  auto loops = nest.getLoopStmtsFor(b);
-  nest.splitWithTail(loops[0], kVectorWidth, &outer, &inner, &tail);
+  auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
+  nest.splitWithTail(loops[0], kVectorWidth);
   // Now the loopnests will look like:
   //
   // for (int n_outer = 0; ...
@@ -3956,11 +3955,10 @@ static Stmt* splitTailReorder(Tensor* b) {
 
 static Stmt* splitMaskReorder(Tensor* b) {
   constexpr int kVectorWidth = 8;
-  For *outer, *inner;
   LoopNest nest({b});
-  auto loops = nest.getLoopStmtsFor(b);
-  nest.splitWithMask(loops[0], kVectorWidth, &outer, &inner);
-  loops = nest.getLoopStmtsFor(b);
+  auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[1];
+  nest.splitWithMask(loops[0], kVectorWidth);
+  loops = nest.getAllLoopNestsWritingToBuf(b->buf())[1];
   nest.reorderAxis(loops[1], loops[2]);
   nest.prepareForCodegen();
   return nest.root_stmt();
@@ -4061,9 +4059,9 @@ TEST(LoopNest, DISABLED_VectorizeUse) {
   Tensor* c = Compute(
       "c", {{N, "n"}}, [&](const VarHandle& n) { return b->call(n) + 2.0f; });
   LoopNest nest({c});
-  auto loops = nest.getLoopStmtsFor(b);
+  auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
   nest.vectorize(loops[0]);
-  loops = nest.getLoopStmtsFor(c);
+  loops = nest.getAllLoopNestsWritingToBuf(c->buf())[0];
   nest.vectorize(loops[0]);
   nest.prepareForCodegen();
   Stmt* s = nest.root_stmt();
