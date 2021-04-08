@@ -545,24 +545,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "aten::add.tuple(AnyTupleType a, AnyTupleType b) -> AnyTupleType"),
-         [](Stack* stack) {
-           auto b = pop(stack).toTuple();
-           auto a = pop(stack).toTuple();
-           std::vector<IValue> result;
-           for (const auto& el : a->elements()) {
-             result.push_back(el);
-           }
-           for (const auto& el : b->elements()) {
-             result.push_back(el);
-           }
-           using Tuple = at::ivalue::Tuple;
-           auto result_tuple = Tuple::create(result);
-           push(stack, std::move(result_tuple));
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::numel(Tensor self) -> int"),
          [](Stack* stack) {
            at::Tensor arg = pop(stack).toTensor();

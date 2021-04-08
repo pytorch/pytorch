@@ -9,7 +9,7 @@ from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
 from jit.test_backends import TestBackends  # noqa: F401
-from jit.test_list_dict import TestList, TestDict  # noqa: F401
+from jit.test_list_dict import TestList, TestDict, TestNamedTuple  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
 from jit.test_models import TestModels  # noqa: F401
@@ -3508,6 +3508,27 @@ def foo(x):
                 super(D, self).__init__()
 
         self.assertEqual(D()(v), v + v)
+
+    def test_tensor_subclasses(self):
+        def check_subclass(x, tensor):
+            template = dedent("""
+                def func(input: {}) -> {}:
+                    return torch.zeros((input.shape[0], 1), dtype=input.dtype)
+                """)
+
+            self._check_code(template.format(x, x), "func", [tensor])
+
+        check_subclass("torch.LongTensor", torch.LongTensor([[1, 2], [3, 4]]))
+        check_subclass("torch.DoubleTensor", torch.DoubleTensor([[1.2, 2.3], [3.4, 4.5]]))
+        check_subclass("torch.IntTensor", torch.IntTensor([[1, 2], [3, 4]]))
+        check_subclass("torch.BoolTensor", torch.BoolTensor([[False, True], [True, False]]))
+
+        def check_subclass_warn(input: torch.LongTensor) -> torch.LongTensor:
+            return torch.zeros((input.shape[0], 1), dtype=input.dtype)
+
+        with warnings.catch_warnings(record=True) as warns:
+            scripted = torch.jit.script(check_subclass_warn)
+        FileCheck().check("TorchScript will treat type annotations of Tensor").run(str(warns[0]))
 
     def test_first_class_module(self):
         class Foo(torch.jit.ScriptModule):
@@ -11436,23 +11457,34 @@ dedent """
             return a, x
         self.checkScript(return_tuple, (torch.rand(4),))
 
-    def test_add_tuple_slice(self):
+    def test_add_tuple_optional(self):
         def foo(input: Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]):
             changed_input = input[0] + 1
-            return (changed_input,) + input[1:]
-            #return value
+            stuff = (changed_input,) + input[1:]
+            return stuff[2]
         inp: Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]] = (torch.rand(4), None, None)
         self.checkScript(foo, (inp,))
-        s = torch.jit.script(foo)
-        print(s.code)
 
-    def test_add_tuple_slice_non_optional(self):
+    def test_add_tuple_non_optional(self):
         def foo(input: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]):
             changed_input = input[0] + 1
             return (changed_input,) + input[1:]
         inp: Tuple[torch.Tensor, torch.Tensor, torch.Tensor] = (torch.rand(4), torch.rand(4), torch.rand(4))
-        shit = torch.jit.script(foo)
         self.checkScript(foo, (inp,))
+
+    def test_add_tuple_different_types(self):
+        def foo(a: Tuple[int, float], b: Tuple[int]):
+            return a + b
+        a = (1, 2.0)
+        b = (3,)
+        self.checkScript(foo, (a, b))
+
+    def test_add_tuple_same_types(self):
+        def foo(a: Tuple[int, int], b: Tuple[int, int, int]):
+            return a + b
+        a = (1, 2)
+        b = (3, 4, 5)
+        self.checkScript(foo, (a, b))
 
     def test_method_no_self(self):
         with self.assertRaisesRegex(RuntimeError, 'methods must have a self argument'):

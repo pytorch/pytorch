@@ -422,20 +422,7 @@ SugaredValuePtr SimpleValue::getitem(
 
     // Defer to the __getitem__ attr on the class.
     return attr(loc, m, "__getitem__")->call(loc, m, {idx}, {}, 1);
-  }
-  else if (auto tuple = val_type->cast<TupleType>()) {
-    std::cout << "HFHEHFEEEEE\n";
-    auto idx_val = toIValue(idx);
-    auto out_type = tuple->elements().at(0);
-    return std::make_shared<SimpleValue>(g.insertNode(g.createTupleIndex(val, idx, out_type))->output());
-  }
-  else if (auto tuple = val_type->cast<AnyTupleType>()) {
-    std::cout << "HFHEHFE\n";
-    throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
-                           << " object is not subscriptable";
-
-  }
-  else {
+  } else {
     throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
                            << " object is not subscriptable";
   }
