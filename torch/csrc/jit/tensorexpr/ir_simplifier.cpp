@@ -471,12 +471,14 @@ const Expr* PolynomialTransformer::mutate(const Sub* v) {
   // Multilane folding.
   if (isMultilanePrimitive(lhs_new)) {
     if (auto* ret = combineMultilane<Sub>(lhs_new, rhs_new)) {
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       return ret->accept_mutator(this);
     }
   }
 
   if (rhs_new->isConstant() && immediateEquals(rhs_new, 0)) {
     auto* c = new Cast(v->dtype(), lhs_new);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return c->accept_mutator(this);
   }
 
@@ -788,6 +790,7 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
   // Multilane folding.
   if (isMultilanePrimitive(lhs_new)) {
     if (auto* ret = mulMultilane(lhs_new, rhs_new)) {
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       return ret->accept_mutator(this);
     }
   }
@@ -807,6 +810,7 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
   // it's Nan/Inf.
   if (scalar && immediateEquals(scalar, 1)) {
     auto* c = new Cast(v->dtype(), variable);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return c->accept_mutator(this);
   }
 
@@ -974,6 +978,7 @@ const Expr* PolynomialTransformer::mutate(const Div* v) {
 
   // If the numerator is zero, so is the result.
   if (lhs_new->isConstant() && immediateEquals(lhs_new, 0)) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return lhs_new;
   }
 
@@ -989,6 +994,7 @@ const Expr* PolynomialTransformer::mutate(const Div* v) {
   // }
 
   if (auto ret = factorizeDivision(lhs_new, rhs_new)) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return ret->accept_mutator(this);
   }
 
@@ -1006,11 +1012,13 @@ const Expr* PolynomialTransformer::mutate(const Mod* v) {
 
   // 0 % x => 0.
   if (lhs_new->isConstant() && immediateEquals(lhs_new, 0)) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return lhs_new;
   }
 
   // x % 1 == 0.
   if (rhs_new->isConstant() && immediateEquals(rhs_new, 1)) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return getImmediateByType(v->dtype(), 0);
   }
 
@@ -1321,12 +1329,14 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
   const Expr* diff = new Sub(rhs_new, lhs_new);
   diff = diff->accept_mutator(this);
 
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   if (!diff->isConstant()) {
     return new CompareSelect(
         lhs_new,
         rhs_new,
         true_branch,
         false_branch,
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         v->compare_select_op(),
         v->bias());
   }
@@ -1454,8 +1464,10 @@ Stmt* IRSimplifierBase::mutate(const Cond* v) {
   // If the condition is constant then we can choose the right branch now.
   if (cond_new->isConstant()) {
     if (!immediateEquals(cond_new, 0)) {
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       return true_new ? Stmt::clone(true_new) : nullptr;
     } else {
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       return false_new ? Stmt::clone(false_new) : nullptr;
     }
   }
@@ -1783,6 +1795,7 @@ c10::optional<class ModRound*> isModRound(const Term* e) {
   multiplier = IRSimplifier::simplify(multiplier);
 
   if (!mod) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return c10::nullopt;
   }
 
@@ -1867,6 +1880,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
 
     if (dynamic_cast<const RoundOff*>(e)) {
       rounds.push_back(c);
+      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     } else if (e->expr_type() == IRNodeType::kMod) {
       if (auto a = isModRound(c)) {
         mod_rounds.push_back(c);
@@ -1917,6 +1931,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
         // divisor.
         if (hasher.hash(mod_round->denom) == hasher.hash(mod_lhs) &&
             hasher.hash(mod_round->divisor) == hasher.hash(mod_rhs)) {
+          // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
           const Term* merged_m = new Term(
               hasher,
               mod_round->scalar,
@@ -2120,6 +2135,7 @@ const Expr* TermExpander::mutate(const Polynomial* v) {
     lastNode = new Sub(lastNode, evaluateOp(negated));
   } else {
     // we want to avoid a cast to the scalar if it would happen.
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     if (v->scalar()->dtype() != lastNode->dtype()) {
       lastNode = new Add(
           lastNode, evaluateOp(new Cast(lastNode->dtype(), v->scalar())));
@@ -2197,6 +2213,7 @@ const Expr* buf_flat_size(const Buf* v) {
   }
   flattened = IRSimplifier::simplify(flattened);
 
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return flattened;
 }
 
@@ -2289,6 +2306,7 @@ Block* TermExpander::fuseConditions(Block* v) {
       false_block = nullptr;
     }
 
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     Stmt* new_cond = prev_cond->cloneWithNewBodies(true_block, false_block)
                          ->accept_mutator(this);
     prev_cond = dynamic_cast<Cond*>(new_cond);
@@ -2373,6 +2391,7 @@ Stmt* TermExpander::mutate(const Block* v) {
 
 bool exprEquals(const Expr* A, const Expr* B) {
   try {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     const Expr* diff = IRSimplifier::simplify(new Sub(A, B));
     if (!diff->isConstant()) {
       return false;

@@ -150,6 +150,7 @@ class ExprEval {
       indices.push_back(zero);
     }
     Stmt* store_stmt =
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         new Store(ret_buf.data(), indices, expr.node(), new IntImm(1));
     // NOLINTNEXTLINE(modernize-use-emplace)
     buffer_args_extended.push_back(ret_buf);

@@ -1477,6 +1477,7 @@ void LoopNest::reorderAxis(For* a, For* b) {
       internal_axes.push_back(f);
     }
 
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     s = s->get_parent();
   }
 
@@ -1688,6 +1689,7 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
 
   // 'normalized' points to the outer-most loop in the normalized loopnest.
   // Collect all the normalized loops.
+  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   auto normalized_loops = getLoopStmtsInLoopNest(normalized, loops.size());
 
   auto flat_var = new Var(
@@ -2503,6 +2505,7 @@ void LoopNest::rfactor(
     }
   }
   if (!found) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     std::stringstream ss;
     for (auto& v : new_inner) {
       ss << *v;
@@ -2554,6 +2557,7 @@ void LoopNest::rfactor(
   };
 
   if (insertion_point && insertion_point == root_for->body()) {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     insertion_point = dynamic_cast<For*>(new_root_for)->body();
   } else if (insertion_point) {
     throw std::runtime_error("TODO: enable non-root insertion points");
@@ -2569,6 +2573,7 @@ void LoopNest::rfactor(
   if (output_contains_target) {
     parent_block->insert_stmt_before(init_stmt, new_root_for);
   } else {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     new_root_for->body()->prepend_stmt(init_stmt);
   }
 

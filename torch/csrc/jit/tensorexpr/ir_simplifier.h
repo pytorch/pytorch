@@ -581,6 +581,7 @@ class TORCH_API IRSimplifier {
     // There may be terms left in the IR, expand them.
     TermExpander expander(&simplifier);
     e = e->accept_mutator(&expander);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     if (!expander.check_safe()) {
       throw malformed_input("eliminated null Allocation without free");
     }

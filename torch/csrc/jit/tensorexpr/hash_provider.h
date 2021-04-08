@@ -54,6 +54,7 @@ class TORCH_API HashProvider : public IRVisitor {
  public:
   template <class T>
   SimplifierHashType hash(const T* e) {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     e->accept(this);
     return hashOf(e);
   }
