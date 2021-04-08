@@ -633,15 +633,15 @@ def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     for_inplace_variant = kwargs.get('for_inplace_variant', False)
 
-    test_cases = [((S,), (S, M), (M,), 1, 1),
+    test_cases = (((S,), (S, M), (M,), 1, 1),
                   ((S,), (S, M), (M,), 0.2, 0.6),
-                  ]
+                  )
 
-    test_cases_with_broadcast = [((1,), (S, M), (M,), 1, 1),
+    test_cases_with_broadcast = (((1,), (S, M), (M,), 1, 1),
                                  ((1,), (S, M), (M,), 0.2, 0.6),
                                  ((), (S, M), (M,), 1, 1),
                                  ((), (S, M), (M,), 0.2, 0.6),
-                                 ]
+                                 )
 
     cases = test_cases if for_inplace_variant else (test_cases + test_cases_with_broadcast)
     sample_inputs = []
