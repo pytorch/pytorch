@@ -1194,6 +1194,9 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
+    class NumpyComparison(Exception):
+        pass
+
     # Compares x and y
     # TODO: default exact_device to True
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
@@ -1341,14 +1344,17 @@ class TestCase(expecttest.TestCase):
             super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         # Tensor x Numpy array
         elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
+            raise self.NumpyComparison
             self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         # Numpy array x Tensor
         elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
+            raise self.NumpyComparison
             self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         # Numpy array x Numpy array
         elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
+            raise self.NumpyComparison
             self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         else:
