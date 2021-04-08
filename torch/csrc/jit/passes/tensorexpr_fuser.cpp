@@ -898,6 +898,7 @@ class TensorExprFuser {
     };
     // clang-format on
 
+    // Check types of input values.
     for (const Value* v : node->inputs()) {
       if (auto const& tt = v->type()->cast<TensorType>()) {
         auto const& st = tt->scalarType();
@@ -911,28 +912,6 @@ class TensorExprFuser {
         // Better not to try to handle them.
         if (*st == c10::ScalarType::Byte) {
           return false;
-        }
-
-        // Operator is only supported on CUDA.
-        if (node->isMemberOf(cuda_only_operator_set)) {
-          auto device = tensorexpr::pickDeviceType(node->inputs());
-          if (!device) {
-            device = tensorexpr::pickDeviceType(node->outputs());
-          }
-          if (!device || device->is_cpu()) {
-            return false;
-          }
-        }
-
-        // Operator is only supported on CPU.
-        if (node->isMemberOf(cpu_only_operator_set)) {
-          auto device = tensorexpr::pickDeviceType(node->inputs());
-          if (!device) {
-            device = tensorexpr::pickDeviceType(node->outputs());
-          }
-          if (!device || !device->is_cpu()) {
-            return false;
-          }
         }
 
         // These operators only support floats, because integer divisors need to
@@ -956,6 +935,29 @@ class TensorExprFuser {
         }
       }
     }
+
+    // Operator is only supported on CUDA.
+    if (node->isMemberOf(cuda_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || device->is_cpu()) {
+        return false;
+      }
+    }
+
+    // Operator is only supported on CPU.
+    if (node->isMemberOf(cpu_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || !device->is_cpu()) {
+        return false;
+      }
+    }
+
     if (node->kind() == aten::to) {
       // only support same-device conversion
       auto device = tensorexpr::pickDeviceType(node->inputs());
