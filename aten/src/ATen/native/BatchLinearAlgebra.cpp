@@ -2670,7 +2670,7 @@ Tensor& _lstsq_helper_cpu(
 }
 
 /*
-  Solves a least squares problem. That is minimizing ||B - A X||.
+  Solves a least squares problem. That is minimizing the squared Frobenius norm of |B - A X|.
 
   Input args:
   * 'input' - Tensor containing batches of m-by-n matrix A.
@@ -2679,7 +2679,7 @@ Tensor& _lstsq_helper_cpu(
   * 'driver' - the name of the LAPACK driver that is used to compute the solution.
   Output args (modified in-place):
   * 'solution' - Tensor to store the solution matrix X.
-  * 'residuals' - Tensor to store values of ||B - A X||.
+  * 'residuals' - Tensor to store values of the residual sum of squares for each column of the solution.
   * 'rank' - Tensor to store the rank of A.
   * 'singular_values' - Tensor to store the singular values of A.
   * 'infos' - Tensor to store error codes of linear algebra math library.
@@ -2732,8 +2732,9 @@ static void linalg_lstsq_out_info(
   TORCH_INTERNAL_ASSERT(input.size(-2) == other_2d.size(-2));
 
   std::vector<int64_t> expected_solution_shape = broadcast_batch_size(input, other_2d, input.dim() - 2);
-  // the actual shape of the shape of the solution returned in (*, n,) or (*, n, nrhs)
-  // but LAPACK requires extra dimensions so the expected shape is (*, max(m, n),) or (*, max(m, n), nrhs)
+  // the actual shape of the solution returned is (*, n,) or (*, n, nrhs)
+  // but LAPACK requires extra dimensions to store raw residuals
+  // so the expected shape is (*, max(m, n),) or (*, max(m, n), nrhs)
   auto m = input.size(-2);
   auto n = input.size(-1);
   auto nrhs = other.size(-1);
@@ -2820,11 +2821,10 @@ static void linalg_lstsq_out_info(
       // LAPACK stores residuals data for postprocessing in rows n:(m-n)
       auto raw_residuals = solution.narrow(/*dim=*/-2, /*start=*/n, /*length*/m - n);
       if (raw_residuals.is_complex()) {
-        // in-place abs is not supported for complex tensors
-        raw_residuals = raw_residuals.abs();
-        raw_residuals.pow_(2);
+        raw_residuals.mul_(raw_residuals.conj());
+        raw_residuals = at::real(raw_residuals);
       } else {
-        raw_residuals.abs_().pow_(2);
+        raw_residuals.pow_(2);
       }
       at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
 
@@ -2847,12 +2847,8 @@ static void linalg_lstsq_out_info(
 }
 
 static std::string get_default_lstsq_driver(c10::optional<std::string> driver, const Tensor& input) {
-  // if `driver` is empty, we use `driver_opt` to be set to
-  // c10::nullopt if working with CUDA tensors,
+  // if `driver` is empty, we set driver_str to "gels" if working with CUDA tensors,
   // otherwise to "gelsy" driver.
-  // CUDA tensors are treated specially because MAGMA
-  // has only 'gels' driver supported.
-  c10::optional<std::string> driver_opt = driver;
   std::string driver_str;
   // check whether the user provided name is a valid driver name
   if (driver.has_value()) {
@@ -2925,6 +2921,8 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   checkLinalgCompatibleDtype("torch.linalg.lstsq", residuals.scalar_type(), real_dtype, "solution");
 
   // 'rank' is expected to have integer dtype
+  // actual LAPACK calls use int32_t type for rank, but we promote it to int64_t
+  // to be consistent with torch.linalg.matrix_rank output dtype
   ScalarType rank_expected_type = ScalarType::Long;
   checkLinalgCompatibleDtype("torch.linalg.lstsq", rank.scalar_type(), rank_expected_type, "rank");
 
@@ -2976,7 +2974,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
     is_solution_batched_column_major = solution.transpose(-2, -1).is_contiguous();
   }
 
-  // 'residuals' is not checked because at::sum_out(residuals, ...) is used
+  // 'residuals' is not checked here because at::sum_out(residuals, ...) does that
 
   auto input_batch_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
 
@@ -3045,7 +3043,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   if (infos.numel() > 1) {
     batchCheckErrors(infos, "torch.linalg.lstsq");
   } else {
-    singleCheckErrors(infos.item().toInt(), "torch.linalg.lstsq");
+    singleCheckErrors(infos.item<int64_t>(), "torch.linalg.lstsq");
   }
 
   return std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>(solution, residuals, rank, singular_values);
