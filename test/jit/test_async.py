@@ -137,7 +137,7 @@ class TestAsync(JitTestCase):
     def test_async_script_no_script_mod(self):
         x = torch.rand(3, 4)
 
-        with self.assertRaisesRegex(RuntimeError, 'cannot call a value'):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, 'cannot call a value', 'torch.jit._fork(x'):
             @torch.jit.script
             def wait_script(x):
                 fut = torch.jit._fork(x)
@@ -313,16 +313,18 @@ class TestAsync(JitTestCase):
 
         # no future
         error_msg = 'The size.*must match the size of tensor'
-        with self.assertRaisesRegex(Exception, error_msg):
+        with self.assertRaisesRegexWithHighlight(Exception, error_msg, 'x.t() + x'):
             foo(x)
 
         # one future
-        with self.assertRaisesRegex(Exception, error_msg):
+        with self.assertRaisesRegexWithHighlight(Exception, error_msg, 'torch.jit._fork(foo, x'):
             wait_script(x)
 
         # two futures with a different error
         x = torch.rand(3, 4, 5)
-        with self.assertRaisesRegex(Exception, 'expects a tensor with <= 2 dimensions'):
+        with self.assertRaisesRegexWithHighlight(Exception,
+                                                 'expects a tensor with <= 2 dimensions',
+                                                 'torch.jit._fork(wait_script, x'):
             wait_script_nest(x)
 
     def test_async_grad_guard_with_grad(self):
@@ -396,9 +398,9 @@ class TestAsync(JitTestCase):
             val = torch.jit._wait(fut)
             return my_list[0]
 
-        with self.assertRaisesRegex(RuntimeError, 'did not have observable data dependence with trace inputs; '
-                                                  'this probably indicates your program cannot be understood '
-                                                  'by the tracer.'):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, 'did not have observable data dependence with trace inputs; '
+                                                 'this probably indicates your program cannot be understood '
+                                                 'by the tracer.', ''):
             traced = torch.jit.trace(fn, (torch.rand(3, 4),), check_trace=False)
 
     def test_trace_fork_wait_inline(self):
@@ -491,7 +493,7 @@ class TestAsync(JitTestCase):
         self.checkTrace(TestModule(), (torch.randn(5, 5),))
 
     def test_no_future_subtype_message(self):
-        with self.assertRaisesRegex(RuntimeError, 'Future without a contained type'):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, 'Future without a contained type', ''):
             @torch.jit.script
             def forward(self, x):
                 futs = torch.jit.annotate(List[torch.jit.Future], [])
@@ -513,9 +515,10 @@ class TestAsync(JitTestCase):
             return fut.wait()
 
         # Unsuccessful subtyping.
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegexWithHighlight(
                 RuntimeError,
                 r"was annotated as having type Future\[float\] but is actually of type Future\[int\]",
+                "fut = returns_future_float(x"
         ):
             def returns_future_float(x: int) -> torch.jit.Future[float]:
                 return torch.jit._fork(returns_int, (x))
