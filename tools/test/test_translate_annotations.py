@@ -78,12 +78,28 @@ class TestTranslateAnnotations(unittest.TestCase):
         )
 
     def test_translate_lao_tzu(self) -> None:
+        # we'll pretend that this diff represents the file lao being
+        # renamed to tzu and also modified
         diff = parse_diff(lao_tzu_diff)
-        self.assertEqual(translate(diff, -1), None)  # out of bounds
-        self.assertEqual(translate(diff, 0), None)  # we start at 1
+
+        # line numbers less than 1 are invalid so they map to None
+        self.assertEqual(translate(diff, -1), None)
+        self.assertEqual(translate(diff, 0), None)
+
+        # the first two lines of the file were removed, so the first
+        # line of the new version corresponds to the third line of the
+        # original
         self.assertEqual(translate(diff, 1), 3)
+
+        # the second and third lines of the new file were not present in
+        # the original version, so they map to None
         self.assertEqual(translate(diff, 2), None)
         self.assertEqual(translate(diff, 3), None)
+
+        # at this point, we have a stretch of lines that are identical
+        # in both versions of the file, but the original version of the
+        # file had 4 lines before this section whereas the new version
+        # has only 3 lines before this section
         self.assertEqual(translate(diff, 4), 5)
         self.assertEqual(translate(diff, 5), 6)
         self.assertEqual(translate(diff, 6), 7)
@@ -91,35 +107,69 @@ class TestTranslateAnnotations(unittest.TestCase):
         self.assertEqual(translate(diff, 8), 9)
         self.assertEqual(translate(diff, 9), 10)
         self.assertEqual(translate(diff, 10), 11)
+
+        # these three lines were added in the new version of the file,
+        # so they map to None
         self.assertEqual(translate(diff, 11), None)
         self.assertEqual(translate(diff, 12), None)
         self.assertEqual(translate(diff, 13), None)
-        self.assertEqual(translate(diff, 14), 12)  # keep going
+
+        # the diff doesn't say how long the file is, so we keep mapping
+        # line numbers back; since we can look back at the original
+        # files, though, we can see that the original is two lines
+        # shorter than the new version, which explains why we are
+        # subtracting 2 here
+        self.assertEqual(translate(diff, 14), 12)
         self.assertEqual(translate(diff, 15), 13)
 
     def test_translate_empty(self) -> None:
         diff = parse_diff('--- a/foo')
+
+        # again, we start numbering at 1
         self.assertEqual(translate(diff, -1), None)
         self.assertEqual(translate(diff, 0), None)
+
+        # this diff says there are no changes, so all line numbers
+        # greater than zero map to themselves
         self.assertEqual(translate(diff, 1), 1)
         self.assertEqual(translate(diff, 2), 2)
         self.assertEqual(translate(diff, 3), 3)
         self.assertEqual(translate(diff, 4), 4)
         self.assertEqual(translate(diff, 5), 5)
-        # etc
 
     def test_translate_sparser(self) -> None:
         diff = parse_diff(sparser_diff)
+
+        # again, we start numbering at 1
         self.assertEqual(translate(diff, -1), None)
         self.assertEqual(translate(diff, 0), None)
+
+        # the first three lines are unchanged
         self.assertEqual(translate(diff, 1), 1)
         self.assertEqual(translate(diff, 2), 2)
         self.assertEqual(translate(diff, 3), 3)
+
+        # we removed three lines here and added two, so the two lines we
+        # added don't map back to anything in the original file
         self.assertEqual(translate(diff, 4), None)
         self.assertEqual(translate(diff, 5), None)
+
+        # we have some unchanged lines here, but in the preceding hunk
+        # we removed 3 and added only 2, so we have an offset of 1
         self.assertEqual(translate(diff, 6), 7)
         self.assertEqual(translate(diff, 7), 8)
-        self.assertEqual(translate(diff, 8), 9)  # don't get caught here
+
+        # since the unified diff format essentially subtracts 1 from the
+        # starting line number when the count is 0, and since we use
+        # bisect.bisect_right to decide which hunk to look at, an
+        # earlier version of translate had a bug that caused it to get
+        # confused because it would look at the second hunk (which lists
+        # 8 as its start line number) rather than the first hunk
+        self.assertEqual(translate(diff, 8), 9)
+
+        # after the two lines that we removed in the second hunk, we've
+        # reduced the total length of the file by 3 lines, so once we
+        # reach the end of the diff, we just add 3 to every line number
         self.assertEqual(translate(diff, 9), 12)
         self.assertEqual(translate(diff, 10), 13)
         self.assertEqual(translate(diff, 11), 14)
