@@ -300,7 +300,7 @@ inline InferredType tryToInferType(py::handle input) {
   // Try basic types first
   if (py::isinstance<py::bool_>(input)) {
     return InferredType(BoolType::get());
-  // NOLINTNEXTLINE(bugprone-branch-clone)
+    // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (py::isinstance<py::int_>(input)) {
     return InferredType(IntType::get());
   } else if (py::isinstance<py::float_>(input)) {

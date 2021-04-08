@@ -1430,7 +1430,8 @@ struct TORCH_API ProfileIValueOp : public Node {
   ProfileIValueOp(
       Graph* graph,
       std::function<void(std::vector<IValue>&)> callback)
-      : Node(graph, ::c10::prim::profile_ivalue), callback_(std::move(callback)) {}
+      : Node(graph, ::c10::prim::profile_ivalue),
+        callback_(std::move(callback)) {}
 
   void cloneFrom(Node* other_) override;
   Node* allocNewInstance(Graph* g) override;

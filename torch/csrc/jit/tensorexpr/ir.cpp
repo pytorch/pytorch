@@ -35,7 +35,10 @@ Load::Load(
     const Buf* buf,
     std::vector<const Expr*> indices,
     const Expr* mask)
-    : ExprNodeBase(dtype), buf_(buf), indices_(std::move(indices)), mask_(mask) {
+    : ExprNodeBase(dtype),
+      buf_(buf),
+      indices_(std::move(indices)),
+      mask_(mask) {
   castIndicesToInts(indices_);
 }
 

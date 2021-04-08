@@ -30,9 +30,7 @@ LoopNest::LoopNest(const LoopNest& other)
   verify(root_stmt_);
 }
 
-LoopNest::LoopNest(
-    Stmt* stmt,
-    std::unordered_set<const Buf*> output_bufs)
+LoopNest::LoopNest(Stmt* stmt, std::unordered_set<const Buf*> output_bufs)
     : root_stmt_(stmt), output_bufs_(std::move(output_bufs)) {
   verify(root_stmt_);
 }

@@ -177,6 +177,7 @@ class RegisterCodeGenList {
   TORCH_API StmtFactoryMethod FindStmtFactoryMethod(const std::string& name);
   RegisterCodeGenList(const RegisterCodeGenList&) = delete;
   RegisterCodeGenList& operator=(const RegisterCodeGenList&) = delete;
+
  private:
   template <class CodeGenType>
   friend class RegisterCodeGen;

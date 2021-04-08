@@ -270,7 +270,8 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
 
   // An internal struct holding the accesses found within a scope Block.
   struct Scope {
-    Scope(Block* b, std::shared_ptr<Scope> p) : block(b), parent(std::move(p)) {}
+    Scope(Block* b, std::shared_ptr<Scope> p)
+        : block(b), parent(std::move(p)) {}
 
     Block* block;
     std::shared_ptr<Scope> parent;

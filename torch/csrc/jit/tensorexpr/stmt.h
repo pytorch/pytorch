@@ -778,7 +778,10 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
       std::string func_name,
       std::vector<const Buf*> buf_args,
       std::vector<const Expr*> args)
-      : buf_(buf), func_name_(std::move(func_name)), buf_args_(std::move(buf_args)), args_(std::move(args)) {}
+      : buf_(buf),
+        func_name_(std::move(func_name)),
+        buf_args_(std::move(buf_args)),
+        args_(std::move(args)) {}
 
  private:
   const Buf* buf_;
