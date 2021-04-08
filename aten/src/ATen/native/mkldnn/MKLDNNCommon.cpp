@@ -90,7 +90,8 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
              "itensor_view_from_dense expects float tensor input");
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   return {{{tensor.sizes().cbegin(), tensor.sizes().cend()},
-           ideep::tensor::data_type::f32},
+           ideep::tensor::data_type::f32,
+           {tensor.strides().cbegin(), tensor.strides().cend()}},
           tensor.template data_ptr<float>()};
 }
 

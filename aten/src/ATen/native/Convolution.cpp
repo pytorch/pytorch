@@ -896,9 +896,15 @@ at::Tensor _convolution(
              || (input.is_mkldnn() && bias.device().is_cpu() && bias.scalar_type() == kFloat),
              "Input type (", input.toString(), ") and bias type (", bias.toString(),
              ") should be the same or input should be a MKLDNN tensor and bias is a dense tensor");
+    bool use_channels_last = input.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+                             weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+    auto mkldnn_memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast
+                                                  : at::MemoryFormat::Contiguous;
     if (!input_is_mkldnn) {
-      output = at::mkldnn_convolution(input.contiguous(), weight.contiguous(), bias.defined() ? bias.contiguous() : bias,
-                                      params.padding, params.stride, params.dilation, params.groups);
+      output = at::mkldnn_convolution(
+          input.contiguous(mkldnn_memory_format), weight.contiguous(mkldnn_memory_format),
+          bias.defined() ? bias.contiguous() : bias,
+          params.padding, params.stride, params.dilation, params.groups);
     } else {
       // do not call contiguous on mkldnn tensor
       output = at::mkldnn_convolution(input, weight, bias,
