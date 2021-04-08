@@ -3263,7 +3263,7 @@ class TestSparse(TestCase):
             # cpp implementation
             r2 = torch.sparse.mm(a, b)
             if a.is_cuda:
-                if r1._nnz() != r2._nnz(): 
+                if r1._nnz() != r2._nnz():
                     # Note: This is because  cusparseXcsrgemm2Nnz ROCm function doesn't return
                     # the same nnz as CUDA version
                     self.assertEqual(r1.to_dense(), r2.to_dense())
