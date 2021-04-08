@@ -1193,8 +1193,11 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
 }
 
 void GraphTask::stash_current_streams() {
-  // If Pytorch was linked with CUDA support, stashes this thread's current and default streams.
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::CUDA)) {
+  // If there's a chance we used GPUs, stashes this thread's current and default streams.
+  if (at::globalContext().hasCUDA() /* should only be true if:
+      * Pytorch was compiled with CUDA support AND
+      * the CUDA driver loaded without erroring AND
+      * > 0 CUDA-capable GPUs are visible to the process */) {
     const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
     auto num_gpus = guard.deviceCount();
     caller_current_streams_.resize(num_gpus);
