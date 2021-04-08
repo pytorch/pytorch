@@ -241,7 +241,7 @@ class TestLinalg(TestCase):
                     rcond = 1e-3
 
             # specifying rcond value has no effect for gels driver so no need to run the tests again
-            if driver == 'gels' and rcond != None:
+            if driver == 'gels' and rcond is not None:
                 continue
 
             shape = batch + matrix_size
@@ -261,7 +261,7 @@ class TestLinalg(TestCase):
 
             # gels driver is not checked by comparing to NumPy or SciPy implementation
             # because NumPy and SciPy do not implement this driver
-            if driver == 'gels' and rcond == None:
+            if driver == 'gels' and rcond is None:
                 check_solution_correctness(a, b, sol)
 
     @skipCUDAIfNoMagma
