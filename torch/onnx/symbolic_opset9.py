@@ -2556,7 +2556,10 @@ def index(g, self, index):
 @parse_args('v', 'is', 'i')
 def frobenius_norm(g, self, dim=None, keepdim=False):
     sqr = g.op('Mul', self, self)
-    sumsqr = g.op('ReduceSum', sqr, axes_i=dim, keepdims_i=keepdim)
+    if dim != []:
+        sumsqr = g.op('ReduceSum', sqr, axes_i=dim, keepdims_i=keepdim)
+    else:
+        sumsqr = g.op('ReduceSum', sqr, keepdims_i=keepdim)
     return g.op('Sqrt', sumsqr)
 
 
