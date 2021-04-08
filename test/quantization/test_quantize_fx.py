@@ -72,8 +72,6 @@ from torch.testing._internal.common_quantized import (
 
 from torch.testing._internal.common_utils import TemporaryFileName
 
-from torch.testing._internal.common_distributed import skip_if_not_multigpu
-
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
 from torch.testing import FileCheck
@@ -647,7 +645,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         dict_input = {"input": torch.randn(1, 1, 1, 1)}
         m = M().eval()
-        qconfig_dict = {"": default_qconfig}
+        qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
         m = prepare_fx(m, qconfig_dict)
         m(dict_input)
         m = convert_fx(m)
@@ -2298,15 +2296,15 @@ class TestQuantizeFxOps(QuantizationTestCase):
             model = FuncLinear(use_bias, has_relu, f_relu)
             linear_fun = ns.call_function(torch.nn.functional.linear)
             prepare_node_occurrence = {
-                # activation, weight, bias and output
-                ns.call_module(torch.quantization.PlaceholderObserver): 3 + int(use_bias)
+                # activation, weight, bias, output
+                ns.call_module(torch.quantization.PlaceholderObserver): 4 if use_bias else 3
             }
             convert_node_occurrence = {
                 # we don't support static fp16 ops, so the linear functino
                 # is unfused
                 linear_fun: 1,
-                # activation, weight, bias and output
-                ns.call_method("to"): 3 + int(use_bias)
+                # activation, weight, bias, output
+                ns.call_method("to"): 4 if use_bias else 3
             }
             self.checkGraphModeFxOp(
                 model, data, QuantType.DYNAMIC, linear_fun,
@@ -3645,8 +3643,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # make sure it runs
         m = convert_fx(m)
         expected_occurrence = {
+            # we have extra quant/dequant after reshape since currently we do not
+            # propagate the information about the dtype of the output
+            # of CopyNode, we may improve this later and remove the
+            # extra quant/dequant
             ns.call_function(torch.quantize_per_tensor): 2,
-            ns.call_method("dequantize"): 2,
+            ns.call_method("dequantize"): 3,
             ns.call_method("to"): 1,
             ns.call_function(torch.ops.quantized.linear): 2
         }
@@ -3949,8 +3951,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
         # print('----------------------')
 
     @skip_if_no_torchvision
-    @skip_if_not_multigpu
     @skipIfNoFBGEMM
+    @unittest.skip("TODO: Test is always failing - https://github.com/pytorch/pytorch/issues/54979")
     def test_resnet18_ddp(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models

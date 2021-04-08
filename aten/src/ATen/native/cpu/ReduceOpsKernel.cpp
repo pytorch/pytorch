@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -25,7 +26,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
     const func_t& f,
     scalar_t init_val) {
   if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
+    at::native::resize_output(result, self.sizes());
   }
   if (self.numel() == 0) {
     return;
@@ -36,6 +37,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
     return;
   }
 
+  // TODO This probably should be using at::native::make_reduction
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)

@@ -48,7 +48,7 @@ demonstration of these components in action:
         return clamp_1
     """
 
-The **symbolic tracer** performs “symbolic execution” of the Python
+The **symbolic tracer** performs "symbolic execution" of the Python
 code. It feeds fake values, called Proxies, through the code. Operations
 on theses Proxies are recorded. More information about symbolic tracing
 can be found in the :func:`symbolic_trace` and :class:`Tracer`
@@ -63,13 +63,13 @@ IR is the format on which transformations are applied.
 
 **Python code generation** is what makes FX a Python-to-Python (or
 Module-to-Module) transformation toolkit. For each Graph IR, we can
-create valid Python code matching the Graph’s semantics. This
+create valid Python code matching the Graph's semantics. This
 functionality is wrapped up in :class:`GraphModule`, which is a
 :class:`torch.nn.Module` instance that holds a :class:`Graph` as well as a
 ``forward`` method generated from the Graph.
 
-Taken together, this pipeline of components (symbolic tracing →
-intermediate representation → transforms → Python code generation)
+Taken together, this pipeline of components (symbolic tracing ->
+intermediate representation -> transforms -> Python code generation)
 constitutes the Python-to-Python transformation pipeline of FX. In
 addition, these components can be used separately. For example,
 symbolic tracing can be used in isolation to capture a form of
