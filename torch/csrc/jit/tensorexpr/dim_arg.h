@@ -14,6 +14,7 @@ class DimArg {
  public:
   // Intentionally leave out explicit to allow implicit conversions.
   DimArg(const ExprHandle& dim) : dim_(dim) {}
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   DimArg(const ExprHandle& dim, const std::string& name_hint)
       : dim_(dim), name_hint_(name_hint) {}
   const ExprHandle& dim() const {

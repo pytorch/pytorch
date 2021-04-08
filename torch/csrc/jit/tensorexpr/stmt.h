@@ -16,6 +16,7 @@ class Placeholder;
 // The common base between all statement node.
 class TORCH_API Stmt : public KernelScopedObject {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   Stmt() {}
   virtual void accept(IRVisitor* visitor) const = 0;
   virtual Stmt* accept_mutator(IRMutator* mutator) = 0;
@@ -50,11 +51,13 @@ class StmtNode : public Stmt {
     visitor->visit(static_cast<const Op*>(this));
   }
   Stmt* accept_mutator(IRMutator* mutator) override;
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   StmtNode() {}
 };
 
 template <class Op>
 Stmt* StmtNode<Op>::accept_mutator(IRMutator* mutator) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   StmtNode* this_mutable = const_cast<StmtNode*>(this);
   return mutator->mutate(static_cast<Op*>(this_mutable));
 }
@@ -472,6 +475,7 @@ class TORCH_API LoopOptions {
       throw malformed_input("Has no GPU block index");
     }
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     static const char* kBlockIndexNames[] = {
         "blockIdx.x",
         "blockIdx.y",
@@ -514,6 +518,7 @@ class TORCH_API LoopOptions {
       throw malformed_input("has no GPU thread index");
     }
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     static const char* kThreadIndexNames[] = {
         "threadIdx.x", "threadIdx.y", "threadIdx.z", "threadIdx.w"};
 
@@ -631,6 +636,7 @@ class TORCH_API For : public StmtNode<For> {
       const Expr* start,
       const Expr* stop,
       Stmt* body,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const LoopOptions& loop_options)
       : var_(var), start_(start), stop_(stop), loop_options_(loop_options) {
     if (!var) {
@@ -691,6 +697,7 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
   AtomicAdd(
       const Buf* buf,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::vector<const Expr*>& indices,
       const Expr* value)
       : buf_(buf), indices_(indices), value_(value) {}
@@ -724,6 +731,7 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
 
 class TORCH_API SyncThreads : public StmtNode<SyncThreads> {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   SyncThreads() {}
 };
 
@@ -772,8 +780,11 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
 
   ExternalCall(
       const Buf* buf,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::string& func_name,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::vector<const Buf*>& buf_args,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::vector<const Expr*>& args)
       : buf_(buf), func_name_(func_name), buf_args_(buf_args), args_(args) {}
 

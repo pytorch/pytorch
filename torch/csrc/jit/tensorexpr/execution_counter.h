@@ -59,8 +59,11 @@ class ExecutionTriggerList {
  private:
   friend class ExecutionTrigger;
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ExecutionTriggerList() {}
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   ExecutionTriggerList(const ExecutionTriggerList&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   ExecutionTriggerList& operator=(const ExecutionTriggerList&) = delete;
 
   void AddTrigger(const std::string& name, ExecutionTrigger* trigger) {
@@ -88,7 +91,9 @@ class ExecutionTrigger {
   }
 
  private:
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   ExecutionTrigger(const ExecutionTrigger&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   ExecutionTrigger& operator=(const ExecutionTrigger&) = delete;
   int value_ = 0;
   const std::string name_;

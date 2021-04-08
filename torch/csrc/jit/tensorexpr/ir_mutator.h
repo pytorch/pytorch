@@ -56,6 +56,7 @@ class ExternalCall;
 
 class TORCH_API IRMutator {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~IRMutator() {}
   virtual const Expr* mutate(const Add* v);
   virtual const Expr* mutate(const Sub* v);

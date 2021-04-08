@@ -33,6 +33,7 @@ class TORCH_API Reducer {
   Reducer(ExprHandle init, RI interaction) : init_(init.node()) {
     interaction_ = interaction;
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~Reducer() {}
 
   const Expr* initializer() const {
@@ -129,6 +130,7 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
  public:
   ReduceOp(
       const Expr* body,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::vector<const Var*>& reduce_args,
       const Reducer& reducer)
       : ExprNodeBase(body->dtype()),

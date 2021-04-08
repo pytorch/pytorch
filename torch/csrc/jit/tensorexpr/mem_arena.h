@@ -13,11 +13,14 @@ class KernelArena {
  public:
   static KernelArena* GetCurrentKernelArena();
   static void SetCurrentKernelArena(KernelArena* new_arena);
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   TORCH_API KernelArena() {}
   TORCH_API ~KernelArena();
 
  private:
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   KernelArena(const KernelArena&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   KernelArena& operator=(const KernelArena&) = delete;
   friend class KernelScopedObject;
   std::vector<KernelScopedObject*> kernel_objects_; // owned
@@ -34,7 +37,9 @@ class KernelScope {
   TORCH_API ~KernelScope();
 
  private:
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   KernelScope(const KernelScope&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   KernelScope& operator=(const KernelScope&) = delete;
   KernelArena* old_kernel_arena_ =
       nullptr; // previous arena, will be restored in destructor
@@ -51,7 +56,9 @@ class TORCH_API KernelScopedObject {
   virtual ~KernelScopedObject() = default;
 
  private:
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   KernelScopedObject(const KernelScopedObject&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   KernelScopedObject& operator=(const KernelScopedObject&) = delete;
 };
 

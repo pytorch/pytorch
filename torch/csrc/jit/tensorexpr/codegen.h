@@ -22,14 +22,17 @@ class TORCH_API CodeGen {
 
   CodeGen(
       Stmt* stmt,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::kCPU,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::string& kernel_func_name = "func")
       : stmt_(stmt),
         buffer_args_(buffer_args),
         device_(device),
         kernel_func_name_(kernel_func_name) {}
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~CodeGen() {}
 
   Stmt* stmt() const {
@@ -120,12 +123,15 @@ class CodeGen::CallArg {
   CallArg(const PaddedBuffer<T>& buffer);
 
   template <typename T>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-pro-type-const-cast)
   CallArg(const std::vector<T>& buffer) : ptr_(const_cast<T*>(buffer.data())) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CallArg(void* ptr) : ptr_(ptr) {}
 
 #define ARG_TYPE_CTOR(Type, Name) \
   CallArg(Type v) : Name##val_(v) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_TYPE_CTOR);
 #undef ARG_TYPE_CTOR
 
@@ -144,6 +150,7 @@ class CodeGen::CallArg {
   Type* Name##Ptr() const {                \
     return const_cast<Type*>(&Name##val_); \
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_PTR_DEFINE);
 #undef ARG_PTR_DEFINE
 
@@ -175,11 +182,14 @@ class RegisterCodeGenList {
  private:
   template <class CodeGenType>
   friend class RegisterCodeGen;
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   RegisterCodeGenList() {}
   TORCH_API void AddStmtFactoryMethod(
       const std::string& name,
       const StmtFactoryMethod& stmt_factory_method);
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   RegisterCodeGenList(const RegisterCodeGenList&) = delete;
+  // NOLINTNEXTLINE(modernize-use-equals-delete)
   RegisterCodeGenList& operator=(const RegisterCodeGenList&) = delete;
 
   std::unordered_map<std::string, StmtFactoryMethod> stmt_factory_methods_;
