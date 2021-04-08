@@ -42,10 +42,10 @@ from typing import cast, Any, Dict, Iterable, Iterator, Optional
 
 import numpy as np
 
+from torch.testing import floating_types_and, integral_types, complex_types
 from torch.testing._internal import expecttest
-from torch.testing import \
-    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type,
-     floating_types_and, integral_types, complex_types)
+from .._core import \
+    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
 
 import torch
 import torch.cuda
@@ -816,6 +816,27 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
+
+slow_tests_dict: Optional[Dict[str, float]] = None
+def check_slow_test_from_stats(test):
+    global slow_tests_dict
+    if slow_tests_dict is None:
+        url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/.pytorch-slow-tests'
+        try:
+            contents = urlopen(url, timeout=1).read().decode('utf-8')
+            slow_tests_dict = json.loads(contents)
+        except Exception as e:
+            print(f'Could not download slow test stats because of error {e}. Proceeding with no added slow tests.')
+            slow_tests_dict = {}
+    test_suite = str(test.__class__).split('\'')[1]
+    test_name = f'{test._testMethodName} ({test_suite})'
+
+    if test_name in slow_tests_dict:
+        getattr(test, test._testMethodName).__dict__['slow_test'] = True
+        if not TEST_WITH_SLOW:
+            raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+
+
 disabled_test_from_issues: Optional[Dict[str, Any]] = None
 def check_disabled(test_name):
     global disabled_test_from_issues
@@ -990,7 +1011,7 @@ class TestCase(expecttest.TestCase):
 
     def setUp(self):
 
-
+        check_slow_test_from_stats(self)
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
