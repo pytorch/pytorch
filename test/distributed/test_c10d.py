@@ -4881,11 +4881,8 @@ class CommTest(MultiProcessTestCase):
             store=store,
         )
 
-        default_pg = c10d.distributed_c10d._get_default_group()
         subgroup = dist.new_group([0, 1])
-        default_seq = default_pg._get_sequence_number_for_group()
         subgroup_seq = subgroup._get_sequence_number_for_group()
-        self.assertNotEqual(default_seq, subgroup_seq)
         obj_list = [None for _ in range(dist.get_world_size())]
         dist.all_gather_object(obj_list, subgroup_seq)
         self.assertEqual(len(set(obj_list)), 1)
