@@ -249,8 +249,8 @@ class ChildFailedError(Exception):
 
 def _no_error_file_warning_msg(rank: int, failure: ProcessFailure) -> str:
     msg = [
-        "CHILD PROCESS FAILED WITH NO ERROR_FILE"
-        f"Child process {failure.pid} (local_rank {rank}) FAILED (exitcode {failure.exitcode})"
+        "CHILD PROCESS FAILED WITH NO ERROR_FILE",
+        f"Child process {failure.pid} (local_rank {rank}) FAILED (exitcode {failure.exitcode})",
         f"Error msg: {failure.message}",
         f"Without writing an error file to {failure.error_file}.",
         "While this DOES NOT affect the correctness of your application,",
@@ -287,7 +287,8 @@ def record(fn, error_handler: Optional[ErrorHandler] = None) -> Callable:
      try:
         foobar()
      except ChildFailedError as e:
-        error_handler.copy_error_file(e.get_first_failure())
+        _, failure = e.get_first_failure()
+        error_handler.dump_error_file(failure.error_file, failure.exitcode)
         raise
      except Exception as e:
         error_handler.record(e)
@@ -322,7 +323,7 @@ def record(fn, error_handler: Optional[ErrorHandler] = None) -> Callable:
             except ChildFailedError as e:
                 rank, failure = e.get_first_failure()
                 if failure.error_file != _NOT_AVAILABLE:
-                    error_handler.copy_error_file(failure.error_file)
+                    error_handler.dump_error_file(failure.error_file, failure.exitcode)
                 else:
                     warnings.warn(_no_error_file_warning_msg(rank, failure))
                 raise

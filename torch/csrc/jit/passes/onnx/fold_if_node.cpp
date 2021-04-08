@@ -4,6 +4,7 @@
 #include <torch/torch.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 
 namespace torch {
@@ -138,7 +139,7 @@ static bool constantFoldedConditionValue(Node* node) {
       } else if (input_node->kind() == onnx::ReduceProd) {
         auto sizes = shape.sizes();
         int64_t prod = 1;
-        for (int64_t i = 0; i < (int64_t)*shape.rank(); i++) {
+        for (const auto i : c10::irange((int64_t)*shape.rank())) {
           auto dim = sizes.value()[i].static_size();
           prod *= dim;
         }
