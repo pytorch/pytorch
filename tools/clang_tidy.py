@@ -31,7 +31,7 @@ try:
 except ImportError:
     from pipes import quote
 
-from typing import Dict, Iterable, List, Set
+from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
 Patterns = collections.namedtuple("Patterns", "positive, negative")
 
@@ -75,15 +75,15 @@ def split_negative_from_positive_patterns(patterns: Iterable[str]) -> Patterns:
     return Patterns(positive, negative)
 
 
-def get_file_patterns(globs, regexes) -> Patterns:
+def get_file_patterns(globs: Iterable[str], regexes: Iterable[str]) -> Patterns:
     """Returns a list of compiled regex objects from globs and regex pattern strings."""
     # fnmatch.translate converts a glob into a regular expression.
     # https://docs.python.org/2/library/fnmatch.html#fnmatch.translate
     glob = split_negative_from_positive_patterns(globs)
-    regexes = split_negative_from_positive_patterns(regexes)
+    regexes_ = split_negative_from_positive_patterns(regexes)
 
-    positive_regexes = regexes.positive + [fnmatch.translate(g) for g in glob.positive]
-    negative_regexes = regexes.negative + [fnmatch.translate(g) for g in glob.negative]
+    positive_regexes = regexes_.positive + [fnmatch.translate(g) for g in glob.positive]
+    negative_regexes = regexes_.negative + [fnmatch.translate(g) for g in glob.negative]
 
     positive_patterns = [re.compile(regex) for regex in positive_regexes] or [
         DEFAULT_FILE_PATTERN
@@ -106,7 +106,7 @@ def filter_files(files: Iterable[str], file_patterns: Patterns) -> Iterable[str]
             print("{} omitted due to file filters".format(file))
 
 
-def get_changed_files(revision, paths):
+def get_changed_files(revision: str, paths: List[str]) -> List[str]:
     """Runs git diff to get the paths of all changed files."""
     # --diff-filter AMU gets us files that are (A)dded, (M)odified or (U)nmerged (in the working copy).
     # --name-only makes git diff return only the file paths, without any of the source changes.
@@ -115,13 +115,13 @@ def get_changed_files(revision, paths):
     return output.split("\n")
 
 
-def get_all_files(paths):
+def get_all_files(paths: List[str]) -> List[str]:
     """Returns all files that are tracked by git in the given paths."""
     output = run_shell_command(["git", "ls-files"] + paths)
     return output.split("\n")
 
 
-def get_changed_lines(revision, filename):
+def get_changed_lines(revision: str, filename: str) -> Dict[str, Union[str, List[List[int]]]]:
     """Runs git diff to get the line ranges of all file changes."""
     command = shlex.split("git diff-index --unified=0") + [revision, filename]
     output = run_shell_command(command)
@@ -150,7 +150,7 @@ build {i}: do_cmd
 """
 
 
-def run_shell_commands_in_parallel(commands):
+def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
     """runs all the commands in parallel with ninja, commands is a List[List[str]]"""
     build_entries = [build_template.format(i=i, cmd=' '.join([quote(s) for s in command]))
                      for i, command in enumerate(commands)]
@@ -161,7 +161,7 @@ def run_shell_commands_in_parallel(commands):
         return run_shell_command(['ninja', '-f', f.name])
 
 
-def run_clang_tidy(options, line_filters, files) -> str:
+def run_clang_tidy(options:Any, line_filters: Any, files: Iterable[str]) -> str:
     """Executes the actual clang-tidy command in the shell."""
     command = [options.clang_tidy_exe, "-p", options.compile_commands_dir]
     if not options.config_file and os.path.exists(".clang-tidy"):
@@ -196,7 +196,7 @@ def run_clang_tidy(options, line_filters, files) -> str:
 
 
 def extract_warnings(output: str, base_dir: str = ".") -> Dict[str, Dict[int, Set[str]]]:
-    rc = {}
+    rc: Dict[str, Dict[int, Set[str]]] = {}
     for line in output.split("\n"):
         p = CLANG_WARNING_PATTERN.match(line)
         if p is None:
@@ -205,13 +205,13 @@ def extract_warnings(output: str, base_dir: str = ".") -> Dict[str, Dict[int, Se
             path = os.path.abspath(p.group(1))
         else:
             path = os.path.abspath(os.path.join(base_dir, p.group(1)))
-        line = int(p.group(2))
+        line_no = int(p.group(2))
         warnings = set(p.group(3).split(","))
         if path not in rc:
             rc[path] = {}
-        if line not in rc[path]:
-            rc[path][line] = set()
-        rc[path][line].update(warnings)
+        if line_no not in rc[path]:
+            rc[path][line_no] = set()
+        rc[path][line_no].update(warnings)
     return rc
 
 
@@ -231,7 +231,7 @@ def apply_nolint(fname: str, warnings: Dict[int, Set[str]]) -> None:
         f.write("".join(lines))
 
 
-def parse_options():
+def parse_options() -> Any:
     """Parses the command line options."""
     parser = argparse.ArgumentParser(description="Run Clang-Tidy (on your Git changes)")
     parser.add_argument(
