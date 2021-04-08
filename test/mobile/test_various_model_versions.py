@@ -2,7 +2,7 @@ import torch
 from torch.utils.mobile_optimizer import optimize_for_mobile
 import io
 
-from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
+from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_utils import TestCase, run_tests
 import pathlib
 import tempfile
@@ -93,7 +93,8 @@ class testVariousModelVersions(TestCase):
             output_model_path = pathlib.Path(tmpdirname, "script_module_v4.ptl")
             script_module = torch.jit.script(TestModule(1))
             optimized_scripted_module = optimize_for_mobile(script_module)
-            exported_optimized_scripted_module = optimized_scripted_module._save_for_lite_interpreter(str(output_model_path), _version=4)
+            exported_optimized_scripted_module = \
+                optimized_scripted_module._save_for_lite_interpreter(str(output_model_path), _version=4)
             buf = io.StringIO()
             torch.utils.show_pickle.main(["", tmpdirname + "/" + output_model_path.name + "@*/bytecode.pkl"], output_stream=buf)
             output = buf.getvalue()
