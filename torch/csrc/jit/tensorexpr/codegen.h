@@ -22,18 +22,15 @@ class TORCH_API CodeGen {
 
   CodeGen(
       Stmt* stmt,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      const std::vector<BufferArg>& buffer_args,
+      std::vector<BufferArg> buffer_args,
       at::Device device = at::kCPU,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      const std::string& kernel_func_name = "func")
+      std::string kernel_func_name = "func")
       : stmt_(stmt),
-        buffer_args_(buffer_args),
+        buffer_args_(std::move(buffer_args)),
         device_(device),
-        kernel_func_name_(kernel_func_name) {}
+        kernel_func_name_(std::move(kernel_func_name)) {}
 
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  virtual ~CodeGen() {}
+  virtual ~CodeGen() = default;
 
   Stmt* stmt() const {
     return stmt_;
@@ -179,18 +176,15 @@ class RegisterCodeGenList {
 
   TORCH_API StmtFactoryMethod FindStmtFactoryMethod(const std::string& name);
 
+  RegisterCodeGenList(const RegisterCodeGenList&) = delete;
+  RegisterCodeGenList& operator=(const RegisterCodeGenList&) = delete;
  private:
   template <class CodeGenType>
   friend class RegisterCodeGen;
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  RegisterCodeGenList() {}
+  RegisterCodeGenList() = default;
   TORCH_API void AddStmtFactoryMethod(
       const std::string& name,
       const StmtFactoryMethod& stmt_factory_method);
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  RegisterCodeGenList(const RegisterCodeGenList&) = delete;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  RegisterCodeGenList& operator=(const RegisterCodeGenList&) = delete;
 
   std::unordered_map<std::string, StmtFactoryMethod> stmt_factory_methods_;
 };

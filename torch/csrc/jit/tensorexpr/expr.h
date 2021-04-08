@@ -76,8 +76,7 @@ class ExprNode : public Base {
 // Also serves the primary way to build and operate on other expressions.
 class TORCH_API ExprHandle {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  ExprHandle() {}
+  ExprHandle() = default;
   explicit ExprHandle(const Expr* node)
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       : base_expr_node_(const_cast<Expr*>(node)) {}
@@ -152,9 +151,8 @@ class TORCH_API Var : public ExprNode<Var> {
     return name_hint_;
   }
 
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  Var(const std::string& name_hint, Dtype dtype)
-      : ExprNodeBase(dtype, kPrimitive), name_hint_(name_hint) {}
+  Var(std::string name_hint, Dtype dtype)
+      : ExprNodeBase(dtype, kPrimitive), name_hint_(std::move(name_hint)) {}
 
  private:
   std::string name_hint_;
@@ -183,13 +181,12 @@ class TORCH_API Buf : public ExprNode<Buf> {
       : Buf(new Var(name_hint, kHandle), dims, dtype, initializer) {}
 
   Buf(const Var* var,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      const std::vector<const Expr*>& dims,
+      std::vector<const Expr*> dims,
       Dtype dtype,
       const Expr* initializer = nullptr)
       : ExprNodeBase(dtype, kPrimitive),
         base_handle_(var),
-        dims_(dims),
+        dims_(std::move(dims)),
         initializer_(initializer) {
     TORCH_CHECK(var);
   }

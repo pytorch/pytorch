@@ -987,8 +987,7 @@ SimpleIREvaluator::SimpleIREvaluator(
   expand_intrinsics();
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-SimpleIREvaluator::~SimpleIREvaluator() {}
+SimpleIREvaluator::~SimpleIREvaluator() = default;
 
 void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
   if (args.size() != buffer_args().size()) {

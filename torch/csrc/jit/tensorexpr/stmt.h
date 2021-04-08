@@ -16,8 +16,7 @@ class Placeholder;
 // The common base between all statement node.
 class TORCH_API Stmt : public KernelScopedObject {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  Stmt() {}
+  Stmt()  = default;
   virtual void accept(IRVisitor* visitor) const = 0;
   virtual Stmt* accept_mutator(IRMutator* mutator) = 0;
 
@@ -51,8 +50,7 @@ class StmtNode : public Stmt {
     visitor->visit(static_cast<const Op*>(this));
   }
   Stmt* accept_mutator(IRMutator* mutator) override;
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  StmtNode() {}
+  StmtNode() = default;
 };
 
 template <class Op>
@@ -636,9 +634,8 @@ class TORCH_API For : public StmtNode<For> {
       const Expr* start,
       const Expr* stop,
       Stmt* body,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      const LoopOptions& loop_options)
-      : var_(var), start_(start), stop_(stop), loop_options_(loop_options) {
+      LoopOptions loop_options)
+      : var_(var), start_(start), stop_(stop), loop_options_(std::move(loop_options)) {
     if (!var) {
       throw malformed_input("invalid Var in For loop", var);
     } else if (!start) {
@@ -697,10 +694,9 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
   AtomicAdd(
       const Buf* buf,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      const std::vector<const Expr*>& indices,
+      std::vector<const Expr*> indices,
       const Expr* value)
-      : buf_(buf), indices_(indices), value_(value) {}
+      : buf_(buf), indices_(std::move(indices)), value_(value) {}
 
   const Var* base_handle() const {
     return buf_->base_handle();
@@ -731,8 +727,7 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
 
 class TORCH_API SyncThreads : public StmtNode<SyncThreads> {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  SyncThreads() {}
+  SyncThreads() = default;
 };
 
 /*

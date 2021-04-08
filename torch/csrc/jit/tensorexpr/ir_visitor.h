@@ -53,8 +53,7 @@ class ExternalCall;
 
 class TORCH_API IRVisitor {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  virtual ~IRVisitor() {}
+  virtual ~IRVisitor() = default;
   virtual void visit(const Add* v);
   virtual void visit(const Sub* v);
   virtual void visit(const Mul* v);
