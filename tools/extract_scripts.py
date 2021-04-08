@@ -18,10 +18,7 @@ windows_labels = {'windows-latest', 'windows-2019'}
 
 
 def get_default_shell(job: Job) -> str:
-    if job['runs-on'] in windows_labels:
-        return 'pwsh'
-    else:
-        return 'bash'
+    return 'pwsh' if job['runs-on'] in windows_labels else 'bash'
 
 
 def main() -> None:
