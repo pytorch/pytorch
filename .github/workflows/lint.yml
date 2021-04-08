@@ -46,7 +46,7 @@ jobs:
           (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
         run: |
-          (! git grep -In ' $' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above lines have trailing spaces; please remove them"; false))
+          (! git grep -In '[[:blank:]]$' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above lines have trailing spaces; please remove them"; false))
       - name: Ensure no tabs
         run: |
           (! git grep -In $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above lines have tabs; please convert them to spaces"; false))
