@@ -302,8 +302,6 @@ class ProcessGroup : public torch::CustomClassHolder {
         backendName,
         " does not yet support sequence numbers.")
     );
-    // to appease compiler
-    return 0;
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> send(
