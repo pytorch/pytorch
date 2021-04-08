@@ -231,8 +231,10 @@ i0e = _add_docstr(_special.special_i0e,
 i0e(input, *, out=None) -> Tensor
 Computes the exponentially scaled zeroth order modified Bessel function of the first kind (as defined below)
 for each element of :attr:`input`.
+
 .. math::
-    \text{out}_{i} = \exp(-|x|) * \text{i0(x)} = \exp(-|x|) * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+    \text{out}_{i} = \exp(-|x|) * i0(x) = \exp(-|x|) * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+
 """ + r"""
 Args:
     {input}
