@@ -172,7 +172,7 @@ void RequestCallbackNoPython::processPythonRemoteCall(
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
     const std::shared_ptr<JitFuture>& /* unused */,
-    std::shared_ptr<LazyStreamContext> ctx) const {
+    std::shared_ptr<LazyStreamContext> /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -526,7 +526,7 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
         wrappedMsgType,
         messageId,
         wrappedRpcResponseFuture,
-        {}); // TODO: ctx?
+        {});
 
     wrappedRpcResponseFuture->addCallback(
         at::wrapPropagateTLSState<void>([wrappedRpcResponseFuture,

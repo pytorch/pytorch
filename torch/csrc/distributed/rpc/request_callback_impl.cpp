@@ -26,7 +26,6 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
-#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/unpickled_python_call.h>
 #include <torch/csrc/distributed/rpc/unpickled_python_remote_call.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -358,7 +357,7 @@ void RequestCallbackImpl::processPythonRemoteCall(
         messageId,
         responseFuture,
         uprc.isAsyncExecution(),
-        [ownerRRef, rrefId, forkId, markComplete, lsctx](
+        [ownerRRef, rrefId, forkId, markComplete, lsctx = std::move(lsctx)](
             const py::object& result,
             const int64_t messageId,
             PythonRpcHandler& /* unused */,
@@ -366,11 +365,11 @@ void RequestCallbackImpl::processPythonRemoteCall(
           // Check we have GIL.
           DCHECK(PyGILState_Check());
 
-          IValue py_ivalue = jit::toIValue(result, PyObjectType::get()); // 1. compute value for the RRef
+          IValue py_ivalue = jit::toIValue(result, PyObjectType::get());
 
           py::gil_scoped_release release;
-          ownerRRef->recordAllDevices(lsctx); // 2. record events and store events in RRef
-          ownerRRef->setValue(std::move(py_ivalue)); // 3. set RRef value, this will unblock
+          ownerRRef->recordAllStreams(lsctx);
+          ownerRRef->setValue(std::move(py_ivalue));
           auto m = RemoteRet(rrefId, forkId).toMessage();
           m.setId(messageId);
           responseFuture->markCompleted(
@@ -394,7 +393,7 @@ void RequestCallbackImpl::processPythonRRefFetchCall(
     const std::shared_ptr<JitFuture>& responseFuture,
     std::shared_ptr<LazyStreamContext> lsctx) const {
   // Making this lambda mutable to allow move-capture it in callbacks
-  auto postProcessing = [responseFuture, lsctx](
+  auto postProcessing = [responseFuture, lsctx = std::move(lsctx)](
                             const c10::intrusive_ptr<OwnerRRef>& rref,
                             int64_t messageId) mutable {
     auto whenValueSet = rref->getFuture();
@@ -410,15 +409,12 @@ void RequestCallbackImpl::processPythonRRefFetchCall(
         // py::object
         py::gil_scoped_acquire acquire;
         result = std::make_shared<SerializedPyObj>(
-            pythonRpcHandler.serialize(jit::toPyObject(rref->getValue()))); // a. get the RRef value
+            pythonRpcHandler.serialize(jit::toPyObject(rref->getValue())));
       }
-
-      // b. when a is done, we know that 3. is done and hence 2. is done too. So that we can use the cuda events on the RRef.
-
       Message m =
           PythonRRefFetchRet(std::move(*result).toIValues()).toMessage();
       m.setId(messageId);
-      rref->waitAllDevices(lsctx);
+      rref->blockAllStreams(lsctx);
       responseFuture->markCompleted(
           IValue(c10::make_intrusive<Message>(std::move(m))));
     } catch (py::error_already_set& e) {
