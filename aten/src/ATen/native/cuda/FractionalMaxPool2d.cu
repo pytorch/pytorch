@@ -259,41 +259,6 @@ void fractional_max_pool2d_backward_out_cuda_template(
 
 }// namespace
 
-std::tuple<Tensor&, Tensor&> fractional_max_pool2d_out_cuda(
-    const at::Tensor& input,
-    IntArrayRef pool_size,
-    IntArrayRef output_size,
-    const at::Tensor& randomSamples,
-    at::Tensor& output,
-    at::Tensor& indices) {
-  fractional_max_pool2d_out_cuda_template(
-    output,
-    indices,
-    input,
-    pool_size,
-    output_size,
-    randomSamples);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
-}
-
-std::tuple<Tensor, Tensor> fractional_max_pool2d_cuda(
-  const at::Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& randomSamples)
-{
-  Tensor output = at::empty({0}, input.options());
-  Tensor indices = at::empty({0}, input.options().dtype(kLong));
-  fractional_max_pool2d_out_cuda_template(
-    output,
-    indices,
-    input,
-    pool_size,
-    output_size,
-    randomSamples);
-  return std::tuple<Tensor, Tensor>(output, indices);
-}
-
 Tensor& fractional_max_pool2d_backward_out_cuda(const at::Tensor& gradOutput_,
   const at::Tensor& input,
   IntArrayRef pool_size,
