@@ -473,7 +473,7 @@ Args:
     ``'gelsy'`` is the fastest among the rank-revealing algorithms that also handles rank-deficient inputs.
 
 .. warning::
-    The default value for :attr:`rcond` is subject to a potential change.
+    The default value for :attr:`rcond` may change in a future PyTorch release.
     It is therefore recommended to use some fixed value to avoid potential
     issues upon the library update.
 
