@@ -1466,10 +1466,10 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
-        with self.maybeWarnsRegex(UserWarning, 'floor_divide'):
+        with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
             y1 = x1 // 37.5
         y2 = x1.clone()
-        with self.maybeWarnsRegex(UserWarning, 'floor_divide'):
+        with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
             y2.floor_divide_(37.5)
         expected = self.safeToDense(x1) // 37.5
         self.assertEqual(self.safeToDense(y1), expected)
@@ -3193,6 +3193,14 @@ class TestCudaSparse(TestSparse):
         self.device = 'cuda'
         self.legacy_sparse_tensor = torch.cuda.sparse.DoubleTensor
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    def test_mixed_device_constructor(self):
+        # https://github.com/pytorch/pytorch/issues/54075
+        v = torch.empty(2, 0).cuda()
+        torch.sparse_coo_tensor(([0, 1],), v, (4, 0))
+        v = torch.empty(2, 0).cuda(1)
+        torch.sparse_coo_tensor(([0, 1],), v, (4, 0))
+
 
 @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
 class TestCudaUncoalescedSparse(TestCudaSparse):
@@ -3264,13 +3272,11 @@ class TestSparseUnaryUfuncs(TestCase):
 
         sample = samples[0]
 
-        if len(sample.input) > 1:
-            self.skipTest("Skipped! Testing unary ops, one input is expected")
-        sample = sample.input[0]
+        assert isinstance(sample.input, torch.Tensor)
 
-        expected = op(sample)
+        expected = op(sample.input)
         assert torch.is_tensor(expected)
-        output = op(sample.to_sparse())
+        output = op(sample.input.to_sparse())
         assert torch.is_tensor(output)
         self.assertEqual(output.to_dense(), expected)
 

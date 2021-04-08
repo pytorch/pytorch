@@ -28,6 +28,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/hash.h>
 
 #include <atomic>
 #include <climits>
@@ -333,6 +334,7 @@ struct Environment {
       SugaredValuePtr value,
       TypePtr annotated_type) {
     Value* as_simple_value = asSimple(value);
+    std::cout << typeKindToString(as_simple_value->type()->kind()) << std::endl;
     if (as_simple_value && !as_simple_value->hasDebugName() &&
         meaningfulName(name) &&
         // note: if the value wasn't defined in this block, we might be giving a
@@ -444,6 +446,10 @@ struct Environment {
            makeMagic(
                "__float__",
                std::make_shared<CastValue>(FloatType::get(), aten::Float))},
+          {"complex",
+           makeMagic(
+               "__complex__",
+               std::make_shared<CastValue>(ComplexType::get(), aten::Complex))},
           {"int",
            makeMagic(
                "__int__",
@@ -495,8 +501,6 @@ struct Environment {
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
           {"pow", std::make_shared<BuiltinFunction>(aten::pow, at::nullopt)},
-          {"complex",
-           std::make_shared<BuiltinFunction>(aten::complex, at::nullopt)},
           {"range", SpecialFormValue::create(prim::range)},
           {"zip", SpecialFormValue::create(prim::zip)},
           {"enumerate", SpecialFormValue::create(prim::enumerate)},
@@ -572,12 +576,12 @@ struct Environment {
   ValueTable value_table;
 };
 
-template <class T>
+template <class T, class Hash>
 static Value* materializeConstant(
     T val,
     Graph& graph,
     const SourceRange& r,
-    std::unordered_map<T, Value*>& map) {
+    std::unordered_map<T, Value*, Hash>& map) {
   auto existing_constant = map.find(val);
   if (existing_constant != map.end()) {
     return existing_constant->second;
@@ -664,8 +668,13 @@ struct to_ir {
   Function& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
-  std::unordered_map<int64_t, Value*> integral_constants;
-  std::unordered_map<double, Value*> fp_constants;
+  std::unordered_map<int64_t, Value*, std::hash<int64_t>> integral_constants;
+  std::unordered_map<double, Value*, std::hash<double>> fp_constants;
+  std::unordered_map<
+      c10::complex<double>,
+      Value*,
+      c10::hash<c10::complex<double>>>
+      complex_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
   LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;
@@ -2290,13 +2299,14 @@ struct to_ir {
   NamedValue emitValueToTensor(
       const NamedValue& value,
       const NamedValue& matchTypeOf) {
-    // Add implicit conversion of int/float/bool/number types to tensors
+    // Add implicit conversion of int/float/complex/bool/number types to tensors
     // Used in emitSubscriptAssign to convert:
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
     if (kind == c10::TypeKind::NumberType || kind == c10::TypeKind::IntType ||
-        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType) {
+        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType ||
+        kind == c10::TypeKind::ComplexType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
@@ -2338,7 +2348,7 @@ struct to_ir {
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
 
-      // rhs must be a tensor, implicitly convert int/float/bool
+      // rhs must be a tensor, implicitly convert int/float/complex/bool
       const auto convertedRhs = emitValueToTensor(rhs, slicedArg);
 
       if (tensorIndices.size() == 0) {
@@ -3251,20 +3261,26 @@ struct to_ir {
       const TypePtr& type_hint = nullptr) {
     switch (tree.kind()) {
       case TK_VAR:
+        std::cout << "TYPE VAR:\n";
         return environment_stack->getSugaredVar(Var(tree).name());
       case '.': {
         auto select = Select(tree);
         auto sv = emitSugaredExpr(select.value(), 1);
+        std::cout << "TYPE DOT:\n";
         return sv->attr(select.range(), method, select.selector().name());
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
+        std::cout << "TYPE APPLY:\n";
         return emitApplyExpr(apply, n_binders, type_hint);
       } break;
       case TK_SUBSCRIPT: {
+        std::cout << "TYPE SUBSCRIPT:\n";
         return emitSubscript(Subscript(tree), type_hint);
       } break;
       default:
+        auto l = std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
+        std::cout << "TYPE DEAULT: " << typeKindToString(l->getValue()->type()->kind()) << std::endl;
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
     }
   }
@@ -3607,6 +3623,8 @@ struct to_ir {
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
+        auto val = graph->insertNode(graph->createTuple(values))->output();
+        std::cout << "TUPEEE: " << typeKindToString(val->type()->kind()) << std::endl;
         return graph->insertNode(graph->createTuple(values))->output();
       } break;
       case TK_DICT_LITERAL: {
@@ -3677,6 +3695,9 @@ struct to_ir {
     if (c.isFloatingPoint())
       return materializeConstant(
           c.asFloatingPoint(), *graph, c.range(), fp_constants);
+    else if (c.isComplex())
+      return materializeConstant(
+          c.asComplex(), *graph, c.range(), complex_constants);
     else
       return materializeConstant(
           c.asIntegral(), *graph, c.range(), integral_constants);

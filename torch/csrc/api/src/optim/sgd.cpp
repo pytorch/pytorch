@@ -40,6 +40,14 @@ void SGDOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, nesterov);
 }
 
+double SGDOptions::get_lr() const {
+  return lr();
+}
+
+void SGDOptions::set_lr(const double lr) {
+  this->lr(lr);
+}
+
 bool operator==(const SGDParamState& lhs, const SGDParamState& rhs) {
   return torch::equal(lhs.momentum_buffer(), rhs.momentum_buffer());
 }

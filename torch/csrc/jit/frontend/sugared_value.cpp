@@ -37,6 +37,8 @@ builtin_cast_method_to_scalar_type() {
       {"char", at::kChar},
       {"double", at::kDouble},
       {"float", at::kFloat},
+      {"cfloat", at::kComplexFloat},
+      {"cdouble", at::kComplexDouble},
       {"int", at::kInt},
       {"long", at::kLong},
       {"short", at::kShort},
@@ -413,14 +415,27 @@ SugaredValuePtr SimpleValue::getitem(
     // sure its contents implement the module interface referred to by
     // type_hint.
     if (class_type->is_module() && type_hint) {
-      auto res = g.insert(prim::ModuleDictIndex, {val, idx}, {}, loc);
+      auto res = g.insert(prim::ModuleContainerIndex, {val, idx}, {}, loc);
       res->setType(type_hint);
       return std::make_shared<SimpleValue>(res);
     }
 
     // Defer to the __getitem__ attr on the class.
     return attr(loc, m, "__getitem__")->call(loc, m, {idx}, {}, 1);
-  } else {
+  }
+  else if (auto tuple = val_type->cast<TupleType>()) {
+    std::cout << "HFHEHFEEEEE\n";
+    auto idx_val = toIValue(idx);
+    auto out_type = tuple->elements().at(0);
+    return std::make_shared<SimpleValue>(g.insertNode(g.createTupleIndex(val, idx, out_type))->output());
+  }
+  else if (auto tuple = val_type->cast<AnyTupleType>()) {
+    std::cout << "HFHEHFE\n";
+    throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
+                           << " object is not subscriptable";
+
+  }
+  else {
     throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
                            << " object is not subscriptable";
   }

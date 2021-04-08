@@ -14,12 +14,6 @@ struct SROperatorFunctor {
     std::function<void(ProcessedNode*)> out;
     return out;
   }
-  virtual bool CanReuseInput() {
-    return false;
-  }
-  virtual bool CanReuseOutput() {
-    return false;
-  }
   virtual ~SROperatorFunctor() = default;
 };
 
@@ -35,17 +29,6 @@ C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
     }                                                        \
   };                                                         \
   C10_REGISTER_CLASS(SROperatorRegistry, name, SROperatorFunctor_##id);
-
-#define REGISTER_VIEW_OPERATOR_FUNCTOR(name, id, ...)        \
-  struct SROperatorFunctor_##id : public SROperatorFunctor { \
-    const SROpFunctor fn = __VA_ARGS__;                      \
-    SROperator Generate(Node* n) override {                  \
-      return fn(n);                                          \
-    }                                                        \
-  };                                                         \
-  C10_REGISTER_CLASS(SRViewOperatorRegistry, name, SROperatorFunctor_##id);
-
-C10_DECLARE_REGISTRY(SRViewOperatorRegistry, SROperatorFunctor);
 
 inline at::Tensor create_empty_from(const at::Tensor& t) {
   return at::detail::empty_cpu(
@@ -100,12 +83,11 @@ inline void fastResizeToZero(at::Tensor& t) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(checkResizedDataPtr(t));
 }
 
+bool opIsRegistered(const c10::Symbol& op_name);
+
 bool canRunOutOfPlace(Node* n);
 bool canReuseInputsOutputs(Node* n);
-bool canReuseInputs(Node* n);
-bool canReuseOutputs(Node* n);
 bool canOptimizeConstruct(Node* n);
-bool isViewOp(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 

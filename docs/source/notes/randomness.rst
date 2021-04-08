@@ -37,7 +37,7 @@ Python
 
 For custom operators, you might need to set python seed as well::
 
-    inport random
+    import random
     random.seed(0)
 
 Random number generators in other libraries
@@ -149,5 +149,3 @@ Use :meth:`worker_init_fn` to preserve reproducibility::
         num_workers=num_workers,
         worker_init_fn=seed_worker
     )
-
-

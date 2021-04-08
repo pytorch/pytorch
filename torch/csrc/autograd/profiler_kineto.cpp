@@ -8,8 +8,10 @@
 
 #ifdef USE_KINETO
 #include <pthread.h>
-#include <torch/cuda.h>
 #include <libkineto.h>
+
+#include <unistd.h>
+#include <sys/syscall.h>
 
 // TODO: TO be removed, once this properly works from libkineto
 // Literal copy-n-paste from third_party/kineto/libkineto/src/WeakSymbols.cpp
@@ -35,12 +37,21 @@ inline int64_t getTimeUs() {
   return duration_cast<microseconds>(high_resolution_clock::now().time_since_epoch()).count();
 }
 
+// Getting the linux tid is expensive, so cache it.
+// Caching linux pids and tids is not advisable in the general case,
+// but this is only for profiling purposes and we don't need to handle
+// special cases during fork, clone etc.
+pid_t cachedTid() {
+  static thread_local pid_t tid{(pid_t)syscall(SYS_gettid)};
+  return tid;
+}
+
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
 std::string stacksToStr(const std::vector<std::string>& stacks);
 
 struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   using ProfilerThreadLocalState::ProfilerThreadLocalState;
-  virtual ~KinetoThreadLocalState() override = default;
+  ~KinetoThreadLocalState() override = default;
 
   void reportClientActivity(
       const at::RecordFunction& fn,
@@ -53,7 +64,6 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.endTime = getTimeUs();
     op.opType = std::string(fn.name().str());
     op.device = 0;
-    op.threadId = ctx->startThreadId;
     op.correlation = ctx->correlationId;
     // optimization - postpone shapesToStr till finalizeCPUTrace
     // is called from disableProfiler
@@ -69,8 +79,10 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.inputNames = "[]";
     op.outputNames = "[]";
 
-    //
-    op.threadId = pthread_self();
+    // setting both pthread and linux tid for Kineto
+    op.sysThreadId = cachedTid();
+    op.pthreadId = pthread_self();
+
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
       kineto_events_.emplace_back();
@@ -126,7 +138,7 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
 
   void finalizeCPUTrace() {
     TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
-    for (auto idx = 0; idx < cpu_trace->activities.size(); ++idx) {
+    for (size_t idx = 0; idx < cpu_trace->activities.size(); ++idx) {
       if (kineto_events_[idx].hasShapes()) {
         cpu_trace->activities[idx].inputDims = shapesToStr(kineto_events_[idx].shapes());
       } else {
@@ -214,12 +226,12 @@ void pushProfilingCallbacks() {
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   std::ostringstream oss;
   oss << "[";
-  for (auto t_idx = 0; t_idx < shapes.size(); ++t_idx) {
+  for (size_t t_idx = 0; t_idx < shapes.size(); ++t_idx) {
     if (t_idx > 0) {
       oss << ", ";
     }
     oss << "[";
-    for (auto s_idx = 0; s_idx < shapes[t_idx].size(); ++s_idx) {
+    for (size_t s_idx = 0; s_idx < shapes[t_idx].size(); ++s_idx) {
       if (s_idx > 0) {
         oss << ", ";
       }
@@ -270,7 +282,7 @@ void prepareProfiler(
   }
 
   if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init(!torch::cuda::is_available());
+    libkineto_init(/*cpuOnly=*/!at::hasCUDA(), /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
   }
 
@@ -319,19 +331,19 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     at::removeCallback(state_ptr->callbackHandle());
   }
 
-  state_ptr->mark("__stop_profile");
+  state_ptr->mark("__stop_profile", false);
 
   state_ptr->cpu_trace->span.endTime = getTimeUs();
 
   state_ptr->finalizeCPUTrace();
   libkineto::api().activityProfiler().transferCpuTrace(std::move(state_ptr->cpu_trace));
 
-  auto trace = std::move(libkineto::api().activityProfiler().stopTrace());
+  auto trace = libkineto::api().activityProfiler().stopTrace();
   TORCH_CHECK(trace);
   state_ptr->addTraceEvents(*trace);
   return std::make_unique<ProfilerResult>(
       std::move(state_ptr->kineto_events_),
-      std::move(state_ptr->consolidate()),
+      state_ptr->consolidate(),
       std::move(trace));
 }
 
@@ -355,17 +367,14 @@ KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
 }
 
 c10::DeviceType KinetoEvent::deviceType() const {
+  // fallthrough
   switch (activity_type_) {
-    case (uint8_t)libkineto::ActivityType::CPU_OP:
-      return c10::DeviceType::CPU;
     case (uint8_t)libkineto::ActivityType::GPU_MEMCPY:
-      return c10::DeviceType::CUDA;
     case (uint8_t)libkineto::ActivityType::GPU_MEMSET:
-      return c10::DeviceType::CUDA;
     case (uint8_t)libkineto::ActivityType::CONCURRENT_KERNEL:
       return c10::DeviceType::CUDA;
+    case (uint8_t)libkineto::ActivityType::CPU_OP:
     case (uint8_t)libkineto::ActivityType::EXTERNAL_CORRELATION:
-      return c10::DeviceType::CPU;
     case (uint8_t)libkineto::ActivityType::CUDA_RUNTIME:
       return c10::DeviceType::CPU;
   }
@@ -381,7 +390,7 @@ ProfilerResult::ProfilerResult(
   : events_(std::move(events)),
     legacy_events_(std::move(legacy_events)),
     trace_(std::move(trace)) {}
-ProfilerResult::~ProfilerResult() {}
+ProfilerResult::~ProfilerResult() = default;
 
 void ProfilerResult::save(const std::string& path) {
   // Kineto's save is destructive
@@ -389,7 +398,6 @@ void ProfilerResult::save(const std::string& path) {
   trace_->save(path);
   saved_ = true;
 }
-
 
 }}} // namespace torch::autograd::profiler
 #endif /* USE_KINETO */

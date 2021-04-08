@@ -138,6 +138,9 @@ public:
   // Like findSchema, but also returns OperatorHandle even if there is no schema
   c10::optional<OperatorHandle> findOp(const OperatorName& operator_name);
 
+  // Returns a list of all operator names present in the operatorLookupTable_
+  const std::vector<OperatorName> getAllOpNames();
+
   // ------------------------------------------------------------------------
   //
   // Invoking operators
@@ -385,10 +388,12 @@ public:
   TypedOperatorHandle(const TypedOperatorHandle&) = default;
   TypedOperatorHandle& operator=(const TypedOperatorHandle&) = default;
 
+  // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
   C10_ALWAYS_INLINE Return call(Args... args) const {
     return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
+  // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
   C10_ALWAYS_INLINE Return redispatch(DispatchKeySet currentDispatchKeySet, Args... args) const {
     return c10::Dispatcher::singleton().redispatch<Return, Args...>(*this, currentDispatchKeySet, std::forward<Args>(args)...);
   }
@@ -400,9 +405,73 @@ private:
 };
 
 namespace detail {
-template<class... Args> inline void unused_arg_(const Args&...) {}
+template <class... Args> inline void unused_arg_(const Args&...) {}
+
+// CaptureKernelCall is intended to capture return values from Dispatcher
+// unboxed kernel calls. A record function may request to get outputs from the
+// kernel calls. For boxed kernels, it's straightforward, the returned values
+// are in the stack object. The stack can be passed to record functions. For
+// unboxed kernels, we need to handle different kinds of return values, cache
+// them temporarily, then release the values for the actual function call
+// return.
+template <typename ReturnType>
+struct CaptureKernelCall {
+  template <typename F, typename... Args>
+  CaptureKernelCall(
+      const F& kernel,
+      const TypedOperatorHandle<ReturnType(Args...)>& op,
+      const DispatchKeySet& dispatchKeySet,
+      Args&&... args)
+      // Calls the kernel and capture the result in output_.
+      : output_{kernel.template call<ReturnType, Args...>(
+            op,
+            dispatchKeySet,
+            std::forward<Args>(args)...)} {}
+  // Wraps the return values in a Stack.
+  Stack getOutputs() {
+    Stack stack;
+    impl::push_outputs<ReturnType, false>::copy(output_, &stack);
+    return stack;
+  }
+  // Since we are returning the output_, we don't expect the output_ to be used
+  // afterward. Copy elision and RVO do not apply to class data members. Using
+  // move semantic to avoid copies when possible.
+  ReturnType release() && {
+    return std::move(output_);
+  }
+
+ private:
+  ReturnType output_;
+};
+
+// Handle the lvalue reference differently since it should not be moved.
+template <>
+inline at::Tensor& CaptureKernelCall<at::Tensor&>::release() && {
+  return output_;
 }
 
+// Handle case where the kernel returns void.
+template <>
+struct CaptureKernelCall<void> {
+  template <typename F, typename... Args>
+  CaptureKernelCall(
+      const F& kernel,
+      const TypedOperatorHandle<void(Args...)>& op,
+      const DispatchKeySet& dispatchKeySet,
+      Args&&... args) {
+    // Calling the kernel and no need to capture void.
+    kernel.template call<void, Args...>(
+        op, dispatchKeySet, std::forward<Args>(args)...);
+  }
+  Stack getOutputs() {
+    return Stack();
+  }
+  void release() && {}
+};
+
+} // namespace detail
+
+// See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
 template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<Return(Args...)>& op, bool pre_sampled, DispatchKeySet dispatchKeySet, const KernelFunction& kernel, Args... args) {
     // Check if we need to run callbacks registered with RecordFunction
@@ -420,12 +489,22 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
       } else {
         runRecordFunction(guard, op, dispatchKey);
       }
+      if (C10_UNLIKELY(guard.needsOutputs())) {
+        // Calls the kernel and capture the output temporarily to pass to
+        // RecordFunction.
+        detail::CaptureKernelCall<Return> captureKernelCall(
+            kernel, op, dispatchKeySet, std::forward<Args>(args)...);
+        guard.setOutputs(captureKernelCall.getOutputs());
+        // Releases the captured output to return to caller.
+        return std::move(captureKernelCall).release();
+      }
     }
   }
   // keeping the guard alive while executing the kernel
   return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
+// See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
 template<class Return, class... Args>
 C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
@@ -451,6 +530,7 @@ C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorH
   return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
+// See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
 template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
@@ -481,6 +561,11 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
     }
     // keeping the guard alive while executing the kernel
     kernel.callBoxed(op, dispatchKeySet, stack);
+    // track outputs
+    if (C10_UNLIKELY(
+            guard.isActive() && entry.isObserved() && guard.needsOutputs())) {
+      guard.setOutputs(*stack);
+    }
     return;
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING

@@ -27,6 +27,11 @@ ARG ANACONDA_PYTHON_VERSION
 ADD ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
 
+# Install gcc
+ARG GCC_VERSION
+ADD ./common/install_gcc.sh install_gcc.sh
+RUN bash ./install_gcc.sh && rm install_gcc.sh
+
 # (optional) Install protobuf for ONNX
 ARG PROTOBUF
 ADD ./common/install_protobuf.sh install_protobuf.sh
