@@ -18,7 +18,7 @@ inferExpandGeometry(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
     IntArrayRef sizes);
-TORCH_API std::tuple<DimVector, DimVector>>
+TORCH_API std::tuple<DimVector, DimVector>
 inferExpandGeometry_dimvector(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
