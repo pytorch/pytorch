@@ -332,12 +332,7 @@ public:
     return map(std::expm1);
   }
   Vec256<T> frac() const {
-    return map([](const T& x) -> T {
-      if (std::isinf(x)) {
-        return std::copysign(static_cast<T>(0), x);
-      }
-      return x - at::native::trunc_impl(x);
-    });
+    return *this - this->trunc();
   }
   template <
     typename U = T,
