@@ -25,6 +25,9 @@ void lapackEig(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *w,
 template<class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
+template <class scalar_t, class value_t = scalar_t>
+void lapackSyevd(char jobz, char uplo, int n, scalar_t* a, int lda, value_t* w, scalar_t* work, int lwork, value_t* rwork, int lrwork, int* iwork, int liwork, int* info);
+
 template <class scalar_t>
 void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t* a, int lda, scalar_t* b, int ldb, int* info);
 
@@ -157,6 +160,10 @@ using eig_fn = std::tuple<Tensor, Tensor> (*)(const Tensor&, bool&);
 
 DECLARE_DISPATCH(eig_fn, eig_stub);
 
+using linalg_eig_fn = void (*)(Tensor& /*eigenvalues*/, Tensor& /*eigenvectors*/, Tensor& /*infos*/, const Tensor& /*input*/, bool /*compute_eigenvectors*/);
+
+DECLARE_DISPATCH(linalg_eig_fn, linalg_eig_stub);
+
 /*
   The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
   from a sequence of elementary reflectors, such as produced by the geqrf function.
@@ -234,6 +241,14 @@ DECLARE_DISPATCH(lstsq_fn, lstsq_stub);
 
 using orgqr_fn = Tensor& (*)(Tensor& /*result*/, const Tensor& /*tau*/, Tensor& /*infos*/, int64_t /*n_columns*/);
 DECLARE_DISPATCH(orgqr_fn, orgqr_stub);
+
+using linalg_eigh_fn = void (*)(
+    Tensor& /*eigenvalues*/,
+    Tensor& /*eigenvectors*/,
+    Tensor& /*infos*/,
+    bool /*upper*/,
+    bool /*compute_eigenvectors*/);
+DECLARE_DISPATCH(linalg_eigh_fn, linalg_eigh_stub);
 
 using triangular_solve_fn = void (*)(
     Tensor& /*A*/,
