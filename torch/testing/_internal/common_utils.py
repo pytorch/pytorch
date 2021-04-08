@@ -1194,6 +1194,12 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
+    class ComplexComparison(Exception):
+        pass
+
+    def is_complex(self, *tensors):
+        return any(t.dtype in (torch.complex32, torch.complex64, torch.complex128) for t in tensors)
+
     # Compares x and y
     # TODO: default exact_device to True
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
@@ -1204,9 +1210,13 @@ class TestCase(expecttest.TestCase):
 
         # Tensor x Number and Number x Tensor comparisons
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
+            if self.is_complex(x):
+                raise self.ComplexComparison
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
+            if self.is_complex(y):
+                raise self.ComplexComparison
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         # Tensor x np.bool
@@ -1219,6 +1229,8 @@ class TestCase(expecttest.TestCase):
 
         # Tensor x Tensor
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
+            if self.is_complex(x, y):
+                raise self.ComplexComparison
             debug_msg = ("Attempted to compare with different is_sparse settings: "
                          f"Expected: {x.is_sparse}; Actual: {y.is_sparse}.")
             super().assertEqual(x.is_sparse, y.is_sparse, msg=self._get_assert_msg(msg=msg, debug_msg=debug_msg))
@@ -1341,15 +1353,25 @@ class TestCase(expecttest.TestCase):
             super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         # Tensor x Numpy array
         elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
-            self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
+            y = torch.from_numpy(y)
+            if self.is_complex(x, y):
+                raise self.ComplexComparison
+            self.assertEqual(x, y, atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         # Numpy array x Tensor
         elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
-            self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
+            x = torch.from_numpy(x)
+            if self.is_complex(x, y):
+                raise self.ComplexComparison
+            self.assertEqual(x, y, atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         # Numpy array x Numpy array
         elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
+            x = torch.from_numpy(x)
+            y = torch.from_numpy(y)
+            if self.is_complex(x, y):
+                raise self.ComplexComparison
+            self.assertEqual(x, y, atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         else:
             super().assertEqual(x, y, msg=msg)
