@@ -150,7 +150,7 @@ The main goal of this process is to rephrase all the commit messages below to ma
 * **Please cleanup, and format commit titles to be readable by the general pytorch user.** [Detailed intructions here](https://fb.quip.com/OCRoAbEvrRD9#HdaACARZZvo)
 * Please sort commits into the following categories (you should not rename the categories!), I tried to pre-sort these to ease your work, feel free to move commits around if the current categorization is not good.
 * Please drop any commits that are not user-facing.
-* If anything is from another domain, leave it in the UNTOPICED section at the end and I’ll come and take care of it.
+* If anything is from another domain, leave it in the UNTOPICED section at the end and I'll come and take care of it.
 
 The categories below are as follows:
 
