@@ -21,12 +21,14 @@ from urllib.parse import quote
 import torch
 from torch.serialization import location_tag, normalize_storage_type
 
+from ._dependency_resolver import _DependencyResolver
 from ._file_structure_representation import Folder, _create_folder_from_file_list
 from ._glob_group import GlobPattern, _GlobGroup
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._package_pickler import create_pickler
 from ._stdlib import is_stdlib_module
+from ._utils import _import_module
 from .find_file_dependencies import find_files_source_depends_on
 from .importer import Importer, OrderedImporter, sys_importer
 
@@ -108,8 +110,6 @@ class PackageExporter:
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
         self.serialized_storages: Dict[str, Any] = {}
-        self.extern_modules: List[str] = []
-        self.provided: Dict[str, bool] = {}
         self.verbose = verbose
 
         if isinstance(importer, Importer):
@@ -122,6 +122,7 @@ class PackageExporter:
                 )
             self.importer = OrderedImporter(*importer)
 
+        self.dependency_resolver = _DependencyResolver(self.importer, self.verbose, self._on_require)
         self.patterns: List[
             Tuple[Any, Callable[[str], None], bool]
         ] = []  # 'any' is 're.Pattern' but breaks old mypy
@@ -150,7 +151,8 @@ class PackageExporter:
                 relative_path = filename.relative_to(path).as_posix()
                 archivename = module_path + "/" + relative_path
                 if filename.is_dir():
-                    self.provided[archivename] = True
+                    # self.provided[archivename] = True
+                    self.dependency_resolver.mark_provided(archivename)
                 else:
                     submodule_name = None
                     if filename.name == "__init__.py":
@@ -162,7 +164,8 @@ class PackageExporter:
                         submodule_name = archivename[: -len(".py")].replace("/", ".")
                         is_package = False
 
-                    self.provided[submodule_name] = True
+                    # self.provided[submodule_name] = True
+                    self.dependency_resolver.mark_provided(submodule_name)
                     # we delay the call to save_source_string so that we record all the source files
                     # being provided by this directory structure _before_ attempting to resolve the dependencies
                     # on the source. This makes sure we don't try to copy over modules that will just get
@@ -232,64 +235,13 @@ class PackageExporter:
             dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
             orig_file_name (str, optional): If present, used in logging to identifying where the source came from. Defaults to None.
         """
-        self.provided[module_name] = True
+        # self.provided[module_name] = True
+        self.dependency_resolver.mark_provided(module_name)
         extension = "/__init__.py" if is_package else ".py"
         filename = module_name.replace(".", "/") + extension
         self._write(filename, src)
         if dependencies:
-            package = (
-                module_name if is_package else module_name.rsplit(".", maxsplit=1)[0]
-            )
-            dep_pairs = find_files_source_depends_on(src, package)
-            dep_list = {}
-            for dep_module_name, dep_module_obj in dep_pairs:
-                # handle the case where someone did something like `from pack import sub`
-                # where `sub` is a submodule. In this case we don't have to save pack, just sub.
-                # this ensures we don't pick up additional dependencies on pack.
-                # However, in the case where `sub` is not a submodule but an object, then we do have
-                # to save pack.
-                if dep_module_obj is not None:
-                    possible_submodule = f"{dep_module_name}.{dep_module_obj}"
-                    if self._module_exists(possible_submodule):
-                        dep_list[possible_submodule] = True
-                        # we don't need to save `pack`
-                        continue
-                if self._module_exists(dep_module_name):
-                    dep_list[dep_module_name] = True
-
-            for dep in dep_list.keys():
-                self.debug_deps.append((module_name, dep))
-
-            if self.verbose:
-                dep_str = "".join(f"  {dep}\n" for dep in dep_list.keys())
-                file_info = (
-                    f"(from file {orig_file_name}) "
-                    if orig_file_name is not None
-                    else ""
-                )
-                print(f"{module_name} {file_info}depends on:\n{dep_str}\n")
-
-            for dep in dep_list.keys():
-                self.require_module_if_not_provided(dep)
-
-    def _import_module(self, module_name: str):
-        try:
-            return self.importer.import_module(module_name)
-        except ModuleNotFoundError as e:
-            if not is_mangled(module_name):
-                raise
-            msg = (
-                f"Module not found: '{module_name}'. Modules imported "
-                "from a torch.package cannot be re-exported directly."
-            )
-            raise ModuleNotFoundError(msg) from None
-
-    def _module_exists(self, module_name: str) -> bool:
-        try:
-            self._import_module(module_name)
-            return True
-        except Exception:
-            return False
+            self.dependency_resolver.scan_module_dependencies(module_name, src, is_package, orig_file_name)
 
     def _write_dep_graph(self, failing_module=None):
         edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.debug_deps)
@@ -322,11 +274,6 @@ node [shape=box];
             )
         return "".join(result)
 
-    def require_module_if_not_provided(self, module_name: str, dependencies=True):
-        if self._module_is_already_provided(module_name):
-            return
-        self.require_module(module_name, dependencies)
-
     def require_module(self, module_name: str, dependencies=True):
         """This is called by dependencies resolution when it finds that something in the package
         depends on the module and it is not already present. It then decides how to provide that module.
@@ -334,24 +281,7 @@ node [shape=box];
         and call `save_module` otherwise. Clients can subclass this object
         and override this method to provide other behavior, such as automatically mocking out a whole class
         of modules"""
-
-        root_name = module_name.split(".", maxsplit=1)[0]
-        if self._can_implicitly_extern(root_name):
-            if self.verbose:
-                print(
-                    f"implicitly adding {root_name} to external modules "
-                    f"since it is part of the standard library and is a dependency."
-                )
-            self.save_extern_module(root_name)
-            return
-
-        for i, (pattern, action, _) in enumerate(self.patterns):
-            if pattern.matches(module_name):
-                action(module_name)
-                self.matched_patterns.add(i)
-                return
-
-        self.save_module(module_name, dependencies)
+        self.dependency_resolver.require_module(module_name, dependencies)
 
     def save_module(self, module_name: str, dependencies=True):
         """Save the code for `module_name` into the package. Code for the module is resolved using the `importers` path to find the
@@ -360,7 +290,7 @@ node [shape=box];
             module_name (str): e.g. `my_package.my_subpackage`, code will be saved to provide code for this package.
             dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
         """
-        module = self._import_module(module_name)
+        module = _import_module(module_name, self.importer)
         source = self._get_source_of_module(module)
         self.save_source_string(
             module_name,
@@ -406,15 +336,15 @@ node [shape=box];
                     if module not in all_dependencies:
                         all_dependencies.append(module)
 
-            for dep in all_dependencies:
-                self.debug_deps.append((package + "." + resource, dep))
+            # for dep in all_dependencies:
+            #     self.debug_deps.append((package + "." + resource, dep))
 
             if self.verbose:
                 dep_string = "".join(f"  {dep}\n" for dep in all_dependencies)
                 print(f"{resource} depends on:\n{dep_string}\n")
 
             for module_name in all_dependencies:
-                self.require_module_if_not_provided(module_name)
+                self.dependency_resolver.require_module_if_not_provided(module_name)
 
         self._write(filename, data_value)
 
@@ -523,8 +453,7 @@ node [shape=box];
 
         Prefer using `extern` to only mark modules extern if they are actually required by the packaged code.
         """
-        if module_name not in self.extern_modules:
-            self.extern_modules.append(module_name)
+        self.dependency_resolver.add_extern(module_name)
 
     def save_mock_module(self, module_name: str):
         """Add `module_name` to the package, implemented it with a mocked out version that
@@ -532,11 +461,12 @@ node [shape=box];
 
         Prefer using `mock` to only include this module if it is required by other modules.
         """
-        if "_mock" not in self.provided:
+        # if "_mock" not in self.provided:
+        if not self.dependency_resolver.is_provided("_mock"):
             self.save_source_file(
                 "_mock", str(Path(__file__).parent / "_mock.py"), dependencies=False
             )
-        is_package = hasattr(self._import_module(module_name), "__path__")
+        is_package = hasattr(_import_module(module_name, self.importer), "__path__")
         self.save_source_string(module_name, _MOCK_IMPL, is_package, dependencies=False)
 
     def _reject_denied_module(self, module_name: str):
@@ -546,12 +476,6 @@ node [shape=box];
         raise DeniedModuleError(
             f"{module_name} was required during packaging but has been explicitly blocklisted"
         )
-
-    def _module_is_already_provided(self, qualified_name: str) -> bool:
-        for mod in self.extern_modules:
-            if qualified_name == mod or qualified_name.startswith(mod + "."):
-                return True
-        return qualified_name in self.provided
 
     def _persistent_id(self, obj):
         if torch.is_storage(obj):
@@ -609,7 +533,7 @@ node [shape=box];
                 storage = storage.cpu()
             num_bytes = storage.size() * storage.element_size()
             self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
-        contents = "\n".join(self.extern_modules) + "\n"
+        contents = "\n".join(self.dependency_resolver.extern_modules) + "\n"
         self._write(".data/extern_modules", contents)
         del self.zip_file
         if self.buffer:
@@ -620,11 +544,14 @@ node [shape=box];
         resource = _normalize_path(resource)
         return f"{package_path}/{resource}"
 
-    def _can_implicitly_extern(self, module_name: str):
-        return module_name == "torch" or (
-            module_name not in _DISALLOWED_MODULES and is_stdlib_module(module_name)
-        )
+    def _on_require(self, module_name, dependencies):
+        for i, (pattern, action, _) in enumerate(self.patterns):
+            if pattern.matches(module_name):
+                action(module_name)
+                self.matched_patterns.add(i)
+                return
 
+        self.save_module(module_name, dependencies)
 
 # even though these are in the standard library, we do not allow them to be
 # automatically externed since they offer a lot of system level access
