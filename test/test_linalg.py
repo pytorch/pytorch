@@ -230,7 +230,8 @@ class TestLinalg(TestCase):
         rconds = (None, True, -1)
 
         for batch, matrix_size, driver, rcond in itertools.product(batches, matrix_sizes, drivers, rconds):
-            if rcond and driver != 'gels':
+            # keep the rcond value if it is None or -1, set the driver specific value if it is True
+            if rcond and rcond != -1:
                 if driver in ('gelss', 'gelsd'):
                     # SVD based algorithm; set to zero roughly half of all the singular values
                     rcond = 1.0
@@ -238,6 +239,10 @@ class TestLinalg(TestCase):
                     # driver == 'gelsy'
                     # QR based algorithm; setting the value too high might lead to non-unique solutions and flaky tests
                     rcond = 1e-3
+
+            # specifying rcond value has no effect for gels driver so no need to run the tests again
+            if driver == 'gels' and rcond != None:
+                continue
 
             shape = batch + matrix_size
             a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
@@ -248,11 +253,15 @@ class TestLinalg(TestCase):
             res = torch.linalg.lstsq(a, b, rcond=rcond, driver=driver)
             sol = res.solution
 
+            # Only checks gelsd, gelss, gelsy drivers
             check_correctness_scipy(a, b, res, driver, rcond)
+
+            # Only checks gelsd driver
             check_correctness_numpy(a, b, res, driver, rcond)
 
-            # gels driver is not checked comparing to NumPy or SciPy
-            if driver == 'gels' and rcond is None:
+            # gels driver is not checked by comparing to NumPy or SciPy implementation
+            # because NumPy and SciPy do not implement this driver
+            if driver == 'gels' and rcond == None:
                 check_solution_correctness(a, b, sol)
 
     @skipCUDAIfNoMagma
