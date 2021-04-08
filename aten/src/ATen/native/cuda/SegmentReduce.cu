@@ -1,4 +1,3 @@
-
 #include <ATen/native/SegmentReduce.h>
 
 #include <ATen/ATen.h>
@@ -6,7 +5,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <ATen/cuda/CubUtils.cuh>
+#include <ATen/cuda/cub.cuh>
 #include <iostream>
 
 namespace at {
