@@ -88,6 +88,8 @@ class ListenThread : public BackgroundThread {
     void callbackHandler(int socket);
     // List of callbacks map each watched key
     std::unordered_map<std::string, std::function<void(std::string, std::string)>> keyToCallbacks_;
+  private:
+    std::mutex keyToCallbacksLock;
 };
 
 class TCPStore : public Store {

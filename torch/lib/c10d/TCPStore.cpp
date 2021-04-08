@@ -122,7 +122,9 @@ ListenThread::ListenThread(int listenSocket) : BackgroundThread(listenSocket) {
 void ListenThread::addCallback(
     std::string key,
     std::function<void(std::string, std::string)> cb) {
+  keyToCallbacksLock.lock();
   keyToCallbacks_[key] = cb;
+  keyToCallbacksLock.unlock();
 }
 
 void ListenThread::callbackHandler(int socket) {
@@ -136,7 +138,9 @@ void ListenThread::callbackHandler(int socket) {
   if (watchResponse != WatchResponseType::KEY_UPDATED) {
     throw std::runtime_error("KEY_UPDATED response is expected");
   }
+  keyToCallbacksLock.lock();
   keyToCallbacks_.at(key)(currentValue, newValue);
+  keyToCallbacksLock.unlock();
 }
 
 #ifdef _WIN32
@@ -171,6 +175,11 @@ void ListenThread::run() {
     int ret = recv(fds[0].fd, &data, 1, MSG_PEEK);
     LOG(ERROR) << ret;
     if (ret == 0) {
+      auto rv = WaitForSingleObject(ghStopEvent_, 0);
+      if (rv != WAIT_TIMEOUT) {
+        finished = true;
+        break;
+      }
       continue;
     }
 
@@ -223,8 +232,8 @@ TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket)
   LOG(ERROR) << "finish TCPStoreDaemon()";
 }
 
-void TCPStoreDaemon::cleanUpSockets(std::unordered_map<std::string, std::vector<int>>& socketMap, int fd) {
-  for (auto it = socketMap.begin(); it != socketMap.end();) {
+void TCPStoreDaemon::cleanUpSockets(std::unordered_map<std::string, std::vector<int>>& socketMapping, int fd) {
+  for (auto it = socketMapping.begin(); it != socketMapping.end();) {
     for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
       if (*vecIt == fd) {
         vecIt = it->second.erase(vecIt);
@@ -233,7 +242,7 @@ void TCPStoreDaemon::cleanUpSockets(std::unordered_map<std::string, std::vector<
       }
     }
     if (it->second.size() == 0) {
-      it = socketMap.erase(it);
+      it = socketMapping.erase(it);
     } else {
       ++it;
     }
@@ -354,7 +363,7 @@ void TCPStoreDaemon::setHandler(int socket) {
   auto it = tcpStore_.find(key);
   if (it != tcpStore_.end()) {
     oldData = it->second;
-  } 
+  }
   tcpStore_[key] = newData;
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
