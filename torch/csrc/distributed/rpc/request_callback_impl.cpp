@@ -368,7 +368,7 @@ void RequestCallbackImpl::processPythonRemoteCall(
           IValue py_ivalue = jit::toIValue(result, PyObjectType::get());
 
           py::gil_scoped_release release;
-          ownerRRef->recordAllDevices(lsctx);
+          ownerRRef->recordAllStreams(lsctx);
           ownerRRef->setValue(std::move(py_ivalue));
           auto m = RemoteRet(rrefId, forkId).toMessage();
           m.setId(messageId);
@@ -414,7 +414,7 @@ void RequestCallbackImpl::processPythonRRefFetchCall(
       Message m =
           PythonRRefFetchRet(std::move(*result).toIValues()).toMessage();
       m.setId(messageId);
-      rref->waitAllDevices(lsctx);
+      rref->blockAllStreams(lsctx);
       responseFuture->markCompleted(
           IValue(c10::make_intrusive<Message>(std::move(m))));
     } catch (py::error_already_set& e) {

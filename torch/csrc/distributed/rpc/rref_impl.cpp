@@ -260,7 +260,7 @@ void OwnerRRef::setError(std::exception_ptr eptr) {
   future_->setErrorIfNeeded(std::move(eptr));
 }
 
-void OwnerRRef::recordAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
+void OwnerRRef::recordAllStreams(std::shared_ptr<LazyStreamContext> ctx) {
 #ifdef USE_CUDA_NOT_ROCM
   if (ctx) {
     for (auto stream : ctx->getReservedStreams()) {
@@ -272,7 +272,7 @@ void OwnerRRef::recordAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
 #endif
 }
 
-void OwnerRRef::waitAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
+void OwnerRRef::blockAllStreams(std::shared_ptr<LazyStreamContext> ctx) {
 #ifdef USE_CUDA_NOT_ROCM
   if (ctx) {
     for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
