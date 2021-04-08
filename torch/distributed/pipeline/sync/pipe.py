@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """The Pipe interface."""
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union, cast, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Union, Sequence
 
 import torch
 from torch import Tensor, nn
@@ -70,8 +70,8 @@ def _verify_module(module: nn.Sequential) -> None:
 def _verify_splitting(
     partitions: nn.Sequential, devices: List[torch.device]
 ) -> None:
-    num_parameters = len(list(module.parameters()))
-    num_child_parameters = sum(len(list(child.parameters())) for child in module.children())
+    num_parameters = len(list(partitions.parameters()))
+    num_child_parameters = sum(len(list(child.parameters())) for child in partitions.children())
     if num_parameters == num_child_parameters:
         return
 

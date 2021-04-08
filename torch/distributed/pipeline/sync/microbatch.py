@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """Manipulation of micro-batches."""
 import typing
-from typing import Callable, Iterable, Iterator, List, Union, cast, Sequence
+from typing import Callable, Iterator, List, Union, cast, Sequence
 
 import torch
 from torch import Tensor
@@ -170,13 +170,13 @@ def scatter(*inputs, chunks: int) -> List[Batch]:
         # Handle sequences for backward compatibility.
         if len(inputs) == 1 and isinstance(inputs[0], Sequence):
             is_single_sequence = True
-            inputs = inputs[0]
+            inputs = inputs[0]  # type: ignore
 
         for tensor in inputs:
             tensors = tensor.chunk(chunks)
             rotated.append(tensors)
 
-        unwrapped_inputs = zip(*rotated)
+        unwrapped_inputs = zip(*rotated)  # type: ignore
 
     return [Batch(x, is_single_sequence) for x in unwrapped_inputs]
 
