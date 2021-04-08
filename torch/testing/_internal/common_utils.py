@@ -1194,6 +1194,9 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
+    class QuantizedComparison(Exception):
+        pass
+
     # Compares x and y
     # TODO: default exact_device to True
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
@@ -1253,6 +1256,7 @@ class TestCase(expecttest.TestCase):
                     debug_msg = "Sparse tensor values failed to compare as equal! " + debug_msg_values
                 super().assertTrue(values_result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
             elif x.is_quantized and y.is_quantized:
+                raise self.QuantizedComparison
                 self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
                                  exact_device=exact_device)
