@@ -56,7 +56,7 @@ std::tuple<Container, Container> inferExpandGeometryImpl(
         Container(sizes.begin(), sizes.end()), Container(ndim, 0));
   }
 
-  std::tuple<Container> result((Container(ndim), Container(ndim)));
+  std::tuple<Container, Container> result{Container(ndim), Container(ndim)};
   auto& expandedSizes = std::get<0>(result);
   auto& expandedStrides = std::get<1>(result);
 
