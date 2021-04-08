@@ -797,7 +797,7 @@ Tensor mean_cpu_gpu(const Tensor &self, optional<ScalarType> dtype) {
 }
 
 Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  ScalarType dtype = toValueType(get_dtype_from_self(self, opt_dtype, true));
+  ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
   Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::mean_out_cpu_gpu(self, dim, keepdim, dtype, result);
 }
@@ -1211,13 +1211,16 @@ static Tensor& std_var_out(
     c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction_opt,
     bool keepdim, bool take_sqrt) {
   TORCH_CHECK(self.device().is_cpu() || self.device().is_cuda(),
-              "std and var only supports CPU AND CUDA device type, got: ", self.device().type());
+              "std and var only supports tensors on a CPU or CUDA device, but got: ",
+              self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std and var only supports strided layout, got: ", self.layout());
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-              "std and var only support floating-point dtypes");
+              "std and var only support floating point and complex dtypes");
 
-  if (at::isComplexType(self.scalar_type())){
+  if (at::isComplexType(self.scalar_type())) {
+    // For complex, calculate variance of real and imaginary components
+    // seperately then add to get overall variance.
     ScalarType dtype = c10::toValueType(get_dtype_from_result(result, {}));
     Tensor real_in = at::real(self);
     Tensor real_out = at::empty({0}, self.options().dtype(dtype));
@@ -1248,6 +1251,7 @@ static Tensor& std_var_out(
     return result;
   }
 
+  // Computation for floating point
   const auto correction = correction_opt.value_or(1);
   ScalarType dtype = get_dtype_from_result(result, {});
   auto iter = make_reduction(fname, result, self, dim, keepdim, dtype);
@@ -1276,18 +1280,22 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              fname, " only supports CPU AND CUDA device type, got: ", self.device().type());
+              fname, " only supports tensors on a CPU or CUDA device, got: ",
+              self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-              fname, " only support floating-point dtypes");
+              fname, " only support floating point and complex dtypes");
   TORCH_CHECK(result1.scalar_type() == result2.scalar_type(),
            "provided by result1 dtype must match dtype of result2. Got ",
            toString(result1.scalar_type()),
            " and ",
            toString(result2.scalar_type()),
            ".");
-  if (at::isComplexType(self.scalar_type())){
+  if (at::isComplexType(self.scalar_type())) {
+    // For complex, calculate for real and imaginary components seperately then combine as:
+    // variance = var_real + var_imag
+    // mean = mean_real + j * mean_imag
     ScalarType dtype = c10::toValueType(get_dtype_from_result(result1, {}));
     Tensor real_in = at::real(self);
     Tensor real_out_var = at::empty({0}, self.options().dtype(dtype));
@@ -1323,6 +1331,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     return std::tuple<Tensor&, Tensor&>(result1, result2);
   }
 
+  // Computation for floating point
   const auto correction = correction_opt.value_or(1);
   ScalarType dtype = get_dtype_from_result(result1, {});
   auto iter =

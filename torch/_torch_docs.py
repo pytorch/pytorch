@@ -2983,75 +2983,22 @@ add_docstr(torch.erf,
            r"""
 erf(input, *, out=None) -> Tensor
 
-Computes the error function of each element. The error function is defined as follows:
-
-.. math::
-    \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
-""" + r"""
-
-.. note:: Alias for :func:`torch.special.erf`.
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.erf(torch.tensor([0, -1., 10.]))
-    tensor([ 0.0000, -0.8427,  1.0000])
-""".format(**common_args))
+Alias for :func:`torch.special.erf`.
+""")
 
 add_docstr(torch.erfc,
            r"""
 erfc(input, *, out=None) -> Tensor
 
-Computes the complementary error function of each element of :attr:`input`.
-The complementary error function is defined as follows:
-
-.. math::
-    \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
-""" + r"""
-
-.. note:: Alias for :func:`torch.special.erfc`.
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.erfc(torch.tensor([0, -1., 10.]))
-    tensor([ 1.0000, 1.8427,  0.0000])
-""".format(**common_args))
+Alias for :func:`torch.special.erfc`.
+""")
 
 add_docstr(torch.erfinv,
            r"""
 erfinv(input, *, out=None) -> Tensor
 
-Computes the inverse error function of each element of :attr:`input`.
-The inverse error function is defined in the range :math:`(-1, 1)` as:
-
-.. math::
-    \mathrm{erfinv}(\mathrm{erf}(x)) = x
-""" + r"""
-
-.. note:: Alias for :func:`torch.special.erfinv`.
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.erfinv(torch.tensor([0, 0.5, -1.]))
-    tensor([ 0.0000,  0.4769,    -inf])
-""".format(**common_args))
+Alias for :func:`torch.special.erfinv`.
+""")
 
 add_docstr(torch.exp,
            r"""
@@ -3079,52 +3026,15 @@ add_docstr(torch.exp2,
            r"""
 exp2(input, *, out=None) -> Tensor
 
-Computes the base two exponential function of :attr:`input`.
-
-.. math::
-    y_{i} = 2^{x_{i}}
-
-.. note:: Alias for :func:`torch.special.exp2`.
-""" + r"""
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
-    tensor([ 1.,  2.,  8., 16.])
-""".format(**common_args))
+Alias for :func:`torch.special.exp2`.
+""")
 
 add_docstr(torch.expm1,
            r"""
 expm1(input, *, out=None) -> Tensor
 
-Returns a new tensor with the exponential of the elements minus 1
-of :attr:`input`.
-
-.. math::
-    y_{i} = e^{x_{i}} - 1
-
-.. note:: This function provides greater precision than exp(x) - 1 for small values of x.
-
-.. note:: Alias for :func:`torch.special.expm1`.
-""" + r"""
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.expm1(torch.tensor([0, math.log(2.)]))
-    tensor([ 0.,  1.])
-""".format(**common_args))
+Alias for :func:`torch.special.expm1`.
+""")
 
 add_docstr(torch.eye,
            r"""
@@ -6544,7 +6454,7 @@ Example::
 
 .. function:: normal(mean, std=1.0, *, out=None) -> Tensor
 
-Similar to the function above, but the standard-deviations are shared among
+Similar to the function above, but the standard deviations are shared among
 all drawn elements.
 
 Args:
@@ -7678,58 +7588,15 @@ Sets the number of threads used for interop parallelism
 add_docstr(torch.sigmoid, r"""
 sigmoid(input, *, out=None) -> Tensor
 
-Returns a new tensor with the sigmoid of the elements of :attr:`input`.
-
-.. math::
-    \text{out}_{i} = \frac{1}{1 + e^{-\text{input}_{i}}}
-""" + r"""
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.9213,  1.0887, -0.8858, -1.7683])
-    >>> torch.sigmoid(a)
-    tensor([ 0.7153,  0.7481,  0.2920,  0.1458])
-""".format(**common_args))
+Alias for :func:`torch.special.expit`.
+""")
 
 add_docstr(torch.logit,
            r"""
 logit(input, eps=None, *, out=None) -> Tensor
 
-Returns a new tensor with the logit of the elements of :attr:`input`.
-:attr:`input` is clamped to [eps, 1 - eps] when eps is not None.
-When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
-
-.. math::
-    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
-    z_{i} = \begin{cases}
-        x_{i} & \text{if eps is None} \\
-        \text{eps} & \text{if } x_{i} < \text{eps} \\
-        x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
-        1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
-    \end{cases}
-""" + r"""
-Args:
-    {input}
-    eps (float, optional): the epsilon for input clamp bound. Default: ``None``
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.rand(5)
-    >>> a
-    tensor([0.2796, 0.9331, 0.6486, 0.1523, 0.6516])
-    >>> torch.logit(a, eps=1e-6)
-    tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
-""".format(**common_args))
+Alias for :func:`torch.special.logit`.
+""")
 
 add_docstr(torch.sign,
            r"""
@@ -8188,7 +8055,7 @@ Example::
 add_docstr(torch.std, r"""
 std(input, dim=None, *, correction=1, keepdim=False, out=None) -> Tensor
 
-Returns the standard-deviation over the dimensions specified by :attr:`dim`.
+Calculates the standard deviation over the dimensions specified by :attr:`dim`.
 :attr:`dim` can be a single dimension, list of dimensions, or ``None`` to
 reduce over all dimensions.
 
@@ -8244,7 +8111,7 @@ Keyword args:
 
 .. function:: std(input, unbiased) -> Tensor
 
-Returns the standard-deviation of all elements in the :attr:`input` tensor.
+Calculates the standard deviation of all elements in the :attr:`input` tensor.
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used.
 Otherwise, the sample deviation is calculated, without any correction.
@@ -8266,7 +8133,7 @@ add_docstr(torch.std_mean,
            r"""
 std_mean(input, dim=None, *, correction=1, keepdim=False, out=None) -> (Tensor, Tensor)
 
-Returns the standard-deviation and mean over the dimensions specified by
+Calculates the standard deviation and mean over the dimensions specified by
 :attr:`dim`. :attr:`dim` can be a single dimension, list of dimensions, or
 ``None`` to reduce over all dimensions.
 
@@ -8327,7 +8194,7 @@ Returns:
 
 .. function:: std_mean(input, unbiased) -> (Tensor, Tensor)
 
-Returns the standard-deviation and mean of all elements in the :attr:`input`
+Calculates the standard deviation and mean of all elements in the :attr:`input`
 tensor.
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used.
@@ -9502,7 +9369,7 @@ Example::
 add_docstr(torch.var, r"""
 var(input, dim=None, *, correction=1, keepdim=False, out=None) -> Tensor
 
-Returns the variance over the dimensions specified by :attr:`dim`. :attr:`dim`
+Calcualtes the variance over the dimensions specified by :attr:`dim`. :attr:`dim`
 can be a single dimension, list of dimensions, or ``None`` to reduce over all
 dimensions.
 
@@ -9557,7 +9424,7 @@ Keyword args:
 
 .. function:: var(input, unbiased) -> Tensor
 
-Returns the variance of all elements in the :attr:`input` tensor.
+Calculates the variance of all elements in the :attr:`input` tensor.
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used.
 Otherwise, the sample deviation is calculated, without any correction.
@@ -9579,7 +9446,7 @@ add_docstr(torch.var_mean,
            r"""
 var_mean(input, dim=None, *, correction=1, keepdim=False, out=None) -> (Tensor, Tensor)
 
-Returns the variance and mean over the dimensions specified by :attr:`dim`.
+Calculates the variance and mean over the dimensions specified by :attr:`dim`.
 :attr:`dim` can be a single dimension, list of dimensions, or ``None`` to
 reduce over all dimensions.
 
@@ -9639,7 +9506,7 @@ Returns:
 
 .. function:: var_mean(input, unbiased) -> (Tensor, Tensor)
 
-Returns the standard-deviation and mean of all elements in the :attr:`input`
+Calculates the standard deviation and mean of all elements in the :attr:`input`
 tensor.
 
 If :attr:`unbiased` is ``True``, Bessel's correction will be used.

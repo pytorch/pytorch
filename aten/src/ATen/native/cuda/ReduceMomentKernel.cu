@@ -25,8 +25,8 @@ static void std_var_kernel_cuda(TensorIterator& iter, int64_t correction, bool t
   using limits = std::numeric_limits<int32_t>;
   TORCH_CHECK(
       correction < limits::max() && correction > limits::min(),
-      "Correction must fit in 32-bit on CUDA, but got ",
-      correction);
+      "The correction argument for std and var computation on CUDA must "
+      "fit within a 32-bit integer, but got ", correction);
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "std_var_cuda", [&]() {
     std_var_kernel_impl<scalar_t>(iter, correction, take_sqrt);
   });

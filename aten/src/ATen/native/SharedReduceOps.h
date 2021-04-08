@@ -124,10 +124,10 @@ struct WelfordOps {
     };
   }
   inline C10_DEVICE res_t project(acc_t acc) const __ubsan_ignore_float_divide_by_zero__ {
-    auto mean = acc.mean;
-    combine_t divisor = acc.nf > correction ? acc.nf - correction : 0;
-    auto var = acc.m2 / divisor;
-    detail::pair<scalar_t, scalar_t> results{take_sqrt ? device_sqrt(var) : var, (scalar_t)mean};
+    const auto mean = static_cast<scalar_t>(acc.mean);
+    const combine_t divisor = acc.nf > correction ? acc.nf - correction : 0;
+    const auto var = acc.m2 / divisor;
+    detail::pair<scalar_t, scalar_t> results{take_sqrt ? device_sqrt(var) : var, mean};
     return results;
   }
 

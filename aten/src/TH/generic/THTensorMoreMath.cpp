@@ -302,14 +302,10 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
 }
 
 accreal THTensor_(std_var_all)(THTensor* tensor, int64_t correction, bool take_sqrt) {
-  const auto denom = THTensor_(nElement)(tensor) - correction;
-  if (denom <= 0) {
-    return std::numeric_limits<accreal>::infinity();
-  }
   accreal mean = THTensor_wrap(tensor).mean().item<accreal>();
   accreal sum = 0;
   TH_TENSOR_APPLY(scalar_t, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
-  sum /= denom;
+  sum /= std::max(int64_t{0}, THTensor_(nElement)(tensor) - correction);
   if (take_sqrt) {
     return std::sqrt(sum);
   } else {
