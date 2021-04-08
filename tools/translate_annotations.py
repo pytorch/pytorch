@@ -141,15 +141,15 @@ def translate_all(
             ['git', 'diff-index', '--unified=0', commit, filename],
             encoding='utf-8',
         )
-        if raw_diff.strip():
-            diff = parse_diff(raw_diff)
-            for annotation in annotations:
-                translated = translate(diff, annotation['lineNumber'])
-                if translated:
-                    # mutation... spooky
-                    annotation['filename'] = diff['old_filename']
-                    annotation['lineNumber'] = translated
-                    ann_list.append(annotation)
+        diff = parse_diff(raw_diff) if raw_diff.strip() else None
+        for annotation in annotations:
+            line_number: Optional[int] = annotation['lineNumber']
+            if diff:
+                annotation['filename'] = diff['old_filename']
+                line_number = translate(diff, cast(int, line_number))
+            if line_number:
+                annotation['lineNumber'] = line_number
+                ann_list.append(annotation)
     return ann_list
 
 
