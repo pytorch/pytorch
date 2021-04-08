@@ -798,12 +798,6 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
-            // std::cout << "[" << getpid() << "]" << "[" << std::this_thread::get_id() << "]" << "futureResponseMessage = cb_->operator()(requestMessage, ctx)";
-            // if (ctx) {
-            //   std::cout << " with ctx->devices().size() = " << ctx->devices().size() << std::endl;
-            // } else {
-            //   std::cout << " with empty ctx" << std::endl;
-            // }
             futureResponseMessage = cb_->operator()(requestMessage, ctx);
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =

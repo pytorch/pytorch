@@ -2,16 +2,13 @@
 #include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-// #include <torch/csrc/distributed/rpc/macros.h>
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-
-// #include <unistd.h>
-// #include <thread>
 
 namespace {
 // If the type is subtype of named type, return its qualifiedname, otherwise
@@ -264,7 +261,7 @@ void OwnerRRef::setError(std::exception_ptr eptr) {
 }
 
 void OwnerRRef::recordAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
-// #ifdef USE_CUDA_NOT_ROCM
+#ifdef USE_CUDA_NOT_ROCM
   if (ctx) {
     for (auto stream : ctx->getReservedStreams()) {
       at::cuda::CUDAEvent cudaEvent;
@@ -272,17 +269,17 @@ void OwnerRRef::recordAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
       cudaEvents_.push_back(std::move(cudaEvent));
     }
   }
-// #endif
+#endif
 }
 
 void OwnerRRef::waitAllDevices(std::shared_ptr<LazyStreamContext> ctx) {
-// #ifdef USE_CUDA_NOT_ROCM
+#ifdef USE_CUDA_NOT_ROCM
   if (ctx) {
     for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
       cudaEvent.block(ctx->getStream(cudaEvent.device_index()));
     }
   }
-// #endif
+#endif
 }
 
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {

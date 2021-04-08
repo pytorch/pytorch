@@ -5,12 +5,12 @@
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-// #ifdef USE_CUDA_NOT_ROCM
+#ifdef USE_CUDA_NOT_ROCM
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
-// #endif
+#endif
 
 namespace tensorpipe {
 class Message;
@@ -20,9 +20,9 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-// #ifdef USE_CUDA_NOT_ROCM
+#ifdef USE_CUDA_NOT_ROCM
 using at::cuda::CUDAStream;
-// #endif
+#endif
 
 // A general device context class for both CPU and CUDA. If CUDA is not
 // available, all CUDA-related methods will be no-ops.
@@ -39,7 +39,7 @@ struct TORCH_API LazyStreamContext {
     return {};
   }
 
-// #ifdef USE_CUDA_NOT_ROCM
+#ifdef USE_CUDA_NOT_ROCM
   virtual std::vector<CUDAStream> getReservedStreams() const {
     throw std::runtime_error(
         "Attempting to access CUDA streams, but torch is not built with CUDA");
@@ -51,7 +51,7 @@ struct TORCH_API LazyStreamContext {
         index,
         ", but torch is not built with CUDA"));
   }
-// #endif
+#endif
 };
 
 #ifndef USE_CUDA_NOT_ROCM

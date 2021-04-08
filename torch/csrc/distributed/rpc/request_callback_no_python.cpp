@@ -12,11 +12,7 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
-// #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-
-// #include <unistd.h>
-// #include <thread>
 
 namespace torch {
 namespace distributed {
