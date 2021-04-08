@@ -20,8 +20,7 @@ def _powerSGD_comm_hook_wrapper(
     model,
     state,
     matrix_approximation_rank,
-    use_error_feedback=True,
-    random_seed=0,
+    start_powerSGD_iter,
 ):
     """
     To be consistent with the wrappers of other DDP comm hooks, the input state only needs to be a process group,
@@ -30,8 +29,7 @@ def _powerSGD_comm_hook_wrapper(
     powerSGD_state = powerSGD.PowerSGDState(
         process_group=state,
         matrix_approximation_rank=matrix_approximation_rank,
-        use_error_feedback=use_error_feedback,
-        random_seed=random_seed,
+        start_powerSGD_iter=start_powerSGD_iter,
     )
     model.register_comm_hook(powerSGD_state, comm_hook)
 
