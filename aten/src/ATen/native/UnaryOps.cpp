@@ -474,6 +474,21 @@ Tensor& logit_(Tensor& self, c10::optional<double> eps) {
   return at::logit_out(self, self, eps);
 }
 
+Tensor& special_logit_out(const Tensor& self, c10::optional<double> eps, Tensor& result) {
+  return at::logit_out(result, self, eps);
+}
+Tensor special_logit(const Tensor& self, c10::optional<double> eps) {
+  return self.logit(eps);
+}
+
+// special_expit, alias for sigmoid
+Tensor& special_expit_out(const Tensor& self, Tensor& result) {
+  return at::sigmoid_out(result, self);
+}
+Tensor special_expit(const Tensor& self) {
+  return self.sigmoid();
+}
+
 Tensor& nan_to_num_out(const Tensor& self,
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
