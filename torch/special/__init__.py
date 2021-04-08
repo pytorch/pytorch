@@ -73,7 +73,7 @@ Keyword args:
 
 Example::
 
-    >>> torch.erf(torch.tensor([0, -1., 10.]))
+    >>> torch.special.erf(torch.tensor([0, -1., 10.]))
     tensor([ 0.0000, -0.8427,  1.0000])
 """.format(**common_args))
 
@@ -95,7 +95,7 @@ Keyword args:
 
 Example::
 
-    >>> torch.erfc(torch.tensor([0, -1., 10.]))
+    >>> torch.special.erfc(torch.tensor([0, -1., 10.]))
     tensor([ 1.0000, 1.8427,  0.0000])
 """.format(**common_args))
 
@@ -118,6 +118,110 @@ Keyword args:
 
 Example::
 
-    >>> torch.erfinv(torch.tensor([0, 0.5, -1.]))
+    >>> torch.special.erfinv(torch.tensor([0, 0.5, -1.]))
     tensor([ 0.0000,  0.4769,    -inf])
+""".format(**common_args))
+
+logit = _add_docstr(_special.special_logit,
+                    r"""
+logit(input, eps=None, *, out=None) -> Tensor
+
+Returns a new tensor with the logit of the elements of :attr:`input`.
+:attr:`input` is clamped to [eps, 1 - eps] when eps is not None.
+When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
+
+.. math::
+    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
+    z_{i} = \begin{cases}
+        x_{i} & \text{if eps is None} \\
+        \text{eps} & \text{if } x_{i} < \text{eps} \\
+        x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
+        1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
+    \end{cases}
+""" + r"""
+Args:
+    {input}
+    eps (float, optional): the epsilon for input clamp bound. Default: ``None``
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.rand(5)
+    >>> a
+    tensor([0.2796, 0.9331, 0.6486, 0.1523, 0.6516])
+    >>> torch.special.logit(a, eps=1e-6)
+    tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
+""".format(**common_args))
+
+expit = _add_docstr(_special.special_expit,
+                    r"""
+expit(input, *, out=None) -> Tensor
+
+Computes the expit (also known as the logistic sigmoid function) of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \frac{1}{1 + e^{-\text{input}_{i}}}
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> t = torch.randn(4)
+    >>> t
+    tensor([ 0.9213,  1.0887, -0.8858, -1.7683])
+    >>> torch.special.expit(t)
+    tensor([ 0.7153,  0.7481,  0.2920,  0.1458])
+""".format(**common_args))
+
+exp2 = _add_docstr(_special.special_exp2,
+                   r"""
+exp2(input, *, out=None) -> Tensor
+
+Computes the base two exponential function of :attr:`input`.
+
+.. math::
+    y_{i} = 2^{x_{i}}
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.special.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
+    tensor([ 1.,  2.,  8., 16.])
+""".format(**common_args))
+
+expm1 = _add_docstr(_special.special_expm1,
+                    r"""
+expm1(input, *, out=None) -> Tensor
+
+Computes the exponential of the elements minus 1
+of :attr:`input`.
+
+.. math::
+    y_{i} = e^{x_{i}} - 1
+
+.. note:: This function provides greater precision than exp(x) - 1 for small values of x.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.special.expm1(torch.tensor([0, math.log(2.)]))
+    tensor([ 0.,  1.])
 """.format(**common_args))

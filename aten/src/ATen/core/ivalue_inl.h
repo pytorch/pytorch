@@ -255,9 +255,9 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
   }
 
   template <typename... Args>
-  static c10::intrusive_ptr<Tuple> create(Args... elements_) {
+  static c10::intrusive_ptr<Tuple> create(Args&&... elements_) {
     return c10::make_intrusive<Tuple>(
-        std::vector<IValue>{IValue(elements_)...});
+        std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
   }
 
   const std::vector<IValue>& elements() const& {
@@ -366,7 +366,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   /**
    * Explicitly mark the future as completed with the output value and DataPtrs.
    * The data_ptrs contains storage pointers for all tensors in IValue, which
-   * will be passed to postMarkCompletedHook. Some subclass, like CUDAFuture,
+   * will be passed to preMarkCompletedHook. Some subclass, like CUDAFuture,
    * uses these DataPtrs to synchronize CUDA streams. You only need to provide
    * data_ptrs when 1) DataPtrs cannot be extracted through
    * IValue::getSubValues() or 2) customized DataPtrs extraction is more
@@ -381,10 +381,12 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
         !completed(),
         "Attempting to mark a completed Future as complete again. Note that "
         "a Future can only be marked completed once.");
-    completed_ = true;
-    value_ = std::move(value);
 
-    postMarkCompletedHook(value_, std::move(data_ptrs));
+    preMarkCompletedHook(value, std::move(data_ptrs));
+    // Only set value_ and completed_ flag once preMarkCompletedHook has
+    // returned successfully to allow for proper error propagation.
+    value_ = std::move(value);
+    completed_ = true;
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
@@ -527,7 +529,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   // resides on and record an event in those devices' current streams.
   // The data_ptrs field contains storage pointers of all tensors in the value,
   // which is used by the CUDAFuture subclass to synchronize streams.
-  virtual void postMarkCompletedHook(
+  virtual void preMarkCompletedHook(
       const at::IValue& value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
           data_ptrs) {}
@@ -567,7 +569,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     completed_ = true;
     eptr_ = std::move(eptr);
 
-    // Do not call postMarkCompletedHook() here as there isn't any value.
+    // Do not call preMarkCompletedHook() here as there isn't any value.
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
@@ -1147,7 +1149,19 @@ template <
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(
-          std::move(c10::guts::apply(c10::ivalue::Tuple::create<Args...>, t))) {
+          std::move(c10::guts::apply(c10::ivalue::Tuple::create<const Args&...>, t))) {
+}
+
+template <
+    typename... Args,
+    std::enable_if_t<
+        !guts::disjunction<
+            std::is_lvalue_reference<Args>...,
+            guts::negation<std::is_constructible<IValue, Args>>...>::value,
+        std::nullptr_t>>
+inline IValue::IValue(std::tuple<Args...>&& t)
+    : IValue(
+          std::move(c10::guts::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t)))) {
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
@@ -1377,7 +1391,7 @@ namespace detail {
 
 template <typename T>
 IValue from_(T&& x, std::true_type) {
-  return IValue(std::move(x));
+  return IValue(std::forward<T>(x));
 }
 template <typename T>
 IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
