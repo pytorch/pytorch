@@ -501,3 +501,35 @@ TEST(InferenceModeTest, TestInplaceUpdateInferenceTensorWithNormalTensor) {
   ASSERT_THROWS_WITH(t.add_(s),
     "Inplace update to inference tensor outside InferenceMode is not allowed");
 }
+
+TEST(InferenceModeTest, TestComplexViewInInferenceMode) {
+  torch::Tensor s = torch::ones({3, 3, 2});
+  torch::Tensor t = torch::view_as_complex(s);
+  {
+    InferenceMode guard;
+    torch::Tensor tmp;
+
+    tmp = torch::view_as_real(t);
+    ASSERT_FALSE(is_inference_tensor(tmp));
+    tmp = torch::view_as_complex(s);
+    ASSERT_FALSE(is_inference_tensor(tmp));
+
+    torch::Tensor e = torch::ones({3, 3, 2});
+    tmp = torch::view_as_complex(e);
+    ASSERT_TRUE(is_inference_tensor(tmp));
+    tmp = torch::view_as_real(tmp);
+    ASSERT_TRUE(is_inference_tensor(tmp));
+  }
+}
+
+TEST(InferenceModeTest, TestComplexViewInNormalMode) {
+  torch::Tensor s;
+  {
+    InferenceMode guard;
+    s = torch::ones({3, 3, 2});
+  }
+  torch::Tensor tmp = torch::view_as_complex(s);
+  ASSERT_TRUE(is_inference_tensor(tmp));
+  tmp = torch::view_as_real(tmp);
+  ASSERT_TRUE(is_inference_tensor(tmp));
+}
