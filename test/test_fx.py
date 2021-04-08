@@ -2492,12 +2492,16 @@ def get_example_args(module_cls, constructor_arg_db, extra_kwargs=None):
     return args, kwargs
 
 
-def generate_test_func(test_cls, module_cls, constructor_arg_db):
+def generate_test_func(test_cls, module_cls, constructor_arg_db, expect_traceable=True):
     # Generate a function for testing the given module.
     def run_test(test_cls, module_cls=module_cls):
         args, kwargs = get_example_args(module_cls, constructor_arg_db)
         m = module_cls(*args, **kwargs)
-        symbolic_traced : torch.fx.GraphModule = symbolic_trace(m)
+        if expect_traceable:
+            symbolic_traced : torch.fx.GraphModule = symbolic_trace(m)
+        else:
+            with test_cls.assertRaises(Exception):
+                symbolic_traced : torch.fx.GraphModule = symbolic_trace(m)
     return run_test
 
 
@@ -2583,10 +2587,12 @@ def generate_tests(test_cls, constructor_arg_db):
         for module_name in namespace.modules.__all__:
             # class object for this module (e.g. torch.nn.Linear)
             module_cls = getattr(namespace.modules, module_name)
-            if module_cls in MODULES_TO_SKIP or module_cls in UNTRACEABLE_MODULES:
+            if module_cls in MODULES_TO_SKIP:
                 continue
             # Generate a function for testing this module and setattr it onto the test class.
-            run_test = generate_test_func(test_cls, module_cls, constructor_arg_db)
+            expect_traceable = module_cls not in UNTRACEABLE_MODULES
+            run_test = generate_test_func(test_cls, module_cls, constructor_arg_db,
+                                          expect_traceable=expect_traceable)
             test_name = f'test_{namespace_basename}_{module_name}'
             if module_cls in MODULES_THAT_REQUIRE_FBGEMM:
                 run_test = skipIfNoFBGEMM(run_test)
