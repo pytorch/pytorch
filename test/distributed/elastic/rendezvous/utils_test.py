@@ -4,9 +4,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import socket
 from unittest import TestCase
 
 from torch.distributed.elastic.rendezvous.utils import (
+    _matches_machine_hostname,
     _parse_rendezvous_config,
     _parse_rendezvous_endpoint,
     _try_parse_port,
@@ -182,3 +184,34 @@ class UtilsTest(TestCase):
                     r"between 0 and 65536.$",
                 ):
                     _parse_rendezvous_endpoint(endpoint, default_port=123)
+
+    def test_matches_machine_hostname_returns_true_if_hostname_is_loopback(self) -> None:
+        hosts = ["localhost", "127.0.0.1", "::1", "0000:0000:0000:0000:0000:0000:0000:0001"]
+
+        for host in hosts:
+            with self.subTest(host=host):
+                self.assertTrue(_matches_machine_hostname(host))
+
+    def test_matches_machine_hostname_returns_true_if_hostname_is_machine_hostname(self) -> None:
+        host = socket.gethostname()
+
+        self.assertTrue(_matches_machine_hostname(host))
+
+    def test_matches_machine_hostname_returns_true_if_hostname_is_machine_fqdn(self) -> None:
+        host = socket.getfqdn()
+
+        self.assertTrue(_matches_machine_hostname(host))
+
+    def test_matches_machine_hostname_returns_true_if_hostname_is_machine_address(self) -> None:
+        addr_list = socket.getaddrinfo(socket.gethostname(), None, proto=socket.IPPROTO_TCP)
+
+        for addr in (addr_info[4][0] for addr_info in addr_list):
+            with self.subTest(addr=addr):
+                self.assertTrue(_matches_machine_hostname(addr))
+
+    def test_matches_machine_hostname_returns_false_if_hostname_does_not_match(self) -> None:
+        hosts = ["dummy", "0.0.0.0", "::2"]
+
+        for host in hosts:
+            with self.subTest(host=host):
+                self.assertFalse(_matches_machine_hostname(host))

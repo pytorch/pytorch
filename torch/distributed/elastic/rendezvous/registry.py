@@ -6,6 +6,7 @@
 
 from .api import RendezvousHandler, RendezvousParameters
 from .api import rendezvous_handler_registry as handler_registry
+from .default_rendezvous import create_handler
 
 
 def _create_etcd_handler(params: RendezvousParameters) -> RendezvousHandler:
@@ -14,8 +15,17 @@ def _create_etcd_handler(params: RendezvousParameters) -> RendezvousHandler:
     return etcd_rendezvous.create_rdzv_handler(params)
 
 
+def _create_expr_c10d_handler(params: RendezvousParameters) -> RendezvousHandler:
+    from .c10d_rendezvous_backend import create_backend
+
+    backend = create_backend(params)
+
+    return create_handler(backend.store, backend, params)
+
+
 def _register_default_handlers() -> None:
     handler_registry.register("etcd", _create_etcd_handler)
+    handler_registry.register("c10d-experimental", _create_expr_c10d_handler)
 
 
 # The legacy function kept for backwards compatibility.
