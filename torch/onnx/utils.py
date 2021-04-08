@@ -1041,6 +1041,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                 if symbolic_fn is None:
                     return None
                 attrs = {k: n[k] for k in n.attributeNames()}
+                if op_name == 'PythonOp':
+                    inputs = (n, *inputs)
                 return symbolic_fn(g, *inputs, **attrs)
 
         elif ns == "quantized":
