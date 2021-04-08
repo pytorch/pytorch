@@ -1,4 +1,4 @@
-from typing import Optional, List, Union
+from typing import Optional, List
 
 import torch
 from torch.backends._nnapi.serializer import serialize_model
@@ -11,7 +11,8 @@ class NnapiModule(torch.nn.Module):
     of all inputs and outputs.
     """
 
-    comp: Optional[torch.classes._nnapi.Compilation]
+    # _nnapi.Compilation is defined
+    comp: Optional[torch.classes._nnapi.Compilation]  # type: ignore[name-defined]
     weights: List[torch.Tensor]
     out_templates: List[torch.Tensor]
 
@@ -35,7 +36,8 @@ class NnapiModule(torch.nn.Module):
     @torch.jit.export
     def init(self, args: List[torch.Tensor]):
         assert self.comp is None
-        self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)
+        # self.shape_compute_prepare is a module and not a Tensor
+        self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)  # type: ignore[operator]
         self.weights = [w.contiguous() for w in self.weights]
         comp = torch.classes._nnapi.Compilation()
         comp.init(self.ser_model, self.weights)
