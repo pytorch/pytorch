@@ -1194,6 +1194,9 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
+    class SparseComparison(Exception):
+        pass
+
     # Compares x and y
     # TODO: default exact_device to True
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
@@ -1226,6 +1229,7 @@ class TestCase(expecttest.TestCase):
                          f"Expected: {x.is_quantized}; Actual: {y.is_quantized}.")
             super().assertEqual(x.is_quantized, y.is_quantized, msg=self._get_assert_msg(msg=msg, debug_msg=debug_msg))
             if x.is_sparse:
+                raise self.SparseComparison
                 if x.size() != y.size():
                     debug_msg_sparse = ("Attempted to compare equality of tensors with different sizes: "
                                         f"Expected: {x.size()}; Actual: {y.size()}.")
