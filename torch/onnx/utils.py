@@ -757,13 +757,13 @@ def _set_input_and_output_names(graph, input_names, output_names):
 attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
 
-def _run_symbolic_method(op_name, symbolic_fn, args):
+def _run_symbolic_method(g, op_name, symbolic_fn, args):
     r"""
     This trampoline function gets invoked for every symbolic method
     call from C++.
     """
     try:
-        return symbolic_fn(*args)
+        return symbolic_fn(g, *args)
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
