@@ -344,8 +344,8 @@ void NodeToONNX(
       pyobj = func->get();
     }
 
-    py::object symbolic_fn = onnx_registry.attr("is_registered_op")("PythonOp", "prim", 1);
-    if (!py::hasattr(pyobj, "symbolic") && (symbolic_fn.ptr() == Py_None)) {
+    py::object is_registered_op = onnx_registry.attr("is_registered_op")("prim_PythonOp", "", 9);
+    if (!py::hasattr(pyobj, "symbolic") && (!PyObject_IsTrue(is_registered_op.ptr()))) {
       cloneNode(op);
       return;
     }
@@ -389,7 +389,7 @@ void NodeToONNX(
 
       processSymbolicOutput(op->name(), op, raw_output);
     } else {
-      TORCH_INTERNAL_ASSERT(symbolic_fn.ptr() != Py_None);
+      TORCH_INTERNAL_ASSERT(PyObject_IsTrue(is_registered_op.ptr()));
       Node* n = static_cast<Node*>(op);
       n->s_(attr::name, op->name());
       // Call symbolic function
