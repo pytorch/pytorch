@@ -419,7 +419,7 @@ class TORCH_API Tensor {
   /// Returns is a `Tensor` has a sparse CSR backend.
   bool is_sparse_csr() const {
     // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_sparse_csr();    
+    return impl_->is_sparse_csr();
   }
 
   /// Returns if a `Tensor` is mkldnn tensor.
