@@ -483,6 +483,7 @@ class TestTyping(JitTestCase):
             # type: (Optional[int]) -> int
             return torch.jit._unwrap_optional(x)
 
+
         @torch.jit.script
         def fn(x):
             # type: (int) -> int
