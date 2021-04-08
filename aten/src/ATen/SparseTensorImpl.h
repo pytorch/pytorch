@@ -33,6 +33,8 @@ public:
   // Public for now...
   explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta);
 
+  void release_resources() override;
+
   int64_t nnz() const { return values_.size(0); }
   int64_t sparse_dim() const { return sparse_dim_; }
   int64_t dense_dim() const { return dense_dim_; }

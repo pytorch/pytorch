@@ -1201,7 +1201,7 @@ void magmaGels<c10::complex<double>>(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
+static void apply_solve(Tensor& b, Tensor& A, Tensor& infos_out) {
 #ifndef USE_MAGMA
 AT_ERROR("solve: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1214,11 +1214,13 @@ AT_ERROR("solve: MAGMA library not found in "
 
   if (b.dim() == 2) {
     auto ipiv = at::empty({n}, at::kInt);
-    infos = infos.to(at::kCPU);  // magmaSolve requires infos tensor to live on CPU
+    // magmaSolve requires infos tensor to live on CPU
+    Tensor infos = at::empty(infos_out.sizes(), infos_out.options().device(kCPU));
     magmaSolve<scalar_t>(n, nrhs, A_data, lda, ipiv.data_ptr<magma_int_t>(),
                         b_data, lda, infos.data_ptr<magma_int_t>());
+    infos_out.copy_(infos);
   } else {
-    auto infos_data = infos.data_ptr<magma_int_t>();
+    auto infos_data = infos_out.data_ptr<magma_int_t>();
     auto A_mat_stride = matrixStride(A);
     auto b_mat_stride = matrixStride(b);
     magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
