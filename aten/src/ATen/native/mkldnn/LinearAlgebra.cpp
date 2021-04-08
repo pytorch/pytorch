@@ -54,6 +54,11 @@ void matmul_common(
   TORCH_CHECK(mkldnn_bf16_device_check(),
     "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
 
+  auto batch_items_are_expanded = [&](const Tensor& t) {
+    const auto strides = t.strides();
+    return 0 == std::accumulate(strides.begin(), strides.end(), 1, std::multiplies<int64_t>());
+  };
+
   float dst_coeff = alpha.to<float>();
   float sum_coeff = beta.to<float>();
 
@@ -61,25 +66,25 @@ void matmul_common(
   // In aten, expect beta * result = 0 if beta = 0
   if (sum_coeff == 0.0f)
     result.zero_();
-  auto mat1_c = mat1.contiguous();
-  auto mat2_c = mat2.contiguous();
+  auto mat1_c = batch_items_are_expanded(mat1) ? mat1.contiguous(): mat1;
+  auto mat2_c = batch_items_are_expanded(mat2) ? mat2.contiguous(): mat2;
   const ideep::tensor x = itensor_from_tensor(mat1_c);
   const ideep::tensor w = itensor_from_tensor(mat2_c);
   ideep::tensor y = itensor_from_tensor(result);
   if (bias.defined()) {
     TORCH_CHECK(bias.scalar_type() == at::kBFloat16, "mkldnn_matmul:  only enabled for bf16 path");
-    auto bias_c = bias.contiguous();
-    const ideep::tensor b = itensor_from_tensor(bias_c);
+    const ideep::tensor b = itensor_from_tensor(bias);
     // DNNL only supports bias in 1xN dims
     // For bias = 1 x N case, directly use matmul primitive
     // For other case, use a fused sum to add bias to gemm result
-    if (dst_coeff == 1.0f  && sum_coeff == 1.0f && bias_c.size(0) == 1 && bias_c.dim() == 2) {
+    if (dst_coeff == 1.0f  && sum_coeff == 1.0f && bias.size(0) == 1 && bias.dim() == 2) {
       ideep::matmul_forward::compute(x, w, b, y);
       setStrided(result, y.get_dims(), y.get_strides(), result.storage_offset());
+      return;
     }
     // avoid tensor copy if beta = 0
-    if (sum_coeff != 0.0f && !result.is_same(bias_c))
-      ideep::direct_copy::compute(b, y);
+    if (sum_coeff != 0.0f && !result.is_same(bias))
+      result.copy_(bias);
   }
 
   ideep::matmul_forward::compute(x, w, y, dst_coeff, sum_coeff,
