@@ -396,13 +396,10 @@ void testSequenceNumInit(const std::string& path, int /* unused */, int /* unuse
   auto runTest = [&](int i) {
     NCCLTest test(path, worldSize);
     test.initialize(i, worldSize);
+    test.getProcessGroup().setSequenceNumberForGroup();
     std::lock_guard<std::mutex> lock(m);
-    auto seqNum = test.getProcessGroup().getSequenceNum();
-    // Verify sequence number is set appropriately.
-    EXPECT_NO_THROW(*seqNum);
-    EXPECT_TRUE(seqNum->isSet());
-    auto num = seqNum->get();
-    nums.insert(num);
+    auto seqNum = test.getProcessGroup().getSequenceNumberForGroup();
+    nums.insert(seqNum);
   };
   std::vector<std::thread> threads;
   threads.reserve(worldSize);

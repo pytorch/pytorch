@@ -1,4 +1,5 @@
 #include <c10d/ProcessGroupNCCL.hpp>
+#include "c10/util/Optional.h"
 
 #include <exception>
 #include <map>
@@ -451,21 +452,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     ncclDebugLevel = "UNSET";
   }
 
-  if (rank_ == 0) {
-    // Create and broadcast sequence number
-    auto seq = 1 + rand();
-    sequenceNum_ = c10d::SequenceNum(seq);
-    std::vector<uint8_t> values = c10d::toVec<uint8_t>(seq, 8);
-    store_->set(kSeqNumStoreKey, values);
-  } else {
-    // Read rank 0's sequence number from store.
-    sequenceNum_ = c10d::SequenceNum();
-   store_->wait({kSeqNumStoreKey}, options_->timeout);
-   std::vector<uint8_t> values = store_->get(kSeqNumStoreKey);
-   uint64_t num = c10d::fromVec<uint8_t>(values);
-   sequenceNum_->set(num);
-  }
-
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialized with following options:"
             << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
@@ -474,6 +460,32 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "\nUSE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
+}
+
+void ProcessGroupNCCL::setSequenceNumberForGroup() {
+  if (rank_ == 0) {
+    // Create and broadcast sequence number
+    auto seq = 1 + rand();
+    sequenceNum_ = c10d::SequenceNum(seq);
+    std::vector<uint8_t> values = c10d::toVec<uint8_t>(seq, 8);
+    store_->set(kSeqNumStoreKey, values);
+  } else {
+    // Read rank 0's sequence number from store.
+   sequenceNum_ = c10d::SequenceNum();
+   store_->wait({kSeqNumStoreKey}, options_->timeout);
+   std::vector<uint8_t> values = store_->get(kSeqNumStoreKey);
+   uint64_t num = c10d::fromVec<uint8_t>(values);
+   sequenceNum_->set(num);
+   }
+}
+
+uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
+  TORCH_CHECK(
+    sequenceNum_ != c10::nullopt,
+    "Sequence number is not set for rank ", rank_
+  );
+  return sequenceNum_->get();
+
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {

@@ -259,6 +259,15 @@ class ProcessGroupGloo : public ProcessGroup {
       const BarrierOptions& opts = BarrierOptions(),
       bool waitAllRanks = false) override;
 
+  // Agrees on an initial sequence number for the whole group by having rank 0
+  // create it and broadcast it to other ranks using the store.
+  void setSequenceNumberForGroup() override;
+
+  // Retrieves the current sequence number for the whole group, which should be
+  // in sync. If the returned number is not consistent across the group, it
+  // may indicate that there is some sort of collective desynchronization.
+  uint64_t getSequenceNumberForGroup() override;
+
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
   const c10::intrusive_ptr<Options> options_;

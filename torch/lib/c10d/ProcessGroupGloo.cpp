@@ -652,21 +652,6 @@ ProcessGroupGloo::ProcessGroupGloo(
     throw std::runtime_error("No device(s) specified");
   }
 
-  if (rank == 0) {
-    // Create and broadcast sequence number
-    auto seq = 1 + rand();
-    sequenceNum_ = c10d::SequenceNum(seq);
-    std::vector<char> values = c10d::toVec<char>(seq, 8);
-    store_->set(kSeqNumStoreKey, values);
-  } else {
-    // Read rank 0's sequence number from store.
-   sequenceNum_ = c10d::SequenceNum();
-   store_->wait({kSeqNumStoreKey}, options_->timeout);
-   std::vector<char> values = store_->get(kSeqNumStoreKey);
-   uint64_t num = c10d::fromVec<char>(values);
-   sequenceNum_->set(num);
-   }
-
   // Create and connect a context for every device.
   //
   // Note that the same device can be specified multiple times, either
@@ -2862,6 +2847,31 @@ void ProcessGroupGloo::monitoredBarrier(
   LOG(INFO) << "All ranks passed monitoredBarrier in "
             << elapsedTime.count()
             << " ms.";
+}
+
+void ProcessGroupGloo::setSequenceNumberForGroup() {
+  if (rank_ == 0) {
+    // Create and broadcast sequence number
+    auto seq = 1 + rand();
+    sequenceNum_ = c10d::SequenceNum(seq);
+    std::vector<char> values = c10d::toVec<char>(seq, 8);
+    store_->set(kSeqNumStoreKey, values);
+  } else {
+    // Read rank 0's sequence number from store.
+   sequenceNum_ = c10d::SequenceNum();
+   store_->wait({kSeqNumStoreKey}, options_->timeout);
+   std::vector<char> values = store_->get(kSeqNumStoreKey);
+   uint64_t num = c10d::fromVec<char>(values);
+   sequenceNum_->set(num);
+   }
+}
+
+uint64_t ProcessGroupGloo::getSequenceNumberForGroup() {
+  TORCH_CHECK(
+    sequenceNum_ != c10::nullopt,
+    "Sequence number is not set for rank ", rank_
+  );
+  return sequenceNum_->get();
 }
 
 } // namespace c10d

@@ -1075,6 +1075,14 @@ Arguments:
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_set_sequence_number_for_group",
+              &::c10d::ProcessGroup::setSequenceNumberForGroup,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_sequence_number_for_group",
+              &::c10d::ProcessGroup::getSequenceNumberForGroup,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "monitored_barrier",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::chrono::milliseconds& timeout,

@@ -500,14 +500,15 @@ def init_process_group(backend,
                 "are ignored since they are assigned by the "
                 "MPI runtime.".format(world_size, rank))
 
-        _update_default_pg(_new_process_group_helper(
+        default_pg = _new_process_group_helper(
             -1,
             -1,
             [],
             Backend.MPI,
             None,
             group_name=group_name,
-            timeout=timeout))
+            timeout=timeout)
+        _update_default_pg(default_pg)
     else:
         # backward compatible API
         if store is None:
@@ -517,7 +518,7 @@ def init_process_group(backend,
             store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
-        _update_default_pg(_new_process_group_helper(
+        default_pg = _new_process_group_helper(
             world_size,
             rank,
             [],
@@ -525,7 +526,8 @@ def init_process_group(backend,
             store,
             pg_options=pg_options,
             group_name=group_name,
-            timeout=timeout))
+            timeout=timeout)
+        _update_default_pg(default_pg)
 
     _pg_group_ranks[GroupMember.WORLD] = {i: i for i in range(GroupMember.WORLD.size())}  # type: ignore
     _backend = _pg_map[GroupMember.WORLD][0]  # type: ignore
@@ -541,6 +543,8 @@ def init_process_group(backend,
         # Use store based barrier here since barrier() used a bunch of
         # default devices and messes up NCCL internal state.
         _store_based_barrier(rank, store, timeout)
+        # Set sequence numbers for gloo and nccl process groups.
+        default_pg._set_sequence_number_for_group()
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -2647,5 +2651,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         # Use store based barrier here since barrier() used a bunch of
         # default devices and messes up NCCL internal state.
         _store_based_barrier(global_rank, default_store, timeout)
+        # Set sequence numbers for gloo and nccl process groups.
+        pg._set_sequence_number_for_group()
 
     return pg

@@ -467,15 +467,14 @@ void testMonitoredBarrier(const std::string& path) {
 void testSequenceNumInit(const std::string& path) {
   const auto size = 4;
   auto tests = CollectiveTest::initialize(path, size);
-  // Get numbers
+  for (int i = 0; i < size; ++i) {
+    tests[i].getProcessGroup().setSequenceNumberForGroup();
+  }
+
   std::unordered_set<uint64_t> nums;
   for (int i = 0; i < size; ++i) {
-    auto seqNum = tests[i].getProcessGroup().getSequenceNum();
-    // Verify sequence number is set appropriately.
-    EXPECT_NO_THROW(*seqNum);
-    EXPECT_TRUE(seqNum->isSet());
-    auto num = seqNum->get();
-    nums.insert(num);
+    auto seqNum = tests[i].getProcessGroup().getSequenceNumberForGroup();
+    nums.insert(seqNum);
   }
   EXPECT_EQ(nums.size(), 1);
 }

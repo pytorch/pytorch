@@ -4846,6 +4846,61 @@ class CommTest(MultiProcessTestCase):
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
 
+    def _test_sequence_num_set_default_pg(self, backend):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        default_pg = c10d.distributed_c10d._get_default_group()
+        seq_num = default_pg._get_sequence_number_for_group()
+        obj_list = [None for _ in range(dist.get_world_size())]
+        dist.all_gather_object(obj_list, seq_num)
+        self.assertEqual(len(set(obj_list)), 1)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_default_pg_gloo(self):
+        self._test_sequence_num_set_default_pg(backend="gloo")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_default_pg_nccl(self):
+        torch.cuda.set_device(self.rank)
+        self._test_sequence_num_set_default_pg(backend="nccl")
+
+    def _test_sequence_num_set_new_group(self, backend):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        default_pg = c10d.distributed_c10d._get_default_group()
+        subgroup = dist.new_group([0, 1])
+        default_seq = default_pg._get_sequence_number_for_group()
+        subgroup_seq = subgroup._get_sequence_number_for_group()
+        self.assertNotEqual(default_seq, subgroup_seq)
+        obj_list = [None for _ in range(dist.get_world_size())]
+        dist.all_gather_object(obj_list, subgroup_seq)
+        self.assertEqual(len(set(obj_list)), 1)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_gloo_new_group(self):
+        self._test_sequence_num_set_new_group(backend="gloo")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_nccl_new_group(self):
+        torch.cuda.set_device(self.rank)
+        self._test_sequence_num_set_new_group(backend="nccl")
+
     @requires_gloo()
     def test_pass_gloo_options(self):
         pg_opts = c10d.ProcessGroupGloo.Options()
