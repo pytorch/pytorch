@@ -597,7 +597,7 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
 ) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("replication_pad1d_backward_out_cuda");
+  globalContext().alertNotDeterministic("replication_pad1d_backward_cuda");
 
   TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
       "input tensor must fit into 32-bit index math");
