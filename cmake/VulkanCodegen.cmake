@@ -52,6 +52,14 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
     endif(NOT GLSLC_PATH)
   endif()
 
+  find_program(
+    SPIRV_OPT_PATH spirv-opt
+    PATHS)
+
+  if(NOT SPIRV_OPT_PATH)
+    message(FATAL_ERROR "USE_VULKAN spirv-opt not found")
+  endif(NOT SPIRV_OPT_PATH)
+
   set(PYTHONPATH "$ENV{PYTHONPATH}")
   set(ENV{PYTHONPATH} "$ENV{PYTHONPATH}:${CMAKE_CURRENT_LIST_DIR}/..")
   execute_process(
@@ -61,6 +69,7 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
     --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
     --output-path ${VULKAN_GEN_OUTPUT_PATH}
     --glslc-path=${GLSLC_PATH}
+    --spirv-opt-path=${SPIRV_OPT_PATH}
     --tmp-dir-path=${CMAKE_BINARY_DIR}/vulkan/spv
     --env ${VULKAN_GEN_ARG_ENV}
     RESULT_VARIABLE error_code)

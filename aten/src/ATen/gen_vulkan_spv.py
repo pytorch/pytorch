@@ -14,9 +14,9 @@ DEFAULT_ENV = {"precision": "highp"}
 def getName(filePath):
     return os.path.basename(filePath).replace("/", "_").replace(".", "_")
 
-def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
-    print("hFilePath:{} cppFilePath:{} srcDirPath:{} glslcPath:{} tmpDirPath:{}".format(
-        hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath))
+def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, spirvOptPath, tmpDirPath, env):
+    print("hFilePath:{} cppFilePath:{} srcDirPath:{} glslcPath:{} sprivOptPath: {} tmpDirPath:{}".format(
+        hFilePath, cppFilePath, srcDirPath, glslcPath, spirvOptPath, tmpDirPath))
 
     cmd = "find " + srcDirPath + " -name \"*.glsl\""
     vexs = os.popen(cmd).read().split('\n')
@@ -50,8 +50,16 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
         ]
 
         print("\nglslc cmd:", cmd)
-
         subprocess.check_call(cmd)
+
+        opt_cmd = [
+            spirvOptPath, "-O",
+            spvPath, "-o", spvPath,
+        ]
+
+        print("\nspirv-opt cmd:", opt_cmd)
+        subprocess.check_call(opt_cmd)
+
         spvPaths.append(spvPath)
 
     h = "#pragma once\n"
@@ -113,6 +121,10 @@ def main(argv):
         required=True,
         help='')
     parser.add_argument(
+        '--spirv-opt-path',
+        required=True,
+        help='')
+    parser.add_argument(
         '-t',
         '--tmp-dir-path',
         required=True,
@@ -142,6 +154,7 @@ def main(argv):
         hFilePath=options.output_path + "/spv.h",
         cppFilePath=options.output_path + "/spv.cpp",
         srcDirPath=options.glsl_path,
+        spirvOptPath=options.spirv_opt_path,
         glslcPath=options.glslc_path,
         tmpDirPath=options.tmp_dir_path,
         env=env)
