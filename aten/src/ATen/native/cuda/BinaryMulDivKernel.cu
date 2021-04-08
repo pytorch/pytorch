@@ -1,11 +1,10 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/BinaryOps.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/TensorIterator.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAMathCompat.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/BinaryOps.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <type_traits>
 
@@ -142,7 +141,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
             floordiv += scalar_t(1.0);
           }
         } else {
-          floordiv = c10::cuda::compat::copysign(scalar_t(0), a * inv_b);
+          floordiv = std::copysign(scalar_t(0), a * inv_b);
         }
         return floordiv;
       });
@@ -163,7 +162,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
             floordiv += scalar_t(1.0);
           }
         } else {
-          floordiv = c10::cuda::compat::copysign(scalar_t(0), a / b);
+          floordiv = std::copysign(scalar_t(0), a / b);
         }
         return floordiv;
       });
