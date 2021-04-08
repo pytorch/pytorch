@@ -1041,6 +1041,7 @@
   variants: method
   device_guard: False
   dispatch:
+    MkldnnCPU: copy_mkldnn_
     CompositeExplicitAutograd: copy_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
