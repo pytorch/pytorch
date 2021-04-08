@@ -5491,7 +5491,7 @@ class DistributedTest:
                             self.assertTrue(unused_param_fqn in unused_param_substr or debug_mode_off)
                             self.assertTrue(
                                 str(fqn_to_param_index[unused_param_fqn]) in unused_param_substr,
-                                f"Did not find index {fqn_to_param_index[unused_param_fqn]} for {unused_param_fqn}, original error was {e}"
+                                f"Did not find index {fqn_to_param_index[unused_param_fqn]} for {unused_param_fqn}"
                             )
 
                         # Validate that used param fqns don't show up in error
