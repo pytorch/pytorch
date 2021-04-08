@@ -221,6 +221,9 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
 Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
                                    const Tensor &max_indices,
                                    int64_t num_weights) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("embedding_bag_backward_cuda_max");
 
   auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
 
@@ -354,10 +357,6 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
-
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("_embedding_bag_dense_backward_cuda");
 
   // indices, offsets and offset2bag are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward in
