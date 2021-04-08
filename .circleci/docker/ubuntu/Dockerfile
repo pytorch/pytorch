@@ -85,6 +85,8 @@ ENV INSTALLED_ANDROID ${ANDROID}
 # (optional) Install breakpad
 ARG BREAKPAD
 ADD ./common/install_breakpad.sh install_breakpad.sh
+RUN echo "${BREAKPAD}"
+RUN if [ -n "${BREAKPAD}" ]; then echo HELLO; fi
 RUN if [ -n "${BREAKPAD}" ]; then bash ./install_breakpad.sh; fi
 RUN rm install_breakpad.sh
 ENV INSTALLED_BREAKPAD ${BREAKPAD}
