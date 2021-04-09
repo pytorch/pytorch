@@ -592,23 +592,25 @@ class TestVmapAPI(TestCase):
         B0, B1, B2 = 2, 3, 1237
         tensor = torch.randn(B0, 10)
 
-        self._assert_uses_vmap_fallback((torch.var_mean,), (tensor,))
+        def var_mean_op(x):
+            return torch.var_mean(x, correction=0)
+        self._assert_uses_vmap_fallback((var_mean_op,), (tensor,))
 
         # fallback correctness on torch.var_mean
-        result = vmap(torch.var_mean)(tensor)
-        expected = torch.var_mean(tensor, dim=1)
+        result = vmap(var_mean_op)(tensor)
+        expected = torch.var_mean(tensor, dim=1, correction=0)
         self.assertEqual(result, expected)
 
         # nested vmap
         tensor = torch.randn(B0, B1, 10)
-        result = vmap(vmap(torch.var_mean))(tensor)
-        expected = torch.var_mean(tensor, dim=2)
+        result = vmap(vmap(var_mean_op))(tensor)
+        expected = torch.var_mean(tensor, dim=2, correction=0)
         self.assertEqual(result, expected)
 
         # big batch size, nested vmap
         tensor = torch.randn(B0, B1, B2, 10)
-        result = vmap(vmap(vmap(torch.var_mean)))(tensor)
-        expected = torch.var_mean(tensor, dim=3)
+        result = vmap(vmap(vmap(var_mean_op)))(tensor)
+        expected = torch.var_mean(tensor, dim=3, correction=0)
         self.assertEqual(result, expected)
 
     def test_inplace_fallback_unary(self):
@@ -958,7 +960,8 @@ class Namespace:
             # One day we'll implement a batching rule for torch.var_mean.
             # When that happens, please change the example to use an
             # operator that doesn't have a batching rule implemented.
-            op_using_fallback = torch.var_mean
+            def op_using_fallback(x):
+                return torch.var_mean(x, correction=0)
             vmap(op_using_fallback)(torch.rand(3))
 
         def test_vmap_fallback_check(self):
@@ -969,7 +972,8 @@ class Namespace:
             # One day we'll implement a batching rule for torch.var_mean.
             # When that happens, please change the example to use an
             # operator that doesn't have a batching rule implemented.
-            op_using_fallback = torch.var_mean
+            def op_using_fallback(x):
+                return torch.var_mean(x, correction=0)
 
             @self._wrap_method_with_vmap_fallback_check
             def uses_fallback(self):
