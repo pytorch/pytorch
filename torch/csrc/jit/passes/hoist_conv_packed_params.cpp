@@ -1,3 +1,4 @@
+#include <memory>
 #include <stack>
 
 #include <torch/csrc/jit/api/module.h>
@@ -38,11 +39,10 @@ namespace jit {
 //
 void hoistConvPackedParams(
     Module& rootModule,
+    std::shared_ptr<Graph> graph,
     Node* getConvPackedParamsNode,
     const std::string& prefix,
     int& nameUniqueCounter) {
-  auto method = rootModule.get_method("forward");
-  auto graph = method.graph();
   Value* rootModuleAsValue = graph->inputs()[0];
 
   // get a path from root module to conv module
@@ -81,53 +81,55 @@ void hoistConvPackedParams(
 }
 
 void HoistConvPackedParams(script::Module& m) {
-  auto method = m.get_method("forward");
-  auto graph = method.graph();
+  for (const auto& method : m.get_methods()) {
+    auto graph = method.graph();
 
-  std::stack<Block*> blocks_to_visit;
-  blocks_to_visit.push(graph->block());
-  std::string attr_name_base = "_jit_pass_hoist_conv_packed_params";
-  // counter to ensure new attribute names are unique
-  int nameUniqueCounter = 0;
+    std::stack<Block*> blocks_to_visit;
+    blocks_to_visit.push(graph->block());
+    std::string attr_name_base = "_jit_pass_hoist_conv_packed_params_" + method.name();
+    // counter that when combined with method name ensures new attribute names are unique
+    int nameUniqueCounter = 0;
 
-  while (!blocks_to_visit.empty()) {
-    Block* b = blocks_to_visit.top();
-    blocks_to_visit.pop();
+    while (!blocks_to_visit.empty()) {
+      Block* b = blocks_to_visit.top();
+      blocks_to_visit.pop();
 
-    for (Node* n : b->nodes()) {
-      // make sure this node is fetching {foo}.{_packed_params}
-      bool isGetPackedParamsNode =
-          n->kind() == prim::GetAttr && n->s(attr::name) == "_packed_params";
-      if (isGetPackedParamsNode) {
-        // make sure the foo in {foo}.{_packed_params} is a quantized conv
-        c10::optional<std::string> moduleName = getModuleName(n->inputs()[0]);
-        bool moduleNameIsQuantizedConv = moduleName.has_value() &&
-            (moduleName.value() ==
-                 "__torch__.torch.nn.quantized.modules.conv.Conv1d" ||
-             moduleName.value() ==
-                 "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
-             moduleName.value() ==
-                 "__torch__.torch.nn.quantized.modules.conv.Conv3d" ||
-             moduleName.value() ==
-                 "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU1d" ||
-             moduleName.value() ==
-                 "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d" ||
-             moduleName.value() ==
-                 "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d");
+      for (Node* n : b->nodes()) {
+        // make sure this node is fetching {foo}.{_packed_params}
+        bool isGetPackedParamsNode =
+            n->kind() == prim::GetAttr && n->s(attr::name) == "_packed_params";
+        if (isGetPackedParamsNode) {
+          // make sure the foo in {foo}.{_packed_params} is a quantized conv
+          c10::optional<std::string> moduleName = getModuleName(n->inputs()[0]);
+          bool moduleNameIsQuantizedConv = moduleName.has_value() &&
+              (moduleName.value() ==
+                  "__torch__.torch.nn.quantized.modules.conv.Conv1d" ||
+              moduleName.value() ==
+                  "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
+              moduleName.value() ==
+                  "__torch__.torch.nn.quantized.modules.conv.Conv3d" ||
+              moduleName.value() ==
+                  "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU1d" ||
+              moduleName.value() ==
+                  "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d" ||
+              moduleName.value() ==
+                  "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d");
 
-        if (moduleNameIsQuantizedConv) {
-          GRAPH_UPDATE("Hoisting ", *n, " to root module.");
-          hoistConvPackedParams(m, n, attr_name_base, nameUniqueCounter);
+          if (moduleNameIsQuantizedConv) {
+            GRAPH_UPDATE("Hoisting ", *n, " to root module.");
+            hoistConvPackedParams(m, graph, n, attr_name_base, nameUniqueCounter);
+          }
         }
-      }
 
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
-      }
+        for (Block* subblock : n->blocks()) {
+          blocks_to_visit.push(subblock);
+        }
 
-    } // for
+      } // for
 
-  } // while
+    } // while
+
+  } // for
 }
 
 } // namespace jit
