@@ -152,8 +152,8 @@ class DataParallel(Module):
             for t in chain(self.module.parameters(), self.module.buffers()):
                 if t.device != self.src_device_obj:
                     raise RuntimeError("module must have its parameters and buffers "
-                                    "on device {} (device_ids[0]) but found one of "
-                                    "them on device: {}".format(self.src_device_obj, t.device))
+                                       "on device {} (device_ids[0]) but found one of "
+                                       "them on device: {}".format(self.src_device_obj, t.device))
 
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
             # for forward function without any inputs, empty list and dict will be created
