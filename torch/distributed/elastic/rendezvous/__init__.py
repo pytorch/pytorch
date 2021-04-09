@@ -1,4 +1,4 @@
-#!/usr/bin/env/python3
+# -*- coding: utf-8 -*-
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -13,7 +13,7 @@ a particular functionality that combines a **distributed
 synchronization** primitive with **peer discovery**.
 
 It is used by torchelastic to gather participants of a training job
-(i.e. workers) such that they all agree on the same list of participants
+(i.e. workers) such that they all agree on the same list of participants
 and everyone’s roles, as well as make a consistent collective decision
 on when training can begin/resume.
 
@@ -44,7 +44,7 @@ interpreted as non-retryable.
 
 A simple distributed barrier would not be sufficient, as we also need to
 ensure that only one group of workers exists at any given time (for a
-given job). In other words, new workers (i.e. joining late) should not
+given job). In other words, new workers (i.e. joining late) should not
 be able to form a parallel independent group of workers for the same
 job.
 
@@ -101,12 +101,22 @@ process:
    to participate in next rendezvous.
 """
 
-from .api import (  # noqa: F401
-    RendezvousClosedException,
-    RendezvousException,
-    RendezvousHandler,
-    RendezvousHandlerFactory,
-    RendezvousNonRetryableError,
-    RendezvousParameters,
-    RendezvousTimeoutException,
-)
+from .api import *
+from .registry import _register_default_handlers
+
+
+_register_default_handlers()
+
+
+__all__ = [
+    "RendezvousClosedError",
+    "RendezvousConnectionError",
+    "RendezvousError",
+    "RendezvousHandler",
+    "RendezvousHandlerCreator",
+    "RendezvousHandlerRegistry",
+    "RendezvousParameters",
+    "RendezvousStateError",
+    "RendezvousTimeoutError",
+    "rendezvous_handler_registry",
+]
