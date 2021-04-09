@@ -22,6 +22,7 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
+from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, declare_returned_variables,
     tie_return_values, get_return_value, type_wrapper_name,
@@ -342,6 +343,7 @@ def gen_variable_type_shard(
         'wrapper_registrations': wrapper_registrations,
     })
 
+@with_native_function_with_differentiability_info
 def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     assert dispatch_strategy(fn) == 'use_derived'
     f = fn.func
@@ -689,8 +691,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables(f))
 
-    with native_function_manager(f):
-        body.append(emit_call(f, unpacked_bindings))
+    body.append(emit_call(f, unpacked_bindings))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
