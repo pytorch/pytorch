@@ -93,8 +93,8 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
         # swap each differentiable graph with optimized graph in their execution plan
         for n, state in zip(diff_nodes, fw_states):
             fw_execution_plans = list(state.execution_plans.values())
-            assert(len(fw_execution_plans) == 1)
-            n.g_('Subgraph', fw_execution_plans[0].graph)
+            if len(fw_execution_plans) == 1:
+                n.g_('Subgraph', fw_execution_plans[0].graph)
 
         return graph
     except Exception:

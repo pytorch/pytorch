@@ -793,6 +793,10 @@ void GraphExecutor::debugFlushCompilationCache() {
   }
 }
 
+bool GraphExecutor::isOptimized() const {
+  return pImpl && pImpl->isOptimized();
+}
+
 TORCH_API bool IsNewExecutorEnabled() {
   static const auto disable_new_executor =
       std::getenv("TORCH_JIT_DISABLE_NEW_EXECUTOR");

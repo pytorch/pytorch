@@ -82,6 +82,10 @@ struct GraphExecutorImplBase {
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
 
+  virtual bool isOptimized() const {
+    return false;
+  }
+
  protected:
   friend struct GraphExecutor;
 

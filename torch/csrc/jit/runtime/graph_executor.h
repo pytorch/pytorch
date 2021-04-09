@@ -87,6 +87,8 @@ struct TORCH_API GraphExecutor {
 
   void debugFlushCompilationCache();
 
+  bool isOptimized() const;
+
  private:
   std::shared_ptr<GraphExecutorImplBase> pImpl;
 };
