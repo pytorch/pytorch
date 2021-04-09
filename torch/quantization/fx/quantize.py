@@ -377,7 +377,7 @@ def handle_copy_nodes(
                     if (
                         isinstance(prev_node, Node) and
                         prev_node.op == "call_module" and
-                        is_activation_post_process(modules[prev_node.target])
+                        is_activation_post_process(modules[prev_node.target])  # type: ignore
                     ):
                         prev_prev_node = prev_node.args[0]
                         # If previous node is unmatched, the input to copy node should not
@@ -398,7 +398,7 @@ def handle_copy_nodes(
 
         if all_node_args_have_no_tensors(node, modules, cache_for_no_tensor_check):
             non_tensor_input_binary_op_nodes.add(node)
-        if root_node is None:
+        if root_node is None and node.op != 'placeholder':
             unmatched_nodes.add(node)
 
         # rule 3: for special node, we'll just remove observer for its input
