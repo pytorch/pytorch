@@ -49,7 +49,8 @@ std::unique_ptr<RpcCommandBase> RequestCallbackNoPython::
 }
 
 std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
-    Message& request, std::shared_ptr<LazyStreamContext> ctx) const {
+    Message& request,
+    std::shared_ptr<LazyStreamContext> ctx) const {
   // We need two futures here because it could pause twice when processing a
   // RPC message:
   //  1) waiting for all RRefs in the arguments to become confirmed;
@@ -71,7 +72,7 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
          messageType = request.type(),
          id = request.id(),
-         ctx = std::move(ctx)]() {
+         ctx = std::move(ctx)]() mutable {
           // The cost of pre-request check is minimal thanks to
           // std::shared_lock. The cost is in magnitude
           // of 10us.
@@ -87,7 +88,8 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
                     ->config());
           }
 
-          processRpcWithErrors(*rpc, messageType, id, retFuture, std::move(ctx));
+          processRpcWithErrors(
+              *rpc, messageType, id, retFuture, std::move(ctx));
 
           // Response message has been sent at this moment, this post-response
           // work doesn't affect RPC trip time.
@@ -607,7 +609,8 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
-      processPythonRemoteCall(rpc, markComplete, messageId, responseFuture, std::move(ctx));
+      processPythonRemoteCall(
+          rpc, markComplete, messageId, responseFuture, std::move(ctx));
       return;
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
@@ -615,7 +618,8 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
-      processPythonRRefFetchCall(rpc, messageId, responseFuture, std::move(ctx));
+      processPythonRRefFetchCall(
+          rpc, messageId, responseFuture, std::move(ctx));
       return;
     }
     case MessageType::RREF_USER_DELETE: {
