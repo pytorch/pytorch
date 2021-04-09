@@ -35,6 +35,7 @@
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/proto_convert.h"
+#include "caffe2/utils/signal_handler.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/module_python.h"
@@ -1031,6 +1032,13 @@ void addObjectMethods(py::module& m) {
 
 void addGlobalMethods(py::module& m) {
   m.attr("is_asan") = py::bool_(C10_ASAN_ENABLED);
+  m.attr("has_fbgemm") = py::bool_(
+#ifdef USE_FBGEMM
+      true
+#else
+      false
+#endif
+  );
   m.def("get_build_options", []() { return GetBuildOptions(); });
 
   // The old mkl backend has been removed permanently, but we
@@ -1913,6 +1921,11 @@ void addGlobalMethods(py::module& m) {
     new_proto.SerializeToString(&out);
     return py::bytes(out);
   });
+
+#if defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+  m.def("set_print_stack_traces_on_fatal_signal",
+    &caffe2::setPrintStackTracesOnFatalSignal);
+#endif
 
   auto initialize = [&]() {
   // Initialization of the module

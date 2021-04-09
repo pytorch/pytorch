@@ -8,6 +8,7 @@ add_executable(
   bench_compile.cpp
   bench_fuser_overhead.cpp
   bench_gemm.cpp
+  bench_parallel.cpp
   bench_reduce.cpp
   main.cpp)
 

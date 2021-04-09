@@ -68,11 +68,9 @@ __global__ void _sparse_mask_copy_kernel(
 
 } // end namespace
 
-SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
+SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();
-  if (self.is_coalesced()) {
-    return self;
-  }
+  TORCH_INTERNAL_ASSERT(!self.is_coalesced());
   // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
   // we should keep the original tensor intact and do coalesce on a copy of the tensor
   if (nnz < 2) {
@@ -158,7 +156,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // int64_t blockX = min(stride, (int64_t) 512);
   // dim3 block(blockX, 512 / blockX);
   // int64_t grid = min((int64_t) 1024, THCCeilDiv((int64_t) newNnz * stride, (int64_t) block.x * block.y));
-  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream>>>(
+  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream> >>(
   //   THCIndexTensor_(data)(state, uniqueOffsets),
   //   THCIndexTensor_(data)(state, origIndices),
   //   THCTensor_(data)(state, values),

@@ -187,7 +187,8 @@ def _jit_unflatten(vars: List[Tensor], desc: IODescriptor) -> Any: ...
 def _jit_get_operation(op_name: str) -> Callable: ...
 def _jit_pass_optimize_for_mobile(module: 'torch.jit.ScriptModule',
                                   optimization_blocklist: Set[MobileOptimizerType],
-                                  preserved_methods: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
+                                  preserved_methods: List[AnyStr],
+                                  methods_to_optimize: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
 def _jit_pass_vulkan_optimize_for_mobile(module: 'torch.jit.ScriptModule',
                                          preserved_methods: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
 def _jit_pass_metal_optimize_for_mobile(module: 'torch.jit.ScriptModule',
@@ -365,9 +366,15 @@ def _propagate_and_assign_input_shapes(
 class GraphExecutorState:
     ...
 
+# Defined in torch/torch/csrc/jit/ir/alias_analysis.h
+class AliasDb:
+    def __str__(self) -> str: ...
+    ...
+
 # Defined in torch/torch/csrc/jit/ir/ir.h
 class Graph:
     def eraseInput(self, i: _int) -> None: ...
+    def alias_db(self) -> AliasDb: ...
     ...
 
 # Defined in torch/csrc/jit/ir/ir.h
@@ -389,6 +396,7 @@ class Argument:
     type: JitType
     default_value: Optional[Any]
     def has_default_value(self) -> _bool: ...
+    kwarg_only : _bool
     ...
 class FunctionSchema:
     arguments: List[Argument]
@@ -542,6 +550,7 @@ def _disabled_torch_function_impl(func: Callable, types: Iterable[Type], args: T
 # Defined in `valgrind.h` and `callgrind.h` respecitively.
 def _valgrind_supported_platform() -> _bool: ...  # NVALGRIND
 def _valgrind_toggle() -> None: ...  # CALLGRIND_TOGGLE_COLLECT
+def _valgrind_toggle_and_dump_stats() -> None: ...  # CALLGRIND_TOGGLE_COLLECT and CALLGRIND_DUMP_STATS
 
 has_openmp: _bool
 has_mkl: _bool
@@ -830,7 +839,7 @@ class IValue:
 Stack = List[IValue]
 
 class JitType:
-    ...
+    annotation_str : str
 
 class InferredType:
     def __init__(self, arg: Union[JitType, str]): ...
