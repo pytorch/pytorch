@@ -4198,8 +4198,8 @@ class TestAutograd(TestCase):
 
             x_c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
             with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
-                gradcheck(fn, (x_c,), fast_mode=fast_mode)
-            self.assertFalse(gradcheck(fn, (x_c,), raise_exception=False, fast_mode=fast_mode))
+                gradcheck(fn, (x_c,), fast_mode=False)
+            self.assertFalse(gradcheck(fn, (x_c,), raise_exception=False, fast_mode=False))
 
             def fn2(x):  # R -> C
                 y = torch.complex(x, x)
@@ -4207,8 +4207,8 @@ class TestAutograd(TestCase):
                 return y
             x = torch.ones(2, 2, requires_grad=True)
             with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
-                gradcheck(fn2, (x,), fast_mode=fast_mode)
-            self.assertFalse(gradcheck(fn2, (x,), raise_exception=False, fast_mode=fast_mode))
+                gradcheck(fn2, (x,), fast_mode=False)
+            self.assertFalse(gradcheck(fn2, (x,), raise_exception=False, fast_mode=False))
 
             def fn3(x):  # C -> R
                 y = torch.real(x)
@@ -4216,7 +4216,7 @@ class TestAutograd(TestCase):
                 return y
             with self.assertRaisesRegex(RuntimeError, 'Jacobian mismatch for output 0 with respect to input 0'):
                 gradcheck(fn3, (x_c,), fast_mode=False)
-            self.assertFalse(gradcheck(fn3, (x_c,), raise_exception=False, fast_mode=fast_mode))
+            self.assertFalse(gradcheck(fn3, (x_c,), raise_exception=False, fast_mode=False))
         check(fast_mode=True)
         check(fast_mode=False)
 
