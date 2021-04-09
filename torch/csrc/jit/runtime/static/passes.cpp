@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/runtime/static/ops.h>
 
 namespace torch {
 namespace jit {
@@ -406,7 +407,8 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
   bool has_inplace_ops = HasInplaceOp(graph, db);
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto* n : graph->nodes()) {
-    if (!supported.count(n->kind())) {
+    if (!supported.count(n->kind()) ||
+        !opIsRegistered(supported.at(n->kind()))) {
       continue;
     }
     DCHECK(n->outputs().size() == 1);
