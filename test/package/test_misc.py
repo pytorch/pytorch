@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import inspect
 from io import BytesIO
 from sys import version_info
