@@ -176,10 +176,22 @@ class GlooStore : public ::gloo::rendezvous::Store {
     store_->set(key, value);
   }
 
+  void set(const std::string& key, const std::vector<char>& value) override {
+    std::vector<uint8_t> tmp(value.begin(), value.end());
+    store_->set(key, tmp);
+  }
+
   std::vector<uint8_t> get(const std::string& key) override {
     auto value = store_->get(key);
     return value;
   }
+
+  std::vector<char> get(const std::string& key) override {
+    auto value = store_->get(key);
+    return std::vector<char>(value.begin(), value.end());
+  }
+
+
 
   void wait(const std::vector<std::string>& keys) override {
     store_->wait(keys, Store::kDefaultTimeout);
