@@ -193,7 +193,7 @@ class ArrayCType:
         return f'std::array<{self.elem.cpp_type()},{self.size}>'
 
     def cpp_type_registration_declarations(self) -> str:
-        return f'std::array<{self.elem.cpp_type_registration_declarations()}, {self.size}>'
+        return f'std::array<{self.elem.cpp_type_registration_declarations()},{self.size}>'
 
     @property
     def name(self) -> ArgName:
