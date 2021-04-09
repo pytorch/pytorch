@@ -3484,6 +3484,21 @@ struct to_ir {
       // checked is second)
       std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
     }
+
+    // if this is adding two tuples, we deal with it here.
+    // the reason is we can't specify the length of tuples
+    // when registering custom aten::add.
+    if (named_values[0].type()->kind() == TupleType::Kind &&
+        named_values[1].type()->kind() == TupleType::Kind &&
+        kind == aten::add) {
+      auto first_tuple = createTupleUnpack(named_values[0].value(*graph)).vec();
+      auto second_tuple =
+          createTupleUnpack(named_values[1].value(*graph)).vec();
+      first_tuple.insert(
+          first_tuple.end(), second_tuple.begin(), second_tuple.end());
+      return graph->insertNode(graph->createTuple(first_tuple))->output();
+    }
+
     return asSimple(
         makeMagic(
             overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
