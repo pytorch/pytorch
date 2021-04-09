@@ -20,12 +20,16 @@ if(MAKE_EXE STREQUAL "MAKE_EXE-NOTFOUND")
 endif()
 
 # Build jemalloc with autotools and make
-set(JEMALLOC_ROOT "${Torch_SOURCE_DIR}/third_party/jemalloc")
+set(JEMALLOC_SOURCE_DIR "${Torch_SOURCE_DIR}/third_party/jemalloc")
+# NOTE: Build is always in-place
+set(JEMALLOC_BINARY_DIR "${Torch_SOURCE_DIR}/third_party/jemalloc")
 ExternalProject_Add(jemalloc_setup
-  SOURCE_DIR "${JEMALLOC_ROOT}"
+  SOURCE_DIR "${JEMALLOC_SOURCE_DIR}"
   BUILD_IN_SOURCE ON
   CONFIGURE_COMMAND
-    "${JEMALLOC_ROOT}/configure"
+    "${JEMALLOC_SOURCE_DIR}/configure"
+    CC=${CMAKE_C_COMPILER}
+    CXX=${CMAKE_CXX_COMPILER}
     # Required for dlopen support, see https://github.com/jemalloc/jemalloc/issues/937
     --disable-initial-exec-tls
     # Don't override system malloc
@@ -33,24 +37,20 @@ ExternalProject_Add(jemalloc_setup
     # Don't export je_ symbol names
     --without-export
   BUILD_COMMAND
-    "${MAKE_EXE}"
-    build_lib_static
-    "CC=${CMAKE_C_COMPILER}"
-    "CXX=${CMAKE_CXX_COMPILER}"
+    "${MAKE_EXE}" build_lib_static
     VERBOSE=0
     -j$ENV{MAX_JOBS}
   BUILD_BYPRODUCTS
-    "${JEMALLOC_ROOT}/lib/libjemalloc.a"
-    "${JEMALLOC_ROOT}/lib/libjemalloc_pic.a"
-    "${JEMALLOC_ROOT}/include/jemalloc.h"
-  INSTALL_COMMAND ""
-  )
+    "${JEMALLOC_BINARY_DIR}/lib/libjemalloc.a"
+    "${JEMALLOC_BINARY_DIR}/lib/libjemalloc_pic.a"
+    "${JEMALLOC_SOURCE_DIR}/include/jemalloc.h"
+  INSTALL_COMMAND "")
 
 ExternalProject_Add_Step(jemalloc_setup autoconf
   DEPENDERS configure
-  DEPENDS "${JEMALLOC_ROOT}/configure.ac"
-  BYPRODUCTS "${JEMALLOC_ROOT}/configure"
-  WORKING_DIRECTORY "${JEMALLOC_ROOT}"
+  DEPENDS "${JEMALLOC_SOURCE_DIR}/configure.ac"
+  BYPRODUCTS "${JEMALLOC_SOURCE_DIR}/configure"
+  WORKING_DIRECTORY "${JEMALLOC_SOURCE_DIR}"
   COMMAND "${AUTOCONF_EXE}")
 
 add_library(jemalloc::jemalloc INTERFACE IMPORTED GLOBAL)
@@ -58,6 +58,6 @@ add_dependencies(jemalloc::jemalloc jemalloc_setup)
 set_target_properties(
   jemalloc::jemalloc PROPERTIES
   INTERFACE_LINK_LIBRARIES
-    "${JEMALLOC_ROOT}/lib/libjemalloc_pic.a"
+    "${JEMALLOC_BINARY_DIR}/lib/libjemalloc_pic.a"
   INTERFACE_INCLUDE_DIRECTORIES
-    "${JEMALLOC_ROOT}/include/")
+    "${JEMALLOC_SOURCE_DIR}/include/")
