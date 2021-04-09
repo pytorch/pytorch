@@ -1218,13 +1218,10 @@ static Tensor& std_var_out(
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "std and var only support floating point and complex dtypes");
 
-  if (!correction_opt.has_value()) {
-    TORCH_WARN_ONCE(
-        fname, ": the default for the correction parameter is deprecated. ",
-        "Call with correction=1 to maintain the current default behavior.")
-  }
-
-  const auto correction = correction_opt.value_or(1);
+	TORCH_CHECK(correction_opt.has_value(),
+      fname, ": the correction parameter must be given explicitly. ",
+      "Call with correction=1 for the old default behavior.")
+  const auto correction = *correction_opt;
   if (at::isComplexType(self.scalar_type())) {
     // For complex, calculate variance of real and imaginary components
     // seperately then add to get overall variance.
@@ -1298,13 +1295,11 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
            " and ",
            toString(result2.scalar_type()),
            ".");
-  if (!correction_opt.has_value()) {
-    TORCH_WARN_ONCE(
-        fname, ": the default for the correction parameter is deprecated. ",
-        "Call with correction=1 to maintain the current default behavior.")
-  }
 
-  const auto correction = correction_opt.value_or(1);
+	TORCH_CHECK(correction_opt.has_value(),
+      fname, ": the correction parameter must be given explicitly. ",
+      "Call with correction=1 for the old default behavior.")
+  const auto correction = *correction_opt;
   if (at::isComplexType(self.scalar_type())) {
     // For complex, calculate for real and imaginary components seperately then combine as:
     // variance = var_real + var_imag
