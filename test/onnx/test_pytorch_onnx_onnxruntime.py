@@ -4208,10 +4208,10 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_item(self):
         class M(torch.nn.Module):
-            def comp(self, a:int, b:int):
+            def comp(self, a: int, b: int):
                 return a > b
 
-            def forward(self, x, y, i:int) -> bool:
+            def forward(self, x, y, i: int) -> bool:
                 return int(x[y[i]].item()) > i
 
         x = torch.arange(6, dtype=torch.float)
