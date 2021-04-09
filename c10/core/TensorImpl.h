@@ -229,6 +229,17 @@ struct C10_API VariableVersion {
   c10::intrusive_ptr<VersionCounter> version_counter_;
 
  public:
+  // Note [Disabled VariableVersion]
+  // VariableVersion struct has an intrusive_ptr pointing VersionCounter struct
+  // with an atomic variable. Thus `VariableVersion(/*version=*/0)` is not as
+  // cheap as we expected. In some cases constructing a VariableVersion with
+  // version 0 is not necessary so we add a cheap constructor which
+  // doesn't allocate the intrusive_ptr.
+  // Example use cases are:
+  //  - Inference tensors don't track version counter, so they'll just always
+  //    have disbaled VariableVersion.
+  //  - In SavedVariable class we override version_counter_ inside its construtor
+  //    so that we can use the cheap constructor there.
   enum Disabled { DISABLED };
   // It's okay to return true even for inference tensor which
   // doesn't have version counter enabled.
@@ -395,9 +406,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // See Note [Enum ImplType]
   TensorImpl(
+      ImplType,
       Storage&& storage,
       DispatchKeySet,
-      const caffe2::TypeMeta data_type, ImplType);
+      const caffe2::TypeMeta data_type);
 
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
@@ -539,9 +551,37 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Tensors with non-trivial strides are not contiguous.  See
    * compute_contiguous() for the exact definition of whether or not
    * a tensor is contiguous or not.
+   *
+   * NOTE: is_contiguous is only `TENSORIMPL_MAYBE_VIRTUAL` for
+   * backward compatibility. See `set_has_contiguity_policy` and
+   * `is_contiguous_custom` for the encouraged customization point.
    */
-  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const;
+  TENSORIMPL_MAYBE_VIRTUAL bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+    if (C10_UNLIKELY(has_contiguity_ != static_cast<uint8_t>(HasContiguityPolicy::Default))) {
+      return is_contiguous_nondefault_policy_impl(memory_format);
+    }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
+    if (memory_format == at::MemoryFormat::ChannelsLast) {
+      return is_channels_last_contiguous_;
+    }
+    else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+      return is_channels_last_3d_contiguous_;
+    }
+    return is_contiguous_;
+  }
 
+ private:
+  bool is_contiguous_nondefault_policy_impl(at::MemoryFormat) const;
+
+ protected:
+  /**
+   * Customization point for is_contiguous; must also
+   * set_has_contiguity_policy(HasContiguityPolicy::Custom) for this
+   * to be called.
+   */
+  virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
+
+ public:
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::SparseCPU) ||
@@ -621,7 +661,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Inference tensor doesn't have autograd or InplaceOrView key.
   // Invariant:
-  //   is_inference_tensor() == !version_counter_.enabled()
+  //   Inference tensor has version_counter_.enabled() == false
   bool is_inference_tensor() {
     bool no_InplaceOrView = !key_set_.has(c10::DispatchKey::InplaceOrView);
     bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
@@ -1789,6 +1829,24 @@ public:
   }
 
 protected:
+  // Policy for adjusting the behavior of is_contiguous(). Allows
+  // subclass customization while still being able to inline
+  // is_contiguous() in the common case.
+  enum class HasContiguityPolicy : uint8_t {
+    // Default behavior: check is_contiguous_ and similar bitflags.
+    Default,
+    // Throw a generic error message that this tensor type does not
+    // support is_contiguous.
+    ContiguityNotSupported,
+    // Call virtual is_contiguous_custom method to implement custom
+    // is_contiguous behavior.
+    CustomBehavior,
+  };
+
+  void set_has_contiguity_policy(HasContiguityPolicy p) {
+    has_contiguity_ = static_cast<uint8_t>(p);
+  }
+
   Storage storage_;
 
 private:
@@ -1865,13 +1923,19 @@ protected:
   c10::optional<c10::Device> device_opt_;
 
   // Tensor is contiguous
-  bool is_contiguous_ = true;
+  bool is_contiguous_ : 1;
+  // gcc doesn't like enum class bitfields; see
+  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61414
+  /* HasContiguityPolicy */ uint8_t has_contiguity_ : 2;
 
   // Tensor is a subclass that does not permit storage access.
   bool storage_access_should_throw_ = false;
 
   // default member initializers for bit-fields only available with -std=c++2a or -std=gnu++2a
   inline void init_bitfields() {
+    is_contiguous_ = true;
+    has_contiguity_ = static_cast<uint8_t>(HasContiguityPolicy::Default);
+
     is_channels_last_ = false;
     is_channels_last_contiguous_ = false;
     is_channels_last_3d_ = false;

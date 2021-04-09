@@ -23,11 +23,11 @@ struct TORCH_API QTensorImpl : public c10::TensorImpl {
 
   // See Note [Enum ImplType]
   QTensorImpl(
+      ImplType type,
       Storage&& storage,
       DispatchKeySet key_set,
       const caffe2::TypeMeta data_type,
-      QuantizerPtr quantizer,
-      ImplType);
+      QuantizerPtr quantizer);
 
 
   // TODO: Expose in PyTorch Frontend
