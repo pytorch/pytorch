@@ -9289,7 +9289,7 @@ class TestNN(NNTestCase):
                     input = torch.randn(1, 2, 2, 2, requires_grad=True)
                     gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
-    @unittest.skipIf(not TEST_CUDA, "torch.nn.interpolate for channels-last is currently only implemented on CUDA with some modes")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_interpolate_channels_last_cuda(self):
         def helper(mode, input_size, out_size, align_corners):
             memory_format_cl = torch.contiguous_format
