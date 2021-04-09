@@ -3,8 +3,7 @@ from collections import namedtuple
 from typing import Any, Optional, Tuple
 
 import torch
-from torch.testing import _unravel_index
-from torch.testing._internal.common_utils import get_comparison_dtype as _get_comparison_dtype, TestCase as _TestCase
+from ._core import _unravel_index
 
 __all__ = ["assert_tensors_equal", "assert_tensors_allclose"]
 
@@ -24,9 +23,24 @@ except KeyError:
         pass
 
 
+# This is copy-pasted from torch.testing._internal.common_utils.TestCase.dtype_precisions. With this we avoid a
+# dependency on torch.testing._internal at import. See
+# https://github.com/pytorch/pytorch/pull/54769#issuecomment-813174256 for details.
+# {dtype: (rtol, atol)}
+_DTYPE_PRECISIONS = {
+    torch.float16: (0.001, 1e-5),
+    torch.bfloat16: (0.016, 1e-5),
+    torch.float32: (1.3e-6, 1e-5),
+    torch.float64: (1e-7, 1e-7),
+    torch.complex32: (0.001, 1e-5),
+    torch.complex64: (1.3e-6, 1e-5),
+    torch.complex128: (1e-7, 1e-7),
+}
+
+
 def _get_default_rtol_and_atol(a: torch.Tensor, b: torch.Tensor) -> Tuple[float, float]:
-    dtype = a.dtype if a.dtype == b.dtype else _get_comparison_dtype(a, b)
-    return _TestCase.dtype_precisions.get(dtype, (0.0, 0.0))
+    dtype = a.dtype if a.dtype == b.dtype else torch.promote_types(a.dtype, b.dtype)
+    return _DTYPE_PRECISIONS.get(dtype, (0.0, 0.0))
 
 
 def _assert_are_tensors(a: Any, b: Any) -> None:
@@ -138,7 +152,7 @@ def _equalize_attributes(a: torch.Tensor, b: torch.Tensor) -> Tuple[torch.Tensor
         b = b.cpu()
 
     if a.dtype != b.dtype:
-        dtype = _get_comparison_dtype(a, b)
+        dtype = torch.promote_types(a.dtype, b.dtype)
         a = a.to(dtype)
         b = b.to(dtype)
 

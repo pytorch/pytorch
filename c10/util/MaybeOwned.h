@@ -122,7 +122,7 @@ class MaybeOwned final {
     }
   }
 
-  const T& operator*() const {
+  const T& operator*() const & {
     if (isBorrowed_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(borrow_ != nullptr);
     }
@@ -134,6 +134,19 @@ class MaybeOwned final {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(borrow_ != nullptr);
     }
     return C10_LIKELY(isBorrowed_) ? borrow_ : &own_;
+  }
+
+  // If borrowed, copy the underlying T. If owned, move from
+  // it. borrowed/owned state remains the same, and either we
+  // reference the same borrow as before or we are an owned moved-from
+  // T.
+  T operator*() && {
+    if (isBorrowed_) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(borrow_ != nullptr);
+      return *borrow_;
+    } else {
+      return std::move(own_);
+    }
   }
 };
 

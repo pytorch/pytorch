@@ -63,7 +63,7 @@ class TestBuiltins(JitTestCase):
                 # not allowed, `name` must be static.
                 return hasattr(self.mod, name)
 
-        with self.assertRaisesRegex(RuntimeError, "hasattr"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "hasattr", "name"):
             torch.jit.script(Mod())
 
         class Mod(torch.nn.Module):
@@ -74,7 +74,7 @@ class TestBuiltins(JitTestCase):
                 # not allowed, `torch.rand` is not a class type
                 return hasattr(torch.rand(2, 3), name)
 
-        with self.assertRaisesRegex(RuntimeError, "hasattr"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "hasattr", "name"):
             torch.jit.script(Mod())
 
     def test_del(self):
@@ -85,14 +85,14 @@ class TestBuiltins(JitTestCase):
 
         self.checkScript(fn, ([1, 2, 3],))
 
-        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "a"):
             @torch.jit.script
             def fn(x):
                 a = x ** 2
                 del a
                 return a
 
-        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "a"):
             @torch.jit.script
             def fn(x):
                 a = x ** 2
@@ -100,7 +100,7 @@ class TestBuiltins(JitTestCase):
                     del a
                 return a
 
-        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "b"):
             @torch.jit.script
             def fn(x):
                 a = x ** 2
