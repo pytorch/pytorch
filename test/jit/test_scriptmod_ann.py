@@ -139,8 +139,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = x
                 return 1
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to set "
-                                    "nonexistent attribute"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "Tried to set nonexistent attribute",
+                                                 "self.x = x"):
             with self.assertWarnsRegex(UserWarning, "doesn't support "
                                        "instance-level annotations on "
                                        "empty non-base types"):
@@ -156,8 +157,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = x
                 return 1
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to set "
-                                    "nonexistent attribute"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "Tried to set nonexistent attribute",
+                                                 "self.x = x"):
             with self.assertWarnsRegex(UserWarning, "doesn't support "
                                        "instance-level annotations on "
                                        "empty non-base types"):
@@ -173,8 +175,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = x
                 return 1
 
-        with self.assertRaisesRegex(RuntimeError, "Wrong type for "
-                                    "attribute assignment"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "Wrong type for attribute assignment",
+                                                 "self.x = x"):
             with self.assertWarnsRegex(UserWarning, "doesn't support "
                                        "instance-level annotations on "
                                        "empty non-base types"):
@@ -190,8 +193,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = x
                 return 1
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to set "
-                                    "nonexistent attribute"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "Tried to set nonexistent attribute",
+                                                 "self.x = x"):
             with self.assertWarnsRegex(UserWarning, "doesn't support "
                                        "instance-level annotations on "
                                        "empty non-base types"):
@@ -207,8 +211,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = x
                 return 1
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to set "
-                                    "nonexistent attribute"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "Tried to set nonexistent attribute",
+                                                 "self.x = x"):
             with self.assertWarnsRegex(UserWarning, "doesn't support "
                                        "instance-level annotations on "
                                        "empty non-base types"):
@@ -224,8 +229,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = x
                 return 1
 
-        with self.assertRaisesRegex(RuntimeError, "Wrong type for "
-                                    "attribute assignment"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "Wrong type for attribute assignment",
+                                                 "self.x = x"):
             with self.assertWarnsRegex(UserWarning, "doesn't support "
                                        "instance-level annotations on "
                                        "empty non-base types"):
@@ -243,8 +249,9 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = x
                 return 1
 
-        with self.assertRaisesRegex(RuntimeError, "Wrong type for "
-                                    "attribute assignment"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "Wrong type for attribute assignment",
+                                                 "self.x = x"):
             with self.assertWarnsRegex(UserWarning, "doesn't support "
                                        "instance-level annotations on "
                                        "empty non-base types"):
