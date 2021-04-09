@@ -30,13 +30,12 @@ LoopNest::LoopNest(const LoopNest& other)
   verify(root_stmt_);
 }
 
-LoopNest::LoopNest(
-    Stmt* stmt,
-    const std::unordered_set<const Buf*>& output_bufs)
-    : root_stmt_(stmt), output_bufs_(output_bufs) {
+LoopNest::LoopNest(Stmt* stmt, std::unordered_set<const Buf*> output_bufs)
+    : root_stmt_(stmt), output_bufs_(std::move(output_bufs)) {
   verify(root_stmt_);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(
     const std::vector<Tensor*>& output_tensors,
     const std::vector<Tensor*>& tensors_to_compute) {
@@ -44,6 +43,7 @@ LoopNest::LoopNest(
   verify(root_stmt_);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   initialize(output_tensors, output_tensors);
   verify(root_stmt_);
@@ -1020,8 +1020,11 @@ void LoopNest::vectorizeInnerLoops() {
 
   // vectorize inner loops.
   for (For* loop : innerLoops) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* outer1;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* split1;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* tail1;
 
     static const int kBodyVectorWidth = 8;
@@ -1029,8 +1032,11 @@ void LoopNest::vectorizeInnerLoops() {
     vectorize(split1);
 
     if (tail1) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       For* outer2;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       For* split2;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       For* tail2;
       static const int kTailVectorWidth = 4;
       splitWithTail(tail1, kTailVectorWidth, &outer2, &split2, &tail2);
@@ -1078,6 +1084,7 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
   // TODO: record history of transformations
 }
 void LoopNest::sliceHead(For* f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *head, *tail;
   sliceHead(f, factor, &head, &tail);
 }
@@ -1125,11 +1132,13 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
   // TODO: record history of transformations
 }
 void LoopNest::sliceTail(For* f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *head, *tail;
   sliceTail(f, factor, &head, &tail);
 }
 
 void LoopNest::splitWithTail(For* f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *outer, *inner, *tail;
   splitWithTail(f, factor, &outer, &inner, &tail);
 }
@@ -1202,6 +1211,7 @@ void LoopNest::splitWithTail(
 }
 
 void LoopNest::splitWithMask(For* f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *outer, *inner;
   splitWithMask(f, factor, &outer, &inner);
 }
@@ -1467,6 +1477,7 @@ void LoopNest::reorderAxis(For* a, For* b) {
       internal_axes.push_back(f);
     }
 
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     s = s->get_parent();
   }
 
@@ -1669,6 +1680,7 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
   // loop is normalized, the given pointers to inner loops point to old code.
   // For the same reason, we can't store the normalized inner loops until after
   // the outer-most loop is normalized.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* normalized;
   for (size_t i = 0; i < loops.size(); ++i) {
     size_t idx = loops.size() - i - 1;
@@ -1677,6 +1689,7 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
 
   // 'normalized' points to the outer-most loop in the normalized loopnest.
   // Collect all the normalized loops.
+  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   auto normalized_loops = getLoopStmtsInLoopNest(normalized, loops.size());
 
   auto flat_var = new Var(
@@ -2492,6 +2505,7 @@ void LoopNest::rfactor(
     }
   }
   if (!found) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     std::stringstream ss;
     for (auto& v : new_inner) {
       ss << *v;
@@ -2543,6 +2557,7 @@ void LoopNest::rfactor(
   };
 
   if (insertion_point && insertion_point == root_for->body()) {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     insertion_point = dynamic_cast<For*>(new_root_for)->body();
   } else if (insertion_point) {
     throw std::runtime_error("TODO: enable non-root insertion points");
@@ -2558,6 +2573,7 @@ void LoopNest::rfactor(
   if (output_contains_target) {
     parent_block->insert_stmt_before(init_stmt, new_root_for);
   } else {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     new_root_for->body()->prepend_stmt(init_stmt);
   }
 
