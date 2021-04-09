@@ -9,7 +9,7 @@ from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
 from jit.test_backends import TestBackends  # noqa: F401
-from jit.test_list_dict import TestList, TestDict  # noqa: F401
+from jit.test_list_dict import TestList, TestDict, TestNamedTuple  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
 from jit.test_models import TestModels  # noqa: F401
@@ -45,6 +45,8 @@ from jit.test_hash import TestHash  # noqa: F401
 from jit.test_complex import TestComplex  # noqa: F401
 from jit.test_jit_utils import TestJitUtils  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
+from jit.test_types import TestTypesAndAnnotation  # noqa: F401
+from jit.test_misc import TestMisc  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -3282,6 +3284,27 @@ def foo(x):
 
         self.assertEqual(D()(v), v + v)
 
+    def test_tensor_subclasses(self):
+        def check_subclass(x, tensor):
+            template = dedent("""
+                def func(input: {}) -> {}:
+                    return torch.zeros((input.shape[0], 1), dtype=input.dtype)
+                """)
+
+            self._check_code(template.format(x, x), "func", [tensor])
+
+        check_subclass("torch.LongTensor", torch.LongTensor([[1, 2], [3, 4]]))
+        check_subclass("torch.DoubleTensor", torch.DoubleTensor([[1.2, 2.3], [3.4, 4.5]]))
+        check_subclass("torch.IntTensor", torch.IntTensor([[1, 2], [3, 4]]))
+        check_subclass("torch.BoolTensor", torch.BoolTensor([[False, True], [True, False]]))
+
+        def check_subclass_warn(input: torch.LongTensor) -> torch.LongTensor:
+            return torch.zeros((input.shape[0], 1), dtype=input.dtype)
+
+        with warnings.catch_warnings(record=True) as warns:
+            scripted = torch.jit.script(check_subclass_warn)
+        FileCheck().check("TorchScript will treat type annotations of Tensor").run(str(warns[0]))
+
     def test_first_class_module(self):
         class Foo(torch.jit.ScriptModule):
             def __init__(self):
@@ -4498,6 +4521,12 @@ a")
                 a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
                 func(2, a, profile_and_replay=True).backward()
 
+    def _check_code(self, code_str, fn_name, inputs):
+        scope = {}
+        exec(code_str, globals(), scope)
+        cu = torch.jit.CompilationUnit(code_str)
+        self.assertEqual(cu.func(*inputs), scope[fn_name](*inputs))
+
     @unittest.skipIf(not RUN_CUDA, 'no CUDA')
     def test_scriptmodule_releases_tensors_cuda(self):
         with enable_profiling_mode_for_profiling_tests():
@@ -4634,124 +4663,6 @@ a")
         @torch.jit.script
         def tuple_call():
             return foo((1, 2))
-
-    def test_advancedindex(self):
-        def consec(size, start=0):
-            numel = torch.tensor(size).prod().item()
-            return torch.arange(numel).view(size)
-
-        def check_indexing(indexing, tensor, **kwargs):
-            indices_dict = kwargs
-
-            template = dedent("""
-            def func(x{formals}):
-                return x{expr}
-            """)
-
-            formals = []
-            values = []
-            for formal, value in indices_dict.items():
-                formals.append(formal)
-                values.append(value)
-
-            formals = ''.join(map(', {}'.format, formals))
-            inputs = [tensor] + values
-            self._check_code(template.format(formals=formals, expr=indexing),
-                             "func", inputs)
-
-        # Indexing with tensor (basic)
-        check_indexing('[i]', consec((3, 3)), i=torch.tensor([0]))
-        check_indexing('[i]', consec((3, 3)), i=torch.tensor(1))
-        check_indexing('[i]', consec((3, 3)), i=torch.tensor([-2]))
-        check_indexing('[i]', consec((3, 3), 2), i=torch.tensor([0, 0]))
-        check_indexing('[i]', consec((3, 3, 2, 2)), i=torch.tensor([0, -2, 1]))
-
-        # NB: indexing with tensors and indexing with sequences can be implemented
-        # in a very similar way (sequences are converted to tensors), so only one
-        # case needs to be tested extensively.
-        # XXX: When we can index with sequences, replace these cases with
-        # sequence indexing expressions; those are much easier to read.
-
-        # Misc sequence advanced indexing
-        inp = consec((4, 8, 5))
-        to_check = [
-            # [[0, 1, 3]]
-            ['[i]', {'i': [0, 1, 3]}],
-            # [[0, 2], [1, 3]]
-            ['[i, j]', {'i': [0, 2], 'j': [1, 3]}],
-            # [[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
-            ['[i, j]', {'i': [[0, 1], [0, 1]], 'j': [[0, 1], [0, 1]]}],
-            # [[0, 2], [1, 3], [1, 1]]
-            ['[i, j, k]', {'i': [0, 2], 'j': [1, 3], 'k': [1, 1]}],
-            # [[0, 2], 1, [1, 1]]
-            ['[i, j, k]', {'i': [0, 2], 'j': 1, 'k': [1, 1]}],
-            # [:, :, [0, 3, 4]]
-            ['[:, :, i]', {'i': [0, 3, 4]}],
-            # [:, [2, 4, 5, 7], 2:4]
-            ['[:, i, 2:4]', {'i': [0, 2, 3]}],
-            # [[2, 3], :, :]
-            ['[i, :, :]', {'i': [2, 3]}],
-            # [:, [0, 2, 3], [1, 3, 4]]
-            ['[:, i, j]', {'i': [0, 2, 3], 'j': [1, 3, 4]}],
-            # [:, [0], [1, 2, 4]]
-            ['[:, i, j]', {'i': [0], 'j': [1, 2, 4]}],
-            # [:, [0, 1, 3], [4]]
-            ['[:, i, j]', {'i': [0, 1, 3], 'j': [4]}],
-            # [:, [[0, 1], [1, 0]], [[2, 3]]]
-            ['[:, i, j]', {'i': [[0, 1], [1, 0]], 'j': [[2, 3]]}],
-            # [:, [[0, 1], [2, 3]], [[0]]]
-            ['[:, i, j]', {'i': [[0, 1], [2, 3]], 'j': [[0]]}],
-            # [:, [[5, 6]], [[0, 3], [4, 4]]]
-            ['[:, i, j]', {'i': [[5, 6]], 'j': [[0, 3], [4, 4]]}],
-            # [[0, 2, 3], [1, 3, 4], :]
-            ['[i, j, :]', {'i': [0, 2, 3], 'j': [1, 3, 4]}],
-            # [0, [1, 2, 4], :]
-            ['[i, j, :]', {'i': 0, 'j': [1, 2, 4]}],
-            # [[0, 1, 3], 4, :]
-            ['[i, j, :]', {'i': [0, 1, 3], 'j': 4}],
-            # [[[0, 1], [1, 0]], [[2, 1], [3, 5]], :]
-            ['[i, j, :]', {'i': [[0, 1], [1, 0]], 'j': [[2, 1], [3, 5]]}],
-            # [[[0, 1], [1, 0]], [[2, 3]], :]
-            ['[i, j, :]', {'i': [[0, 1], [1, 0]], 'j': [[2, 3]]}],
-            # [[[0, 1], [2, 3]], [[0]], :]
-            ['[i, j, :]', {'i': [[0, 1], [2, 3]], 'j': [[0]]}],
-            # [[[2, 1]], [[0, 3], [4, 4]], :]
-            ['[i, j, :]', {'i': [[2, 1]], 'j': [[0, 3], [4, 4]]}],
-            # [[[2]], [[0, 3], [4, 1]], 0:2]
-            ['[i, j, 0:2]', {'i': [[2]], 'j': [[0, 3], [4, 1]]}],
-        ]
-
-        for expr, argdict in to_check:
-            tensordict = {k: torch.tensor(v) for (k, v) in argdict.items()}
-            check_indexing(expr, inp, **tensordict)
-
-    def test_adv_indexing_list(self):
-        # indexing with list is equivalent to indexing with tensor
-        def func1(x):
-            return x[[0, 1, 5]]
-
-        def func2(x):
-            return x[[0, 1], [0, 1]]
-
-        def func3(x):
-            return x[[[0, 1], [0, 1]], [[0, 1], [0, 1]]]
-
-        def func4(x):
-            ls = [0]
-            ls.append(1)
-            ls.append(2)
-            return x[ls]
-
-        def func5(x):
-            ls = [0.1, 1.2, 2.3]
-            return x[ls]
-
-        input = torch.rand((6, 2))
-        self.checkScript(func1, (input,))
-        self.checkScript(func2, (input,))
-        self.checkScript(func3, (input,))
-        self.checkScript(func4, (input,))
-        self.checkScript(func5, (input,))
 
     def test_keyword(self):
         @torch.jit.script
@@ -11848,26 +11759,6 @@ dedent """
 
         self.assertEqual(test_indexing_end_out_of_bounds(), ())
 
-    def test_stepped_tuple_slicing(self):
-
-        def check_slicing_tuple(slicing, tuple_type, tuple):
-            template = dedent("""
-            def func(x):
-                # type: ({}) -> Any
-                return x{}
-            """)
-            self._check_code(template.format(tuple_type, slicing), "func", [tuple])
-
-        check_slicing_tuple("[-3:3:2]", "Tuple[int, int, int]", (0, 1, 2))
-        check_slicing_tuple("[::55]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
-        check_slicing_tuple("[:4:4]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
-        check_slicing_tuple("[::-1]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
-        check_slicing_tuple("[7:5:2]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
-        check_slicing_tuple("[5:7:-2]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
-        check_slicing_tuple("[::-2]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
-        check_slicing_tuple("[:4:-3]", "Tuple[int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5))
-        check_slicing_tuple("[3::-2]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
-
     def test_lower_nested_tuples(self):
         @torch.jit.script
         def test():
@@ -12580,42 +12471,6 @@ dedent """
             return 3
 
         self.checkScript(foo, (True,))
-
-        @torch.jit.script
-        def fn(x):
-            # type: (int) -> int
-            return other_fn(x)
-
-        self.assertEqual(fn(2), 2)
-
-        @torch.jit.script
-        def unify_to_optional(x):
-            # type: (bool) -> Optional[int]
-            if x:
-                a = None
-            else:
-                a = 2
-            return a
-
-        self.assertEqual(unify_to_optional(True), None)
-        self.assertEqual(unify_to_optional(False), 2)
-
-        @torch.jit.script
-        def opt_list(x):
-            # type: (Optional[List[float]]) -> int
-            return 2
-
-        @torch.jit.script
-        def broadcast_opt_list(x):
-            # type: (Optional[BroadcastingList2[float]]) -> int
-            return 2
-
-        @torch.jit.script
-        def opt_list_tuple_caller(x):
-            # type: (Tuple[float, float]) -> int
-            return opt_list(x) + broadcast_opt_list(x)
-
-        self.assertEqual(opt_list_tuple_caller((2., 3.)), 4)
 
     def test_lhs_indexing(self):
         def foo(a, b):
