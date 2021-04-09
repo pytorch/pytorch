@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -203,7 +204,8 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
 }
 
 bool needsProfiledInputs(Node* n) {
-  if (tensorexpr::isSupported(n) || fuser::cuda::canFuseNode(n)) {
+  if (tensorexpr::isSupported(n) ||
+      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::canFuseNode(n))) {
     return true;
   }
 
@@ -234,7 +236,8 @@ bool needsProfiledInputs(Node* n) {
 }
 
 bool needsProfiledOutput(Node* n) {
-  if (tensorexpr::isSupported(n) || fuser::cuda::canFuseNode(n)) {
+  if (tensorexpr::isSupported(n) ||
+      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::canFuseNode(n))) {
     return true;
   }
 
