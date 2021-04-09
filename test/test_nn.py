@@ -12567,6 +12567,22 @@ class TestNNDeviceType(NNTestCase):
             helper((2, 3, 6, 6), mf)
 
     @onlyOnCPUAndCUDA
+    def test_adaptive_avg_pool3d_output_size_one(self, device):
+        x = torch.randn((2, 3, 6, 6, 6) , dtype=torch.float, device=device, requires_grad=True)
+
+        net = torch.nn.AdaptiveAvgPool3d(1)
+        out = net(x)
+        ref_out = x.contiguous().mean((-1, -2, -3)).view(out.shape)
+
+        out.sum().backward()    # make sure it doesn't crash
+
+        self.assertEqual(out, ref_out)
+        self.assertTrue(out.is_contiguous())
+        c = out.size(1)
+        self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
+
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
     def test_adaptive_pooling_no_suppot_input(self, device, dtype):
         for numel in (2, 3):
