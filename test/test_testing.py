@@ -810,7 +810,7 @@ class TestAsserts(TestCase):
 
     @onlyCUDA
     def test_mismatching_device_no_check(self, device):
-        a = torch.empty((), device=device)
+        a = torch.rand((), device=device)
         b = a.clone().cpu()
 
         for fn in self.assert_fns_with_inputs(a, b):
@@ -844,7 +844,7 @@ class TestAsserts(TestCase):
 
     @onlyCPU
     def test_mismatching_stride_no_check(self, device):
-        a = torch.empty((2, 2), device=device)
+        a = torch.rand((2, 2), device=device)
         b = torch.as_strided(a.clone().t().contiguous(), a.shape, a.stride()[::-1])
 
         for fn in self.assert_fns_with_inputs(a, b):
