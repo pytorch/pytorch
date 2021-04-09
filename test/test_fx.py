@@ -2269,6 +2269,7 @@ class TestFunctionalTracing(JitTestCase):
                 'has_torch_function_variadic': None}
 
     BUILT_IN_FUNC = (AssertionError, '')
+    PROXY_ITERABLE = (TypeError, r"argument of type 'Proxy' is not iterable")
     PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
     LEN_ERROR = (RuntimeError, r"'len' is not supported in symbolic tracing by default")
     ARG_TYPE_MISMATCH = (TypeError, r", not Proxy$")
@@ -2309,19 +2310,20 @@ class TestFunctionalTracing(JitTestCase):
         'adaptive_avg_pool3d': LEN_ERROR,
         "adaptive_max_pool2d_with_indices": LEN_ERROR,
         "adaptive_max_pool3d_with_indices": LEN_ERROR,
-        "group_norm": LEN_ERROR,
         "instance_norm": LEN_ERROR,
         'pad': LEN_ERROR,
 
-        "adaptive_max_pool1d": PROXY_ITERATED,
-        "adaptive_max_pool2d": PROXY_ITERATED,
-        "adaptive_max_pool3d": PROXY_ITERATED,
-        "fractional_max_pool2d": PROXY_ITERATED,
-        "fractional_max_pool3d": PROXY_ITERATED,
+        "adaptive_max_pool1d": PROXY_ITERABLE,
+        "adaptive_max_pool2d": PROXY_ITERABLE,
+        "adaptive_max_pool3d": PROXY_ITERABLE,
+        "fractional_max_pool2d": PROXY_ITERABLE,
+        "fractional_max_pool3d": PROXY_ITERABLE,
+        "max_pool1d": PROXY_ITERABLE,
+        "max_pool2d": PROXY_ITERABLE,
+        "max_pool3d": PROXY_ITERABLE,
+
+        "group_norm": PROXY_ITERATED,
         "lp_pool2d": PROXY_ITERATED,
-        "max_pool1d": PROXY_ITERATED,
-        "max_pool2d": PROXY_ITERATED,
-        "max_pool3d": PROXY_ITERATED,
         "max_unpool1d": PROXY_ITERATED,
         "max_unpool2d": PROXY_ITERATED,
         "max_unpool3d": PROXY_ITERATED,
@@ -2452,8 +2454,6 @@ class TestFunctionalTracing(JitTestCase):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)
-                # Remove from UNTRACEBLE
-                del TestFunctionalTracing.UNTRACEABLE_FUNCTIONALS[func_name]
             else:
                 symbolic_trace(fn)
         return functional_test
@@ -2478,9 +2478,6 @@ class TestFunctionalTracing(JitTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        # Check if all UNTRACEABLE_FUNCTIONALS are covered
-        assert len(cls.UNTRACEABLE_FUNCTIONALS) == 0
-
         for name in cls.TO_PATCH.keys():
             setattr(torch.nn.functional, name, cls.TO_PATCH[name])
 
