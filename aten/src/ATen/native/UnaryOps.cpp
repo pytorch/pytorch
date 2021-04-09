@@ -36,6 +36,7 @@ namespace meta {
 // extra error checking/have a different signature, etc.
 CREATE_UNARY_META_FUNC(sin)
 CREATE_UNARY_META_FUNC(sinc)
+CREATE_UNARY_META_FUNC(sinh)
 
 } // namespace meta
 
@@ -412,10 +413,7 @@ Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
 Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
 
 CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
-
-Tensor& sinh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, sinh_stub); }
-Tensor sinh(const Tensor& self) { return unary_op_impl_float(self, sinh_stub); }
-Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
+CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
 
 Tensor& cosh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cosh_stub); }
 Tensor cosh(const Tensor& self) { return unary_op_impl_float(self, cosh_stub); }
