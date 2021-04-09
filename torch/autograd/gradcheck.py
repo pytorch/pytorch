@@ -750,7 +750,7 @@ def gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, ep
                               rtol, atol, check_grad_dtypes, nondet_tol)
 
 
-def slow_gradcheck_helper(func, func_out, tupled_inputs, outputs, eps, rtol,
+def slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
                           atol, check_grad_dtypes, nondet_tol, complex_indices=None):
     if not outputs:
         return check_no_differentiable_outputs(func, tupled_inputs, _as_tuple(func_out), eps)
@@ -863,7 +863,7 @@ def slow_mode_jacobian_message(func, tupled_inputs, outputs, input_idx, output_i
     return msg
 
 
-def fast_gradcheck_helper(func, func_out, tupled_inputs, outputs, eps, rtol,
+def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
                           atol, check_grad_dtypes, nondet_tol, complex_indices=None):
     # Perform the fast version of gradcheck
     # See https://github.com/pytorch/pytorch/issues/53876 for details
@@ -1004,14 +1004,14 @@ def gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_tol
     check_inputs(tupled_inputs, check_sparse_nnz)
     func_out = func(*tupled_inputs)
 
-    if fast_mode and has_complex_inputs_or_outputs(tupled_inputs, func_out):
-        raise NotImplementedError("Fast mode for gradcheck and gradgradcheck is currently only implemented"
-                                  " for R to R functions.")
+    # if fast_mode and has_complex_inputs_or_outputs(tupled_inputs, func_out):
+    #     raise NotImplementedError("Fast mode for gradcheck and gradgradcheck is currently only implemented"
+    #                               " for R to R functions.")
 
     outputs = _differentiable_outputs(func_out)
     check_outputs(outputs)
     complex_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
-    gradcheck_fn = fast_gradcheck_helper if fast_mode else slow_gradcheck_helper
+    gradcheck_fn = fast_gradcheck if fast_mode else slow_gradcheck
     gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps,
                         rtol, atol, check_grad_dtypes, nondet_tol, complex_indices)
 
