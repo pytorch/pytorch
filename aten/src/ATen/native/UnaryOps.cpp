@@ -36,6 +36,7 @@ namespace meta {
 // extra error checking/have a different signature, etc.
 CREATE_UNARY_META_FUNC(sin)
 CREATE_UNARY_META_FUNC(sinc)
+CREATE_UNARY_META_FUNC(special_i0e)
 
 } // namespace meta
 
@@ -350,8 +351,9 @@ Tensor& i0_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(re
 Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
 Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
-Tensor& special_i0e_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, i0e_stub); }
-Tensor special_i0e(const Tensor& self) { return unary_op_impl_float(self, i0e_stub); }
+TORCH_IMPL_FUNC(special_i0e_out) (const Tensor& self, const Tensor& result) {
+  i0e_stub(device_type(), *this);
+}
 
 Tensor& log_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, log_stub); }
 Tensor log(const Tensor& self) { return unary_op_impl_float(self, log_stub); }
