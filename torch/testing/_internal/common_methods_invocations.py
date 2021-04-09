@@ -1063,6 +1063,17 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           requires_grad=requires_grad),))
     return inputs
 
+def sample_inputs_mm(op_info, device, dtype, requires_grad):
+    args_list = (
+        ((S, M), (M, S)),
+    )
+    inputs = tuple(SampleInput(make_tensor(first_shape, device, dtype,
+                                           requires_grad=requires_grad),
+                               args=(make_tensor(second_shape, device, dtype,
+                                     requires_grad=requires_grad),))
+                   for first_shape, second_shape in args_list)
+    return inputs
+
 def sample_inputs_outer(op_info, device, dtype, requires_grad, **kwargs):
     inputs = []
     arg_a = make_tensor((S,), device, dtype, requires_grad=requires_grad)
@@ -3241,35 +3252,25 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,
            supports_out=False),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_scatter,
            supports_out=False),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_select),
     OpInfo('max',
            op=torch.max,
            variant_test_name='binary',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,
            assert_autodiffed=True,),
     OpInfo('max',
            op=torch.max,
            variant_test_name='reduction_with_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            skips=(
                # max does not correctly warn when resizing out= inputs
@@ -3278,24 +3279,18 @@ op_db: List[OpInfo] = [
            op=torch.max,
            variant_test_name='reduction_no_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('min',
            op=torch.min,
            variant_test_name='binary',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,
            assert_autodiffed=True,),
     OpInfo('min',
            op=torch.min,
            variant_test_name='reduction_with_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            skips=(
                # min does not correctly warn when resizing out= inputs
@@ -3305,10 +3300,17 @@ op_db: List[OpInfo] = [
            op=torch.min,
            variant_test_name='reduction_no_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
+    OpInfo('mm',
+           dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_mm,
+           skips=(
+               # mm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('maximum',
            op=torch.maximum,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -3320,8 +3322,6 @@ op_db: List[OpInfo] = [
     OpInfo('mode',
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_mode,),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
@@ -4484,7 +4484,6 @@ def method_tests():
         ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('dot', (L,), ((L,),), '', (True,)),
         ('vdot', (L,), ((L,),),),
-        ('mm', (S, M), ((M, S),), '', (True,)),
         ('bmm', (M, S, M), ((M, M, S),), '', (True,)),
         ('mv', (S, M), ((M,),), '', (True,)),
         ('inner', (S,), ((S,),), "1d_1d", (False,)),
