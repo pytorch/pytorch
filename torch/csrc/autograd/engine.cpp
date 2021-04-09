@@ -896,6 +896,7 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
   // Computes the number of dependencies for each function which requires grad
   std::unordered_set<Node*> seen;
   std::vector<Node*> queue { root };
+  bool will_use_cuda = false;
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
@@ -905,6 +906,9 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
     if (fn->topological_nr() < min_topo_nr) {
       continue;
     }
+    if (!will_use_cuda) {
+      will_use_cuda = fn->stream(c10::DeviceType::CUDA).has_value();
+    }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
@@ -913,6 +917,8 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
       }
     }
   }
+
+  return will_use_cuda;
 }
 
 auto Engine::execute(const edge_list& roots,
@@ -939,10 +945,6 @@ auto Engine::execute(const edge_list& roots,
       /* depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
       /* cpu_ready_queue */ local_ready_queue);
 
-  // Collects current and default streams for devices where this process has a context,
-  // so GraphTask::exec_post_processing can sync them with leaf_streams.
-  graph_task->stash_current_streams();
-
   // If we receive a single root, skip creating extra root node
   bool skip_dummy_node = roots.size() == 1;
   auto graph_root = skip_dummy_node ?
@@ -951,7 +953,12 @@ auto Engine::execute(const edge_list& roots,
 
   auto min_topo_nr = compute_min_topological_nr(outputs);
   // Now compute the dependencies for all executable functions
-  compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
+  auto will_use_cuda = compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
+  if (will_use_cuda) {
+    // Collects current and default streams for devices where this process has a context,
+    // so GraphTask::exec_post_processing can sync them with leaf_streams.
+    graph_task->stash_current_streams();
+  }
 
   if (!outputs.empty()) {
     graph_task->init_to_execute(*graph_root, outputs, accumulate_grad, min_topo_nr);
@@ -1192,25 +1199,21 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   thread_pool_shared_->work_.notify_one();
 }
 
+// Remembers current and default streams on all devices where a context has been created.
+// Only called if Engine::execute detects at least one node runs on a cuda stream.
 void GraphTask::stash_current_streams() {
-  // If there's a chance we used GPUs, stashes this thread's current and default streams.
-  if (at::globalContext().hasCUDA() /* should only be true if:
-      * Pytorch was compiled with CUDA support AND
-      * the CUDA driver loaded without erroring AND
-      * > 0 CUDA-capable GPUs are visible to the process */) {
-    const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-    auto num_gpus = guard.deviceCount();
-    caller_current_streams_.resize(num_gpus);
-    caller_default_streams_.resize(num_gpus);
-    if (num_gpus > 0) {
-      for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
-        if (at::detail::getCUDAHooks().hasPrimaryContext(idx)) {
-          caller_current_streams_[idx] = guard.getStream({c10::DeviceType::CUDA, idx});
-          caller_default_streams_[idx] = guard.getDefaultStream({c10::DeviceType::CUDA, idx});
-        } else {
-          caller_current_streams_[idx] = c10::nullopt;
-          caller_default_streams_[idx] = c10::nullopt;
-        }
+  const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+  auto num_gpus = guard.deviceCount();
+  caller_current_streams_.resize(num_gpus);
+  caller_default_streams_.resize(num_gpus);
+  if (num_gpus > 0) {
+    for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
+      if (at::detail::getCUDAHooks().hasPrimaryContext(idx)) {
+        caller_current_streams_[idx] = guard.getStream({c10::DeviceType::CUDA, idx});
+        caller_default_streams_[idx] = guard.getDefaultStream({c10::DeviceType::CUDA, idx});
+      } else {
+        caller_current_streams_[idx] = c10::nullopt;
+        caller_default_streams_[idx] = c10::nullopt;
       }
     }
   }
