@@ -14,7 +14,7 @@ jobs:
       id: vars
       run: |
         set -eux
-        if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
+        if [[ "$EVENT_NAME" == "pull_request_target" ]]; then
           TITLE="${PR_TITLE}"
           ISSUE_NUMBER="${PR_NUMBER}"
         else
@@ -24,6 +24,7 @@ jobs:
         echo ::set-output name=TITLE::"${TITLE}"
         echo ::set-output name=ISSUE_NUMBER::"${ISSUE_NUMBER}"
       env:
+        EVENT_NAME: ${{ github.event_name }}
         PR_TITLE: ${{ github.event.pull_request.title }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         ISSUE_TITLE: ${{ github.event.issue.title }}
