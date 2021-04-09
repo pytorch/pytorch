@@ -2,6 +2,7 @@
 
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
+#include <c10/util/MaybeOwned.h>
 #include <atomic>
 #include <stdexcept>
 
@@ -492,6 +493,37 @@ inline bool operator!=(
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
+
+template <typename T>
+struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
+  using owned_type = c10::intrusive_ptr<T>;
+  using borrow_type = c10::intrusive_ptr<T>;
+
+  static borrow_type createBorrow(const owned_type& from) {
+    return borrow_type::reclaim(from.get());
+  }
+
+  static void assignBorrow(borrow_type& lhs, const borrow_type& rhs) {
+    lhs.release();
+    lhs = borrow_type::reclaim(rhs.get());
+  }
+
+  static void destroyBorrow(borrow_type& toDestroy) {
+    toDestroy.release();
+  }
+
+  static const owned_type& referenceFromBorrow(const borrow_type& borrow) {
+    return borrow;
+  }
+
+  static const owned_type* pointerFromBorrow(const borrow_type& borrow) {
+    return &borrow;
+  }
+
+  static bool debugBorrowIsValid(const borrow_type& borrow) {
+    return true;
+  }
+};
 
 template <
     typename TTarget,
