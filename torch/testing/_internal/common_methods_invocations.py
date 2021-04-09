@@ -3360,8 +3360,7 @@ op_db: List[OpInfo] = [
                    supports_autograd=False,
                    skips=(
                        # Skip since real and imag don't have out variants.
-                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
-                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                    )),
     OpInfo('linalg.householder_product',
            aten_name='linalg_householder_product',
@@ -3799,8 +3798,7 @@ op_db: List[OpInfo] = [
                    supports_autograd=False,
                    skips=(
                        # Skip since real and imag don't have out variants.
-                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
-                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                    )),
     UnaryUfuncInfo('round',
                    ref=np.round,
