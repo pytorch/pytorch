@@ -2171,9 +2171,11 @@ def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
-def sample_inputs_lerp(op_info, device, dtype, requires_grad):
+def sample_inputs_lerp(op_info, device, dtype, requires_grad, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    for_inplace_variant = kwargs.get('for_inplace_variant', False)
 
     samples = (
         # no broadcast
@@ -2188,13 +2190,6 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
         SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)), _make_tensor_helper((S, S)))),
         # broadcast rhs and weight tensor
         SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, 1)), _make_tensor_helper((S,)))),
-
-        # Broadcasts `self` : Issue with inplace-variants
-        # Reference: https://github.com/pytorch/pytorch/issues/50747
-        # SampleInput((_make_tensor_helper((S,)), _make_tensor_helper((S, S)), 0.4)),
-        # SampleInput((_make_tensor_helper(()), _make_tensor_helper((S, S)), 0.4)),
-        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), 0.4)),
-        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
     )  # type: ignore
 
     if dtype.is_complex:
@@ -2211,6 +2206,18 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
             # broadcast rhs scalar-tensor
             SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper(()), 0.4j)),
             SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper(()), 1 + 2j)),
+        )
+
+    if not for_inplace_variant:
+        samples = samples + (  # type: ignore
+            # broadcast_lhs
+            SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper((S, S)), 0.4)),
+            # scalar broadcast_lhs
+            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper((S, S)), 0.4)),
+            # broadcast all
+            SampleInput(_make_tensor_helper((S, 1)), args=(_make_tensor_helper((S, S)), 0.4)),
+            # tensor broadcast all
+            SampleInput(_make_tensor_helper((S, 1)), args=(_make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
         )
 
     return samples
@@ -3684,9 +3691,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            dtypesIfROCM=floating_and_complex_types_and(torch.half),
            sample_inputs_func=sample_inputs_lerp,
-           skips=(
-               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
-           ),
            assert_autodiffed=True),
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
@@ -4355,10 +4359,6 @@ def method_tests():
         ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
         ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
         ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-        ('lerp', (S,), ((S, S, S), 0.4), 'broadcast_lhs', (True,)),
-        ('lerp', (S, 1, S), ((S, S), 0.4), 'broadcast_all', (True,)),
-        ('lerp', (), ((S, S, S), 0.4), 'scalar_broadcast_lhs', (True,)),
-        ('lerp', (S, 1, S), ((S, S), (S, 1, 1, S)), 'tensor_broadcast_all', (True,)),
         ('mean', (S, S, S), NO_ARGS, '', (True,)),
         ('mean', (S, S, S), (1,), 'dim', (True,), [0]),
         ('mean', (S, S, S), (1, True,), 'keepdim_dim', (True,), [0]),
