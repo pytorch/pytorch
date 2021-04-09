@@ -82,7 +82,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn(1), 3)
 
     def test_set_attr_type_mismatch(self):
-        with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Wrong type for attribute assignment", "self.foo = 10"):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
@@ -90,7 +90,7 @@ class TestClassType(JitTestCase):
                     self.foo = 10  # should error since int != Tensor
 
     def test_get_attr_not_initialized(self):
-        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Tried to access nonexistent attribute", "self.asdf"):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
@@ -100,7 +100,7 @@ class TestClassType(JitTestCase):
                     return self.asdf  # asdf isn't an attr
 
     def test_set_attr_non_initialized(self):
-        with self.assertRaisesRegex(RuntimeError, "Tried to set nonexistent attribute"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Tried to set nonexistent attribute", "self.bar = y"):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
@@ -116,13 +116,13 @@ class TestClassType(JitTestCase):
         str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor):
         Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
         """
-        with self.assertRaisesRegex(RuntimeError, "nearest"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "nearest", ""):
             @torch.jit.script
             def FooTest(x):
                 return torch.nn.functional.interpolate(x, 'bad')
 
     def test_type_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value of type \'bool"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Expected a value of type \'bool", ""):
             @torch.jit.script  # noqa: B903
             class FooTest(object):  # noqa: B903
                 def __init__(self, x: bool) -> None:
@@ -135,7 +135,7 @@ class TestClassType(JitTestCase):
             fn(2)
 
     def test_conditional_set_attr(self):
-        with self.assertRaisesRegex(RuntimeError, "assignment cannot be in a control-flow block"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "assignment cannot be in a control-flow block", ""):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
@@ -383,7 +383,7 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(test_nested_inside_tuple(), [(1, 11), (1, 12)])
 
-        with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "bool\' for argument \'reverse", ""):
             @torch.jit.script
             def test():
                 li = [Foo(1)]
@@ -391,7 +391,7 @@ class TestClassType(JitTestCase):
                 return li
             test()
 
-        with self.assertRaisesRegex(RuntimeError, "must define a __lt__"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "must define a __lt__", ""):
             @torch.jit.script
             class NoMethod(object):
                 def __init__(self):
@@ -413,7 +413,7 @@ class TestClassType(JitTestCase):
             def __lt__(self, other):
                 pass
 
-        with self.assertRaisesRegex(RuntimeError, "must define a __lt__"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "must define a __lt__", ""):
             @torch.jit.script
             def test():
                 li = [WrongLt(), WrongLt()]
@@ -430,7 +430,7 @@ class TestClassType(JitTestCase):
             def two(self, x):
                 return x + self.b
 
-        with self.assertRaisesRegex(RuntimeError, "does not support inheritance"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "does not support inheritance", ""):
             @torch.jit.script
             class Derived(Base):
                 def two(self, x):
@@ -466,7 +466,7 @@ class TestClassType(JitTestCase):
             else:
                 return B.f(x.t)
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute or method"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Tried to access nonexistent attribute or method", ""):
             sc = torch.jit.script(fun)
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
@@ -589,22 +589,22 @@ class TestClassType(JitTestCase):
         def inherit(x: OneTwoThree) -> OneTwo:
             return as_interface(x)
 
-        with self.assertRaisesRegex(RuntimeError, "does not have method"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "does not have method", ""):
             @torch.jit.script
             def wrong1():
                 return as_interface(NotMember())
 
-        with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "is not compatible with interface", ""):
             @torch.jit.script
             def wrong2():
                 return as_interface(NotMember2())
 
-        with self.assertRaisesRegex(RuntimeError, "does not have method"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "does not have method", ""):
             @torch.jit.script
             def wrong3():
                 return inherit(as_interface(Foo()))
 
-        with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "is not compatible with interface", ""):
 
             @torch.jit.script
             def wrong4(x: OneTwoWrong) -> int:
@@ -636,8 +636,8 @@ class TestClassType(JitTestCase):
 
         TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
 
-        with self.assertRaisesRegex(RuntimeError,
-                                    "is not compatible with interface __torch__"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "is not compatible with interface __torch__", ""):
             torch.jit.script(TestPyAssignError(Foo()))
 
         # test pure python object assignment to interface fails
@@ -645,8 +645,8 @@ class TestClassType(JitTestCase):
             def __init__(self):
                 pass
 
-        with self.assertRaisesRegex(RuntimeError,
-                                    "the value is not a TorchScript compatible type"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "the value is not a TorchScript compatible type", ""):
             torch.jit.script(TestPyAssignError(PyClass()))
         # TODO test: interface-interface class-interface inheritance errors,
         # NamedTuple inheritance errors
@@ -783,7 +783,7 @@ class TestClassType(JitTestCase):
         for func in ops:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "nonexistent attribute", ""):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
@@ -828,7 +828,7 @@ class TestClassType(JitTestCase):
             def __bool__(self):
                 return (1, 2)
 
-        with self.assertRaisesRegex(RuntimeError, "expected a bool expression for condition"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "expected a bool expression for condition", ""):
             @torch.jit.script
             def test():
                 if BadBool():
@@ -932,7 +932,7 @@ class TestClassType(JitTestCase):
 
         test_fn(Foo(3, 4.0))
 
-        with self.assertRaisesRegex(RuntimeError, 'missing attribute i'):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, 'missing attribute i', ""):
             test_fn(torch.rand(3, 4))
 
     def test_unused_method(self):
@@ -1127,7 +1127,7 @@ class TestClassType(JitTestCase):
         def should_fail():
             obj: ClassWithMutableArgs = ClassWithMutableArgs()
 
-        with self.assertRaisesRegex(RuntimeError, "Mutable default parameters are not supported"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Mutable default parameters are not supported", ""):
             torch.jit.script(should_fail)
 
     def test_staticmethod(self):
@@ -1404,7 +1404,7 @@ class TestClassType(JitTestCase):
                     mod = self.mod2
                 return mod.val
 
-        with self.assertRaisesRegex(RuntimeError, "Could not cast attribute 'val' to type Tensor"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Could not cast attribute 'val' to type Tensor", ""):
             torch.jit.script(Mod())
 
     def test_recursive_scripting(self):
@@ -1452,7 +1452,7 @@ class TestClassType(JitTestCase):
             def forward(self) -> bool:
                 return self.obj.get_a()
 
-        with self.assertRaisesRegex(RuntimeError, "failed to convert Python type"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "failed to convert Python type", ""):
             torch.jit.script(ShouldNotCompile(UnscriptableClass(4)))
 
         # This Module has an attribute of type UnscriptableClass
