@@ -18,13 +18,13 @@ See also these wiki pages:
 - https://github.com/pytorch/pytorch/wiki/Lint-as-you-type
 """
 
-import fnmatch
 import re
 import sys
 from configparser import ConfigParser
 from itertools import chain
 from pathlib import Path, PurePath, PurePosixPath
 from typing import List, Set
+from wcmatch.glob import globmatch  # type: ignore[import]
 
 import mypy.api
 
@@ -41,7 +41,7 @@ def glob(*, pattern: str, filename: PurePosixPath) -> bool:
     Return True iff the filename matches the (mypy ini) glob pattern.
     """
     return any(
-        fnmatch.fnmatchcase(str(prefix), pattern)
+        globmatch(str(prefix), pattern)
         for prefix in chain([filename], filename.parents)
     )
 

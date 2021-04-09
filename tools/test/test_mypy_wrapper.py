@@ -63,5 +63,16 @@ class TestMypyWrapper(unittest.TestCase):
             filename=PurePosixPath('tools/autograd/deprecated.yaml'),
         ))
 
+    def test_glob_wildcards_dont_expand_or_collapse(self):
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='benchmarks/instruction_counts/*.py',
+            filename=PurePosixPath('benchmarks/instruction_counts/core/utils.py'),
+        ))
+        self.assertFalse(mypy_wrapper.glob(
+            pattern='benchmarks/instruction_counts/*/*.py',
+            filename=PurePosixPath('benchmarks/instruction_counts/main.py'),
+        ))
+
+
 if __name__ == '__main__':
     unittest.main()
