@@ -3,7 +3,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh> //for MAX_DIMS
-#include <ATen/cuda/CubUtils.cuh>
+#include <ATen/cuda/cub.cuh>
 
 
 namespace at {
