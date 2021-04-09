@@ -11,7 +11,7 @@ namespace c10 {
 
 template<typename dest_t, typename src_t>
 struct needs_real {
-  constexpr static bool value = (is_complex_t<src_t>::value && !is_complex_t<dest_t>::value);
+  constexpr static bool value = (is_complex<src_t>::value && !is_complex<dest_t>::value);
 };
 
 template<bool, typename src_t>
@@ -44,7 +44,7 @@ struct static_cast_with_inter_type {
 // Note: Converting from negative float values to unsigned integer types is
 // undefined behavior in C++, and current CPU and GPU compilers exhibit
 // divergent behavior. Casting from negative float values to signed
-// integer types and then to unsigned integer types is not undefiend,
+// integer types and then to unsigned integer types is not undefined,
 // however, so this cast improves the consistency of type conversions
 // to uint8 across compilers.
 // Further note: Type conversions across compilers still have other undefined
@@ -57,15 +57,6 @@ struct static_cast_with_inter_type<uint8_t, src_t> {
       static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
   }
 };
-
-#if defined(__CUDACC__)
-template <typename dest_value_t, typename src_value_t>
-  struct static_cast_with_inter_type<thrust::complex<dest_value_t>, c10::complex<src_value_t>> {
-    C10_HOST_DEVICE static inline thrust::complex<dest_value_t> apply(c10::complex<src_value_t> src) {
-      return thrust::complex<dest_value_t>(src.real(), src.imag());
-    }
-};
-#endif
 
 // Dynamic type casting utils:
 // - fetch_and_cast
@@ -179,3 +170,5 @@ To checked_convert(From f, const char* name) {
 }
 
 }  // namespace c10
+
+// Trigger tests for D25440771. TODO: Remove this line any time you want.

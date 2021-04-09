@@ -1,27 +1,24 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
-import numpy as np
+from typing import Tuple
+import io
+import itertools
 import sys
 import unittest
-import itertools
 
-import torch.onnx
-import torch.onnx.operators
-from torch.onnx import ExportTypes
+import numpy as np
+
+from debug_embed_params import run_embed_params
 from torch import nn
 from torch.autograd import Variable, function
-import torch.utils.model_zoo as model_zoo
 from torch.nn.utils import rnn as rnn_utils
-from debug_embed_params import run_embed_params
-import io
+from torch.onnx import ExportTypes
+import torch.onnx
+import torch.onnx.operators
+import torch.utils.model_zoo as model_zoo
 
 # Import various models for testing
 from torchvision.models.alexnet import alexnet
-from torchvision.models.inception import inception_v3
 from torchvision.models.densenet import densenet121
+from torchvision.models.inception import inception_v3
 from torchvision.models.resnet import resnet50
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 
@@ -51,6 +48,13 @@ def skipIfEmbed(func):
     def wrapper(self):
         if self.embed_params:
             raise unittest.SkipTest("Skip embed_params verify test")
+        return func(self)
+    return wrapper
+
+def skipIfNoEmbed(func):
+    def wrapper(self):
+        if not self.embed_params:
+            raise unittest.SkipTest("Skip debug embed_params test")
         return func(self)
     return wrapper
 
@@ -130,7 +134,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         return cuda_model, cuda_input
 
     def run_debug_test(self, model, train, batch_size, state_dict=None,
-                       input=None, use_gpu=True, example_outputs=None):
+                       input=None, use_gpu=True, example_outputs=None,
+                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
         """
         # TODO: remove this from the final release version
         This test is for our debugging only for the case where
@@ -152,7 +157,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                       do_constant_folding=False,
                                       opset_version=self.opset_version,
                                       keep_initializers_as_inputs=True,
-                                      add_node_names=False)
+                                      add_node_names=False,
+                                      operator_export_type=operator_export_type)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -162,7 +168,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                        example_outputs=None, do_constant_folding=True):
+                        example_outputs=None, do_constant_folding=True,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
         """
         This is what the user facing version will look like
         """
@@ -185,11 +192,13 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                       example_outputs=example_outputs,
                       do_constant_folding=do_constant_folding,
                       opset_version=self.opset_version,
-                      keep_initializers_as_inputs=True)
+                      keep_initializers_as_inputs=True,
+                      operator_export_type=operator_export_type)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                       example_outputs=None, do_constant_folding=True):
+                       example_outputs=None, do_constant_folding=True,
+                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
         use_gpu_ = torch.cuda.is_available() and use_gpu
         # NOTE: do_constant_folding is turned on only when model has
         # parameters embedded (which are needed for constant folding),
@@ -199,10 +208,12 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             self.run_actual_test(model, train, batch_size, state_dict, input,
                                  use_gpu=use_gpu_, rtol=rtol, atol=atol,
                                  example_outputs=example_outputs,
-                                 do_constant_folding=do_constant_folding)
+                                 do_constant_folding=do_constant_folding,
+                                 operator_export_type=operator_export_type)
         else:
             self.run_debug_test(model, train, batch_size, state_dict, input,
-                                use_gpu=use_gpu_, example_outputs=example_outputs)
+                                use_gpu=use_gpu_, example_outputs=example_outputs,
+                                operator_export_type=operator_export_type)
 
     def test_linear(self):
         class MyModel(torch.nn.Module):
@@ -448,11 +459,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                                   do_constant_folding=False)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
-            assert len(prepared.init_net.op) == 875
-            assert len(prepared.predict_net.op) == 130
+            assert len(prepared.init_net.op) == 879
+            assert len(prepared.predict_net.op) == 133
         else:
-            assert len(prepared.init_net.op) == 8
-            assert len(prepared.predict_net.op) == 997
+            assert len(prepared.init_net.op) == 12
+            assert len(prepared.predict_net.op) == 1000
 
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)
@@ -497,6 +508,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(inception_v3(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict, input=x)
 
+    @skipIfNoEmbed
     def test_resnet(self):
         state_dict = model_zoo.load_url(model_urls['resnet50'], progress=False)
         self.run_model_test(resnet50(), train=False, batch_size=BATCH_SIZE,
@@ -1025,14 +1037,16 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 def forward(self, x):
                     return torch.cumsum(x, **params)
             x = torch.randn(*shape)
-            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False,
+                                operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_cosine_similarity(self):
         shape = (100, 128)
         x = torch.randn(*shape)
         y = torch.randn(*shape)
         self.run_model_test(torch.nn.CosineSimilarity(dim=1, eps=1e-6), train=False,
-                            input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+                            input=(x, y), batch_size=BATCH_SIZE, use_gpu=False,
+                            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     @skipIfUnsupportedOpsetVersion([10])
     def test_lstm_constant_folding(self):
@@ -1159,7 +1173,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 super(MyModel, self).__init__()
 
             def forward(self, x, y):
-                return x.repeat(y.size()[0] / 2, y.size()[1] * 2)
+                return x.repeat(y.size()[0] // 2, y.size()[1] * 2)
 
         x = torch.randn(1, 2, requires_grad=True)
         y = torch.randn(2, 4, requires_grad=True)
@@ -1415,6 +1429,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    # ConstantFill is a deprecated experimental op (used in opsets < 9).
+    # Shape inference does not cover this op.
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_arithmetic(self):
         class Arithmetic(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1611,7 +1628,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(ScatterModel(), train=False, input=(input, indices, values),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
-
+    @skipIfUnsupportedOpsetVersion([10])
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
@@ -1962,8 +1979,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_tuple_input_output(self):
         class TupleModel(torch.jit.ScriptModule):
             @torch.jit.script_method
-            def forward(self, a):
-                # type: (Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+            def forward(self, a: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
                 return a
 
         x = (torch.randn(3, 4), torch.randn(4, 3))
@@ -1973,8 +1989,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_nested_tuple_input_output(self):
         class NestedTupleModel(torch.jit.ScriptModule):
             @torch.jit.script_method
-            def forward(self, a, b):
-                # type: (Tensor, Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
+            def forward(self, a: torch.Tensor, b: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]) -> torch.Tensor:
                 return a + b[0] + b[1][0] + b[1][1]
 
         x = torch.randn(4, 5)
@@ -2022,7 +2037,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return torch._dim_arange(input, 1)
 
         x = torch.ones(5, 6)
-        self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE)
+        self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE,
+                            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_end(self):
@@ -2102,7 +2118,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         model = DirichletModel()
-        onnxir, _ = do_export(model, x, keep_initializers_as_inputs=True)
+        onnxir, _ = do_export(model, x, keep_initializers_as_inputs=True,
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         onnx_model = onnx.ModelProto.FromString(onnxir)
         prepared = c2.prepare(onnx_model)
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
@@ -2115,7 +2132,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         model = GammaModel()
-        onnxir, _ = do_export(model, x, keep_initializers_as_inputs=True)
+        onnxir, _ = do_export(model, x, keep_initializers_as_inputs=True,
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         onnx_model = onnx.ModelProto.FromString(onnxir)
         prepared = c2.prepare(onnx_model)
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
@@ -2500,6 +2518,11 @@ TestCaffe2BackendEmbed_opset10 = type(str("TestCaffe2BackendEmbed_opset10"),
                                       dict(TestCaffe2Backend_opset9.__dict__,
                                            embed_params=True, opset_version=10))
 
+# add the same test suite as above, but switch embed_params=False
+# to embed_params=True
+TestCaffe2BackendEmbed_opset9_new_jit_API = type(str("TestCaffe2BackendEmbed_opset9_new_jit_API"),
+                                                 (unittest.TestCase,),
+                                                 dict(TestCaffe2Backend_opset9.__dict__, embed_params=True))
 
 if __name__ == '__main__':
     unittest.main()

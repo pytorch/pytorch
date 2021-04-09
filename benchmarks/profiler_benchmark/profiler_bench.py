@@ -1,35 +1,22 @@
-import itertools
-import statistics
+import argparse
+import sys
 import timeit
 import torch
 
-profiling_enabled = None
-profiling_tensor_size = None
-TENSOR_SIZES = [1, 32, 128, 256, 512]
-INTERNAL_ITER = 256
-PARALLEL_TASKS_NUM = 4
-N = 100
+from torch.utils.benchmark import Timer
 
+PARALLEL_TASKS_NUM = 4
+INTERNAL_ITER = None
 def loop_workload(x):
     for i in range(INTERNAL_ITER):
         x = torch.mm(x, x)
     return x
 
-traced_loop_workload = None
-def run_profiler_benchmark_loop():
-    x = torch.rand(profiling_tensor_size, profiling_tensor_size)
-    if profiling_enabled:
-        with torch.autograd.profiler.profile() as prof:
-            traced_loop_workload(x)
-    else:
-        traced_loop_workload(x)
-
-def parallel_task(x):
-    for i in range(int(INTERNAL_ITER / PARALLEL_TASKS_NUM)):
-        x = torch.mm(x, x)
-    return x
-
 def parallel_workload(x):
+    def parallel_task(x):
+        for i in range(int(INTERNAL_ITER / PARALLEL_TASKS_NUM)):
+            x = torch.mm(x, x)
+        return x
     futs = []
     for i in range(PARALLEL_TASKS_NUM):
         futs.append(torch.jit._fork(parallel_task, x))
@@ -37,41 +24,77 @@ def parallel_workload(x):
         torch.jit._wait(futs[i])
     return x
 
-traced_parallel_workload = None
-def run_profiler_benchmark_parallel():
-    x = torch.rand(profiling_tensor_size, profiling_tensor_size)
-    if profiling_enabled:
-        with torch.autograd.profiler.profile() as prof:
-            traced_parallel_workload(x)
-    else:
-        traced_parallel_workload(x)
 
 if __name__ == '__main__':
-    for workload_name in ["loop", "parallel"]:
-        print("Payload: {}; {} iterations, N = {}\n".format(
-            workload_name, INTERNAL_ITER, N))
-        for params in itertools.product(TENSOR_SIZES, [False, True]):
-            profiling_tensor_size = params[0]
-            profiling_enabled = params[1]
+    torch._C._set_graph_executor_optimize(False)
+    parser = argparse.ArgumentParser(
+        description='Profiler benchmark')
 
-            print("Profiling {}, tensor size {}x{}".format(
-                "enabled " if profiling_enabled else "disabled",
-                profiling_tensor_size, profiling_tensor_size))
+    parser.add_argument('--with_cuda', action='store_true')
+    parser.add_argument('--with_stack', action='store_true')
+    parser.add_argument('--use_script', action='store_true')
+    parser.add_argument('--use_kineto', action='store_true')
+    parser.add_argument('--profiling_tensor_size', default=1, type=int)
+    parser.add_argument('--workload', default='loop', type=str)
+    parser.add_argument('--internal_iter', default=256, type=int)
+    parser.add_argument('--timer_min_run_time', default=10, type=int)
+    parser.add_argument('--cuda_only', action='store_true')
 
-            x = torch.rand(profiling_tensor_size, profiling_tensor_size)
-            workload = None
-            if workload_name == "loop":
-                workload = run_profiler_benchmark_loop
-                traced_loop_workload = torch.jit.trace(loop_workload, x)
-            elif workload_name == "parallel":
-                workload = run_profiler_benchmark_parallel
-                traced_parallel_workload = torch.jit.trace(
-                    parallel_workload, x)
+    args = parser.parse_args()
 
-            runtimes = timeit.repeat(workload, repeat=N, number=1)
-            avg_time = statistics.mean(runtimes) * 1000.0
-            stddev_time = statistics.stdev(runtimes) * 1000.0
-            print("\tavg. time: {:.3f} ms, stddev: {:.3f} ms".format(
-                avg_time, stddev_time))
-            print("\ttime per iteration: {:.3f} ms\n".format(
-                avg_time / INTERNAL_ITER))
+    if args.with_cuda and not torch.cuda.is_available():
+        print("No CUDA available")
+        sys.exit()
+
+    print("Payload: {}, {} iterations; timer min. runtime = {}\n".format(
+        args.workload, args.internal_iter, args.timer_min_run_time))
+    INTERNAL_ITER = args.internal_iter
+
+    for profiling_enabled in [False, True]:
+        print("Profiling {}, tensor size {}x{}, use cuda: {}, use kineto: {}, with stacks: {}, use script: {}".format(
+            "enabled" if profiling_enabled else "disabled",
+            args.profiling_tensor_size,
+            args.profiling_tensor_size,
+            args.with_cuda,
+            args.use_kineto,
+            args.with_stack,
+            args.use_script))
+
+        input_x = torch.rand(
+            args.profiling_tensor_size,
+            args.profiling_tensor_size)
+
+        if args.with_cuda:
+            input_x = input_x.cuda()
+
+        workload = None
+        assert args.workload in ["loop", "parallel"]
+        if args.workload == "loop":
+            workload = loop_workload
+        else:
+            workload = parallel_workload
+
+        if args.use_script:
+            traced_workload = torch.jit.trace(workload, (input_x,))
+            workload = traced_workload
+
+        if profiling_enabled:
+            def payload():
+                x = None
+                with torch.autograd.profiler.profile(
+                        use_cuda=args.with_cuda,
+                        with_stack=args.with_stack,
+                        use_kineto=args.use_kineto,
+                        use_cpu=not args.cuda_only) as prof:
+                    x = workload(input_x)
+                return x
+        else:
+            def payload():
+                return workload(input_x)
+
+        t = Timer(
+            "payload()",
+            globals={"payload": payload},
+            timer=timeit.default_timer,
+        ).blocked_autorange(min_run_time=args.timer_min_run_time)
+        print(t)

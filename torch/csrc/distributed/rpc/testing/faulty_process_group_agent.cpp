@@ -1,30 +1,31 @@
+#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-namespace {
-constexpr auto kSecToMsConversion = 1000;
-}
 
 std::string fromVec(const std::vector<char>& vec) {
   return std::string(vec.begin(), vec.end());
 }
 
 FaultyProcessGroupAgent::FaultyProcessGroupAgent(
+    const c10::intrusive_ptr<::c10d::Store>& store,
     std::string workerName,
-    std::shared_ptr<c10d::ProcessGroup> pg,
+    c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout,
     const std::vector<std::string>& messagesToFail,
     const std::unordered_map<std::string, float>& messageTypesToDelay,
     int failNumSends)
     : ProcessGroupAgent(
+          store,
           std::move(workerName),
           std::move(pg),
           numSendRecvThreads,
-          rpcTimeout),
+          rpcTimeout,
+          std::make_unique<RequestCallbackImpl>()),
       failNumSends_(failNumSends),
       messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
       messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) {}
@@ -57,10 +58,11 @@ std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
   return delayMessages;
 }
 
-std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
+std::shared_ptr<JitFuture> FaultyProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
   if (!shouldFailMessage(message.type())) {
@@ -79,9 +81,11 @@ std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
   if (failMessageCountMap_[key] < failNumSends_) {
     failMessageCountMap_[key]++;
     lock.unlock();
-    auto fm = std::make_shared<FutureMessage>();
-    fm->setError(c10::str("Send attempt failed intentionally for ", key));
-    return fm;
+    auto jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+    jitFuture->setError(std::make_exception_ptr(std::runtime_error(makeRPCError(
+        c10::str("Send attempt failed intentionally for ", key),
+        RPCErrorType::INTENTIONAL_FAILURE))));
+    return jitFuture;
   } else {
     lock.unlock();
     return ProcessGroupAgent::send(to, std::move(message), rpcTimeoutSeconds);
@@ -96,6 +100,16 @@ void FaultyProcessGroupAgent::enqueueSend(SendWork work) {
         static_cast<int>(msgDelay * kSecToMsConversion)));
   }
   ProcessGroupAgent::enqueueSend(std::move(work));
+}
+
+void FaultyProcessGroupAgent::sendToSelf(Message&& message) {
+  float msgDelay = getDelayForMessage(message.type());
+  if (msgDelay != 0) {
+    // Sleep for the specified delay for the message.
+    std::this_thread::sleep_for(std::chrono::milliseconds(
+        static_cast<int>(msgDelay * kSecToMsConversion)));
+  }
+  ProcessGroupAgent::sendToSelf(std::move(message));
 }
 
 bool FaultyProcessGroupAgent::shouldFailMessage(MessageType type) const {
@@ -120,9 +134,11 @@ MessageType FaultyProcessGroupAgent::messageStringToType(
       {"CLEANUP_AUTOGRAD_CONTEXT_REQ",
        MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ},
       {"PYTHON_REMOTE_CALL", MessageType::PYTHON_REMOTE_CALL},
+      {"SCRIPT_REMOTE_CALL", MessageType::SCRIPT_REMOTE_CALL},
       {"PYTHON_CALL", MessageType::PYTHON_CALL},
       {"SCRIPT_CALL", MessageType::SCRIPT_CALL},
-  };
+      {"PYTHON_RREF_FETCH_CALL", MessageType::PYTHON_RREF_FETCH_CALL},
+      {"SCRIPT_RREF_FETCH_CALL", MessageType::SCRIPT_RREF_FETCH_CALL}};
   const auto& it = msgMap.find(messageString);
   TORCH_CHECK(
       it != msgMap.end(),

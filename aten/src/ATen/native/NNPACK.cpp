@@ -1,15 +1,16 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 
+#include <thread>
+
 #if !AT_NNPACK_ENABLED()
 
 namespace at {
 namespace native {
 
 at::Tensor _nnpack_spatial_convolution(
-    const at::Tensor& input,
-    const at::Tensor& weight,
-    const at::Tensor& bias,
+    const Tensor& input,
+    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     const IntArrayRef padding,
     const IntArrayRef stride) {
   throw std::runtime_error(
@@ -56,8 +57,9 @@ bool _nnpack_available() {
 
 #include <nnpack.h>
 
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/Parallel.h>
 
 namespace at {
 namespace native {
@@ -85,15 +87,9 @@ static bool init_nnpack() {
 }
 
 static pthreadpool_t nnpack_threadpool() {
-  // Try initializing a threadpool for NNPACK's use.  If we fail to
-  // successfully initialize an implementation, return nullptr which will
-  // instruct NNPACK to run single threaded.
-
 #ifdef C10_MOBILE
-  // If building for mobile, use Caffe 2's mobile-friendly threadpool.
-  return caffe2::mobile_pthreadpool();
+  return caffe2::pthreadpool_();
 #else
-  // Otherwise, try using pthreadpool if we manage to initialize it successfully.
   static pthreadpool_t nnpack_threadpool_ = nullptr;
   static bool called_nnpack_threadpool_ = false;
 
@@ -145,11 +141,13 @@ static inline void allocate_workspace() {
 }
 
 Tensor _nnpack_spatial_convolution(
-    const at::Tensor& input,
-    const at::Tensor& weight,
-    const at::Tensor& bias,
+    const Tensor& input,
+    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     const IntArrayRef padding,
     const IntArrayRef stride) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   at::Tensor output = at::empty(
       conv_output_size(input.sizes(), weight.sizes(), padding, stride),
       input.options());

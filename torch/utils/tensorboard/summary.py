@@ -1,15 +1,13 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import json
 import logging
 import numpy as np
 import os
+from typing import Optional
 
 # pylint: disable=unused-import
 from six.moves import range
 
+from google.protobuf import struct_pb2
 from tensorboard.compat.proto.summary_pb2 import Summary
 from tensorboard.compat.proto.summary_pb2 import HistogramProto
 from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
@@ -50,7 +48,7 @@ def _draw_single_box(image, xmin, ymin, xmax, ymax, display_str, color='black', 
     return image
 
 
-def hparams(hparam_dict=None, metric_dict=None):
+def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     """Outputs three `Summary` protocol buffers needed by hparams plugin.
     `Experiment` keeps the metadata of an experiment, such as the name of the
       hyperparameters and the name of the metrics.
@@ -62,6 +60,8 @@ def hparams(hparam_dict=None, metric_dict=None):
         and their values.
       metric_dict: A dictionary that contains names of the metrics
         and their values.
+      hparam_domain_discrete: (Optional[Dict[str, List[Any]]]) A dictionary that
+        contains names of the hyperparameters and all discrete values they can hold
 
     Returns:
       The `Summary` protobufs for Experiment, SessionStartInfo and
@@ -99,6 +99,21 @@ def hparams(hparam_dict=None, metric_dict=None):
         logging.warning('parameter: metric_dict should be a dictionary, nothing logged.')
         raise TypeError('parameter: metric_dict should be a dictionary, nothing logged.')
 
+    hparam_domain_discrete = hparam_domain_discrete or {}
+    if not isinstance(hparam_domain_discrete, dict):
+        raise TypeError(
+            "parameter: hparam_domain_discrete should be a dictionary, nothing logged."
+        )
+    for k, v in hparam_domain_discrete.items():
+        if (
+            k not in hparam_dict
+            or not isinstance(v, list)
+            or not all(isinstance(d, type(hparam_dict[k])) for d in v)
+        ):
+            raise TypeError(
+                "parameter: hparam_domain_discrete[{}] should be a list of same type as "
+                "hparam_dict[{}].".format(k, k)
+            )
     hps = []
 
 
@@ -108,17 +123,68 @@ def hparams(hparam_dict=None, metric_dict=None):
             continue
         if isinstance(v, int) or isinstance(v, float):
             ssi.hparams[k].number_value = v
-            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_FLOAT64")))
+
+            if k in hparam_domain_discrete:
+                domain_discrete: Optional[struct_pb2.ListValue] = struct_pb2.ListValue(
+                    values=[
+                        struct_pb2.Value(number_value=d)
+                        for d in hparam_domain_discrete[k]
+                    ]
+                )
+            else:
+                domain_discrete = None
+
+            hps.append(
+                HParamInfo(
+                    name=k,
+                    type=DataType.Value("DATA_TYPE_FLOAT64"),
+                    domain_discrete=domain_discrete,
+                )
+            )
             continue
 
         if isinstance(v, string_types):
             ssi.hparams[k].string_value = v
-            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_STRING")))
+
+            if k in hparam_domain_discrete:
+                domain_discrete = struct_pb2.ListValue(
+                    values=[
+                        struct_pb2.Value(string_value=d)
+                        for d in hparam_domain_discrete[k]
+                    ]
+                )
+            else:
+                domain_discrete = None
+
+            hps.append(
+                HParamInfo(
+                    name=k,
+                    type=DataType.Value("DATA_TYPE_STRING"),
+                    domain_discrete=domain_discrete,
+                )
+            )
             continue
 
         if isinstance(v, bool):
             ssi.hparams[k].bool_value = v
-            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_BOOL")))
+
+            if k in hparam_domain_discrete:
+                domain_discrete = struct_pb2.ListValue(
+                    values=[
+                        struct_pb2.Value(bool_value=d)
+                        for d in hparam_domain_discrete[k]
+                    ]
+                )
+            else:
+                domain_discrete = None
+
+            hps.append(
+                HParamInfo(
+                    name=k,
+                    type=DataType.Value("DATA_TYPE_BOOL"),
+                    domain_discrete=domain_discrete,
+                )
+            )
             continue
 
         if isinstance(v, torch.Tensor):
@@ -164,7 +230,7 @@ def hparams(hparam_dict=None, metric_dict=None):
     return exp, ssi, sei
 
 
-def scalar(name, scalar, collections=None):
+def scalar(name, scalar, collections=None, new_style=False):
     """Outputs a `Summary` protocol buffer containing a single scalar value.
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
@@ -173,15 +239,30 @@ def scalar(name, scalar, collections=None):
       tensor: A real numeric Tensor containing a single value.
       collections: Optional list of graph collections keys. The new summary op is
         added to these collections. Defaults to `[GraphKeys.SUMMARIES]`.
+      new_style: Whether to use new style (tensor field) or old style (simple_value
+        field). New style could lead to faster data loading.
     Returns:
       A scalar `Tensor` of type `string`. Which contains a `Summary` protobuf.
     Raises:
       ValueError: If tensor has the wrong shape or type.
     """
     scalar = make_np(scalar)
-    assert(scalar.squeeze().ndim == 0), 'scalar should be 0D'
+    assert scalar.squeeze().ndim == 0, "scalar should be 0D"
     scalar = float(scalar)
-    return Summary(value=[Summary.Value(tag=name, simple_value=scalar)])
+    if new_style:
+        plugin_data = SummaryMetadata.PluginData(plugin_name="scalars")
+        smd = SummaryMetadata(plugin_data=plugin_data)
+        return Summary(
+            value=[
+                Summary.Value(
+                    tag=name,
+                    tensor=TensorProto(float_val=[scalar], dtype="DT_FLOAT"),
+                    metadata=smd,
+                )
+            ]
+        )
+    else:
+        return Summary(value=[Summary.Value(tag=name, simple_value=scalar)])
 
 
 def histogram_raw(name, min, max, num, sum, sum_squares, bucket_limits, bucket_counts):
@@ -423,27 +504,22 @@ def audio(tag, tensor, sample_rate=44100):
         print('warning: audio amplitude out of range, auto clipped.')
         tensor = tensor.clip(-1, 1)
     assert(tensor.ndim == 1), 'input tensor should be 1 dimensional.'
+    tensor = (tensor * np.iinfo(np.int16).max).astype('<i2')
 
-    tensor_list = [int(32767.0 * x) for x in tensor]
     import io
     import wave
-    import struct
     fio = io.BytesIO()
     wave_write = wave.open(fio, 'wb')
     wave_write.setnchannels(1)
     wave_write.setsampwidth(2)
     wave_write.setframerate(sample_rate)
-    tensor_enc = b''
-    for v in tensor_list:
-        tensor_enc += struct.pack('<h', v)
-
-    wave_write.writeframes(tensor_enc)
+    wave_write.writeframes(tensor.data)
     wave_write.close()
     audio_string = fio.getvalue()
     fio.close()
     audio = Summary.Audio(sample_rate=sample_rate,
                           num_channels=1,
-                          length_frames=len(tensor_list),
+                          length_frames=tensor.shape[-1],
                           encoded_audio_string=audio_string,
                           content_type='audio/wav')
     return Summary(value=[Summary.Value(tag=tag, audio=audio)])
@@ -528,7 +604,7 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
 
     # Compute bins of true positives and false positives.
     bucket_indices = np.int32(np.floor(predictions * (num_thresholds - 1)))
-    float_labels = labels.astype(np.float)
+    float_labels = labels.astype(np.float64)
     histogram_range = (0, num_thresholds - 1)
     tp_buckets, _ = np.histogram(
         bucket_indices,

@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Functions.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
 
@@ -71,10 +72,10 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   auto rets = torch::jit::pop(*stack, num_returns);
   for (size_t i = 0; i < num_returns; i++) {
     // TODO: Handle tensor list
-    if (args[i].isTensor()) {
-      torch::jit::push(*stack, at::detail::make_tensor<GenericWrapperTensorImpl>(std::move(args[i]).toTensor()));  // yes move!
+    if (rets[i].isTensor()) {
+      torch::jit::push(*stack, at::detail::make_tensor<GenericWrapperTensorImpl>(std::move(rets[i]).toTensor()));  // yes move!
     } else {
-      torch::jit::push(*stack, std::move(args[i]));
+      torch::jit::push(*stack, std::move(rets[i]));
     }
   }
 }

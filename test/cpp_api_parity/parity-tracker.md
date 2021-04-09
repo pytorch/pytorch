@@ -57,6 +57,7 @@ torch::nn::RReLU|Yes|No
 torch::nn::SELU|Yes|No
 torch::nn::CELU|Yes|No
 torch::nn::GELU|Yes|No
+torch::nn::SiLU|Yes|No
 torch::nn::Sigmoid|Yes|No
 torch::nn::Softplus|Yes|No
 torch::nn::Softshrink|Yes|No
@@ -87,11 +88,11 @@ torch::nn::GRU|Yes|No
 torch::nn::RNNCell|Yes|No
 torch::nn::LSTMCell|Yes|No
 torch::nn::GRUCell|Yes|No
-torch::nn::Transformer|No|No
+torch::nn::Transformer|Yes|No
 torch::nn::TransformerEncoder|No|No
 torch::nn::TransformerDecoder|No|No
-torch::nn::TransformerEncoderLayer|No|No
-torch::nn::TransformerDecoderLayer|No|No
+torch::nn::TransformerEncoderLayer|Yes|No
+torch::nn::TransformerDecoderLayer|Yes|No
 torch::nn::Identity|Yes|No
 torch::nn::Linear|Yes|No
 torch::nn::Bilinear|Yes|No
@@ -118,12 +119,14 @@ torch::nn::MarginRankingLoss|Yes|No
 torch::nn::HingeEmbeddingLoss|Yes|No
 torch::nn::MultiLabelMarginLoss|Yes|No
 torch::nn::SmoothL1Loss|Yes|No
+torch::nn::HuberLoss|Yes|No
 torch::nn::SoftMarginLoss|Yes|No
 torch::nn::MultiLabelSoftMarginLoss|Yes|No
 torch::nn::CosineEmbeddingLoss|Yes|No
 torch::nn::MultiMarginLoss|Yes|No
 torch::nn::TripletMarginLoss|Yes|No
 torch::nn::PixelShuffle|Yes|No
+torch::nn::PixelUnshuffle|Yes|No
 torch::nn::Upsample|Yes|No
 torch::nn::DataParallel|No|No
 torch::nn::parallel::DistributedDataParallel|No|No
@@ -183,6 +186,7 @@ F::prelu|Yes|No
 F::rrelu|Yes|No
 F::glu|Yes|No
 F::gelu|Yes|No
+F::silu|Yes|No
 F::logsigmoid|Yes|No
 F::hardshrink|Yes|No
 F::tanhshrink|Yes|No
@@ -226,6 +230,7 @@ F::multilabel_soft_margin_loss|Yes|No
 F::multi_margin_loss|Yes|No
 F::nll_loss|Yes|No
 F::smooth_l1_loss|Yes|No
+F::huber_loss|Yes|No
 F::soft_margin_loss|Yes|No
 F::triplet_margin_loss|Yes|No
 F::pixel_shuffle|Yes|No

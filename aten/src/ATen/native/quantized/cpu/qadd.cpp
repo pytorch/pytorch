@@ -7,7 +7,7 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
 
@@ -47,7 +47,7 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
 }
 
 template <bool ReLUFused = false>
-Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
+Tensor _add_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
   TORCH_CHECK(
       self.qscheme() == kPerTensorAffine,
       "Only per tensor affine is supported for now!!");
@@ -88,7 +88,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
     if (q_min > z - c_q) {
       s_prime = (((double)q_max - (z - c_q))) / ((double)q_max - q_min) * s;
       z_prime = q_min;
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
         qadd_scalar_relu_stub(self.device().type(), out, self, c_q);
@@ -98,7 +98,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
     } else if (q_max < z - c_q) {
       s_prime = ((double)(z - c_q) - q_min) / ((double)q_max - q_min) * s;
       z_prime = q_max;
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
         qadd_scalar_relu_stub(self.device().type(), out, self, c_q);
@@ -109,10 +109,10 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
       s_prime = s;
       z_prime = z - c_q;
       out.copy_(self);
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
-        at::native::quantized_relu_(out);
+        at::native::relu_quantized_cpu_(out);
       }
     }
   });
@@ -139,10 +139,13 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 
   Tensor qy = at::native::empty_affine_quantized(
       qa_contig.sizes(),
-      at::device(kCPU).dtype(kQUInt8).memory_format(qa.suggest_memory_format()),
+      kQUInt8,
+      c10::nullopt /* layout */,
+      kCPU,
+      c10::nullopt /* pin_memory */,
       scale,
       zero_point,
-      c10::nullopt);
+      qa.suggest_memory_format());
 
   if (qa_contig.size(0) == 0) {
     return qy;
@@ -194,7 +197,7 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK Add operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
   const pytorch_qnnp_status runStatus =
       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
 
@@ -235,33 +238,71 @@ Tensor qadd_out(Tensor qa, Tensor qb, Tensor out) {
 
 
 template <bool ReLUFused = false>
-Tensor qadd_scalar(Tensor qa, Scalar b) {
+Tensor qadd_scalar(Tensor qa, const Scalar& b) {
   TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
-              "Only per tensor quantization is suuported in Add.");
+              "Only per tensor quantization is supported in Add.");
   auto qc = at::empty_like(qa, qa.suggest_memory_format());
   return _add_scalar_out<ReLUFused>(qc, qa, b);
 }
 
 template <bool ReLUFused = false>
-Tensor qadd_scalar_out(Tensor qa, Scalar b, Tensor out) {
+Tensor qadd_scalar2(Scalar b, Tensor qa) {
+  TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
+              qa.qscheme() == kPerTensorSymmetric,
+              "Only per tensor quantization is supported in Add.");
+  auto qc = at::empty_like(qa, qa.suggest_memory_format());
+  return _add_scalar_out<ReLUFused>(qc, qa, b);
+}
+
+template <bool ReLUFused = false>
+Tensor qadd_scalar_out(Tensor qa, const Scalar& b, Tensor out) {
   check_inputs(qa, out);
   return _add_scalar_out<ReLUFused>(out, qa, b);
 }
 
+// `torch.jit.trace` will trace Scalar as Tensor
+// This can be removed after broadcast is supported and
+// all variations of `quantized::add` is merged into `quantized::add`
+template <bool ReLUFused = false>
+Tensor qadd_scalar_tensor(Tensor qa, Tensor b) {
+  return qadd_scalar(qa, b.item());
+}
+
+// `torch.jit.trace` will trace Scalar as Tensor
+// This can be removed after broadcast is supported and
+// all variations of `quantized::add` is merged into `quantized::add`
+template <bool ReLUFused = false>
+Tensor qadd_scalar_tensor_out(Tensor qa, Tensor b, Tensor out) {
+  return qadd_scalar_out(qa, b.item(), out);
+}
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("add",                 qadd</*ReLUFused=*/false>);
-  m.impl("add_relu",            qadd</*ReLUFused=*/true>);
-  m.impl("add_out",             qadd_out</*ReLUFused=*/false>);
-  m.impl("add_relu_out",        qadd_out</*ReLUFused=*/true>);
-  m.impl("add_scalar",          qadd_scalar</*ReLUFused=*/false>);
-  m.impl("add_scalar_relu",     qadd_scalar</*ReLUFused=*/true>);
-  m.impl("add_scalar_out",      qadd_scalar_out</*ReLUFused=*/false>);
-  m.impl("add_scalar_relu_out", qadd_scalar_out</*ReLUFused=*/true>);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add"),                 TORCH_FN(qadd</*ReLUFused=*/false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add.out"),             TORCH_FN(qadd_out</*ReLUFused=*/false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add.Scalar"),          TORCH_FN(qadd_scalar</*ReLUFused=*/false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add.Scalar2"),          TORCH_FN(qadd_scalar2</*ReLUFused=*/false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add.Scalar_out"),      TORCH_FN(qadd_scalar_out</*ReLUFused=*/false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_relu"),            TORCH_FN(qadd</*ReLUFused=*/true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_relu.out"),        TORCH_FN(qadd_out</*ReLUFused=*/true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_relu.Scalar"),     TORCH_FN(qadd_scalar</*ReLUFused=*/true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_relu.Scalar2"),     TORCH_FN(qadd_scalar2</*ReLUFused=*/true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_relu.Scalar_out"), TORCH_FN(qadd_scalar_out</*ReLUFused=*/true>));
+  // deprecated functions, kept for backward compatibility
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_out"),             TORCH_FN(qadd_out</*ReLUFused=*/false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_relu_out"),        TORCH_FN(qadd_out</*ReLUFused=*/true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_scalar"),          TORCH_FN(qadd_scalar</*ReLUFused=*/false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_scalar_relu"),     TORCH_FN(qadd_scalar</*ReLUFused=*/true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_scalar_out"),      TORCH_FN(qadd_scalar_out</*ReLUFused=*/false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_scalar_relu_out"), TORCH_FN(qadd_scalar_out</*ReLUFused=*/true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_scalar.Tensor"),   TORCH_FN(qadd_scalar_tensor</*ReLUFused=*/false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_scalar_relu.Tensor"), TORCH_FN(qadd_scalar_tensor</*ReLUFused=*/true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_scalar_out.Tensor"), TORCH_FN(qadd_scalar_tensor_out</*ReLUFused=*/false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::add_scalar_relu_out.Tensor"), TORCH_FN(qadd_scalar_tensor_out</*ReLUFused=*/true>));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl("add", qadd</*ReLUFused=*/false>);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::add"), TORCH_FN(qadd</*ReLUFused=*/false>));
 }
 
 }  // namespace

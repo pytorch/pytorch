@@ -6,6 +6,47 @@
 
 namespace at { namespace native {
 
+// Returns true if resize is necessary
+bool resize_output_check(Tensor& output, IntArrayRef shape) {
+  // Tests for resizing of tensors with one more elements
+  if (output.sizes().equals(shape)) {
+    return false;
+  }
+  if (output.numel() != 0) {
+    TORCH_WARN(
+      "An output with one or more elements was resized since it had ",
+      "shape ", output.sizes(), ", which does not match the required ",
+      "output shape ", shape, ".",
+      "This behavior is deprecated, and in a future PyTorch release outputs ",
+      "will not be resized unless they have zero elements. You can explicitly ",
+      "reuse an out tensor t by resizing it, inplace, to zero elements with ",
+      "t.resize_(0).");
+  }
+  return true;
+}
+
+bool resize_output(Tensor& output, IntArrayRef shape) {
+  if (resize_output_check(output, shape)) {
+    output.resize_(shape);
+    return true;
+  } else {
+    return false;
+  }
+}
+
+// This is a performance escape hatch for resize_output.
+// It's CPU only and it skips the dispatcher.
+// Ideally, once external backends have access to meta functions
+// We can write one for resize_ and get rid of this.
+bool resize_output_cpu(Tensor& output, IntArrayRef shape) {
+  if (resize_output_check(output, shape)) {
+    at::native::resize_(output, shape);
+    return true;
+  } else {
+    return false;
+  }
+}
+
 // Call the sparse implementation in SparseTensor.cpp directly.
 // A dynamic dispatch here is NOT necessary, so I didn't put
 // this function in native_functions.yaml
@@ -77,14 +118,6 @@ Tensor& resize_(
     self_->empty_tensor_restride(memory_format);
   }
   return self;
-}
-
-TORCH_LIBRARY_IMPL(aten, CPU, m) {
-  m.impl_UNBOXED("resize_", resize_);
-}
-
-TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
-  m.impl_UNBOXED("resize_as_", resize_as_);
 }
 
 } // namespace native

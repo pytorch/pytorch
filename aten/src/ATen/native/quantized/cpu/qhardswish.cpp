@@ -5,7 +5,7 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
 
@@ -38,6 +38,10 @@ Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
     std::numeric_limits<uint8_t>::max(), // output max
     0, // flags
     &hardswish_op);
+
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+      qnnpack_uniq_ptr(hardswish_op);
+
   TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
                         "failed to create QNNPACK Hardswish operator");
 
@@ -51,7 +55,7 @@ Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
   TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
                         "failed to setup QNNPACK Hardswish operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
 
   const pytorch_qnnp_status runStatus =
     pytorch_qnnp_run_operator(hardswish_op, threadpool);
@@ -68,17 +72,14 @@ Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
 Tensor quantized_hardswish(const Tensor& qx, double output_scale, int64_t output_zero_point) {
   Tensor qy = at::_empty_affine_quantized(
       qx.sizes(),
-      at::device(kCPU)
-        .dtype(qx.scalar_type()),
-        // .memory_format(MemoryFormat::ChannelsLast),
+      at::device(kCPU).dtype(qx.scalar_type()),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      qx.suggest_memory_format());
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
     Tensor qx_contig = qx.contiguous(qx.suggest_memory_format());
-    TORCH_CHECK(qy.is_contiguous(), "qy must be contiguous");
     qnnpack_hardswish(qx_contig, qy);
     return qy;
   }
@@ -88,7 +89,7 @@ Tensor quantized_hardswish(const Tensor& qx, double output_scale, int64_t output
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("hardswish", quantized_hardswish);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::hardswish"), TORCH_FN(quantized_hardswish));
 }
 
 }}  // namespace at::native

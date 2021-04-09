@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
+
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
@@ -15,13 +17,6 @@ IValue deepCopy(const IValue& self) {
   // Tensors need special handling, since copy assignment creates an alias
   if (self.isTensor()) {
     return IValue(self.toTensor().clone(at::MemoryFormat::Preserve));
-  }
-  if (self.isTensorList()) {
-    c10::List<at::Tensor> newList;
-    for (const at::Tensor& oldTensor : self.toTensorVector()) {
-      newList.push_back(oldTensor.clone(at::MemoryFormat::Preserve));
-    }
-    return newList;
   }
 
   // Lists of ivalues should recursively deep copy their contents
@@ -40,6 +35,8 @@ IValue deepCopy(const IValue& self) {
     return IValue(self.toIntList().copy());
   } else if (self.isDoubleList()) {
     return IValue(self.toDoubleList().copy());
+  } else if (self.isComplexDoubleList()) {
+    return IValue(self.toComplexDoubleList().copy());
   } else if (self.isBoolList()) {
     return IValue(self.toBoolList().copy());
   } else if (self.isString()) {
@@ -61,19 +58,25 @@ Stack deepCopy(const Stack& stack) {
 }
 
 bool deepEquals(const IValue& lhs, const IValue& rhs) {
-  if (lhs.isInt() && rhs.isInt()) {
-    return lhs.toInt() == rhs.toInt();
-  } else if (lhs.isDouble() && rhs.isDouble()) {
-    return lhs.toDouble() == rhs.toDouble();
-  } else if (lhs.isNone() && rhs.isNone()) {
-    return true;
-  } else if (lhs.isIntList() && rhs.isIntList()) {
-    return lhs.toIntVector() == rhs.toIntVector();
-  } else if (lhs.isTensor() && rhs.isTensor()) {
+  if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
   }
 
-  throw std::runtime_error("Deep equals not implemented for type");
+  if (lhs.isTensorList() && rhs.isTensorList()) {
+    const auto a = lhs.toTensorList();
+    const auto b = rhs.toTensorList();
+    if (a.size() != b.size()) {
+      return false;
+    }
+    for (auto i = decltype(a.size()){0}; i < a.size(); ++i) {
+      if (!a[i].equal(b[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  return lhs == rhs;
 }
 
 struct AliasAndIValue {
@@ -146,6 +149,16 @@ const Node* findNodeForOp(
       return node;
     }
   }
+
+  // Check for alias-ed operator names
+  const auto aliasOp = torch::jit::getOperatorAliasMap().find(opName);
+  AT_ASSERT(aliasOp != torch::jit::getOperatorAliasMap().end());
+  for (const auto node : g.nodes()) {
+    if (node->kind() == aliasOp->second) {
+      return node;
+    }
+  }
+
   AT_ASSERT(false);
 }
 
@@ -236,7 +249,7 @@ void checkAliasAnnotation(
   const auto inputsDeepCopy = deepCopy(stack);
 
   // Run the op
-  node->getOperation()(stack);
+  node->getOperation()(&stack);
 
   const auto outputs = std::move(stack);
 

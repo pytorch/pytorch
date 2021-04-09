@@ -14,7 +14,7 @@ bool is_pinned(const Tensor& self) {
 }
 
 Tensor pin_memory(const Tensor& self) {
-  if (self.options().backend() != Backend::CPU) {
+  if (!self.device().is_cpu()) {
     AT_ERROR("cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
   }
   if (self.is_pinned()) {
@@ -23,7 +23,6 @@ Tensor pin_memory(const Tensor& self) {
   auto* allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
   auto storage = Storage(
       Storage::use_byte_size_t(),
-      self.dtype(),
       detail::computeStorageNbytes(
           self.sizes(), self.strides(), self.dtype().itemsize()),
       allocator,

@@ -1,17 +1,17 @@
 # @package utils
 # Module caffe2.python.utils
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python.compatibility import container_abcs
 from future.utils import viewitems
 from google.protobuf.message import DecodeError, Message
 from google.protobuf import text_format
 
 import sys
+import collections
 import copy
 import functools
 import numpy as np
@@ -41,7 +41,7 @@ def OpAlmostEqual(op_a, op_b, ignore_fields=None):
 
     op_a = clean_op(op_a)
     op_b = clean_op(op_b)
-    return op_a == op_b
+    return op_a == op_b or str(op_a) == str(op_b)
 
 
 def CaffeBlobToNumpyArray(blob):
@@ -126,7 +126,7 @@ def MakeArgument(key, value):
     """Makes an argument based on the value type."""
     argument = caffe2_pb2.Argument()
     argument.name = key
-    iterable = isinstance(value, container_abcs.Iterable)
+    iterable = isinstance(value, collections.abc.Iterable)
 
     # Fast tracking common use case where a float32 array of tensor parameters
     # needs to be serialized.  The entire array is guaranteed to have the same

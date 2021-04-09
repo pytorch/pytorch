@@ -79,11 +79,11 @@ call_torchbind_method_from_stack(
       typename c10::guts::infer_function_traits_t<Functor>::parameter_types;
   // TODO We shouldn't use c10::impl stuff directly here. We should use the KernelFunction API instead.
   return (functor)(c10::impl::ivalue_to_arg<
-                   std::remove_cv_t<std::remove_reference_t<
+                   typename c10::impl::decay_if_not_tensor<
                        c10::guts::typelist::
-                           element_t<ivalue_arg_indices, IValueArgTypes>>>,
-                   AllowDeprecatedTypes>::call(std::move(
-      torch::jit::peek(stack, ivalue_arg_indices, num_ivalue_args)))...);
+                           element_t<ivalue_arg_indices, IValueArgTypes>>::type,
+                   AllowDeprecatedTypes>::call(
+      torch::jit::peek(stack, ivalue_arg_indices, num_ivalue_args))...);
 }
 
 template <class Functor, bool AllowDeprecatedTypes>
@@ -147,6 +147,10 @@ TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 // Given an IValue, return true if the object contained in that IValue
 // is a custom C++ class, otherwise return false.
 TORCH_API bool isCustomClass(const c10::IValue& v);
+
+// This API is for testing purposes ONLY. It should not be used in
+// any load-bearing code.
+TORCH_API std::vector<c10::FunctionSchema> customClassSchemasForBCCheck();
 
 namespace jit {
 using ::torch::registerCustomClass;

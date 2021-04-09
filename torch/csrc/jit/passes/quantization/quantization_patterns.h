@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <string>
 #include <unordered_map>
@@ -13,13 +15,264 @@ struct QuantFusionInfo {
   std::string quantized_op_name;
   std::string pattern;
   std::string replacement;
-  std::function<
-      bool(const Match&, const std::unordered_map<std::string, Value*>&)>
-      filter =
-          [](const Match&, const std::unordered_map<std::string, Value*>&) {
-            return true;
-          };
+  std::vector<MatchFilter> filters = {};
 };
+
+namespace {
+std::string getExtraArgList(std::vector<std::string> extra_args) {
+  return std::accumulate(
+      extra_args.begin(),
+      extra_args.end(),
+      std::string(),
+      [](std::string acc, const std::string& arg) { return acc + ", " + arg; });
+}
+
+// Get the pattern we want to replace the match with
+std::string getAtenOpPattern(
+    const std::string& graph_header,
+    const std::string& op_name,
+    const std::vector<std::string>& extra_op_args,
+    bool scalar_args = false) {
+  std::vector<std::string> _extra_op_args = extra_op_args;
+  std::string aten_op_pattern = graph_header;
+  if (scalar_args) {
+    for (const auto& extra_arg : _extra_op_args) {
+      aten_op_pattern += R"(
+          )" +
+          extra_arg + "_scalar = aten::item(" + extra_arg + ")";
+    }
+
+    for (auto& _extra_op_arg : _extra_op_args) {
+      _extra_op_arg = _extra_op_arg + "_scalar";
+    }
+  }
+  const auto& extra_op_arg_list = getExtraArgList(_extra_op_args);
+  aten_op_pattern += R"(
+          %r = )";
+  aten_op_pattern += op_name + "(" + "%a_quant" + extra_op_arg_list + ")";
+  aten_op_pattern += R"(
+          return (%r) )";
+  return aten_op_pattern;
+}
+
+// generate ops for quantize pattern for a scalar value
+std::string getQuantizeForScalar(const std::string& value) {
+  // 6 is `torch.float` ScalarType, we are creating a float scalar
+  // tensor from a scalar value
+  std::string quantize_pattern = R"(
+          )" +
+      value + "_float_scalar_type : int = prim::Constant[value=6]()";
+  quantize_pattern += R"(
+          )" +
+      value + "_none : None = prim::Constant()";
+  quantize_pattern += R"(
+          )" +
+      value + "_tensor : Tensor = aten::scalar_tensor(" + value + ", " + value +
+      "_float_scalar_type";
+  for (auto i = 0; i < 3; ++i) {
+    quantize_pattern += ", " + value + "_none";
+  }
+  quantize_pattern += ")";
+  quantize_pattern +=
+      R"(
+          )" +
+      value + "_quant = aten::quantize_per_tensor(" + value + "_tensor" +
+      getExtraArgList(
+          {value + "_scale", value + "_zero_point", value + "_dtype"}) +
+      ")";
+  return quantize_pattern;
+}
+
+std::string getDequantize(const std::string& value) {
+  return R"(
+          )" +
+      value + "_dequant = aten::dequantize(" + value + "_quant)";
+}
+
+std::string getItem(const std::string& value) {
+  return R"(
+          )" +
+      value + "_scalar : float = aten::item(" + value + "_dequant)";
+}
+
+// Patterns for the ops that inherit parameters from input
+std::string getInputTensorQParamOpPattern(
+    const std::string& op_name,
+    const std::vector<std::string>& extra_op_args) {
+  const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
+  std::string op_pattern = "graph(%a_quant" + extra_op_arg_list + "):" + R"(
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = )" +
+      op_name + "(" + "%a_dequant" + extra_op_arg_list + ")" + R"(
+          %r_scale : float = aten::q_scale(%a_quant)
+          %r_zero_point : int = aten::q_zero_point(%a_quant)
+          %r_dtype : int = prim::dtype(%a_quant)
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+  return op_pattern;
+}
+
+// QuantFusionInfo for the ops that inherit parameters from input
+QuantFusionInfo getInputTensorQParamOpFusionInfo(
+    const std::string& op_name,
+    const std::vector<std::string>& extra_op_args) {
+  std::string op_pattern =
+      getInputTensorQParamOpPattern(op_name, extra_op_args);
+  const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
+  std::string graph_header = "graph(%a_quant" + extra_op_arg_list + "):";
+  std::string op_replacement =
+      getAtenOpPattern(graph_header, op_name, extra_op_args);
+
+  return {op_name, op_pattern, op_replacement};
+}
+
+// quant fusion for ops like `quantized::add_scalar`, `quantized::mul_scalar`
+QuantFusionInfo getBinaryOpScalarFusionInfo(
+    const std::string& op_name,
+    const std::vector<std::string>& extra_op_args,
+    const std::string& quantized_op_name,
+    const std::vector<std::string>& extra_quantized_op_args,
+    const std::vector<MatchFilter>& filters = {}) {
+  std::string op_pattern =
+      getInputTensorQParamOpPattern(op_name, extra_op_args);
+
+  const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
+  std::string graph_header = "graph(%a_quant" + extra_op_arg_list + "):";
+  std::string op_replacement = getAtenOpPattern(
+      graph_header, quantized_op_name, extra_quantized_op_args);
+
+  return {op_name, op_pattern, op_replacement, filters};
+}
+
+QuantFusionInfo getClampOpFusionInfo(
+    const std::string& op_name,
+    const std::vector<std::string>& extra_op_args) {
+  std::vector<std::string> header_args = extra_op_args;
+  std::vector<std::string> input_qparams = {"_scale", "_zero_point", "_dtype"};
+  for (const auto& arg : extra_op_args) {
+    for (const auto& qparam : input_qparams) {
+      header_args.push_back(arg + qparam);
+    }
+  }
+  for (const auto& qparam : input_qparams) {
+    header_args.push_back("%r" + qparam);
+  }
+  const auto& extra_header_arg_list = getExtraArgList(header_args);
+  std::string graph_header = "graph(%a_quant" + extra_header_arg_list + "):";
+  std::string op_pattern = graph_header;
+  for (const auto& arg : extra_op_args) {
+    op_pattern += getQuantizeForScalar(arg);
+    op_pattern += getDequantize(arg);
+    op_pattern += getItem(arg);
+  }
+  op_pattern += getDequantize("%a");
+  op_pattern += R"(
+          %r = )";
+  std::vector<std::string> scalar_extra_args;
+  for (const auto& arg : extra_op_args) {
+    scalar_extra_args.push_back(arg + "_scalar");
+  }
+  op_pattern +=
+      op_name + "(" + "%a_dequant" + getExtraArgList(scalar_extra_args) + ")";
+  // IR pattern common to all ops that inherit qparam from input
+  op_pattern += R"(
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+
+  std::string aten_op_pattern =
+      getAtenOpPattern(graph_header, op_name, extra_op_args);
+
+  return {op_name, op_pattern, aten_op_pattern};
+}
+
+// Patterns for the ops that has fixed quantization parameters
+QuantFusionInfo getFixedQParamOpFusionInfo(
+    const std::string& op_name,
+    const std::vector<std::string>& extra_op_args,
+    bool is_symmetric) {
+  const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
+  std::string graph_header = "graph(%a_quant" + extra_op_arg_list + "):";
+  std::string op_pattern = graph_header;
+  op_pattern += R"(
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = )";
+  op_pattern += op_name + "(" + "%a_dequant" + extra_op_arg_list + ")";
+  // IR pattern common to all ops with fixed quantization parameters for
+  // asymetric quantization
+  std::string asym_fixed_qparam_op_suffix = R"(
+          %r_scale : float = prim::Constant[value=0.00390625]()
+          %r_zero_point : int = prim::Constant[value=0]()
+          %r_dtype : int = prim::Constant[value=13]()
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+
+  std::string sym_fixed_qparam_op_suffix = R"(
+          %r_scale : float = prim::Constant[value=0.0078125]()
+          %r_zero_point : int = prim::Constant[value=128]()
+          %r_dtype : int = prim::Constant[value=13]()
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+  op_pattern +=
+      is_symmetric ? sym_fixed_qparam_op_suffix : asym_fixed_qparam_op_suffix;
+
+  std::string aten_op_pattern =
+      getAtenOpPattern(graph_header, op_name, extra_op_args);
+
+  return {op_name, op_pattern, aten_op_pattern};
+}
+
+// filter that checks %b_scalar is a scalar
+bool input_b_is_scalar(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  const auto& match_vmap = match.values_map;
+  auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
+  return isScalar(b_scalar);
+}
+
+// Patterns for ops that require observation for output quantization parameters
+// Example:
+//
+// before fusion:
+//
+// graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
+//     %a_dequant = aten::dequantize(%a_quant)
+//     %r = {op_name}(%a_dequant, {extra_args})
+//     %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point,
+//     %r_dtype) return (%r_quant)
+//
+// after fusion:
+//
+// graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
+//     %r_quant = {quantized_op_name}(%a_quant, {extra_args}, %r_scale,
+//     %r_zero_point) return (%r_quant)
+QuantFusionInfo getObservedQParamOpFusionInfo(
+    const std::string& fp_op_name,
+    const std::string& q_op_name,
+    const std::vector<std::string>& fp_extra_args,
+    const std::vector<std::string>& q_extra_args) {
+  const auto& fp_extra_arg_list = getExtraArgList(fp_extra_args);
+  const auto& q_extra_arg_list = getExtraArgList(q_extra_args);
+
+  std::string op_pattern = "graph(%a_quant" + fp_extra_arg_list +
+      ", %r_scale, %r_zero_point, %r_dtype):" + R"(
+          %a_dequant = aten::dequantize(%a_quant)
+          %r = )" +
+      fp_op_name + "(" + "%a_dequant" + fp_extra_arg_list + ")" + R"(
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+
+  std::string aten_op_pattern = "graph(%a_quant" + fp_extra_arg_list +
+      ", %r_scale, %r_zero_point, %r_dtype):" + R"(
+          %r_quant = )" +
+      q_op_name + "(%a_quant" + q_extra_arg_list +
+      ", %r_scale, %r_zero_point)" + R"(
+          return (%r_quant) )";
+
+  return {q_op_name, op_pattern, aten_op_pattern};
+}
+
+} // namespace
 
 std::vector<QuantFusionInfo> quant_fusion_pattern_and_replacements() {
   // aten::conv1d
@@ -30,6 +283,40 @@ graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %pad
         %w_dequant = aten::dequantize(%w_quant)
         %r = aten::conv1d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant) )";
+
+  // aten::conv1d - aten::relu
+  std::string conv1d_relu = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv1d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %conv_out = aten::conv1d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        %r = aten::relu(%conv_out)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant) )";
+
+  // aten::conv1d - aten::relu_
+  std::string conv1d_inplace_relu = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv1d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %conv_out = aten::conv1d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        %r = aten::relu_(%conv_out)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant) )";
+
+  // quantized::conv1d
+  std::string quantized_conv1d = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
+        %r_quant = quantized::conv1d(%a_quant, %packed_params, %r_scale, %r_zero_point)
+        return (%r_quant) )";
+
+  // quantized::conv1d_relu
+  std::string quantized_conv1d_relu = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
+        %r_quant = quantized::conv1d_relu(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r_quant) )";
 
   // aten::conv2d
@@ -62,12 +349,6 @@ graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %pad
         %conv_out = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         %r = aten::relu_(%conv_out)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        return (%r_quant) )";
-
-  // quantized::conv1d
-  std::string quantized_conv1d = R"(
-graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
-        %r_quant = quantized::conv1d(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r_quant) )";
 
   // quantized::conv2d
@@ -126,9 +407,58 @@ graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %pad
         %r_quant = quantized::conv3d_relu(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r_quant) )";
 
+  // aten::conv_transpose1d
+  std::string conv_transpose1d = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %output_padding, %groups, %dilation):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv_transpose1d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv_transpose1d(%a_dequant, %w_dequant, %b, %stride, %padding, %output_padding, %groups, %dilation)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant) )";
+
+  // quantized::conv_transpose1d
+  std::string quantized_conv_transpose1d = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %output_padding, %groups, %dilation):
+        %r_quant = quantized::conv_transpose1d(%a_quant, %packed_params, %r_scale, %r_zero_point)
+        return (%r_quant) )";
+
+  // aten::conv_transpose2d
+  std::string conv_transpose2d = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %output_padding, %groups, %dilation):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv_transpose2d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv_transpose2d(%a_dequant, %w_dequant, %b, %stride, %padding, %output_padding, %groups, %dilation)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant) )";
+
+  // quantized::conv_transpose1d
+  std::string quantized_conv_transpose2d = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %output_padding, %groups, %dilation):
+        %r_quant = quantized::conv_transpose2d(%a_quant, %packed_params, %r_scale, %r_zero_point)
+        return (%r_quant) )";
+
   std::string add_relu = R"(
-graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
-         %alpha = prim::Constant[value=1]()
+graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_add = aten::add(%a_dequant, %b_dequant, %alpha)
+         %r_relu = aten::relu(%r_add)
+         %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  std::string add_inplace_relu = R"(
+graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_add = aten::add(%a_dequant, %b_dequant, %alpha)
+         %r_relu = aten::relu_(%r_add)
+         %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  std::string inplace_add_relu = R"(
+graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %a_dequant = aten::dequantize(%a_quant)
          %b_dequant = aten::dequantize(%b_quant)
          %r_add = aten::add_(%a_dequant, %b_dequant, %alpha)
@@ -136,9 +466,8 @@ graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
          %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
          return (%r) )";
 
-  std::string add_inplace_relu = R"(
-graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
-         %alpha = prim::Constant[value=1]()
+  std::string inplace_add_inplace_relu = R"(
+graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %a_dequant = aten::dequantize(%a_quant)
          %b_dequant = aten::dequantize(%b_quant)
          %r_add = aten::add_(%a_dequant, %b_dequant, %alpha)
@@ -147,13 +476,13 @@ graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
          return (%r) )";
 
   std::string quantized_add_relu = R"(
-graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %r = quantized::add_relu(%a_quant, %b_quant, %scale, %zero_point)
          return (%r) )";
 
   // aten::linear
   std::string linear = R"(
-graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
         %a_dequant = aten::dequantize(%a_quant)
         %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
@@ -161,10 +490,35 @@ graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant) )";
 
+  std::string linear_relu = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %linear_out = aten::linear(%a_dequant, %w_dequant, %b)
+        %r = aten::relu(%linear_out)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant) )";
+
+  std::string linear_inplace_relu = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
+        %a_dequant = aten::dequantize(%a_quant)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant)
+        %linear_out = aten::linear(%a_dequant, %w_dequant, %b)
+        %r = aten::relu_(%linear_out)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant) )";
+
   // quantized::linear
   std::string quantized_linear = R"(
-graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
+        return (%r) )";
+
+  std::string quantized_linear_relu = R"(
+graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
+        %r = quantized::linear_relu(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r) )";
 
   std::string cat = R"(
@@ -196,13 +550,6 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %r = quantized::add(%a_quant, %b_quant, %scale, %zero_point)
          return (%r) )";
 
-  auto add_filter = [](const Match& match,
-                       const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
-    return alpha && alpha->isInt() && alpha->toInt() == 1;
-  };
-
   // aten::add_
   std::string inplace_add = R"(
 graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
@@ -212,87 +559,78 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %r = aten::quantize_per_tensor(%r_add, %scale, %zero_point, %dtype)
          return (%r) )";
 
-  // quantized::add_scalar
-  std::string add_scalar = R"(
-graph(%a_quant, %b_scalar, %alpha):
-         %a_dequant = aten::dequantize(%a_quant)
-         %r = aten::add(%a_dequant, %b_scalar, %alpha)
-         return (%r) )";
+  auto add_scalar = getBinaryOpScalarFusionInfo(
+      "aten::add",
+      {"%b_scalar", "%alpha"},
+      "quantized::add_scalar",
+      {"%b_scalar"},
+      {aten_add_alpha_is_one, input_b_is_scalar});
 
-  std::string quantized_add_scalar = R"(
-graph(%a_quant, %b_scalar, %alpha):
-         %r = quantized::add_scalar(%a_quant, %b_scalar)
-         return (%r) )";
+  auto add_scalar_out = getBinaryOpScalarFusionInfo(
+      "aten::add_",
+      {"%b_scalar", "%alpha"},
+      "quantized::add_scalar_out",
+      {"%b_scalar", "%a_quant"},
+      {aten_add_alpha_is_one, input_b_is_scalar});
 
-  // filter that checks %alpha is constant 1 and %b_scalar is a scalar
-  auto add_scalar_filter =
-      [](const Match& match,
-         const std::unordered_map<std::string, Value*>& vmap) {
-        const auto& match_vmap = match.values_map;
-        auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
-        auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
-        return alpha && alpha->isInt() && alpha->toInt() == 1 &&
-            b_scalar->type()->isSubtypeOf(NumberType::get());
-      };
-
-  // quantized::add_scalar_out
-  std::string add_scalar_out = R"(
-graph(%a_quant, %b_scalar, %alpha):
-         %a_dequant = aten::dequantize(%a_quant)
-         %r = aten::add_(%a_dequant, %b_scalar, %alpha)
-         return (%r) )";
-
-  std::string quantized_add_scalar_out = R"(
-graph(%a_quant, %b_scalar, %alpha):
-         %r = quantized::add_scalar_out(%a_quant, %b_scalar, %a_quant)
-         return (%r) )";
-
-  // quantized::add_scalar_relu
-  std::string add_scalar_relu = R"(
-graph(%a_quant, %b_scalar, %alpha):
-         %a_dequant = aten::dequantize(%a_quant)
-         %r_add = aten::add(%a_dequant, %b_scalar, %alpha)
+  // quantized::add_scalar_relu -- fusing quantized::add_scalar
+  // and aten::relu
+  auto quantized_add_scalar_relu_pattern = R"(
+graph(%a_quant, %b_scalar):
+         %r_add = quantized::add_scalar(%a_quant, %b_scalar)
          %r = aten::relu(%r_add)
          return (%r) )";
 
-  std::string quantized_add_scalar_relu = R"(
-graph(%a_quant, %b_scalar, %alpha):
+  auto quantized_add_scalar_inplace_relu_pattern = R"(
+graph(%a_quant, %b_scalar):
+         %r_add = quantized::add_scalar(%a_quant, %b_scalar)
+         %r = aten::relu_(%r_add)
+         return (%r) )";
+
+  auto quantized_add_scalar_relu_replacement = R"(
+graph(%a_quant, %b_scalar):
          %r = quantized::add_scalar_relu(%a_quant, %b_scalar)
          return (%r) )";
 
-  // quantized::add_scalar_relu_out
-  std::string add_scalar_relu_out = R"(
-graph(%a_quant, %b_scalar, %alpha):
-         %a_dequant = aten::dequantize(%a_quant)
-         %r_add = aten::add_(%a_dequant, %b_scalar, %alpha)
+  // quantized::add_scalar_relu_out -- fusing quantized::add_scalarOut
+  // and aten::relu
+  auto quantized_add_scalar_relu_out_pattern = R"(
+graph(%a_quant, %b_scalar):
+         %r_add = quantized::add_scalar_out(%a_quant, %b_scalar, %a_quant)
          %r = aten::relu(%r_add)
          return (%r) )";
 
-  std::string quantized_add_scalar_relu_out = R"(
-graph(%a_quant, %b_scalar, %alpha):
+  auto quantized_add_scalar_inplace_relu_out_pattern = R"(
+graph(%a_quant, %b_scalar):
+         %r_add = quantized::add_scalar_out(%a_quant, %b_scalar, %a_quant)
+         %r = aten::relu_(%r_add)
+         return (%r) )";
+
+  auto quantized_add_scalar_relu_out_replacement = R"(
+graph(%a_quant, %b_scalar):
          %r = quantized::add_scalar_relu_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
 
   // quantized::batch_norm
-  std::string batch_norm2d = R"(
+  std::string batch_norm = R"(
 graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
          %a_dequant = aten::dequantize(%a_quant)
          %r_bn = aten::batch_norm(%a_dequant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7)
          %r = aten::quantize_per_tensor(%r_bn, %scale, %zero_point, %scalar_type)
          return (%r) )";
-  std::string quantized_batch_norm2d = R"(
+  std::string quantized_batch_norm = R"(
 graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
-         %r = quantized::batch_norm2d(%a_quant, %weight, %bias, %mean, %var, %eps, %scale, %zero_point)
+         %r = quantized::batch_norm(%a_quant, %weight, %bias, %mean, %var, %eps, %scale, %zero_point)
          return (%r) )";
 
-  std::string batch_norm2d_relu = R"(
+  std::string batch_norm_relu = R"(
 graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
          %a_dequant = aten::dequantize(%a_quant)
          %bn_out = aten::batch_norm(%a_dequant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7)
          %relu = aten::relu(%bn_out)
          %r = aten::quantize_per_tensor(%relu, %scale, %zero_point, %scalar_type)
          return (%r) )";
-  std::string batch_norm2d_inplace_relu = R"(
+  std::string batch_norm_inplace_relu = R"(
 graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
          %a_dequant = aten::dequantize(%a_quant)
          %bn_out = aten::batch_norm(%a_dequant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7)
@@ -300,9 +638,9 @@ graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, 
          %r = aten::quantize_per_tensor(%relu, %scale, %zero_point, %scalar_type)
          return (%r) )";
 
-  std::string quantized_batch_norm2d_relu = R"(
+  std::string quantized_batch_norm_relu = R"(
 graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
-         %r = quantized::batch_norm2d_relu(%a_quant, %weight, %bias, %mean, %var, %eps, %scale, %zero_point)
+         %r = quantized::batch_norm_relu(%a_quant, %weight, %bias, %mean, %var, %eps, %scale, %zero_point)
          return (%r) )";
 
   // aten::mul
@@ -329,37 +667,19 @@ graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
          %r = quantized::mul(%a_quant, %b_quant, %scale, %zero_point)
          return (%r) )";
 
-  // quantized::mul_scalar
-  std::string mul_scalar = R"(
-graph(%a_quant, %b_scalar):
-         %a_dequant = aten::dequantize(%a_quant)
-         %r = aten::mul(%a_dequant, %b_scalar)
-         return (%r) )";
+  auto mul_scalar = getBinaryOpScalarFusionInfo(
+      "aten::mul",
+      {"%b_scalar"},
+      "quantized::mul_scalar",
+      {"%b_scalar"},
+      {input_b_is_scalar});
 
-  std::string mul_scalar_out = R"(
-graph(%a_quant, %b_scalar):
-         %a_dequant = aten::dequantize(%a_quant)
-         %r = aten::mul_(%a_dequant, %b_scalar)
-         return (%r) )";
-
-  std::string quantized_mul_scalar = R"(
-graph(%a_quant, %b_scalar):
-         %r = quantized::mul_scalar(%a_quant, %b_scalar)
-         return (%r) )";
-
-  std::string quantized_mul_scalar_out = R"(
-graph(%a_quant, %b_scalar):
-         %r = quantized::mul_scalar_out(%a_quant, %b_scalar, %a_quant)
-         return (%r) )";
-
-  // filter that checks %b_scalar is a scalar
-  auto mul_scalar_filter =
-      [](const Match& match,
-         const std::unordered_map<std::string, Value*>& vmap) {
-        const auto& match_vmap = match.values_map;
-        auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
-        return b_scalar->type()->isSubtypeOf(NumberType::get());
-      };
+  auto mul_scalar_out = getBinaryOpScalarFusionInfo(
+      "aten::mul_",
+      {"%b_scalar"},
+      "quantized::mul_scalar_out",
+      {"%b_scalar", "%a_quant"},
+      {input_b_is_scalar});
 
   // quantized::mul_relu
   std::string mul_relu = R"(
@@ -371,21 +691,21 @@ graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
          %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
          return (%r) )";
 
-  std::string inplace_mul_relu = R"(
-graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
-         %a_dequant = aten::dequantize(%a_quant)
-         %b_dequant = aten::dequantize(%b_quant)
-         %r_mul = aten::mul_(%a_dequant, %b_dequant)
-         %r_relu = aten::relu(%r_mul)
-         %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
-         return (%r) )";
-
   std::string mul_inplace_relu = R"(
 graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
          %a_dequant = aten::dequantize(%a_quant)
          %b_dequant = aten::dequantize(%b_quant)
          %r_mul = aten::mul(%a_dequant, %b_dequant)
          %r_relu = aten::relu_(%r_mul)
+         %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  std::string inplace_mul_relu = R"(
+graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_mul = aten::mul_(%a_dequant, %b_dequant)
+         %r_relu = aten::relu(%r_mul)
          %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
          return (%r) )";
 
@@ -403,60 +723,83 @@ graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
          %r = quantized::mul_relu(%a_quant, %b_quant, %scale, %zero_point)
          return (%r) )";
 
-  // quantized::mul_scalar_relu
-  std::string mul_scalar_relu = R"(
+  // quantized::mul_scalar_relu -- fusing quantized::mul_scalar
+  // and aten::relu
+  auto quantized_mul_scalar_relu_pattern = R"(
 graph(%a_quant, %b_scalar):
-         %a_dequant = aten::dequantize(%a_quant)
-         %r_mul = aten::mul(%a_dequant, %b_scalar)
+         %r_mul = quantized::mul_scalar(%a_quant, %b_scalar)
          %r = aten::relu(%r_mul)
          return (%r) )";
 
-  std::string quantized_mul_scalar_relu = R"(
+  auto quantized_mul_scalar_inplace_relu_pattern = R"(
+graph(%a_quant, %b_scalar):
+         %r_mul = quantized::mul_scalar(%a_quant, %b_scalar)
+         %r = aten::relu_(%r_mul)
+         return (%r) )";
+
+  auto quantized_mul_scalar_relu_replacement = R"(
 graph(%a_quant, %b_scalar):
          %r = quantized::mul_scalar_relu(%a_quant, %b_scalar)
          return (%r) )";
 
-  // quantized::mul_scalar_relu_out
-  std::string mul_scalar_relu_out = R"(
+  // quantized::mul_scalar_relu_out -- fusing quantized::mul_scalarOut
+  // and aten::relu
+  auto quantized_mul_scalar_relu_out_pattern = R"(
 graph(%a_quant, %b_scalar):
-         %a_dequant = aten::dequantize(%a_quant)
-         %r_mul = aten::mul_(%a_dequant, %b_scalar)
+         %r_mul = quantized::mul_scalar_out(%a_quant, %b_scalar, %a_quant)
          %r = aten::relu(%r_mul)
          return (%r) )";
 
-  std::string quantized_mul_scalar_relu_out = R"(
+  auto quantized_mul_scalar_inplace_relu_out_pattern = R"(
+graph(%a_quant, %b_scalar):
+         %r_mul = quantized::mul_scalar_out(%a_quant, %b_scalar, %a_quant)
+         %r = aten::relu_(%r_mul)
+         return (%r) )";
+
+  auto quantized_mul_scalar_relu_out_replacement = R"(
 graph(%a_quant, %b_scalar):
          %r = quantized::mul_scalar_relu_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
 
-  // quantized::hardswish
-  std::string hardswish = R"(
-graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
+  // quantized::elu
+  std::string elu = R"(
+graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype):
          %a_dequant = aten::dequantize(%a_quant)
-         %r = aten::hardswish(%a_dequant)
+         %r = aten::elu(%a_dequant, %alpha, %scale, %input_scale)
          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
          return (%r_quant) )";
 
-  std::string quantized_hardswish = R"(
-graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
-         %r_quant = quantized::hardswish(%a_quant, %r_scale, %r_zero_point)
+  std::string quantized_elu = R"(
+graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype):
+         %r_quant = quantized::elu(%a_quant, %r_scale, %r_zero_point, %alpha, %scale, %input_scale)
          return (%r_quant) )";
 
-  // quantized::layer_norm
-  std::string layer_norm = R"(
-graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
+  std::string elu_ = R"(
+graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype):
          %a_dequant = aten::dequantize(%a_quant)
-         %r_ln = aten::layer_norm(%a_dequant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled)
-         %r = aten::quantize_per_tensor(%r_ln, %output_scale, %output_zero_point, %scalar_type)
-         return (%r) )";
+         %r = aten::elu_(%a_dequant, %alpha, %scale, %input_scale)
+         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+         return (%r_quant) )";
 
-  std::string quantized_layer_norm = R"(
-graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
-         %r = quantized::layer_norm(%a_quant, %normalized_shape, %weight, %bias, %eps, %output_scale, %output_zero_point)
-         return (%r) )";
+  // ============= General Ops that inherit quantization paramters from input
+  // tensor =============
+  auto avg_pool1d = getInputTensorQParamOpFusionInfo(
+      "aten::avg_pool1d",
+      {"%kernel_size",
+       "%stride",
+       "%padding",
+       "%ceil_mode",
+       "%count_include_pad"});
 
-  // ============= General Ops that doesn't require observation =============
-  // IR pattern common to all general value ops
+  auto avg_pool2d = getInputTensorQParamOpFusionInfo(
+      "aten::avg_pool2d",
+      {"%kernel_size",
+       "%stride",
+       "%padding",
+       "%ceil_mode",
+       "%count_include_pad",
+       "%divisor_override"});
+
   std::string common_general_value_op = R"(
           %r_scale : float = aten::q_scale(%a_quant)
           %r_zero_point : int = aten::q_zero_point(%a_quant)
@@ -464,338 +807,250 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
           %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
           return (%r_quant) )";
 
-  // aten::avg_pool1d
-  std::string avg_pool1d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::avg_pool1d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad)
-)" + common_general_value_op;
+  auto avg_pool3d = getInputTensorQParamOpFusionInfo(
+      "aten::avg_pool3d",
+      {"%kernel_size",
+       "%stride",
+       "%padding",
+       "%ceil_mode",
+       "%count_include_pad",
+       "%divisor_override"});
 
-  std::string aten_avg_pool1d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad):
-          %r = aten::avg_pool1d(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad)
-          return (%r) )";
+  auto adaptive_avg_pool1d = getInputTensorQParamOpFusionInfo(
+      "aten::adaptive_avg_pool1d", {"%output_size"});
 
-  // aten::avg_pool2d
-  std::string avg_pool2d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::avg_pool2d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
-)" + common_general_value_op;
+  auto adaptive_avg_pool2d = getInputTensorQParamOpFusionInfo(
+      "aten::adaptive_avg_pool2d", {"%output_size"});
 
-  std::string aten_avg_pool2d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
-          %r = aten::avg_pool2d(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
-          return (%r) )";
+  auto adaptive_avg_pool3d = getInputTensorQParamOpFusionInfo(
+      "aten::adaptive_avg_pool3d", {"%output_size"});
 
-  // aten::avg_pool3d
-  std::string avg_pool3d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::avg_pool3d(%a_dequant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
-)" + common_general_value_op;
+  auto mean1 = getInputTensorQParamOpFusionInfo("aten::mean", {"%dim"});
 
-  std::string aten_avg_pool3d = R"(
-graph(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override):
-          %r = aten::avg_pool3d(%a_quant, %kernel_size, %stride, %padding, %ceil_mode, %count_include_pad, %divisor_override)
-          return (%r) )";
+  auto mean2 = getInputTensorQParamOpFusionInfo(
+      "aten::mean", {"%dim", "%keepdim", "%out"});
 
-  // aten::adaptive_avg_pool1d
-  std::string adaptive_avg_pool1d = R"(
-graph(%a_quant, %output_size):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::adaptive_avg_pool1d(%a_dequant, %output_size)
-)" + common_general_value_op;
+  auto upsample_nearest1d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest1d", {"%output_size", "%scale_factors"});
 
-  std::string aten_adaptive_avg_pool1d = R"(
-graph(%a_quant, %output_size):
-          %r = aten::adaptive_avg_pool1d(%a_quant, %output_size)
-          return (%r) )";
+  auto upsample_nearest2d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest2d", {"%output_size", "%scale_factors"});
 
-  // aten::adaptive_avg_pool2d
-  std::string adaptive_avg_pool2d = R"(
-graph(%a_quant, %output_size):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::adaptive_avg_pool2d(%a_dequant, %output_size)
-)" + common_general_value_op;
+  auto upsample_nearest3d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest3d", {"%output_size", "%scale_factors"});
 
-  std::string aten_adaptive_avg_pool2d = R"(
-graph(%a_quant, %output_size):
-          %r = aten::adaptive_avg_pool2d(%a_quant, %output_size)
-          return (%r) )";
+  auto upsample_linear1d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_linear1d",
+      {"%output_size", "%align_corners", "%scale_factors"});
 
-  // aten::adaptive_avg_pool3d
-  std::string adaptive_avg_pool3d = R"(
-graph(%a_quant, %output_size):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::adaptive_avg_pool3d(%a_dequant, %output_size)
-)" + common_general_value_op;
+  auto upsample_bilinear2d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_bilinear2d",
+      {"%output_size", "%align_corners", "%scale_factors"});
 
-  std::string aten_adaptive_avg_pool3d = R"(
-graph(%a_quant, %output_size):
-          %r = aten::adaptive_avg_pool3d(%a_quant, %output_size)
-          return (%r) )";
+  auto upsample_trilinear3d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_trilinear3d",
+      {"%output_size", "%align_corners", "%scale_factors"});
 
-  // aten::mean
-  std::string mean = R"(
-graph(%a_quant, %dim):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::mean(%a_dequant, %dim)
-)" + common_general_value_op;
+  auto upsample_nearest1d = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest1d", {"%output_size", "%scales"});
 
-  std::string aten_mean = R"(
-graph(%a_quant, %dim):
-          %r = aten::mean(%a_quant, %dim)
-          return (%r) )";
+  auto upsample_nearest2d = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest2d", {"%output_size", "%scale_h", "%scale_w"});
 
-  // aten::upsample_nearest1d
-  std::string upsample_nearest1d = R"(
-graph(%a_quant, %size, %scale_factor):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::upsample_nearest1d(%a_dequant, %size, %scale_factor)
-)" + common_general_value_op;
+  auto upsample_nearest3d = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest3d",
+      {"%output_size", "%scale_d", "%scale_h", "%scale_w"});
 
-  std::string aten_upsample_nearest1d = R"(
-graph(%a_quant, %size, %scale_factor):
-          %r = aten::upsample_nearest1d(%a_quant, %size, %scale_factor)
-          return (%r) )";
+  auto upsample_linear1d = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_linear1d", {"%output_size", "%align_corners", "%scales"});
 
-  // aten::upsample_nearest2d
-  std::string upsample_nearest2d = R"(
-graph(%a_quant, %size, %scale_h, %scale_w):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::upsample_nearest2d(%a_dequant, %size, %scale_h, %scale_w)
-)" + common_general_value_op;
+  auto upsample_bilinear2d = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_bilinear2d",
+      {"%output_size", "%align_corners", "%scale_h", "%scale_w"});
 
-  std::string aten_upsample_nearest2d = R"(
-graph(%a_quant, %size, %scale_h, %scale_w):
-          %r = aten::upsample_nearest2d(%a_quant, %size, %scale_h, %scale_w)
-          return (%r) )";
+  auto upsample_trilinear3d = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_trilinear3d",
+      {"%output_size", "%align_corners", "%scale_d", "%scale_h", "%scale_w"});
 
-  // aten::upsample_nearest3d
-  std::string upsample_nearest3d = R"(
-graph(%a_quant, %size, %scale_d, %scale_h, %scale_w):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::upsample_nearest3d(%a_dequant, %size, %scale_d, %scale_h, %scale_w)
-)" + common_general_value_op;
+  auto clamp = getClampOpFusionInfo("aten::clamp", {"%min", "%max"});
 
-  std::string aten_upsample_nearest3d = R"(
-graph(%a_quant, %size, %scale_d, %scale_h, %scale_w):
-          %r = aten::upsample_nearest3d(%a_quant, %size, %scale_d, %scale_h, %scale_w)
-          return (%r) )";
+  auto hardtanh = getClampOpFusionInfo("aten::hardtanh", {"%min", "%max"});
 
-  // aten::upsample_linear1d
-  std::string upsample_linear1d = R"(
-graph(%a_quant, %size, %align_corners, %scales):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::upsample_linear1d(%a_dequant, %size, %align_corners, %scales)
-)" + common_general_value_op;
+  auto hardtanh_ = getClampOpFusionInfo("aten::hardtanh_", {"%min", "%max"});
 
-  std::string aten_upsample_linear1d = R"(
-graph(%a_quant, %size, %align_corners, %scales):
-          %r = aten::upsample_linear1d(%a_quant, %size, %align_corners, %scales)
-          return (%r) )";
+  auto leaky_relu =
+      getInputTensorQParamOpFusionInfo("aten::leaky_relu", {"%negative_slope"});
 
-  // aten::upsample_bilinear2d
-  std::string upsample_bilinear2d = R"(
-graph(%a_quant, %size, %align_corners, %scales_h, %scales_w):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::upsample_bilinear2d(%a_dequant, %size, %align_corners, %scales_h, %scales_w)
-)" + common_general_value_op;
+  auto leaky_relu_ = getInputTensorQParamOpFusionInfo(
+      "aten::leaky_relu_", {"%negative_slope"});
 
-  std::string aten_upsample_bilinear2d = R"(
-graph(%a_quant, %size, %align_corners, %scales_h, %scales_w):
-          %r = aten::upsample_bilinear2d(%a_quant, %size, %align_corners, %scales_h, %scales_w)
-          return (%r) )";
+  // Ops with fixed quantization parameters
+  auto hardsigmoid = getFixedQParamOpFusionInfo("aten::hardsigmoid", {}, false);
 
-  // aten::upsample_trilinear3d
-  std::string upsample_trilinear3d = R"(
-graph(%a_quant, %size, %align_corners, %scales_d, %scales_h, %scales_w):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::upsample_trilinear3d(%a_dequant, %size, %align_corners, %scales_h, %scales_w)
-)" + common_general_value_op;
+  auto hardsigmoid_ =
+      getFixedQParamOpFusionInfo("aten::hardsigmoid_", {}, false);
 
-  std::string aten_upsample_trilinear3d = R"(
-graph(%a_quant, %size, %align_corners, %scales_d, %scales_h, %scales_w):
-          %r = aten::upsample_trilinear3d(%a_quant, %size, %align_corners, %scales_d, %scales_h, %scales_w)
-          return (%r) )";
+  auto sigmoid = getFixedQParamOpFusionInfo("aten::sigmoid", {}, false);
 
-  // aten::clamp
-  std::string clamp = R"(
-graph(%a_quant, %min, %max):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::clamp(%a_dequant, %min, %max)
-)" + common_general_value_op;
+  auto sigmoid_ = getFixedQParamOpFusionInfo("aten::sigmoid_", {}, false);
 
-  std::string aten_clamp = R"(
-graph(%a_quant, %min, %max):
-          %r = aten::clamp(%a_quant, %min, %max)
-          return (%r) )";
+  auto tanh = getFixedQParamOpFusionInfo("aten::tanh", {}, true);
 
-  // aten::hardtanh
-  std::string hardtanh = R"(
-graph(%a_quant, %min, %max):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::hardtanh(%a_dequant, %min, %max)
-)" + common_general_value_op;
+  auto tanh_ = getFixedQParamOpFusionInfo("aten::tanh_", {}, true);
 
-  std::string aten_hardtanh = R"(
-graph(%a_quant, %min, %max):
-          %r = aten::hardtanh(%a_quant, %min, %max)
-          return (%r) )";
+  auto hardswish = getObservedQParamOpFusionInfo(
+      "aten::hardswish", "quantized::hardswish", {}, {});
 
-  // aten::hardtanh_
-  std::string hardtanh_ = R"(
-graph(%a_quant, %min, %max):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::hardtanh_(%a_dequant, %min, %max)
-)" + common_general_value_op;
+  auto hardswish_ = getObservedQParamOpFusionInfo(
+      "aten::hardswish_", "quantized::hardswish", {}, {});
 
-  std::string aten_hardtanh_ = R"(
-graph(%a_quant, %min, %max):
-          %r = aten::hardtanh_(%a_quant, %min, %max)
-          return (%r) )";
+  auto layer_norm = getObservedQParamOpFusionInfo(
+      "aten::layer_norm",
+      "quantized::layer_norm",
+      {"%normalized_shape", "%weight", "%bias", "%eps", "%cudnn_enabled"},
+      {"%normalized_shape", "%weight", "%bias", "%eps"});
 
-  // aten::elu
-  std::string elu = R"(
-graph(%a_quant, %alpha, %scale, %input_scale):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::elu(%a_dequant, %alpha, %scale, %input_scale)
-)" + common_general_value_op;
+  auto group_norm = getObservedQParamOpFusionInfo(
+      "aten::group_norm",
+      "quantized::group_norm",
+      {"%num_groups", "%weight", "%bias", "%eps", "%cudnn_enabled"},
+      {"%num_groups", "%weight", "%bias", "%eps"});
 
-  std::string aten_elu = R"(
-graph(%a_quant, %alpha, %scale, %input_scale):
-          %r = aten::elu_(%a_quant, %alpha, %scale, %input_scale)
-          return (%r) )";
-
-  // aten::elu_
-  std::string elu_ = R"(
-graph(%a_quant, %alpha, %scale, %input_scale):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::elu_(%a_dequant, %alpha, %scale, %input_scale)
-)" + common_general_value_op;
-
-  std::string aten_elu_ = R"(
-graph(%a_quant, %alpha, %scale, %input_scale):
-          %r = aten::elu_(%a_quant, %alpha, %scale, %input_scale)
-          return (%r) )";
-
-  // aten::leaky_relu
-  std::string leaky_relu = R"(
-graph(%a_quant, %negative_slope):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::leaky_relu(%a_dequant, %negative_slope)
-)" + common_general_value_op;
-
-  std::string aten_leaky_relu = R"(
-graph(%a_quant, %negative_slope):
-          %r = aten::leaky_relu(%a_quant, %negative_slope)
-          return (%r) )";
-
-  // aten::leaky_relu_
-  std::string leaky_relu_ = R"(
-graph(%a_quant, %negative_slope):
-          %a_dequant = aten::dequantize(%a_quant)
-          %r = aten::leaky_relu_(%a_dequant, %negative_slope)
-)" + common_general_value_op;
-
-  std::string aten_leaky_relu_ = R"(
-graph(%a_quant, %negative_slope):
-          %r = aten::leaky_relu_(%a_quant, %negative_slope)
-          return (%r) )";
+  auto instance_norm = getObservedQParamOpFusionInfo(
+      "aten::instance_norm",
+      "quantized::instance_norm",
+      {"%weight",
+       "%bias",
+       "%running_mean",
+       "%running_var",
+       "%use_input_stats",
+       "%momentum",
+       "%eps",
+       "%cudnn_enabled"},
+      {"%weight", "%bias", "%eps"});
 
   return {
       {"quantized::conv1d", conv1d, quantized_conv1d},
+      {"quantized::conv1d_relu", conv1d_relu, quantized_conv1d_relu},
+      {"quantized::conv1d_relu", conv1d_inplace_relu, quantized_conv1d_relu},
       {"quantized::conv2d", conv2d, quantized_conv2d},
       {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
       {"quantized::conv2d_relu", conv2d_inplace_relu, quantized_conv2d_relu},
       {"quantized::conv3d", conv3d, quantized_conv3d},
       {"quantized::conv3d_relu", conv3d_relu, quantized_conv3d_relu},
       {"quantized::conv3d_relu", conv3d_inplace_relu, quantized_conv3d_relu},
+      {"quantized::conv_transpose1d",
+       conv_transpose1d,
+       quantized_conv_transpose1d},
+      {"quantized::conv_transpose2d",
+       conv_transpose2d,
+       quantized_conv_transpose2d},
       {"quantized::linear", linear, quantized_linear},
-      {"quantized::add_relu", add_relu, quantized_add_relu, add_filter},
-      {"quantized::add_relu", add_inplace_relu, quantized_add_relu, add_filter},
-      {"quantized::add", add, quantized_add, add_filter},
-      {"quantized::add", inplace_add, quantized_add, add_filter},
-      // note that this must come before quantized::add_scalar
+      {"quantized::linear_relu", linear_relu, quantized_linear_relu},
+      {"quantized::linear_relu", linear_inplace_relu, quantized_linear_relu},
+      {"quantized::add_relu",
+       add_relu,
+       quantized_add_relu,
+       {aten_add_alpha_is_one}},
+      {"quantized::add_relu",
+       add_inplace_relu,
+       quantized_add_relu,
+       {aten_add_alpha_is_one}},
+      {"quantized::add_relu",
+       inplace_add_relu,
+       quantized_add_relu,
+       {aten_add_alpha_is_one}},
+      {"quantized::add_relu",
+       inplace_add_inplace_relu,
+       quantized_add_relu,
+       {aten_add_alpha_is_one}},
+      add_scalar,
+      add_scalar_out,
+      // note that these must come after quantized::add_scalar and
+      // quantized::add_scalar_out patterns
       {"quantized::add_scalar_relu",
-       add_scalar_relu,
-       quantized_add_scalar_relu,
-       add_scalar_filter},
+       quantized_add_scalar_relu_pattern,
+       quantized_add_scalar_relu_replacement},
+      {"quantized::add_scalar_relu",
+       quantized_add_scalar_inplace_relu_pattern,
+       quantized_add_scalar_relu_replacement},
       {"quantized::add_scalar_relu_out",
-       add_scalar_relu_out,
-       quantized_add_scalar_relu_out,
-       add_scalar_filter},
-      {"quantized::add_scalar",
-       add_scalar,
-       quantized_add_scalar,
-       add_scalar_filter},
-      {"quantized::add_scalar_out",
-       add_scalar_out,
-       quantized_add_scalar_out,
-       add_scalar_filter},
+       quantized_add_scalar_relu_out_pattern,
+       quantized_add_scalar_relu_out_replacement},
+      {"quantized::add_scalar_relu_out",
+       quantized_add_scalar_inplace_relu_out_pattern,
+       quantized_add_scalar_relu_out_replacement},
+      {"quantized::add", add, quantized_add, {aten_add_alpha_is_one}},
+      {"quantized::add", inplace_add, quantized_add, {aten_add_alpha_is_one}},
       {"quantized::cat", cat, quantized_cat},
-      {"quantized::batch_norm2d", batch_norm2d, quantized_batch_norm2d},
-      {"quantized::batch_norm2d_relu",
-       batch_norm2d_relu,
-       quantized_batch_norm2d_relu},
-      {"quantized::batch_norm2d_relu",
-       batch_norm2d_inplace_relu,
-       quantized_batch_norm2d_relu},
-      {"quantized::mul", mul, quantized_mul},
-      {"quantized::mul", inplace_mul, quantized_mul},
+      {"quantized::batch_norm", batch_norm, quantized_batch_norm},
+      {"quantized::batch_norm_relu",
+       batch_norm_relu,
+       quantized_batch_norm_relu},
+      {"quantized::batch_norm_relu",
+       batch_norm_inplace_relu,
+       quantized_batch_norm_relu},
+      mul_scalar,
+      mul_scalar_out,
+      // note that these must come after quantized::mul_scalar and
+      // quantized::mul_scalar_out patterns
       {"quantized::mul_scalar_relu",
-       mul_scalar_relu,
-       quantized_mul_scalar_relu,
-       mul_scalar_filter},
+       quantized_mul_scalar_relu_pattern,
+       quantized_mul_scalar_relu_replacement},
+      {"quantized::mul_scalar_relu",
+       quantized_mul_scalar_inplace_relu_pattern,
+       quantized_mul_scalar_relu_replacement},
       {"quantized::mul_scalar_relu_out",
-       mul_scalar_relu_out,
-       quantized_mul_scalar_relu_out,
-       mul_scalar_filter},
-      {"quantized::mul_scalar",
-       mul_scalar,
-       quantized_mul_scalar,
-       mul_scalar_filter},
-      {"quantized::mul_scalar",
-       mul_scalar_out,
-       quantized_mul_scalar_out,
-       mul_scalar_filter},
+       quantized_mul_scalar_relu_out_pattern,
+       quantized_mul_scalar_relu_out_replacement},
+      {"quantized::mul_scalar_relu_out",
+       quantized_mul_scalar_inplace_relu_out_pattern,
+       quantized_mul_scalar_relu_out_replacement},
       {"quantized::mul_relu", mul_relu, quantized_mul_relu},
       {"quantized::mul_relu", mul_inplace_relu, quantized_mul_relu},
       {"quantized::mul_relu", inplace_mul_relu, quantized_mul_relu},
       {"quantized::mul_relu", inplace_mul_inplace_relu, quantized_mul_relu},
-      {"quantized::hardswish", hardswish, quantized_hardswish},
-      {"quantized::layer_norm", layer_norm, quantized_layer_norm},
-      {"aten::avg_pool1d", avg_pool1d, aten_avg_pool1d},
-      {"aten::avg_pool2d", avg_pool2d, aten_avg_pool2d},
-      {"aten::avg_pool3d", avg_pool3d, aten_avg_pool3d},
-      {"aten::adaptive_avg_pool1d",
-       adaptive_avg_pool1d,
-       aten_adaptive_avg_pool1d},
-      {"aten::adaptive_avg_pool2d",
-       adaptive_avg_pool2d,
-       aten_adaptive_avg_pool2d},
-      {"aten::adaptive_avg_pool3d",
-       adaptive_avg_pool3d,
-       aten_adaptive_avg_pool3d},
-      {"aten::mean", mean, aten_mean},
-      {"aten::upsample_nearest1d", upsample_nearest1d, aten_upsample_nearest1d},
-      {"aten::upsample_nearest2d", upsample_nearest2d, aten_upsample_nearest2d},
-      {"aten::upsample_nearest3d", upsample_nearest3d, aten_upsample_nearest3d},
-      {"aten::upsample_linea1d", upsample_linear1d, aten_upsample_linear1d},
-      {"aten::upsample_bilinear2d",
-       upsample_bilinear2d,
-       aten_upsample_bilinear2d},
-      {"aten::upsample_trilinear3d",
-       upsample_trilinear3d,
-       aten_upsample_trilinear3d},
-      {"aten::clamp", clamp, aten_clamp},
-      {"aten::hardtanh", hardtanh, aten_hardtanh},
-      {"aten::hardtanh_", hardtanh_, aten_hardtanh_},
-      {"aten::elu", elu, aten_elu},
-      {"aten::elu_", elu_, aten_elu_},
-      {"aten::leaky_relu", leaky_relu, aten_leaky_relu},
-      {"aten::leaky_relu_", leaky_relu_, aten_leaky_relu_},
+      {"quantized::mul", mul, quantized_mul},
+      {"quantized::mul", inplace_mul, quantized_mul},
+      hardswish,
+      hardswish_,
+      layer_norm,
+      group_norm,
+      instance_norm,
+      {"quantized::elu", elu, quantized_elu},
+      {"quantized::elu_", elu_, quantized_elu},
+      avg_pool1d,
+      avg_pool2d,
+      avg_pool3d,
+      adaptive_avg_pool1d,
+      adaptive_avg_pool2d,
+      adaptive_avg_pool3d,
+      mean1,
+      mean2,
+      upsample_nearest1d,
+      upsample_nearest2d,
+      upsample_nearest3d,
+      upsample_linear1d,
+      upsample_bilinear2d,
+      upsample_trilinear3d,
+      upsample_nearest1d_vec,
+      upsample_nearest2d_vec,
+      upsample_nearest3d_vec,
+      upsample_linear1d_vec,
+      upsample_bilinear2d_vec,
+      upsample_trilinear3d_vec,
+      clamp,
+      hardtanh,
+      hardtanh_,
+      leaky_relu,
+      leaky_relu_,
+      // fixed qparam ops
+      hardsigmoid,
+      hardsigmoid_,
+      sigmoid,
+      sigmoid_,
+      tanh,
+      tanh_,
   };
 }
 
@@ -812,11 +1067,143 @@ graph(%packed_params, %a, %reduce_range, %a_dtype):
 
   std::string quantized_linear_dynamic = R"(
 graph(%packed_params, %a, %reduce_range, %a_dtype):
-        %r = quantized::linear_dynamic(%a, %packed_params)
+        %r = quantized::linear_dynamic(%a, %packed_params, %reduce_range)
         return (%r) )";
+
+  std::string linear_dynamic_fp16 = R"(
+graph(%packed_params, %a):
+        %w_unpacked : Tensor, %b : Tensor? = quantized::linear_unpack_fp16(%packed_params)
+        %r = aten::linear(%a, %w_unpacked, %b)
+        return (%r) )";
+
+  std::string quantized_linear_dynamic_fp16 = R"(
+graph(%packed_params, %a):
+        %r = quantized::linear_dynamic_fp16(%a, %packed_params)
+        return (%r) )";
+
   return {
       {"quantized::linear_dynamic", linear_dynamic, quantized_linear_dynamic},
+      {"quantized::linear_dynamic_fp16",
+       linear_dynamic_fp16,
+       quantized_linear_dynamic_fp16},
   };
+}
+
+std::vector<QuantFusionInfo> linear_prepack_unpack_patterns() {
+  std::string linear_with_quant = R"(
+graph(%a_dequant, %w_quant, %b):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::linear(%a_dequant, %w_dequant, %b)
+        return (%r) )";
+
+  std::string linear_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b):
+        %packed_params = quantized::linear_prepack(%w_quant, %b)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::linear(%a_dequant, %w_dequant, %b_unpacked)
+        return (%r) )";
+  std::string linear_fp16_with_cast = R"(
+graph(%w, %a_dq, %b):
+        %fp16_tensor = aten::_saturate_weight_to_fp16(%w)
+        %r = aten::linear(%a_dq, %fp16_tensor, %b)
+        return (%r) )";
+  std::string linear_fp16_with_prepack = R"(
+graph(%w, %a_dq, %b):
+        %packed_params = quantized::linear_prepack_fp16(%w, %b)
+        %w_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack_fp16(%packed_params)
+        %r = aten::linear(%a_dq, %w_unpacked, %b_unpacked)
+        return (%r) )";
+
+  return {
+      {"linear_prepack_unpack", linear_with_quant, linear_with_quant_prepack},
+      {"linear_fp16_prepack_unpack",
+       linear_fp16_with_cast,
+       linear_fp16_with_prepack},
+  };
+}
+
+std::vector<QuantFusionInfo> conv_prepack_unpack_patterns() {
+  std::string conv1d_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv1d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv1d_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv1d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv1d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv1d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv2d_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv2d_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv3d_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv3d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv3d_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %packed_params : __torch__.torch.classes.quantized.Conv3dPackedParamsBase = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv3d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv3d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv_transpose1d_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %dilation):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv_transpose1d(%a_dequant, %w_dequant, %b, %stride, %padding, %output_padding, %groups, %dilation)
+        return (%r) )";
+
+  std::string conv_transpose1d_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %dilation):
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv_transpose1d_prepack(%w_quant, %b, %stride, %padding, %output_padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv_transpose1d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv_transpose1d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %output_padding, %groups, %dilation)
+        return (%r) )";
+
+  std::string conv_transpose2d_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %dilation):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv_transpose2d(%a_dequant, %w_dequant, %b, %stride, %padding, %output_padding, %groups, %dilation)
+        return (%r) )";
+
+  std::string conv_transpose2d_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %dilation):
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv_transpose2d_prepack(%w_quant, %b, %stride, %padding, %output_padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv_transpose2d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv_transpose2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %output_padding, %groups, %dilation)
+        return (%r) )";
+
+  return {
+      {"conv1d_prepack_unpack", conv1d_with_quant, conv1d_with_quant_prepack},
+      {"conv2d_prepack_unpack", conv2d_with_quant, conv2d_with_quant_prepack},
+      {"conv3d_prepack_unpack", conv3d_with_quant, conv3d_with_quant_prepack},
+      {"conv_transpose1d_prepack_unpack",
+       conv_transpose1d_with_quant,
+       conv_transpose1d_with_quant_prepack},
+      {"conv_transpose2d_prepack_unpack",
+       conv_transpose2d_with_quant,
+       conv_transpose2d_with_quant_prepack}};
 }
 
 } // namespace jit

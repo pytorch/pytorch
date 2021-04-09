@@ -1,7 +1,6 @@
 r"""Importing this file includes common utility methods for checking quantized
 tensors and modules.
 """
-from __future__ import absolute_import, division, print_function, unicode_literals
 import numpy as np
 import torch
 from contextlib import contextmanager
@@ -12,13 +11,12 @@ supported_qengines.remove('none')
 # Note: We currently do not run QNNPACK tests on WINDOWS and MACOS as it is flaky. Issue #29326
 # QNNPACK is not supported on PPC
 # QNNPACK throws ASAN heap-buffer-overflow error.
-if 'qnnpack' in supported_qengines:
-    if IS_PPC or TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN or IS_MACOS or IS_WINDOWS:
-        supported_qengines.remove('qnnpack')
+if 'qnnpack' in supported_qengines and any([IS_PPC, TEST_WITH_ASAN, TEST_WITH_TSAN, TEST_WITH_UBSAN, IS_MACOS, IS_WINDOWS]):
+    supported_qengines.remove('qnnpack')
 
-"""Computes the output shape given convolution parameters."""
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                        output_padding=0):
+    """Computes the output shape given convolution parameters."""
     return np.floor((input_size + 2 * padding - kernel_size - (kernel_size - 1)
                      * (dilation - 1)) / stride) + 2 * output_padding + 1
 
@@ -37,7 +35,7 @@ def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
 
 def _dequantize(qx, scale, zero_point):
     """Dequantizes a numpy array."""
-    x = (qx.astype(np.float) - zero_point) * scale
+    x = (qx.astype(float) - zero_point) * scale
     return x
 
 
@@ -63,7 +61,6 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
             qmin, qmax = 0, 127
         else:
             qmin, qmax = 0, 255
-    n_levels = 255.0
     min_val = X.min()
     max_val = X.max()
     if min_val == max_val:
@@ -72,7 +69,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     else:
         max_val = max(max_val, 0.0)
         min_val = min(min_val, 0.0)
-        scale = (max_val - min_val) / n_levels
+        scale = (max_val - min_val) / (qmax - qmin)
         scale = max(scale, np.finfo(np.float32).eps)
         zero_point = qmin - round(min_val / scale)
         zero_point = max(qmin, zero_point)
@@ -105,6 +102,35 @@ def _calculate_dynamic_per_channel_qparams(X, dtype):
 
     return scale, zero_point
 
+def _snr(x, x_hat):
+    """Calculates the signal to noise ratio and returns the signal and noise
+    power, as well as the SNR in dB.
+    If the input is a list/tuple this function is called recursively on each
+    element. The result will have the same nested structure as the inputs.
+
+    Args:
+        x, x_hat: Either a tensor or a nested list/tuple of tensors.
+    Returns:
+        signal, noise, SNR(in dB): Either floats or a nested list of floats
+    """
+    if isinstance(x, (list, tuple)):
+        assert(len(x) == len(x_hat))
+        res = []
+        for idx in range(len(x)):
+            res.append(_snr(x[idx], x_hat[idx]))
+        return res
+    if x_hat.is_quantized:
+        x_hat = x_hat.dequantize()
+    if x.is_quantized:
+        x = x.dequantize()
+    noise = (x - x_hat).norm()
+    if noise == 0:
+        return 0.0, float('inf'), float('inf')
+    signal = x.norm()
+    snr = signal / noise
+    snr_db = 20 * snr.log10()
+    return signal, noise, snr_db
+
 @contextmanager
 def override_quantized_engine(qengine):
     previous = torch.backends.quantized.engine
@@ -113,6 +139,16 @@ def override_quantized_engine(qengine):
         yield
     finally:
         torch.backends.quantized.engine = previous
+
+@contextmanager
+def override_cpu_allocator_for_qnnpack(qengine_is_qnnpack):
+    try:
+        if qengine_is_qnnpack:
+            torch._C._set_default_mobile_cpu_allocator()
+        yield
+    finally:
+        if qengine_is_qnnpack:
+            torch._C._unset_default_mobile_cpu_allocator()
 
 # TODO: Update all quantization tests to use this decorator.
 # Currently for some of the tests it seems to have inconsistent params
@@ -124,3 +160,8 @@ def override_qengines(qfunction):
                 # qfunction should not return anything.
                 qfunction(*args, **kwargs)
     return test_fn
+
+def qengine_is_fbgemm():
+    return torch.backends.quantized.engine == 'fbgemm'
+def qengine_is_qnnpack():
+    return torch.backends.quantized.engine == 'qnnpack'

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+
 #include <ATen/core/Reduction.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
@@ -18,6 +19,7 @@ using c10::ListType;
 using c10::make_left;
 using c10::make_right;
 using c10::OperatorName;
+using c10::OptionalType;
 
 namespace torch {
 namespace jit {
@@ -109,7 +111,6 @@ struct SchemaParser {
   }
 
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
-    Argument result;
     auto p = type_parser.parseType();
     auto type = std::move(p.first);
     auto alias_info = std::move(p.second);
@@ -127,6 +128,9 @@ struct SchemaParser {
         container->addContainedType(std::move(*alias_info));
       }
       alias_info = std::move(container);
+      if (L.nextIf('?')) {
+        type = OptionalType::create(type);
+      }
     }
     if (is_return) {
       // optionally field names in return values
@@ -169,6 +173,8 @@ struct SchemaParser {
         auto text = tok.text();
         if ("float" == text) {
           return static_cast<int64_t>(at::kFloat);
+        } else if ("complex" == text) {
+          return static_cast<int64_t>(at::kComplexFloat);
         } else if ("long" == text) {
           return static_cast<int64_t>(at::kLong);
         } else if ("strided" == text) {
@@ -187,7 +193,12 @@ struct SchemaParser {
           n = "-" + L.expect(TK_NUMBER).text();
         else
           n = L.expect(TK_NUMBER).text();
-        if (kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
+
+        if (kind == TypeKind::ComplexType || n.find('j') != std::string::npos) {
+          auto imag = c10::stod(n.substr(0, n.size() - 1));
+          return c10::complex<double>(0, imag);
+        } else if (
+            kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
             n.find('e') != std::string::npos) {
           return c10::stod(n);
         } else {
@@ -199,17 +210,19 @@ struct SchemaParser {
   IValue convertToList(
       TypeKind kind,
       const SourceRange& range,
-      std::vector<IValue> vs) {
+      const std::vector<IValue>& vs) {
     switch (kind) {
+      case TypeKind::ComplexType:
+        return fmap(vs, [](const IValue& v) { return v.toComplexDouble(); });
       case TypeKind::FloatType:
-        return fmap(vs, [](IValue v) { return v.toDouble(); });
+        return fmap(vs, [](const IValue& v) { return v.toDouble(); });
       case TypeKind::IntType:
-        return fmap(vs, [](IValue v) { return v.toInt(); });
+        return fmap(vs, [](const IValue& v) { return v.toInt(); });
       case TypeKind::BoolType:
-        return fmap(vs, [](IValue v) { return v.toBool(); });
+        return fmap(vs, [](const IValue& v) { return v.toBool(); });
       default:
         throw ErrorReport(range)
-            << "lists are only supported for float or int types";
+            << "lists are only supported for float, int and complex types";
     }
   }
   IValue parseConstantList(TypeKind kind) {
@@ -221,7 +234,7 @@ struct SchemaParser {
       } while (L.nextIf(','));
     }
     L.expect(']');
-    return convertToList(kind, tok.range, std::move(vs));
+    return convertToList(kind, tok.range, vs);
   }
 
   IValue parseTensorDefault(const SourceRange& range) {
@@ -234,7 +247,8 @@ struct SchemaParser {
     auto range = L.cur().range;
     switch (arg_type->kind()) {
       case TypeKind::TensorType:
-      case TypeKind::GeneratorType: {
+      case TypeKind::GeneratorType:
+      case TypeKind::QuantizerType: {
         return parseTensorDefault(range);
       } break;
       case TypeKind::StringType:
@@ -243,6 +257,7 @@ struct SchemaParser {
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
+      case TypeKind::ComplexType:
         return parseSingleConstant(arg_type->kind());
         break;
       case TypeKind::DeviceObjType: {
@@ -252,7 +267,7 @@ struct SchemaParser {
         break;
       }
       case TypeKind::ListType: {
-        auto elem_kind = arg_type->cast<ListType>()->getElementType();
+        auto elem_kind = arg_type->castRaw<ListType>()->getElementType();
         if (L.cur().kind == TK_IDENT) {
           return parseTensorDefault(range);
         } else if (arg_N && L.cur().kind != '[') {

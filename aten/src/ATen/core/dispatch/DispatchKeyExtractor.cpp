@@ -4,11 +4,11 @@
 
 namespace c10 {
 
-void DispatchKeyExtractor::setOperatorHasKernelForBackend(DispatchKey k, bool has_kernel) {
-  if (has_kernel) {
-    operatorHasKernelForBackend_ = operatorHasKernelForBackend_.add(k);
+void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough) {
+  if (has_fallthrough) {
+    nonFallthroughKeys_ = nonFallthroughKeys_.remove(k);
   } else {
-    operatorHasKernelForBackend_ = operatorHasKernelForBackend_.remove(k);
+    nonFallthroughKeys_ = nonFallthroughKeys_.add(k);
   }
 }
 
@@ -21,7 +21,7 @@ std::string DispatchKeyExtractor::dumpState() const {
       oss << "0";
     }
   }
-  oss << " " << operatorHasKernelForBackend_ << "\n";
+  oss << " " << nonFallthroughKeys_ << "\n";
   return oss.str();
 }
 

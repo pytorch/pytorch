@@ -241,6 +241,9 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     Tensor tensor;
     if (tensor_.is_quantized()) {
       tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
+    } else if (tensor_.is_mkldnn()) {
+      stream << "MKLDNN Tensor: ";
+      tensor = tensor_.to_dense().to(kCPU, kDouble).contiguous();
     } else {
       tensor = tensor_.to(kCPU, kDouble).contiguous();
     }
@@ -256,7 +259,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
           printScale(stream, scale);
         }
         double* tensor_p = tensor.data_ptr<double>();
-        for(int64_t i = 0; i < tensor.size(0); i++) {
+        for (int64_t i = 0; i < tensor.size(0); i++) {
           stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
         }
       }
@@ -281,7 +284,8 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       if (tensor_.qscheme() == c10::kPerTensorAffine) {
         stream << ", scale: " << tensor_.q_scale();
         stream << ", zero_point: " << tensor_.q_zero_point();
-      } else if (tensor_.qscheme() == c10::kPerChannelAffine) {
+      } else if (tensor_.qscheme() == c10::kPerChannelAffine ||
+          tensor_.qscheme() == c10::kPerChannelAffineFloatQParams) {
         stream << ", scales: ";
         Tensor scales = tensor_.q_per_channel_scales();
         print(stream, scales, linesize);
@@ -290,6 +294,11 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         print(stream, zero_points, linesize);
         stream << ", axis: " << tensor_.q_per_channel_axis();
       }
+    }
+
+    auto& fw_grad = tensor._fw_grad(/* level */ 0);
+    if (fw_grad.defined()) {
+      stream << ", tangent:" << std::endl << fw_grad;
     }
     stream << " ]";
   }

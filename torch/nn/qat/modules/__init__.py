@@ -1,10 +1,9 @@
-
 from .linear import Linear
 from .conv import Conv2d
-from .activations import Hardswish
+from .conv import Conv3d
 
 __all__ = [
-    'Linear',
-    'Conv2d',
-    'Hardswish',
+    "Linear",
+    "Conv2d",
+    "Conv3d",
 ]

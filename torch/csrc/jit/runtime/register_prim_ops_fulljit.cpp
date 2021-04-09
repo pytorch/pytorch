@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
+#include <ATen/core/ivalue.h>
 #include <algorithm>
 #include <bitset>
 #include <cctype>
@@ -28,11 +29,18 @@ RegisterOperators reg(
     {Operator(
          prim::profile,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOp>()->getCallback();
-           return [](Stack& stack) {
+           return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
-             return 0;
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::profile_ivalue,
+         [](const Node* node) -> Operation {
+           return [](Stack* stack) {
+             AT_ERROR(
+                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
            };
          },
          aliasAnalysisSpecialCase()),
@@ -40,30 +48,69 @@ RegisterOperators reg(
          prim::FusionGroup,
          [](const Node* node) -> Operation {
            const auto key = registerFusion(node);
-           return [key](Stack& stack) {
+           return [key](Stack* stack) {
              RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
-             runFusion(key, stack);
-             return 0;
+             runFusion(key, *stack);
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::RequiresGradCheck /* (...)  -> (..., bool) */,
+         [](const Node* node) -> Operation {
+           std::vector<bool> rg_props =
+               fmap(node->tys(attr::types), [](const TypePtr& t) {
+                 // if an rg property changes we assume a tensor does require
+                 // gradients which is set in `guardDifferentiableGraph`
+                 TORCH_INTERNAL_ASSERT(
+                     t->castRaw<TensorType>()->requiresGrad().has_value());
+                 return *t->castRaw<TensorType>()->requiresGrad();
+               });
+           return [rg_props](Stack* stack) {
+             auto num_inputs = rg_props.size();
+             // Check every input's shape against profiled (expected) shape.
+             for (size_t i = 0; i < num_inputs; i++) {
+               auto& input = peek(stack, i, num_inputs);
+               const auto& t = input.toTensor();
+               if (rg_props[i] != t.requires_grad()) {
+                 push(stack, false);
+                 return;
+               }
+             }
+
+             push(stack, true);
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::TypeCheck /* (...)  -> (..., bool) */,
+         [](const Node* /* node */) -> Operation {
+           return [](Stack* /* stack */) {
+             AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::FallbackGraph,
+         [](const Node* node) -> Operation {
+           return [](Stack* stack) {
+             AT_ERROR(
+                 "Must be converted to prim::FunctionCall by replaceFallbackGraphWithFallbackFunction"); // NOLINT
            };
          },
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::Guard(Tensor(a) t) -> Tensor(a)",
-         [](Stack& stack) {
-           AT_ERROR("Should be replaced by prim::BailOut");
-           return 0;
-         },
+         [](Stack* stack) { AT_ERROR("Should be replaced by prim::BailOut"); },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailOut(...) -> Tensor(a)",
-         [](Stack& /* stack */) {
+         [](Stack* /* stack */) {
            AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailoutTemplate() -> int",
-         [](Stack& stack) {
+         [](Stack* stack) {
            // TODO: today, we put a single bailout template at the front to
            // carry the un-optimized graph for bailout nodes to use. Ideally
            // this should never run, but we haven't written the code to remove
@@ -72,12 +119,11 @@ RegisterOperators reg(
 
            // Returns an int so that we have an easy way to do graph traversal
            push(stack, 1);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? retain_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor?[]",
-         [](Stack& stack) {
+         [](Stack* stack) {
            bool allow_unused = pop(stack).toBool();
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
@@ -109,7 +155,6 @@ RegisterOperators reg(
              res_list.emplace_back(t.defined() ? t : IValue());
            }
            push(stack, res_list);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      // NB: backward op might write to every input tensors in the graph and it's
@@ -118,7 +163,7 @@ RegisterOperators reg(
      // create_graph=True so we use aliasAnalysisConservative for these two OPs
      Operator(
          "aten::backward.TensorList(Tensor[] tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
-         [](Stack& stack) {
+         [](Stack* stack) {
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
            auto grad_tensors = pop(stack);
@@ -135,27 +180,11 @@ RegisterOperators reg(
 
            torch::autograd::backward(
                output_vars, gradients, retain_graph, create_graph);
-           return 0;
-         },
-         aliasAnalysisConservative()),
-     Operator(
-         "aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
-         [](Stack& stack) {
-           bool create_graph = pop(stack).toBool();
-           auto retain_graph = pop(stack).toOptional<bool>();
-           IValue gradient_ivalue = pop(stack);
-           at::Tensor gradient = gradient_ivalue.isNone()
-               ? at::Tensor()
-               : gradient_ivalue.toTensor();
-           at::Tensor self = pop(stack).toTensor();
-           bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
-           self.backward(gradient, keep_graph, create_graph);
-           return 0;
          },
          aliasAnalysisConservative()),
      Operator(
          "aten::save(t item, str filename) -> ()",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto filename = pop(stack).toStringRef();
            auto ivalue = pop(stack);
 
@@ -165,24 +194,22 @@ RegisterOperators reg(
            // Write file
            std::fstream output(filename, std::ios::out | std::ios::binary);
            output.write(data.data(), data.size());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::IgnoredPythonOp(...) -> None",
-         [](Stack& stack) {
+         [](Stack* stack) {
            throw JITException(
                "This Python function is annotated to be ignored"
                " and cannot be and has not been included in the exported"
                " binary, meaning that it cannot be executed now."
                " Make sure that ignored operations are never executed after"
                " import");
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::rangelist(int n) -> int[]",
-         [](Stack& stack) {
+         [](Stack* stack) {
            int64_t n;
            pop(stack, n);
            c10::List<int64_t> elems;
@@ -191,55 +218,34 @@ RegisterOperators reg(
              elems.push_back(i);
            }
            push(stack, std::move(elems));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      // note: this op needs to share a name with the Scalar -> Tensor conversion
      // because all _to_tensor conversion have to have the same operator namet
      Operator(
          "prim::NumToTensor.bool(bool a) -> Tensor",
-         [](Stack& stack) {
+         [](Stack* stack) {
            bool b;
            pop(stack, b);
            push(stack, at::scalar_to_tensor(b));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::str(t elem) -> str",
-         [](Stack& stack) {
-           std::stringstream ss;
-           ss << pop(stack);
-           push(stack, ss.str());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::device(str a) -> Device",
-         [](Stack& stack) {
+         [](Stack* stack) {
            push(stack, c10::Device(pop(stack).toStringRef()));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
-         [](Stack& stack) {
-           bool non_blocking;
-           bool copy;
-           pop(stack, non_blocking, copy);
-           c10::optional<at::ScalarType> scalarType =
-               pop(stack).toOptional<at::ScalarType>();
-           c10::optional<c10::Device> device = c10::nullopt;
-           at::Tensor self = pop(stack).toTensor();
-           push(
-               stack,
-               to_dispatch(self, device, scalarType, non_blocking, copy));
-           return 0;
+         "aten::percentFormat(str self, ...) -> str",
+         [](Stack* stack) {
+           size_t num_inputs = pop(stack).toInt();
+           percentFormat(*stack, num_inputs);
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor self;
            bool non_blocking;
            bool copy;
@@ -249,75 +255,75 @@ RegisterOperators reg(
            push(
                stack,
                to_dispatch(self, device, scalarType, non_blocking, copy));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::eq(Device a, Device b) -> bool",
-         [](Stack& stack) {
-           auto a = pop(stack).toDevice();
-           auto b = pop(stack).toDevice();
-           push(stack, a == b);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::requires_grad(Tensor a) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.requires_grad());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::grad(Tensor a) -> Tensor(*)",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.grad());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::data(Tensor(a) a) -> Tensor(a)",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, autograd::Variable(a).variable_data());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::is_sparse(Tensor a) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_sparse());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::is_mkldnn(Tensor a) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_mkldnn());
-           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_mlc(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_mlc());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_vulkan(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_vulkan());
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::is_quantized(Tensor a) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_quantized());
-           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_meta(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_meta());
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::name(Tensor a) -> str?",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            if (a.name() == "") {
@@ -325,77 +331,68 @@ RegisterOperators reg(
            } else {
              push(stack, a.name());
            }
-           return 0;
          },
          aliasAnalysisFromSchema()),
-     Operator(
-         "prim::layout(Tensor a) -> int",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.layout());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.cpu());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-
      Operator(
          "prim::index(Device self) -> int?",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto d = pop(stack).toDevice();
            if (d.has_index()) {
              push(stack, d.index());
            } else {
              push(stack, IValue());
            }
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          // TODO return generator object when torchscript supports RNG
          // first-class
          "aten::manual_seed(int seed) -> ()",
-         [](Stack& stack) {
-           at::manual_seed(pop(stack).toInt());
-           return 0;
-         },
+         [](Stack* stack) { at::manual_seed(pop(stack).toInt()); },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::cuda(Tensor(a) self) -> Tensor(a|b)",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a;
            pop(stack, a);
            push(stack, a.cuda());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)",
-         [](Stack& stack) {
-           bool _requires_grad = pop(stack).toBool();
-           at::Tensor self = pop(stack).toTensor();
-           self.requires_grad_(_requires_grad);
-           return 0;
-         },
-         aliasAnalysisConservative()),
-     Operator(
          "prim::AutogradZero() -> Tensor",
-         [](Stack& stack) {
-           stack.emplace_back(at::Tensor());
-           return 0;
-         },
+         [](Stack* stack) { stack->emplace_back(at::Tensor()); },
          aliasAnalysisSpecialCase()),
      Operator(
+         "prim::ReductionSizes(int[] size, int[] red_axes, bool keepdim = False) -> int[]",
+         [](Stack* stack) {
+           bool keepdim = pop(stack).toBool();
+           c10::List<int64_t> axes = pop(stack).toIntList();
+           c10::List<int64_t> size = pop(stack).toIntList();
+           if (keepdim) {
+             for (const auto& axis : axes) {
+               size.set(axis, 1);
+             }
+           } else {
+             int64_t index = 0;
+             auto iter = size.begin();
+             std::sort(axes.begin(), axes.end());
+             for (const auto& axis : axes) {
+               // move iter to the next axis
+               iter += axis - index;
+
+               // input iter points to axis and is updated to axis + 1
+               iter = size.erase(iter);
+
+               // update current index for iter
+               index = axis + 1;
+             }
+           }
+           push(stack, IValue(std::move(size)));
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::BroadcastSizes(...) -> int[]",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
            std::vector<int64_t> size;
            size.reserve(8);
@@ -404,8 +401,7 @@ RegisterOperators reg(
                  at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
            }
            drop(stack, num_inputs);
-           push(stack, IValue(std::move(size)));
-           return 0;
+           push(stack, IValue(size));
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -413,7 +409,7 @@ RegisterOperators reg(
          [](const Node* node) -> Operation {
            int64_t raw_dim = node->i(attr::dim);
            int64_t chunks = node->i(attr::chunks);
-           return [raw_dim, chunks](Stack& stack) {
+           return [raw_dim, chunks](Stack* stack) {
              c10::List<int64_t> shape = pop(stack).toIntList();
              c10::List<int64_t> regular_shape = shape.copy();
              c10::List<int64_t> last_shape = shape.copy();
@@ -434,34 +430,31 @@ RegisterOperators reg(
              }
              push(stack, std::move(regular_shape));
              push(stack, std::move(last_shape));
-             return 0;
            };
          },
          aliasAnalysisSpecialCase()),
      Operator(
          "aten::warn(str message, int stacklevel=2) -> ()",
-         [](Stack& stack) {
+         [](Stack* stack) {
            TORCH_CHECK(
                false, "warn is implemented directly in the interpreter");
-           return 0;
          },
          aliasAnalysisFromSchema()),
 
      Operator(
          "onnx::Reshape(Tensor input, Tensor shape) -> Tensor",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor input, shape;
            pop(stack, input, shape);
            shape = shape.contiguous();
            AT_ASSERT(shape.ndimension() == 1);
            at::IntArrayRef shape_list(shape.data_ptr<int64_t>(), shape.size(0));
            push(stack, input.reshape(shape_list));
-           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
          "onnx::Shape(Tensor t) -> Tensor",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto t = pop(stack).toTensor();
            at::IntArrayRef sizes = t.sizes();
            auto sizes_tensor = torch::empty(
@@ -470,13 +463,12 @@ RegisterOperators reg(
            for (size_t i = 0; i < sizes.size(); ++i) {
              accessor[i] = sizes[i];
            }
-           stack.emplace_back(sizes_tensor);
-           return 0;
+           stack->emplace_back(sizes_tensor);
          },
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::AutogradAnyNonZero(...) -> bool",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
            bool result = false;
            for (const IValue& v : last(stack, num_inputs)) {
@@ -499,31 +491,62 @@ RegisterOperators reg(
              }
            }
            drop(stack, num_inputs);
-           stack.emplace_back(result);
-           return 0;
+           stack->emplace_back(result);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::AutogradAllZero(...) -> bool",
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           bool result = true;
+           for (const IValue& v : last(stack, num_inputs)) {
+             TORCH_INTERNAL_ASSERT(v.isTensor());
+             if (v.toTensor().defined()) {
+               result = false;
+               break;
+             }
+           }
+           drop(stack, num_inputs);
+           stack->emplace_back(result);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::AutogradAllNonZero(...) -> bool",
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           bool result = true;
+           for (const IValue& v : last(stack, num_inputs)) {
+             TORCH_INTERNAL_ASSERT(v.isTensor());
+             if (!v.toTensor().defined()) {
+               result = false;
+               break;
+             }
+           }
+           drop(stack, num_inputs);
+           stack->emplace_back(result);
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::AutogradAdd(Any a, Any b) -> Any",
-         [](Stack& stack) {
+         [](Stack* stack) {
            at::Tensor a, b;
            pop(stack, a, b);
            if (!a.defined() && !b.defined()) {
              // undef + undef == undef
-             stack.emplace_back(a);
+             stack->emplace_back(a);
            } else if (!a.defined()) {
-             stack.emplace_back(b);
+             stack->emplace_back(b);
            } else if (!b.defined()) {
-             stack.emplace_back(a);
+             stack->emplace_back(a);
            } else {
-             stack.emplace_back(a + b);
+             stack->emplace_back(a + b);
            }
-           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
          "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
-         [](Stack& stack) {
+         [](Stack* stack) {
+           RECORD_FUNCTION("_grad_sum_to_size", std::vector<c10::IValue>());
            IValue self, size;
            pop(stack, self, size);
            if (size.isNone()) {
@@ -531,12 +554,11 @@ RegisterOperators reg(
            } else {
              push(stack, at::sum_to(self.toTensor(), size.toIntVector()));
            }
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::_size_if_not_equal(int[] self_size, int[] other_size) -> int[]?",
-         [](Stack& stack) {
+         [](Stack* stack) {
            IValue self_size, other_size;
            pop(stack, self_size, other_size);
            auto s = self_size.toIntVector();
@@ -546,87 +568,8 @@ RegisterOperators reg(
            } else {
              push(stack, s);
            }
-           return 0;
          },
          aliasAnalysisFromSchema()),
-     Operator(
-         prim::tolist,
-         // This operator has to be unschematized because the return type
-         // depends on the type hint and input. The implementation of this
-         // operator below is intended to be as close to the Python
-         // implementation in torch/csrc/utils/tensor_list.cpp as possible.
-         [](const Node* node) -> Operation {
-           return [](Stack& stack) {
-             int elem_ty_val;
-             int dim_val;
-             at::Tensor t;
-
-             pop(stack, elem_ty_val);
-             pop(stack, dim_val);
-             pop(stack, t);
-
-             // If the Tensor is not on the CPU, transfer it.
-             if (!t.device().is_cpu()) {
-               t = t.cpu();
-             }
-
-             // Rebuild the output type using elem_ty_val and dim_val. Start
-             // with the element type corresponding to elem_ty_val.
-             TypePtr out_ty;
-             if (elem_ty_val == 0) {
-               out_ty = IntType::get();
-             } else if (elem_ty_val == 1) {
-               out_ty = FloatType::get();
-             } else if (elem_ty_val == 2) {
-               out_ty = BoolType::get();
-             } else {
-               TORCH_CHECK(
-                   false,
-                   "Unsupported element type for tolist; only int, float and bool are supported");
-             }
-
-             // Check that type of the Tensor matches that of the annotation.
-             // Make an exception for the case in which the annotated type is
-             // float and the Tensor data type is also float; the elements will
-             // be casted to double later.
-             auto scalarTypeForJitType = tryScalarTypeFromJitType(out_ty);
-             if (scalarTypeForJitType != at::ScalarType::Double ||
-                 t.scalar_type() != at::ScalarType::Float) {
-               TORCH_CHECK(
-                   tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
-                   "Output annotation element type and runtime tensor element type must match for tolist()")
-             }
-
-             // Check that the dimension of the Tensor matches that of the
-             // annotation.
-             TORCH_CHECK(
-                 dim_val == t.dim(),
-                 "Output annotation list dimension and runtime tensor dimension must match for tolist()")
-
-             // Wrap out_ty in a ListType dim times.
-             for (int i = 0; i < dim_val; ++i) {
-               out_ty = ListType::create(out_ty);
-             }
-
-             int64_t dim = t.dim();
-             auto sizes = t.sizes();
-             auto strides = t.strides();
-             size_t element_size = t.element_size();
-             char* data = static_cast<char*>(t.data_ptr());
-             auto result = tensorToListRecursive(
-                 data,
-                 0,
-                 dim,
-                 out_ty,
-                 t.scalar_type(),
-                 sizes,
-                 strides,
-                 element_size);
-             push(stack, std::move(result));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
      Operator(
          prim::ConstantChunk,
          [](const Node* node) -> Operation {
@@ -635,14 +578,14 @@ RegisterOperators reg(
            auto outputs_used = fmap(node->outputs(), [](const Value* v) {
              return v->uses().size() > 0;
            });
-           return [=](Stack& stack) {
+           return [=](Stack* stack) {
              RECORD_FUNCTION("chunk", last(stack, 1));
 
              at::Tensor t;
              pop(stack, t);
              auto result = at::chunk(t, chunks, dim);
-             stack.insert(
-                 stack.end(),
+             stack->insert(
+                 stack->end(),
                  std::make_move_iterator(result.begin()),
                  std::make_move_iterator(result.end()));
              // NB: Chunk can sometimes return a smaller number of outputs.
@@ -665,50 +608,58 @@ RegisterOperators reg(
                      num_results);
                  // We know that the output is unused, so it's ok to push
                  // anything on the stack.
-                 stack.emplace_back();
+                 stack->emplace_back();
                }
              }
-             return 0;
            };
          },
          aliasAnalysisSpecialCase()),
-     Operator(
-         "aten::dict() -> Dict(str, Tensor)",
-         [](Stack& stack) {
-           auto dict =
-               c10::impl::GenericDict(StringType::get(), TensorType::get());
-           push(stack, dict);
-           return 0;
+     // This operator is generated inside the compiler for indexing into
+     // ModuleList without a statically determinable key. Accordingly,
+     // self must be a ModuleType and the output must be an InterfaceType.
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "prim::ModuleContainerIndex.list(Any self, int ind) -> Any"),
+         [](Stack* stack) {
+           IValue ind = pop(stack);
+           IValue module_dict = pop(stack);
+           std::stringstream ss;
+           ss << ind.toInt();
+           push(stack, module_dict.toModule().attr(ss.str()));
+         },
+         aliasAnalysisFromSchema()),
+     // This operator is generated inside the compiler for indexing into
+     // ModuleDict without a statically determinable key. Accordingly,
+     // self must be a ModuleType and the output must be an InterfaceType.
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "prim::ModuleContainerIndex.dict(Any self, str ind) -> Any"),
+         [](Stack* stack) {
+           IValue ind = pop(stack);
+           IValue module_dict = pop(stack);
+           push(stack, module_dict.toModule().attr(ind.toStringRef()));
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::_unwrap_optional(t(a)? optional) -> t(a)",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto val = pop(stack);
            TORCH_CHECK(!val.isNone(), "Unwrapping null optional");
            push(stack, std::move(val));
-           return 0;
          },
          aliasAnalysisFromSchema()),
-     // This op is no longer generated, but old models use it instead of
-     // unchecked_cast, so we keep it here so it gets handled correctly.
-     Operator(
-         "prim::unchecked_cast(t x) -> t",
-         noop,
-         aliasAnalysisSpecialCase()),
      Operator(
          "aten::wait(Future(t) self) -> t",
-         [](Stack& stack) {
+         [](Stack* stack) {
            TORCH_CHECK(
                false, "wait is implemented directly in the interpreter");
-           return 0;
          },
          aliasAnalysisSpecialCase())});
 
 RegisterOperators logging_operators(
     {Operator(
          "prim::AddStatValue(str key, int val) -> ()",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto val = pop(stack).toInt();
            auto key = pop(stack).toString();
 
@@ -725,12 +676,11 @@ RegisterOperators logging_operators(
              graph->insertNode(node);
            }
            torch::jit::logging::getLogger()->addStatValue(*key, val);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::TimePoint() -> int",
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto schema = parseSchema("prim::TimePoint() -> int");
            Node* node = nullptr;
            // TODO: remove this custom tracing code once the custom op bugfix
@@ -741,73 +691,20 @@ RegisterOperators logging_operators(
              tracer::recordSourceLocation(node);
              graph->insertNode(node);
            }
-           auto output = autograd::profiler::getTime();
+           auto output = autograd::profiler::getTime(/*allow_monotonic=*/true);
            push(stack, output);
            if (jit::tracer::isTracing()) {
              jit::tracer::addOutput(node, output);
            }
-           return 0;
          },
          aliasAnalysisFromSchema())});
 
-template <typename T>
-int hashValue(Stack& stack) {
+void hashValue(Stack* stack) {
   auto value = pop(stack);
-  auto hash = std::hash<T>()(value.to<T>());
-  push(stack, int64_t(hash));
-  return 0;
+  push(stack, value.hash());
 }
 
 RegisterOperators reg2({
-
-#define DEFINE_STRING_OP(op_name, string_op, result) \
-  Operator(                                          \
-      #op_name "(str a, str b) ->" #result,          \
-      [](Stack& stack) {                             \
-        auto b = pop(stack).toStringRef();           \
-        auto a = pop(stack).toStringRef();           \
-        push(stack, string_op);                      \
-        return 0;                                    \
-      },                                             \
-      aliasAnalysisFromSchema())
-
-    DEFINE_STRING_OP(aten::eq, a == b, bool),
-    DEFINE_STRING_OP(aten::ne, a != b, bool),
-    DEFINE_STRING_OP(aten::add, a + b, str),
-#undef DEFINE_STRING_OP
-    Operator(
-        "aten::len.str(str s) -> int",
-        [](Stack& stack) {
-          auto string = pop(stack).toStringRef();
-          push(stack, static_cast<int64_t>(string.size()));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::__getitem__.str(str s, int index) -> str",
-        [](Stack& stack) {
-          auto index = pop(stack).toInt();
-          auto string = pop(stack).toStringRef();
-          auto norm_index = normalizeIndex(index, string.size());
-          char c = string.at(norm_index);
-          push(stack, std::string(&c, 1));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::list(str t) -> str[]",
-        [](Stack& stack) {
-          auto str = pop(stack).toStringRef();
-          c10::List<std::string> chars;
-          chars.reserve(str.size());
-          for (auto c : str) {
-            chars.push_back(std::string(1, c));
-          }
-          push(stack, std::move(chars));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-
     // registered as Any[] so that heterogenous tuples can be called with len()
     Operator(
         "aten::len.any(Any[] a) -> int",
@@ -823,7 +720,7 @@ RegisterOperators reg2({
       listRemove<value_type>,                              \
       aliasAnalysisFromSchema()),                          \
       Operator(                                            \
-          "aten::index." decl_type "(" decl_type           \
+          "aten::index.list_" decl_type "(" decl_type      \
           "[] self,                                                               \
         " decl_type " el) -> int",                         \
           listIndex<value_type>,                           \
@@ -839,6 +736,7 @@ RegisterOperators reg2({
         CREATE_SPECIALIZED_LIST_OPS("float", double)
             CREATE_SPECIALIZED_LIST_OPS("bool", bool)
                 CREATE_SPECIALIZED_LIST_OPS("Tensor", at::Tensor)
+                    CREATE_SPECIALIZED_LIST_OPS("str", std::string)
 
 #undef CREATE_GENERIC_LIST_OPS
 #undef CREATE_SPECIALIZED_LIST_OPS
@@ -846,16 +744,8 @@ RegisterOperators reg2({
     // `listContains<T>` is not implemented for non-primitive types
     // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
     Operator(
-        "aten::__contains__.int(int[] l, int item) -> bool",
-        listContains<int64_t>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::__contains__.float(float[] l, float item) -> bool",
+        "aten::__contains__.float_list(float[] l, float item) -> bool",
         listContains<double>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::__contains__.str(str[] l, str item) -> bool",
-        listContains<std::string>,
         aliasAnalysisFromSchema()),
     Operator(
         "aten::sort.int(int[](a!) self, bool reverse=False) -> ()",
@@ -874,6 +764,10 @@ RegisterOperators reg2({
         listSort<bool>,
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::sort.str(str[](a!) self, bool reverse=False) -> ()",
+        listSort<std::string>,
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::sorted.int(int[](a) input) -> (int[])",
         listCopyAndSort<int64_t>,
         aliasAnalysisFromSchema()),
@@ -889,10 +783,9 @@ RegisterOperators reg2({
         "aten::sorted.bool(bool[](a) input) -> (bool[])",
         listCopyAndSort<bool>,
         aliasAnalysisFromSchema()),
-
     Operator(
-        "aten::eq.int_list(int[] a, int[] b) -> bool",
-        listEq<int64_t>,
+        "aten::sorted.str(str[](a) input) -> (str[])",
+        listCopyAndSort<std::string>,
         aliasAnalysisFromSchema()),
     Operator(
         "aten::eq.float_list(float[] a, float[] b) -> bool",
@@ -907,6 +800,10 @@ RegisterOperators reg2({
         listEq<bool>,
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::eq.str_list(str[] a, str[] b) -> bool",
+        listEq<std::string>,
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::ne.float_list(float[] a, float[] b) -> bool",
         listNe<double>,
         aliasAnalysisFromSchema()),
@@ -918,11 +815,15 @@ RegisterOperators reg2({
         "aten::ne.bool_list(bool[] a, bool[] b) -> bool",
         listNe<bool>,
         aliasAnalysisFromSchema()),
+    Operator(
+        "aten::ne.str_list(str[] a, str[] b) -> bool",
+        listNe<std::string>,
+        aliasAnalysisFromSchema()),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
   Operator(                                              \
       #op_name "(int i) -> str",                         \
-      [](Stack& stack) {                                 \
+      [](Stack* stack) {                                 \
         auto i = pop(stack).toInt();                     \
         std::stringstream ss;                            \
         if (i < 0) {                                     \
@@ -931,7 +832,6 @@ RegisterOperators reg2({
         }                                                \
         ss << "0" << prefix << char_op << i;             \
         push(stack, ss.str());                           \
-        return 0;                                        \
       },                                                 \
       aliasAnalysisFromSchema())
 
@@ -940,7 +840,7 @@ RegisterOperators reg2({
 
     Operator(
         "aten::bin(int i) -> str",
-        [](Stack& stack) {
+        [](Stack* stack) {
           auto i = pop(stack).toInt();
           std::stringstream ss;
           if (i == 0) {
@@ -955,37 +855,22 @@ RegisterOperators reg2({
             ss << "0b" << str;
             push(stack, ss.str());
           }
-          return 0;
         },
         aliasAnalysisFromSchema()),
     // TODO: deprecate this in favor of aten::getelem
     Operator(
         "prim::StringIndex(str string, int index) -> str",
-        [](Stack& stack) {
+        [](Stack* stack) {
           auto index = pop(stack).toInt();
           auto string = pop(stack).toStringRef();
           auto norm_index = normalizeIndex(index, string.size());
           char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::ord(str string) -> int",
-        [](Stack& stack) {
-          auto string = pop(stack).toStringRef();
-          TORCH_CHECK(
-              string.size() == 1,
-              "String for ord() must be 1 character, found ",
-              string.size());
-          uint8_t ord = string.at(0);
-          push(stack, int64_t(ord));
-          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::chr(int i) -> str",
-        [](Stack& stack) {
+        [](Stack* stack) {
           auto i = pop(stack).toInt();
           std::stringstream ss;
           TORCH_CHECK(
@@ -995,58 +880,43 @@ RegisterOperators reg2({
           char c = i;
           ss << c;
           push(stack, ss.str());
-          return 0;
         },
         aliasAnalysisFromSchema()),
-#define CREATE_COPY_OP(other_type, c_type)                                 \
-  Operator(                                                                \
-      "aten::copy_(Tensor(a!) self, " #other_type " other) -> Tensor(a!)", \
-      [](Stack& stack) {                                                   \
-        at::Tensor t;                                                      \
-        c_type other;                                                      \
-        pop(stack, t, other);                                              \
-        std::move(t) = other; /* NOLINT(bugprone-use-after-move) */        \
-        push(stack, std::move(t)); /* NOLINT(bugprone-use-after-move) */   \
-        return 0;                                                          \
-      },                                                                   \
-      aliasAnalysisFromSchema())
-
-    CREATE_COPY_OP(Tensor, at::Tensor),
-    CREATE_COPY_OP(int, int64_t),
-    CREATE_COPY_OP(float, double),
-#undef CREATE_COPY_OP
 
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
 
-    // only used internally in range() translation
     Operator(
-        "aten::__range_length(int lo, int hi, int step) -> int",
-        [](Stack& stack) {
-          int64_t lo, hi, step;
-          pop(stack, lo, hi, step);
-          // error handling when step_val = 0 during runtime
-          if (step == 0) {
-            throw std::runtime_error("range() arg 3 must not be zero");
-          }
-          if (step > 0 && lo < hi)
-            push(stack, 1 + (hi - 1 - lo) / step);
-          else if (step < 0 && lo > hi)
-            push(stack, 1 + (lo - 1 - hi) / (0 - step));
-          else
-            push(stack, 0);
-          return 0;
+        "aten::modf(float a) -> (float, float)",
+        [](Stack* stack) {
+          double a;
+          pop(stack, a);
+          double b, c;
+          b = modf(a, &c);
+          push(stack, b, c);
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__derive_index(int index, int start, int step) -> int",
-        [](Stack& stack) {
-          int64_t index, start, step;
-          pop(stack, index, start, step);
-          push(stack, start + index * step);
-          return 0;
+        "aten::frexp(float a) -> (float, int)",
+        [](Stack* stack) {
+          double a;
+          pop(stack, a);
+          double m;
+          int e;
+          m = std::frexp(a, &e);
+          push(stack, m, e);
         },
         aliasAnalysisFromSchema()),
+    Operator(
+        "aten::ldexp(float x, int i) -> float",
+        [](Stack* stack) {
+          double a;
+          int64_t b;
+          pop(stack, a, b);
+          push(stack, std::ldexp(a, b));
+        },
+        aliasAnalysisFromSchema()),
+    DEFINE_BINARY_FLOAT_OP(aten::mathremainder, std::remainder(a, b)),
 
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
@@ -1054,28 +924,47 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__lshift__, a << b),
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
-    DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
-    DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
-    DEFINE_UNARY_OP(aten::round, std::round(a), float, float),
-    DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
-    DEFINE_BINARY_FLOAT_OP(aten::log, std::log(a) / std::log(b)),
+    DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
+    DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
+    DEFINE_SCALAR_SCALAR_BINARY_OP(
+        aten::log,
+        std::log(a) / std::log(b),
+        std::log(a) / std::log(b),
+        float),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
-    DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
-    DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
-    DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
-    DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
-    DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
-    DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
-    DEFINE_BINARY_FLOAT_OP(aten::atan2, std::atan2(a, b)),
-    DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
-    DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
-    DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
-    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
-    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
-    DEFINE_UNARY_OP(aten::acosh, std::acosh(a), float, float),
-    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
-    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
-    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::log10, std::log10(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sqrt, std::sqrt(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::acos, std::acos(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::asin, std::asin(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::atan, std::atan(a), float, float),
+    DEFINE_GENERIC_OP(
+        aten::atan2,
+        std::atan2(a, b),
+        std::atan2(a, b),
+        float,
+        float),
+    DEFINE_INT_FLOAT_OP(aten::atan2, std::atan2(a, b), float),
+    DEFINE_SCALAR_SCALAR_BINARY_OP(
+        aten::atan2,
+        std::atan2(a, b),
+        std::atan2(a, b),
+        float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::cos, std::cos(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sin, std::sin(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::tan, std::tan(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::asinh, std::asinh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::atanh, std::atanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::acosh, std::acosh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::sinh, std::sinh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::cosh, std::cosh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX(aten::tanh, std::tanh(a), float, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX_CAST(
+        aten::angle,
+        std::arg(a),
+        float,
+        float,
+        float,
+        float),
     DEFINE_UNARY_OP(aten::degrees, degrees(a), float, float),
     DEFINE_UNARY_OP(aten::radians, radians(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
@@ -1083,50 +972,27 @@ RegisterOperators reg2({
     DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
     DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
     DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
-    Operator(
-        "aten::modf(float a) -> (float, float)",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          double b, c;
-          b = modf(a, &c);
-          push(stack, b, c);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::frexp(float a) -> (float, int)",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          double m;
-          int e;
-          m = std::frexp(a, &e);
-          push(stack, m, e);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::ldexp(float x, int i) -> float",
-        [](Stack& stack) {
-          double a;
-          int64_t b;
-          pop(stack, a, b);
-          push(stack, std::ldexp(a, b));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    DEFINE_BINARY_FLOAT_OP(aten::mathremainder, std::remainder(a, b)),
+    DEFINE_UNARY_OP(aten::gamma, std::tgamma(a), float, float),
+    DEFINE_UNARY_OP(aten::erf, std::erf(a), float, float),
+    DEFINE_UNARY_OP(aten::erfc, std::erfc(a), float, float),
+    DEFINE_UNARY_OP(aten::expm1, std::expm1(a), float, float),
+    DEFINE_UNARY_OP(aten::fabs, std::fabs(a), float, float),
+    DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
 
     // TODO: move abs to aten namespace because it's schematized!
-    DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),
+    DEFINE_UNARY_OP_WITH_COMPLEX_CAST(
+        prim::abs,
+        std::abs(a),
+        int,
+        float,
+        float,
+        float),
     Operator(
         "prim::abs(Tensor x) -> Tensor",
-        [](Stack& stack) {
+        [](Stack* stack) {
           at::Tensor x;
           pop(stack, x);
           push(stack, x.abs());
-          return 0;
         },
         aliasAnalysisFromSchema()),
 
@@ -1144,33 +1010,9 @@ RegisterOperators reg2({
         std::copysign(a, b),
         std::copysign(a, b),
         float),
-
-    DEFINE_UNARY_OP(aten::gamma, std::tgamma(a), float, float),
-    DEFINE_UNARY_OP(aten::erf, std::erf(a), float, float),
-    DEFINE_UNARY_OP(aten::erfc, std::erfc(a), float, float),
-    DEFINE_UNARY_OP(aten::expm1, std::expm1(a), float, float),
-    DEFINE_UNARY_OP(aten::fabs, std::fabs(a), float, float),
-    DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
-    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
-    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
-    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
-    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
-    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
-
-    Operator(
-        "aten::isnan(float a) -> bool",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::isnan(a));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-
-    DEFINE_UNARY_OP(aten::neg, -a, int, float),
     Operator(
         "aten::_tensor_to_list(Tensor self) -> int[]",
-        [](Stack& stack) {
+        [](Stack* stack) {
           at::Tensor t;
           pop(stack, t);
           c10::List<int64_t> elems;
@@ -1179,12 +1021,11 @@ RegisterOperators reg2({
             elems.push_back(*t[i].data_ptr<int32_t>());
           }
           push(stack, std::move(elems));
-          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::_list_to_tensor(int[] self) -> Tensor",
-        [](Stack& stack) {
+        [](Stack* stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
           auto t = torch::empty(
               {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
@@ -1192,54 +1033,137 @@ RegisterOperators reg2({
             t[i] = l.get(i);
           }
           push(stack, std::move(t));
-          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.int(int[] self) -> int",
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          auto sum = 0;
+          for (const auto& elem : l) {
+            sum += elem;
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.float(float[] self) -> float",
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          auto sum = 0.0;
+          for (const auto& elem : l) {
+            sum += elem;
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.bool(bool[] self) -> int",
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          auto sum = 0;
+          for (const auto& elem : l) {
+            if (elem) {
+              sum += 1;
+            }
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.str(str[] self) -> bool",
+        [](Stack* stack) {
+          auto l = pop(stack).toList();
+          for (const auto& elem : l) {
+            if (elem != "") {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.int(int[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.float(float[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any.bool(bool[] self) -> bool",
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          for (const auto& elem : l) {
+            if (elem) {
+              push(stack, true);
+              return;
+            }
+          }
+          push(stack, false);
         },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::all.int(int[] self) -> bool",
-        [](Stack& stack) {
+        [](Stack* stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
           for (const auto& elem : l) {
             if (!elem) {
               push(stack, false);
-              return 0;
+              return;
             }
           }
           push(stack, true);
-          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::all.float(float[] self) -> bool",
-        [](Stack& stack) {
+        [](Stack* stack) {
           c10::List<double> l = pop(stack).toDoubleList();
           for (const auto& elem : l) {
             if (!elem) {
               push(stack, false);
-              return 0;
+              return;
             }
           }
           push(stack, true);
-          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::all.bool(bool[] self) -> bool",
-        [](Stack& stack) {
+        [](Stack* stack) {
           c10::List<bool> l = pop(stack).toBoolList();
           for (const auto& elem : l) {
             if (!elem) {
               push(stack, false);
-              return 0;
+              return;
             }
           }
           push(stack, true);
-          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::divmod.int(int x, int y) -> (int, int)",
-        [](Stack& stack) {
+        [](Stack* stack) {
           int64_t a, b;
           lldiv_t divresult = {};
           pop(stack, a, b);
@@ -1256,12 +1180,11 @@ RegisterOperators reg2({
               stack,
               static_cast<int64_t>(divresult.quot),
               static_cast<int64_t>(divresult.rem));
-          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
         "aten::divmod.float(float x, float y) -> (float, float)",
-        [](Stack& stack) {
+        [](Stack* stack) {
           double a, b;
           pop(stack, a, b);
           if (b == 0) {
@@ -1272,12 +1195,11 @@ RegisterOperators reg2({
             rem += b;
           }
           push(stack, (a - rem) / b, rem);
-          return 0;
         },
         aliasAnalysisFromSchema()),
     Operator(
         "prim::id(AnyClassType? x) -> int",
-        [](Stack& stack) {
+        [](Stack* stack) {
           IValue a;
           pop(stack, a);
           if (a.isNone()) {
@@ -1285,14 +1207,14 @@ RegisterOperators reg2({
           } else {
             push(stack, reinterpret_cast<int64_t>(a.internalToPointer()));
           }
-          return 0;
         },
         aliasAnalysisFromSchema()),
 
 #define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                           \
   Operator(                                                              \
-      "aten::divmod(" #type_a " x," #type_b " y) -> (float, float)",     \
-      [](Stack& stack) {                                                 \
+      "aten::divmod." #type_a "_" #type_b "(" #type_a " x," #type_b      \
+      " y) -> (float, float)",                                           \
+      [](Stack* stack) {                                                 \
         type_a a;                                                        \
         type_b b;                                                        \
         pop(stack, a, b);                                                \
@@ -1302,7 +1224,6 @@ RegisterOperators reg2({
         double quot = floor(a / b);                                      \
         double rem = a - (quot * b);                                     \
         push(stack, quot, rem);                                          \
-        return 0;                                                        \
       },                                                                 \
       aliasAnalysisFromSchema())
 
@@ -1311,92 +1232,174 @@ RegisterOperators reg2({
 
 #undef DEFINE_DIVMOD_MIXED_OP
     Operator(
-        "aten::hash(str t) -> int",
-        hashValue<std::string>,
+        "aten::hash.generic(t value) -> int",
+        hashValue,
         aliasAnalysisFromSchema()),
-    Operator(
-        "aten::hash(int t) -> int",
-        hashValue<int>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::hash(float t) -> int",
-        hashValue<double>,
-        aliasAnalysisFromSchema()),
+
+#define DEFINE_COMPLEX_OP(type_a, type_b, actual_type_a, actual_type_b) \
+  Operator(                                                             \
+      "aten::Complex." #type_a "_" #type_b "(" #type_a " x," #type_b    \
+      " y) -> complex",                                                 \
+      [](Stack* stack) {                                                \
+        actual_type_a a;                                                \
+        actual_type_b b;                                                \
+        pop(stack, a, b);                                               \
+        auto comp = c10::complex<double>(a, b);                         \
+        push(stack, comp);                                              \
+      },                                                                \
+      aliasAnalysisFromSchema())
+
+#define DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(                               \
+    type_a, type_b, actual_type_a, actual_type_b)                        \
+  Operator(                                                              \
+      "aten::Complex." #type_a "_" #type_b "(" #type_a " x," #type_b     \
+      " y) -> complex",                                                  \
+      [](Stack* stack) {                                                 \
+        actual_type_a a;                                                 \
+        actual_type_b b;                                                 \
+        pop(stack, a, b);                                                \
+        auto comp = c10::complex<double>(a.item<double>(), b);           \
+        push(stack, comp);                                               \
+      },                                                                 \
+      aliasAnalysisFromSchema()),                                        \
+      Operator(                                                          \
+          "aten::Complex." #type_b "_" #type_a "(" #type_b " x," #type_a \
+          " y) -> complex",                                              \
+          [](Stack* stack) {                                             \
+            actual_type_b a;                                             \
+            actual_type_a b;                                             \
+            pop(stack, a, b);                                            \
+            auto comp = c10::complex<double>(a, b.item<double>());       \
+            push(stack, comp);                                           \
+          },                                                             \
+          aliasAnalysisFromSchema())
+
+    DEFINE_COMPLEX_OP(int, bool, int, bool),
+    DEFINE_COMPLEX_OP(bool, int, bool, int),
+    DEFINE_COMPLEX_OP(float, bool, double, bool),
+    DEFINE_COMPLEX_OP(bool, float, bool, double),
+    DEFINE_COMPLEX_OP(float, int, double, int),
+    DEFINE_COMPLEX_OP(int, float, int, double),
+    DEFINE_COMPLEX_OP(int, int, int, int),
+    DEFINE_COMPLEX_OP(bool, bool, bool, bool),
+    DEFINE_COMPLEX_OP(float, float, double, double),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, float, at::Tensor, double),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, int, at::Tensor, int),
+    DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, bool, at::Tensor, bool),
 });
 
-bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
-  return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
+bool isSortableTupleType(
+    const TupleTypePtr& tuple_type,
+    std::stringstream& why_not) {
+  for (const TypePtr& ele_type : tuple_type->containedTypes()) {
+    switch (ele_type->kind()) {
+      case TypeKind::IntType:
+      case TypeKind::BoolType:
+      case TypeKind::FloatType:
+      case TypeKind::StringType:
+      case TypeKind::TensorType:
+        continue;
+      case TypeKind::TupleType:
+        if (!isSortableTupleType(ele_type->expect<TupleType>(), why_not)) {
+          return false;
+        }
+        continue;
+      case TypeKind::ClassType:
+        if (!c10::checkObjectSortSchema(
+                ele_type->expect<ClassType>(), why_not)) {
+          return false;
+        }
+        continue;
+      default:
+        why_not << "Contained elements in " << *tuple_type
+                << " are not sortable. Only Int, Bool, Float, String, Tensor, "
+                << "a User Defined Class with __lt__ method defined or Tuples "
+                << "of aforementionted types can be sorted.";
+        return false;
+    }
+  }
+
+  return true;
 }
 
-Function* checkSortSchema(const c10::TypePtr& list_element_type) {
-  std::stringstream error_str;
-  if (auto class_type = list_element_type->cast<ClassType>()) {
-    if (auto method = class_type->findMethod("__lt__")) {
-      const auto& lt_schema = method->getSchema();
-      const auto& schema_args = lt_schema.arguments();
-      bool error =
-          (schema_args.size() != 2 ||
-           !simpleClassTypeArg(schema_args[0], class_type) ||
-           !simpleClassTypeArg(schema_args[1], class_type) ||
-           lt_schema.returns().size() != 1 ||
-           lt_schema.returns()[0].type() != BoolType::get());
-      if (!error) {
-        return method;
-      }
-    }
-    error_str << "To sort a list of " << class_type->python_str()
-              << " it must define a "
-              << "__lt__ method with two inputs of type "
-              << class_type->python_str() << " that "
-              << "returns a bool";
-  } else {
-    error_str << "To sort a list of " << list_element_type->python_str()
-              << " must be of Tensors, ints, floats, bools or "
-              << "a User Defined Class that defines the __lt__ compare method"
-              << ", got list of " << list_element_type->python_str() << "\n";
+bool isSortableListOfObjectsOrTuples(
+    c10::List<IValue>& ivalues,
+    std::stringstream& why_not) {
+  if (ivalues.empty()) {
+    return true;
   }
-  throw std::runtime_error(error_str.str());
+
+  auto type = ivalues.get(0).type();
+  // We assume lists have homogenous types, use first element to determine
+  // best sorting methods. If in the future we need to support heterogenous
+  // types inside list, then sorting needs to have runtime sortable checks.
+  const size_t n = ivalues.size();
+  for (size_t i = 0; i < n; ++i) {
+    const IValue& v = ivalues.get(i);
+    auto curr_type = v.type();
+    if (*curr_type != *type) {
+      why_not << "Only values of same type can be compared. "
+              << "Found " << type->repr_str() << " and "
+              << curr_type->repr_str();
+      return false;
+    }
+  }
+
+  if (auto tuple_type = type->cast<TupleType>()) {
+    return isSortableTupleType(tuple_type, why_not);
+  }
+
+  if (auto class_type = type->cast<ClassType>()) {
+    return c10::checkObjectSortSchema(class_type, why_not) != nullptr;
+  }
+
+  // Basic types like tensors/ints/floats/bools/strs are not checked in this
+  // method because they should have been schema matched to specialized
+  // aten::sort kernels using listSort<T>.
+  why_not << "Only list of Tensors, ints, floats, bools, strs, "
+          << "a User Defined Class that defines the __lt__ compare method "
+          << "or Tuples of aforementioned types can be sorted, got list of "
+          << type->repr_str() << "\n";
+  return false;
 }
 
 template <bool has_reverse_arg, bool copy_return_list>
-int sort_op(Stack& stack) {
+void sort_op(Stack* stack) {
   bool reverse = has_reverse_arg ? pop(stack).toBool() : false;
   auto g_list = pop(stack).toList();
+
   if (copy_return_list) {
     g_list = g_list.copy();
   }
-  Stack sort_stack;
-  Function* lt_func = nullptr;
-  std::sort(
-      g_list.begin(),
-      g_list.end(),
-      [reverse, &sort_stack, &lt_func](IValue a, IValue b) -> bool {
-        // "strict weak ordering" issue - see other sort
-        if (a.is(b)) {
-          return false;
-        }
-        if (!lt_func) {
-          lt_func = checkSortSchema(a.type());
-        }
-        sort_stack.push_back(a);
-        sort_stack.push_back(b);
-        lt_func->run(sort_stack);
-        return pop(sort_stack).toBool() != reverse;
-      });
+
+  if (!g_list.empty()) {
+    std::stringstream error_str;
+    if (!isSortableListOfObjectsOrTuples(g_list, error_str)) {
+      throw std::runtime_error(error_str.str());
+    }
+
+    c10::IValueComparator comparator;
+    if (reverse) {
+      comparator = c10::getGreaterThanComparator(g_list.get(0));
+    } else {
+      comparator = c10::getLessThanComparator(g_list.get(0));
+    }
+    std::sort(g_list.begin(), g_list.end(), comparator);
+  }
+
   if (copy_return_list) {
     push(stack, g_list);
   }
-  return 0;
 }
 
 // NB: this must be registered after the other aten::sort operators
 RegisterOperators regSort({
     Operator(
-        "aten::sorted(t[](a) self) -> (t[])",
+        "aten::sorted.any(t[](a) self) -> (t[])",
         sort_op</*has_reverse_arg*/ false, /*copy_return_list*/ true>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sort(t[](a!) self, bool reverse=False) -> ()",
+        "aten::sort.any(t[](a!) self, bool reverse=False) -> ()",
         sort_op</*has_reverse_arg*/ true, /*copy_return_list*/ false>,
         aliasAnalysisFromSchema()),
 });
@@ -1525,7 +1528,9 @@ at::Tensor interpolate(
   auto input_dim = input.dim();
   if (input_dim == dim1d && mode == "nearest")
     return at::upsample_nearest1d(
-        input, _output_size(input, 1, size, scale_factors), scale_factors_1);
+        input,
+        _output_size(input, 1, size, scale_factors),
+        c10::make_optional(scale_factors_1));
   if (input_dim == dim2d && mode == "nearest")
     return at::upsample_nearest2d(
         input,
@@ -1553,7 +1558,7 @@ at::Tensor interpolate(
         input,
         _output_size(input, 1, size, scale_factors),
         *align_corners,
-        scale_factors_1);
+        c10::make_optional(scale_factors_1));
   if (input_dim == dim1d && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
   if (input_dim == dim1d && mode == "bicubic")
@@ -1603,7 +1608,7 @@ at::Tensor interpolate(
       ") ");
 }
 
-int interpolate_op(Stack& stack) {
+void interpolate_op(Stack* stack) {
   at::Tensor input;
   IValue size;
   IValue scale_factors;
@@ -1625,7 +1630,6 @@ int interpolate_op(Stack& stack) {
       align_corners.toOptional<bool>(),
       recompute_scale_factor.toOptional<bool>());
   push(stack, std::move(res));
-  return 0;
 }
 
 // interpolate takes in float & float[] for scale factor
@@ -1650,7 +1654,7 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   return scale_factor_double;
 }
 
-int upsample_nearest_op(Stack& stack) {
+void upsample_nearest_op(Stack* stack) {
   at::Tensor input;
   IValue size;
   IValue scale_factor_int;
@@ -1659,10 +1663,9 @@ int upsample_nearest_op(Stack& stack) {
   at::Tensor res = interpolate(
       input, size, scale_factor_double, "nearest", c10::nullopt, c10::nullopt);
   push(stack, std::move(res));
-  return 0;
 }
 
-int upsample_op(Stack& stack) {
+void upsample_op(Stack* stack) {
   at::Tensor input;
   IValue size;
   IValue scale_factor_int;
@@ -1678,10 +1681,9 @@ int upsample_op(Stack& stack) {
       align_corners.toOptional<bool>(),
       c10::nullopt);
   push(stack, std::move(res));
-  return 0;
 }
 
-int upsample_bilinear_op(Stack& stack) {
+void upsample_bilinear_op(Stack* stack) {
   at::Tensor input;
   IValue size;
   IValue scale_factor_int;
@@ -1690,7 +1692,6 @@ int upsample_bilinear_op(Stack& stack) {
   at::Tensor res = interpolate(
       input, size, scale_factor_double, "bilinear", true, c10::nullopt);
   push(stack, std::move(res));
-  return 0;
 }
 
 // These ops are no longer generated, but remain here for BC
@@ -1739,11 +1740,11 @@ RegisterOperators reg3({
         upsample_bilinear_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__upsample_bilinear(Tensor input, int? size = None, int[]? scale_factor = None) -> Tensor",
+        "aten::__upsample_bilinear.scale_list(Tensor input, int? size = None, int[]? scale_factor = None) -> Tensor",
         upsample_bilinear_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__upsample_bilinear.size_list(Tensor input, int[]? size = None, int[]? scale_factor = None) -> Tensor",
+        "aten::__upsample_bilinear.size_list_scale_list(Tensor input, int[]? size = None, int[]? scale_factor = None) -> Tensor",
         upsample_bilinear_op,
         aliasAnalysisFromSchema()),
 

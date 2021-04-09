@@ -28,8 +28,33 @@ using c10::KernelFunction;
 
 namespace {
 
-TORCH_LIBRARY_IMPL(_, Autograd, m) {
+// Register fallthrough for Autograd backends dispatch keys
+// NB: But not the private use ones; maybe the extension wants
+// to override it themselves!
+
+TORCH_LIBRARY_IMPL(_, AutogradOther, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradCPU, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradCUDA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradXLA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradMLC, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+// see Note [InplaceOrView key]
+TORCH_LIBRARY_IMPL(_, InplaceOrView, m) {
+      m.fallback(torch::CppFunction::makeFallthrough());
 }
 
 }

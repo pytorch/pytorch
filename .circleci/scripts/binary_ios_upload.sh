@@ -14,7 +14,7 @@ mkdir -p ${ZIP_DIR}/src
 cp -R ${ARTIFACTS_DIR}/arm64/include ${ZIP_DIR}/install/
 # build a FAT bianry
 cd ${ZIP_DIR}/install/lib
-target_libs=(libc10.a libclog.a libcpuinfo.a libeigen_blas.a libpytorch_qnnpack.a libtorch_cpu.a libtorch.a libXNNPACK.a)
+target_libs=(libc10.a libclog.a libcpuinfo.a libeigen_blas.a libpthreadpool.a libpytorch_qnnpack.a libtorch_cpu.a libtorch.a libXNNPACK.a)
 for lib in ${target_libs[*]}
 do
     if [ -f "${ARTIFACTS_DIR}/x86_64/lib/${lib}" ] && [ -f "${ARTIFACTS_DIR}/arm64/lib/${lib}" ]; then
@@ -22,8 +22,6 @@ do
         lipo -create "${libs[@]}" -o ${ZIP_DIR}/install/lib/${lib}
     fi
 done
-# for nnpack, we only support arm64 build
-cp ${ARTIFACTS_DIR}/arm64/lib/libnnpack.a ./
 lipo -i ${ZIP_DIR}/install/lib/*.a
 # copy the umbrella header and license
 cp ${PROJ_ROOT}/ios/LibTorch.h ${ZIP_DIR}/src/
@@ -36,7 +34,13 @@ touch version.txt
 echo $(date +%s) > version.txt
 zip -r ${ZIPFILE} install src version.txt LICENSE
 # upload to aws
-brew install awscli
+# Install conda then 'conda install' awscli
+curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+chmod +x ~/conda.sh
+/bin/bash ~/conda.sh -b -p ~/anaconda
+export PATH="~/anaconda/bin:${PATH}"
+source ~/anaconda/bin/activate
+conda install -c conda-forge awscli --yes
 set +x
 export AWS_ACCESS_KEY_ID=${AWS_S3_ACCESS_KEY_FOR_PYTORCH_BINARY_UPLOAD}
 export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}

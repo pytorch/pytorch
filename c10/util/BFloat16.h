@@ -7,6 +7,10 @@
 #include <cmath>
 #include <cstring>
 
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#include <cuda_bf16.h>
+#endif
+
 namespace c10 {
 
 namespace detail {
@@ -77,13 +81,18 @@ struct alignas(2) BFloat16 {
 #endif
 
   struct from_bits_t {};
-  static constexpr from_bits_t from_bits() {
+  static constexpr C10_HOST_DEVICE from_bits_t from_bits() {
     return from_bits_t();
   }
 
   constexpr C10_HOST_DEVICE BFloat16(unsigned short bits, from_bits_t) : x(bits){};
   inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
+  explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
+#endif
 };
 
 } // namespace c10

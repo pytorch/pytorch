@@ -283,6 +283,31 @@ TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
       expected_parameters::Adam_with_weight_decay_and_amsgrad());
 }
 
+TEST(OptimTest, XORConvergence_AdamW) {
+  ASSERT_TRUE(test_optimizer_xor<AdamW>(AdamWOptions(0.1)));
+}
+
+TEST(OptimTest, XORConvergence_AdamWWithAmsgrad) {
+  ASSERT_TRUE(test_optimizer_xor<AdamW>(
+      AdamWOptions(0.1).amsgrad(true)));
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamW) {
+  check_exact_values<AdamW>(AdamWOptions(1.0), expected_parameters::AdamW());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamWWithoutWeightDecay) {
+  check_exact_values<AdamW>(
+      AdamWOptions(1.0).weight_decay(0),
+      expected_parameters::AdamW_without_weight_decay());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamWWithAMSGrad) {
+  check_exact_values<AdamW>(
+      AdamWOptions(1.0).amsgrad(true),
+      expected_parameters::AdamW_with_amsgrad());
+}
+
 TEST(OptimTest, ProducesPyTorchValues_Adagrad) {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0), expected_parameters::Adagrad());
@@ -397,7 +422,7 @@ TEST(OptimTest, ExternalVectorOfParameters) {
 
   // Set all gradients to one
   for (auto& parameter : parameters) {
-    parameter.grad() = torch::ones_like(parameter);
+    parameter.mutable_grad() = torch::ones_like(parameter);
   }
 
   SGD optimizer(parameters, 1.0);
@@ -417,7 +442,7 @@ TEST(OptimTest, AddParameter_LBFGS) {
 
   // Set all gradients to one
   for (auto& parameter : parameters) {
-    parameter.grad() = torch::ones_like(parameter);
+    parameter.mutable_grad() = torch::ones_like(parameter);
   }
 
   LBFGS optimizer(std::vector<torch::Tensor>{}, 1.0);
@@ -426,4 +451,52 @@ TEST(OptimTest, AddParameter_LBFGS) {
   optimizer.step([]() { return torch::tensor(1); });
 
   // REQUIRE this doesn't throw
+}
+
+//Check whether the learning rate of the parameter groups in the optimizer are the
+//same as the expected learning rates given in the epoch:learning rate map
+void check_lr_change(
+    Optimizer& optimizer,
+    LRScheduler& lr_scheduler,
+    std::map<unsigned, double> expected_epoch_lrs) {
+
+  //Find maximum epoch in map
+  unsigned kIterations =
+    std::max_element(expected_epoch_lrs.begin(),
+                     expected_epoch_lrs.end(),
+                     [] (const std::pair<unsigned, double>& a,
+                         const std::pair<unsigned, double>& b) -> bool {
+                       return a.second > b.second;
+                     })->first;
+
+  for(unsigned i = 0; i <= kIterations; i++) {
+    const auto epoch_iter = expected_epoch_lrs.find(i);
+    if(epoch_iter != expected_epoch_lrs.end())
+    {
+      //Compare the similarity of the two floating point learning rates
+      ASSERT_TRUE(fabs(epoch_iter->second - optimizer.param_groups()[0].options().get_lr()) <
+                  std::numeric_limits<double>::epsilon());
+    }
+    optimizer.step();
+    lr_scheduler.step();
+  }
+
+}
+
+TEST(OptimTest, CheckLRChange_StepLR_Adam) {
+
+  torch::Tensor parameters = torch::zeros({1});
+  auto optimizer = Adam({parameters}, AdamOptions().lr(1e-3));
+
+  const unsigned step_size = 20;
+  const double gamma = 0.5;
+  StepLR step_lr_scheduler(optimizer, step_size, gamma);
+
+  //The learning rate should have halved at epoch 20
+  const std::map<unsigned, double> expected_epoch_lrs = {
+    {1, 1e-3},
+    {25, 5e-4}
+  };
+
+  check_lr_change(optimizer, step_lr_scheduler, expected_epoch_lrs);
 }

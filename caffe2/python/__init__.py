@@ -1,8 +1,7 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 from caffe2.proto import caffe2_pb2
 import os
 import sys
-import platform
 # TODO: refactor & remove the following alias
 caffe2_pb2.CPU = caffe2_pb2.PROTO_CPU
 caffe2_pb2.CUDA = caffe2_pb2.PROTO_CUDA
@@ -12,9 +11,8 @@ caffe2_pb2.OPENCL = caffe2_pb2.PROTO_OPENCL
 caffe2_pb2.IDEEP = caffe2_pb2.PROTO_IDEEP
 caffe2_pb2.HIP = caffe2_pb2.PROTO_HIP
 caffe2_pb2.COMPILE_TIME_MAX_DEVICE_TYPES = caffe2_pb2.PROTO_COMPILE_TIME_MAX_DEVICE_TYPES
-caffe2_pb2.ONLY_FOR_TEST = caffe2_pb2.PROTO_ONLY_FOR_TEST
 
-if platform.system() == 'Windows':
+if sys.platform == "win32":
     is_conda = os.path.exists(os.path.join(sys.prefix, 'conda-meta'))
     py_dll_path = os.path.join(os.path.dirname(sys.executable), 'Library', 'bin')
     th_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'torch')
@@ -42,13 +40,48 @@ if platform.system() == 'Windows':
     else:
         cuda_path = ''
 
-    if not is_conda and sys.version_info >= (3, 8):
-        dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
+    import ctypes
+    kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
+    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
+    with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
+    prev_error_mode = kernel32.SetErrorMode(0x0001)
 
-        for dll_path in dll_paths:
+    kernel32.LoadLibraryW.restype = ctypes.c_void_p
+    if with_load_library_flags:
+        kernel32.AddDllDirectory.restype = ctypes.c_void_p
+        kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+
+    for dll_path in dll_paths:
+        if sys.version_info >= (3, 8):
             os.add_dll_directory(dll_path)
-    else:
-        dll_paths = [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]
-        dll_paths = list(filter(os.path.exists, dll_paths)) + [os.environ['PATH']]
+        elif with_load_library_flags:
+            res = kernel32.AddDllDirectory(dll_path)
+            if res is None:
+                err = ctypes.WinError(ctypes.get_last_error())
+                err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
+                raise err
 
-        os.environ['PATH'] = ';'.join(dll_paths)
+    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+    path_patched = False
+    for dll in dlls:
+        is_loaded = False
+        if with_load_library_flags:
+            res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
+            last_error = ctypes.get_last_error()
+            if res is None and last_error != 126:
+                err = ctypes.WinError(last_error)
+                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                raise err
+            elif res is not None:
+                is_loaded = True
+        if not is_loaded:
+            if not path_patched:
+                os.environ['PATH'] = ';'.join(dll_paths + [os.environ['PATH']])
+                path_patched = True
+            res = kernel32.LoadLibraryW(dll)
+            if res is None:
+                err = ctypes.WinError(ctypes.get_last_error())
+                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                raise err
+
+    kernel32.SetErrorMode(prev_error_mode)

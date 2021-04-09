@@ -149,7 +149,7 @@ __global__ void RoIAlignForward(
 } // namespace
 
 template <>
-bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
                       // RoI pooled data
@@ -183,6 +183,8 @@ bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
           R.dim32(1),
           Y->mutable_data<float>(),
           aligned_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

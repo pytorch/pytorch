@@ -5,13 +5,6 @@
 
 namespace at {
 
-bool NamedTensorMeta::has_names() const {
-  return !std::all_of(
-      names_.begin(), names_.end(), [](const Dimname& n) {
-        return n.type() == NameType::WILDCARD;
-      });
-}
-
 thread_local bool NamesMode_enabled = true;
 
 bool NamesMode::is_enabled() {
@@ -19,7 +12,8 @@ bool NamesMode::is_enabled() {
 }
 
 void NamesMode::set_enabled(bool enabled) {
-   NamesMode_enabled = enabled;
+  NamesMode_enabled = enabled;
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Named, !enabled);
 }
 
 Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
@@ -98,11 +92,17 @@ void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names, b
   if (validate_names) {
     check_names_valid_for(impl, *names);
   }
+  // Do this after validation!
+  if (std::all_of(names->begin(), names->end(), [](const Dimname& n) { return n.isWildcard(); })) {
+    impl->set_named_tensor_meta(nullptr);
+    return;
+  }
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
-    impl->set_named_tensor_meta(std::make_unique<NamedTensorMeta>(*names));
+    // Constructor is private
+    impl->set_named_tensor_meta(std::make_unique<NamedTensorMeta>(NamedTensorMeta::HasNonWildcard, *names));
   } else {
-    meta->set_names(*names);
+    meta->set_names(NamedTensorMeta::HasNonWildcard, *names);
   }
 }
 
@@ -110,11 +110,16 @@ void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, 
   if (validate_names) {
     check_names_valid_for(impl, names);
   }
+  // Do this after validation!
+  if (std::all_of(names.begin(), names.end(), [](const Dimname& n) { return n.isWildcard(); })) {
+    impl->set_named_tensor_meta(nullptr);
+    return;
+  }
   auto* meta = get_named_tensor_meta(impl);
   if (meta == nullptr) {
-    impl->set_named_tensor_meta(std::make_unique<NamedTensorMeta>(names));
+    impl->set_named_tensor_meta(std::make_unique<NamedTensorMeta>(NamedTensorMeta::HasNonWildcard, names));
   } else {
-    meta->set_names(names);
+    meta->set_names(NamedTensorMeta::HasNonWildcard, names);
   }
 }
 
@@ -136,8 +141,7 @@ DimnameList get_names(const TensorImpl* impl) {
 }
 
 bool has_names(const TensorImpl* impl) {
-  const auto* named_tensor_meta = get_named_tensor_meta(impl);
-  return named_tensor_meta != nullptr && named_tensor_meta->has_names();
+  return impl->has_named_tensor_meta() && NamesMode::is_enabled();
 }
 
 } // namespace impl

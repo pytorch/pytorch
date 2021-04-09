@@ -1,14 +1,16 @@
 try:
     from urllib.parse import urlparse, urlunparse
 except ImportError:
-    from urlparse import urlparse, urlunparse
+    raise ImportError("urllib cannot be found, urlparse from python2 is no longer supported.")
 
 import torch._six as six
 import numbers
 import os
-from . import FileStore, TCPStore
+import sys
+from datetime import timedelta
+from typing import Optional, Dict, Union
+from torch._C._distributed_c10d import FileStore, TCPStore
 from .constants import default_pg_timeout
-
 
 _rendezvous_handlers = {}
 
@@ -29,7 +31,7 @@ def register_rendezvous_handler(scheme, handler):
     Pick a unique name and use the URL scheme to identify it when
     calling the `rendezvous()` function.
 
-    Arguments:
+    Args:
         scheme (str): URL scheme to identify your rendezvous handler.
         handler (function): Handler that is invoked when the
             `rendezvous()` function is called with a URL that uses
@@ -44,7 +46,7 @@ def register_rendezvous_handler(scheme, handler):
     _rendezvous_handlers[scheme] = handler
 
 
-def rendezvous(url, rank=-1, world_size=-1, **kwargs):
+def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     if not isinstance(url, six.string_classes):
         raise RuntimeError("`url` must be a string. {}: {}".format(type(url), url))
 
@@ -57,8 +59,9 @@ def rendezvous(url, rank=-1, world_size=-1, **kwargs):
     # Append node-specific arguments.
     result = urlparse(url)
     if rank != -1 or world_size != -1:
-        query_dict = dict(
-            pair.split("=") for pair in filter(None, result.query.split("&"))
+        query_dict: Dict[str, Union[int, str]] = dict(
+            # mypy doesn't allow dict() to accept List of values (#257)
+            pair.split("=") for pair in filter(None, result.query.split("&"))  # type: ignore[arg-type, misc]
         )
         assert (
             "rank" not in query_dict and "world_size" not in query_dict
@@ -84,15 +87,21 @@ def _rendezvous_error(msg):
     return ValueError("Error initializing torch.distributed using " + msg)
 
 
-def _file_rendezvous_handler(url, **kwargs):
+def _file_rendezvous_handler(url: str, **kwargs):
     def _error(msg):
         return _rendezvous_error("file:// rendezvous: " + msg)
 
     result = urlparse(url)
     path = result.path
+    if sys.platform == 'win32':
+        import urllib.request
+        path = urllib.request.url2pathname(result.path)
+
     if not path:
         raise _error("path missing")
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
+    query: Dict[str, str]
+    # mypy doesn't allow dict() to accept List of values (#257)
+    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))  # type: ignore[misc, arg-type]
     if "rank" not in query:
         raise _error("rank parameter missing")
     if "world_size" not in query:
@@ -107,14 +116,16 @@ def _file_rendezvous_handler(url, **kwargs):
     raise RuntimeError("Unable to perform rerendezvous using file:// method")
 
 
-def _tcp_rendezvous_handler(url, timeout=default_pg_timeout, **kwargs):
+def _tcp_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, **kwargs):
     def _error(msg):
         return _rendezvous_error("tcp:// rendezvous: " + msg)
 
     result = urlparse(url)
     if not result.port:
         raise _error("port number missing")
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
+    query: Dict[str, Union[int, str]]
+    # mypy doesn't allow dict() to accept List of values (#257)
+    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))  # type: ignore[misc, arg-type]
     if "rank" not in query:
         raise _error("rank parameter missing")
     if "world_size" not in query:
@@ -123,6 +134,7 @@ def _tcp_rendezvous_handler(url, timeout=default_pg_timeout, **kwargs):
     rank = int(query["rank"])
     world_size = int(query["world_size"])
     start_daemon = rank == 0
+    assert result.hostname is not None
     store = TCPStore(result.hostname, result.port, world_size, start_daemon, timeout)
     yield (store, rank, world_size)
 
@@ -130,7 +142,7 @@ def _tcp_rendezvous_handler(url, timeout=default_pg_timeout, **kwargs):
     raise RuntimeError("Unable to perform rerendezvous using tcp:// method")
 
 
-def _env_rendezvous_handler(url, timeout=default_pg_timeout, **kwargs):
+def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, **kwargs):
     def _error(msg):
         return _rendezvous_error("env:// rendezvous: " + msg)
 
@@ -138,7 +150,13 @@ def _env_rendezvous_handler(url, timeout=default_pg_timeout, **kwargs):
         return _error("environment variable %s expected, but not set" % var)
 
     result = urlparse(url)
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
+    query: Dict[str, Union[int, str]]
+    # mypy doesn't allow dict() to accept List of values (#257)
+    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))  # type: ignore[misc, arg-type]
+
+    rank: Optional[Union[str, int]]
+    world_size: Optional[Union[str, int]]
+    master_port: Optional[Union[str, int]]
 
     if "rank" in query:
         rank = int(query["rank"])
@@ -175,7 +193,6 @@ def _env_rendezvous_handler(url, timeout=default_pg_timeout, **kwargs):
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform rerendezvous using env:// method")
 
-
-register_rendezvous_handler("file", _file_rendezvous_handler)
 register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
 register_rendezvous_handler("env", _env_rendezvous_handler)
+register_rendezvous_handler("file", _file_rendezvous_handler)

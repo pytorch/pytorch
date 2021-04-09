@@ -9,8 +9,7 @@ namespace rpc {
 
 using namespace torch::distributed::autograd;
 
-std::shared_ptr<FutureMessage> RequestCallback::operator()(
-    Message& request) const {
+std::shared_ptr<JitFuture> RequestCallback::operator()(Message& request) const {
   // NB: cannot clear autograd context id here because the processMessage method
   // might pause waiting for all RRefs in the arguments to be confirmed by their
   // owners and resumne processing in a different thread. Hence, the

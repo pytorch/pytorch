@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Dispatch.h>
+#include <ATen/CPUApplyUtils.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -111,7 +112,7 @@ void normal_fill_AVX2(Tensor& self, const float mean, const float std, RNG gener
     at::uniform_real_distribution<float> uniform(0, 1);
     data[i] = uniform(generator);
   }
-  const __m256 two_pi = _mm256_set1_ps(2.0f * M_PI);
+  const __m256 two_pi = _mm256_set1_ps(2.0f * c10::pi<double>);
   const __m256 one = _mm256_set1_ps(1.0f);
   const __m256 minus_two = _mm256_set1_ps(-2.0f);
   const __m256 mean_v = _mm256_set1_ps(mean);
@@ -139,7 +140,7 @@ static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t s
     const scalar_t u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
     const scalar_t u2 = data[j + 8];
     const scalar_t radius = std::sqrt(-2 * std::log(u1));
-    const scalar_t theta = 2.0f * M_PI * u2;
+    const scalar_t theta = 2.0f * c10::pi<double> * u2;
     data[j] = radius * std::cos(theta) * std + mean;
     data[j + 8] = radius * std::sin(theta) * std + mean;
   }
@@ -179,9 +180,7 @@ void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
     normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #endif
   } else {
-    // bfloat16 cannot be properly tested due to the lack of other operations
-    // like add/sub/mean implemented for half
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "normal_kernel_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "normal_kernel_cpu", [&] {
       if (size >= 16 && self.is_contiguous()) {
         normal_fill<scalar_t>(self, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), generator);
       } else {
@@ -189,7 +188,7 @@ void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
         std::lock_guard<std::mutex> lock(generator->mutex_);
         cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
           at::normal_distribution<double> normal(mean, std);
-          return (scalar_t)normal(generator);
+          return static_cast<scalar_t>(normal(generator));
         });
       }
     });
@@ -206,10 +205,12 @@ struct NormalKernel {
 // ==================================================== Uniform =======================================================
 
 template<typename RNG>
-void uniform_kernel(TensorIterator& iter, double from, double to, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "uniform_kernel_cpu", [&]() {
+void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG generator) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "uniform_kernel_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    at::uniform_real_distribution<scalar_t> uniform(static_cast<scalar_t>(from), static_cast<scalar_t>(to));
+    auto from = static_cast<scalar_t>(from_);
+    auto to = static_cast<scalar_t>(to_);
+    at::uniform_real_distribution<scalar_t> uniform(from, to);
     cpu_serial_kernel(iter, [&uniform, generator]() -> scalar_t {
       return static_cast<scalar_t>(uniform(generator));
     });
@@ -227,11 +228,11 @@ struct UniformKernel {
 
 template<typename RNG>
 void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "cauchy_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "cauchy_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    cpu_serial_kernel(iter, [median, sigma, generator]() -> scalar_t {
-      at::cauchy_distribution<double> cauchy(median, sigma);
-      return (scalar_t)cauchy(generator);
+    at::cauchy_distribution<double> cauchy(median, sigma);
+    cpu_serial_kernel(iter, [&cauchy, generator]() -> scalar_t {
+      return static_cast<scalar_t>(cauchy(generator));
     });
   });
 }
@@ -247,10 +248,10 @@ struct CauchyKernel {
 
 template<typename RNG>
 void log_normal_kernel(TensorIterator& iter, double mean, double std, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_normal_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "log_normal_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
-      at::lognormal_distribution<double> logNormal(mean, std);
+    at::lognormal_distribution<double> logNormal(mean, std);
+    cpu_serial_kernel(iter, [&logNormal, generator]() -> scalar_t {
       return static_cast<scalar_t>(logNormal(generator));
     });
   });
@@ -267,11 +268,11 @@ struct LogNormalKernel {
 
 template<typename RNG>
 void geometric_kernel(TensorIterator& iter, double p, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "geometric_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "geometric_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    cpu_serial_kernel(iter, [p, generator]() -> scalar_t {
-      at::geometric_distribution<double> geometric(p);
-      return (scalar_t)geometric(generator);
+    at::geometric_distribution<double> geometric(p);
+    cpu_serial_kernel(iter, [&geometric, generator]() -> scalar_t {
+      return static_cast<scalar_t>(geometric(generator));
     });
   });
 }
@@ -287,7 +288,7 @@ struct GeometricKernel {
 
 template<typename RNG>
 void exponential_kernel(TensorIterator& iter, double lambda, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "exponential_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "exponential_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     at::exponential_distribution<double> exponential(lambda);
     cpu_serial_kernel(iter, [&exponential, generator]() -> scalar_t {
@@ -300,6 +301,60 @@ template<typename RNG>
 struct ExponentialKernel {
   void operator()(TensorIterator& iter, double lambda, c10::optional<Generator> gen) {
     exponential_kernel(iter, lambda, check_generator<RNG>(gen));
+  }
+};
+
+// ================================================== Bernoulli =======================================================
+
+template<typename RNG>
+void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    using self_t = scalar_t;
+    auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
+    auto iter = TensorIteratorConfig()
+        .add_output(self)
+        .add_input(p)
+        .check_all_same_dtype(false)
+        .build();
+    if (p_.scalar_type() == kDouble) {
+      cpu_serial_kernel(iter, [&](const double p_val) -> self_t {
+        at::bernoulli_distribution<double> bernoulli(p_val);
+        return static_cast<self_t>(bernoulli(generator));
+      });
+    } else {
+      AT_DISPATCH_FLOATING_TYPES(p_.scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
+        using p_t = scalar_t;
+        cpu_serial_kernel(iter, [&](const p_t p_val) -> self_t {
+          at::bernoulli_distribution<float> bernoulli(p_val);
+          return static_cast<self_t>(bernoulli(generator));
+        });
+      });
+    }
+  });
+}
+
+template<typename RNG>
+void bernoulli_kernel(Tensor& self, double p, RNG generator) {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    auto iter = TensorIterator::nullary_op(self);
+    cpu_serial_kernel(iter, [p, generator]() -> scalar_t {
+      at::bernoulli_distribution<double> bernoulli(p);
+      return static_cast<scalar_t>(bernoulli(generator));
+    });
+  });
+}
+
+template<typename RNG>
+struct BernoulliKernel {
+  void operator()(Tensor& self, double p, c10::optional<Generator> gen) {
+    bernoulli_kernel(self, p, check_generator<RNG>(gen));
+  }
+  void operator()(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+    bernoulli_kernel(self, p_, check_generator<RNG>(gen));
   }
 };
 

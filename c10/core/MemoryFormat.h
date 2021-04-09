@@ -48,7 +48,7 @@ inline std::ostream& operator<<(
     case MemoryFormat::ChannelsLast3d:
       return stream << "ChannelsLast3d";
     default:
-      AT_ERROR("Unknown memory format");
+      TORCH_CHECK(false, "Unknown memory format");
   }
 }
 
@@ -98,7 +98,7 @@ inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
 // 1. Please do not combine these helper functions, each helper function handles
 // exactly one case of sizes + memory_format, by doing this, the strides indices
 // will be a constant array and we can access it using constant index number,
-// the complier will fully unroll the loop on strides indices to gain a better
+// the compiler will fully unroll the loop on strides indices to gain a better
 // performance.
 // 2. No error check in helper function, caller ensures the correctness of the input
 // 3. All helper functions have similar comments, only 1st helper function is commented here.
@@ -205,7 +205,7 @@ inline bool is_channels_last_strides_3d_s5(const IntArrayRef sizes, const IntArr
 //   a. we identify corner cases where the implementation compromises on.
 //
 // By the time accumulated permutation is enabled to replace implicit
-// memory_foramt through strides, we should be updating our tests and fix the
+// memory_format through strides, we should be updating our tests and fix the
 // issues in our tests.
 //
 // We use Channels Last 2d as an example above.

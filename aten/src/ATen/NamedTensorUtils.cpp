@@ -264,11 +264,11 @@ static std::vector<Dimname> compute_dot_product_outnames(
   }
   std::vector<Dimname> outnames(num_outnames, Dimname::wildcard());
   int64_t index = 0;
-  for (int64_t j = 0; j < tensor_names.size(); ++j) {
+  for (size_t j = 0; j < tensor_names.size(); ++j) {
     if (j == tensor_dotted_dim) continue;
     outnames[index++] = tensor_names[j];
   }
-  for (int64_t j = 0; j < other_names.size(); ++j) {
+  for (size_t j = 0; j < other_names.size(); ++j) {
     if (j == other_dotted_dim) continue;
     outnames[index++] = other_names[j];
   }
@@ -384,16 +384,17 @@ void propagate_names_for_addmv(
 }
 
 void propagate_names_for_addmm(
-    TensorImpl* result,
-    TensorImpl* m1,
-    TensorImpl* m2,
-    TensorImpl* bias) {
-  if (!impl::has_names(m1) && !impl::has_names(m2) &&
-      !impl::has_names(bias) && !impl::has_names(result)) {
+    Tensor& result,
+    const Tensor& m1,
+    const Tensor& m2,
+    const Tensor& bias) {
+  if (!m1.has_names() && !m2.has_names() &&
+      !bias.has_names() && !result.has_names()) {
     return;
   }
-  auto mm_outnames = compute_matmul_outnames(impl::get_names(m1), impl::get_names(m2));
-  auto add_outnames = unify_from_right(mm_outnames, impl::get_names(bias));
+
+  auto mm_outnames = compute_matmul_outnames(m1.names(), m2.names());
+  auto add_outnames = unify_from_right(mm_outnames, bias.names());
   propagate_names(result, add_outnames);
 }
 
@@ -516,17 +517,16 @@ std::vector<Dimname> compute_bmm_outnames(
 }
 
 std::vector<Dimname> compute_baddbmm_outnames(
-    TensorImpl* result,
-    TensorImpl* batch1,
-    TensorImpl* batch2,
-    TensorImpl* bias) {
-  if (!impl::has_names(result) && !impl::has_names(batch1) &&
-      !impl::has_names(batch2) && !impl::has_names(bias)) {
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& other,
+    const Tensor& bias) {
+  if (!result.has_names() && !self.has_names()
+    && !other.has_names() && !bias.has_names()) {
     return {};
   }
-  auto bmm_names = compute_matmul_outnames(
-      impl::get_names(batch1), impl::get_names(batch2));
-  auto baddbmm_names = unify_from_right(impl::get_names(bias), bmm_names);
+  auto bmm_names = compute_matmul_outnames(self.names(), other.names());
+  auto baddbmm_names = unify_from_right(bias.names(), bmm_names);
   return baddbmm_names;
 }
 

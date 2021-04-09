@@ -16,7 +16,7 @@ enum class PadMode {
   EDGE = 2, // pads with the edge values, with string "edge"
 };
 
-CAFFE2_API PadMode StringToPadMode(const string&);
+TORCH_API PadMode StringToPadMode(const string&);
 
 template <typename T, class Context>
 class PadImageOp final : public ConvPoolOpBase<Context> {

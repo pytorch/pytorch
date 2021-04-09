@@ -66,6 +66,11 @@ static void avg_pool3d_out_frame(
             hend = std::min(hend, iheight);
             wend = std::min(wend, iwidth);
 
+            if (tstart >= tend || hstart >= hend || wstart >= wend) {
+              ++op;
+              continue;
+            }
+
             int divide_factor;
             if (divisor_override.has_value()) {
               divide_factor = divisor_override.value();
@@ -427,15 +432,14 @@ Tensor& avg_pool3d_backward_out_cpu_template(
 
 } // namespace
 
-Tensor& avg_pool3d_out_cpu(
-  Tensor& output,
-  const Tensor& input,
+Tensor& avg_pool3d_out_cpu(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& output)
 {
   avg_pool3d_out_cpu_template(
     output,
@@ -471,16 +475,15 @@ Tensor avg_pool3d_cpu(
   return output;
 }
 
-Tensor& avg_pool3d_backward_out_cpu(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& avg_pool3d_backward_out_cpu(const Tensor& gradOutput_,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& gradInput)
 {
   avg_pool3d_backward_out_cpu_template(
     gradInput,

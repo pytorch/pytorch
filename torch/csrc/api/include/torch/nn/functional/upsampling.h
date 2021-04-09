@@ -53,8 +53,8 @@ inline std::vector<int64_t> _interp_output_size(
       }
     }
     if (is_float_scale_factor) {
-      TORCH_WARN("The default behavior for interpolate/upsample with float scale_factor will change "
-                 "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
+      TORCH_WARN("The default behavior for interpolate/upsample with float scale_factor changed "
+                 "in 1.6.0 to align with other frameworks/libraries, and uses scale_factor directly, "
                  "instead of relying on the computed output size. "
                  "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
                  "See the documentation of nn.Upsample for details. ");
@@ -98,7 +98,7 @@ inline Tensor interpolate(
 
   auto scale_factor_len = input.dim() - 2;
   std::vector<c10::optional<double>> scale_factor_list(scale_factor_len, c10::nullopt);
-  if (scale_factor != c10::nullopt && recompute_scale_factor.has_value() && !recompute_scale_factor.value()) {
+  if (scale_factor != c10::nullopt && !recompute_scale_factor.value_or(false)) {
     auto _scale_factor_repeated = *scale_factor;
     scale_factor_list = {};
     for (const auto& elem : _scale_factor_repeated) {
@@ -110,7 +110,7 @@ inline Tensor interpolate(
   if (input.dim() == 3 && c10::get_if<enumtype::kNearest>(&mode)) {
     return torch::upsample_nearest1d(input, _interp_output_size(1, closed_over_args), scale_factor_list.at(0));
   } else if (input.dim() == 4 && c10::get_if<enumtype::kNearest>(&mode)) {
-    return torch::upsample_nearest2d(input, _interp_output_size(2, closed_over_args), 
+    return torch::upsample_nearest2d(input, _interp_output_size(2, closed_over_args),
                                      scale_factor_list.at(0), scale_factor_list.at(1));
   } else if (input.dim() == 5 && c10::get_if<enumtype::kNearest>(&mode)) {
     return torch::upsample_nearest3d(input, _interp_output_size(3, closed_over_args),
@@ -132,7 +132,7 @@ inline Tensor interpolate(
     TORCH_CHECK(false, "Got 4D input, but linear mode needs 3D input");
   } else if (input.dim() == 4 && c10::get_if<enumtype::kBilinear>(&mode)) {
     TORCH_INTERNAL_ASSERT(align_corners != c10::nullopt);
-    return torch::upsample_bilinear2d(input, _interp_output_size(2, closed_over_args), *align_corners, 
+    return torch::upsample_bilinear2d(input, _interp_output_size(2, closed_over_args), *align_corners,
                                       scale_factor_list.at(0), scale_factor_list.at(1));
   } else if (input.dim() == 4 && c10::get_if<enumtype::kTrilinear>(&mode)) {
     TORCH_CHECK(false, "Got 4D input, but trilinear mode needs 5D input");
@@ -146,7 +146,7 @@ inline Tensor interpolate(
                                        scale_factor_list.at(0), scale_factor_list.at(1), scale_factor_list.at(2));
   } else if (input.dim() == 4 && c10::get_if<enumtype::kBicubic>(&mode)) {
     TORCH_INTERNAL_ASSERT(align_corners != c10::nullopt);
-    return torch::upsample_bicubic2d(input, _interp_output_size(2, closed_over_args), *align_corners, 
+    return torch::upsample_bicubic2d(input, _interp_output_size(2, closed_over_args), *align_corners,
                                      scale_factor_list.at(0), scale_factor_list.at(1));
   } else {
     TORCH_CHECK(

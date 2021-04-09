@@ -1,11 +1,15 @@
 from .module import Module
 from .. import functional as F
 
+from torch import Tensor
+
 
 class _DropoutNd(Module):
     __constants__ = ['p', 'inplace']
+    p: float
+    inplace: bool
 
-    def __init__(self, p=0.5, inplace=False):
+    def __init__(self, p: float = 0.5, inplace: bool = False) -> None:
         super(_DropoutNd, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
@@ -13,7 +17,7 @@ class _DropoutNd(Module):
         self.p = p
         self.inplace = inplace
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'p={}, inplace={}'.format(self.p, self.inplace)
 
 
@@ -50,7 +54,7 @@ class Dropout(_DropoutNd):
         detectors: https://arxiv.org/abs/1207.0580
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.dropout(input, self.p, self.training, self.inplace)
 
 
@@ -89,10 +93,10 @@ class Dropout2d(_DropoutNd):
         >>> output = m(input)
 
     .. _Efficient Object Localization Using Convolutional Networks:
-       http://arxiv.org/abs/1411.4280
+       https://arxiv.org/abs/1411.4280
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.dropout2d(input, self.p, self.training, self.inplace)
 
 
@@ -131,10 +135,10 @@ class Dropout3d(_DropoutNd):
         >>> output = m(input)
 
     .. _Efficient Object Localization Using Convolutional Networks:
-       http://arxiv.org/abs/1411.4280
+       https://arxiv.org/abs/1411.4280
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.dropout3d(input, self.p, self.training, self.inplace)
 
 
@@ -176,19 +180,19 @@ class AlphaDropout(_DropoutNd):
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.alpha_dropout(input, self.p, self.training)
 
 
 class FeatureAlphaDropout(_DropoutNd):
-    r"""Randomly masks out entire channels (a channel is a feature map, 
-    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input 
-    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of 
-    setting activations to zero, as in regular Dropout, the activations are set 
+    r"""Randomly masks out entire channels (a channel is a feature map,
+    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
+    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of
+    setting activations to zero, as in regular Dropout, the activations are set
     to the negative saturation value of the SELU activation function. More details
     can be found in the paper `Self-Normalizing Neural Networks`_ .
 
-    Each element will be masked independently for each sample on every forward 
+    Each element will be masked independently for each sample on every forward
     call with probability :attr:`p` using samples from a Bernoulli distribution.
     The elements to be masked are randomized on every forward call, and scaled
     and shifted to maintain zero mean and unit variance.
@@ -222,8 +226,8 @@ class FeatureAlphaDropout(_DropoutNd):
 
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     .. _Efficient Object Localization Using Convolutional Networks:
-       http://arxiv.org/abs/1411.4280
+       https://arxiv.org/abs/1411.4280
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.feature_alpha_dropout(input, self.p, self.training)

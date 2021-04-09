@@ -21,11 +21,8 @@ call %INSTALLER_DIR%\install_sccache.bat
 call %INSTALLER_DIR%\install_miniconda3.bat
 
 
-:: Install ninja
-if "%REBUILD%"=="" ( pip install -q ninja )
-
-git submodule sync --recursive
-git submodule update --init --recursive
+:: Install ninja and other deps
+if "%REBUILD%"=="" ( pip install -q "ninja==1.9.0" dataclasses typing_extensions )
 
 :: Override VS env here
 pushd .
@@ -37,25 +34,19 @@ if "%VC_VERSION%" == "" (
 @echo on
 popd
 
-if "%CUDA_VERSION%" == "9" goto cuda_build_9
-if "%CUDA_VERSION%" == "10" goto cuda_build_10
-goto cuda_build_end
+if not "%USE_CUDA%"=="1" goto cuda_build_end
 
-:cuda_build_9
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION%
 
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.2
-set CUDA_PATH_V9_2=%CUDA_PATH%
+rem version transformer, for example 10.1 to 10_1.
+set VERSION_SUFFIX=%CUDA_VERSION:.=_%
+set CUDA_PATH_V%VERSION_SUFFIX%=%CUDA_PATH%
 
-goto cuda_build_common
-
-:cuda_build_10
-
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
-set CUDA_PATH_V10_1=%CUDA_PATH%
-
-goto cuda_build_common
-
-:cuda_build_common
+set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
+set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
+set CUDNN_ROOT_DIR=%CUDA_PATH%
+set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
+set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 
 set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
 set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
@@ -87,7 +78,7 @@ if "%USE_CUDA%"=="1" (
   copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
 
   :: randomtemp is used to resolve the intermittent build error related to CUDA.
-  :: code: https://github.com/peterjc123/randomtemp
+  :: code: https://github.com/peterjc123/randomtemp-rust
   :: issue: https://github.com/pytorch/pytorch/issues/25393
   ::
   :: Previously, CMake uses CUDA_NVCC_EXECUTABLE for finding nvcc and then
@@ -95,7 +86,7 @@ if "%USE_CUDA%"=="1" (
   :: in PATH, and then pass the arguments to it.
   :: Currently, randomtemp is placed before sccache (%TMP_DIR_WIN%\bin\nvcc)
   :: so we are actually pretending sccache instead of nvcc itself.
-  curl -kL https://github.com/peterjc123/randomtemp/releases/download/v0.3/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
+  curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.3/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
   set RANDOMTEMP_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc.exe
   set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\randomtemp.exe
   set RANDOMTEMP_BASEDIR=%TMP_DIR_WIN%\bin
@@ -116,12 +107,18 @@ if "%REBUILD%" == "" (
     aws s3 cp "s3://ossci-windows/Restore PyTorch Environment.lnk" "C:\Users\circleci\Desktop\Restore PyTorch Environment.lnk"
   )
 )
+:: tests if BUILD_ENVIRONMENT contains cuda11 as a substring
+if not x%BUILD_ENVIRONMENT:cuda11=%==x%BUILD_ENVIRONMENT% (
+   set BUILD_SPLIT_CUDA=ON
+)
 
 python setup.py install --cmake && sccache --show-stats && (
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
   ) else (
-    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && python %SCRIPT_HELPERS_DIR%\upload_image.py %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z
+    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
+
+    :: export test times so that potential sharded tests that'll branch off this build will use consistent data
+    python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times
   )
 )
-

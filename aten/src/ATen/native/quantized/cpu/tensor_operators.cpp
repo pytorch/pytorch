@@ -18,21 +18,21 @@ TODO: This is an inefficient implementation that uses `.dequantize`.
 */
 
 #define DEFINE_COMPARATOR(at_op) \
-Tensor& at_op##_out_quantized_cpu(Tensor& out, const Tensor& self, \
-                                Scalar other) { \
+Tensor& at_op##_out_quantized_cpu(const Tensor& self, \
+                                const Scalar& other, Tensor& out) { \
   TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \
               "The 'out' tensor must have dtype 'torch.bool'"); \
   auto self_dq = self.dequantize(); \
   return at:: at_op##_out(out, self_dq, other); \
 } \
-Tensor at_op##_quantized_cpu(const Tensor& self, Scalar other) { \
+Tensor at_op##_quantized_cpu(const Tensor& self, const Scalar& other) { \
   auto self_dq = self.dequantize(); \
   return at:: at_op(self_dq, other); \
 } \
-Tensor& at_op##_out_quantized_cpu(Tensor& out, const Tensor& self, \
-                                const Tensor& other) { \
+Tensor& at_op##_out_quantized_cpu(const Tensor& self, \
+                                const Tensor& other, Tensor& out) { \
   /* We infer size to make sure the tensors are compatible. */\
-  infer_size(self.sizes(), other.sizes()); \
+  infer_size_dimvector(self.sizes(), other.sizes()); \
   TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \
               "The 'out' tensor must have dtype 'torch.bool'"); \
   auto self_dq = self.dequantize(); \
@@ -41,7 +41,7 @@ Tensor& at_op##_out_quantized_cpu(Tensor& out, const Tensor& self, \
 } \
 Tensor at_op##_quantized_cpu(const Tensor& self, const Tensor& other) { \
   /* We infer size to make sure the tensors are compatible. */\
-  infer_size(self.sizes(), other.sizes()); \
+  infer_size_dimvector(self.sizes(), other.sizes()); \
   auto self_dq = self.dequantize(); \
   auto other_dq = other.dequantize(); \
   return at:: at_op(self_dq, other_dq); \
@@ -60,7 +60,6 @@ AT_FORALL_OPERATORS(DEFINE_COMPARATOR)
 #undef AT_FORALL_OPERATORS
 #undef DEFINE_COMPARATOR
 
-namespace {
 Tensor& quantized_resize_cpu_(
     Tensor& self,
     IntArrayRef size,
@@ -79,9 +78,4 @@ Tensor& quantized_resize_cpu_(
   return self;
 }
 
-TORCH_LIBRARY_IMPL(aten, QuantizedCPU, m) {
-  m.impl_UNBOXED("resize_", quantized_resize_cpu_);
-}
-
-}  // namespcae
 }}  // at::native

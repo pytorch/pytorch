@@ -1,15 +1,14 @@
 ## @package sampling_trainable_mixin
 # Module caffe2.python.layers.sampling_trainable_mixin
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import abc
-import six
 
 
-class SamplingTrainableMixin(six.with_metaclass(abc.ABCMeta, object)):
+class SamplingTrainableMixin(metaclass=abc.ABCMeta):
 
     def __init__(self, *args, **kwargs):
         super(SamplingTrainableMixin, self).__init__(*args, **kwargs)

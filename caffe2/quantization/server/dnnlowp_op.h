@@ -215,13 +215,18 @@ class DNNLowPOp : public Operator<CPUContext> {
     }
   }
 
-  void GetOutputQuantizationParams_() {
+  void GetOutputQuantizationParams_(
+      dnnlowp::TensorQuantizationParams* out_qparams_overwrite = nullptr) {
     using namespace dnnlowp;
 
     ParseDNNLowPOperatorArguments_();
 
     if (HasStaticQuantization(this)) {
-      out_qparams_ = GetStaticQuantizationParamsOf(this, 0);
+      if (out_qparams_overwrite != nullptr) {
+        out_qparams_ = *out_qparams_overwrite;
+      } else {
+        out_qparams_ = GetStaticQuantizationParamsOf(this, 0);
+      }
 
       if (measure_quantization_error_) {
         // To measure quantization error, run ref fp32 impl.
@@ -237,7 +242,11 @@ class DNNLowPOp : public Operator<CPUContext> {
       // though it never actually uses it.
       Fp32Op_()->DequantizeInput();
       Fp32Op_()->Get()->RunOnDevice();
-      out_qparams_ = Fp32Op_()->GetOutputQuantizationParams(qfactory_.get());
+      if (out_qparams_overwrite != nullptr) {
+        out_qparams_ = *out_qparams_overwrite;
+      } else {
+        out_qparams_ = Fp32Op_()->GetOutputQuantizationParams(qfactory_.get());
+      }
     }
   }
 

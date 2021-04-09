@@ -69,9 +69,9 @@ static void adaptive_max_pool3d_single_out_frame(
             int64_t *indp = ind_p   + d*osizeT*osizeH*osizeW + ot*osizeH*osizeW + oh*osizeW + ow;
 
             /* compute local max: */
-            int64_t maxindex = -1;
-            scalar_t maxval = -std::numeric_limits<float>::max();
-            int64_t it, ih, iw;
+            int64_t it = 0, ih = 0, iw = 0;
+            int64_t maxindex = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + (iw+istartW);
+            scalar_t maxval = -std::numeric_limits<scalar_t>::infinity();
             for(it = 0; it < kT; it++)
             {
               for(ih = 0; ih < kH; ih++)
@@ -393,11 +393,10 @@ Tensor& adaptive_max_pool3d_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> adaptive_max_pool3d_out_cpu(
+std::tuple<Tensor&, Tensor&> adaptive_max_pool3d_out_cpu(const Tensor& input,
+  IntArrayRef output_size,
   Tensor& output,
-  Tensor& indices,
-  const Tensor& input,
-  IntArrayRef output_size)
+  Tensor& indices)
 {
   adaptive_max_pool3d_out_cpu_template(
     output,
@@ -421,11 +420,10 @@ std::tuple<Tensor, Tensor> adaptive_max_pool3d_cpu(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& adaptive_max_pool3d_backward_out_cpu(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& adaptive_max_pool3d_backward_out_cpu(const Tensor& gradOutput_,
   const Tensor& input,
-  const Tensor& indices)
+  const Tensor& indices,
+  Tensor& gradInput)
 {
   adaptive_max_pool3d_backward_out_cpu_template(
     gradInput,

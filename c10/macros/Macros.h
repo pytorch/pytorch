@@ -26,10 +26,37 @@
 #if defined(__clang__)
   #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
   #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
+  #define __ubsan_ignore_signed_int_overflow__ __attribute__((no_sanitize("signed-integer-overflow")))
 #else
   #define __ubsan_ignore_float_divide_by_zero__
   #define __ubsan_ignore_undefined__
+  #define __ubsan_ignore_signed_int_overflow__
 #endif
+
+
+// Detect address sanitizer as some stuff doesn't work with it
+#undef C10_ASAN_ENABLED
+
+// for clang
+#if defined(__has_feature)
+#if ((__has_feature(address_sanitizer)))
+#define C10_ASAN_ENABLED 1
+#endif
+#endif
+
+// for gcc
+#if defined(__SANITIZE_ADDRESS__)
+#if __SANITIZE_ADDRESS__
+#if !defined(C10_ASAN_ENABLED)
+#define C10_ASAN_ENABLED 1
+#endif
+#endif
+#endif
+
+#if !defined(C10_ASAN_ENABLED)
+#define C10_ASAN_ENABLED 0
+#endif
+
 
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
@@ -50,8 +77,10 @@
  * str and ending with a number that varies with the line.
  */
 #ifdef __COUNTER__
+#define C10_UID __COUNTER__
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
 #else
+#define C10_UID __LINE__
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
 #endif
 
@@ -147,6 +176,24 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_UNLIKELY(expr)  (expr)
 #endif
 
+/// C10_NOINLINE - Functions whose declaration is annotated with this will not
+/// be inlined.
+#ifdef __GNUC__
+#define C10_NOINLINE __attribute__((noinline))
+#elif _MSC_VER
+#define C10_NOINLINE __declspec(noinline)
+#else
+#define C10_NOINLINE
+#endif
+
+#if defined(_MSC_VER)
+#define C10_ALWAYS_INLINE __forceinline
+#elif __has_attribute(always_inline) || defined(__GNUC__)
+#define C10_ALWAYS_INLINE __attribute__((__always_inline__)) inline
+#else
+#define C10_ALWAYS_INLINE inline
+#endif
+
 #include <sstream>
 #include <string>
 
@@ -156,11 +203,14 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_DEVICE __device__
 #define C10_HOST __host__
 // constants from (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications)
-// The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5)
-// but 2048 for previous architectures. You'll get warnings if you exceed these constants.
+// The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5),
+// 1536 for Geforce Ampere (8.6),
+// and 2048 for all other architectures. You'll get warnings if you exceed these constants.
 // Hence, the following macros adjust the input values from the user to resolve potential warnings.
-#if __CUDA_ARCH__ >= 750
+#if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
+#elif __CUDA_ARCH__ == 860
+constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1536;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
 #endif
@@ -207,31 +257,32 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define __func__ __FUNCTION__
 #endif
 
-// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
-// kernels. This is not supported by Apple platforms so we special case it.
-// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
-#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
-#define CUDA_KERNEL_ASSERT(...)
-#else // __APPLE__
-#define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
-#endif // __APPLE__
-
-// CUDA_ALWAYS_ASSERT is similar to CUDA_KERNEL_ASSERT but checks the assertion
+// CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
-// code that when building Release.
-#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+// code that would otherwise be suppressed when building Release.
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
 // Those platforms do not support assert()
-#define CUDA_ALWAYS_ASSERT(cond)
+#define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
-// TODO: This should be defined but I don't have the environment to properly
-// test it. See e.g., https://github.com/pytorch/pytorch/pull/32719#discussion_r379918384
-#define CUDA_ALWAYS_ASSERT(cond)
+#if defined(NDEBUG)
+extern "C" {
+  C10_IMPORT
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
+    __host__ __device__
+#endif // __CUDA_ARCH__
+ void _wassert(
+    wchar_t const* _Message,
+    wchar_t const* _File,
+    unsigned _Line);
+}
+#endif
+#define CUDA_KERNEL_ASSERT(cond)                                                                 \
+  if (C10_UNLIKELY(!(cond))) {                                                                   \
+    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
+  }
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
 extern "C" {
-#if !defined(__CUDA_ARCH__)  || !defined(__clang__)
-  [[noreturn]]
-#endif
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
     defined(__HIP_ARCH__) || defined(__HIP__)
 __host__ __device__
@@ -244,7 +295,7 @@ __host__ __device__
         const char* function) throw();
 }
 #endif // NDEBUG
-#define CUDA_ALWAYS_ASSERT(cond)                                         \
+#define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(#cond, __FILE__, static_cast<unsigned int>(__LINE__),  \
                   __func__);                                             \
@@ -265,7 +316,10 @@ __host__ __device__
 #define C10_MOBILE 1
 #endif // ANDROID / IOS
 
-// Portably determine if a type T is trivially copyable or not.
+// Portable determination of whether type T is trivially copyable.
+// Warning: __has_trivial_copy for GCC may not always detect the non-POD
+// correctly. For example, T = std::unique_ptr may evaluate to true and be
+// treated as POD. This can cause unexpected behavior.
 #if defined(__GNUG__) && __GNUC__ < 5
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
@@ -305,7 +359,7 @@ __host__ __device__
 
 #if defined(__CUDA_ARCH__)
 #if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
@@ -313,7 +367,7 @@ __host__ __device__
 #endif
 #else
 #if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr

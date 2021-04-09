@@ -10,9 +10,20 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_distributed import requires_gloo
-from torch.testing._internal.common_utils import TestCase, load_tests, run_tests
+from torch.testing._internal.common_distributed import requires_gloo, \
+    create_device, MultiProcessTestCase, skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import TestCase, load_tests, \
+    run_tests
 from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_WITH_TSAN
+
+
+# Torch distributed.nn is not available in windows
+# check #42095, it errors on import.
+_torch_dist_nn_available = True
+try:
+    import torch.distributed.nn
+except ImportError:
+    _torch_dist_nn_available = False
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -20,12 +31,12 @@ from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_
 load_tests = load_tests
 
 if not c10d.is_available():
-    print('c10d not available, skipping tests')
+    print('c10d not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
 
 if NO_MULTIPROCESSING_SPAWN:
-    print('spawn not available, skipping tests')
+    print('spawn not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
 
@@ -39,9 +50,9 @@ class ProcessGroupShareTensorTest(TestCase):
     @classmethod
     def opts(cls, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.devices = [c10d.ProcessGroupGloo.create_device(interface="lo")]
         opts.timeout = 5.0
-        opts.threads = threads
+        opts._devices = [create_device(interface='lo')]
+        opts._threads = threads
         return opts
 
     @classmethod
@@ -76,7 +87,7 @@ class ProcessGroupShareTensorTest(TestCase):
             self.assertEqual(
                 expected,
                 result,
-                (
+                msg=(
                     "Expect rank {} to receive tensor {} but got {}."
                 ).format(pid, expected, result)
             )
@@ -229,9 +240,14 @@ class DistributedDataParallelSingleProcessTest(TestCase):
     def _test_base(self, net, inp, check_allclose=True):
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        if inp[0].is_cuda:
+            device_ids = [torch.cuda.current_device()]
+        else:
+            device_ids = None
 
         ddp = nn.parallel.DistributedDataParallel(
             copy.deepcopy(net),
+            device_ids=device_ids,
             process_group=process_group
         )
 
@@ -241,7 +257,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
         for i, j in zip(ddp.parameters(), net.parameters()):
             self.assertTrue(i.allclose(j))
 
-        for _ in range(1):
+        for _ in range(10):
             net_out = net(*inp)
             ddp_out = ddp(*inp)
 
@@ -269,7 +285,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
     def test_rnn(self):
         # This test is inspired by the bug reported in
         # https://github.com/pytorch/pytorch/issues/36268
-        BATCH_SIZE = 4
+        BATCH_SIZE = 12  # Divisible by 2, 3, 4
         INPUT_DIM = 256
         OUTPUT_DIM = 256
         HIDDEN_DIM = 256
@@ -303,6 +319,187 @@ class DistributedDataParallelSingleProcessTest(TestCase):
         # Not checking result allclose as the parameter inconsistency exist
         # prior to this change. See #37079
         self._test_base(net, inp, check_allclose=False)
+
+
+class TestDistributedNNFunctions(MultiProcessTestCase):
+    def setUp(self):
+        if not _torch_dist_nn_available:
+            raise unittest.SkipTest("torch.distributed.nn is not available")
+        super(TestDistributedNNFunctions, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(TestDistributedNNFunctions, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def op_timeout_sec(self):
+        return 1
+
+    @property
+    def world_size(self):
+        return 2
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        # This is required because these functions calls directly to the .dist and needs
+        # the world to be initialized
+        c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
+        device = torch.device(f"cuda:{self.rank}")
+        x = torch.ones(5, 5, device=device) + self.rank
+        x.requires_grad = True
+        y = torch.distributed.nn.broadcast(x, 1)
+        self.assertEqual(y, 1 + torch.ones(5, 5))
+        z = y.sin().sum()
+        z.backward()
+        # We can't check the gradient of communications numerically so we have to do some calculations
+        if self.rank == 1:
+            self.assertEqual(x.grad, 2 * torch.cos(x))
+        elif self.rank == 0:
+            self.assertEqual(x.grad, torch.zeros(5, 5, device=device))
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_gather(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        # This is required because these functions calls directly to the .dist and needs
+        # the world to be initialized
+        c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
+        device = torch.device(f"cuda:{self.rank}")
+        x = torch.ones(5, 5, device=device) + self.rank
+        x.requires_grad = True
+        tensors = torch.distributed.nn.gather(x, 1)
+        if self.rank == 1:
+            for i, t in enumerate(tensors):
+                self.assertEqual(t, torch.ones(5, 5, device=device) + i)
+        elif self.rank == 0:
+            for i, t in enumerate(tensors):
+                zeros = torch.zeros(5, 5, device=device)
+                self.assertEqual(t, zeros)
+        y = torch.sum(torch.stack(tensors), axis=0)
+        z = y.sin().sum()
+        z.backward()
+
+        # Test gradient
+        x_s = 3 * torch.ones(5, 5, device=device)
+        self.assertEqual(x.grad, x_s.cos())
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_scatter(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        # This is required because these functions calls directly to the .dist and needs
+        # the world to be initialized
+        c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
+        device = torch.device(f"cuda:{self.rank}")
+        x0 = torch.ones(5, 5, device=device)
+        x1 = torch.ones(5, 5, device=device) + 1
+        x0.requires_grad = True
+        x1.requires_grad = True
+
+        y = torch.distributed.nn.scatter([x0, x1], 1)
+        if self.rank == 1:
+            self.assertEqual(y, 1 + torch.ones(5, 5, device=device))
+        elif self.rank == 0:
+            self.assertEqual(y, torch.ones(5, 5, device=device))
+        z = y.sin().sum()
+        z.backward()
+
+        # Test gradient
+        if self.rank == 1:
+            x0_s = torch.ones(5, 5, device=device).cos()
+            x1_s = (2 * torch.ones(5, 5, device=device)).cos()
+            self.assertEqual(x0.grad, x0_s)
+            self.assertEqual(x1.grad, x1_s)
+        if self.rank == 0:
+            self.assertEqual(x0.grad, torch.zeros(5, 5, device=device))
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_reduce(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        # This is required because these functions calls directly to the .dist and needs
+        # the world to be initialized
+        c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
+        device = torch.device(f"cuda:{self.rank}")
+        x = torch.ones(5, 5, device=device) + self.rank
+        x.requires_grad = True
+        y = torch.distributed.nn.reduce(x, 1, op=c10d.ReduceOp.SUM)
+
+        if self.rank == 1:
+            self.assertEqual(y, 3 * torch.ones(5, 5, device=device))
+
+        z = y.sin().sum()
+        z.backward()
+        # Gradients are broadcasted to both ranks
+        x_g = (3 * torch.ones(5, 5, device=device)).cos()
+        self.assertEqual(x.grad, x_g)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_allreduce(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        # This is required because these functions calls directly to the .dist and needs
+        # the world to be initialized
+        c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
+        device = torch.device(f"cuda:{self.rank}")
+        x = torch.ones(5, 5, device=device) + self.rank
+        x.requires_grad = True
+        y = torch.distributed.nn.all_reduce(x, op=c10d.ReduceOp.SUM)
+
+        self.assertEqual(y, 3 * torch.ones(5, 5, device=device))
+
+        z = y.sin().sum()
+        z.backward()
+        x_g = 2 * (3 * torch.ones(5, 5, device=device)).cos()
+        self.assertEqual(x.grad, x_g)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_all_gather(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        # This is required because these functions calls directly to the .dist and needs
+        # the world to be initialized
+        c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
+        device = torch.device(f"cuda:{self.rank}")
+        x = torch.ones(5, 5, device=device) + self.rank
+        x.requires_grad = True
+        tensors = torch.distributed.nn.all_gather(x)
+        for i, t in enumerate(tensors):
+            self.assertEqual(t, torch.ones(5, 5, device=device) + i)
+        y = torch.sum(torch.stack(tensors), axis=0)
+        z = y.sin().sum()
+        z.backward()
+
+        x_s = 2 * (3 * torch.ones(5, 5, device=device)).cos()
+        self.assertEqual(x.grad, x_s)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        # This is required because these functions calls directly to the .dist and needs
+        # the world to be initialized
+        c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='gloo')
+        device = torch.device(f"cuda:{self.rank}")
+        x0 = torch.ones(5, 5, device=device) + 2 * self.rank
+        x1 = torch.ones(5, 5, device=device) + 2 * self.rank
+        x0.requires_grad = True
+        x1.requires_grad = True
+        tensors = torch.distributed.nn.all_to_all([x0, x1])
+        for i, t in enumerate(tensors):
+            self.assertEqual(t, torch.ones(5, 5, device=device) + 2 * i)
+        y = torch.sum(torch.stack(tensors), axis=0)
+        z = y.sin().sum()
+        z.backward()
+        x_s = (4 * torch.ones(5, 5, device=device)).cos()
+        self.assertEqual(x0.grad, x_s)
+        self.assertEqual(x1.grad, x_s)
 
 
 if __name__ == '__main__':

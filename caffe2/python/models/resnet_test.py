@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 
@@ -14,7 +14,7 @@ import caffe2.python.models.imagenet_trainer_test_utils as utils
 class ResnetMemongerTest(hu.HypothesisTestCase):
 
     @given(with_shapes=st.booleans(), **hu.gcs_cpu_only)
-    @settings(max_examples=2, timeout=120)
+    @settings(max_examples=2, deadline=None)
     def test_resnet_shared_grads(self, with_shapes, gc, dc):
         results = utils.test_shared_grads(
             with_shapes,
@@ -53,6 +53,7 @@ if __name__ == "__main__":
     import unittest
     import random
     random.seed(2603)
+    # pyre-fixme[10]: Name `workspace` is used but not defined in the current scope
     workspace.GlobalInit([
         'caffe2',
         '--caffe2_log_level=0',

@@ -1,24 +1,27 @@
 import os
 import sys
 import inspect
-from typing import List
+import unittest
+from typing import Dict, List
 
 import torch
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+
 class TestBuiltins(JitTestCase):
     """
     Tests for TorchScript support of Python builtin functions.
     """
+
     def test_has_attr(self):
         class HasA(torch.nn.Module):
             def __init__(self):
@@ -60,7 +63,7 @@ class TestBuiltins(JitTestCase):
                 # not allowed, `name` must be static.
                 return hasattr(self.mod, name)
 
-        with self.assertRaisesRegex(RuntimeError, "hasattr"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "hasattr", "name"):
             torch.jit.script(Mod())
 
         class Mod(torch.nn.Module):
@@ -71,26 +74,25 @@ class TestBuiltins(JitTestCase):
                 # not allowed, `torch.rand` is not a class type
                 return hasattr(torch.rand(2, 3), name)
 
-        with self.assertRaisesRegex(RuntimeError, "hasattr"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "hasattr", "name"):
             torch.jit.script(Mod())
 
     def test_del(self):
-        def fn(x):
-            # type: (List[int]) -> List[int]
+        def fn(x: List[int]) -> List[int]:
             a = x * 2
             del a
             return x
 
         self.checkScript(fn, ([1, 2, 3],))
 
-        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "a"):
             @torch.jit.script
             def fn(x):
                 a = x ** 2
                 del a
                 return a
 
-        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "a"):
             @torch.jit.script
             def fn(x):
                 a = x ** 2
@@ -98,7 +100,7 @@ class TestBuiltins(JitTestCase):
                     del a
                 return a
 
-        with self.assertRaisesRegex(RuntimeError, "undefined value"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "b"):
             @torch.jit.script
             def fn(x):
                 a = x ** 2
@@ -106,22 +108,28 @@ class TestBuiltins(JitTestCase):
                 return a
 
     def test_del_multiple_operands(self):
+        def fn(x: List[int]) -> List[int]:
+            a, b, c = x[0], x[1], x[2]
+            del a, b, c
+            return x
 
-        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
-                                    "with more than one operand"):
-            @torch.jit.script
-            def del_list_multiple_operands(x):
-                # type: (List[int]) -> List[int]
-                del x[0], x[1]
-                return x
+        self.checkScript(fn, ([1, 2, 3],))
 
-        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
-                                    "with more than one operand"):
-            @torch.jit.script
-            def del_dict_multiple_operands(x):
-                # type: (Dict[str, int]) -> Dict[str, int]
-                del x['hi'], x['there']
-                return x
+        def del_list_multiple_operands(x: List[int]) -> List[int]:
+            del x[0], x[1]
+            return x
+
+        py_out = del_list_multiple_operands([0, 1, 2])
+        jit_out = torch.jit.script(del_list_multiple_operands)([0, 1, 2])
+        self.assertEquals(py_out, jit_out)
+
+        def del_dict_multiple_operands(x: Dict[str, int]) -> Dict[str, int]:
+            del x['hi'], x['there']
+            return x
+
+        py_out = del_dict_multiple_operands({"hi": 5, "there": 6})
+        jit_out = torch.jit.script(del_dict_multiple_operands)({"hi": 5, "there": 6})
+        self.assertEquals(py_out, jit_out)
 
 
 class TestTensorBuiltins(JitTestCase):
@@ -134,7 +142,15 @@ class TestTensorBuiltins(JitTestCase):
             return True
 
         tensor = torch.arange(4, dtype=torch.float).view(2, 2)
-        properties = [p for p in dir(tensor) if should_keep(tensor, p)]
+        keys = dir(tensor)
+
+        # real and imag are only implemented for complex tensors.
+        self.assertRaises(RuntimeError, lambda: should_keep(tensor, 'imag'))
+        keys.remove('imag')
+        self.assertRaises(RuntimeError, lambda: should_keep(tensor, 'real'))
+        keys.remove('real')
+
+        properties = [p for p in keys if should_keep(tensor, p)]
 
         code_template = """
         def fn(x):
@@ -165,3 +181,41 @@ class TestTensorBuiltins(JitTestCase):
             if p in EQUALITY_MISMATCH:
                 continue
             self.assertEqual(getattr(tensor, p), cu.fn(tensor))
+
+    def test_tensor_subscript_assign(self):
+        def fn1(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[torch.tensor(0)] = torch.tensor(2, dtype=torch.uint8)
+            return a
+
+        def fn2(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[0] = 2
+            return a
+
+        def fn3(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[torch.tensor(0)] = 2
+            return a
+
+        def fn4(x):
+            a = torch.zeros_like(x, dtype=torch.uint8)
+            a[0] = torch.tensor(2, dtype=torch.uint8)
+            return a
+
+        def fn5(x):
+            a = torch.zeros_like(x, dtype=torch.float32)
+            a[torch.tensor(0)] = 2
+            return a
+
+        for fn in (fn1, fn2, fn3, fn4, fn5):
+            self.checkScript(fn, (torch.zeros(2, dtype=torch.uint8),))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_tensor_subscript_assign_device(self):
+        def fn6(x):
+            a = torch.zeros_like(x, dtype=torch.float32, device="cuda")
+            a[torch.tensor(0)] = 2
+            return a
+
+        self.checkScript(fn6, (torch.zeros(2, dtype=torch.float32, device="cuda"),))

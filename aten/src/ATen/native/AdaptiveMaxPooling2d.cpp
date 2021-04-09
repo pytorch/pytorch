@@ -59,12 +59,12 @@ static void adaptive_max_pool2d_single_out_frame(
           int64_t *indp = ind_p   + d*osizeH*osizeW + oh*osizeW + ow;
 
           /* compute local max: */
-          int64_t maxindex = -1;
-          scalar_t maxval = -std::numeric_limits<float>::max();
-          int ih, iw;
-          for(ih = 0; ih < kH; ih++)
+          int ih=0, iw=0;
+          int64_t maxindex = (ih+istartH)*isizeW + (iw+istartW);
+          scalar_t maxval = -std::numeric_limits<scalar_t>::infinity();
+          for(ih=0; ih < kH; ih++)
           {
-            for(iw = 0; iw < kW; iw++)
+            for(iw=0; iw < kW; iw++)
             {
               scalar_t val = *(ip + ih*istrideH + iw*istrideW);
               if ((val > maxval) || std::isnan(val))
@@ -346,11 +346,10 @@ Tensor& adaptive_max_pool2d_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> adaptive_max_pool2d_out_cpu(
+std::tuple<Tensor&, Tensor&> adaptive_max_pool2d_out_cpu(const Tensor& input,
+  IntArrayRef output_size,
   Tensor& output,
-  Tensor& indices,
-  const Tensor& input,
-  IntArrayRef output_size)
+  Tensor& indices)
 {
   adaptive_max_pool2d_out_cpu_template(
     output,
@@ -366,7 +365,6 @@ std::tuple<Tensor, Tensor> adaptive_max_pool2d_cpu(
 {
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
-  AT_ASSERT(output_size.size() == 2);
   adaptive_max_pool2d_out_cpu_template(
     output,
     indices,
@@ -375,11 +373,10 @@ std::tuple<Tensor, Tensor> adaptive_max_pool2d_cpu(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& adaptive_max_pool2d_backward_out_cpu(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& adaptive_max_pool2d_backward_out_cpu(const Tensor& gradOutput_,
   const Tensor& input,
-  const Tensor& indices)
+  const Tensor& indices,
+  Tensor& gradInput)
 {
   adaptive_max_pool2d_backward_out_cpu_template(
     gradInput,

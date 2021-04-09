@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, dyndep
 from hypothesis import given
@@ -86,7 +86,7 @@ class TestATen(hu.HypothesisTestCase):
             operator="index")
 
         def ref(self, mask):
-            return (self[mask.astype(np.bool)],)
+            return (self[mask.astype(np.bool_)],)
 
         tensor = np.random.randn(2, 3, 4).astype(np.float32)
         mask = np.array([[1, 0, 0], [1, 1, 0]]).astype(np.uint8)

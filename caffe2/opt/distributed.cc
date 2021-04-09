@@ -72,12 +72,12 @@ void addBlobDeviceOptions(
 void injectDataEdgeIndicators(nom::repr::NNModule* nn) {
   for (auto& input : nn->inputs) {
     auto declareNode =
-        nn->dataFlow.createNode(nom::util::make_unique<Declare>());
+        nn->dataFlow.createNode(std::make_unique<Declare>());
     nn->dataFlow.createEdge(declareNode, input);
   }
 
   for (auto& output : nn->outputs) {
-    auto exportNode = nn->dataFlow.createNode(nom::util::make_unique<Export>());
+    auto exportNode = nn->dataFlow.createNode(std::make_unique<Export>());
     nn->dataFlow.createEdge(output, exportNode);
   }
 

@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack
 
@@ -16,11 +15,10 @@ import os
 import shutil
 import torch.testing._internal.common_utils as common
 
-import unittest
-
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
           --produce-onnx-test-data: generate onnx test data
+          --accept: accept onnx updates and overwrite models
 '''
 
 _onnx_test = False  # flag to produce onnx test cases.
@@ -34,7 +32,6 @@ def export_to_pbtxt(model, inputs, *args, **kwargs):
 
 
 def export_to_pb(model, inputs, *args, **kwargs):
-    kwargs['operator_export_type'] = torch.onnx.OperatorExportTypes.ONNX
     f = io.BytesIO()
     with torch.no_grad():
         torch.onnx.export(model, inputs, f, *args, **kwargs)
@@ -358,7 +355,7 @@ class TestOperators(TestCase):
 
     def test_full(self):
         x = torch.randn(3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.full(x.shape, 2), x)
+        self.assertONNX(lambda x: torch.full(x.shape, 2.), x)
 
     def test_full_like(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -597,7 +594,8 @@ class TestOperators(TestCase):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
         offset = torch.tensor([0]).long()
-        self.assertONNX(emb_bag, (input, offset), keep_initializers_as_inputs=True)
+        self.assertONNX(emb_bag, (input, offset), keep_initializers_as_inputs=True,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_implicit_expand(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -680,6 +678,10 @@ class TestOperators(TestCase):
     def test_dropout_training(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.max(functional.dropout(x)), x, training=torch.onnx.TrainingMode.TRAINING)
+
+    def test_dropout_opset12(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x)), x, opset_version=12)
 
     def test_dropout_training_opset12(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -774,7 +776,7 @@ class TestOperators(TestCase):
                 return x_out
 
         x = {torch.tensor(1.): torch.randn(1, 2, 3)}
-        self.assertONNX(MyModel(), (x,))
+        self.assertONNX(MyModel(), (x, {}))
 
     def test_dict_str(self):
         class MyModel(torch.nn.Module):
@@ -784,7 +786,7 @@ class TestOperators(TestCase):
                 return x_out
 
         x = {"test_key_in": torch.randn(1, 2, 3)}
-        self.assertONNX(MyModel(), (x,))
+        self.assertONNX(MyModel(), (x, {}))
 
     def test_arange_dynamic(self):
         class TestModel(torch.nn.Module):
@@ -873,38 +875,33 @@ class TestOperators(TestCase):
     def test_det(self):
         x = torch.randn(2, 3, 5, 5, device=torch.device('cpu'))
         self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
+        self.assertONNX(lambda x: torch.linalg.det(x), x, opset_version=11)
 
-    @unittest.skip("disable test until onnx submodule is updated")
     def test_softmaxcrossentropy(self):
         x = torch.randn(3, 5)
         y = torch.empty(3, dtype=torch.long).random_(5)
         self.assertONNX(torch.nn.CrossEntropyLoss(), (x, y), opset_version=12)
 
-    @unittest.skip("disable test until onnx submodule is updated")
     def test_softmaxcrossentropy_ignore_index(self):
         x = torch.randn(3, 5)
         y = torch.empty(3, dtype=torch.long).random_(5)
         self.assertONNX(torch.nn.CrossEntropyLoss(ignore_index=1), (x, y), opset_version=12)
 
-    @unittest.skip("disable test until onnx submodule is updated")
     def test_softmaxcrossentropy_weights(self):
         x = torch.randn(3, 5)
         y = torch.empty(3, dtype=torch.long).random_(5)
         self.assertONNX(torch.nn.CrossEntropyLoss(weight=torch.randn(5)), (x, y), opset_version=12)
 
-    @unittest.skip("disable test until onnx submodule is updated")
     def test_softmaxcrossentropy_3d(self):
         x = torch.randn(3, 5, 2)
         y = torch.empty(3, 2, dtype=torch.long).random_(5)
         self.assertONNX(torch.nn.CrossEntropyLoss(), (x, y), opset_version=12)
 
-    @unittest.skip("disable test until onnx submodule is updated")
     def test_softmaxcrossentropy_3d_none(self):
         x = torch.randn(3, 5, 2)
         y = torch.empty(3, 2, dtype=torch.long).random_(5)
         self.assertONNX(torch.nn.CrossEntropyLoss(reduction='none'), (x, y), opset_version=12)
 
-    @unittest.skip("disable test until onnx submodule is updated")
     def test_softmaxcrossentropy_4d(self):
         x = torch.randn(3, 5, 2, 1)
         y = torch.empty(3, 2, 1, dtype=torch.long).random_(5)

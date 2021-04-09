@@ -13,6 +13,7 @@ namespace at { namespace native {
 using reduce_fn = void(*)(TensorIterator &);
 
 DECLARE_DISPATCH(reduce_fn, sum_stub);
+DECLARE_DISPATCH(reduce_fn, nansum_stub);
 DECLARE_DISPATCH(reduce_fn, prod_stub);
 DECLARE_DISPATCH(reduce_fn, mean_stub);
 DECLARE_DISPATCH(reduce_fn, and_stub);
@@ -27,14 +28,15 @@ using reduce_std_var_function =
 DECLARE_DISPATCH(reduce_std_var_function, std_var_stub);
 
 using reduce_norm_fn =
-    void (*)(Tensor&, const Tensor&, Scalar, c10::optional<int64_t>);
+    void (*)(Tensor&, const Tensor&, const Scalar&, c10::optional<int64_t>);
 DECLARE_DISPATCH(reduce_norm_fn, norm_kernel);
 
-using reduce_fn_flag = void(*)(TensorIterator &, Scalar);
+using reduce_fn_flag = void(*)(TensorIterator &, const Scalar&);
 DECLARE_DISPATCH(reduce_fn_flag, norm_stub);
 
 using cum_fn = void (*)(Tensor&, const Tensor&, int64_t);
 DECLARE_DISPATCH(cum_fn, cumsum_stub);
 DECLARE_DISPATCH(cum_fn, cumprod_stub);
+DECLARE_DISPATCH(cum_fn, logcumsumexp_stub);
 
 }} // namespace at::native

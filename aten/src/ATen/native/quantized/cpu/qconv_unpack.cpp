@@ -13,7 +13,6 @@ template <int kSpatialDim>
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
     kSpatialDim>::unpack() {
   auto* packed_weights_p = w.get();
-
   // output channels
   const int output_channels = packed_weights_p->outputChannels();
   const int input_channels = packed_weights_p->inputChannels();
@@ -54,6 +53,9 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
                   w_scale[0],
                   w_zp[0]);
   } else if (q_scheme == c10::kPerChannelAffine) {
+    TORCH_CHECK(
+        !transpose(),
+        "Per Channel Quantization is currently disabled for transposed conv");
     auto scales = at::from_blob(
         w_scale.data(), w_scale.size(), device(c10::kCPU).dtype(c10::kFloat));
     auto zero_points = at::from_blob(
@@ -82,7 +84,11 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
   int8_t* unpacked_weights_p =
       reinterpret_cast<int8_t*>(unpacked_weights.data_ptr<c10::qint8>());
   packed_weights_p->unpack(unpacked_weights_p);
-
+  if(transpose()){
+    unpacked_weights =
+        at::native::fbgemm_utils::TransposeConvTensorUnpackConversion<
+            kSpatialDim>(unpacked_weights, groups);
+  }
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
       unpacked_weights, bias);
 }
@@ -205,6 +211,15 @@ class QConvPadding final {
 };
 
 template <int kSpatialDim = 2>
+class QConvOutputPadding final {
+ public:
+  static torch::List<int64_t> run(
+      const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight) {
+    return packed_weight->output_padding();
+  }
+};
+
+template <int kSpatialDim = 2>
 class QConvDilation final {
  public:
   static torch::List<int64_t> run(
@@ -222,22 +237,55 @@ class QConvGroups final {
   }
 };
 
+template <int kSpatialDim = 2>
+class QConvTranspose final {
+ public:
+  static int64_t run(
+      const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight) {
+    return packed_weight->transpose();
+  }
+};
+
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
-  m.impl("conv_unpack", QConvUnpackWeightsInt8<2>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_unpack"), TORCH_FN(QConvUnpackWeightsInt8<2>::run));
   // We use  conv2d_unpack to be consistent with conv3d_unpack
-  m.impl("conv1d_unpack", QConv1dUnpackWeightsInt8::run);
-  m.impl("conv2d_unpack", QConvUnpackWeightsInt8<2>::run);
-  m.impl("conv3d_unpack", QConvUnpackWeightsInt8<3>::run);
-  m.impl("conv2d_stride", QConvStride<2>::run);
-  m.impl("conv2d_padding", QConvPadding<2>::run);
-  m.impl("conv2d_dilation", QConvDilation<2>::run);
-  m.impl("conv2d_groups", QConvGroups<2>::run);
-  m.impl("conv3d_stride", QConvStride<3>::run);
-  m.impl("conv3d_padding", QConvPadding<3>::run);
-  m.impl("conv3d_dilation", QConvDilation<3>::run);
-  m.impl("conv3d_groups", QConvGroups<3>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_unpack"), TORCH_FN(QConv1dUnpackWeightsInt8::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_unpack"), TORCH_FN(QConvUnpackWeightsInt8<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_unpack"), TORCH_FN(QConvUnpackWeightsInt8<3>::run));
+
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_stride"), TORCH_FN(QConvStride<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_padding"), TORCH_FN(QConvPadding<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_output_padding"), TORCH_FN(QConvOutputPadding<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_dilation"), TORCH_FN(QConvDilation<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_groups"), TORCH_FN(QConvGroups<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_transpose"), TORCH_FN(QConvTranspose<2>::run));
+
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_stride"), TORCH_FN(QConvStride<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_padding"), TORCH_FN(QConvPadding<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_output_padding"), TORCH_FN(QConvOutputPadding<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_dilation"), TORCH_FN(QConvDilation<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_groups"), TORCH_FN(QConvGroups<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_transpose"), TORCH_FN(QConvTranspose<3>::run));
+
+  // ConvTranspose is the same, however, we want to have different name.
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose1d_unpack"), TORCH_FN(QConv1dUnpackWeightsInt8::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_unpack"), TORCH_FN(QConvUnpackWeightsInt8<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_unpack"), TORCH_FN(QConvUnpackWeightsInt8<3>::run));
+
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_stride"), TORCH_FN(QConvStride<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_padding"), TORCH_FN(QConvPadding<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_output_padding"), TORCH_FN(QConvOutputPadding<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_dilation"), TORCH_FN(QConvDilation<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_groups"), TORCH_FN(QConvGroups<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_transpose"), TORCH_FN(QConvTranspose<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_stride"), TORCH_FN(QConvStride<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_padding"), TORCH_FN(QConvPadding<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_output_padding"), TORCH_FN(QConvOutputPadding<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_dilation"), TORCH_FN(QConvDilation<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_groups"), TORCH_FN(QConvGroups<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_transpose"), TORCH_FN(QConvTranspose<3>::run));
 }
 
 } // namespace

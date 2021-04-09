@@ -51,6 +51,7 @@ Sections start with a reference to the source file where the code related to the
   - [Interpreter](#interpreter)
   - [Graph Executor](#graph-executor)
   - [JIT Logging](#jit-logging)
+  - [JIT Optimization Limitter](#jit-optimization-limitter)
   - [DifferentiableGraphOp](#differentiablegraphop)
   - [Interpreter](#interpreter-1)
   - [FusionGroup](#fusiongroup)
@@ -180,7 +181,7 @@ For Nodes representing built-in Operators, the method `Node::schema` can also lo
 
 All of the strings correspond to different `FunctionSchema` objects. A `Node` can be queried for its schema using the `schema()` method (it will check the argument types, and will try to match one of the options for its `kind()`).
 
-Note that the chosen overload is not shown in any way in the textual output. If you're unsure which function does a node resolve to, you might need to check the type annotations of its input values.
+Note that the chosen overload is not shown in any way in the textual output. If you're unsure which function a node resolves to, you might need to check the type annotations of its input values.
 
 
 Each node also has a set of attributes which are named integers, strings, floats, Tensors, and subgraphs, or lists of these types. These are used by special primitive operators to encode additional data in the Node. For instance `prim::Constant` defines a compile-time constant value. For Tensor constants, it will have a single Tensor attribute with the name `attr::value` which contains the value of the constant.
@@ -204,7 +205,7 @@ Iterators for the `nodes()` list are invalided when the current Node they point 
 
 Block also contain a list of input and output values. The meaning of these values depends on where the block is used. For the Graph's top-level block, these are inputs and outputs to the Graph, and line up with the FunctionSchema associated with a Method.
 
-**Control-flow** is represented with using sub-blocks rather than a control-flow graph representation. A `prim::If` has one block for the true branch and one block for the else.A `prim:Loop` has a block for the loop body (there is no condition block, instead the end of the loop body computes whether to re-enter the loop body). This representation ensures we have structured control-flow. This limitation makes a lot of optimizations easier and is true for the vast majority of networks. A Node can lookup what Block it is in, and a Block and can look up its parent (either the Node that has it as a subblock, or `nullptr` for the main Block).
+**Control-flow** is represented with using sub-blocks rather than a control-flow graph representation. A `prim::If` has one block for the true branch and one block for the else.A `prim:Loop` has a block for the loop body (there is no condition block, instead the end of the loop body computes whether to re-enter the loop body). This representation ensures we have structured control-flow. This limitation makes a lot of optimizations easier and is true for the vast majority of networks. A Node can look up what Block it is in, and a Block and can look up its parent (either the Node that has it as a subblock, or `nullptr` for the main Block).
 
 ### If ###
 For if-statements (`prim::If`) the Blocks have no inputs, and the outputs are the new values of variables in the outer block whose values were altered in an if-statement.
@@ -309,6 +310,38 @@ graph(%z.1 : Dynamic):
   return (%z)
 ```
 
+### With ###
+With-statements are represented in two different ways. For most of the compilation and optimization process, they are represented as a pair of `prim::Enter` and `prim::Exit` nodes that wrap the nodes corresponding to the body of the with-statement. However, with-statements are temporarily represented for the duration of the `exit_transform` pass using a block-based representation in which a `prim::With` node is inserted after the `prim::Exit` node, all of the nodes between the `prim::Exit` and `prim::Enter` are moved into the first block of the `prim::With`, and the `prim::Exit` is moved into the second block of the `prim::With`. For example, this program:
+
+```
+with c as mult:
+  y = x + mult
+```
+
+can be translated as:
+
+```
+%2 : int = prim::Constant[value=1]()
+%mult.1 : int = prim::Enter(%c.1)
+%y.1 : Tensor = aten::add(%x.1, %mult.1, %2)
+%11 : Tensor = prim::Exit(%c.1)
+```
+
+and will temporarily be transformed to:
+
+```
+%mult.1 : int = prim::Enter(%c.1)
+= prim::With()
+  block0():
+    %y.1 : Tensor = aten::add(%x.1, %mult.1, %4)
+    -> ()
+  block1():
+    %11 : Tensor = prim::Exit(%c.1)
+    -> ()
+```
+
+for the duration of the `exit_transform` pass.
+
 ## Value ##
 
 [ir.h](ir/ir.h)
@@ -351,7 +384,7 @@ The entry point from Python into C++ for tracing using `torch.jit.trace` is `_cr
 
 A thread local instance of the TracingState object maintains a mapping between actual data being computed during the trace (e.g. Tensors) stored in IValues, and the abstract `Value*` in the Graph that would compute that value. The functions `void setValueTrace(const IValue&, Value*)` and `Value* getValueTrace(const IValue&)` are used by the tracer to maintain this mapping.
 
-An initial IValue to Value mapping is setup up between the inputs to the function being traced and symbolic Value inputs to the Graph being constructed. If we are tracing a `torch.nn.Module`, the tracer also adds Parameters and sub-Modules to the Module being constructed that correspond to the Python `torch.nn.Module` being traced.  These values are also added as mapping so that uses of the Parameters in the trace will create uses of the Parameters in the Graph.
+An initial IValue to Value mapping is set up between the inputs to the function being traced and symbolic Value inputs to the Graph being constructed. If we are tracing a `torch.nn.Module`, the tracer also adds Parameters and sub-Modules to the Module being constructed that correspond to the Python `torch.nn.Module` being traced.  These values are also added as mapping so that uses of the Parameters in the trace will create uses of the Parameters in the Graph.
 
 As the trace runs, individual operators create Nodes in the Graph being traced to record what happens. This code is currently generated per operator in [tools/autograd/gen_variable_type.py](../../../tools/autograd/gen_variable_type.py). It results in code that looks like the following:
 
@@ -729,10 +762,10 @@ All builtin operators are represented using a stack machine concept. An operator
 
 ```cpp
 using Stack = std::vector<IValue>;
-using Operation = std::function<int(Stack&)>;
+using Operation = std::function<void(Stack*)>;
 
 // schema: example_add(Tensor a, Tensor b) -> Tensor
-int example_add(Stack& stack) {
+void example_add(Stack* stack) {
     Tensor a, b;
     // stack before: ? ? ? a b <- back
     pop(stack, a, b); //Templated helper function
@@ -854,7 +887,7 @@ def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
     return hy, cy
 ```
 
-After going through the the frontend, we get start with this unoptimized graph:
+After going through the the frontend, we start with this unoptimized graph:
 
 ```
 graph(%x : Tensor,
@@ -1145,6 +1178,39 @@ one specifies a file(s) in `PYTORCH_JIT_LOG_LEVEL`.
 `>>` and `>>>` are also valid and **currently** are equivalent to `GRAPH_DEBUG` as there is no logging level that is
 higher than `GRAPH_DEBUG`.
 
+By default, types in the graph are printed with maximum verbosity.  The verbosity level can be controlled via the environment variable `PYTORCH_JIT_TYPE_VERBOSITY`.  The available settings are:
+
+* `0`: No type information
+* `1`: Types and shapes only
+* `2`: Also print strides
+* `3`: Also print device type and whether gradient is required
+
+## JIT Optimization Limitter ##
+
+[jit_opt_limit.h](jit_opt_limit.h)
+
+Often times, we need to limit the number of optimizations for any lowering passes for debugging purposes.
+
+`TorchScript` offers a simple optimization limit checker that can be configured through environment variable `PYTORCH_JIT_OPT_LIMIT`. The purpose is to limit how many optimization you can make per pass. This is useful for debugging any passes.
+
+Opt limit checker is enabled on a per file basis (hence per pass). For example, in `constant_propagation.cpp`, `PYTORCH_JIT_OPT_LIMIT` should be set to `constant_propagation=<opt_limit>` where `<opt_limit>` is the number of optimizations you want to make for the pass. (i.e.
+`PYTORCH_JIT_OPT_LIMIT="constant_propagation=<opt_limit>"`).
+
+Multiple files can be configured by separating each file name with a colon
+`:` as in the following example,
+`PYTORCH_JIT_OPT_LIMIT="constant_propagation=<opt_limit>:dead_code_elimination=<opt_limit>"`
+
+You can call opt limiter by calling a macro `JIT_OPT_ALLOWED`. It will return true if
+we haven't reached the optimization limit yet. Otherwise, it will return
+false. Typical usage:
+
+```cpp
+if (!JIT_OPT_ALLOWED) {
+    GRAPH_DUMP(...); //supplied from jit_log
+    return;
+}
+```
+
 ## DifferentiableGraphOp ##
 
 [runtime/graph_executor.cpp](runtime/graph_executor.cpp)
@@ -1170,7 +1236,7 @@ a = torch.rand(2, 3)
 b = a
 # At this point, `a` and `b` share their storage.
 c = b[0]
-# `c` is shares storage with `a` and `b`, but only sees a slice of the allocated memory.
+# `c` shares storage with `a` and `b`, but only sees a slice of the allocated memory.
 ```
 
 Some operators will *mutate* one or more of their operands in-place. These are typically denoted with a trailing underscore, or by taking an `out` argument as input:
@@ -1254,7 +1320,7 @@ So to determine whether  `a` and `b` may alias, we traverse the `AliasTracker` D
 ### Writing optimization passes with `AliasDb`
 `AliasDb` provides a high-level interface to help people write mutability-safe optimization passes.
 
-In particular, `moveAfterTopologicallyValid()` (and it's `moveBefore` variant) will reorder nodes in a way that preserves data dependencies and avoids any data hazards.  The rules for this are that all mutable *writes* to a given memory location must occur in the same order (avoid WAW hazards), and that no reads can be reordered before or after any write (WAR, RAW hazards).
+In particular, `moveAfterTopologicallyValid()` (and its `moveBefore` variant) will reorder nodes in a way that preserves data dependencies and avoids any data hazards.  The rules for this are that all mutable *writes* to a given memory location must occur in the same order (avoid WAW hazards), and that no reads can be reordered before or after any write (WAR, RAW hazards).
 
 However, reordering of reads across writes *is allowed* if we can prove that the read cannot alias the thing being written. This happens whenever we have tensors that come from functions that produce fresh results (common) inside of the function. It also happens whenever the creation of the mutable tensor is seen in the function (so it gets assigned a fresh variable), and all of its writes occur in that function.
 

@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import operator_benchmark as op_bench
 import torch
 
@@ -27,13 +22,19 @@ diag_configs_short = op_bench.config_list(
 
 class DiagBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, dim, M, N, diagonal, out, device):
-        self.input = torch.rand(M, N, device=device) if dim == 2 else torch.rand(M, device=device)
-        self.diagonal = diagonal
-        self.out = torch.tensor((),) if out else None
+        self.inputs = {
+            "input": torch.rand(M, N, device=device) if dim == 2 else torch.rand(M, device=device),
+            "diagonal": diagonal,
+            "out": out,
+            "out_tensor": torch.tensor((),)
+        }
         self.set_module_name('diag')
 
-    def forward(self):
-        return torch.diag(self.input, diagonal=self.diagonal, out=self.out)
+    def forward(self, input, diagonal: int, out: bool, out_tensor):
+        if out:
+            return torch.diag(input, diagonal=diagonal, out=out_tensor)
+        else:
+            return torch.diag(input, diagonal=diagonal)
 
 
 op_bench.generate_pt_test(diag_configs_short, DiagBenchmark)

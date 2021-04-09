@@ -1,7 +1,9 @@
+load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
-load("//third_party:substitution.bzl", "template_rule")
-load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
+load("//third_party:substitution.bzl", "header_template_rule")
+load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sources", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops")
@@ -17,7 +19,6 @@ COMMON_COPTS = [
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
-    "-DAT_PARALLEL_NATIVE=1",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
 ] + if_cuda([
@@ -26,19 +27,18 @@ COMMON_COPTS = [
 ])
 
 # c10
-template_rule(
+header_template_rule(
     name = "cmake_macros_h",
     src = "c10/macros/cmake_macros.h.in",
     out = "c10/macros/cmake_macros.h",
     substitutions = {
         "cmakedefine": "define",
         "#define FEATURE_TORCH_MOBILE": "/* #undef FEATURE_TORCH_MOBILE */",
-        "#define USE_STATIC_DISPATCH": "/* #undef USE_STATIC_DISPATCH */",
         "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
     },
 )
 
-template_rule(
+header_template_rule(
     name = "cuda_cmake_macros_h",
     src = "c10/cuda/impl/cuda_cmake_macros.h.in",
     out = "c10/cuda/impl/cuda_cmake_macros.h",
@@ -55,15 +55,15 @@ cc_library(
         "c10/cuda/*.h",
         "c10/cuda/impl/*.h",
         "c10/macros/*.h",
+        "c10/mobile/*.h",
         "c10/util/*.h",
         "c10/util/*.hpp",
-    ]) + [
-        "c10/macros/cmake_macros.h",
-        "c10/cuda/impl/cuda_cmake_macros.h",
-    ],
+    ]),
     deps = [
         "@com_github_gflags_gflags//:gflags",
         "@com_github_glog//:glog",
+        ":cmake_macros_h",
+        ":cuda_cmake_macros_h",
     ],
 )
 
@@ -72,6 +72,7 @@ cc_library(
     srcs = glob([
         "c10/core/*.cpp",
         "c10/core/impl/*.cpp",
+        "c10/mobile/*.cpp",
         "c10/util/*.cpp",
     ]) + if_cuda(
         glob([
@@ -107,48 +108,51 @@ cc_test(
     ],
 )
 
+# TODO: refactor this into its own library (but how to make
+# a binary based off of a module in a library?)
 py_binary(
     name = "gen",
-    srcs = ["aten/src/ATen/gen.py"],
+    srcs = ["tools/setup_helpers/gen.py"],
+    deps = [
+        ":tools_codegen"
+    ],
 )
 
 genrule(
     name = "generated_cpp",
     srcs = [
-        "aten/src/ATen/Declarations.cwrap",
-        "aten/src/THCUNN/generic/THCUNN.h",
-        "aten/src/ATen/nn.yaml",
         "aten/src/ATen/native/native_functions.yaml",
     ] + glob(["aten/src/ATen/templates/**"]),
     outs = [
         "aten/src/ATen/Declarations.yaml",
-        "aten/src/ATen/BackendSelectRegister.cpp",
-        "aten/src/ATen/CPUType.h",
-        "aten/src/ATen/CPUType.cpp",
+        "aten/src/ATen/RegisterBackendSelect.cpp",
+        "aten/src/ATen/RegisterCPU.cpp",
+        "aten/src/ATen/RegisterMkldnnCPU.cpp",
+        "aten/src/ATen/RegisterQuantizedCPU.cpp",
+        "aten/src/ATen/RegisterSparseCPU.cpp",
+        "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
+        "aten/src/ATen/RegisterMeta.cpp",
+        "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
+        "aten/src/ATen/RegisterSchema.cpp",
+        "aten/src/ATen/CPUFunctions.h",
+        "aten/src/ATen/CUDAFunctions.h",
         "aten/src/ATen/Functions.h",
-        "aten/src/ATen/LegacyTHFunctionsCPU.h",
-        "aten/src/ATen/LegacyTHFunctionsCPU.cpp",
+        "aten/src/ATen/Functions.cpp",
+        "aten/src/ATen/RedispatchFunctions.h",
+        "aten/src/ATen/RedispatchFunctions.cpp",
         "aten/src/ATen/NativeFunctions.h",
-        "aten/src/ATen/MkldnnCPUType.h",
-        "aten/src/ATen/MkldnnCPUType.cpp",
-        "aten/src/ATen/QuantizedCPUType.h",
-        "aten/src/ATen/QuantizedCPUType.cpp",
-        "aten/src/ATen/SparseCPUType.h",
-        "aten/src/ATen/SparseCPUType.cpp",
-        "aten/src/ATen/TypeDefault.h",
-        "aten/src/ATen/TypeDefault.cpp",
+        "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/core/TensorBody.h",
-        "aten/src/ATen/core/TensorMethods.h",
+        "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
-    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)` aten/src/ATen/Declarations.cwrap aten/src/THCUNN/generic/THCUNN.h aten/src/ATen/nn.yaml aten/src/ATen/native/native_functions.yaml",
+    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
     tools = [":gen"],
 )
 
 py_library(
-    name = "code_template",
-    srcs = ["aten/src/ATen/code_template.py"],
-    imports = ["aten"],
+    name = "tools_codegen",
+    srcs = glob(["tools/codegen/**/*.py"]),
 )
 
 py_library(
@@ -158,7 +162,7 @@ py_library(
         "tools/autograd/*.yaml",
         "tools/autograd/templates/*",
     ]),
-    deps = [":code_template"],
+    deps = [":tools_codegen"],
 )
 
 py_library(
@@ -176,17 +180,7 @@ py_binary(
     ],
 )
 
-genrule(
-    name = "generated_code",
-    srcs = [
-        "aten/src/ATen/Declarations.yaml",
-    ],
-    outs = [
-        #"torch/csrc/autograd/generated/python_functions.h",
-        #"torch/csrc/autograd/generated/python_functions.cpp",
-        #"torch/csrc/autograd/generated/python_variable_methods.cpp",
-        #"torch/csrc/autograd/generated/python_torch_functions.cpp",
-        #"torch/csrc/autograd/generated/python_nn_functions.cpp",
+libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/VariableType.h",
         "torch/csrc/autograd/generated/VariableType_0.cpp",
         "torch/csrc/autograd/generated/VariableType_1.cpp",
@@ -194,22 +188,52 @@ genrule(
         "torch/csrc/autograd/generated/VariableType_3.cpp",
         "torch/csrc/autograd/generated/VariableType_4.cpp",
         # "torch/csrc/autograd/generated/VariableTypeEverything.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_0.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_1.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_2.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_3.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_4.cpp",
-        # "torch/csrc/autograd/generated/ProfiledTypeEverything.cpp",
-        "torch/csrc/autograd/generated/RegistrationDeclarations.h",
+        "torch/csrc/autograd/generated/TraceType_0.cpp",
+        "torch/csrc/autograd/generated/TraceType_1.cpp",
+        "torch/csrc/autograd/generated/TraceType_2.cpp",
+        "torch/csrc/autograd/generated/TraceType_3.cpp",
+        "torch/csrc/autograd/generated/TraceType_4.cpp",
+        # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
+        "torch/csrc/autograd/generated/InplaceOrViewType_0.cpp",
+        "torch/csrc/autograd/generated/InplaceOrViewType_1.cpp",
+        # "torch/csrc/autograd/generated/InplaceOrViewTypeEverything.cpp",
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_0.cpp",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_1.cpp",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_2.cpp",
+]
+
+libtorch_python_generated_sources = [
+        "torch/csrc/autograd/generated/python_functions.h",
+        "torch/csrc/autograd/generated/python_functions.cpp",
+        "torch/csrc/autograd/generated/python_variable_methods.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions.cpp",
+        "torch/csrc/autograd/generated/python_nn_functions.cpp",
+        "torch/csrc/autograd/generated/python_fft_functions.cpp",
+        "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+        "torch/csrc/autograd/generated/python_special_functions.cpp",
+]
+
+genrule(
+    name = "all_generated_code",
+    srcs = [
+        "aten/src/ATen/Declarations.yaml",
+        "aten/src/ATen/native/native_functions.yaml",
     ],
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --nn-path aten/src",
+    outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
     tools = [":generate_code"],
+)
+
+filegroup(
+    name = "cpp_generated_code",
+    data = [":all_generated_code"],
+    srcs = libtorch_cpp_generated_sources,
+)
+
+filegroup(
+    name = "python_generated_code",
+    data = [":all_generated_code"],
+    srcs = libtorch_python_generated_sources,
 )
 
 exports_files(
@@ -274,6 +298,16 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_base_vulkan",
+    srcs = glob(["aten/src/ATen/vulkan/*.cpp"]),
+)
+
+filegroup(
+    name = "aten_base_metal",
+    srcs = glob(["aten/src/ATen/metal/*.cpp"]),
+)
+
+filegroup(
     name = "ATen_QUANTIZED_SRCS",
     srcs = glob(
         [
@@ -295,13 +329,9 @@ filegroup(
         "aten/src/TH/THStorageFunctions.cpp",
         "aten/src/TH/THTensor.cpp",
         "aten/src/TH/THTensorEvenMoreMath.cpp",
-        "aten/src/TH/THTensorFill.cpp",
         "aten/src/TH/THTensorLapack.cpp",
         "aten/src/TH/THTensorMath.cpp",
         "aten/src/TH/THTensorMoreMath.cpp",
-        "aten/src/TH/THTensorRandom.cpp",
-        "aten/src/TH/THVector.cpp",
-        "aten/src/TH/vector/AVX.cpp",
     ],
 )
 
@@ -309,17 +339,20 @@ filegroup(
     name = "aten_cuda_srcs",
     srcs = [
         "aten/src/ATen/cuda/CUDABlas.cpp",
+        "aten/src/ATen/cuda/CUDASolver.cpp",
         "aten/src/ATen/cuda/CUDAContext.cpp",
-        "aten/src/ATen/cuda/CUDAGenerator.cpp",
+        "aten/src/ATen/cuda/CUDAGeneratorImpl.cpp",
+        "aten/src/ATen/cuda/CUDAGraph.cpp",
         "aten/src/ATen/cuda/CuSparseHandlePool.cpp",
         "aten/src/ATen/cuda/CublasHandlePool.cpp",
+        "aten/src/ATen/cuda/CusolverDnHandlePool.cpp",
         "aten/src/ATen/cuda/PinnedMemoryAllocator.cpp",
         "aten/src/ATen/cuda/detail/CUDAHooks.cpp",
+        "aten/src/ATen/cudnn/AutocastRNN.cpp",
         "aten/src/ATen/cudnn/Descriptors.cpp",
         "aten/src/ATen/cudnn/Handle.cpp",
         "aten/src/ATen/cudnn/Types.cpp",
         "aten/src/ATen/native/cuda/CUDAUnaryOps.cpp",
-        "aten/src/ATen/native/cuda/LegacyDefinitions.cpp",
         "aten/src/ATen/native/cuda/TensorShapeCUDA.cpp",
         "aten/src/ATen/native/cudnn/AffineGridGenerator.cpp",
         "aten/src/ATen/native/cudnn/BatchNorm.cpp",
@@ -341,7 +374,6 @@ filegroup(
 filegroup(
     name = "thc_srcs_cu",
     srcs = [
-        "aten/src/THC/THCBlas.cu.cc",
         "aten/src/THC/THCReduceApplyUtils.cu.cc",
         "aten/src/THC/THCSleep.cu.cc",
         "aten/src/THC/THCSortUtils.cu.cc",
@@ -349,28 +381,14 @@ filegroup(
         "aten/src/THC/THCStorageCopy.cu.cc",
         "aten/src/THC/THCTensor.cu.cc",
         "aten/src/THC/THCTensorCopy.cu.cc",
-        "aten/src/THC/THCTensorIndex.cu.cc",
         "aten/src/THC/THCTensorMath.cu.cc",
-        "aten/src/THC/THCTensorMathBlas.cu.cc",
         "aten/src/THC/THCTensorMathMagma.cu.cc",
         "aten/src/THC/THCTensorMathPairwise.cu.cc",
         "aten/src/THC/THCTensorMathReduce.cu.cc",
         "aten/src/THC/THCTensorMathScan.cu.cc",
-        "aten/src/THC/THCTensorMode.cu.cc",
-        "aten/src/THC/THCTensorRandom.cu.cc",
         "aten/src/THC/THCTensorScatterGather.cu.cc",
         "aten/src/THC/THCTensorSort.cu.cc",
         "aten/src/THC/THCTensorTopK.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedBFloat16.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedBool.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedByte.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedChar.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedDouble.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedFloat.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedHalf.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedInt.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedLong.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedShort.cu.cc",
         "aten/src/THC/generated/THCTensorMathPointwiseBool.cu.cc",
         "aten/src/THC/generated/THCTensorMathPointwiseByte.cu.cc",
         "aten/src/THC/generated/THCTensorMathPointwiseChar.cu.cc",
@@ -428,6 +446,7 @@ filegroup(
     name = "aten_srcs_cu",
     srcs = [
         "aten/src/ATen/cuda/detail/IndexUtils.cu.cc",
+        "aten/src/ATen/cuda/detail/CUDAGraphsUtils.cu.cc",
         "aten/src/ATen/native/cuda/Activation.cu.cc",
         "aten/src/ATen/native/cuda/AdaptiveAveragePooling.cu.cc",
         "aten/src/ATen/native/cuda/AdaptiveAveragePooling3d.cu.cc",
@@ -436,6 +455,7 @@ filegroup(
         "aten/src/ATen/native/cuda/AveragePool2d.cu.cc",
         "aten/src/ATen/native/cuda/AveragePool3d.cu.cc",
         "aten/src/ATen/native/cuda/BatchLinearAlgebra.cu.cc",
+        "aten/src/ATen/native/cuda/BatchLinearAlgebraLib.cu.cc",
         "aten/src/ATen/native/cuda/BinaryArithmeticKernel.cu.cc",
         "aten/src/ATen/native/cuda/BinaryCompareKernel.cu.cc",
         "aten/src/ATen/native/cuda/BinaryMiscOpsKernels.cu.cc",
@@ -505,20 +525,24 @@ filegroup(
     ],
 )
 
-template_rule(
+header_template_rule(
     name = "aten_src_ATen_config",
     src = "aten/src/ATen/Config.h.in",
     out = "aten/src/ATen/Config.h",
     substitutions = {
         "@AT_MKLDNN_ENABLED@": "1",
         "@AT_MKL_ENABLED@": "0",
+        "@AT_FFTW_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
         "@USE_BLAS@": "1",
+        "@AT_PARALLEL_OPENMP@": "0",
+        "@AT_PARALLEL_NATIVE@": "1",
+        "@AT_PARALLEL_NATIVE_TBB@": "0",
     },
 )
 
-template_rule(
+header_template_rule(
     name = "aten_src_ATen_cuda_config",
     src = "aten/src/ATen/cuda/CUDAConfig.h.in",
     out = "aten/src/ATen/cuda/CUDAConfig.h",
@@ -529,16 +553,19 @@ template_rule(
     },
 )
 
-template_rule(
+header_template_rule(
     name = "aten_src_TH_THGeneral",
     src = "aten/src/TH/THGeneral.h.in",
     out = "aten/src/TH/THGeneral.h",
     substitutions = {
-        "cmakedefine": "define",
+        "#cmakedefine USE_BLAS": "#define USE_BLAS",
+        "#cmakedefine USE_LAPACK": "#define USE_LAPACK",
+        "#cmakedefine BLAS_F2C": "/* #undef BLAS_F2C */",
+        "#cmakedefine BLAS_USE_CBLAS_DOT": "#define BLAS_USE_CBLAS_DOT",
     },
 )
 
-template_rule(
+header_template_rule(
     name = "aten_src_THC_THCGeneral",
     src = "aten/src/THC/THCGeneral.h.in",
     out = "aten/src/THC/THCGeneral.h",
@@ -550,63 +577,21 @@ template_rule(
 cc_library(
     name = "aten_headers",
     hdrs = [
-        "aten/src/TH/THGeneral.h",
-        "aten/src/THC/THCGeneral.h",
         "torch/csrc/WindowsTorchApiMacro.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
-        "aten/src/ATen/templates/TensorBody.h",
-        "aten/src/ATen/templates/TensorMethods.h",
     ] + glob([
-        "aten/src/ATen/*.h",
-        "aten/src/ATen/core/*.h",
-        "aten/src/ATen/core/boxing/*.h",
-        "aten/src/ATen/core/boxing/impl/*.h",
-        "aten/src/ATen/core/dispatch/*.h",
-        "aten/src/ATen/core/op_registration/*.h",
-        "aten/src/ATen/cpu/*.h",
-        "aten/src/ATen/cpu/vec256/*.h",
-        "aten/src/ATen/cuda/*.cuh",
-        "aten/src/ATen/cuda/*.h",
-        "aten/src/ATen/cuda/detail/*.cuh",
-        "aten/src/ATen/cuda/detail/*.h",
-        "aten/src/ATen/cuda/nvrtc_stub/*.h",
-        "aten/src/ATen/cudnn/*.h",
-        "aten/src/ATen/detail/*.h",
-        "aten/src/ATen/mkl/*.h",
-        "aten/src/ATen/mkldnn/*.h",
-        "aten/src/ATen/native/*.h",
-        "aten/src/ATen/native/cpu/*.h",
-        "aten/src/ATen/native/cuda/*.cuh",
-        "aten/src/ATen/native/cuda/*.h",
-        "aten/src/ATen/native/mkldnn/*.h",
-        "aten/src/ATen/native/quantized/*.h",
-        "aten/src/ATen/native/quantized/cuda/*.h",
-        "aten/src/ATen/native/quantized/cpu/*.h",
-        "aten/src/ATen/native/sparse/*.h",
-        "aten/src/ATen/native/sparse/cuda/*.cuh",
-        "aten/src/ATen/native/utils/*.h",
-        "aten/src/ATen/native/xnnpack/*.h",
-        "aten/src/ATen/quantized/*.h",
-        "aten/src/TH/*.hpp",
-        "aten/src/TH/*.h",
-        "aten/src/TH/vector/*.h",
-        "aten/src/TH/generic/*.hpp",
-        "aten/src/TH/generic/*.h",
-        "aten/src/TH/generic/*.cpp",
-        "aten/src/TH/generic/*.c",
-        "aten/src/THC/*.cpp",
+        "aten/src/**/*.h",
+        "aten/src/**/*.hpp",
+        "aten/src/TH/**/*.cpp",
+        "aten/src/THC/**/*.cpp",
         "aten/src/THC/*.cuh",
-        "aten/src/THC/*.h",
-        "aten/src/THC/*.hpp",
-        "aten/src/THC/generic/*.cpp",
         "aten/src/THC/generic/*.cu.cc",
-        "aten/src/THC/generic/*.h",
-        "aten/src/THC/generic/*.hpp",
-        "aten/src/THCUNN/*.h",
         "aten/src/THCUNN/*.cuh",
-        "aten/src/THCUNN/generic/*.h",
         "aten/src/THCUNN/generic/*.cu.cc",
-    ]) + [
+    ],
+    exclude = [
+        "aten/src/ATen/Config.h",
+    ],) + [
         ":generated_cpp",
         ":aten_src_ATen_config",
     ],
@@ -616,6 +601,8 @@ cc_library(
     ],
     deps = [
         ":c10_headers",
+        ":aten_src_TH_THGeneral",
+        ":aten_src_THC_THCGeneral",
     ],
 )
 
@@ -659,6 +646,8 @@ cc_library(
         ":ATen_CORE_SRCS",
         ":ATen_QUANTIZED_SRCS",
         ":aten_base_cpp",
+        ":aten_base_metal",
+        ":aten_base_vulkan",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
         ":aten_native_mkldnn_cpp",
@@ -731,6 +720,7 @@ torch_cuda_half_options = [
     "-DCUDA_HAS_FP16=1",
     "-D__CUDA_NO_HALF_OPERATORS__",
     "-D__CUDA_NO_HALF_CONVERSIONS__",
+    "-D__CUDA_NO_BFLOAT16_CONVERSIONS__",
     "-D__CUDA_NO_HALF2_OPERATORS__",
 ]
 
@@ -776,7 +766,7 @@ cc_proto_library(
     deps = [":caffe2_proto_source"],
 )
 
-template_rule(
+header_template_rule(
     name = "caffe2_core_macros_h",
     src = "caffe2/core/macros.h.in",
     out = "caffe2/core/macros.h",
@@ -1228,9 +1218,9 @@ filegroup(
         "caffe2/perfkernels/adagrad.cc",
         "caffe2/perfkernels/embedding_lookup.cc",
         "caffe2/perfkernels/embedding_lookup_idx.cc",
-        "caffe2/perfkernels/fused_8bit_rowwise_conversion.cc",
         "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.cc",
         "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup_idx.cc",
+        "caffe2/perfkernels/fused_nbit_rowwise_conversion.cc",
         "caffe2/perfkernels/lstm_unit_cpu_common.cc",
         "caffe2/perfkernels/math_cpu_base.cc",
         "caffe2/perfkernels/typed_axpy.cc",
@@ -1274,6 +1264,7 @@ filegroup(
         "caffe2/quantization/server/fully_connected_dnnlowp_op.cc",
         "caffe2/quantization/server/fully_connected_fake_lowp_op.cc",
         "caffe2/quantization/server/group_norm_dnnlowp_op.cc",
+        "caffe2/quantization/server/int8_gen_quant_params.cc",
         "caffe2/quantization/server/kl_minimization.cc",
         "caffe2/quantization/server/lstm_unit_dnnlowp_op.cc",
         "caffe2/quantization/server/norm_minimization.cc",
@@ -1360,9 +1351,9 @@ filegroup(
         "caffe2/utils/smart_tensor_printer.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
-        "caffe2/utils/threadpool/ThreadPoolMobile.cc",
         "caffe2/utils/threadpool/pthreadpool.cc",
         "caffe2/utils/threadpool/pthreadpool_impl.cc",
+        "caffe2/utils/threadpool/thread_pool_guard.cpp",
     ],
 )
 
@@ -1596,7 +1587,6 @@ filegroup(
 cc_library(
     name = "caffe2_for_aten_headers",
     hdrs = [
-        "caffe2/core/macros.h",
         "caffe2/core/common.h",
         "caffe2/core/logging.h",
         "caffe2/core/types.h",
@@ -1614,6 +1604,7 @@ cc_library(
     deps = [
         ":c10_headers",
         ":caffe2_protos",
+        ":caffe2_core_macros_h",
     ],
 )
 
@@ -1737,13 +1728,16 @@ cc_library(
         "@gloo",
         "@onnx",
         "@fmt",
-        "@tensorpipe",
     ] + if_cuda(
         [
             ":caffe2_cpp_cuda",
             ":aten_cuda",
+            "@tensorpipe//:tensorpipe_cuda",
         ],
-        [":aten"],
+        [
+            ":aten",
+            "@tensorpipe",
+        ],
     ),
     alwayslink = True,
 )
@@ -1774,7 +1768,7 @@ cu_library(
         "@cudnn",
         "@eigen",
         "@gloo",
-        "@tensorpipe",
+        "@tensorpipe//:tensorpipe_cuda",
     ],
     alwayslink = True,
 )
@@ -1865,82 +1859,40 @@ cc_library(
 )
 
 # torch
+py_binary(
+    name = "gen_version_header",
+    srcs = ["tools/setup_helpers/gen_version_header.py"],
+)
+
+genrule(
+    name = "version_h",
+    srcs = ["torch/csrc/api/include/torch/version.h.in", "version.txt"],
+    outs = ["torch/csrc/api/include/torch/version.h"],
+    cmd = "$(location :gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
+    tools = [':gen_version_header']
+)
+
+torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
 cc_library(
     name = "torch_headers",
     hdrs = if_cuda(
-        glob(
-            [
-                "torch/csrc/cuda/*.h",
-            ],
-        ),
+        torch_cuda_headers,
     ) + glob(
         [
             "torch/*.h",
-            "torch/csrc/*.h",
-            "torch/csrc/api/include/torch/*.h",
-            "torch/csrc/api/include/torch/data/*.h",
-            "torch/csrc/api/include/torch/data/dataloader/*.h",
-            "torch/csrc/api/include/torch/data/datasets/*.h",
-            "torch/csrc/api/include/torch/data/detail/*.h",
-            "torch/csrc/api/include/torch/data/samplers/*.h",
-            "torch/csrc/api/include/torch/data/transforms/*.h",
-            "torch/csrc/api/include/torch/detail/*.h",
-            "torch/csrc/api/include/torch/nn/*.h",
-            "torch/csrc/api/include/torch/nn/functional/*.h",
-            "torch/csrc/api/include/torch/nn/modules/*.h",
-            "torch/csrc/api/include/torch/nn/modules/container/*.h",
-            "torch/csrc/api/include/torch/nn/options/*.h",
-            "torch/csrc/api/include/torch/nn/parallel/*.h",
-            "torch/csrc/api/include/torch/nn/utils/*.h",
-            "torch/csrc/api/include/torch/optim/*.h",
-            "torch/csrc/api/include/torch/python/*.h",
-            "torch/csrc/api/include/torch/serialize/*.h",
-            "torch/csrc/autograd/*.h",
-            "torch/csrc/autograd/functions/*.h",
-            "torch/csrc/autograd/utils/*.h",
-            "torch/csrc/distributed/autograd/functions/*.h",
-            "torch/csrc/distributed/autograd/context/*.h",
-            "torch/csrc/distributed/autograd/engine/*.h",
-            "torch/csrc/distributed/autograd/rpc_messages/*.h",
-            "torch/csrc/distributed/autograd/*.h",
-            "torch/csrc/distributed/c10d/*.h",
-            "torch/csrc/distributed/rpc/*.h",
-            "torch/csrc/generic/*.h",
-            "torch/csrc/generic/*.cpp",
-            "torch/csrc/jit/*.h",
-            "torch/csrc/jit/api/*.h",
-            "torch/csrc/jit/backends/backend_interface.h",
-            "torch/csrc/jit/codegen/cuda/*.h",
-            "torch/csrc/jit/codegen/fuser/*.h",
-            "torch/csrc/jit/codegen/fuser/cpu/*.h",
-            "torch/csrc/jit/codegen/fuser/cuda/*.h",
-            "torch/csrc/jit/ir/*.h",
-            "torch/csrc/jit/fuser/*.h",
-            "torch/csrc/jit/fuser/cpu/*.h",
-            "torch/csrc/jit/fuser/cuda/*.h",
-            "torch/csrc/jit/passes/*.h",
-            "torch/csrc/jit/passes/onnx/*.h",
-            "torch/csrc/jit/passes/quantization/*.h",
-            "torch/csrc/jit/passes/utils/*.h",
-            "torch/csrc/jit/python/*.h",
-            "torch/csrc/jit/runtime/*.h",
-            "torch/csrc/jit/frontend/*.h",
-            "torch/csrc/jit/mobile/*.h",
-            "torch/csrc/jit/serialization/*.h",
-            "torch/csrc/jit/tensorexpr/*.h",
-            "torch/csrc/jit/testing/*.h",
-            "torch/csrc/multiprocessing/*.h",
-            "torch/csrc/onnx/*.h",
-            "torch/csrc/tensor/*.h",
-            "torch/csrc/utils/*.h",
+            "torch/csrc/**/*.h",
             "torch/lib/libshm/*.h",
             "torch/lib/c10d/*.hpp",
         ],
         exclude = [
             "torch/lib/c10d/ProcessGroupMPI.hpp",
             "torch/lib/c10d/ProcessGroupNCCL.hpp",
-        ],
-    ) + [":generated_code"],
+            "torch/csrc/autograd/generated/VariableType.h",
+            "torch/csrc/autograd/generated/RegistrationDeclarations.h",
+            "torch/csrc/autograd/generated/variable_factories.h",
+            "torch/csrc/autograd/generated/Functions.h",
+        ] + torch_cuda_headers,
+    ) + [":cpp_generated_code", ":version_h"],
     includes = [
         "torch/csrc",
         "torch/csrc/api/include",
@@ -1980,7 +1932,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
         ],
     )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
-        ":generated_code",
+        ":cpp_generated_code",
     ],
     copts = TORCH_COPTS + if_cuda(["-DUSE_CUDA=1"]),
     defines = [
@@ -1992,6 +1944,14 @@ cc_library(
         ":torch_headers",
     ],
     alwayslink = True,
+)
+
+cc_library(
+    name = "shm",
+    srcs = glob(["torch/lib/libshm/*.cpp"]),
+    deps = [
+        ":torch",
+    ],
 )
 
 cc_library(
@@ -2016,6 +1976,26 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "torch_python",
+    srcs = libtorch_python_core_sources + [":python_generated_code"],
+    hdrs = glob([
+        "torch/csrc/generic/*.cpp",
+    ]),
+    deps = [
+        ":torch",
+        ":shm",
+    ],
+)
+
+pybind_extension(
+    name = "_C",
+    srcs = ["torch/csrc/stub.c"],
+    deps = [
+        ":torch_python"
+    ],
+)
+
 # cpp api tests
 cc_library(
     name = "test_support",
@@ -2024,6 +2004,8 @@ cc_library(
         "test/cpp/api/support.cpp",
     ],
     hdrs = [
+        "test/cpp/api/init_baseline.h",
+        "test/cpp/api/optim_baseline.h",
         "test/cpp/api/support.h",
         "test/cpp/common/support.h",
     ],
@@ -2033,315 +2015,21 @@ cc_library(
     ],
 )
 
-cc_test(
-    name = "any_test",
-    srcs = ["test/cpp/api/any.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "autograd_test",
-    srcs = ["test/cpp/api/autograd.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "dataloader_test",
-    srcs = ["test/cpp/api/dataloader.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "enum_test",
-    srcs = ["test/cpp/api/enum.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "expanding_array_test",
-    srcs = ["test/cpp/api/expanding-array.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "functional_test",
-    srcs = ["test/cpp/api/functional.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "init_test",
-    srcs = [
-        "test/cpp/api/init.cpp",
-        "test/cpp/api/init_baseline.h",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
 # Torch integration tests rely on a labeled data set from the MNIST database.
 # http://yann.lecun.com/exdb/mnist/
-cc_test(
-    name = "integration_test",
-    srcs = ["test/cpp/api/integration.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
 
-cc_test(
-    name = "jit_test",
-    srcs = ["test/cpp/api/jit.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "memory_test",
-    srcs = ["test/cpp/api/memory.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "misc_test",
-    srcs = ["test/cpp/api/misc.cpp"],
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "module_test",
-    srcs = ["test/cpp/api/module.cpp"],
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "modulelist_test",
-    srcs = ["test/cpp/api/modulelist.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "modules_test",
-    srcs = ["test/cpp/api/modules.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "nn_utils_test",
-    srcs = ["test/cpp/api/nn_utils.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "optim_test",
-    srcs = [
-        "test/cpp/api/optim.cpp",
-        "test/cpp/api/optim_baseline.h",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "ordered_dict_test",
-    srcs = ["test/cpp/api/ordered_dict.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "parallel_test",
-    srcs = ["test/cpp/api/parallel.cpp"],
-    copts = COMMON_COPTS,
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "rnn_test",
-    size = "small",
-    srcs = ["test/cpp/api/rnn.cpp"],
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "sequential_test",
-    size = "small",
-    srcs = ["test/cpp/api/sequential.cpp"],
-    copts = ["-Wno-deprecated-declarations"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "serialize_test",
-    size = "small",
-    srcs = ["test/cpp/api/serialize.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "static_test",
-    size = "small",
-    srcs = ["test/cpp/api/static.cpp"],
-    deps = [
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "tensor_test",
-    size = "small",
-    srcs = ["test/cpp/api/tensor.cpp"],
-    copts = ["-Wno-deprecated-declarations"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "tensor_cuda_test",
-    size = "small",
-    srcs = ["test/cpp/api/tensor_cuda.cpp"],
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "tensor_options_test",
-    size = "small",
-    srcs = ["test/cpp/api/tensor_options.cpp"],
-    deps = [
-        ":test_support",
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "tensor_options_cuda_test",
-    size = "small",
-    srcs = ["test/cpp/api/tensor_options_cuda.cpp"],
-    tags = [
-        "exclusive",
-        "gpu-required",
-    ],
-    deps = [
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "torch_include_test",
-    size = "small",
-    srcs = ["test/cpp/api/torch_include.cpp"],
-    deps = [
-        ":torch",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
+cpp_api_tests = glob(["test/cpp/api/*.cpp"])
+[
+  cc_test(
+      name = paths.split_extension(paths.basename(filename))[0].replace("-","_") + "_test",
+    size = "medium",
+      srcs = [filename],
+      deps = [
+          ":test_support",
+          "@com_google_googletest//:gtest_main",
+      ],
+  ) for filename in cpp_api_tests
+]
 
 test_suite(
     name = "api_tests",

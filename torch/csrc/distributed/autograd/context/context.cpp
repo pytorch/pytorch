@@ -1,8 +1,9 @@
+#include <torch/csrc/distributed/autograd/context/context.h>
+
 #include <functional>
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
-#include <torch/csrc/distributed/autograd/context/context.h>
 
 namespace torch {
 namespace distributed {
@@ -122,26 +123,27 @@ void DistAutogradContext::resetGraphTask() {
 }
 
 void DistAutogradContext::addOutstandingRpc(
-    const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
-  futureMessage->addCallback([this](const rpc::FutureMessage& futureMessage) {
-    if (futureMessage.hasError()) {
+    const std::shared_ptr<rpc::JitFuture>& jitFuture) {
+  std::weak_ptr<rpc::JitFuture> wp = jitFuture;
+  jitFuture->addCallback([this, wp]() {
+    auto future = wp.lock();
+    if (future->hasError()) {
       // If we have an error, let the local autograd engine know about it.
-      std::runtime_error err((*futureMessage.error()).what());
       std::unique_lock<std::mutex> lock(lock_);
       if (graphTask_) {
         graphTask_->set_exception_without_signal(nullptr);
         lock.unlock();
         if (!graphTask_->future_completed_.exchange(true)) {
-          graphTask_->future_result_->setErrorIfNeeded(err.what());
+          graphTask_->future_result_->setErrorIfNeeded(future->exception_ptr());
         }
       } else {
         LOG(WARNING) << "Ignoring error since GraphTask is no longer valid: "
-                     << err.what();
+                     << future->tryRetrieveErrorMessage();
       }
     }
   });
   std::lock_guard<std::mutex> guard(lock_);
-  outStandingRpcs_.push_back(futureMessage);
+  outStandingRpcs_.push_back(jitFuture);
 }
 
 void DistAutogradContext::clearOutstandingRpcs() {
@@ -149,7 +151,7 @@ void DistAutogradContext::clearOutstandingRpcs() {
   outStandingRpcs_.clear();
 }
 
-std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
+std::shared_ptr<c10::ivalue::Future> DistAutogradContext::
     clearAndWaitForOutstandingRpcsAsync() {
   std::unique_lock<std::mutex> lock(lock_);
   auto outStandingRpcs = std::move(outStandingRpcs_);
@@ -157,18 +159,22 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
 
   struct State {
     explicit State(int32_t count)
-        : future(std::make_shared<rpc::FutureMessage>()), remaining(count) {}
-    std::shared_ptr<rpc::FutureMessage> future;
+        : future(
+              std::make_shared<c10::ivalue::Future>(c10::NoneType::create())),
+          remaining(count) {}
+    std::shared_ptr<c10::ivalue::Future> future;
     std::atomic<int32_t> remaining;
     std::atomic<bool> alreadySentError{false};
   };
   auto state = std::make_shared<State>(outStandingRpcs.size());
   if (outStandingRpcs.empty()) {
-    state->future->markCompleted(rpc::Message());
+    state->future->markCompleted(c10::IValue());
   } else {
     for (auto& rpc : outStandingRpcs) {
-      rpc->addCallback([state](const rpc::FutureMessage& rpc) {
-        if (rpc.hasError()) {
+      std::weak_ptr<rpc::JitFuture> wp = rpc;
+      rpc->addCallback([state, wp]() {
+        auto future = wp.lock();
+        if (future->hasError()) {
           // If there's an error, we want to setError() on the future,
           // unless another error has already been sent - use a CAS to
           // guard.
@@ -180,13 +186,13 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
           bool expectedAlreadySent = false;
           if (state->alreadySentError.compare_exchange_strong(
                   expectedAlreadySent, true)) {
-            state->future->setError(rpc.error()->what());
+            state->future->setError(future->exception_ptr());
           }
           return;
         }
 
         if (--state->remaining == 0) {
-          state->future->markCompleted(rpc::Message());
+          state->future->markCompleted(c10::IValue());
         }
       });
     }
@@ -209,6 +215,44 @@ const c10::Dict<torch::Tensor, torch::Tensor> DistAutogradContext::
     getGradients() const {
   std::lock_guard<std::mutex> guard(lock_);
   return accumulatedGrads_;
+}
+
+void DistAutogradContext::runGradCallbackForVariable(
+    const torch::autograd::Variable& variable,
+    GradCallback&& cb) {
+  torch::Tensor grad;
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    auto it = accumulatedGrads_.find(variable);
+    TORCH_INTERNAL_ASSERT(
+        it != accumulatedGrads_.end(),
+        "The grad for the variable should exist in dist_autograd context.");
+    grad = it->value();
+  }
+  if (cb(grad)) {
+    std::lock_guard<std::mutex> guard(lock_);
+    // Needs to update the grad in the map.
+    accumulatedGrads_.insert_or_assign(variable, std::move(grad));
+  }
+}
+
+namespace {
+thread_local ContextPtr tl_context_ptr;
+} // namespace
+
+ThreadLocalDistAutogradContext::ThreadLocalDistAutogradContext(
+    ContextPtr&& new_context)
+    : prev_context_ptr_(std::move(tl_context_ptr)) {
+  tl_context_ptr = std::move(new_context);
+}
+
+ThreadLocalDistAutogradContext::~ThreadLocalDistAutogradContext() {
+  tl_context_ptr = std::move(prev_context_ptr_);
+}
+
+// static
+ContextPtr ThreadLocalDistAutogradContext::getContextPtr() {
+  return tl_context_ptr;
 }
 
 } // namespace autograd

@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -11,6 +10,7 @@ import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
 
+from sys import maxsize
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -18,6 +18,44 @@ import torch.onnx.symbolic_opset9
 # This file exports ONNX ops for opset 10
 # Opset 10 is supported by ONNX release 1.5.0
 # release on 04/24/19
+
+
+def div(g, self, other, *args):
+    if len(args) == 0:
+        return torch.onnx.symbolic_opset9.true_divide(g, self, other)
+    else:
+        return _div_rounding_mode(g, self, other, *args)
+
+
+@parse_args('v', 'v', 's')
+def _div_rounding_mode(g, self, other, rounding_mode):
+    if rounding_mode == 'floor':
+        return _floor_divide(g, self, other)
+    else:
+        return torch.onnx.symbolic_opset9._div_rounding_mode(g, self, other, rounding_mode)
+
+
+def _floor_divide(g, self, other):
+    if sym_help._is_fp(self) or sym_help._is_fp(other):
+        out = torch.onnx.symbolic_opset9.true_divide(g, self, other)
+        return g.op('Floor', out)
+    else:
+        # Integer division does trunction rounding
+        div = g.op('Div', self, other)
+        # Division is negative if: self < 0 != other < 0
+        zero = g.op('Constant', value_t=torch.tensor(0, dtype=torch.int64))
+        negative = g.op('Xor',
+                        g.op('Less', self, zero),
+                        g.op('Less', other, zero))
+
+        # For negative numbers with self % other != 0, subtract 1 to round down instead of up
+        mod = g.op('Mod', self, other, fmod_i=0)
+        fixup_mask = g.op('And', negative,
+                          g.op('Not', g.op('Equal', mod, zero)))
+
+        one = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        fixup = g.op('Sub', div, one)
+        return g.op('Where', fixup_mask, fixup, div)
 
 
 @parse_args('v', 'i', 'i', 'none')
@@ -136,9 +174,11 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
 
 def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:
-        starts = g.op("Unsqueeze", starts, axes_i=[0])
-        ends = g.op("Unsqueeze", ends, axes_i=[0])
-        axes = g.op("Unsqueeze", axes, axes_i=[0])
+        starts = sym_help._unsqueeze_helper(g, starts, [0])
+        ends = sym_help._unsqueeze_helper(g, ends, [0])
+        if isinstance(axes, int):
+            axes = g.op("Constant", value_t=torch.tensor(axes))
+        axes = sym_help._unsqueeze_helper(g, axes, [0])
     else:
         assert len(starts) == len(ends)
         assert len(starts) == len(axes)
@@ -155,10 +195,21 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     return g.op("Slice", input, starts, ends, axes, steps)
 
 
-@parse_args('v', 'v', 'v', 'v', 'i')
-def slice(g, self, dim, start, end, step):
+def slice(g, self, *args):
+    if len(args) == 4:
+        # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
+        dim, start, end, step = args
+    elif len(args) == 3:
+        # aten::slice(t[] l, int start, int end, int step) -> t[]
+        start, end, step = args
+        dim = 0
+    else:
+        raise NotImplementedError("Unknown aten::slice signature")
+
+    step = sym_help._parse_arg(step, 'i')
     if (start.node().kind() != 'onnx::Constant' or
-       end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant'):
+       (not isinstance(end, int) and end.node().kind() != 'onnx::Constant') or
+       (not isinstance(dim, int) and dim.node().kind() != 'onnx::Constant')):
         dynamic_slice = True
     else:
         start = [sym_help._parse_arg(start, 'i')]
@@ -178,3 +229,74 @@ def flip(g, input, dims):
 
 def fmod(g, input, other):
     return g.op("Mod", input, other, fmod_i=1)
+
+
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
+def embedding_bag(g,
+                  embedding_matrix,
+                  indices,
+                  offsets,
+                  scale_grad_by_freq,
+                  mode,
+                  sparse,
+                  per_sample_weights,
+                  include_last_offset):
+    if scale_grad_by_freq and sym_help._training_mode:
+        return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
+    from torch.onnx.symbolic_opset9 import select
+    import warnings
+    warnings.warn("Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
+                  "Please use opset 11 or higher to export model for dynamic input shape.'")
+    offsets_dim_0 = sym_help._get_tensor_dim_size(offsets, 0)
+    if offsets_dim_0 is not None:
+        if include_last_offset:
+            offset_len = offsets_dim_0 - 1
+            offsets_extended = offsets
+        else:
+            offset_len = offsets_dim_0
+            offsets_extended = [offsets, g.op("Constant", value_t=torch.tensor([maxsize]))]
+            offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
+        list_ = []
+        for i in range(offset_len):
+            start_ = sym_help._unsqueeze_helper(g, select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), [0])
+            end_ = sym_help._unsqueeze_helper(g, select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)), [0])
+            axes_ = g.op("Constant", value_t=torch.tensor([0]))
+            indices_row = g.op("Slice", indices, start_, end_, axes_)
+
+            embeddings = g.op("Gather", embedding_matrix, indices_row)
+            if not sym_help._is_none(per_sample_weights):
+                per_sample_weights_row = g.op("Slice", per_sample_weights, start_, end_, axes_)
+                per_sample_weights_row = sym_help._unsqueeze_helper(g, per_sample_weights_row, [1])
+                embeddings = g.op("Mul", embeddings, per_sample_weights_row)
+            if mode == 0:
+                embeddings = sym_help._reducesum_helper(g, embeddings, axes_i=[0], keepdims_i=0)
+            elif mode == 1:
+                embeddings = g.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
+            else:
+                embeddings = g.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
+
+            embeddings = sym_help._unsqueeze_helper(g, embeddings, [0])
+            list_.append(embeddings)
+
+        output = g.op("Concat", *list_, axis_i=0)
+        # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
+        # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
+        return output, None, None, None
+    else:
+        return sym_help._onnx_unsupported('embedding_bag with unknown shape of offsets for opset 10 is not supported. '
+                                          'please use opset 11 or higher.')
+
+
+@parse_args('v', 't', 'i', 'i', 'i')
+def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128, quant_max=127):
+    if quant_min not in [0, -128] or quant_max not in [127, 255]:
+        raise RuntimeError(
+            "ONNX defines [0, 255] for quint8 and [-128, 127] for qint8, got [{}, {}]".format(quant_min, quant_max))
+    scale = scale.float().data  # Avoid exporter generating double type
+    zero_point_dtype = torch.int8 if quant_min == -128 else torch.uint8
+    zero_point = torch.tensor(zero_point, dtype=zero_point_dtype)  # ONNX requires zero_point to be tensor
+    return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
+
+def isinf(g, input):
+    from torch.onnx.symbolic_opset9 import _cast_Double  # type: ignore
+    return g.op("IsInf", _cast_Double(g, input, False))  # type: ignore

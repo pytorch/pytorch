@@ -71,6 +71,17 @@ struct EndsWith {
   std::string suffix_;
 };
 
+struct StrEquals {
+  explicit StrEquals(OperatorBase& op)
+      : text_(op.GetSingleArgument<std::string>("text", "")) {}
+  bool operator()(const std::string& str) {
+    return str == text_;
+  }
+
+ private:
+  std::string text_;
+};
+
 struct Prefix {
   explicit Prefix(OperatorBase& op)
       : length_(op.GetSingleArgument<int>("length", 3)) {}
@@ -108,6 +119,9 @@ REGISTER_CPU_OPERATOR(
 REGISTER_CPU_OPERATOR(
     StringEndsWith,
     StringElementwiseOp<EndsWith, FixedType<bool>>);
+REGISTER_CPU_OPERATOR(
+    StringEquals,
+    StringElementwiseOp<StrEquals, FixedType<bool>>);
 REGISTER_CPU_OPERATOR(StringJoin, StringJoinOp<CPUContext>);
 
 OPERATOR_SCHEMA(StringPrefix)
@@ -164,6 +178,17 @@ Returns tensor of boolean of the same dimension of input.
     .Input(0, "strings", "Tensor of std::string.")
     .Output(0, "bools", "Tensor of bools of same shape as input.");
 
+OPERATOR_SCHEMA(StringEquals)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Performs equality check on each string in the input tensor.
+Returns tensor of booleans of the same dimension as input.
+)DOC")
+    .Arg("text", "The text to check input strings equality against.")
+    .Input(0, "strings", "Tensor of std::string.")
+    .Output(0, "bools", "Tensor of bools of same shape as input.");
+
 OPERATOR_SCHEMA(StringJoin)
     .NumInputs(1)
     .NumOutputs(1)
@@ -187,6 +212,7 @@ SHOULD_NOT_DO_GRADIENT(StringPrefix);
 SHOULD_NOT_DO_GRADIENT(StringSuffix);
 SHOULD_NOT_DO_GRADIENT(StringStartsWith);
 SHOULD_NOT_DO_GRADIENT(StringEndsWith);
+SHOULD_NOT_DO_GRADIENT(StringEquals);
 SHOULD_NOT_DO_GRADIENT(StringJoin);
 }
 } // namespace caffe2

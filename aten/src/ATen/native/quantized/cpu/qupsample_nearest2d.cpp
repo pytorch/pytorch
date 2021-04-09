@@ -3,6 +3,9 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/quantized/Quantizer.h>
+
+#include <c10/util/irange.h>
+
 #include <cstring>
 
 
@@ -70,7 +73,7 @@ static void upsample_nearest2d_out_frame_nhwc(
   float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
   float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
 
-  for (int b = 0; b < nbatch; b++) {
+  for (const auto b : c10::irange(nbatch)) {
     auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * input_height * input_width * channels);
     auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * output_height * output_width * channels);
     // special case: just copy
@@ -95,7 +98,7 @@ static void upsample_nearest2d_out_frame_nhwc(
   }
 }
 
-Tensor quantized_upsample_nearest2d_cpu(
+Tensor upsample_nearest2d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales_h,
@@ -106,7 +109,7 @@ Tensor quantized_upsample_nearest2d_cpu(
       output_size.size());
 
   TORCH_CHECK(
-      input.numel() != 0 && input.dim() == 4,
+      input.dim() == 4,
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
@@ -168,6 +171,19 @@ Tensor quantized_upsample_nearest2d_cpu(
     });
     return output;
   }
+}
+
+using at::native::upsample::compute_output_size;
+using at::native::upsample::get_scale_value;
+
+Tensor upsample_nearest2d_quantized_cpu(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_h = get_scale_value(scale_factors, 0);
+  auto scale_w = get_scale_value(scale_factors, 1);
+  return upsample_nearest2d_quantized_cpu(input, osize, scale_h, scale_w);
 }
 
 } // namespace native

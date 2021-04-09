@@ -1,17 +1,15 @@
 ## @package rnn_cell
 # Module caffe2.python.rnn_cell
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import functools
 import inspect
-import itertools
 import logging
 import numpy as np
 import random
-import six
 from future.utils import viewkeys
 
 from caffe2.proto import caffe2_pb2
@@ -32,7 +30,7 @@ from caffe2.python.model_helper import ModelHelper
 def _RectifyName(blob_reference_or_name):
     if blob_reference_or_name is None:
         return None
-    if isinstance(blob_reference_or_name, six.string_types):
+    if isinstance(blob_reference_or_name, str):
         return core.ScopedBlobReference(blob_reference_or_name)
     if not isinstance(blob_reference_or_name, core.BlobReference):
         raise Exception("Unknown blob reference type")
@@ -42,7 +40,7 @@ def _RectifyName(blob_reference_or_name):
 def _RectifyNames(blob_references_or_names):
     if blob_references_or_names is None:
         return None
-    return list(map(_RectifyName, blob_references_or_names))
+    return [_RectifyName(i) for i in blob_references_or_names]
 
 
 class RNNCell(object):
@@ -236,7 +234,7 @@ class RNNCell(object):
         '''
         Returns recurrent state names with self.name scoping applied
         '''
-        return list(map(self.scope, self.get_state_names_override()))
+        return [self.scope(name) for name in self.get_state_names_override()]
 
     def get_state_names_override(self):
         '''

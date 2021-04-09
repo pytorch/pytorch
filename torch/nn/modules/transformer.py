@@ -1,5 +1,5 @@
 import copy
-from typing import Optional
+from typing import Optional, Any
 
 import torch
 from torch import Tensor
@@ -31,6 +31,7 @@ class Transformer(Module):
         activation: the activation function of encoder/decoder intermediate layer, relu or gelu (default=relu).
         custom_encoder: custom encoder (default=None).
         custom_decoder: custom decoder (default=None).
+        layer_norm_eps: the eps value in layer normalization components (default=1e-5).
 
     Examples::
         >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
@@ -42,23 +43,24 @@ class Transformer(Module):
     https://github.com/pytorch/examples/tree/master/word_language_model
     """
 
-    def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
-                 num_decoder_layers=6, dim_feedforward=2048, dropout=0.1,
-                 activation="relu", custom_encoder=None, custom_decoder=None):
+    def __init__(self, d_model: int = 512, nhead: int = 8, num_encoder_layers: int = 6,
+                 num_decoder_layers: int = 6, dim_feedforward: int = 2048, dropout: float = 0.1,
+                 activation: str = "relu", custom_encoder: Optional[Any] = None, custom_decoder: Optional[Any] = None,
+                 layer_norm_eps: float = 1e-5) -> None:
         super(Transformer, self).__init__()
 
         if custom_encoder is not None:
             self.encoder = custom_encoder
         else:
-            encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
-            encoder_norm = LayerNorm(d_model)
+            encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation, layer_norm_eps)
+            encoder_norm = LayerNorm(d_model, eps=layer_norm_eps)
             self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         if custom_decoder is not None:
             self.decoder = custom_decoder
         else:
-            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
-            decoder_norm = LayerNorm(d_model)
+            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation, layer_norm_eps)
+            decoder_norm = LayerNorm(d_model, eps=layer_norm_eps)
             self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
         self._reset_parameters()
@@ -66,10 +68,9 @@ class Transformer(Module):
         self.d_model = d_model
         self.nhead = nhead
 
-    def forward(self, src, tgt, src_mask=None, tgt_mask=None,
-                memory_mask=None, src_key_padding_mask=None,
-                tgt_key_padding_mask=None, memory_key_padding_mask=None):
-        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tensor  # noqa
+    def forward(self, src: Tensor, tgt: Tensor, src_mask: Optional[Tensor] = None, tgt_mask: Optional[Tensor] = None,
+                memory_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None,
+                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Take in and process masked source/target sequences.
 
         Args:
@@ -96,7 +97,7 @@ class Transformer(Module):
             positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
             while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
             are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
-            is provided, it will be added to the attention weight. 
+            is provided, it will be added to the attention weight.
             [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
             the attention. If a ByteTensor is provided, the non-zero positions will be ignored while the zero
             positions will be unchanged. If a BoolTensor is provided, the positions with the
@@ -127,7 +128,7 @@ class Transformer(Module):
                               memory_key_padding_mask=memory_key_padding_mask)
         return output
 
-    def generate_square_subsequent_mask(self, sz):
+    def generate_square_subsequent_mask(self, sz: int) -> Tensor:
         r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
             Unmasked positions are filled with float(0.0).
         """
@@ -165,8 +166,7 @@ class TransformerEncoder(Module):
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, src, mask=None, src_key_padding_mask=None):
-        # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
+    def forward(self, src: Tensor, mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
 
         Args:
@@ -211,10 +211,9 @@ class TransformerDecoder(Module):
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, tgt, memory, tgt_mask=None,
-                memory_mask=None, tgt_key_padding_mask=None,
-                memory_key_padding_mask=None):
-        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tensor
+    def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None,
+                memory_mask: Optional[Tensor] = None, tgt_key_padding_mask: Optional[Tensor] = None,
+                memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
         Args:
@@ -255,6 +254,7 @@ class TransformerEncoderLayer(Module):
         dim_feedforward: the dimension of the feedforward network model (default=2048).
         dropout: the dropout value (default=0.1).
         activation: the activation function of intermediate layer, relu or gelu (default=relu).
+        layer_norm_eps: the eps value in layer normalization components (default=1e-5).
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -262,7 +262,7 @@ class TransformerEncoderLayer(Module):
         >>> out = encoder_layer(src)
     """
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu"):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu", layer_norm_eps=1e-5):
         super(TransformerEncoderLayer, self).__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
         # Implementation of Feedforward model
@@ -270,8 +270,8 @@ class TransformerEncoderLayer(Module):
         self.dropout = Dropout(dropout)
         self.linear2 = Linear(dim_feedforward, d_model)
 
-        self.norm1 = LayerNorm(d_model)
-        self.norm2 = LayerNorm(d_model)
+        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps)
+        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
 
@@ -282,8 +282,7 @@ class TransformerEncoderLayer(Module):
             state['activation'] = F.relu
         super(TransformerEncoderLayer, self).__setstate__(state)
 
-    def forward(self, src, src_mask=None, src_key_padding_mask=None):
-        # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
+    def forward(self, src: Tensor, src_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layer.
 
         Args:
@@ -318,6 +317,7 @@ class TransformerDecoderLayer(Module):
         dim_feedforward: the dimension of the feedforward network model (default=2048).
         dropout: the dropout value (default=0.1).
         activation: the activation function of intermediate layer, relu or gelu (default=relu).
+        layer_norm_eps: the eps value in layer normalization components (default=1e-5).
 
     Examples::
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
@@ -326,7 +326,7 @@ class TransformerDecoderLayer(Module):
         >>> out = decoder_layer(tgt, memory)
     """
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu"):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu", layer_norm_eps=1e-5):
         super(TransformerDecoderLayer, self).__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
         self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
@@ -335,9 +335,9 @@ class TransformerDecoderLayer(Module):
         self.dropout = Dropout(dropout)
         self.linear2 = Linear(dim_feedforward, d_model)
 
-        self.norm1 = LayerNorm(d_model)
-        self.norm2 = LayerNorm(d_model)
-        self.norm3 = LayerNorm(d_model)
+        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps)
+        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps)
+        self.norm3 = LayerNorm(d_model, eps=layer_norm_eps)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
@@ -349,9 +349,8 @@ class TransformerDecoderLayer(Module):
             state['activation'] = F.relu
         super(TransformerDecoderLayer, self).__setstate__(state)
 
-    def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
-                tgt_key_padding_mask=None, memory_key_padding_mask=None):
-        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tensor
+    def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None, memory_mask: Optional[Tensor] = None,
+                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer.
 
         Args:

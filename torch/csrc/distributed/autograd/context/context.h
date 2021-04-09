@@ -1,11 +1,13 @@
 #pragma once
 
+#include <cstdint>
+#include <functional>
+
 #include <ATen/core/Dict.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <cstdint>
 
 namespace torch {
 namespace distributed {
@@ -17,6 +19,8 @@ class RecvRpcBackward;
 // autograd pass on a worker.
 class TORCH_API DistAutogradContext {
  public:
+  using GradCallback = std::function<bool(torch::Tensor&)>;
+
   explicit DistAutogradContext(int64_t contextId);
 
   // Retrieves the autograd context id for this context.
@@ -48,10 +52,17 @@ class TORCH_API DistAutogradContext {
 
   // Adds a future message recording an outstanding RPC.
   void addOutstandingRpc(
-      const std::shared_ptr<rpc::FutureMessage>& futureMessage);
+      const std::shared_ptr<rpc::JitFuture>& jitFuture);
 
   // Returns all gradients.
   const c10::Dict<torch::Tensor, torch::Tensor> getGradients() const;
+
+  // This function gives a mutable grad reference to the callback.
+  // If the callback returns true, it means the grad in the context
+  // needs to be updated.
+  void runGradCallbackForVariable(
+      const torch::autograd::Variable& variable,
+      GradCallback&& cb);
 
   DistAutogradContext(const DistAutogradContext&) = delete;
   DistAutogradContext& operator=(const DistAutogradContext&) = delete;
@@ -93,7 +104,7 @@ class TORCH_API DistAutogradContext {
 
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.
-  std::shared_ptr<rpc::FutureMessage> clearAndWaitForOutstandingRpcsAsync();
+  std::shared_ptr<c10::ivalue::Future> clearAndWaitForOutstandingRpcsAsync();
 
   void clearOutstandingRpcs();
 
@@ -123,13 +134,29 @@ class TORCH_API DistAutogradContext {
   // List of futures for RPCs initiated by this node to propagate gradients to
   // other nodes. The distributed autograd engine on this node can return
   // successfully only if all these futures are done and are successful.
-  std::vector<std::shared_ptr<rpc::FutureMessage>> outStandingRpcs_;
+  std::vector<std::shared_ptr<rpc::JitFuture>> outStandingRpcs_;
 
   // Lock to protect concurrent modification of the context.
   mutable std::mutex lock_;
 };
 
 using ContextPtr = std::shared_ptr<DistAutogradContext>;
+
+// This class stores a shared_ptr to a DistAutogradContext instance in a
+// thread local variable. The instance is given by the call site. The class
+// doesn't know the current context. It's just a util class.
+class TORCH_API ThreadLocalDistAutogradContext {
+ public:
+  // Store 'new_context' to the thread local variable maintained by this class.
+  explicit ThreadLocalDistAutogradContext(ContextPtr&& new_context);
+  ~ThreadLocalDistAutogradContext();
+
+  // Retrieve the stored DistAutogradContext instance.
+  static ContextPtr getContextPtr();
+
+ private:
+  ContextPtr prev_context_ptr_;
+};
 
 } // namespace autograd
 } // namespace distributed

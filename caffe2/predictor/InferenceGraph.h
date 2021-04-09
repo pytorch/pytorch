@@ -20,5 +20,7 @@ struct InferenceGraph {
   std::vector<std::string> input_names;
   std::vector<std::string> output_names;
   std::vector<std::string> parameter_names;
+
+  bool predictor_net_ssa_rewritten{false};
 };
 } // namespace caffe2

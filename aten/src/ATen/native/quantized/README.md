@@ -21,7 +21,7 @@ Tensor quantized_xand(Tensor qa, Tensor qb) {
   // Some type checks for qa and qb should be here...
   Tensor qc;
   double scale = qa.q_scale();
-  long zero_point qa.q_zero_point();
+  int64_t zero_point = qa.q_zero_point();
 
   auto iter = TensorIterator::binary_op(qc, qa, qb);
 
@@ -77,7 +77,7 @@ The registration is done using `TORCH_LIBRARY_IMPL`.
 
 ```c++
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("xand", quantized_xand);
+  m.impl("xand", TORCH_FN(quantized_xand));
 }
 ```
 
@@ -128,7 +128,7 @@ namespace at {
   }
 
   TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-    m.impl("xand", quantized_xand);
+    m.impl("xand", TORCH_FN(quantized_xand));
   }
 }}  // namespace at::native
 ```
@@ -179,52 +179,8 @@ You should not need to use the registered kernels in C++.
 Although **officially not supported**, you can use the following
 
 ```c++
-namespace at {
-  namespace native {
-  namespace dispatch_tools {
-  /* Creates a stack of inputs consumable by the dispatcher.*/
-  template <class... Inputs>
-  inline std::vector<torch::IValue> makeStack(Inputs&&... inputs) {
-    return {std::forward<Inputs>(inputs)...};
-  }
-
-  /* Given an operator handle, calls it using some arguments.
-     Note: this is slow because it boxes every argument
-     and likely has to re-unbox them when calling the kernel.
-     Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
-  */
-  template <class... Args>
-  inline std::vector<torch::IValue> callOp(
-      const torch::OperatorHandle& op,
-      Args... args) {
-    auto stack = makeStack(std::forward<Args>(args)...);
-    auto kernel = torch::Dispatcher::singleton().lookup(op, &stack);
-    kernel.call(&stack);
-    return stack;
-  }
-
-  /* Finds the op and calls the callOp on it.
-     Note: this is slow because it boxes every argument
-     and likely has to re-unbox them when calling the kernel.
-     Prefer calling c10::OperatorHandle::callUnboxed<Args...>(args...).
-  */
-  template <class... Args>
-  inline std::vector<torch::IValue> callOp(
-      const char* func_name,
-      const char* overload_name,
-      Args... args) {
-    const torch::optional<torch::OperatorHandle> op_handle =
-        torch::Dispatcher::singleton().findSchema(func_name, overload_name);
-    assert(op_handle.has_value());
-    return callOp(op_handle.value(), args...);
-  }
-  } // dispatch_tools
-
-  // This is your new function
   Tensor quantized_xand(Tensor qa, Tensor qb) {
-    return dispatch_tools::callOp("quantized::xand", "", qa, qb);
+    static const c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"quantized::xand", ""}).value();
+    return op.call<Tensor, Tensor, Tensor>(qa, qb);
   }
-  }}  // namespace at::native
 ```
-
-The `dispatch_tools` is just a local namespace created for a sake of example.

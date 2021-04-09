@@ -61,15 +61,30 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
     }
   }
 
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, in_tensor.scalar_type(), "flip_cpu", [&] {
-    flip_cpu_kernel<scalar_t>(
-      total_dims,
-      stride_contiguous_v,
-      flip_dims_b,
-      in_tensor,
-      out_tensor
-    );
-  });
+  if (in_tensor.is_quantized()) {
+    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(in_tensor.scalar_type(),
+                                        "flip_quantized_cpu", [&] {
+      flip_cpu_kernel<scalar_t>(
+        total_dims,
+        stride_contiguous_v,
+        flip_dims_b,
+        in_tensor,
+        out_tensor
+      );
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16,
+                                          in_tensor.scalar_type(),
+                                          "flip_cpu", [&] {
+      flip_cpu_kernel<scalar_t>(
+        total_dims,
+        stride_contiguous_v,
+        flip_dims_b,
+        in_tensor,
+        out_tensor
+      );
+    });
+  }
 
   return out_tensor;
 }
@@ -128,6 +143,81 @@ Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
     default:
       return self.clone(at::MemoryFormat::Contiguous);
   }
+}
+
+Tensor fliplr(const Tensor& self) {
+  TORCH_CHECK(self.dim() >= 2, "Input must be >= 2-d.");
+
+  return self.flip({1});
+}
+
+Tensor flipud(const Tensor& self) {
+  TORCH_CHECK(self.dim() >= 1, "Input must be >= 1-d.");
+
+  return self.flip({0});
+}
+
+Tensor atleast_1d(const Tensor& self) {
+  switch (self.dim()) {
+    case 0:
+      return self.reshape({1});
+    default:
+      return self;
+  }
+}
+
+std::vector<Tensor> atleast_1d(TensorList tensors) {
+  std::vector<Tensor> result(tensors.size());
+  auto transform_lambda = [](const Tensor& input) -> Tensor {
+    return at::native::atleast_1d(input);
+  };
+  std::transform(tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
+  return result;
+}
+
+Tensor atleast_2d(const Tensor& self) {
+  switch (self.dim()) {
+    case 0:
+      return self.reshape({1, 1});
+    case 1: {
+      return self.unsqueeze(0);
+    }
+    default:
+      return self;
+  }
+}
+
+std::vector<Tensor> atleast_2d(TensorList tensors) {
+  std::vector<Tensor> result(tensors.size());
+  auto transform_lambda = [](const Tensor& input) -> Tensor {
+    return at::native::atleast_2d(input);
+  };
+  std::transform(tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
+  return result;
+}
+
+Tensor atleast_3d(const Tensor& self) {
+  switch (self.dim()) {
+    case 0:
+      return self.reshape({1, 1, 1});
+    case 1: {
+      return self.unsqueeze(0).unsqueeze(-1);
+    }
+    case 2: {
+      return self.unsqueeze(-1);
+    }
+    default:
+      return self;
+  }
+}
+
+std::vector<Tensor> atleast_3d(TensorList tensors) {
+  std::vector<Tensor> result(tensors.size());
+  auto transform_lambda = [](const Tensor& input) -> Tensor {
+    return at::native::atleast_3d(input);
+  };
+  std::transform(tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
+  return result;
 }
 
 }} // namespace at::native

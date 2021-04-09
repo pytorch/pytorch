@@ -4,13 +4,17 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <vector>
 
-torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 namespace {
@@ -58,7 +62,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
     weight_zero_points_int32[0] = weight.q_zero_point();
   } else if (qtype == c10::kPerChannelAffine) {
     weight_zero_points_int32.resize(N, 0);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       weight_zero_points_int32[i] =
           weight.q_per_channel_zero_points()[i].item<int32_t>();
     }
@@ -68,7 +72,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
     weight_scales_float[0] = weight.q_scale();
   } else if (qtype == c10::kPerChannelAffine) {
     weight_scales_float.resize(N, 0.0);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       weight_scales_float[i] = weight.q_per_channel_scales()[i].item<float>();
     }
   }
@@ -119,9 +123,6 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
   TORCH_CHECK(
       weight.dim() == 2,
       "quantized::linear_prepack (qnnpack): Weight tensor rank should be == 2");
-  TORCH_CHECK(
-      weight.qscheme() == c10::kPerTensorAffine,
-      "quantized::linear_prepack (qnnpack) only supports Per Tensor Quantization Scheme")
 
   int64_t rows_w = weight.size(0);
   at::Tensor bias_fp32;
@@ -143,7 +144,10 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
       " instead");
 
   at::Tensor weight_contig = weight.contiguous();
-  auto weight_zp = weight.q_zero_point();
+  std::vector<uint8_t> w_zero_points;
+  at::Tensor  w_scales;
+  std::tie(w_zero_points, w_scales) =
+      make_zero_points_and_scales_tensor(weight_contig);
 
   at::native::initQNNPACK();
 
@@ -156,67 +160,24 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsQnnp::prepack(
       weight_contig, /* int8_t weight */
       bias_fp32.contiguous(), /* fp32 bias */
       c10::nullopt, /* input_scale */
-      weight.q_scale(),
-      weight_zp);
+      w_scales,
+      std::move(w_zero_points));
   return wt_ptr;
 }
 #endif // USE_PYTORCH_QNNPACK
 
 #ifdef USE_FBGEMM
-namespace {
-float RawUint16ToFp16(unsigned short value) {
-  // Convert raw 16 bits half precision floating point number
-  // to single precision floating point number.
-  const unsigned short sign_bits = value >> 15;
-  const unsigned short exponent_bits = value >> 10 & 0x1f;
-  const unsigned short significand_bits = value & 0x3ff;
-
-  const float sign = sign_bits ? -1 : 1;
-  const float significand =
-      1 + significand_bits * 0.0009765625f; // 0.0009765625f = 0x1p-10 = 2^-10;
-  const float exponent = exponent_bits - 0xf;
-
-  return sign * std::ldexp(significand, exponent);
-}
-
-template <typename T>
-bool CheckAndSaturate(T max_val, T* element) {
-  if (*element > max_val) {
-    *element = max_val;
-    return true;
-  }
-  if (*element < -max_val) {
-    *element = -max_val;
-    return true;
-  }
-  return false;
-}
-
-// The range for using FP16 quantization of weights requires that the elements
-// should be in the range of [5.96e-8, 65504]. If it is out of range, then the
-// number will be saturated to max or min representable values by FP16.
-void HandleWeightsSaturation(int64_t N, float* weight) {
-  const float kFp16Max = RawUint16ToFp16(0x7BFF);
-  bool found_out_of_range = false;
-  for (int64_t i = 0; i < N; ++i) {
-    if (CheckAndSaturate<float>(kFp16Max, weight + i)) {
-      found_out_of_range = true;
-    }
-  }
-  if (found_out_of_range) {
-    TORCH_WARN("FOUND weight out of range ");
-  }
-}
-} // namespace
 
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
     at::Tensor weight,
     c10::optional<at::Tensor> bias) {
+
+  weight = at::_saturate_weight_to_fp16(weight);
+
   const int64_t K = weight.size(1);
   const int64_t N = weight.size(0);
   at::Tensor weight_contig = weight.contiguous();
   float* weight_contig_ptr = weight_contig.data_ptr<float>();
-  HandleWeightsSaturation(K * N, weight_contig_ptr);
 
   // TODO(mingzhe09088):
   // Consider using a functor here in PackedGemmMatrixFP16
@@ -235,6 +196,13 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
 
 namespace at {
 namespace native {
+
+at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
+  float* weight_contig_ptr = weight.contiguous().data_ptr<float>();
+  quant_utils::HandleWeightsSaturation(weight.size(0) * weight.size(1), weight_contig_ptr);
+  return weight;
+}
+
 namespace {
 
 class QLinearPackWeightInt8 final {
@@ -353,22 +321,22 @@ class QLinearPackWeightFp16Legacy final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("linear_prepack", QLinearPackWeightInt8::run);
-  m.impl("linear_prepack_legacy", QLinearPackWeightInt8Legacy::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack"), TORCH_FN(QLinearPackWeightInt8::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack_legacy"), TORCH_FN(QLinearPackWeightInt8Legacy::run));
 }
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("linear_prepack_fp16", QLinearPackWeightFp16::run);
-  m.impl("linear_prepack_fp16_legacy", QLinearPackWeightFp16Legacy::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack_fp16"), TORCH_FN(QLinearPackWeightFp16::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack_fp16_legacy"), TORCH_FN(QLinearPackWeightFp16Legacy::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl("linear_prepack", QLinearPackWeightInt8::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack"), TORCH_FN(QLinearPackWeightInt8::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
-  m.impl("linear_prepack_fp16", QLinearPackWeightFp16::run);
-  m.impl("linear_prepack_fp16_legacy", QLinearPackWeightFp16Legacy::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16"), TORCH_FN(QLinearPackWeightFp16::run));
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16_legacy"), TORCH_FN(QLinearPackWeightFp16Legacy::run));
 }
 
 } // namespace

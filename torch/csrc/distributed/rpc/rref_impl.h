@@ -207,12 +207,17 @@ class TORCH_API RRef : public RRefInterface {
     return RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_;
   }
 
+  // returns the worker info of the owner
+  inline WorkerInfo ownerWorkerInfo() const {
+    return RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_);
+  }
+
   // Returns the globally unique RRefId of this RRef
   inline const RRefId& rrefId() const {
     return rrefId_;
   }
 
-  inline bool isPyObj() {
+  inline bool isPyObj() const {
     return type_ == PyObjectType::get();
   }
   inline const TypePtr type() const override {
@@ -223,14 +228,22 @@ class TORCH_API RRef : public RRefInterface {
   // node. Note that this is only set when processing requests invoked with
   // rpc.remote. This is only used to get the future corresponding to the rref
   // for profiling use cases.
-  inline void registerOwnerCreationFuture(std::shared_ptr<FutureMessage> fut) {
+  inline void registerOwnerCreationFuture(std::shared_ptr<JitFuture> fut) {
     ownerCreationFuture_ = std::move(fut);
   }
 
   // Get the future corresponding to the creation of this rref.
-  inline std::shared_ptr<FutureMessage> getOwnerCreationFuture() const {
+  inline std::shared_ptr<JitFuture> getOwnerCreationFuture() const {
     return ownerCreationFuture_;
   }
+
+  // Check if creation of this RRef on owner node has timed out.
+  inline bool getTimedOut() const {
+    return timedOut_.load();
+  }
+
+  // Dispatches an error to the correct handler based on its RPCErrorType.
+  void handleError(RPCErrorType errorType, const JitFuture& JitFuture);
 
   // Send delete UserRRef request to Owner,
   // if the request hasn't been sent yet.
@@ -241,6 +254,10 @@ class TORCH_API RRef : public RRefInterface {
   virtual void tryDel() {}
 
  protected:
+  // Indicates that the creation of this RRef on owner node has timed out.
+  inline void setTimedOut() {
+    timedOut_ = true;
+  }
   friend class RRefContext;
 
   RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type);
@@ -249,12 +266,13 @@ class TORCH_API RRef : public RRefInterface {
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
+  std::atomic<bool> timedOut_{false};
 
   // type field to denote the type of the element that the RRef is holding
   // it could be any TypePtr that JIT support, including PyObjectType
   const TypePtr type_;
   // Future corresponding to request to create RRef on remote node.
-  std::shared_ptr<FutureMessage> ownerCreationFuture_;
+  std::shared_ptr<JitFuture> ownerCreationFuture_;
 };
 
 // ``UserRRef`` represents a user of an RRef. Besides the ``RRefId``, each user
@@ -287,7 +305,9 @@ class TORCH_API UserRRef final : public RRef {
 
   // Get of copy of the value from the ``OwnerRRef``. If the value is not ready
   // yet, this call will block.
-  IValue toHere();
+  IValue toHere(
+      const float timeoutSeconds =
+          torch::distributed::rpc::kUnsetRpcTimeout) const;
 
   void tryDel() override;
 
@@ -364,7 +384,7 @@ class TORCH_API OwnerRRef final : public RRef {
   // does not create any new py::object.
   void setValue(IValue&& value);
   // Sets the value of this ``OwnerRRef`` to contain an exception.
-  void setError(const std::string& err);
+  void setError(std::exception_ptr eptr);
 
   // Has a value or error been set?
   bool hasValue() const;
@@ -376,6 +396,20 @@ class TORCH_API OwnerRRef final : public RRef {
 
   std::shared_ptr<JitFuture> future_;
 };
+
+TORCH_API std::ostream& operator<<(std::ostream& os, const RRef& rref);
+
+// Helper function that casts from c10::RRefInterface to OwnerRRef
+inline TORCH_API c10::intrusive_ptr<OwnerRRef> fromRRefInterface(
+    const c10::intrusive_ptr<c10::RRefInterface>& rrefInterface) {
+  return c10::static_intrusive_pointer_cast<OwnerRRef>(rrefInterface);
+}
+
+// Helper function that casts from OwnerRRef to c10::RRefInterface
+inline TORCH_API c10::intrusive_ptr<c10::RRefInterface> fromOwnerRRef(
+    const c10::intrusive_ptr<RRef>& ownerRRef) {
+  return c10::static_intrusive_pointer_cast<c10::RRefInterface>(ownerRRef);
+}
 
 } // namespace rpc
 } // namespace distributed

@@ -6,9 +6,9 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
+#include <c10/util/hash.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
-#include <torch/csrc/utils/hash.h>
 
 namespace torch {
 namespace jit {
@@ -16,6 +16,12 @@ namespace jit {
 namespace {
 
 bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
+  // type_equal doesnt distinguish between mkldnn/pytorch cpu tensors,
+  // and we dont want to coalesce mkldnn tensors bc they do layout
+  // transformations based on usage
+  if (lhs.is_mkldnn() || rhs.is_mkldnn()) {
+    return false;
+  }
   return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
 }
 
@@ -114,7 +120,7 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
       const auto& e_a1 = *it_a1;
       const auto& e_a2 = *it_a2;
 
-      if (!ivaluesEqual(e_a1.key(), e_a2.key()) &&
+      if (!ivaluesEqual(e_a1.key(), e_a2.key()) ||
           !ivaluesEqual(e_a1.value(), e_a2.value())) {
         return false;
       }
@@ -122,6 +128,12 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
       it_a2++;
     }
     return true;
+  }
+  if (a1.isEnum()) {
+    return a1.toEnumHolder() == a2.toEnumHolder();
+  }
+  if (a1.isObject()) {
+    return &a1.toObjectRef() == &a2.toObjectRef();
   }
   TORCH_INTERNAL_ASSERT(false);
 }
@@ -158,7 +170,9 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 
     switch (lhs->kindOf(name)) {
       COMPARE_ATTRIBUTEVALUE(f)
+      COMPARE_ATTRIBUTEVALUE(c)
       COMPARE_ATTRIBUTEVALUE(fs)
+      COMPARE_ATTRIBUTEVALUE(cs)
       COMPARE_ATTRIBUTEVALUE(i)
       COMPARE_ATTRIBUTEVALUE(is)
       COMPARE_ATTRIBUTEVALUE(s)
@@ -200,7 +214,11 @@ size_t HashNode::operator()(const Node* k) const {
     } else if (
         type->isSubtypeOf(NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::f) {
-      constant_hash = std::hash<float>{}(k->f(attr::value));
+      constant_hash = std::hash<double>{}(k->f(attr::value));
+    } else if (
+        type->isSubtypeOf(NumberType::get()) &&
+        k->kindOf(attr::value) == AttributeKind::c) {
+      constant_hash = c10::hash<c10::complex<double>>{}(k->c(attr::value));
     } else if (type->isSubtypeOf(BoolType::get())) {
       constant_hash = std::hash<bool>{}(k->i(attr::value));
     }

@@ -2,18 +2,21 @@
 
 """
 
-from typing import Optional, Tuple
-
-import torch
 from torch import Tensor
+import torch
+
+from typing import Optional, Tuple
 
 
 def is_sparse(A):
     """Check if tensor A is a sparse tensor"""
     if isinstance(A, torch.Tensor):
         return A.layout == torch.sparse_coo
-    raise TypeError("expected Tensor but got %s" % (type(A).__name__))
 
+    error_str = "expected Tensor"
+    if not torch.jit.is_scripting():
+        error_str += " but got {}".format(type(A))
+    raise TypeError(error_str)
 
 def get_floating_dtype(A):
     """Return the floating point dtype of tensor A.
@@ -26,8 +29,7 @@ def get_floating_dtype(A):
     return torch.float32
 
 
-def matmul(A, B):
-    # type: (Optional[Tensor], Tensor) -> Tensor
+def matmul(A: Optional[Tensor], B: Tensor) -> Tensor:
     """Multiply two matrices.
 
     If A is None, return B. A can be sparse or dense. B is always
@@ -63,15 +65,13 @@ def transjugate(A):
     return conjugate(transpose(A))
 
 
-def bform(X, A, Y):
-    # type: (Tensor, Optional[Tensor], Tensor) -> Tensor
+def bform(X: Tensor, A: Optional[Tensor], Y: Tensor) -> Tensor:
     """Return bilinear form of matrices: :math:`X^T A Y`.
     """
     return matmul(transpose(X), matmul(A, Y))
 
 
-def qform(A, S):
-    # type: (Optional[Tensor], Tensor) -> Tensor
+def qform(A: Optional[Tensor], S: Tensor):
     """Return quadratic form :math:`S^T A S`.
     """
     return bform(S, A, S)
@@ -88,8 +88,7 @@ def basis(A):
     return Q
 
 
-def symeig(A, largest=False, eigenvectors=True):
-    # type: (Tensor, Optional[bool], Optional[bool]) -> Tuple[Tensor, Tensor]
+def symeig(A: Tensor, largest: Optional[bool] = False, eigenvectors: Optional[bool] = True) -> Tuple[Tensor, Tensor]:
     """Return eigenpairs of A with specified ordering.
     """
     if largest is None:

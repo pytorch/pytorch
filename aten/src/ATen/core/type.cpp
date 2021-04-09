@@ -3,11 +3,19 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/function.h>
 #include <iostream>
 
 namespace c10 {
+
+TypeVerbosity type_verbosity() {
+  static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
+  static TypeVerbosity verbosity = c_verbosity ?
+    static_cast<TypeVerbosity>(c10::stoi(c_verbosity)) : TypeVerbosity::Default;
+  return verbosity;
+}
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if (auto value = t.cast<TensorType>()) {
@@ -20,11 +28,12 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "Tensor";
     }
     if (auto ndim = value->sizes().size()) {
-      bool has_valid_strides_info =
+      bool has_valid_strides_info = *ndim > 0 &&
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
-      for (size_t i = 0; i < *ndim; ++i) {
+      size_t i = 0;
+      for (i = 0; i < *ndim; ++i) {
         if (i > 0) {
           out << ", ";
         }
@@ -33,27 +42,64 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         } else {
           out << "*";
         }
-        if (has_valid_strides_info) {
-          out << ":" << *value->strides()[i];
+      }
+      if (has_valid_strides_info &&
+          type_verbosity() >= TypeVerbosity::TypeAndStride) {
+        out << ", strides=[";
+        for (size_t i = 0; i < *ndim; ++i) {
+          if (i > 0) {
+            out << ", ";
+          }
+          out << *value->strides()[i];
+        }
+        out << "]";
+      }
+      if (type_verbosity() >= TypeVerbosity::Full) {
+        if (value->requiresGrad()) {
+          if (i++ > 0) {
+            out << ", ";
+          }
+          out << "requires_grad=" << *value->requiresGrad();
+        }
+        if (value->device()) {
+          if (i++ > 0) {
+            out << ", ";
+          }
+          out << "device=" << *value->device();
         }
       }
       out << ")";
+    } else {
+      if (type_verbosity() >= TypeVerbosity::Full) {
+        size_t i = 0;
+        if (value->requiresGrad()) {
+          out << "("
+              << "requires_grad=" << *value->requiresGrad();
+          i++;
+        }
+        if (value->device()) {
+          out << ((i++ > 0) ? ", " : "(") << "device=" << *value->device();
+        }
+        if (i > 0) {
+          out << ")";
+        }
+      }
     }
 
     if (value->undefined() && *value->undefined()) {
       out << "[Undefined]";
     }
   } else if(t.kind() == TypeKind::ListType) {
-    auto prim = t.cast<ListType>()->getElementType();
+    auto prim = t.castRaw<ListType>()->getElementType();
     out << *prim << "[]";
   } else if (t.kind() == TypeKind::OptionalType) {
-    auto prim = t.cast<OptionalType>()->getElementType();
+    auto prim = t.castRaw<OptionalType>()->getElementType();
     out << *prim << "?";
   } else if(t.kind() == TypeKind::FutureType) {
-    auto elem = t.cast<FutureType>()->getElementType();
+    auto elem = t.castRaw<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
   } else if(t.kind() == TypeKind::RRefType) {
-    auto elem = t.cast<RRefType>()->getElementType();
+    auto elem = t.castRaw<RRefType>()->getElementType();
     out << "RRef[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
     if (tup->schema()) {
@@ -84,7 +130,7 @@ AnyTypePtr AnyType::get() {
 
 TensorTypePtr TensorType::get() {
   static auto value = TensorType::create(
-      {}, {}, VaryingShape<ShapeSymbol>{}, VaryingShape<Stride>{}, {});
+      {}, {}, SymbolicShape(), VaryingShape<Stride>{}, {});
   return value;
 }
 
@@ -100,8 +146,16 @@ FloatTypePtr FloatType::get() {
   static auto value = FloatType::create();
   return value;
 }
+ComplexTypePtr ComplexType::get() {
+  static auto value = ComplexType::create();
+  return value;
+}
 BoolTypePtr BoolType::get() {
   static auto value = BoolType::create();
+  return value;
+}
+StorageTypePtr StorageType::get() {
+  static auto value = StorageType::create();
   return value;
 }
 NoneTypePtr NoneType::get() {
@@ -110,6 +164,10 @@ NoneTypePtr NoneType::get() {
 }
 GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
+  return value;
+}
+QuantizerTypePtr QuantizerType::get() {
+  static auto value = QuantizerType::create();
   return value;
 }
 QSchemeTypePtr QSchemeType::get() {
@@ -122,6 +180,10 @@ StringTypePtr StringType::get() {
 }
 DeviceObjTypePtr DeviceObjType::get() {
   static auto value = DeviceObjType::create();
+  return value;
+}
+StreamObjTypePtr StreamObjType::get() {
+  static auto value = StreamObjType::create();
   return value;
 }
 ScalarTypeTypePtr ScalarTypeType::get() {
@@ -152,6 +214,10 @@ ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
 }
+ListTypePtr ListType::ofComplexDoubles() {
+  static auto value = ListType::create(ComplexType::get());
+  return value;
+}
 ListTypePtr ListType::ofFloats() {
   static auto value = ListType::create(FloatType::get());
   return value;
@@ -180,7 +246,12 @@ AnyClassTypePtr AnyClassType::get() {
   return value;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+AnyEnumTypePtr AnyEnumType::get() {
+  static auto value = AnyEnumType::create();
+  return value;
+}
+
+c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(t2)) {
     return t2;
@@ -190,7 +261,7 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
 
   // Handle non-container types which do not subtype each other and unify
   if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
-    return t1->expect<TensorType>()->merge(t2->expect<TensorType>());
+    return t1->expectRef<TensorType>().merge(*t2->expect<TensorType>());
   }
 
   if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
@@ -234,8 +305,8 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
 
   if (t1->cast<FutureType>() && t2->cast<FutureType>()) {
     if (auto elem = unifyTypes(
-            t1->cast<FutureType>()->getElementType(),
-            t2->cast<FutureType>()->getElementType())) {
+            t1->castRaw<FutureType>()->getElementType(),
+            t2->castRaw<FutureType>()->getElementType())) {
       return FutureType::create(*elem);
     }
   }
@@ -255,6 +326,16 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   return c10::nullopt;
 }
 
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_any) {
+  auto unified = unifyTypesImpl(t1, t2);
+
+  if (default_to_any && !unified) {
+    return AnyType::get();
+  }
+
+  return unified;
+}
+
 c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
     std::ostream& why_not) {
@@ -268,9 +349,9 @@ c10::optional<TypePtr> unifyTypeList(
     auto maybe_unified = unifyTypes(ret_type, elements.at(i));
     if (!maybe_unified) {
       why_not << "Could not unify type list since element " << i << " of type "
-              << elements.at(i)->python_str()
+              << elements.at(i)->repr_str()
               << " did not match the types before it ("
-              << ret_type->python_str() << ")";
+              << ret_type->repr_str() << ")";
       return c10::nullopt;
     }
     ret_type = maybe_unified.value();
@@ -300,8 +381,8 @@ MatchTypeReturn matchTypeVariables(
     }
     std::stringstream ss;
     ss << "Type variable '" << vt->name() << "' previously matched to type "
-       << it->second->python_str() << " is matched to type "
-       << actual->python_str();
+       << it->second->repr_str() << " is matched to type "
+       << actual->repr_str();
     return ss.str();
   } else if (auto lt_formal = formal->cast<ListType>()) {
     if (auto lt_actual = actual->cast<ListType>()) {
@@ -322,8 +403,8 @@ MatchTypeReturn matchTypeVariables(
     }
 
     std::stringstream ss;
-    ss << "Cannot match " << lt_formal->python_str() << " to "
-       << actual->python_str();
+    ss << "Cannot match " << lt_formal->repr_str() << " to "
+       << actual->repr_str();
     return ss.str();
   } else if (auto tp_formal = formal->cast<TupleType>()) {
     if (auto tp_actual = actual->cast<TupleType>()) {
@@ -340,7 +421,7 @@ MatchTypeReturn matchTypeVariables(
       return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
-      ss << "Cannot match a tuple to " << actual->python_str();
+      ss << "Cannot match a tuple to " << actual->repr_str();
       return MatchTypeReturn(ss.str());
     }
   } else if (auto lt_formal = formal->cast<FutureType>()) {
@@ -353,7 +434,7 @@ MatchTypeReturn matchTypeVariables(
       return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
-      ss << "Cannot match a future to " << actual->python_str();
+      ss << "Cannot match a future to " << actual->repr_str();
       return ss.str();
     }
   } else if (auto lt_formal = formal->cast<RRefType>()) {
@@ -366,7 +447,7 @@ MatchTypeReturn matchTypeVariables(
       return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
-      ss << "Cannot match a rref to " << actual->python_str();
+      ss << "Cannot match a rref to " << actual->repr_str();
       return ss.str();
     }
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
@@ -383,7 +464,7 @@ MatchTypeReturn matchTypeVariables(
       // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     }
-    // note: if actual was non here we potentially did not fill in the type
+    // note: if actual was None here we potentially did not fill in the type
     // variables contained in the formal. It is still a valid match because None
     // matches Optional[T] later error checking on tryEvalTypeVariables will
     // report the problem if we never match variables in type T
@@ -403,16 +484,16 @@ MatchTypeReturn matchTypeVariables(
       return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
-      ss << "Cannot match a dict to " << actual->python_str();
+      ss << "Cannot match a dict to " << actual->repr_str();
       return ss.str();
     }
   }
 
-  AT_ERROR("Unhandled free variable container: ", formal->python_str());
+  AT_ERROR("Unhandled free variable container: ", formal->repr_str());
 }
 
 // change return types like List[List[t]] into List[List[int]]
-CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
+TORCH_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
   if (!type->hasFreeVariables()) {
     return type;
   }
@@ -437,7 +518,7 @@ CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::st
   }
 }
 
-CAFFE2_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
+TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
   if (elem_type->kind() == OptionalType::Kind ||
       elem_type->kind() == NumberType::Kind) {
     // Builtin Union types
@@ -464,7 +545,7 @@ const char * typeKindToString(TypeKind kind) {
   return "";
 }
 
-bool Type::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool Type::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
     return true;
   }
@@ -495,32 +576,63 @@ VaryingShape<T> VaryingShape<T>::merge(const VaryingShape<T>& other) const {
 }
 
 VaryingShape<int64_t> TensorType::sizes() const {
-  if (!sizes_.size().has_value()) {
+  if (!sizes_.rank()) {
     return VaryingShape<int64_t>();
   }
   return VaryingShape<int64_t>(
-      fmap(*sizes_.sizes(), [](c10::optional<ShapeSymbol> ss) {
+      fmap(*sizes_.sizes(), [](ShapeSymbol ss) {
         // we turn symbolic shapes into unknowns
-        return ss.has_value() && ss->is_static()
-            ? c10::optional<int64_t>(ss->static_size())
+        return ss.is_static()
+            ? c10::optional<int64_t>(ss.static_size())
             : c10::nullopt;
       }));
 }
 
-TensorTypePtr TensorType::merge(TensorTypePtr other, bool merge_sizes) const {
-  auto scalar_type = merge_primitive(scalarType(), other->scalarType());
-  auto dev = merge_primitive(device(), other->device());
-  auto sprops = stride_properties().merge(other->stride_properties());
-  auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
-  auto undef = merge_primitive(undefined(), other->undefined());
+TensorTypePtr TensorType::merge(const TensorType& other, bool merge_sizes) const {
+  auto scalar_type = merge_primitive(scalarType(), other.scalarType());
+  auto dev = merge_primitive(device(), other.device());
+  auto sprops = stride_properties().merge(other.stride_properties());
+  auto gr = merge_primitive(requiresGrad(), other.requiresGrad());
+  auto undef = merge_primitive(undefined(), other.undefined());
   return TensorType::create(
       scalar_type,
       dev,
-      merge_sizes ? symbolic_sizes().merge(other->symbolic_sizes())
+      merge_sizes ? symbolic_sizes().merge(other.symbolic_sizes())
                   : symbolic_sizes(),
       sprops,
       gr,
       undef);
+}
+
+template <typename T>
+bool is_null_or_equal(c10::optional<T> a, c10::IntArrayRef b) {
+  return !a.has_value() || a.value() == b;
+}
+
+bool TensorType::matchTensor(const at::Tensor& t) {
+  bool undef = undefined().value_or(!t.defined());
+  if (undef != !t.defined()) {
+    // When the followings are true, we consider it's not a match:
+    // - undefined().has_value() == true
+    // - undefined().value() != !t.defined()
+    return false;
+  } else if (!t.defined()) {
+    // When the followings are true, we consider it's a match:
+    // - t is not defined
+    // - undefined() == null or undefined().value() == true
+    return true;
+  }
+  // Here we know t.defined() == true and compare all other properties.
+  bool rg = at::GradMode::is_enabled() && t.requires_grad();
+  bool matched_strides = (!stride_properties().size()) ||
+      (!t.has_storage() && !stride_properties().isComplete()) ||
+      stride_properties() ==
+          computeStrideProps(t.sizes(), t.strides(), t.is_contiguous());
+  return scalarType().value_or(t.scalar_type()) == t.scalar_type()
+    && device().value_or(t.device()) == t.device()
+    && requiresGrad().value_or(rg) == rg
+    && matched_strides
+    && is_null_or_equal(sizes().concrete_sizes(), t.sizes());
 }
 
 bool TensorType::operator==(const c10::Type& rhs) const {
@@ -562,10 +674,35 @@ template std::ostream& operator<<(
     const VaryingShape<int64_t>& vs);
 template std::ostream& operator<<(
     std::ostream& out,
-    const VaryingShape<ShapeSymbol>& vs);
-template std::ostream& operator<<(
-    std::ostream& out,
     const VaryingShape<Stride>& vs);
+
+std::ostream& operator<<(
+    std::ostream& os,
+    const SymbolicShape& ss) {
+  // TODO: Unranked SymbolicShape printing is ambiguous with that of
+  // dynamic-shaped vector.
+  if(!ss.rank()) {
+    os << "(*)";
+    return os;
+  }
+
+  auto sizes = ss.sizes().value();
+
+  os << "(";
+  for (size_t i = 0; i < ss.rank().value(); i++) {
+    if (i > 0) {
+      os << ", ";
+    }
+    if(sizes[i].is_static()) {
+      os << sizes[i];
+    } else {
+      os << "*";
+    }
+  }
+  os << ")";
+
+  return os;
+}
 
 std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s) {
   os << "SS(" << s.value_ << ')';
@@ -620,6 +757,9 @@ TupleType::TupleType(
       schema_(std::move(schema)) {
   has_free_variables_ =
       std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
+        if (!v) {
+          throw std::runtime_error("Can not create tuple with None type");
+        }
         return v->hasFreeVariables();
       });
   if (schema_) {
@@ -629,7 +769,7 @@ TupleType::TupleType(
   }
 }
 
-bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+bool TupleType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
   }
@@ -664,7 +804,7 @@ bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const 
   });
 }
 
-bool ListType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+bool ListType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
   }
@@ -707,7 +847,7 @@ std::string TupleType::str() const {
   }
   return ss.str();
 }
-std::string TupleType::python_str_impl(TypePrinter printer) const {
+std::string TupleType::annotation_str_impl(TypePrinter printer) const {
   std::stringstream ss;
   if (schema_ && name()) {
     ss << name()->qualifiedName();
@@ -716,7 +856,7 @@ std::string TupleType::python_str_impl(TypePrinter printer) const {
     for(size_t i = 0; i < elements().size(); ++i) {
       if(i > 0)
         ss << ", ";
-      ss << elements()[i]->python_str(printer);
+      ss << elements()[i]->annotation_str(printer);
     }
     ss << "]";
   }
@@ -755,7 +895,8 @@ VaryingShape<int64_t> TensorType::strides() const {
 
 VaryingShape<Stride> TensorType::computeStrideProps(
     at::IntArrayRef sizes,
-    at::IntArrayRef strides) {
+    at::IntArrayRef strides,
+    bool tensor_contiguity) {
   std::vector<size_t> stride_indices(sizes.size());
   std::iota(stride_indices.begin(), stride_indices.end(), 0);
 
@@ -773,19 +914,21 @@ VaryingShape<Stride> TensorType::computeStrideProps(
 
   std::vector<Stride> stride_properties;
   for (size_t i = 0; i < stride_indices.size(); i++) {
-    Stride s{stride_indices[i], false, strides[stride_indices[i]]};
-    // innermost stride expected to be 1
-    // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
-    // BROADCASTED
-    if (i == 0) {
-      s.contiguous_ = strides[stride_indices[i]] == 1;
-    } else {
-      s.contiguous_ = strides[stride_indices[i]] == 1 ||
-          (strides[stride_indices[i]] != 0 &&
-           strides[stride_indices[i]] ==
-               strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]);
+    bool contiguous_ = tensor_contiguity;
+    if (!contiguous_) {
+      // innermost stride expected to be 1
+      // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
+      // BROADCASTED
+      if (i == 0) {
+        contiguous_ = strides[stride_indices[i]] == 1;
+      } else {
+        contiguous_ = strides[stride_indices[i]] == 1 ||
+            (strides[stride_indices[i]] != 0 &&
+             strides[stride_indices[i]] ==
+                 strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]);
+      }
     }
-    stride_properties.push_back(s);
+    stride_properties.emplace_back(stride_indices[i], contiguous_, strides[stride_indices[i]]);
   }
 
   return VaryingShape<Stride>{stride_properties};
@@ -801,7 +944,7 @@ template struct VaryingShape<int64_t>;
 TensorType::TensorType(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
-    const VaryingShape<ShapeSymbol>& sizes,
+    const SymbolicShape& sizes,
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined)
@@ -822,13 +965,13 @@ TensorTypePtr TensorType::create(const at::Tensor& t) {
     sizes = VaryingShape<int64_t>{t.sizes().vec()};
     strides = VaryingShape<int64_t>{t.strides().vec()};
     return TensorType::create(
-        t.scalar_type(), t.device(), sizes, strides, t.requires_grad(), false);
+        t.scalar_type(), t.device(), sizes, strides, t.requires_grad(), false, t.is_contiguous());
   }
 
   return TensorType::create(
       t.scalar_type(),
       t.device(),
-      VaryingShape<ShapeSymbol>{},
+      SymbolicShape(),
       VaryingShape<Stride>{},
       t.requires_grad(),
       false);
@@ -840,30 +983,35 @@ TensorTypePtr TensorType::create(
     const VaryingShape<int64_t>& sizes,
     const VaryingShape<int64_t>& strides,
     c10::optional<bool> requires_grad,
-    c10::optional<bool> undefined) {
-  TORCH_INTERNAL_ASSERT(sizes.concrete_sizes().has_value());
-  TORCH_INTERNAL_ASSERT(
-      !strides.concrete_sizes().has_value() ||
-      sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
-  auto sprops = strides.concrete_sizes().has_value()
-      ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes())
+    c10::optional<bool> undefined, bool tensor_contiguity) {
+  if(strides.concrete_sizes() && strides.concrete_sizes().has_value()){
+    // handles case where strides are set
+    TORCH_INTERNAL_ASSERT(sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
+    auto sprops = strides.concrete_sizes().has_value()
+      ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_contiguity)
       : VaryingShape<Stride>();
-
-  auto symbol_sizes =
-      VaryingShape<ShapeSymbol>::fromStaticShape(*sizes.concrete_sizes());
-  return TensorType::create(
+    auto symbol_sizes = SymbolicShape(*sizes.concrete_sizes());
+    return TensorType::create(
       scalar_type, device, symbol_sizes, sprops, requires_grad, undefined);
+  } else {
+    // strides are all null, but still have number of strides equal to number of ranks
+    TORCH_INTERNAL_ASSERT(sizes.sizes() && sizes.size());
+    auto symbol_sizes = SymbolicShape(*sizes.sizes());
+    return TensorType::create(
+      scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined);
+  }
 }
 
 TensorTypePtr TensorType::create(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
-    const VaryingShape<ShapeSymbol>& sizes,
+    const SymbolicShape& sizes,
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined) {
-  return TensorTypePtr(new TensorType(
+  auto pt = TensorTypePtr(new TensorType(
       scalar_type, device, sizes, strides, requires_grad, undefined));
+  return pt;
 }
 
 TensorTypePtr TensorType::create(
@@ -874,7 +1022,7 @@ TensorTypePtr TensorType::create(
   return TensorType::create(
       scalar_type,
       device,
-      VaryingShape<ShapeSymbol>(dim),
+      SymbolicShape(dim),
       VaryingShape<Stride>(dim),
       requires_grad);
 }
@@ -893,17 +1041,17 @@ TensorTypePtr TensorType::createContiguous(
       c10::nullopt);
 }
 
-const VaryingShape<ShapeSymbol>& TensorType::symbolic_sizes() const {
+const SymbolicShape& TensorType::symbolic_sizes() const {
   return sizes_;
 }
 
-bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool TensorType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (auto rhs_p = rhs->cast<TensorType>()) {
     // if we have the same pointer, avoid computing the merge
     if (this == rhs_p.get()) {
       return true;
     }
-    return *merge(rhs_p) == *rhs_p;
+    return *merge(*rhs_p) == *rhs_p;
   }
   return Type::isSubtypeOfExt(rhs, why_not);
 }
@@ -919,8 +1067,303 @@ void ClassType::addMethod(torch::jit::Function* method) {
       "Can't redefine method: ",
       method->name(),
       " on class: ",
-      python_str());
+      repr_str());
   methods_.push_back(method);
+}
+
+const std::vector<torch::jit::Function*>& ClassType::getForwardHooks() const {
+    return forward_hooks_;
+}
+
+const std::vector<torch::jit::Function*>& ClassType::getForwardPreHooks() const {
+    return forward_pre_hooks_;
+}
+
+void ClassType::addForwardPreHook(torch::jit::Function* pre_hook_ptr) {
+    forward_pre_hooks_.emplace_back(pre_hook_ptr);
+}
+
+void ClassType::addForwardHook(torch::jit::Function* hook_ptr) {
+    forward_hooks_.emplace_back(hook_ptr);
+}
+
+torch::jit::Function* ClassType::findForwardPreHook(const std::string& name) const {
+  for (const auto& pre_hook : forward_pre_hooks_) {
+    if (name == pre_hook->name()) {
+      return pre_hook;
+    }
+  }
+  return nullptr;
+}
+
+torch::jit::Function* ClassType::findForwardHook(const std::string& name) const {
+  for (const auto& hook : forward_hooks_) {
+    if (name == hook->name()) {
+      return hook;
+    }
+  }
+  return nullptr;
+}
+
+std::string getSchemaInputTypesString(const FunctionSchema& schema) {
+  std::stringstream input_types;
+  const std::vector<Argument>& forward_args = schema.arguments();
+  for (const auto i : c10::irange(1, forward_args.size())) {
+    input_types << forward_args[i].type()->annotation_str();
+    if (forward_args.size() - 1 != i) {
+      input_types << ", ";
+    }
+  }
+  if (forward_args.size() == 1) {
+    input_types << "()";
+  }
+  return input_types.str();
+}
+
+std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
+  const std::string& pre_hook_name = forward_pre_hooks_[pre_hook_idx]->name();
+  const FunctionSchema& forward_schema = getMethod("forward").getSchema();
+  std::string input_types = getSchemaInputTypesString(forward_schema);
+  const std::vector<Argument>& forward_args = forward_schema.arguments();
+
+  std::string single_output = "";
+  if (forward_args.size() == 2 &&
+      forward_args[1].type()->cast<TupleType>() == nullptr) {
+    // if the output type is a single tuple, it needs to be wrapped in an outer tuple
+    // to match eager's behavior
+    single_output = ", '" + forward_args[1].type()->annotation_str() + "',";
+  }
+  std::string pre_hook_schema =
+      pre_hook_name + "(self, input: Tuple[" + input_types + "])";
+  std::string return_string =
+      "This error occured while scripting the forward pre-hook '" +
+      pre_hook_name + "' on module '" + name()->name() +
+      "'. If you did not want to script this pre-hook remove it from the "
+      "original NN module before scripting. Pre-hooks for module '" +
+      name()->name() + "' are expected to have the following signature: "
+      + pre_hook_schema + " with a return type of either 'None'" +
+      single_output + " or 'Tuple[" + input_types + "]'.";
+  return return_string;
+}
+
+std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
+  const std::string& hook_name = forward_hooks_[hook_idx]->name();
+  const FunctionSchema& forward_schema = getMethod("forward").getSchema();
+  std::string input_types = getSchemaInputTypesString(forward_schema);
+
+  // create expected output types string
+  const Argument& pre_output =
+      (hook_idx == 0)
+          ? forward_schema.returns()[0]
+          : forward_hooks_[hook_idx - 1]->getSchema().returns()[0];
+  std::string output_types = pre_output.type()->annotation_str();
+  // create error message
+  std::string hook_schema = hook_name + "(self, input: Tuple[" +
+                            input_types + "], output: " + output_types + ")";
+  std::string return_string =
+      "This error occured while scripting the forward hook '"
+      + hook_name + "' on module " + name()->name() +
+      ". If you did not want to script this hook remove it from" +
+      " the original NN module before scripting. This hook was" +
+      " expected to have the following signature: " + hook_schema +
+      ". The type of the output arg is the returned type from" +
+      " either the forward method or the previous hook if it exists. " +
+      "Note that hooks can return anything, but if the hook is " +
+      "on a submodule the outer module is expecting" +
+      " the same return type as the submodule's forward.";
+  return return_string;
+}
+
+void checkForwardHookInputArguments(
+    const FunctionSchema& forward_schema,
+    const FunctionSchema& hook_schema,
+    const std::string& hook_id,
+    const std::string& hook_err_msg) {
+  // check for proper tuple input types
+  const std::vector<Argument>& forward_args = forward_schema.arguments();
+  const Argument input_arg = hook_schema.arguments()[1];
+  TORCH_CHECK(
+      input_arg.type()->cast<TupleType>() != nullptr,
+      hook_id,
+      "expected the input argument to be typed as a Tuple but found type: '",
+      input_arg.type()->annotation_str(),
+      "' instead.\n",
+      hook_err_msg
+   );
+
+  const at::ArrayRef<TypePtr> input_tuple_types = input_arg.type()->castRaw<TupleType>()->elements();
+  if (forward_args.size() == 1) {
+    // check for empty forward case
+    TORCH_CHECK(
+        input_tuple_types.size() == 0,
+        hook_id,
+        "was expecting Tuple[()] as the input type. Received type: '",
+        input_arg.type()->annotation_str(),
+        "'.\n",
+        hook_err_msg
+      );
+  } else {
+    // check input tuple for correct size and correct contained types
+    TORCH_CHECK(
+        input_tuple_types.size() == forward_args.size() - 1,
+        hook_id,
+        "has the wrong number of contained types for the",
+        " input argument's Tuple. Received type: '",
+        input_arg.type()->annotation_str(),
+        "'.\n",
+        hook_err_msg
+    );
+
+    for (const auto i : c10::irange(1, forward_args.size())) {
+      if (*forward_args[i].type() != *input_tuple_types[i - 1]) {
+        TORCH_CHECK(
+            false,
+            hook_id,
+            "has the wrong inner types for the input tuple argument. Received type: '",
+            input_arg.type()->annotation_str(),
+            "'.\n",
+            hook_err_msg
+        );
+      }
+    }
+  }
+}
+
+void ClassType::checkForwardPreHookSchema(
+    int pre_hook_idx,
+    const FunctionSchema& pre_hook_schema) const {
+  const torch::jit::Function* pre_hook = forward_pre_hooks_[pre_hook_idx];
+  std::string hook_id =
+      "Pre-hook '" + pre_hook->name() + "' on module '" + name()->name() + "' ";
+  std::string pre_hook_err_msg = getForwardPreHookErrorMessage(pre_hook_idx) + "\n";
+
+  // Pre-hooks are expecting two inputs: self, and a Tuple containing the
+  // non-self arguments passed to Forward
+  TORCH_CHECK(
+      pre_hook_schema.arguments().size() == 2,
+      hook_id,
+      "was expected to only have exactly 2 inputs but it had ",
+      pre_hook_schema.arguments().size(),
+      " inputs. ",
+      pre_hook_err_msg
+   );
+
+  const FunctionSchema& forward_schema = getMethod("forward").getSchema();
+  const std::vector<Argument>& forward_args = forward_schema.arguments();
+  checkForwardHookInputArguments(forward_schema, pre_hook_schema, hook_id, pre_hook_err_msg);
+
+  // check return type, expected to be either None, the same type as the input,
+  // or the contained single type if the input was a tuple containing a single
+  // type.
+  TORCH_CHECK(
+            pre_hook_schema.returns().size() != 0,
+            hook_id,
+            "is missing a return annotation. Return annotations are required, please add one.\n",
+            pre_hook_err_msg
+  );
+  const Argument return_arg = pre_hook_schema.returns()[0];
+  std::string wrong_type_returned_err_msg = hook_id +
+      "returned the wrong type of: '" +
+      return_arg.type()->annotation_str() + "'.";
+
+  if (return_arg.type()->kind() == NoneType::get()->kind()) {
+    return;
+  }
+  if (forward_args.size() == 2 && *forward_args[1].type() == *return_arg.type()) {
+    // TORCH_CHECK below is for the edge case where forward's input is a tuple and the
+    // pre-hook returns a matching tuple. Eager doesn't support this- the working eager return
+    // for a tuple type is the forward's input tuple wrapped inside of another tuple.
+    TORCH_CHECK(
+        return_arg.type()->cast<TupleType>() == nullptr,
+        wrong_type_returned_err_msg,
+        " When forward has a single tuple input argument, the return needs",
+        " to be 'None' or a nested tuple containing forward's input tuple",
+        " argument as in: 'Tuple[",
+        forward_args[1].type()->annotation_str(),
+        "]'.\n",
+        pre_hook_err_msg
+    );
+    return;
+  }
+  // return can only be tuple of nested types now
+  // check to make sure return is of tuple type
+  TORCH_CHECK(
+      return_arg.type()->cast<TupleType>() != nullptr,
+      wrong_type_returned_err_msg,
+      pre_hook_err_msg
+  );
+  const at::ArrayRef<TypePtr> return_tuple_types =
+      return_arg.type()->castRaw<TupleType>()->elements();
+  // check for edge case of Tuple[()] for when forward has no arguments
+  if (forward_args.size() == 1) {
+    TORCH_CHECK(
+        return_tuple_types.size() == 0,
+        wrong_type_returned_err_msg,
+        " Was expecting either 'None' or 'Tuple[()]' since forward had ",
+        "no arguments.\n",
+        pre_hook_err_msg
+    );
+    return;
+  }
+
+  // check that tuple has proper number of contained types
+  TORCH_CHECK(
+      return_tuple_types.size() == forward_args.size() - 1,
+      wrong_type_returned_err_msg,
+      " The returned tuple contains the wrong number of contained types.\n",
+      pre_hook_err_msg
+  );
+  // check that contained types match forward types
+  for (const auto i : c10::irange(1, forward_args.size())) {
+    if (*forward_args[i].type() != *return_tuple_types[i - 1]) {
+      TORCH_CHECK(
+          false,
+          wrong_type_returned_err_msg,
+          " The returned tuple contains the wrong inner types.\n",
+          pre_hook_err_msg);
+    }
+  }
+}
+
+void ClassType::checkForwardHookSchema(
+      int hook_idx,
+      const FunctionSchema& hook_schema) const {
+  const torch::jit::Function* hook = forward_hooks_[hook_idx];
+  std::string hook_id =
+      "Hook '" + hook->name() + "' on module '" + name()->name() + "' ";
+  std::string hook_err_msg = getForwardHookErrorMessage(hook_idx) + "\n";
+  // Hooks are expecting three inputs: self, a Tuple containing the non-self
+  // arguments passed to Forward, and the output of either Forward or the
+  // previous hook
+  TORCH_CHECK(
+      hook_schema.arguments().size() == 3,
+      hook_id,
+      "was expected to only have exactly 3 inputs but it had ",
+      hook_schema.arguments().size(),
+      " inputs. ",
+      hook_err_msg
+  );
+
+  const FunctionSchema& forward_schema = getMethod("forward").getSchema();
+  checkForwardHookInputArguments(forward_schema, hook_schema, hook_id, hook_err_msg);
+
+  // check output tuple
+  const Argument& prev_output = (hook_idx == 0)
+            ? forward_schema.returns()[0]
+            : forward_hooks_[hook_idx - 1]->getSchema().returns()[0];
+  const Argument return_arg = hook_schema.arguments()[2];
+
+  // output tuple needs to match prev_output's return exactly
+  TORCH_CHECK(
+      *prev_output.type() == *return_arg.type(),
+      hook_id,
+      "has the wrong type for the output argument. Received type: '",
+      return_arg.type()->annotation_str(),
+      "'. Expected type: '",
+      prev_output.type()->annotation_str(),
+      "'.\n",
+      hook_err_msg
+  );
 }
 
 torch::jit::Function* ClassType::findMethod(const std::string& name) const {
@@ -938,12 +1381,52 @@ torch::jit::Function& ClassType::getMethod(const std::string& name) const {
       "Couldn't find method: '",
       name,
       "' on class: '",
-      python_str(),
+      repr_str(),
       "'");
   return *method;
 }
+
+torch::jit::Function* ClassType::findHook(const std::string& name) const {
+  auto hook = findForwardHook(name);
+  if (hook == nullptr) {
+    hook = findForwardPreHook(name);
+  }
+  return hook;
+}
+
+torch::jit::Function& ClassType::getHook(const std::string& name) const {
+  torch::jit::Function* function = findHook(name);
+  TORCH_CHECK(
+      function != nullptr,
+      "Couldn't find: '",
+      name,
+      "' on class: '",
+      repr_str(),
+      "'as forward hook or forward pre_hook.");
+  return *function;
+}
+
 bool ClassType::hasMethod(const std::string& name) const {
   return findMethod(name) != nullptr;
+}
+
+void ClassType::addStaticMethod(torch::jit::Function* method) {
+  TORCH_CHECK(
+      findStaticMethod(method->name()) == nullptr &&
+          findMethod(method->name()) == nullptr, "Can't redefine method: ",
+      method->name(),
+      " on class: ",
+      repr_str());
+  staticmethods_.emplace_back(method);
+}
+
+torch::jit::Function* ClassType::findStaticMethod(const std::string& name) const {
+  for (auto method : staticmethods_) {
+    if (name == method->name()) {
+      return method;
+    }
+  }
+  return nullptr;
 }
 
 void ClassType::unsafeRemoveMethod(const std::string& name) {
@@ -960,15 +1443,16 @@ void ClassType::unsafeRemoveMethod(const std::string& name) {
       "Can't delete undefined method ",
       name,
       " on class: ",
-      python_str());
+      repr_str());
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassType::create(name(), compilation_unit_);
+  auto ptr = ClassType::create(name(), compilation_unit_, is_module());
   AT_ASSERT(numAttributes() == refined_slots.size());
-  for (size_t i = 0; i < attributeNames_.size(); ++i) {
-    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
-    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
+  for (size_t i = 0; i < attributes_.size(); ++i) {
+    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributes_[i].getType()));
+    ptr->addAttribute(attributes_[i].getName(), refined_slots[i], (attributes_[i].getKind() == AttributeKind::PARAMETER),
+    (attributes_[i].getKind() == AttributeKind::BUFFER));
   }
   // Copy methods over
   for (const auto& method : methods()) {
@@ -977,7 +1461,7 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   return ptr;
 }
 
-bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool ClassType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (rhs->cast<AnyClassType>()) {
     return true;
   }
@@ -987,8 +1471,8 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
     // Module Interface Type but the Class Type is not a Module Class Type
     if (!is_module() && iface->is_module()) {
       if (why_not) {
-        *why_not << "Class '" << python_str() << "' is not a subtype of "
-                 << "the module interface '" << rhs->python_str()
+        *why_not << "Class '" << repr_str() << "' is not a subtype of "
+                 << "the module interface '" << rhs->repr_str()
                  << "' , only ScriptModule class can be subtype of module"
                  << " interface.\n";
       }
@@ -998,8 +1482,8 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
       auto self_method = findMethod(schema.name());
       if (!self_method) {
         if (why_not) {
-          *why_not << "Class '" << python_str() << "' does not have method '"
-                   << schema.name() << "' but '" << rhs->python_str()
+          *why_not << "Class '" << repr_str() << "' does not have method '"
+                   << schema.name() << "' but '" << rhs->repr_str()
                    << "' does.\n";
         }
         return false;
@@ -1007,9 +1491,9 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
       if (!self_method->getSchema().isSubtypeOf(
               schema, /*is_method=*/true, why_not)) {
         if (why_not) {
-          *why_not << "Method on class '" << python_str()
+          *why_not << "Method on class '" << repr_str()
                    << "' (1) is not compatible with interface '"
-                   << rhs->python_str() << "' (2)\n"
+                   << rhs->repr_str() << "' (2)\n"
                    << "  (1) " << self_method->getSchema() << "\n"
                    << "  (2) " << schema << "\n";
         }
@@ -1031,8 +1515,8 @@ bool InterfaceType::isSubTypeImpl(
     std::ostream* why_not) {
   if (!lhs.is_module() && rhs.is_module()) {
     if (why_not) {
-      *why_not << "Interface '" << lhs.python_str() << "' is not a subtype of "
-               << "the module interface '" << rhs.python_str() << "'.\n";
+      *why_not << "Interface '" << lhs.repr_str() << "' is not a subtype of "
+               << "the module interface '" << rhs.repr_str() << "'.\n";
     }
     return false;
   }
@@ -1040,17 +1524,17 @@ bool InterfaceType::isSubTypeImpl(
       auto self_schema = lhs.getMethod(schema.name());
       if (!self_schema) {
         if (why_not) {
-          *why_not << "Interface '" << lhs.python_str()
+          *why_not << "Interface '" << lhs.repr_str()
                    << "' does not have method '" << schema.name() << "' but interface '"
-                   << rhs.python_str() << "' does.\n";
+                   << rhs.repr_str() << "' does.\n";
         }
         return false;
       }
       if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
         if (why_not) {
-          *why_not << "Method on interface '" << lhs.python_str()
+          *why_not << "Method on interface '" << lhs.repr_str()
                    << "' (1) is not compatible with interface '"
-                   << rhs.python_str() << "' (2)\n"
+                   << rhs.repr_str() << "' (2)\n"
                    << "  (1) " << *self_schema << "\n"
                    << "  (2) " << schema << "\n";
           return false;
@@ -1061,7 +1545,7 @@ bool InterfaceType::isSubTypeImpl(
     return true;
 }
 
-bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool InterfaceType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   // to improve performance this check can be cached
   if (auto iface = rhs->cast<InterfaceType>()) {
     return isSubTypeImpl(*this, *iface, why_not);
@@ -1090,21 +1574,21 @@ InterfaceType::~InterfaceType() = default;
 ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module) {
+    bool is_module,
+    std::string doc_string) {
   return ClassTypePtr(
-      new ClassType(std::move(qualifiedName), std::move(cu), is_module));
+      new ClassType(std::move(qualifiedName), std::move(cu), is_module, std::move(doc_string)));
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module)
+    bool is_module = false,
+    std::string doc_string = "")
     : NamedType(TypeKind::ClassType, std::move(name)),
-      compilation_unit_(std::move(cu)) {
-  if (is_module) {
-    parameterSlots_ = std::make_shared<std::vector<bool>>();
-  }
-}
+      compilation_unit_(std::move(cu)),
+      isModule_(is_module),
+      doc_string_(std::move(doc_string)) {}
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;
@@ -1120,65 +1604,86 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
         " '",
         name,
         "' to ",
-        python_str(),
+        repr_str(),
         " but a constant field of the same name already exists with value ",
         constantValues_[i]);
   }
 
   // Check no overlap with existing attributes
-  for (size_t i = 0; i < attributeNames_.size(); ++i) {
+  for (size_t i = 0; i < attributes_.size(); ++i) {
     TORCH_CHECK(
-        name != attributeNames_[i],
+        name != attributes_[i].getName(),
         "attempting to add ",
         what,
         " '",
         name,
         "' to ",
-        python_str(),
+        repr_str(),
         " but an attribute field of the same name already exists with type ",
-        attributeTypes_[i]->python_str());
+        attributes_[i].getType()->repr_str());
   }
+}
+
+void ClassType::addAttribute(ClassAttribute classAttribute) {
+    attributes_.push_back(classAttribute);
+    attributeTypes_.push_back(classAttribute.getType());
+    AT_ASSERT(attributes_.size() == attributeTypes_.size());
 }
 
 size_t ClassType::addAttribute(
     const std::string& name,
     const TypePtr& type,
     bool is_parameter,
-    bool allow_any) {
-  const char* what = is_parameter ? "parameter" : "attribute";
-  checkNotExist(name, what);
-
-  if (!allow_any) {
-    checkNoAny(*this, what, name, type);
+    bool is_buffer) {
+  if (is_parameter && is_buffer){
+    TORCH_INTERNAL_ASSERT(false, "Attribute cannot be both a parameter and a buffer!");
   }
 
-  size_t slot = attributeNames_.size();
-  attributeNames_.push_back(name);
-  attributeTypes_.push_back(type);
+  std::string what = is_parameter ? "parameter" : "attribute";
+  what += (is_buffer? "buffer" : "not buffer");
+  checkNotExist(name, what);
+
+  size_t slot = attributes_.size();
+
+  AttributeKind kind = AttributeKind::REGULAR_ATTRIBUTE;
   if (is_parameter) {
-    TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter to a non module");
+    kind = AttributeKind::PARAMETER;
+  } else if (is_buffer) {
+    kind = AttributeKind::BUFFER;
+  }
+
+  ClassAttribute ClassAttribute(kind, type, name);
+
+  addAttribute(ClassAttribute);
+
+  if (is_parameter || is_buffer) {
+    TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter or buffer to a non module");
     TORCH_CHECK(
         (type->kind() == TensorType::Kind) ||
             (type->kind() == OptionalType::Kind &&
-            type->expect<OptionalType>()->getElementType()->kind() ==
+            type->expectRef<OptionalType>().getElementType()->kind() ==
                 TensorType::Kind) ||
             (type->kind() == NoneType::Kind),
-        "Expecting parameter to have either None, Tensor or Optional[Tensor] type, but got: ",
+        "Expecting parameter or buffer to have either None, Tensor or Optional[Tensor] type, but got: ",
         toString(type));
   }
-  if (is_module()) {
-    parameterSlots_->push_back(is_parameter);
-  }
+
   return slot;
 }
 
 void ClassType::unsafeRemoveAttribute(const std::string& name) {
   auto slot = getAttributeSlot(name);
-  attributeNames_.erase(attributeNames_.begin() + slot);
+  attributes_.erase(attributes_.begin() + slot);
   attributeTypes_.erase(attributeTypes_.begin() + slot);
-  if (is_module()) {
-    parameterSlots_->erase(parameterSlots_->begin() + slot);
-  }
+  AT_ASSERT(attributes_.size() == attributeTypes_.size());
+}
+
+void ClassType::unsafeChangeAttributeType(const std::string& name, TypePtr new_ty) {
+  auto slot = getAttributeSlot(name);
+  auto old_attr_info = attributes_[slot];
+  AT_ASSERT(old_attr_info.getKind() == AttributeKind::REGULAR_ATTRIBUTE);
+  attributes_[slot] = ClassAttribute(old_attr_info.getKind(), new_ty, old_attr_info.getName());
+  attributeTypes_[slot] = new_ty;
 }
 
 size_t ClassType::addConstant(const std::string& name, const IValue& value) {
@@ -1193,7 +1698,7 @@ IValue ClassType::getConstant(const std::string& name) const {
   const auto& v = findConstant(name);
   TORCH_CHECK(
       v.has_value(),
-      python_str(),
+      repr_str(),
       " does not have a constant field with name '",
       name,
       "'");
@@ -1204,7 +1709,7 @@ IValue ClassType::getConstant(size_t slot) const {
   TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
   TORCH_CHECK(
       slot < constantValues_.size(),
-      python_str(),
+      repr_str(),
       " does not have a constant slot of index ",
       slot);
   return constantValues_[slot];
@@ -1242,10 +1747,26 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   return cu;
 }
 
+c10::optional<ClassType::Property> ClassType::getProperty(const std::string& name) {
+  for (auto& prop : properties_) {
+    if (name == prop.name) {
+      return prop;
+    }
+  }
+
+  return c10::nullopt;
+}
+
+void ClassType::addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter) {
+  TORCH_INTERNAL_ASSERT(!getProperty(name), "Property named ", name, " already exists!");
+  properties_.push_back({name, getter, setter});
+}
+
+
 static bool containsAny(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };
   while (!to_scan.empty()) {
-    TypePtr typ = to_scan.back();
+    const auto typ = to_scan.back();
     to_scan.pop_back();
     if (typ->kind() == AnyType::Kind) {
       return true;
@@ -1265,10 +1786,26 @@ void checkNoAny(const Type& base, const char* what, const std::string& attrname,
       " '",
       attrname,
       "' of type ",
-      attrtype->python_str(),
+      attrtype->repr_str(),
       " to '",
-      base.python_str(),
+      base.repr_str(),
       "' but it contains an Any type. Any types cannot be members of modules, classes, or named tuples.");
+}
+
+SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
+  if (!dims_ || !other.dims_ || dims_->size() != other.dims_->size()) {
+    return SymbolicShape();
+  }
+  std::vector<ShapeSymbol> dims;
+  for (size_t i = 0, n = dims_->size(); i < n; i++) {
+    dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
+  }
+  return SymbolicShape(std::move(dims));
+}
+
+bool EnumType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
+  return rhs->kind() == TypeKind::AnyType ||
+      rhs->kind() == TypeKind::AnyEnumType || *this == *rhs;
 }
 
 } // namespace c10

@@ -140,14 +140,14 @@ __global__ void kernelHistogram1D(
   }
 }
 
-#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                   \
-  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, -1, MEMORY_TYPE>    \
-      <<<grid,                                                             \
-         block,                                                            \
-         SHARED_MEM,                                                       \
-         getCurrentCUDAStream()>>>(                    \
-          aInfo, pInfo, bInfo, nbins, minvalue, maxvalue, totalElements, WEIGHTS_OP);        \
-  AT_ASSERTM(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
+#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                              \
+  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, -1, MEMORY_TYPE>              \
+      <<<grid,                                                                        \
+         block,                                                                       \
+         SHARED_MEM,                                                                  \
+         getCurrentCUDAStream()>>>(                                                   \
+          aInfo, pInfo, bInfo, nbins, minvalue, maxvalue, totalElements, WEIGHTS_OP); \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define HANDLE_SWITCH_CASE(mType, getOp)                                   \
   switch (mType) {                                                         \
@@ -165,7 +165,7 @@ inline int64_t getFreeGlobalMemory() {
   // no need to use `cudaSetDevice`
   size_t free_mem, total_mem;
   cudaMemGetInfo(&free_mem, &total_mem);
-  AT_ASSERTM(
+  TORCH_INTERNAL_ASSERT(
       cudaGetLastError() == cudaSuccess,
       "CUDA_tensor_histogram failed to get free global memory");
   return static_cast<int64_t>(free_mem);
@@ -206,6 +206,10 @@ bool CUDA_tensor_histogram(
   }
   auto totalElements = b.numel();
 
+  if (totalElements == 0) {
+    return false;
+  }
+
   const dim3 block = getApplyBlock();
   dim3 grid;
   int64_t curDevice = current_device();
@@ -237,7 +241,12 @@ bool CUDA_tensor_histogram(
   detail::TensorInfo<output_t, IndexType> pInfo(nullptr, 0, {}, {});
   Tensor partial_output;
   if (memType == CUDAHistogramMemoryType::MULTI_BLOCK) {
-    partial_output = native::zeros({grid.x, nbins}, a.options());
+    partial_output = native::zeros(
+        {grid.x, nbins},
+        optTypeMetaToScalarType(a.options().dtype_opt()),
+        a.options().layout_opt(),
+        a.options().device_opt(),
+        a.options().pinned_memory_opt());
     pInfo = detail::getTensorInfo<output_t, IndexType>(partial_output);
   }
 
@@ -274,7 +283,12 @@ Tensor _bincount_cuda_template(
     AT_ERROR("minlength should be >= 0");
   }
   if (self.dim() == 1 && self.numel() == 0) {
-    return native::zeros({minlength}, device(kCUDA).dtype(kLong));
+    return native::zeros(
+        {minlength},
+        kLong,
+        c10::nullopt /* layout */,
+        kCUDA,
+        c10::nullopt /* pin_memory */);
   }
   if (self.dim() != 1 ||
       (!std::is_same<input_t, uint8_t>::value &&
@@ -293,11 +307,21 @@ Tensor _bincount_cuda_template(
   // alloc output counter on GPU
   Tensor output;
   if (has_weights) {
-    output = native::zeros({nbins}, weights.options());
+    output = native::zeros(
+        {nbins},
+        optTypeMetaToScalarType(weights.options().dtype_opt()),
+        weights.options().layout_opt(),
+        weights.options().device_opt(),
+        weights.options().pinned_memory_opt());
     auto ret = cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
         output, self, weights, nbins, minvalue, maxvalue);
   } else {
-    output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
+    output = native::zeros(
+        {nbins},
+        kLong,
+        c10::nullopt /* layout */,
+        DeviceType::CUDA,
+        c10::nullopt /* pin_memory */);
     auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, minvalue, maxvalue);
   }
@@ -314,7 +338,12 @@ Tensor _histc_cuda_template(
   if (nbins <= 0) {
     AT_ERROR("bins must be > 0");
   }
-  Tensor output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(self.scalar_type()));
+  Tensor output = native::zeros(
+      {nbins},
+      self.scalar_type(),
+      c10::nullopt /* layout */,
+      DeviceType::CUDA,
+      c10::nullopt /* pin_memory */);
   input_t minvalue = min;
   input_t maxvalue = max;
   if (min == max) {
@@ -357,9 +386,14 @@ Tensor _histc_cuda_template(
 
 namespace native {
 Tensor _bincount_cuda(
-    const Tensor& self,
-    const Tensor& weights,
+    const Tensor& self, const c10::optional<Tensor>& weights_opt,
     int64_t minlength) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weights = c10::value_or_else(weights_opt, [] {return Tensor();});
+
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("_bincount_cuda");
   return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cuda", [&] {
     const auto scalar = weights.scalar_type();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
@@ -372,17 +406,20 @@ Tensor _bincount_cuda(
 Tensor _histc_cuda(
     const Tensor& self,
     int64_t nbins,
-    Scalar min,
-    Scalar max) {
+    const Scalar& min,
+    const Scalar& max) {
   if (self.scalar_type() == ScalarType::Half) {
     AT_ERROR("HalfTensor is not supported");
   }
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("_histc_cuda");
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
     return _histc_cuda_template<scalar_t>(self, nbins, min.to<scalar_t>(), max.to<scalar_t>());
   });
 }
 
-Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, Scalar min, Scalar max) {
+Tensor& _histc_out_cuda(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max, Tensor& result) {
   auto ret = _histc_cuda(self, bins, min, max);
   result.resize_as_(ret);
   result.copy_(ret);

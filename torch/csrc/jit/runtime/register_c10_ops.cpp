@@ -17,7 +17,7 @@ namespace {
 //      It should also handle autograd.
 Operator createOperatorFromC10_withTracingHandledHere(
     const c10::OperatorHandle& op) {
-  return Operator(op, [op](Stack& stack) {
+  return Operator(op, [op](Stack* stack) {
     const auto input_size = op.schema().arguments().size();
     const auto output_size = op.schema().returns().size();
 
@@ -34,7 +34,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
       tracer::recordSourceLocation(node);
       const auto& args = op.schema().arguments();
       int i = 0;
-      for (auto iter = stack.end() - input_size; iter != stack.end();
+      for (auto iter = stack->end() - input_size; iter != stack->end();
            ++iter, ++i) {
         // TODO we need to refactor graph APIs (e.g., addInputs)
         // appropriately; after that, we can get rid of the giant if-else
@@ -46,7 +46,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
             node->addInput(none);
             continue;
           } else {
-            type = type->expect<OptionalType>()->getElementType();
+            type = type->expectRef<OptionalType>().getElementType();
           }
         }
         if (type->isSubtypeOf(TensorType::get())) {
@@ -67,7 +67,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
         } else if (type->kind() == TypeKind::NumberType) {
           tracer::addInputs(node, args[i].name().c_str(), iter->toScalar());
         } else if (type->kind() == TypeKind::ListType) {
-          const auto& elem_type = type->expect<ListType>()->getElementType();
+          const auto& elem_type = type->expectRef<ListType>().getElementType();
           if (elem_type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensorList());
             auto list = iter->toTensorVector();
@@ -100,7 +100,9 @@ Operator createOperatorFromC10_withTracingHandledHere(
           } else if (elem_type->kind() == TypeKind::IntType) {
             AT_ASSERT(iter->isIntList());
             tracer::addInputs(
-                node, args[i].name().c_str(), iter->toIntVector());
+                node,
+                args[i].name().c_str(),
+                c10::IntArrayRef(iter->toIntVector()));
           } else if (elem_type->kind() == TypeKind::BoolType) {
             AT_ASSERT(iter->isBoolList());
             tracer::addInputs(
@@ -120,26 +122,19 @@ Operator createOperatorFromC10_withTracingHandledHere(
       jit::tracer::setTracingState(nullptr);
     }
 
-#ifdef USE_STATIC_DISPATCH
-    {
-      at::AutoNonVariableTypeMode non_var_type_mode(true);
-      op.callBoxed(&stack);
-    }
-#else
-    op.callBoxed(&stack);
-#endif // USE_STATIC_DISPATCH
+    op.callBoxed(stack);
 
     if (tracer_state) {
       jit::tracer::setTracingState(std::move(tracer_state));
       int i = 0;
-      for (auto iter = stack.end() - output_size; iter != stack.end();
+      for (auto iter = stack->end() - output_size; iter != stack->end();
            ++iter, ++i) {
         const auto& type = op.schema().returns()[i].type();
         if (type->isSubtypeOf(TensorType::get())) {
           AT_ASSERT(iter->isTensor());
           tracer::addOutput(node, iter->toTensor());
         } else if (type->kind() == TypeKind::ListType) {
-          const auto& elem_type = type->expect<ListType>()->getElementType();
+          const auto& elem_type = type->expectRef<ListType>().getElementType();
           if (elem_type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensorList());
             tracer::addOutput(node, iter->toTensorList());
@@ -155,17 +150,12 @@ Operator createOperatorFromC10_withTracingHandledHere(
         }
       }
     }
-
-    return 0;
   });
 }
 
 Operator createOperatorFromC10_withTracingNotHandledHere(
     const c10::OperatorHandle& op) {
-  return Operator(op, [op](Stack& stack) {
-    op.callBoxed(&stack);
-    return 0;
-  });
+  return Operator(op, [op](Stack* stack) { op.callBoxed(stack); });
 }
 
 class RegistrationListener final : public c10::OpRegistrationListener {

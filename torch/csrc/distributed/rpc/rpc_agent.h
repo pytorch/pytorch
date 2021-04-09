@@ -17,6 +17,9 @@ constexpr float kDefaultRpcTimeoutSeconds = 60;
 // timeout for RPCs.
 constexpr float kUnsetRpcTimeout = -1;
 constexpr auto kDefaultInitMethod = "env://";
+constexpr float kSecToMsConversion = 1000;
+constexpr auto kRpcTimeoutErrorStr =
+    "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
@@ -32,7 +35,9 @@ struct RpcBackendOptions {
 
   RpcBackendOptions(float rpcTimeoutSeconds, std::string initMethod)
       : rpcTimeoutSeconds(rpcTimeoutSeconds),
-        initMethod(std::move(initMethod)) {}
+        initMethod(std::move(initMethod)) {
+    TORCH_CHECK(rpcTimeoutSeconds >= 0, "RPC Timeout must be non-negative");
+  }
 
   float rpcTimeoutSeconds;
   std::string initMethod;
@@ -76,6 +81,10 @@ struct TORCH_API WorkerInfo : torch::CustomClassHolder {
   const worker_id_t id_;
 };
 
+TORCH_API std::ostream& operator<<(
+    std::ostream& os,
+    const WorkerInfo& workerInfo);
+
 // Struct for options to configure the RPC Retry protocol.
 struct TORCH_API RpcRetryOptions {
   // Using a default constructor like all other Options structs in the RPC
@@ -96,7 +105,7 @@ struct TORCH_API RpcRetryInfo {
   RpcRetryInfo(
       const WorkerInfo& to,
       Message&& message,
-      std::shared_ptr<FutureMessage> originalFuture,
+      std::shared_ptr<JitFuture> originalFuture,
       int retryCount,
       RpcRetryOptions options)
       : to_(to),
@@ -108,7 +117,7 @@ struct TORCH_API RpcRetryInfo {
   const WorkerInfo& to_;
   Message message_;
   // Future that is returned to the caller of sendWithRetries().
-  std::shared_ptr<FutureMessage> originalFuture_;
+  std::shared_ptr<JitFuture> originalFuture_;
   // Number of send attempts completed so far.
   int retryCount_;
   RpcRetryOptions options_;
@@ -142,30 +151,32 @@ class TORCH_API RpcAgent {
   virtual ~RpcAgent();
 
   // Send a message to the ``RpcAgent`` of id ``to`` and returns a
-  // ``FutureMessage`` ptr. The implementation must be asynchronous, i.e., it
+  // ``JitFuture`` ptr. The implementation must be asynchronous, i.e., it
   // cannot block until it receives the response.
   //
-  // If ``message.isRequest()`` is true, the ``FutureMessage`` will be
+  // If ``message.isRequest()`` is true, the ``JitFuture`` will be
   // completed when the response arrives. For other message types, the Future
   // should be ignored by the caller.
-  virtual std::shared_ptr<FutureMessage> send(
+  virtual std::shared_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
-      const float rpcTimeoutSeconds = kUnsetRpcTimeout) = 0;
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout,
+      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
+          {}) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
   // receieved. The duration between consecutive sends is increased over
   // time using an exponential backoff algorithm.
   //
   // Sends ``message`` to the ``RpcAgent`` of id ``to`` and returns a
-  // ``FutureMessage`` ptr, just like send(). Caller can specify the maximum
+  // ``JitFuture`` ptr, just like send(). Caller can specify the maximum
   // number of retries for this RPC (default is 5), initial duration between
   // sends (default is 1000ms), and backoff constant (default is 1.5) by
   // passing in the RpcRetryOptions struct. This API might end up
   // executing a method twice on the remote end (it does not guarantee
   // exactly-once semantics). Therefore, the user must ensure their requests
   // are idempotent.
-  std::shared_ptr<FutureMessage> sendWithRetries(
+  std::shared_ptr<JitFuture> sendWithRetries(
       const WorkerInfo& to,
       Message&& message,
       RpcRetryOptions retryOptions = RpcRetryOptions());
@@ -196,7 +207,7 @@ class TORCH_API RpcAgent {
 
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
-  virtual void join() = 0;
+  virtual void join(bool shutdown = false) = 0;
 
   // Synchronize the this process with other ``RpcAgent`` processes. Block until
   // all ``RpcAgent``s reach this method and send all pending messages.
@@ -250,6 +261,10 @@ class TORCH_API RpcAgent {
   // Get the type resolver
   std::shared_ptr<TypeResolver> getTypeResolver();
 
+  // Retrieves the device map for the provided destination worker.
+  virtual std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> getDeviceMap(
+      const WorkerInfo& dest);
+
  protected:
   const WorkerInfo workerInfo_;
   const std::unique_ptr<RequestCallback> cb_;
@@ -290,7 +305,7 @@ class TORCH_API RpcAgent {
   // error and do not retry again. In case 3, we move the RpcRetryInfo struct
   // to another time point in the map to schedule the RPC for a future send.
   void rpcRetryCallback(
-      const std::shared_ptr<FutureMessage>& message,
+      const std::shared_ptr<JitFuture>& message,
       steady_clock_time_point newTime,
       std::shared_ptr<RpcRetryInfo> earliestRpc);
 

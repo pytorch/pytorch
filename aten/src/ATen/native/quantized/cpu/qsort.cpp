@@ -38,7 +38,7 @@ std::tuple<Tensor&, Tensor&> quantized_topk_out_cpu(
   return std::forward_as_tuple(values, indices);
 }
 
-std::tuple<Tensor, Tensor> quantized_topk_cpu(
+std::tuple<Tensor, Tensor> topk_quantized_cpu(
     const Tensor& self,
     int64_t k,
     int64_t dim,

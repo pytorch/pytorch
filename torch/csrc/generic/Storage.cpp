@@ -148,13 +148,9 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     if (nindex < 0)
       nindex += (self->cdata->nbytes() / sizeof(scalar_t));
     if (nindex < 0 || nindex >= (self->cdata->nbytes() / sizeof(scalar_t))) {
-      PyErr_Format(
-          PyExc_IndexError,
-          "index %" PRId64
-          " out of range for storage of "
-          "size %" PRId64,
-          (int64_t)nindex,
-          (int64_t)(self->cdata->nbytes() / sizeof(scalar_t)));
+      PyErr_SetString(PyExc_IndexError, fmt::format(
+            "index {} out of range for storage of size {}",
+            nindex, self->cdata->nbytes() / sizeof(scalar_t)));
       return nullptr;
     }
     scalar_t value = THWStorage_(get)(LIBRARY_STATE self->cdata, nindex);
@@ -166,8 +162,8 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
       return nullptr;
     if (step != 1) {
-      THPUtils_setError("Trying to slice with a step of %" PRId64 ", but only a step of "
-          "1 is supported", (int64_t)step);
+      THPUtils_setError("Trying to slice with a step of %lld, but only a step of "
+          "1 is supported", (long long)step);
       return nullptr;
     }
 
@@ -175,11 +171,13 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 
     at::StorageImpl* old_storage = self->cdata;
     c10::raw::intrusive_ptr::incref(old_storage);
-    caffe2::TypeMeta dtype = old_storage->dtype();
     at::Storage new_storage(c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
-        dtype,
-        slicelength * dtype.itemsize(),
+#ifdef THQUANTIZED
+        slicelength * sizeof(quantized_t),
+#else
+        slicelength * sizeof(scalar_t),
+#endif
         at::DataPtr(
             static_cast<void*>(data + start),
             old_storage,
@@ -220,8 +218,8 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
     if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
       return -1;
     if (step != 1) {
-      THPUtils_setError("Trying to slice with a step of %" PRId64 ", but only a step of "
-          "1 is supported", (int64_t)step);
+      THPUtils_setError("Trying to slice with a step of %lld, but only a step of "
+          "1 is supported", (long long)step);
       return 0;
     }
     // TODO: check the bounds only once
@@ -299,7 +297,13 @@ static PyObject * THPStorage_(dtype)(THPStorage *self, void *unused)
 {
   HANDLE_TH_ERRORS
   return torch::autograd::utils::wrap(
-      torch::getTHPDtype(at::typeMetaToScalarType(self->cdata->dtype())));
+      torch::getTHPDtype(at::typeMetaToScalarType(
+#ifdef THQUANTIZED
+          caffe2::TypeMeta::Make<quantized_t>()
+#else
+          caffe2::TypeMeta::Make<scalar_t>()
+#endif
+              )));
   END_HANDLE_TH_ERRORS
 }
 
@@ -319,7 +323,8 @@ void THPStorage_(initCopyMethods)()
   auto& h = THWStorage_(copy_functions);
   // copy from CPU types
   // TODO: Add cross-dtype storage copy for complex storage
-  #if !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE) && !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE)
+#if !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE) && \
+    !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE)
     THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPByteStorageType, h, &THWStorage_(copyByte));
     THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPCharStorageType, h, &THWStorage_(copyChar));
     THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPShortStorageType, h, &THWStorage_(copyShort));
@@ -330,19 +335,19 @@ void THPStorage_(initCopyMethods)()
     THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPDoubleStorageType, h, &THWStorage_(copyDouble));
     THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBoolStorageType, h, &THWStorage_(copyBool));
     THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBFloat16StorageType, h, &THWStorage_(copyBFloat16));
-    #ifdef THQUINT8
+#ifdef THQUINT8
       THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQUInt8StorageType, h, &THWStorage_(copyQUInt8));
-    #endif
-    #ifdef THQINT8
+#endif
+#ifdef THQINT8
       THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQInt8StorageType, h, &THWStorage_(copyQInt8));
-    #endif
-    #ifdef THQINT32
+#endif
+#ifdef THQINT32
       THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQInt32StorageType, h, &THWStorage_(copyQInt32));
-    #endif
-  #else
+#endif
+#else
     THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPComplexFloatStorageType, h, &THWStorage_(copyComplexFloat));
     THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPComplexDoubleStorageType, h, &THWStorage_(copyComplexDouble));
-  #endif
+#endif
 
 #ifdef THC_GENERIC_FILE
   // copy from GPU types

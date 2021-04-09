@@ -64,7 +64,7 @@ public:
     bitset cur = *this;
     size_t index = cur.find_first_set();
     while (0 != index) {
-      // -1 because find_first_set() is not one-indiced.
+      // -1 because find_first_set() is not one-indexed.
       index -= 1;
       func(index);
       cur.unset(index);
@@ -73,17 +73,33 @@ public:
   }
 
 private:
-  // Return the index of the first set bit. The returned index is one-indiced
+  // Return the index of the first set bit. The returned index is one-indexed
   // (i.e. if the very first bit is set, this function returns '1'), and a return
   // of '0' means that there was no bit set.
   size_t find_first_set() const {
-    #if defined(_MSC_VER)
+    #if defined(_MSC_VER) && defined(_M_X64)
       unsigned long result;
       bool has_bits_set = (0 != _BitScanForward64(&result, bitset_));
       if (!has_bits_set) {
         return 0;
       }
       return result + 1;
+    #elif defined(_MSC_VER) && defined(_M_IX86)
+      unsigned long result;
+      if (static_cast<uint32_t>(bitset_) != 0) {
+        bool has_bits_set = (0 != _BitScanForward(&result, static_cast<uint32_t>(bitset_)));
+        if (!has_bits_set) {
+          return 0;
+        }
+        return result + 1;
+      }
+      else {
+        bool has_bits_set = (0 != _BitScanForward(&result, static_cast<uint32_t>(bitset_ >> 32)));
+        if (!has_bits_set) {
+          return 32;
+        }
+        return result + 33;
+      }
     #else
       return __builtin_ffsll(bitset_);
     #endif
@@ -92,7 +108,7 @@ private:
   friend bool operator==(bitset lhs, bitset rhs) noexcept {
     return lhs.bitset_ == rhs.bitset_;
   }
-  
+
   bitset_type bitset_;
 };
 

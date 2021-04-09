@@ -102,9 +102,9 @@ class TestRandom {
  *      return labelMap;
  *    });
  */
-CAFFE2_API nom::Graph<std::string> createGraph();
+TORCH_API nom::Graph<std::string> createGraph();
 
-CAFFE2_API nom::Graph<std::string> createGraphWithCycle();
+TORCH_API nom::Graph<std::string> createGraphWithCycle();
 
 std::map<std::string, std::string> BBPrinter(typename nom::repr::NNCFGraph::NodeRef node);
 
@@ -112,9 +112,9 @@ std::map<std::string, std::string> cfgEdgePrinter(typename nom::repr::NNCFGraph:
 
 std::map<std::string, std::string> NNPrinter(typename nom::repr::NNGraph::NodeRef node);
 
-CAFFE2_API nom::Graph<TestClass>::NodeRef createTestNode(
+TORCH_API nom::Graph<TestClass>::NodeRef createTestNode(
     nom::Graph<TestClass>& g);
 
-CAFFE2_API std::map<std::string, std::string> TestNodePrinter(
+TORCH_API std::map<std::string, std::string> TestNodePrinter(
     nom::Graph<TestClass>::NodeRef node);
 #endif // NOM_TESTS_TEST_UTIL_H

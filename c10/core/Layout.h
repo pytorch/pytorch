@@ -17,6 +17,7 @@ inline Layout layout_from_backend(Backend backend) {
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
+    case Backend::SparseXPU:
       return Layout::Sparse;
     case Backend::MkldnnCPU:
       return Layout::Mkldnn;
@@ -34,7 +35,7 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
     case at::kMkldnn:
       return stream << "Mkldnn";
     default:
-      AT_ERROR("Unknown layout");
+      TORCH_CHECK(false, "Unknown layout");
   }
 }
 

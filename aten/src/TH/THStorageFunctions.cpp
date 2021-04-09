@@ -39,10 +39,9 @@
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateBFloat16Type.h>
 
-THStorage* THStorage_new(caffe2::TypeMeta data_type) {
+THStorage* THStorage_new() {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
-                           data_type,
                            0,
                            getTHDefaultAllocator(),
                            true)

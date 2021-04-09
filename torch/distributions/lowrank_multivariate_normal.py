@@ -73,10 +73,10 @@ class LowRankMultivariateNormal(Distribution):
 
             capacitance = I + cov_factor.T @ inv(cov_diag) @ cov_factor
     """
-    arg_constraints = {"loc": constraints.real,
-                       "cov_factor": constraints.real,
-                       "cov_diag": constraints.positive}
-    support = constraints.real
+    arg_constraints = {"loc": constraints.real_vector,
+                       "cov_factor": constraints.independent(constraints.real, 2),
+                       "cov_diag": constraints.independent(constraints.positive, 1)}
+    support = constraints.real_vector
     has_rsample = True
 
     def __init__(self, loc, cov_factor, cov_diag, validate_args=None):
@@ -96,9 +96,9 @@ class LowRankMultivariateNormal(Distribution):
         cov_diag_ = cov_diag.unsqueeze(-1)
         try:
             loc_, self.cov_factor, cov_diag_ = torch.broadcast_tensors(loc_, cov_factor, cov_diag_)
-        except RuntimeError:
+        except RuntimeError as e:
             raise ValueError("Incompatible batch shapes: loc {}, cov_factor {}, cov_diag {}"
-                             .format(loc.shape, cov_factor.shape, cov_diag.shape))
+                             .format(loc.shape, cov_factor.shape, cov_diag.shape)) from e
         self.loc = loc_[..., 0]
         self.cov_diag = cov_diag_[..., 0]
         batch_shape = self.loc.shape[:-1]

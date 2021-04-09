@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/mobile/interpreter.h>
+
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
@@ -6,9 +7,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <ATen/record_function.h>
-#if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
 #include <torch/csrc/jit/mobile/observer.h>
-#endif
 
 namespace torch {
 namespace jit {
@@ -19,6 +18,26 @@ InterpreterState::InterpreterState(std::shared_ptr<Code> code)
     : code_(std::move(code)) {
   registers_.resize(code_->register_size_);
 }
+
+namespace {
+void createObject(Stack& stack, const at::ClassTypePtr& type) {
+  auto userObj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(type->compilation_unit(), type),
+      type->numAttributes());
+  push(stack, std::move(userObj));
+}
+
+void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
+  at::TypePtr ty = pop(stack).type();
+  for (const at::TypePtr& candidate : types) {
+    if (ty->isSubtypeOf(candidate)) {
+      push(stack, true);
+      return;
+    }
+  }
+  push(stack, false);
+}
+} // namespace
 
 using namespace at;
 
@@ -37,15 +56,14 @@ bool InterpreterState::run(Stack& stack) {
     //    std::cout << std::endl;
     switch (inst.op) {
       case OP: {
-#if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
-        if (auto debug_info = c10::ThreadLocalDebugInfo::get(
-                c10::DebugInfoKind::MOBILE_RUNTIME_INFO)) {
+        if (at::hasGlobalCallbacks()) {
           if (auto* mobile_debug_info =
-                  dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
+                  static_cast<MobileDebugInfo*>(c10::ThreadLocalDebugInfo::get(
+                      c10::DebugInfoKind::MOBILE_RUNTIME_INFO))) {
             mobile_debug_info->setOpIdx(pc);
           }
         }
-#endif
+
         // TODO(iliacher): remove the workaround after RecordFunction is in
         // Dispatcher
         bool prev_value = isRecordFunctionEnabled();
@@ -53,7 +71,7 @@ bool InterpreterState::run(Stack& stack) {
           // enable only for the RecordFunction
           enableRecordFunction(true);
         }
-        RECORD_FUNCTION(code_->op_names_[inst.X].name, stack);
+        RECORD_USER_SCOPE_WITH_INPUTS(code_->op_names_[inst.X].name, stack);
         if (!prev_value) {
           enableRecordFunction(false);
         }
@@ -151,7 +169,7 @@ bool InterpreterState::run(Stack& stack) {
       case RET:
         return false;
       case LIST_CONSTRUCT: {
-        auto type = code_->types_[inst.X]->expect<at::ListType>();
+        const auto& type = code_->types_[inst.X]->expectRef<at::ListType>();
         listConstruct(stack, type, inst.N);
         ++pc;
       } break;
@@ -168,18 +186,36 @@ bool InterpreterState::run(Stack& stack) {
         ++pc;
       } break;
       case DICT_CONSTRUCT: {
-        auto type = code_->types_[inst.X]->expect<at::DictType>();
+        const auto& type = code_->types_[inst.X]->expectRef<at::DictType>();
         dictConstruct(stack, type, inst.N);
         ++pc;
       } break;
       case NAMED_TUPLE_CONSTRUCT: {
-        auto type = code_->types_[inst.X]->expect<at::TupleType>();
-        namedTupleConstruct(stack, type, inst.N);
+        namedTupleConstruct(
+            stack, code_->types_[inst.X]->expect<at::TupleType>(), inst.N);
+        ++pc;
+      } break;
+      case CREATE_OBJECT: {
+        auto type = code_->types_[inst.X]->expect<c10::ClassType>();
+        createObject(stack, type);
+        ++pc;
+      } break;
+      case ISINSTANCE: {
+        at::ArrayRef<TypePtr> types(
+            &(code_->types_[inst.X]), &(code_->types_[inst.X + inst.N]));
+        isinstance(stack, types);
         ++pc;
       } break;
       case WARN: {
         drop(stack, 1);
-        TORCH_WARN(pop(stack).toStringRef());
+        // Note: Please don't move the pop(stack) code below into the TORCH_WARN
+        // macro since TORCH_WARN fails to evaluate its arguments when
+        // STRIP_ERROR_MESSAGES is defined (which happens for production
+        // mobile builds). This will cause the stack to be in an inconsistent
+        // state. It has previously resulted in a SEV (S22350).
+        const auto& sref = stack.back().toStringRef();
+        TORCH_WARN(sref);
+        stack.pop_back();
         ++pc;
       } break;
       default:

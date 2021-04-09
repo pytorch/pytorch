@@ -17,6 +17,17 @@ C10_DECLARE_int(caffe2_tensor_chunk_size);
 C10_DECLARE_int(caffe2_max_tensor_serializer_threads);
 C10_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
 
+#ifdef _MSC_VER
+// It's MSVC, so we just have to guess ... and allow an override
+#ifdef FOLLY_ENDIAN_BE
+constexpr auto kIsLittleEndian = false;
+#else
+constexpr auto kIsLittleEndian = true;
+#endif
+#else
+constexpr auto kIsLittleEndian = __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__;
+#endif
+
 namespace caffe2 {
 
 constexpr auto kTensorBlobType = "Tensor";
@@ -29,11 +40,16 @@ constexpr auto kChunkIdSeparator = "#%";
  * approaches for specific classes. Acceptor should take care of writing data
  * to the actual storage.
  */
-CAFFE2_API void SerializeBlob(
+TORCH_API void SerializeBlob(
+    const Blob& blob,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor);
+
+TORCH_API void SerializeBlob(
     const Blob& blob,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
-    int chunk_size = kDefaultChunkSize);
+    const BlobSerializationOptions& options);
 
 /**
  * @brief Convenience function to serialize a blob to a string.
@@ -45,15 +61,15 @@ CAFFE2_API void SerializeBlob(
  *
  * NOTE: this function doesn't do chunking and might break with big tensors.
  */
-CAFFE2_API string SerializeBlob(const Blob& blob, const string& name);
+TORCH_API string SerializeBlob(const Blob& blob, const string& name);
 
 /**
  * Deserializes from a string containing either BlobProto or TensorProto. If
  * the deserialization fails, the content in the blob should no longer be
  * trusted.
  */
-CAFFE2_API void DeserializeBlob(const string& content, Blob* result);
-CAFFE2_API void DeserializeBlob(const BlobProto& proto, Blob* result);
+TORCH_API void DeserializeBlob(const string& content, Blob* result);
+TORCH_API void DeserializeBlob(const BlobProto& proto, Blob* result);
 
 /*
  * Get an empty Tensor from the TensorProto given the meta data in proto (data
@@ -75,7 +91,7 @@ CAFFE2_API void DeserializeBlob(const BlobProto& proto, Blob* result);
  * these function calls. e.g. mutable_data will allocate memory on the first
  * call and it will return a pointer to the allocated memory on later calls.
  */
-CAFFE2_API Tensor EmptyTensorFromProto(const TensorProto& proto);
+TORCH_API Tensor EmptyTensorFromProto(const TensorProto& proto);
 
 /**
  * @brief TensorSerializer is the serializer for Tensors.
@@ -83,7 +99,7 @@ CAFFE2_API Tensor EmptyTensorFromProto(const TensorProto& proto);
  * TensorSerializer takes in a blob that contains a Tensor, and serializes it
  * into a TensorProto protocol buffer.
  */
-class CAFFE2_API TensorSerializer : public BlobSerializerBase {
+class TORCH_API TensorSerializer : public BlobSerializerBase {
  public:
   TensorSerializer() {}
   ~TensorSerializer() override {}
@@ -96,19 +112,30 @@ class CAFFE2_API TensorSerializer : public BlobSerializerBase {
       TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override;
-  void SerializeWithChunkSize(
+  void SerializeWithOptions(
       const void* pointer,
       TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor,
-      int chunk_size) override;
+      const BlobSerializationOptions& options) override;
+
+  void Serialize(
+      const Tensor& tensor,
+      const string& name,
+      TensorProto* proto,
+      const BlobSerializationOptions& options,
+      size_t chunkBegin,
+      int32_t chunkSize);
 
   void Serialize(
       const Tensor& tensor,
       const string& name,
       TensorProto* proto,
       size_t chunkBegin,
-      int32_t chunkSize);
+      int32_t chunkSize) {
+    BlobSerializationOptions options;
+    Serialize(tensor, name, proto, options, chunkBegin, chunkSize);
+  }
 
  private:
   // A utility function to store the device context detauls.
@@ -125,7 +152,7 @@ class CAFFE2_API TensorSerializer : public BlobSerializerBase {
  * tensor, change the TensorProto's corresponding fields before calling
  * Deserialize.
  */
-class CAFFE2_API TensorDeserializer : public BlobDeserializerBase {
+class TORCH_API TensorDeserializer : public BlobDeserializerBase {
  public:
   void Deserialize(const BlobProto& proto, Blob* blob) override;
 
@@ -151,6 +178,24 @@ class CAFFE2_API TensorDeserializer : public BlobDeserializerBase {
 ////////////////////////////////////////////////////////////////////////////////
 
 namespace detail {
+// Make space for new elements to be copied to the end of the repeated field.
+// The new space is not guaranteed to be initialized.
+template <typename T>
+void ExtendRepeatedField(
+    google::protobuf::RepeatedField<T>* field,
+    size_t size) {
+  field->Reserve(field->size() + size);
+#if GOOGLE_PROTOBUF_VERSION >= 3000000
+  field->AddNAlreadyReserved(size);
+#else
+  // We unfortunately do still need to support old protobuf versions in some
+  // build configurations.
+  for (size_t i = 0; i < size; ++i) {
+    field->Add(0);
+  }
+#endif
+}
+
 template <typename SrcType, typename DstType>
 inline void CopyToProtoAsIs(
     const size_t size,
@@ -161,10 +206,7 @@ inline void CopyToProtoAsIs(
       sizeof(SrcType) == sizeof(DstType),
       "The source type and dest type cannot be copied as-is. Did "
       "you mean CopyToProtoWithCast?");
-  field->Reserve(size);
-  for (size_t i = 0; i < size; ++i) {
-    field->Add(0);
-  }
+  ExtendRepeatedField(field, size);
   context->template CopyToCPU<SrcType>(
       size, src, reinterpret_cast<SrcType*>(field->mutable_data()));
   // Make sure that we finish the copy into the protobuf.
@@ -229,7 +271,7 @@ inline void CopyFromProtoWithCast(
 // Converts MessageLite to string while also checking that SerializeAsString
 // succeeds. Pass description of class/function of the call if you'd
 // like it appended to the error message.
-CAFFE2_API std::string SerializeAsString_EnforceCheck(
+TORCH_API std::string SerializeAsString_EnforceCheck(
     const google::protobuf::MessageLite&,
     const char* error_location = nullptr);
 
@@ -238,6 +280,14 @@ inline std::string SerializeBlobProtoAsString_EnforceCheck(
     const BlobProto& blob) {
   return SerializeAsString_EnforceCheck(blob, blob.name().c_str());
 }
+
+int64_t NumelFromTensorProto(const TensorProto& tensor_proto);
+
+std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto);
+
+TypeMeta GetDataType(const TensorProto& tensor_proto);
+
+std::unique_ptr<BaseContext> ContextFromProto(const TensorProto& tensor_proto);
 
 }  // namespace caffe2
 

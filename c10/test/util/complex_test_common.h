@@ -1,9 +1,11 @@
 #include <type_traits>
 #include <tuple>
 #include <sstream>
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/hash.h>
 #include <gtest/gtest.h>
+#include <unordered_map>
 
 #if (defined(__CUDACC__) || defined(__HIPCC__))
 #define MAYBE_GLOBAL __global__
@@ -31,16 +33,66 @@ MAYBE_GLOBAL void test_pod() {
 }
 
 TEST(TestMemory, ReinterpretCast) {
+  {
   std::complex<float> z(1, 2);
   c10::complex<float> zz = *reinterpret_cast<c10::complex<float>*>(&z);
   ASSERT_EQ(zz.real(), float(1));
   ASSERT_EQ(zz.imag(), float(2));
+  }
 
-  std::complex<double> zzz(1, 2);
-  c10::complex<double> zzzz = *reinterpret_cast<c10::complex<double>*>(&zzz);
-  ASSERT_EQ(zzzz.real(), double(1));
-  ASSERT_EQ(zzzz.imag(), double(2));
+  {
+  c10::complex<float> z(3, 4);
+  std::complex<float> zz = *reinterpret_cast<std::complex<float>*>(&z);
+  ASSERT_EQ(zz.real(), float(3));
+  ASSERT_EQ(zz.imag(), float(4));
+  }
+
+  {
+  std::complex<double> z(1, 2);
+  c10::complex<double> zz = *reinterpret_cast<c10::complex<double>*>(&z);
+  ASSERT_EQ(zz.real(), double(1));
+  ASSERT_EQ(zz.imag(), double(2));
+  }
+
+  {
+  c10::complex<double> z(3, 4);
+  std::complex<double> zz = *reinterpret_cast<std::complex<double>*>(&z);
+  ASSERT_EQ(zz.real(), double(3));
+  ASSERT_EQ(zz.imag(), double(4));
+  }
 }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+TEST(TestMemory, ThrustReinterpretCast) {
+  {
+  thrust::complex<float> z(1, 2);
+  c10::complex<float> zz = *reinterpret_cast<c10::complex<float>*>(&z);
+  ASSERT_EQ(zz.real(), float(1));
+  ASSERT_EQ(zz.imag(), float(2));
+  }
+
+  {
+  c10::complex<float> z(3, 4);
+  thrust::complex<float> zz = *reinterpret_cast<thrust::complex<float>*>(&z);
+  ASSERT_EQ(zz.real(), float(3));
+  ASSERT_EQ(zz.imag(), float(4));
+  }
+
+  {
+  thrust::complex<double> z(1, 2);
+  c10::complex<double> zz = *reinterpret_cast<c10::complex<double>*>(&z);
+  ASSERT_EQ(zz.real(), double(1));
+  ASSERT_EQ(zz.imag(), double(2));
+  }
+
+  {
+  c10::complex<double> z(3, 4);
+  thrust::complex<double> zz = *reinterpret_cast<thrust::complex<double>*>(&z);
+  ASSERT_EQ(zz.real(), double(3));
+  ASSERT_EQ(zz.imag(), double(4));
+  }
+}
+#endif
 
 }  // memory
 
@@ -117,6 +169,17 @@ TEST(TestConstructors, FromThrust) {
 }
 #endif
 
+TEST(TestConstructors, UnorderedMap) {
+  std::unordered_map<c10::complex<double>, c10::complex<double>, c10::hash<c10::complex<double>>> m;
+  auto key1 = c10::complex<double>(2.5, 3);
+  auto key2 = c10::complex<double>(2, 0);
+  auto val1 = c10::complex<double>(2, -3.2);
+  auto val2 = c10::complex<double>(0, -3);
+  m[key1] = val1;
+  m[key2] = val2;
+  ASSERT_EQ(m[key1], val1);
+  ASSERT_EQ(m[key2], val2);
+}
 
 }  // constructors
 
@@ -389,6 +452,32 @@ MAYBE_GLOBAL void test_arithmetic() {
   test_arithmetic_<double>();
 }
 
+template<typename T, typename int_t>
+void test_binary_ops_for_int_type_(T real, T img, int_t num) {
+  c10::complex<T> c(real, img);
+  ASSERT_EQ(c + num, c10::complex<T>(real + num, img));
+  ASSERT_EQ(num + c, c10::complex<T>(num + real, img));
+  ASSERT_EQ(c - num, c10::complex<T>(real - num, img));
+  ASSERT_EQ(num - c, c10::complex<T>(num - real, -img));
+  ASSERT_EQ(c * num, c10::complex<T>(real * num, img * num));
+  ASSERT_EQ(num * c, c10::complex<T>(num * real, num * img));
+  ASSERT_EQ(c / num, c10::complex<T>(real / num, img / num));
+  ASSERT_EQ(num / c, c10::complex<T>(num * real / std::norm(c), -num * img / std::norm(c)));
+}
+
+template<typename T>
+void test_binary_ops_for_all_int_types_(T real, T img, int8_t i) {
+  test_binary_ops_for_int_type_<T, int8_t>(real, img, i);
+  test_binary_ops_for_int_type_<T, int16_t>(real, img, i);
+  test_binary_ops_for_int_type_<T, int32_t>(real, img, i);
+  test_binary_ops_for_int_type_<T, int64_t>(real, img, i);
+}
+
+TEST(TestArithmeticIntScalar, All) {
+  test_binary_ops_for_all_int_types_<float>(1.0, 0.1, 1);
+  test_binary_ops_for_all_int_types_<double>(-1.3, -0.2, -2);
+}
+
 } // namespace arithmetic
 
 namespace equality {
@@ -407,7 +496,7 @@ MAYBE_GLOBAL void test_equality() {
   test_equality_<float>();
   test_equality_<double>();
 }
-  
+
 } // namespace equality
 
 namespace io {
@@ -459,6 +548,10 @@ void test_values_() {
 TEST(TestStd, BasicFunctions) {
   test_values_<float>();
   test_values_<double>();
+  // CSQRT edge cases: checks for overflows which are likely to occur
+  // if square root is computed using polar form
+  ASSERT_LT(std::abs(std::sqrt(c10::complex<float>(-1e20, -4988429.2)).real()), 3e-4);
+  ASSERT_LT(std::abs(std::sqrt(c10::complex<double>(-1e60, -4988429.2)).real()), 3e-4);
 }
 
 } // namespace test_std

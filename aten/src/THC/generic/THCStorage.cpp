@@ -61,7 +61,6 @@ THCStorage* THCStorage_(new)(THCState *state)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
-                           caffe2::TypeMeta::Make<scalar_t>(),
                            0,
                            c10::cuda::CUDACachingAllocator::get(),
                            true)
@@ -73,7 +72,6 @@ THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
-                           caffe2::TypeMeta::Make<scalar_t>(),
                            size * sizeof(scalar_t),
                            c10::cuda::CUDACachingAllocator::get(),
                            true)
@@ -86,7 +84,6 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
-                           caffe2::TypeMeta::Make<scalar_t>(),
                            size * sizeof(scalar_t),
                            allocator,
                            true)
@@ -114,7 +111,6 @@ THCStorage* THCStorage_(newWithDataAndAllocator)(
     at::Allocator* allocator) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
-                           caffe2::TypeMeta::Make<scalar_t>(),
                            size * sizeof(scalar_t),
                            std::move(data),
                            allocator,

@@ -5,22 +5,14 @@
 #include <ATen/TensorNames.h>
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
+#include <c10/util/irange.h>
 
 using at::Dimname;
 using at::DimnameList;
-using at::NamedTensorMeta;
 using at::Symbol;
 using at::namedinference::TensorName;
 using at::namedinference::TensorNames;
 using std::make_unique;
-
-TEST(NamedTensorTest, defaultMetadata) {
-  int num_names = 4;
-  const auto meta = NamedTensorMeta(num_names);
-  for (const auto name : meta.names()) {
-    ASSERT_EQ(name.type(), at::NameType::WILDCARD);
-  }
-}
 
 static Dimname dimnameFromString(const std::string& str) {
   return Dimname::fromSymbol(Symbol::dimname(str));
@@ -31,8 +23,6 @@ TEST(NamedTensorTest, isNamed) {
   ASSERT_FALSE(tensor.has_names());
 
   tensor = at::zeros({3, 2, 5, 7});
-  tensor.unsafeGetTensorImpl()->set_named_tensor_meta(
-      make_unique<NamedTensorMeta>(tensor.dim()));
   ASSERT_FALSE(tensor.has_names());
 
   tensor = at::zeros({3, 2, 5, 7});
@@ -41,8 +31,7 @@ TEST(NamedTensorTest, isNamed) {
   auto H = dimnameFromString("H");
   auto W = dimnameFromString("W");
   std::vector<Dimname> names = { N, C, H, W };
-  tensor.unsafeGetTensorImpl()->set_named_tensor_meta(
-      make_unique<NamedTensorMeta>(names));
+  at::internal_set_names_inplace(tensor, names);
   ASSERT_TRUE(tensor.has_names());
 }
 
@@ -50,7 +39,7 @@ static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
   if (names.size() != other.size()) {
     return false;
   }
-  for (auto i = 0; i < names.size(); i++) {
+  for (const auto i : c10::irange(names.size())) {
     const auto& name = names[i];
     const auto& other_name = other[i];
     if (name.type() != other_name.type() || name.symbol() != other_name.symbol()) {
@@ -68,9 +57,8 @@ TEST(NamedTensorTest, attachMetadata) {
   auto W = dimnameFromString("W");
   std::vector<Dimname> names = { N, C, H, W };
 
-  tensor.unsafeGetTensorImpl()->set_named_tensor_meta(
-      make_unique<NamedTensorMeta>(names));
-  
+  at::internal_set_names_inplace(tensor, names);
+
   const auto retrieved_meta = tensor.get_named_tensor_meta();
   ASSERT_TRUE(dimnames_equal(retrieved_meta->names(), names));
 
@@ -245,5 +233,3 @@ TEST(NamedTensorTest, TensorNamesCheckUnique) {
     ASSERT_THROW(tensornames.checkUnique("op_name"), c10::Error);
   }
 }
-
-

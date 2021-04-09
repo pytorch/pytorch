@@ -9,14 +9,27 @@ import torch.backends.cudnn
 import torch.utils.cpp_extension
 
 try:
-    import torch_test_cpp_extension.cpp as cpp_extension
-    import torch_test_cpp_extension.msnpu as msnpu_extension
-    import torch_test_cpp_extension.rng as rng_extension
-except ImportError:
+    import pytest
+    HAS_PYTEST = True
+except ImportError as e:
+    HAS_PYTEST = False
+
+# TODO: Rewrite these tests so that they can be collected via pytest without
+# using run_test.py
+try:
+    if HAS_PYTEST:
+        cpp_extension = pytest.importorskip("torch_test_cpp_extension.cpp")
+        msnpu_extension = pytest.importorskip("torch_test_cpp_extension.msnpu")
+        rng_extension = pytest.importorskip("torch_test_cpp_extension.rng")
+    else:
+        import torch_test_cpp_extension.cpp as cpp_extension
+        import torch_test_cpp_extension.msnpu as msnpu_extension
+        import torch_test_cpp_extension.rng as rng_extension
+except ImportError as e:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
         "`python run_test.py -i test_cpp_extensions_aot_ninja` instead."
-    )
+    ) from e
 
 
 class TestCppExtensionAOT(common.TestCase):
@@ -77,8 +90,8 @@ class TestCppExtensionAOT(common.TestCase):
         # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
         root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
         matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
-        self.assertEqual(len(matches), 1, str(matches))
-        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", str(matches))
+        self.assertEqual(len(matches), 1, msg=str(matches))
+        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", msg=str(matches))
 
     def test_optional(self):
         has_value = cpp_extension.function_taking_optional(torch.ones(5))
@@ -141,7 +154,6 @@ class TestRNGExtension(common.TestCase):
 
     def setUp(self):
         super(TestRNGExtension, self).setUp()
-        rng_extension.registerOps()
 
     def test_rng(self):
         fourty_two = torch.full((10,), 42, dtype=torch.int64)
@@ -171,6 +183,28 @@ class TestRNGExtension(common.TestCase):
         self.assertEqual(rng_extension.getInstanceCount(), 1)
         del copy2
         self.assertEqual(rng_extension.getInstanceCount(), 0)
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not found")
+class TestTorchLibrary(common.TestCase):
+
+    def test_torch_library(self):
+        import torch_test_cpp_extension.torch_library  # noqa: F401
+
+        def f(a: bool, b: bool):
+            return torch.ops.torch_library.logical_and(a, b)
+
+        self.assertTrue(f(True, True))
+        self.assertFalse(f(True, False))
+        self.assertFalse(f(False, True))
+        self.assertFalse(f(False, False))
+        s = torch.jit.script(f)
+        self.assertTrue(s(True, True))
+        self.assertFalse(s(True, False))
+        self.assertFalse(s(False, True))
+        self.assertFalse(s(False, False))
+        self.assertIn('torch_library::logical_and', str(s.graph))
+
 
 if __name__ == "__main__":
     common.run_tests()

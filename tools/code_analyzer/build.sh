@@ -38,6 +38,7 @@ EXTRA_ANALYZER_FLAGS=$@
 BUILD_ROOT="${BUILD_ROOT:-${SRC_ROOT}/build_code_analyzer}"
 WORK_DIR="${BUILD_ROOT}/work"
 
+rm -rf "${BUILD_ROOT}"
 mkdir -p "${BUILD_ROOT}"
 mkdir -p "${WORK_DIR}"
 cd "${BUILD_ROOT}"
@@ -60,11 +61,9 @@ build_torch_mobile() {
   TORCH_BUILD_ROOT="${BUILD_ROOT}/build_mobile"
   TORCH_INSTALL_PREFIX="${TORCH_BUILD_ROOT}/install"
 
-  if [ ! -d "${TORCH_INSTALL_PREFIX}" ]; then
-    BUILD_ROOT="${TORCH_BUILD_ROOT}" "${SRC_ROOT}/scripts/build_mobile.sh" \
-      -DCMAKE_CXX_FLAGS="-S -emit-llvm -DSTRIP_ERROR_MESSAGES" \
-      -DUSE_STATIC_DISPATCH=OFF
-  fi
+  BUILD_ROOT="${TORCH_BUILD_ROOT}" "${SRC_ROOT}/scripts/build_mobile.sh" \
+    -DCMAKE_CXX_FLAGS="-S -emit-llvm -DSTRIP_ERROR_MESSAGES" \
+    ${MOBILE_BUILD_FLAGS}
 }
 
 build_test_project() {
@@ -102,25 +101,8 @@ analyze_torch_mobile() {
   call_analyzer
 }
 
-convert_output_to_bazel() {
-  cd "${SRC_ROOT}"
-
-  DEST="${BUILD_ROOT}/pt_deps.bzl"
-
-  args=(
-    --op_dependency "${OUTPUT}"
-    --output "${DEST}"
-  )
-
-  if [ -n "${BASE_OPS_FILE}" ] && [ -f "${BASE_OPS_FILE}" ]; then
-    args+=(
-      --base_ops $(< ${BASE_OPS_FILE})
-    )
-  fi
-
-  python -m tools.code_analyzer.op_deps_processor "${args[@]}"
-
-  echo "Deployed file at: ${DEST}"
+print_output_file_path() {
+  echo "Deployed file at: ${OUTPUT}"
 }
 
 analyze_test_project() {
@@ -154,7 +136,7 @@ if [ -n "${ANALYZE_TORCH}" ]; then
   build_torch_mobile
   analyze_torch_mobile
   if [ -n "${DEPLOY}" ]; then
-    convert_output_to_bazel
+    print_output_file_path
   fi
 fi
 

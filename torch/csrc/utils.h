@@ -24,24 +24,6 @@
 #define THP_EXPECT(x, y) (x)
 #endif
 
-#if PY_MAJOR_VERSION == 2
-#define THPUtils_checkReal_FLOAT(object)                                       \
-    (PyFloat_Check(object) || PyLong_Check(object) || PyInt_Check(object))
-
-#define THPUtils_unpackReal_FLOAT(object)                                      \
-    (PyFloat_Check(object) ? PyFloat_AsDouble(object) :                        \
-    PyLong_Check(object) ? PyLong_AsLongLong(object) :                         \
-    PyInt_Check(object) ? PyInt_AsLong(object) :                               \
-    (throw std::runtime_error("Could not parse real"), 0))
-
-#define THPUtils_checkReal_INT(object)                                         \
-    (PyLong_Check(object) || PyInt_Check(object))
-
-#define THPUtils_unpackReal_INT(object)                                        \
-    (PyLong_Check(object) ? PyLong_AsLongLong(object) :                        \
-    PyInt_Check(object) ? PyInt_AsLong(object) :                               \
-    (throw std::runtime_error("Could not parse real"), 0))
-#else /* PY_MAJOR_VERSION == 2 */
 #define THPUtils_checkReal_FLOAT(object)                                       \
     (PyFloat_Check(object) || PyLong_Check(object))
 
@@ -56,7 +38,6 @@
 #define THPUtils_unpackReal_INT(object)                                        \
     (PyLong_Check(object) ? PyLong_AsLongLong(object) :                        \
     (throw std::runtime_error("Could not parse real"), 0))
-#endif
 
 #define THPUtils_unpackReal_BOOL(object)                                       \
     (PyBool_Check(object) ? object :                                           \
@@ -76,7 +57,6 @@
     PyComplex_Check(object) || PyFloat_Check(object) || PyLong_Check(object) || PyInt_Check(object)
 
 #define THPUtils_newReal_FLOAT(value) PyFloat_FromDouble(value)
-// TODO: handle int overflows for py2
 #define THPUtils_newReal_INT(value) PyInt_FromLong(value)
 
 #define THPUtils_newReal_BOOL(value) PyBool_FromLong(value)
@@ -135,6 +115,9 @@
 #define THPQInt32Utils_checkReal(object)         THPUtils_checkReal_INT(object)
 #define THPQInt32Utils_unpackReal(object)        (int)THPUtils_unpackReal_INT(object)
 #define THPQInt32Utils_newReal(value)           THPUtils_newReal_INT(value)
+#define THPQUInt4x2Utils_checkReal(object)      THPUtils_checkReal_INT(object)
+#define THPQUInt4x2Utils_unpackReal(object)     (int)THPUtils_unpackReal_INT(object)
+#define THPQUInt4x2Utils_newReal(value)         THPUtils_newReal_INT(value)
 
 
 #define THPUtils_assert(cond, ...) THPUtils_assertRet(nullptr, cond, __VA_ARGS__)

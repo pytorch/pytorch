@@ -151,7 +151,7 @@ void fetchInputsToIfOpsSubnet(NetDef* net) {
   NetDef clone(*net);
   clone.clear_op();
   for (auto& op : net->op()) {
-    if (op.type() == "If") {
+    if (op.type() == "If" || op.type() == "AsyncIf") {
       OperatorDef new_op(op);
       ArgumentHelper helper(op);
       std::set<std::string> subnet_inputs, subnet_outputs;
@@ -200,6 +200,67 @@ NetDef composeResultNet(const OperatorDef& onnxifi_op) {
   NetDef net_opt;
   net_opt.add_op()->CopyFrom(onnxifi_op);
   return net_opt;
+}
+
+void enforceFp32InputsToFp16(
+    const std::unordered_set<std::string>& weights,
+    NetDef* pred_net,
+    ShapeInfoMap* shape_hints) {
+  std::unordered_map<std::string, ShapeInfo> user_input_map;
+  for (const auto& i : pred_net->external_input()) {
+    if (weights.count(i)) {
+      continue;
+    }
+    auto it = shape_hints->find(i);
+    if (it == shape_hints->end() ||
+        it->second.shape.data_type() != TensorProto_DataType_FLOAT) {
+      continue;
+    }
+    auto& shape_info = it->second;
+    user_input_map[i] = shape_info;
+    shape_info.shape.set_data_type(TensorProto_DataType_FLOAT16);
+  }
+
+  if (user_input_map.empty()) {
+    return;
+  }
+
+  std::vector<OperatorDef> ops;
+  for (const auto& op : pred_net->op()) {
+    ops.emplace_back(op);
+  }
+  pred_net->clear_op();
+  int current_pos = ops.size();
+
+  const char kBridgeTensorSuffix[] = "_to_float_bridge";
+  std::vector<OperatorDef> converts;
+  for (const auto& elem : user_input_map) {
+    const auto& name = elem.first;
+    const auto& shape_info = elem.second;
+    std::string new_name = name + kBridgeTensorSuffix;
+    shape_hints->emplace(new_name, shape_info);
+    converts.emplace_back(CreateOperatorDef(
+        "HalfToFloat",
+        "",
+        {name},
+        {new_name},
+        {MakeArgument<int>(kNetPos, current_pos++)}));
+  }
+  for (const auto& op : converts) {
+    pred_net->add_op()->CopyFrom(op);
+  }
+
+  for (auto& op : ops) {
+    for (auto& input : *op.mutable_input()) {
+      if (user_input_map.count(input)) {
+        input += kBridgeTensorSuffix;
+      }
+    }
+  }
+
+  for (const auto& op : ops) {
+    pred_net->add_op()->CopyFrom(op);
+  }
 }
 
 void mergeFp32InputsAndConvertToFp16(
@@ -256,6 +317,7 @@ void mergeFp32InputsAndConvertToFp16(
     ops.emplace_back(op);
   }
   pred_net->clear_op();
+  int current_pos = ops.size();
 
   for (const auto& elem : user_inputs_by_partition) {
     const auto& partition = elem.first;
@@ -275,9 +337,8 @@ void mergeFp32InputsAndConvertToFp16(
       total += user_input_map[u].shape.dims(1);
     }
     shape_info.shape.set_dims(1, total);
-    auto* arg = op1.add_arg();
-    arg->set_name("axis");
-    arg->set_i(1);
+    AddArgument("axis", 1, &op1);
+    AddArgument(kNetPos, current_pos++, &op1);
     pred_net->add_op()->CopyFrom(op1);
 
     // TODO: a possible optimization is to fuse the fp16 conversion into Concat
@@ -285,9 +346,8 @@ void mergeFp32InputsAndConvertToFp16(
     op2.set_type("FloatToHalf");
     op2.add_input(partition + "_fp32_input_concated");
     op2.add_output(partition + "_fp16_input_concated");
-    arg = op2.add_arg();
-    arg->set_name("clip");
-    arg->set_i(1);
+    AddArgument("clip", 1, &op2);
+    AddArgument(kNetPos, current_pos++, &op2);
     shape_hints->emplace(partition + "_fp16_input_concated", shape_info);
     pred_net->add_op()->CopyFrom(op2);
 
@@ -306,17 +366,16 @@ void mergeFp32InputsAndConvertToFp16(
           "",
           {partition + "_" + i + "_split_fp16"},
           {partition + "_" + i + "_split"},
-          {}));
+          {MakeArgument<int>(kNetPos, current_pos++)}));
       converts.back().mutable_device_option()->set_node_name(partition);
 
       auto converted_shape = user_input_map[i];
       converted_shape.shape.set_data_type(TensorProto_DataType_FLOAT);
       shape_hints->emplace(partition + "_" + i + "_split", converted_shape);
     }
-    arg = op3.add_arg();
-    arg->set_name("axis");
-    arg->set_i(1);
-    arg = op3.add_arg();
+    AddArgument("axis", 1, &op3);
+    AddArgument(kNetPos, current_pos++, &op3);
+    auto* arg = op3.add_arg();
     arg->set_name("split");
     for (const auto& u : user_inputs) {
       arg->add_ints(user_input_map[u].shape.dims(1));
@@ -327,8 +386,9 @@ void mergeFp32InputsAndConvertToFp16(
     }
 
     for (auto& op : ops) {
-      if (!op.device_option().node_name().empty() &&
-          op.device_option().node_name() == partition) {
+      if ((!op.device_option().node_name().empty() &&
+           op.device_option().node_name() == partition) ||
+          (op.device_option().node_name().empty() && partition == "default")) {
         for (auto& i : *op.mutable_input()) {
           if (user_input_set.count(i)) {
             i = partition + "_" + i + "_split";
@@ -343,235 +403,6 @@ void mergeFp32InputsAndConvertToFp16(
   }
 }
 
-NetDef buildLoopTestNet(
-    const NetDef& net,
-    const std::unordered_set<std::string>& initialization_list,
-    std::unordered_map<std::string, ShapeInfo>* shape_hints,
-    size_t batch_size) {
-  NetDef net_dummy;
-
-  // Add non-weigh inputs only
-  for (const auto& i : net.external_input()) {
-    if (!initialization_list.count(i)) {
-      net_dummy.add_external_input(i);
-    }
-  }
-  for (const auto& o : net.external_output()) {
-    net_dummy.add_external_output(o);
-  }
-
-  // Now categorize the inputs into the following groups. We don't support
-  // handling of 3d inputs yet, but it can be done easily by converting n-d
-  // inputs into 2-d with Reshape or ReduceSum
-  std::unordered_set<std::string> batched_2d_inputs;
-  std::unordered_set<std::string> other_2d_inputs;
-  std::unordered_set<std::string> all_1d_inputs;
-  auto addCast = [&net_dummy](
-                     const std::string& i,
-                     std::string& in,
-                     caffe2::TensorProto::DataType dtype) mutable {
-    int multiplier = 1;
-    if (dtype != caffe2::TensorProto::FLOAT) {
-      in += "_fp32";
-      net_dummy.add_op()->CopyFrom(CreateOperatorDef(
-          "Clip",
-          "",
-          {i},
-          {in},
-          {MakeArgument<float>("min", 0.0), MakeArgument<float>("max", 1.0)}));
-      if (dtype == caffe2::TensorProto::INT8 ||
-          dtype == caffe2::TensorProto::UINT8) {
-        multiplier = sizeof(float) / sizeof(int8_t);
-      } else if (
-          dtype == caffe2::TensorProto::INT16 ||
-          dtype == caffe2::TensorProto::UINT16 ||
-          dtype == caffe2::TensorProto::FLOAT16) {
-        multiplier = sizeof(float) / sizeof(int16_t);
-      } else if (dtype == caffe2::TensorProto::INT64) {
-        // Special case, it should really be 0.5
-        multiplier = 0;
-      }
-    }
-    return multiplier;
-  };
-  auto adjustDim = [](int d, int m, TensorShape& shape) {
-    if (m > 1) {
-      CAFFE_ENFORCE_EQ(shape.dims(d) % m, 0);
-      shape.set_dims(d, shape.dims(d) / m);
-    } else if (m == 0) {
-      shape.set_dims(d, shape.dims(d) * 2);
-    }
-    shape.set_data_type(caffe2::TensorProto::FLOAT);
-  };
-  size_t dim2 = 0;
-  for (const auto& i : net_dummy.external_input()) {
-    auto it = shape_hints->find(i);
-    CAFFE_ENFORCE(
-        it != shape_hints->end(), "Cannot find shape info for input ", i);
-    auto& shape = it->second.shape;
-    std::string in = i;
-    // Trick here: since backend like glow doesn't support non-float
-    // arithmatics, we need to be creative and bitcast non-float data type into
-    // float while maintaining the same bit lengths. We do this by changing the
-    // shape dim. So that we will always load the same amount of bits onto the
-    // backend. To avoid numeric complication, we add a Clip.
-    if (shape.dims_size() == 2) {
-      auto m = addCast(i, in, shape.data_type());
-      adjustDim(1, m, shape);
-      if (shape.dims(0) == batch_size) {
-        batched_2d_inputs.emplace(in);
-        dim2 += shape.dims(1);
-      } else {
-        other_2d_inputs.emplace(in);
-      }
-    } else if (shape.dims_size() == 1) {
-      auto m = addCast(i, in, shape.data_type());
-      adjustDim(0, m, shape);
-      all_1d_inputs.emplace(in);
-    } else {
-      const std::string fin = i + "_flatten";
-      net_dummy.add_op()->CopyFrom(
-          CreateOperatorDef("Flatten", "", {i}, {fin}, {}));
-      in = fin;
-      auto m = addCast(fin, in, shape.data_type());
-      auto last = shape.dims_size() - 1;
-      adjustDim(last, m, shape);
-      size_t ndim = 1;
-      for (unsigned k = 1; k < shape.dims_size(); ++k) {
-        ndim *= shape.dims(k);
-      }
-      if (shape.dims(0) == batch_size) {
-        batched_2d_inputs.emplace(in);
-        dim2 += ndim;
-      } else {
-        other_2d_inputs.emplace(in);
-      }
-    }
-  }
-
-  // Add adjusted shape hints
-  auto* shape_arg = net_dummy.add_arg();
-  auto* qshape_arg = net_dummy.add_arg();
-  shape_arg->set_name("input_shape_info");
-  qshape_arg->set_name("input_qshape_info");
-  for (const auto& i : net_dummy.external_input()) {
-    auto info = shape_hints->at(i);
-    if (!info.is_quantized) {
-      shape_arg->mutable_tensors()->Add()->CopyFrom(
-          wrapShapeInfoIntoTensorProto(i, info));
-    } else {
-      qshape_arg->mutable_qtensors()->Add()->CopyFrom(
-          wrapShapeInfoIntoQTensorProto(i, info));
-    }
-  }
-
-  // Collect all the input together into a 2d tensor of {batch_size, X}
-  std::vector<std::string> concat2d_batched(
-      batched_2d_inputs.begin(), batched_2d_inputs.end());
-  const std::string concat_out = "batch_2d_concat";
-  net_dummy.add_op()->CopyFrom(CreateOperatorDef(
-      "Concat",
-      "",
-      concat2d_batched,
-      {concat_out, "batch_2d_concat_split_info"},
-      {MakeArgument<int>("axis", 1)}));
-  std::vector<std::string> scalars;
-  for (const auto& i : other_2d_inputs) {
-    std::string o = i + "_reduced";
-    net_dummy.add_op()->CopyFrom(CreateOperatorDef(
-        "ReduceSum",
-        "",
-        {i},
-        {o},
-        {MakeArgument<std::vector<int>>("axes", {0, 1}),
-         MakeArgument<int>("keepdims", 0)}));
-    scalars.emplace_back(std::move(o));
-  }
-  for (const auto& i : all_1d_inputs) {
-    std::string o = i + "_reduced";
-    net_dummy.add_op()->CopyFrom(CreateOperatorDef(
-        "ReduceSum",
-        "",
-        {i},
-        {o},
-        {MakeArgument<std::vector<int>>("axes", {0}),
-         MakeArgument<int>("keepdims", 0)}));
-    scalars.emplace_back(std::move(o));
-  }
-  const std::string summed = "summed";
-  net_dummy.add_op()->CopyFrom(
-      CreateOperatorDef("Sum", "", scalars, {summed}, {}));
-  const std::string out = "result_out";
-  net_dummy.add_op()->CopyFrom(CreateOperatorDef(
-      "Add",
-      "",
-      {concat_out, summed},
-      {out},
-      {MakeArgument<int>("broadcast", 1)}));
-
-  for (const auto& o : net_dummy.external_output()) {
-    const auto it = shape_hints->find(o);
-    CAFFE_ENFORCE(
-        it != shape_hints->end(), "Cannot find shape info for output ", o);
-    const auto& shape = it->second.shape;
-    // TODO: all doable but I'm lazy
-    if (shape.data_type() != caffe2::TensorProto::FLOAT) {
-      CAFFE_THROW("We need a Cast op to match the output data type");
-    }
-    if (shape.dims_size() == 2) {
-      if (shape.dims(0) == batch_size) {
-        if (shape.dims(1) > dim2) {
-          CAFFE_THROW(
-              "We need Tile op to match the output dim ",
-              shape.dims(1),
-              " vs ",
-              dim2);
-        } else if (shape.dims(1) == dim2) {
-          net_dummy.add_op()->CopyFrom(
-              CreateOperatorDef("Copy", "", {out}, {o}, {}));
-        } else {
-          net_dummy.add_op()->CopyFrom(CreateOperatorDef(
-              "Slice",
-              "",
-              {out},
-              {o},
-              {MakeArgument<std::vector<int>>("starts", {0, 0}),
-               MakeArgument<std::vector<int>>(
-                   "ends", {-1, static_cast<int>(shape.dims(1))})}));
-        }
-      }
-    } else if (shape.dims_size() == 1) {
-      if (shape.dims(0) == batch_size) {
-        const std::string oi = o + "_pre";
-        net_dummy.add_op()->CopyFrom(CreateOperatorDef(
-            "Slice",
-            "",
-            {out},
-            {oi},
-            {MakeArgument<std::vector<int>>("starts", {0, 0}),
-             MakeArgument<std::vector<int>>("ends", {-1, 1})}));
-        net_dummy.add_op()->CopyFrom(CreateOperatorDef(
-            "Reshape",
-            "",
-            {oi},
-            {o},
-            {MakeArgument<std::vector<int>>(
-                "shape", {static_cast<int>(batch_size)})}));
-      } else {
-        CAFFE_THROW(
-            "We need Slice and Tile op to match the output dim ",
-            shape.dims(0),
-            " vs ",
-            batch_size);
-      }
-    } else {
-      CAFFE_THROW("Only support 1D/2D outputs for now");
-    }
-  }
-
-  return net_dummy;
-}
-
 } // namespace
 
 void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws) {
@@ -579,7 +410,7 @@ void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws) {
       {"SparseLengthsSum4BitRowwiseSparse", "SparseLengthsSumFused4BitRowwise"},
       {"SparseLengthsWeightedSum4BitRowwiseSparse",
        "SparseLengthsWeightedSumFused4BitRowwise"},
-      {"SparseLengthsSum8BitRowwiseSparse", "SparseLengthsSum8FusedBitRowwise"},
+      {"SparseLengthsSum8BitRowwiseSparse", "SparseLengthsSumFused8BitRowwise"},
       {"SparseLengthsWeightedSum8BitRowwiseSparse",
        "SparseLengthsWeightedSumFused8BitRowwise"},
       {"SparseLengthsSum2BitRowwiseSparse", "SparseLengthsSumFused2BitRowwise"},
@@ -652,6 +483,71 @@ void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws) {
   new_net.Swap(net);
 }
 
+OnnxifiOptionHelper::OnnxifiOptionHelper() {
+  lib_ = onnx::initOnnxifiLibrary();
+  CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
+}
+
+bool OnnxifiOptionHelper::setOnnxifiOption(
+    const std::string& option,
+    const std::string& value) {
+#ifdef ONNXIFI_ENABLE_EXT
+  onnxStatus (*onnxSetOptionFunctionPointer)(
+      const char* optionName, const char* optionValue) = nullptr;
+  union {
+    onnxExtensionFunctionPointer p;
+    decltype(onnxSetOptionFunctionPointer) set;
+  } u{};
+  onnxBackendID backend_id = nullptr;
+  if (lib_->onnxGetExtensionFunctionAddress(
+          backend_id, "onnxSetOptionFunction", &u.p) !=
+      ONNXIFI_STATUS_SUCCESS) {
+    LOG(ERROR) << "Cannot find onnxSetOptionFunction";
+    return false;
+  } else {
+    onnxSetOptionFunctionPointer = u.set;
+  }
+  if (onnxSetOptionFunctionPointer != nullptr &&
+      (*onnxSetOptionFunctionPointer)(option.c_str(), value.c_str()) ==
+          ONNXIFI_STATUS_SUCCESS) {
+    return true;
+  }
+#endif
+  return false;
+}
+
+std::string OnnxifiOptionHelper::getOnnxifiOption(const std::string& option) {
+#ifdef ONNXIFI_ENABLE_EXT
+  onnxStatus (*onnxGetOptionFunctionPointer)(
+      const char* optionName, char* optionValue, size_t* optionValueLength) =
+      nullptr;
+  union {
+    onnxExtensionFunctionPointer p;
+    decltype(onnxGetOptionFunctionPointer) get;
+  } u{};
+  onnxBackendID backend_id = nullptr;
+  if (lib_->onnxGetExtensionFunctionAddress(
+          backend_id, "onnxGetOptionFunction", &u.p) !=
+      ONNXIFI_STATUS_SUCCESS) {
+    LOG(ERROR) << "Cannot find onnxGetOptionFunction";
+    return "";
+  } else {
+    onnxGetOptionFunctionPointer = u.get;
+  }
+
+  constexpr size_t ll = 1024;
+  char buf[ll];
+  size_t len = ll;
+  if (onnxGetOptionFunctionPointer != nullptr &&
+      (*onnxGetOptionFunctionPointer)(option.c_str(), buf, &len) ==
+          ONNXIFI_STATUS_SUCCESS) {
+    return std::string(buf, len);
+  }
+#endif
+
+  return "";
+}
+
 OnnxifiTransformer::OnnxifiTransformer(const OnnxifiTransformerOptions& opts)
     : BackendTransformerBase(), opts_(opts) {
   lib_ = onnx::initOnnxifiLibrary();
@@ -675,13 +571,38 @@ OnnxifiTransformer::~OnnxifiTransformer() {
   }
 }
 
+bool OnnxifiTransformer::canPassOutputShapeHintsPerBs(
+    const OperatorDef& op,
+    const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs) const {
+  if (shape_hints_per_bs.empty()) {
+    return false;
+  }
+
+  for (int bs = 1; bs < opts_.bound_shape_spec.max_batch_size; ++bs) {
+    auto shape_hints_search = shape_hints_per_bs.find(bs);
+    if (shape_hints_search == shape_hints_per_bs.end()) {
+      return false;
+    }
+    const auto& shape_hints = shape_hints_search->second;
+
+    for (int output_idx = 0; output_idx < op.output_size(); ++output_idx) {
+      auto shape_hint_search = shape_hints.find(op.output(output_idx));
+      if (shape_hint_search == shape_hints.end()) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 OperatorDef OnnxifiTransformer::buildOnnxifiOp(
     const std::string& onnx_model_str,
-    const std::unordered_map<std::string, TensorShape>& output_shape_hints,
     const std::unordered_set<std::string>& initialization_list,
     const std::vector<std::string>& external_inputs,
     const std::vector<std::string>& external_outputs,
-    const std::unordered_map<std::string, ShapeInfo>& shape_hints) {
+    const ShapeInfoMap& shape_hints_max_bs,
+    const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs) {
   OperatorDef op;
   op.set_type("Onnxifi");
   auto* onnx_model_arg = op.add_arg();
@@ -719,9 +640,12 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   int nominal_batch_idx{0};
   for (const auto& input : external_inputs) {
     if (!initialization_list.count(input)) {
-      const auto it = shape_hints.find(input);
+      const auto it = shape_hints_max_bs.find(input);
       CAFFE_ENFORCE(
-          it != shape_hints.end(), "Input shape for ", input, " not found");
+          it != shape_hints_max_bs.end(),
+          "Input shape for ",
+          input,
+          " not found");
       const auto& info = it->second;
       if (info.getDimType(0) == TensorBoundShape_DimType_BATCH &&
           getBlob1stDimSize(info) == max_batch_size) {
@@ -732,21 +656,54 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
     }
   }
 
-  // Add output size hints
+  // Add output size hints for max batch size
+  auto* output_shape_info_arg = op.add_arg();
+  output_shape_info_arg->set_name("output_shape_info");
+  auto* output_qshape_info_arg = op.add_arg();
+  output_qshape_info_arg->set_name("output_qshape_info");
   for (int i = 0; i < op.output_size(); ++i) {
     const auto& o = op.output(i);
-    const auto it = output_shape_hints.find(o);
-    if (it != output_shape_hints.end()) {
-      const auto& shape = it->second;
-      auto* output_shape_hint_arg = op.add_arg();
-      output_shape_hint_arg->set_name(c10::str("output_shape_hint_", i));
-      output_shape_hint_arg->add_ints(onnxifiDataType(shape.data_type()));
-      for (const auto& d : shape.dims()) {
-        output_shape_hint_arg->add_ints(d);
+    const auto it = shape_hints_max_bs.find(o);
+    if (it != shape_hints_max_bs.end()) {
+      if (!it->second.is_quantized) {
+        output_shape_info_arg->mutable_tensors()->Add()->CopyFrom(
+            wrapShapeInfoIntoTensorProto(o, it->second));
+      } else {
+        output_qshape_info_arg->mutable_qtensors()->Add()->CopyFrom(
+            wrapShapeInfoIntoQTensorProto(o, it->second));
       }
-
       VLOG(2) << "Adding output hint: " << o;
     }
+  }
+
+  // Add output size hints per batch size
+  if (canPassOutputShapeHintsPerBs(op, shape_hints_per_bs)) {
+    VLOG(2) << "Passing in output shape hints for batch sizes in [1, "
+            << opts_.bound_shape_spec.max_batch_size << ")";
+    AddArgument("use_passed_output_shapes", 1, &op);
+
+    for (int bs = 1; bs < opts_.bound_shape_spec.max_batch_size; ++bs) {
+      auto* output_shape_arg = op.add_arg();
+      output_shape_arg->set_name("output_shapes_bs_" + caffe2::to_string(bs));
+      auto* output_qshape_arg = op.add_arg();
+      output_qshape_arg->set_name("output_qshapes_bs_" + caffe2::to_string(bs));
+
+      const auto& shape_hints = shape_hints_per_bs.find(bs)->second;
+
+      for (int output_idx = 0; output_idx < op.output_size(); ++output_idx) {
+        const auto& output_name = op.output(output_idx);
+        const auto& shape_hint = shape_hints.find(output_name)->second;
+        if (!shape_hint.is_quantized) {
+          output_shape_arg->mutable_tensors()->Add()->CopyFrom(
+              wrapShapeInfoIntoTensorProto(output_name, shape_hint));
+        } else {
+          output_shape_arg->mutable_qtensors()->Add()->CopyFrom(
+              wrapShapeInfoIntoQTensorProto(output_name, shape_hint));
+        }
+      }
+    }
+  } else {
+    AddArgument("use_passed_output_shapes", 0, &op);
   }
 
   // Tell Onnxifi op that the model is in onnx or c2 proto format
@@ -767,6 +724,7 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   }
   AddArgument("max_batch_size", opts_.bound_shape_spec.max_batch_size, &op);
   AddArgument("max_seq_size", opts_.bound_shape_spec.max_seq_size, &op);
+  AddArgument("timeout", opts_.timeout, &op);
   AddArgument("nominal_batch_idx", nominal_batch_idx, &op);
 
   return op;
@@ -775,11 +733,14 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
 NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     const caffe2::NetDef& net,
     const std::unordered_set<std::string>& weights_in_ws,
-    const ShapeInfoMap& shape_hints) {
+    const ShapeInfoMap& shape_hints_max_bs,
+    const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs) {
   int onnxifi_op_id = onnxifi_op_id_;
   if (opts_.debug) {
     WriteProtoToTextFile(
-        net, "debug_original_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
+        net,
+        "debug_original_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        false);
   }
   if (opts_.min_ops > net.op_size()) {
     return net;
@@ -811,8 +772,8 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
                       op.type() == "SparseLengthsWeightedSumFused4BitRowwise")
           ? 1
           : 0;
-      const auto& indices_hint = shape_hints.at(op.input(1 + weighted));
-      const auto& lengths_hint = shape_hints.at(op.input(2 + weighted));
+      const auto& indices_hint = shape_hints_max_bs.at(op.input(1 + weighted));
+      const auto& lengths_hint = shape_hints_max_bs.at(op.input(2 + weighted));
       const auto& indices_shape = indices_hint.shape;
       const auto& lengths_shape = lengths_hint.shape;
       if ((indices_hint.getDimType(0) ==
@@ -849,42 +810,21 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   auto* qshape_arg = onnxifi_net.add_arg();
   shape_arg->set_name("input_shape_info");
   qshape_arg->set_name("input_qshape_info");
+  std::sort(total_inputs_vec.begin(), total_inputs_vec.end());
   onnxifi_net.clear_external_input();
   for (const auto& i : total_inputs_vec) {
     onnxifi_net.add_external_input(i);
-    auto info = shape_hints.at(i);
+    auto info = shape_hints_max_bs.at(i);
     if (!info.is_quantized) {
       shape_arg->mutable_tensors()->Add()->CopyFrom(
-          wrapShapeInfoIntoTensorProto(i, shape_hints.at(i)));
+          wrapShapeInfoIntoTensorProto(i, shape_hints_max_bs.at(i)));
     } else {
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(
-          wrapShapeInfoIntoQTensorProto(i, shape_hints.at(i)));
+          wrapShapeInfoIntoQTensorProto(i, shape_hints_max_bs.at(i)));
     }
   }
 
-  // Compute output shape hints
-  std::unordered_map<std::string, TensorShape> output_shape_hints;
-  for (const auto& o : onnxifi_net.external_output()) {
-    const auto it = shape_hints.find(o);
-    CAFFE_ENFORCE(
-        it != shape_hints.end(), "Cannot find shape info for output ", o);
-    const auto& shape = it->second.shape;
-    output_shape_hints.emplace(o, shape);
-  }
-
-  // Rewrite the net into a dummy in loop test mode
-  ShapeInfoMap new_shape_hints;
-  if (opts_.loop_test) {
-    new_shape_hints = shape_hints;
-    onnxifi_net = buildLoopTestNet(
-        onnxifi_net,
-        initialization_list,
-        &new_shape_hints,
-        opts_.bound_shape_spec.max_batch_size);
-    initialization_list.clear();
-  }
-
-  // Add parition info
+  // Add partition info
   for (const auto& p : partition_infos_) {
     onnxifi_net.add_partition_info()->CopyFrom(p);
   }
@@ -906,21 +846,23 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
       onnxifi_net.external_output().end());
   auto onnxifi_op = buildOnnxifiOp(
       model_str,
-      output_shape_hints,
       initialization_list,
       onnxifi_net_inputs,
       onnxifi_net_outputs,
-      opts_.loop_test ? new_shape_hints : shape_hints);
+      shape_hints_max_bs,
+      shape_hints_per_bs);
   NetDef net_opt = composeResultNet(onnxifi_op);
 
   // Debugging stuff
   if (opts_.debug) {
     WriteProtoToTextFile(
         onnxifi_net,
-        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
+        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        false);
     WriteProtoToTextFile(
         net_opt,
-        "debug_optimized_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
+        "debug_optimized_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        false);
   }
   return net_opt;
 }
@@ -930,7 +872,8 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
     const std::unordered_set<std::string>& weights_in_ws,
     Workspace* ws,
     onnx::OnnxExporter* exporter,
-    ShapeInfoMap* shape_hints) {
+    ShapeInfoMap* shape_hints_max_bs,
+    const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs) {
   if (opts_.min_ops > net.op_size()) {
     return net;
   }
@@ -954,7 +897,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
       TensorShape shape;
       shape.mutable_dims()->CopyFrom(t.dims());
       auto ret = shape_hints_onnx_.emplace(t.name(), std::move(shape));
-      shape_hints->emplace(
+      shape_hints_max_bs->emplace(
           std::piecewise_construct,
           std::forward_as_tuple(ret.first->first),
           std::forward_as_tuple(
@@ -1000,16 +943,8 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
       onnxifi_net_outputs,
       shape_hints_onnx_,
       std::unordered_map<std::string, ::ONNX_NAMESPACE::TypeProto>());
-  std::unordered_map<std::string, TensorShape> output_shape_hints;
   for (const auto& i : io_vec) {
     onnx_model.mutable_graph()->add_output()->CopyFrom(i);
-    const auto it = shape_hints_onnx_.find(i.name());
-    CAFFE_ENFORCE(
-        it != shape_hints_onnx_.end(),
-        "Cannot find shape info for output ",
-        i.name());
-    const auto& shape = it->second;
-    output_shape_hints.emplace(i.name(), shape);
   }
 
   // Convert inputs and figure out weights
@@ -1034,17 +969,17 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   onnx_model.SerializeToString(&model_str);
   auto onnxifi_op = buildOnnxifiOp(
       model_str,
-      output_shape_hints,
       initialization_list,
       onnxifi_net_inputs,
       onnxifi_net_outputs,
-      *shape_hints);
+      *shape_hints_max_bs,
+      shape_hints_per_bs);
   NetDef net_opt = composeResultNet(onnxifi_op);
 
   // Debugging stuff
   if (opts_.debug) {
-    WriteProtoToTextFile(onnx_model, "debug_onnxifi_net.onnx_txt");
-    WriteProtoToTextFile(net_opt, "debug_optimized_net.pb_txt");
+    WriteProtoToTextFile(onnx_model, "debug_onnxifi_net.onnx_txt", false);
+    WriteProtoToTextFile(net_opt, "debug_optimized_net.pb_txt", false);
   }
   return net_opt;
 }
@@ -1052,13 +987,13 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
 bool OnnxifiTransformer::supportOpOnnx(
     const caffe2::OperatorDef& op,
     onnx::OnnxExporter* exporter,
-    const std::unordered_set<int>& blacklisted_ops,
+    const std::unordered_set<int>& blocklisted_ops,
     onnxBackendID backend_id) const {
   try {
     int pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
-    if (blacklisted_ops.count(pos)) {
-      LOG(INFO) << "Skipping blacklisted op " << op.type() << " at pos " << pos;
+    if (blocklisted_ops.count(pos)) {
+      LOG(INFO) << "Skipping blocklisted op " << op.type() << " at pos " << pos;
       return false;
     }
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
@@ -1153,13 +1088,13 @@ bool OnnxifiTransformer::supportOpC2(
     const caffe2::OperatorDef& op,
     const ShapeInfoMap& shape_hints,
     const std::unordered_set<std::string>& weights,
-    const std::unordered_set<int>& blacklisted_ops,
+    const std::unordered_set<int>& blocklisted_ops,
     onnxBackendID backend_id) const {
   try {
     int pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
-    if (blacklisted_ops.count(pos)) {
-      LOG(INFO) << "Skipping blacklisted op " << op.type() << " at pos " << pos;
+    if (blocklisted_ops.count(pos)) {
+      LOG(INFO) << "Skipping blocklisted op " << op.type() << " at pos " << pos;
       return false;
     }
 
@@ -1248,7 +1183,8 @@ bool OnnxifiTransformer::supportOpC2(
     auto ret = lib_->onnxGetBackendCompatibility(
         backend_id, c2_model_str.size(), c2_model_str.c_str());
     if (ret != ONNXIFI_STATUS_SUCCESS) {
-      LOG(INFO) << "Don't support c2 op " << op.type() << " (" << ret << ")";
+      LOG(INFO) << "Don't support c2 op " << op.type() << " at pos " << pos
+                << " (" << ret << ")";
       return false;
     } else {
       return true;
@@ -1264,7 +1200,7 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
     const std::unordered_set<std::string>& weights,
-    std::unordered_set<int>* blacklisted_ops) const {
+    std::unordered_set<int>* blocklisted_ops) const {
   std::unordered_map<std::string, int> output_pos;
   onnx::OnnxExporter exporter(nullptr);
   onnxBackendID backend_id = backend_ids_[idx_];
@@ -1279,8 +1215,8 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
       }
     } else if (StartsWith(op.type(), "SparseLengthsWeighted")) {
       auto supported = opts_.use_onnx
-          ? supportOpOnnx(op, &exporter, *blacklisted_ops, backend_id)
-          : supportOpC2(op, shape_hints, weights, *blacklisted_ops, backend_id);
+          ? supportOpOnnx(op, &exporter, *blocklisted_ops, backend_id)
+          : supportOpC2(op, shape_hints, weights, *blocklisted_ops, backend_id);
       if (!supported && op.input_size() > 1) {
         check = op.input(1);
       }
@@ -1293,18 +1229,18 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
       if (it == output_pos.end()) {
         continue;
       }
-      blacklisted_ops->emplace(it->second);
+      blocklisted_ops->emplace(it->second);
       // We know that current op is not going to be supported. Might as well
-      // blacklist it too
-      blacklisted_ops->emplace(
+      // blocklist it too
+      blocklisted_ops->emplace(
           ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
     }
   }
 }
 
-void OnnxifiTransformer::blacklistCpuPartition(
+void OnnxifiTransformer::blocklistCpuPartition(
     const NetDef& net,
-    std::unordered_set<int>* blacklisted_ops) const {
+    std::unordered_set<int>* blocklisted_ops) const {
   std::unordered_set<std::string> cpu_partitions;
   for (const auto& p : partition_infos_) {
     if (p.device_id_size() == 0) {
@@ -1314,7 +1250,7 @@ void OnnxifiTransformer::blacklistCpuPartition(
   for (const auto& op : net.op()) {
     const auto& pname = op.device_option().node_name();
     if (cpu_partitions.count(pname)) {
-      blacklisted_ops->emplace(
+      blocklisted_ops->emplace(
           ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
     }
   }
@@ -1324,17 +1260,17 @@ void OnnxifiTransformer::applyFilteringRules(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
     const std::unordered_set<std::string>& weights,
-    std::unordered_set<int>* blacklisted_ops) const {
+    std::unordered_set<int>* blocklisted_ops) const {
   tieGatherAndSparseLengthsWeightedSumOps(
-      net, shape_hints, weights, blacklisted_ops);
-  blacklistCpuPartition(net, blacklisted_ops);
+      net, shape_hints, weights, blocklisted_ops);
+  blocklistCpuPartition(net, blocklisted_ops);
 }
 
-void OnnxifiTransformer::getBackendId() {
+std::vector<onnxBackendID> OnnxifiTransformer::getBackendId() {
   idx_ = 0;
 
   if (opts_.use_onnx) {
-    return;
+    return backend_ids_;
   }
   // Try to find a backend that support Caffe2 proto. Note that this is quite
   // opportunistic as we don't officially support Caffe2 proto.
@@ -1349,27 +1285,31 @@ void OnnxifiTransformer::getBackendId() {
       break;
     }
   }
+  return backend_ids_;
 }
 
 NetDef OnnxifiTransformer::TransformViaC2(
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
-    const std::unordered_set<int>& blacklisted_ops,
-    const ShapeInfoMap& shape_hints) {
+    const std::unordered_set<int>& blocklisted_ops,
+    const ShapeInfoMap& shape_hints_max_bs,
+    const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs) {
   onnxBackendID backend_id = backend_ids_[idx_];
 
-  auto c2_supports = [this,
-                      &shape_hints,
-                      &blacklisted_ops,
-                      backend_id,
-                      &weights](const caffe2::OperatorDef& op) {
-    return supportOpC2(op, shape_hints, weights, blacklisted_ops, backend_id);
-  };
-
-  auto c2_converter =
-      [this, &weights, &shape_hints](const caffe2::NetDef& net) {
-        return SubnetToOnnxifiOpViaC2(net, weights, shape_hints);
+  auto c2_supports =
+      [this, &shape_hints_max_bs, &blocklisted_ops, backend_id, &weights](
+          const caffe2::OperatorDef& op) {
+        return supportOpC2(
+            op, shape_hints_max_bs, weights, blocklisted_ops, backend_id);
       };
+
+  auto c2_converter = [this,
+                       &weights,
+                       &shape_hints_max_bs,
+                       &shape_hints_per_bs](const caffe2::NetDef& net) {
+    return SubnetToOnnxifiOpViaC2(
+        net, weights, shape_hints_max_bs, shape_hints_per_bs);
+  };
 
   return opt::OptimizeForBackend(
       *pred_net, c2_supports, c2_converter, opts_.debug);
@@ -1379,24 +1319,31 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
     Workspace* ws,
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
-    const std::unordered_set<int>& blacklisted_ops,
-    ShapeInfoMap* shape_hints) {
+    const std::unordered_set<int>& blocklisted_ops,
+    ShapeInfoMap* shape_hints_max_bs,
+    const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs) {
   onnxBackendID backend_id = backend_ids_[idx_];
 
   // function to tell whether the ONNXIFI backend supports a given C2 op or not
   onnx::OnnxExporter exporter(nullptr);
-  auto onnx_supports = [this, &exporter, &blacklisted_ops, backend_id](
+  auto onnx_supports = [this, &exporter, &blocklisted_ops, backend_id](
                            const caffe2::OperatorDef& op) {
-    return supportOpOnnx(op, &exporter, blacklisted_ops, backend_id);
+    return supportOpOnnx(op, &exporter, blocklisted_ops, backend_id);
   };
 
   // function to convert runnable subgraph into an onnxifi op. We need to keep
   // the same exporter throughout the process to avoid duplicated dummy name
   // generation
   onnx::OnnxExporter exporter2(nullptr);
-  auto onnx_converter = [this, ws, &weights, shape_hints, &exporter2](
+  auto onnx_converter = [this,
+                         ws,
+                         &weights,
+                         shape_hints_max_bs,
+                         &exporter2,
+                         &shape_hints_per_bs](
                             const caffe2::NetDef& net) mutable {
-    return SubnetToOnnxifiOpViaOnnx(net, weights, ws, &exporter2, shape_hints);
+    return SubnetToOnnxifiOpViaOnnx(
+        net, weights, ws, &exporter2, shape_hints_max_bs, shape_hints_per_bs);
   };
 
   return opt::OptimizeForBackend(
@@ -1417,9 +1364,13 @@ void OnnxifiTransformer::transform(
     NetDef* pred_net,
     const std::vector<std::string>& weight_names,
     const ShapeInfoMap& input_shape_hints,
-    const std::unordered_set<int>& blacklisted_ops) {
+    const std::unordered_set<int>& blocklisted_ops) {
   CAFFE_ENFORCE(ws);
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
+
+  if (opts_.debug) {
+    WriteProtoToTextFile(*pred_net, "debug_pre_ssa_net.pb_txt", false);
+  }
 
   // Get model id and reset Onnxifi op id to 0
   model_id_ = getModelId(*pred_net);
@@ -1437,6 +1388,9 @@ void OnnxifiTransformer::transform(
     LOG(INFO) << "predictor net has been ssaRewritten, skip rewritting here";
     annotateOpIndex(pred_net);
     shape_hints_mapped = input_shape_hints;
+    for (const auto& w : weights) {
+      input_mapping_.emplace(w, w);
+    }
   } else {
     shape_hints_mapped = ssaRewriteAndMapNames(ws, pred_net, input_shape_hints);
   }
@@ -1449,14 +1403,20 @@ void OnnxifiTransformer::transform(
   // blob for output is created. This causes problem if inferShape uses original
   // ws since it does not expect the output blob to be present.
   Workspace mapped_ws(ws, input_mapping_);
-  ShapeInfoMap shape_hints = inferShapes(
+  ShapeInfoMap shape_hints_max_bs = inferShapes(
       &mapped_ws, pred_net, shape_hints_mapped, opts_.bound_shape_spec);
   if (opts_.use_onnx) {
-    shape_hints_onnx_ = stripShapeInfoMap(shape_hints);
+    shape_hints_onnx_ = stripShapeInfoMap(shape_hints_max_bs);
+  }
+  if (opts_.enforce_fp32_inputs_into_fp16) {
+    enforceFp32InputsToFp16(weights, pred_net, &shape_hints_max_bs);
   }
   if (opts_.merge_fp32_inputs_into_fp16) {
     mergeFp32InputsAndConvertToFp16(
-        opts_.bound_shape_spec.max_batch_size, weights, pred_net, &shape_hints);
+        opts_.bound_shape_spec.max_batch_size,
+        weights,
+        pred_net,
+        &shape_hints_max_bs);
   }
 
   if (opts_.debug) {
@@ -1467,7 +1427,7 @@ void OnnxifiTransformer::transform(
     for (const auto& w : weights) {
       w_arg->add_strings(w);
     }
-    dumpNet(ssa_net, shape_hints, "debug_ssa_net.pb_txt");
+    dumpNet(ssa_net, shape_hints_max_bs, "debug_ssa_net.pb_txt");
   }
   extractPartitionInfo(*pred_net);
 
@@ -1475,24 +1435,35 @@ void OnnxifiTransformer::transform(
   getBackendId();
 
   // Apply some filtering rules
-  std::unordered_set<int> new_blacklisted_ops(
-      blacklisted_ops.begin(), blacklisted_ops.end());
-  applyFilteringRules(*pred_net, shape_hints, weights, &new_blacklisted_ops);
+  std::unordered_set<int> new_blocklisted_ops(
+      blocklisted_ops.begin(), blocklisted_ops.end());
+  applyFilteringRules(
+      *pred_net, shape_hints_max_bs, weights, &new_blocklisted_ops);
 
   // Transform the net
-  NetDef net_opt = opts_.use_onnx
-      ? TransformViaOnnx(
-            ws, pred_net, weights, new_blacklisted_ops, &shape_hints)
-      : TransformViaC2(pred_net, weights, new_blacklisted_ops, shape_hints);
+  NetDef net_opt = opts_.use_onnx ? TransformViaOnnx(
+                                        ws,
+                                        pred_net,
+                                        weights,
+                                        new_blocklisted_ops,
+                                        &shape_hints_max_bs,
+                                        opts_.shape_hints_per_bs)
+                                  : TransformViaC2(
+                                        pred_net,
+                                        weights,
+                                        new_blocklisted_ops,
+                                        shape_hints_max_bs,
+                                        opts_.shape_hints_per_bs);
 
   // Need to figure out a proper place to handle device option
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
+  net_opt.set_type(pred_net->type());
 
   pred_net->Swap(&net_opt);
 
-  addShapeToNet(*pred_net, shape_hints);
+  addShapeToNet(*pred_net, shape_hints_max_bs);
   if (opts_.debug) {
-    WriteProtoToTextFile(*pred_net, "debug_full_opt_net.pb_txt");
+    WriteProtoToTextFile(*pred_net, "debug_full_opt_net.pb_txt", false);
   }
 }
 

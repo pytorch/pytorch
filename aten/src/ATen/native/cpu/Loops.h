@@ -31,6 +31,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec256/vec256.h>
 
 #ifndef _MSC_VER
@@ -126,6 +127,70 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
   execute_op(data, strides, i, n, std::forward<func_t>(op));
 }
 
+// the recursive variadic template for iterating over the returned tuple
+template<class T, size_t N>
+struct TupleOutput {
+  static void handle(char *C10_RESTRICT data[], const int64_t *strides, int64_t i,
+                     const T &tuple) {
+    TupleOutput<T, N - 1>::handle(data, strides, i, tuple);
+
+    auto output = std::get<N - 1>(tuple);
+    using output_type = decltype(output);
+    output_type * out_ptr = (output_type *)(data[N - 1] + i * strides[N - 1]);
+    *out_ptr = output;
+  }
+};
+
+// Base case for the above recursive template
+template<class T>
+struct TupleOutput<T, 1> {
+  static void handle(char *C10_RESTRICT data[], const int64_t *strides, int64_t i,
+                     const T &tuple) {
+    auto output = std::get<0>(tuple);
+    using output_type = decltype(output);
+    output_type* out_ptr = (output_type *)(data[0] + i * strides[0]);
+    *out_ptr = output;
+  }
+};
+
+template<class... Args>
+void handle_tuple_outputs(char* C10_RESTRICT data[],
+                          const int64_t* strides,
+                          int64_t i,
+                          const std::tuple<Args...> &tuple) {
+  TupleOutput<decltype(tuple), sizeof...(Args)>::handle(data, strides, i, tuple);
+}
+
+// Loop operation for `cpu_kernel_multiple_outputs`.
+// 1. Use `c10::guts::apply` to make dynamic method invocation
+//    for the lambda passed in `cpu_kernel_multiple_outputs`.
+// 2. Iterate over the members of the returned tuple, set the corresponding
+//    output tensor by the tuple member in `handle_tuple_outputs` function.
+template <typename func_t>
+static inline void
+multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t&& op) {
+  using traits = function_traits<func_t>;
+
+  using result_type = typename traits::result_type;
+  constexpr int num_outputs = std::tuple_size<result_type>::value;
+  constexpr int ntensors = traits::arity + num_outputs;
+
+  // Copying strides to temporary array helps auto vectorization in older GCC
+  // versions.
+  int64_t strides[ntensors];
+  for (int arg = 0; arg < ntensors; arg++) {
+    strides[arg] = strides_[arg];
+  }
+
+  for (; i < n; i++) {
+    auto output = c10::guts::apply(op, dereference<traits>(
+      &data[num_outputs],
+      &strides[num_outputs],
+      i));
+    handle_tuple_outputs(data, strides, i, output);
+  }
+}
+
 // Explicitly vectorized loop implementation. All inputs and outputs must be
 // the same type and contiguous with one exception: a single input may be
 // a scalar (stride 0). It's position is indicated by the argument `S`. If `S`
@@ -184,9 +249,13 @@ static inline void unroll_contiguous_scalar_checks(
 }
 
 template <typename func_t>
-void cpu_kernel(TensorIterator& iter, func_t&& op) {
+void cpu_kernel(TensorIteratorBase& iter, func_t&& op) {
   using traits = function_traits<func_t>;
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
+  // this could be extended to work with void return types
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
+  // dynamic casting not currently supported on CPU
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
@@ -201,14 +270,48 @@ void cpu_kernel(TensorIterator& iter, func_t&& op) {
   iter.cast_outputs();
 }
 
-template <typename func_t, typename vec_func_t>
-void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
+// This function helps write elementwise kernels that requires multiple outputs.
+// It follows the similar structure of cpu_kernel.
+// Instead of `basic_loop` function, a new `multiple_outputs_loop` function is
+// manipulated to handle multiple return values.
+// For now `needs_dynamic_casting` check is not added as the passed lambda (`func_t`)
+// of `multiple_outputs_loop` returns `std::tuple` instead of `scalar_t`.
+// The `gpu_kernel_multiple_outputs` is also implemented without this check,
+// We could extend `needs_dynamic_casting` to support both `std::tuple` and
+// `thrust::tuple` in the future.
+template <typename func_t>
+void cpu_kernel_multiple_outputs(TensorIteratorBase& iter, func_t&& op) {
   using traits = function_traits<func_t>;
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
-      return vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
+      multiple_outputs_loop(data, strides, 0, n, std::forward<func_t>(op));
+    } else {
+      using Indices = std::make_index_sequence<traits::arity>;
+      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
+        multiple_outputs_loop(data, strides, 0, n, std::forward<func_t>(op));
+      });
+    }
+  });
+  iter.cast_outputs();
+}
+
+template <bool check_dynamic_cast=true, typename func_t, typename vec_func_t>
+void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop) {
+  using traits = function_traits<func_t>;
+  // this could be extended to work with void return types
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
+  // dynamic casting not currently supported on CPU, but some kernels (like Fill)
+  // explicitly dynamic_cast, so we give the opt-out of checking.
+  c10::guts::if_constexpr<check_dynamic_cast>([&] {
+    TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  });
+
+  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    if (is_contiguous<traits>(strides)) {
+      vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
     } else {
       using Indices = std::make_index_sequence<traits::arity>;
       unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
@@ -224,10 +327,13 @@ void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
 }
 
 template <typename func_t>
-void cpu_serial_kernel(TensorIterator& iter, func_t&& op, const Range& range) {
+void cpu_serial_kernel(TensorIteratorBase& iter, func_t&& op, const Range& range) {
   using traits = function_traits<func_t>;
-  TORCH_INTERNAL_ASSERT((std::is_void<typename traits::result_type>::value &&
-    iter.noutputs() == 0 && iter.ntensors() == traits::arity) || (iter.ntensors() >= traits::arity + 1));
+  constexpr bool result_void = std::is_void<typename traits::result_type>::value;
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity &&
+                        ((result_void && iter.noutputs() == 0) || (!result_void && iter.noutputs() == 1)));
+  // dynamic casting not currently supported on CPU
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
@@ -243,18 +349,22 @@ void cpu_serial_kernel(TensorIterator& iter, func_t&& op, const Range& range) {
 }
 
 template <typename func_t>
-void cpu_serial_kernel(TensorIterator& iter, func_t&& op) {
+void cpu_serial_kernel(TensorIteratorBase& iter, func_t&& op) {
   cpu_serial_kernel(iter, op, {0, iter.numel()});
 }
 
 template <typename func_t, typename vec_func_t>
-void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop, const Range& range) {
+void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop, const Range& range) {
   using traits = function_traits<func_t>;
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
+  // this could be extended to work with void return types
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
+  // dynamic casting not currently supported on CPU
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
-      return vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
+      vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
     } else {
       using Indices = std::make_index_sequence<traits::arity>;
       unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
@@ -270,7 +380,7 @@ void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop, 
 }
 
 template <typename func_t, typename vec_func_t>
-void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
+void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop) {
   cpu_serial_kernel_vec(iter, op, vop, {0, iter.numel()});
 }
 

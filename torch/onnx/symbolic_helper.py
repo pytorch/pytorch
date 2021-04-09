@@ -1,9 +1,9 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from torch._C import ListType
 import warnings
+import inspect
 from sys import maxsize as maxsize
+from typing import Set
 
 import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
@@ -11,6 +11,7 @@ import torch.onnx
 import torch.onnx.utils
 
 from functools import wraps
+from torch._C import OptionalType
 
 
 # Note [Edit Symbolic Files]
@@ -50,7 +51,7 @@ from functools import wraps
 _sum = sum
 
 
-def _parse_arg(value, desc):
+def _parse_arg(value, desc, arg_name=None, node_name=None):
     if desc == 'none':
         return value
     if desc == 'v' or not _is_value(value):
@@ -71,6 +72,8 @@ def _parse_arg(value, desc):
             return tval
         elif desc == 'is':
             return [int(v) for v in tval]
+        elif desc == 'fs':
+            return [float(v) for v in tval]
         else:
             raise RuntimeError("ONNX symbolic doesn't know to interpret Constant node")
     elif value.node().kind() == 'prim::ListConstruct':
@@ -84,7 +87,11 @@ def _parse_arg(value, desc):
         else:
             raise RuntimeError("ONNX symbolic doesn't know to interpret ListConstruct node")
 
-    raise RuntimeError("Unexpected node type: {}".format(value.node().kind()))
+    if arg_name is None or node_name is None:
+        raise RuntimeError("Expected node type 'onnx::Constant', got '{}'.".format(value.node().kind()))
+    else:
+        raise RuntimeError("Expected node type 'onnx::Constant' "
+                           "for argument '{}' of node '{}', got '{}'.".format(arg_name, node_name, value.node().kind()))
 
 
 def _maybe_get_const(value, desc):
@@ -122,11 +129,23 @@ def parse_args(*arg_descriptors):
     def decorator(fn):
         fn._arg_descriptors = arg_descriptors
 
-        def wrapper(g, *args):
+        def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)
-            args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]
-            return fn(g, *args)
+            try:
+                sig = inspect.signature(fn)
+                arg_names = list(sig.parameters.keys())[1:]
+                fn_name = fn.__name__
+            except Exception:
+                arg_names = [None] * len(args)  # type: ignore
+                fn_name = None  # type: ignore
+            args = [_parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore
+                    for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]  # type: ignore
+            # only support _outputs in kwargs
+            assert len(kwargs) <= 1
+            if len(kwargs) == 1:
+                assert '_outputs' in kwargs
+            return fn(g, *args, **kwargs)
         # In Python 2 functools.wraps chokes on partially applied functions, so we need this as a workaround
         try:
             wrapper = wraps(fn)(wrapper)
@@ -167,16 +186,55 @@ def _is_none(x):
 def _is_value(x):
     return isinstance(x, torch._C.Value)
 
+def _is_tensor(x):
+    return x.type().isSubtypeOf(torch._C.TensorType.get())
 
 def _is_tensor_list(x):
-    return x.type().isSubtypeOf(ListType.ofTensors())
+    return isinstance(x.type(), torch._C.ListType) and isinstance(x.type().getElementType(), torch._C.TensorType)
 
+def _get_tensor_rank(x):
+    if not _is_tensor(x) or x.type() is None:
+        return None
+    return x.type().dim()
+
+def _get_tensor_sizes(x, allow_nonstatic=True):
+    if not _is_tensor(x) or x.type() is None:
+        return None
+    if allow_nonstatic:
+        # Each individual symbol is returned as None.
+        # e.g. [1, 'a', 'b'] -> [1, None, None]
+        return x.type().varyingSizes()
+    # returns None, if exists any symbol in sizes.
+    # e.g. [1, 'a', 'b'] -> None
+    return x.type().sizes()
+
+def _get_tensor_dim_size(x, dim):
+    try:
+        sizes = _get_tensor_sizes(x)
+        return sizes[dim]
+    except Exception:
+        pass
+    return None
 
 def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
 
 
-def _black_list_in_opset(name):
+def _onnx_unsupported(op_name):
+    raise RuntimeError('Unsupported: ONNX export of operator {}. '
+                       'Please feel free to request support or submit a pull request on PyTorch GitHub.'.format(op_name))
+
+
+def _onnx_opset_unsupported(op_name, current_opset, supported_opset):
+    raise RuntimeError('Unsupported: ONNX export of {} in '
+                       'opset {}. Please try opset version {}.'.format(op_name, current_opset, supported_opset))
+
+def _onnx_opset_unsupported_detailed(op_name, current_opset, supported_opset, reason):
+    raise RuntimeError('Unsupported: ONNX export of {} in '
+                       'opset {}. {}. Please try opset version {}.'.format(op_name, current_opset, reason, supported_opset))
+
+
+def _block_list_in_opset(name):
     def symbolic_fn(*args, **kwargs):
         raise RuntimeError("ONNX export failed on {}, which is not implemented for opset {}. "
                            "Try exporting with other opset versions."
@@ -193,21 +251,67 @@ def _try_get_scalar_type(*args):
     return None
 
 
+def _select_helper(g, self, dim, index, apply_reshape=True):
+    index_const = _maybe_get_scalar(index)
+    index_dim = _get_tensor_rank(index)
+    if not _is_value(index_const):
+        # Index is a constant scalar. Make it a size 1 constant tensor.
+        index = g.op("Constant", value_t=torch.LongTensor([index_const]))
+    elif index_dim is not None and apply_reshape:
+        if index_dim == 0:
+            # Index is a scalar. Reshape it to a size 1 tensor.
+            index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
+
+    index_scalar_type = index.type().scalarType()
+    if index_scalar_type is None or index_scalar_type not in ['Long', 'Int']:
+        index = g.op("Cast", index, to_i=cast_pytorch_to_onnx["Long"])
+    return g.op("Gather", self, index, axis_i=dim)
+
+
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if _export_onnx_opset_version <= 9:
-        from torch.onnx.symbolic_opset9 import _slice
-        return _slice(g, input, axes, starts, ends)
+        from torch.onnx.symbolic_opset9 import _slice as _slice9
+        return _slice9(g, input, axes, starts, ends)
     else:
-        from torch.onnx.symbolic_opset10 import _slice
-        return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
+        from torch.onnx.symbolic_opset10 import _slice as _slice10
+        return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
 
+def _hardtanh_helper(g, input, min_val, max_val):
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import hardtanh
+        return hardtanh(g, input, min_val, max_val)
+    else:
+        from torch.onnx.symbolic_opset11 import hardtanh  # type: ignore[no-redef]
+        return hardtanh(g, input, min_val, max_val)
 
 def _is_fp(value):
     if value:
-        type = value.type().scalarType()
-        return (type == 'Float') or (type == 'Double') or (type == 'Half')
+        if isinstance(value, torch.Tensor):
+            type = value.dtype
+            return (type == 'torch.float32') or (type == 'torch.float64') or (type == 'torch.float16')
+        else:
+            type = value.type().scalarType()
+            if type is None:
+                warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
+            return (type == 'Float') or (type == 'Double') or (type == 'Half')
     return False
 
+def _generate_wrapped_number(g, scalar):
+    """
+    Create a wrapped number based on https://github.com/pytorch/pytorch/issues/9515
+    A Tensor is a considered a "wrapped number" if it is
+    auto-wrapped from a C++ or Python number type. Integer types are
+    wrapped as 0-dim int64 tensors and floating-point types are
+    wrapped as 0-dim double tensors.
+
+    The input to this function is constant value. If the data type
+    is a floating point type, it is converted to a 0-dim double
+    tensor, else it is converted to a 0-dim tensor of its original type
+    """
+    assert not isinstance(scalar, torch.Tensor)
+    if isinstance(scalar, float):
+        return g.op("Constant", value_t=torch.tensor(scalar, dtype=torch.double))
+    return g.op("Constant", value_t=torch.tensor(scalar))
 
 def _sort_helper(g, input, dim, decending=True, out=None):
     if out is not None:
@@ -247,9 +351,30 @@ def _interpolate_warning(interpolate_mode):
                   "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
                   "We recommend using opset 11 and above for models using this operator. ")
 
-def _unsqueeze_helper(g, input, dim):
-    from torch.onnx.symbolic_opset9 import unsqueeze
-    return unsqueeze(g, input, dim)
+def _unsqueeze_helper(g, input, axes_i):
+    if _export_onnx_opset_version >= 13:
+        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+        return g.op("Unsqueeze", input, axes)
+    else:
+        return g.op("Unsqueeze", input, axes_i=axes_i)
+
+def _squeeze_helper(g, input, axes_i):
+    if _export_onnx_opset_version >= 13:
+        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+        return g.op("Squeeze", input, axes)
+    else:
+        return g.op("Squeeze", input, axes_i=axes_i)
+
+def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_i=0):
+    keepdims_i = _maybe_get_const(keepdims_i, 'i')
+    if _export_onnx_opset_version >= 13:
+        if axes_i:
+            if not _is_value(axes_i):
+                axes_i = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+            return g.op("ReduceSum", input, axes_i, keepdims_i=keepdims_i, noop_with_empty_axes_i=noop_with_empty_axes_i)
+        return g.op("ReduceSum", input, keepdims_i=keepdims_i, noop_with_empty_axes_i=noop_with_empty_axes_i)
+    else:
+        return g.op("ReduceSum", input, axes_i=axes_i, keepdims_i=keepdims_i)
 
 def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, 'is')
@@ -270,20 +395,14 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
 
 
 def _interpolate_get_scales_if_available(g, scales):
-    available_scales = _maybe_get_const(scales[0], 'f') != -1 and not _is_none(scales[0])
+    available_scales = _maybe_get_const(scales[0], 'fs') != -1 and not _is_none(scales[0])
 
     if not available_scales:
         return None
 
-    scales_list = []
-    for scale in scales:
-        unsqueezed_scale = _unsqueeze_helper(g, scale, 0)
-        # ONNX only supports float for the scales. double -> float.
-        unsqueezed_scale = g.op("Cast", unsqueezed_scale,
-                                to_i=cast_pytorch_to_onnx["Float"])
-        scales_list.append(unsqueezed_scale)
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
-    scales = g.op("Concat", offsets, *scales_list, axis_i=0)
+    scales_list = g.op("Constant", value_t=torch.tensor(_maybe_get_const(scales[0], 'fs')))
+    scales = g.op("Concat", offsets, scales_list, axis_i=0)
     return scales
 
 
@@ -299,10 +418,11 @@ def _get_interpolate_attributes(g, mode, args):
 
 def _interpolate_get_scales(g, scale_factor, dim):
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
-    if isinstance(scale_factor.type(), torch._C.ListType):
+    scale_factor_rank = _get_tensor_rank(scale_factor)
+    if isinstance(scale_factor.type(), torch._C.ListType) or (scale_factor_rank is not None and scale_factor_rank > 0):
         return g.op("Concat", offsets, scale_factor, axis_i=0)
     else:
-        scale_factor = _unsqueeze_helper(g, scale_factor, 0)
+        scale_factor = _unsqueeze_helper(g, scale_factor, [0])
         scale_factor = g.op("Cast", scale_factor, to_i=cast_pytorch_to_onnx["Float"])
         scales = [scale_factor for i in range(dim - 2)]
     scale_factor = g.op("Concat", offsets, *scales, axis_i=0)
@@ -331,22 +451,160 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
         if not _is_packed_list(size):
             is_scalar = ((_maybe_get_const(size, 't').dim() == 0))
             if is_scalar:
-                size = _unsqueeze_helper(g, size, 0)
+                size = _unsqueeze_helper(g, size, [0])
                 size = [size for i in range(dim - 2)]
                 size = g.op("Concat", *size, axis_i=0)
         scale_factor = _interpolate_size_to_scales(g, input, size, dim)
     else:
-        return _unimplemented("Both size and scales are None in __interpolate")
+        return _unimplemented("interpolate", "Both size and scales are None in __interpolate")
     return scale_factor, mode
+
+
+def _interpolate_helper(name, dim, interpolate_mode):
+    def symbolic_fn(g, input, output_size, *args):
+        scales, align_corners = _get_interpolate_attributes(g, interpolate_mode, args)
+        align_corners = _maybe_get_scalar(align_corners)
+        coordinate_transformation_mode = "asymmetric" if interpolate_mode == "nearest" \
+            else "align_corners" if align_corners else "pytorch_half_pixel"
+
+        if scales is None:
+            input_size = g.op("Shape", input)
+            input_size_beg = _slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
+            output_size = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx['Long'])
+            output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
+
+            if _export_onnx_opset_version >= 13:
+                empty_roi = _optional_input_placeholder_tensor(g)
+                empty_scales = _optional_input_placeholder_tensor(g)
+            else:
+                empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+                empty_scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+
+            return g.op("Resize",
+                        input,
+                        empty_roi,
+                        empty_scales,
+                        output_size,
+                        coordinate_transformation_mode_s=coordinate_transformation_mode,
+                        cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                        mode_s=interpolate_mode,  # nearest, linear, or cubic
+                        nearest_mode_s="floor")  # only valid when mode="nearest"
+        else:
+            if _export_onnx_opset_version >= 13:
+                empty_roi = _optional_input_placeholder_tensor(g)
+            else:
+                empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+
+            return g.op("Resize",
+                        input,
+                        empty_roi,
+                        scales,
+                        coordinate_transformation_mode_s=coordinate_transformation_mode,
+                        cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                        mode_s=interpolate_mode,  # nearest, linear, or cubic
+                        nearest_mode_s="floor")  # only valid when mode="nearest"
+    return symbolic_fn
+
+
+def __interpolate_helper(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
+    mode = _maybe_get_const(mode, 's')
+    if 'linear' in mode:
+        mode = 'linear'
+    if 'cubic' in mode:
+        mode = 'cubic'
+    align_corners = _maybe_get_const(align_corners, 'b')
+    align_corners = False if not isinstance(align_corners, bool) else align_corners
+    coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
+        else "align_corners" if align_corners else "pytorch_half_pixel"
+
+    if not _is_none(size) :
+        input_size = g.op("Shape", input)
+        input_size = _slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
+        # in some cases size is not a packed list but size is a scalar
+        # We need to also verify that (_maybe_get_const(size, 't').dim() == 0)
+        # but this information is not always available. Try to get the dim,
+        # and if not assume that it is not a scalar.
+        try:
+            is_scalar = not _is_packed_list(size) and ((_maybe_get_const(size, 't').dim() == 0))
+        except AttributeError:
+            is_scalar = not _is_packed_list(size)
+            if not is_scalar:
+                warnings.warn("Cannot verify if the output_size is a scalar "
+                              "while exporting interpolate. Assuming that it is not a scalar.")
+
+        if is_scalar:
+            rank = _get_tensor_rank(input)
+            if rank is None:
+                return _unimplemented("interpolate (with a scalar output_size)",
+                                      "missing input shape (try giving an array of output_size values)")
+            size = _unsqueeze_helper(g, size, [0])
+            size = [size for i in range(rank - 2)]
+            size = g.op("Concat", *size, axis_i=0)
+        size = g.op("Cast", size, to_i=cast_pytorch_to_onnx['Long'])
+        size = g.op("Concat", input_size, size, axis_i=0)
+
+        if _export_onnx_opset_version >= 13:
+            empty_roi = _optional_input_placeholder_tensor(g)
+            empty_scales = _optional_input_placeholder_tensor(g)
+        else:
+            empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+            empty_scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+
+        return g.op("Resize",
+                    input,
+                    empty_roi,
+                    empty_scales,
+                    size,
+                    coordinate_transformation_mode_s=coordinate_transformation_mode,
+                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                    mode_s=mode,  # nearest, linear, or cubic
+                    nearest_mode_s="floor")
+    else:  # if not _is_none(scales)
+        rank = _get_tensor_rank(input)
+        if rank is None:
+            return _unimplemented("interpolate (with scales)", "missing input shape")
+
+        if _export_onnx_opset_version >= 13:
+            empty_roi = _optional_input_placeholder_tensor(g)
+        else:
+            empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+
+        scales = _interpolate_get_scales(g, scale_factor, rank)
+        return g.op("Resize",
+                    input,
+                    empty_roi,
+                    scales,
+                    coordinate_transformation_mode_s=coordinate_transformation_mode,
+                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                    mode_s=mode,  # nearest, linear, or cubic
+                    nearest_mode_s="floor")  # only valid when mode="nearest"
+
+
+def _unbind_helper(g, self, dim, _outputs):
+    if _export_onnx_opset_version < 11:
+        from torch.onnx.symbolic_opset9 import unbind
+    elif _export_onnx_opset_version <= 12:
+        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
+    else:
+        from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef]
+    return unbind(g, self, dim, _outputs)
 
 
 def _scatter_helper(g, self, dim, index, src):
     if _export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter
     else:
-        from torch.onnx.symbolic_opset11 import scatter
+        # for mypy, scatter was imported two lines above
+        from torch.onnx.symbolic_opset11 import scatter  # type: ignore
     return scatter(g, self, dim, index, src)
 
+def _repeat_interleave_split_helper(g, self, reps, dim):
+    if _export_onnx_opset_version <= 12:
+        return g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
+    else:
+        from torch.onnx.symbolic_opset13 import split  # type: ignore
+        repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
+        return split(g, self, repeats, dim, _outputs=reps)
 
 def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     def _is_all_integral(scalars):
@@ -362,7 +620,7 @@ def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     # infer input types from dtype. If not, then check if any of start, stop,
     # or step are floating point, and infer the type from get_default.
     # Otherwise, the dtype is inferred to be torch.int64.
-    if _is_value(dtype) and _is_none(dtype):
+    if dtype is None or (_is_value(dtype) and _is_none(dtype)):
         if _is_all_integral([start, end, step]):
             type = scalar_type_to_pytorch_type.index(torch.int64)
         else:
@@ -392,15 +650,16 @@ def _index_fill_reshape_helper(g, self, dim, index):
     if _export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter
     else:
-        from torch.onnx.symbolic_opset11 import scatter
+        # for mypy, scatter was imported two lines above
+        from torch.onnx.symbolic_opset11 import scatter  # type: ignore
 
     if self.type().dim() is None:
         return _unimplemented("index_fill", "input rank not accesible")
     self_dim = self.type().dim()
     dim_value = _parse_arg(dim, 'i')
-    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
+    unsqueezed_index = _unsqueeze_helper(g, index, [i for i in range(self_dim) if i != dim_value])
     expanded_index_shape = scatter(g, g.op("Shape", self), 0,
-                                   g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index))
+                                   _unsqueeze_helper(g, dim, [0]), g.op("Shape", index))
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
 
@@ -426,6 +685,31 @@ def assert_training_mode(op_mode, op_name):
                       " mode, but operator " + op_name + " is set to " +
                       op_mode + " mode. The model will be exported in " +
                       training_mode + ", as specified by the export mode.")
+
+def _flatten_helper(g, input, start_dim, end_dim, dim):
+    input_size = g.op("Shape", input)
+    slice1 = _slice_helper(g, input_size, axes=[0], starts=[0], ends=[start_dim])
+    slices = [slice1, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.long))]
+    if end_dim < dim - 1:
+        slice3 = _slice_helper(g, input_size, axes=[0], starts=[end_dim + 1], ends=[dim])
+        slices = [slice1, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.long)), slice3]
+
+    final_shape = g.op("Concat", *slices, axis_i=0)
+    from torch.onnx.symbolic_opset9 import _reshape_from_tensor
+    return _reshape_from_tensor(g, input, final_shape)
+
+def _is_split_static(split_size_or_sizes, _outputs):
+    if _outputs is None:
+        return False
+    if _is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
+        return False
+    return True
+
+def _optional_input_placeholder_tensor(g):
+    n = g.op("prim::Constant")
+    n.setType(OptionalType.ofTensor())
+    return n
+
 
 # ---------------------------------------------------------------------
 # ONNX operator version
@@ -455,7 +739,7 @@ def assert_training_mode(op_mode, op_name):
 
 
 _default_onnx_opset_version = 9
-_onnx_master_opset = 10
+_onnx_main_opset = 13
 _onnx_stable_opsets = [7, 8, 9, 10, 11, 12]
 _export_onnx_opset_version = _default_onnx_opset_version
 
@@ -465,7 +749,7 @@ def _set_opset_version(opset_version):
     if opset_version == _default_onnx_opset_version:
         _export_onnx_opset_version = opset_version
         return
-    if opset_version in _onnx_stable_opsets + [_onnx_master_opset]:
+    if opset_version in _onnx_stable_opsets + [_onnx_main_opset]:
         _export_onnx_opset_version = opset_version
         return
     raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
@@ -479,6 +763,12 @@ _training_mode = None
 def _set_training_mode(training_mode):
     global _training_mode
     _training_mode = training_mode
+
+_onnx_shape_inference = False
+def _set_onnx_shape_inference(onnx_shape_inference):
+    global _onnx_shape_inference
+    _onnx_shape_inference = onnx_shape_inference
+
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an
@@ -528,11 +818,11 @@ scalar_type_to_pytorch_type = [
     torch.half,         # 5
     torch.float,        # 6
     torch.double,       # 7
+    torch.complex32,    # 8
     torch.complex64,    # 9
     torch.complex128,   # 10
     torch.bool,         # 11
 ]
-
 
 def _cast_func_template(to_i, g, input, non_blocking):
     return g.op("Cast", input, to_i=to_i)
@@ -552,6 +842,7 @@ scalar_type_to_onnx = [
     cast_pytorch_to_onnx["ComplexDouble"],
     cast_pytorch_to_onnx["Bool"],
 ]
+
 # Global set to store the list of quantized operators in the network.
 # This is currently only used in the conversion of quantized ops from PT -> C2 via ONNX.
-_quantized_ops = set()
+_quantized_ops: Set[int] = set()

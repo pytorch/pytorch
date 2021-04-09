@@ -13,7 +13,7 @@
 #include <gloo/rendezvous/store.h>
 #include <gloo/transport/device.h>
 
-#include <torch/csrc/utils/hash.h>
+#include <c10/util/hash.h>
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
@@ -26,6 +26,8 @@
 #include <c10d/Utils.hpp>
 
 namespace c10d {
+
+constexpr const char* GLOO_BACKEND_NAME = "gloo";
 
 // ProcessGroupGloo implements Gloo bindings for c10d.
 //
@@ -68,7 +70,13 @@ class ProcessGroupGloo : public ProcessGroup {
   //
   class AsyncWork : public ProcessGroup::Work {
    public:
-    static void execute(std::shared_ptr<AsyncWork> work) {
+    AsyncWork(
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt)
+        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors) {
+    }
+
+    static void execute(c10::intrusive_ptr<AsyncWork> work) {
       std::exception_ptr eptr;
       try {
         work->run();
@@ -96,7 +104,7 @@ class ProcessGroupGloo : public ProcessGroup {
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
 
-    bool wait() override;
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     void abort() override;
 
@@ -109,11 +117,12 @@ class ProcessGroupGloo : public ProcessGroup {
    public:
     explicit RecvWork(
         at::Tensor& tensor,
-        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+        const char* profilingTitle = nullptr);
 
     int sourceRank() const override;
 
-    bool wait() override;
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     void abort() override;
 
@@ -123,13 +132,23 @@ class ProcessGroupGloo : public ProcessGroup {
     int srcRank_;
   };
 
-  struct Options {
-    explicit Options();
+  struct Options : public ProcessGroup::Options {
+    explicit Options(
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout);
+
+    // return intrusive_ptr of the object
+    static c10::intrusive_ptr<Options> create(
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout) {
+      return c10::make_intrusive<Options>(timeout);
+    }
 
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
-    std::chrono::milliseconds timeout;
     int threads;
   };
+
+  const std::string getBackendName() const override {
+    return std::string(GLOO_BACKEND_NAME);
+  }
 
   // Helper functions to create a new device object.
   // They are static functions on this class to keep them logically
@@ -150,79 +169,99 @@ class ProcessGroupGloo : public ProcessGroup {
   static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
 
   explicit ProcessGroupGloo(
-      const std::shared_ptr<Store>& store,
+      const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
-      Options options = Options());
+      c10::intrusive_ptr<Options> options = Options::create());
 
   virtual ~ProcessGroupGloo();
 
-  std::shared_ptr<ProcessGroup::Work> broadcast(
+  c10::intrusive_ptr<Options> getOptions() {
+    return options_;
+  }
+
+  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allreduce(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> reduce(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather_base(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& output_lists,
       std::vector<at::Tensor>& input_list,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> gather(
+  c10::intrusive_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       const GatherOptions& opts = GatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> scatter(
+  c10::intrusive_ptr<ProcessGroup::Work> scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> reduce_scatter(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> send(
+  c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputCounts,
+      std::vector<int64_t>& inputCounts,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> recv(
+  c10::intrusive_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+  c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> barrier(
+  c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
+
+  // Similar to barrier(), but blocks rank 0 until all other ranks have
+  // acknowledged that they are alive (through send/recv from rank 0). Rank 0
+  // is able to report all failed ranks if waitAllRanks = true, otherwise
+  // reports the first rank it detected as failed.
+  void monitoredBarrier(
+      const BarrierOptions& opts = BarrierOptions(),
+      bool waitAllRanks = false) override;
 
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
+  const c10::intrusive_ptr<Options> options_;
 
   // Every Gloo context represents a set of connections to its peers.
   // In order to use more than one device (or allow for parallelism on
@@ -249,7 +288,7 @@ class ProcessGroupGloo : public ProcessGroup {
   void runLoop(int workerIndex);
 
   // Queue work to run on worker thread.
-  void enqueue(std::shared_ptr<AsyncWork> work);
+  void enqueue(c10::intrusive_ptr<AsyncWork> work);
 
   // Keep both a queue of pending work, and a vector with in progress work.
   // Both of these can only be mutated when holding the queue lock.
@@ -257,8 +296,8 @@ class ProcessGroupGloo : public ProcessGroup {
   // to all in progress and pending work when executing a barrier.
   // When executing a barrier, we need to ensure that all prior work
   // has completed before completing itself.
-  std::deque<std::shared_ptr<AsyncWork>> workQueue_;
-  std::vector<std::shared_ptr<AsyncWork>> workInProgress_;
+  std::deque<c10::intrusive_ptr<AsyncWork>> workQueue_;
+  std::vector<c10::intrusive_ptr<AsyncWork>> workInProgress_;
   std::mutex workMutex_;
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;

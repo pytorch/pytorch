@@ -19,12 +19,12 @@ TEST(TypeCustomPrinter, Basic) {
   // Tensor types should be rewritten
   torch::Tensor iv = torch::rand({2, 3});
   const auto type = TensorType::create(iv);
-  EXPECT_EQ(type->python_str(), "Tensor");
-  EXPECT_EQ(type->python_str(printer), "CustomTensor");
+  EXPECT_EQ(type->annotation_str(), "Tensor");
+  EXPECT_EQ(type->annotation_str(printer), "CustomTensor");
 
   // Unrelated types shoudl not be affected
   const auto intType = IntType::create();
-  EXPECT_EQ(intType->python_str(printer), intType->python_str());
+  EXPECT_EQ(intType->annotation_str(printer), intType->annotation_str());
 }
 
 TEST(TypeCustomPrinter, ContainedTypes) {
@@ -40,14 +40,14 @@ TEST(TypeCustomPrinter, ContainedTypes) {
 
   // Contained types should work
   const auto tupleType = TupleType::create({type, IntType::get(), type});
-  EXPECT_EQ(tupleType->python_str(), "Tuple[Tensor, int, Tensor]");
+  EXPECT_EQ(tupleType->annotation_str(), "Tuple[Tensor, int, Tensor]");
   EXPECT_EQ(
-      tupleType->python_str(printer), "Tuple[CustomTensor, int, CustomTensor]");
+      tupleType->annotation_str(printer), "Tuple[CustomTensor, int, CustomTensor]");
   const auto dictType = DictType::create(IntType::get(), type);
-  EXPECT_EQ(dictType->python_str(printer), "Dict[int, CustomTensor]");
+  EXPECT_EQ(dictType->annotation_str(printer), "Dict[int, CustomTensor]");
   const auto listType = ListType::create(tupleType);
   EXPECT_EQ(
-      listType->python_str(printer),
+      listType->annotation_str(printer),
       "List[Tuple[CustomTensor, int, CustomTensor]]");
 }
 
@@ -67,18 +67,18 @@ TEST(TypeCustomPrinter, NamedTuples) {
 
   const auto namedTupleType = TupleType::createNamed(
       "my.named.tuple", {"foo", "bar"}, {type, IntType::get()});
-  EXPECT_EQ(namedTupleType->python_str(printer), "Rewritten");
+  EXPECT_EQ(namedTupleType->annotation_str(printer), "Rewritten");
 
   // Put it inside another tuple, should still work
   const auto outerTupleType = TupleType::create({IntType::get(), namedTupleType});
-  EXPECT_EQ(outerTupleType->python_str(printer), "Tuple[int, Rewritten]");
+  EXPECT_EQ(outerTupleType->annotation_str(printer), "Tuple[int, Rewritten]");
 }
 
 static TypePtr importType(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& qual_name,
     const std::string& src) {
-  std::vector<at::Tensor> constantTable;
+  std::vector<at::IValue> constantTable;
   auto source = std::make_shared<torch::jit::Source>(src);
   torch::jit::SourceImporter si(
       cu,
@@ -175,8 +175,8 @@ class OneForward(Interface):
 
 TEST(TypeEquality, TupleEquality) {
   // Tuples should be structurally typed
-  auto type = TupleType::create({IntType::get(), TensorType::get(), FloatType::get()});
-  auto type2 = TupleType::create({IntType::get(), TensorType::get(), FloatType::get()});
+  auto type = TupleType::create({IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
+  auto type2 = TupleType::create({IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
 
   EXPECT_EQ(*type, *type2);
 }
@@ -185,24 +185,24 @@ TEST(TypeEquality, NamedTupleEquality) {
   // Named tuples should compare equal if they share a name and field names
   auto type = TupleType::createNamed(
       "MyNamedTuple",
-      {"a", "b", "c"},
-      {IntType::get(), TensorType::get(), FloatType::get()});
+      {"a", "b", "c", "d"},
+      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   auto type2 = TupleType::createNamed(
       "MyNamedTuple",
-      {"a", "b", "c"},
-      {IntType::get(), TensorType::get(), FloatType::get()});
+      {"a", "b", "c", "d"},
+      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_EQ(*type, *type2);
 
   auto differentName = TupleType::createNamed(
       "WowSoDifferent",
-      {"a", "b", "c"},
-      {IntType::get(), TensorType::get(), FloatType::get()});
+      {"a", "b", "c", "d"},
+      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_NE(*type, *differentName);
 
   auto differentField = TupleType::createNamed(
       "MyNamedTuple",
-      {"wow", "so", "different"},
-      {IntType::get(), TensorType::get(), FloatType::get()});
+      {"wow", "so", "very", "different"},
+      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_NE(*type, *differentField);
 }
 } // namespace c10

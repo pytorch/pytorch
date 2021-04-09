@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import threading
 
@@ -138,13 +137,12 @@ class DistOptimizerTest(RpcAgentTestFixture):
                 OptimizerFailingOnConstructor, [remote_param1, remote_param2]
             )
 
-    @dist_init()
-    def test_dist_optim(self):
+    def _test_dist_optim_base(self, optim_cls, *args, **kwargs):
         # local version
         module1 = MyModule()
         module2 = MyModule()
         params = [module1.get_w(), module2.get_w()]
-        local_optim = optim.SGD(params, lr=0.05)
+        local_optim = optim_cls(params, *args, **kwargs)
 
         old_w1 = module1.w.clone().detach()
         old_w2 = module2.w.clone().detach()
@@ -176,7 +174,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
         self.assertEqual(old_w2, remote_param2.to_here())
 
         dist_optim = DistributedOptimizer(
-            optim.SGD, [remote_param1, remote_param2], lr=0.05
+            optim_cls, [remote_param1, remote_param2], *args, **kwargs
         )
 
         with dist_autograd.context() as context_id:
@@ -199,3 +197,13 @@ class DistOptimizerTest(RpcAgentTestFixture):
             # ensure local equals remote
             self.assertEqual(new_w1, module1.get_w())
             self.assertEqual(new_w2, module2.get_w())
+
+    @dist_init()
+    def test_dist_optim(self):
+        self._test_dist_optim_base(optim.Adagrad, lr=0.05)
+        self._test_dist_optim_base(optim.Adam, lr=1e-2, amsgrad=True)
+        self._test_dist_optim_base(optim.AdamW, lr=0.05, amsgrad=True)
+        self._test_dist_optim_base(optim.SGD, lr=0.05)
+        self._test_dist_optim_base(optim.SGD, lr=1e-3, momentum=1, weight_decay=1, nesterov=True)
+        self._test_dist_optim_base(optim.Adadelta, rho=0.95)
+        self._test_dist_optim_base(optim.RMSprop, lr=0.05)
