@@ -336,7 +336,7 @@ static void cosh_kernel(TensorIterator& iter) {
   });
 }
 
-static void acosh_kernel(TensorIterator& iter) {
+static void acosh_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "acosh_cpu", [&]() {
       cpu_kernel(
         iter,
