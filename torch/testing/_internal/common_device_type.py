@@ -481,14 +481,19 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     # export PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda,cpu
     # export PYTORCH_TESTING_DEVICE_EXCEPT_FOR=xla
     if only_for is None:
-        only_for = os.getenv("PYTORCH_TESTING_DEVICE_ONLY_FOR", ""). split(",")
+        only_for = os.getenv("PYTORCH_TESTING_DEVICE_ONLY_FOR", None)
+        if only_for is not None:
+            only_for = only_for.split(',')
+
     if except_for is None:
-        except_for = os.getenv("PYTORCH_TESTING_DEVICE_EXCEPT_FOR", ""). split(",")
+        except_for = os.getenv("PYTORCH_TESTING_DEVICE_EXCEPT_FOR", None)
+        if except_for is not None:
+            except_for = except_for.split(',')
 
     # Creates device-specific test cases
     for base in device_type_test_bases:
         # Skips bases listed in except_for
-        if except_for and only_for:
+        if except_for is not None and only_for is not None:
             assert base.device_type not in except_for or base.device_type not in only_for,\
                 "same device cannot appear in except_for and only_for"
         if except_for and base.device_type in except_for:
