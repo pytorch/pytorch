@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from io import BytesIO
 from sys import version_info
 from textwrap import dedent
@@ -24,15 +25,15 @@ class TestResources(PackageTestCase):
             # Layout looks like:
             #    package
             #    ├── one/
-            #    │   ├── a.txt
-            #    │   ├── b.txt
-            #    │   ├── c.txt
-            #    │   └── three/
-            #    │       ├── d.txt
-            #    │       └── e.txt
+            #    │   ├── a.txt
+            #    │   ├── b.txt
+            #    │   ├── c.txt
+            #    │   └── three/
+            #    │       ├── d.txt
+            #    │       └── e.txt
             #    └── two/
-            #       ├── f.txt
-            #       └── g.txt
+            #       ├── f.txt
+            #       └── g.txt
             pe.save_text("one", "a.txt", "hello, a!")
             pe.save_text("one", "b.txt", "hello, b!")
             pe.save_text("one", "c.txt", "hello, c!")

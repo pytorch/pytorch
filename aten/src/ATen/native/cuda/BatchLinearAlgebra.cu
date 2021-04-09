@@ -1201,7 +1201,7 @@ void magmaGels<c10::complex<double>>(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
+static void apply_solve(Tensor& b, Tensor& A, Tensor& infos_out) {
 #ifndef USE_MAGMA
 AT_ERROR("solve: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1214,11 +1214,13 @@ AT_ERROR("solve: MAGMA library not found in "
 
   if (b.dim() == 2) {
     auto ipiv = at::empty({n}, at::kInt);
-    infos = infos.to(at::kCPU);  // magmaSolve requires infos tensor to live on CPU
+    // magmaSolve requires infos tensor to live on CPU
+    Tensor infos = at::empty(infos_out.sizes(), infos_out.options().device(kCPU));
     magmaSolve<scalar_t>(n, nrhs, A_data, lda, ipiv.data_ptr<magma_int_t>(),
                         b_data, lda, infos.data_ptr<magma_int_t>());
+    infos_out.copy_(infos);
   } else {
-    auto infos_data = infos.data_ptr<magma_int_t>();
+    auto infos_data = infos_out.data_ptr<magma_int_t>();
     auto A_mat_stride = matrixStride(A);
     auto b_mat_stride = matrixStride(b);
     magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
@@ -1543,7 +1545,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
 #endif
 }
 
-Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
+Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bool upper) {
   int64_t info = 0;
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
@@ -1552,6 +1554,20 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
   });
   TORCH_CHECK(info == 0, "MAGMA cholesky_solve : invalid argument: ", -info);
   return self_working_copy;
+}
+
+// Todo: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
+//     Batched cholesky_solve is dispatched to magma.
+Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
+#ifdef USE_CUSOLVER
+  if (batchCount(self) == 1 || !use_magma_) {
+    return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+  } else {
+    return _cholesky_solve_helper_cuda_magma(self, A, upper);
+  }
+#else
+  return _cholesky_solve_helper_cuda_magma(self, A, upper);
+#endif
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2300,6 +2316,92 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
 
 REGISTER_DISPATCH(eig_stub, &eig_kernel_impl);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/*
+Computes the eigenvalues and eigenvectors of n-by-n matrix 'input'.
+This is an in-place routine, content of 'input', 'values', 'vectors' is overwritten.
+'infos' is an int Tensor containing error codes for each matrix in the batched input.
+For more information see MAGMA's documentation for GEEV routine.
+*/
+template <typename scalar_t>
+void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
+#ifndef USE_MAGMA
+TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
+                   "Either transfer the tensor to the CPU before calling torch.linalg.eig or recompile with MAGMA.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == at::kCPU);
+  if (compute_eigenvectors) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.device() == at::kCPU);
+  }
+
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+
+  magma_vec_t jobvr = compute_eigenvectors ? MagmaVec : MagmaNoVec;
+  magma_vec_t jobvl = MagmaNoVec;  // only right eigenvectors are computed
+  magma_int_t n = magma_int_cast(input.size(-1), "n");
+  auto lda = std::max<magma_int_t>(1, n);
+  auto batch_size = batchCount(input);
+  auto input_matrix_stride = matrixStride(input);
+  auto values_stride = values.size(-1);
+  auto input_data = input.data_ptr<scalar_t>();
+  auto values_data = values.data_ptr<scalar_t>();
+  auto infos_data = infos.data_ptr<magma_int_t>();
+  auto rvectors_data = compute_eigenvectors ? vectors.data_ptr<scalar_t>() : nullptr;
+  scalar_t* lvectors_data = nullptr;  // only right eigenvectors are computed
+  int64_t ldvr = compute_eigenvectors ? lda : 1;
+  int64_t ldvl = 1;
+
+  Tensor rwork;
+  value_t* rwork_data = nullptr;
+  if (input.is_complex()) {
+    ScalarType real_dtype = toValueType(input.scalar_type());
+    rwork = at::empty({lda * 2}, input.options().dtype(real_dtype));
+    rwork_data = rwork.data_ptr<value_t>();
+  }
+
+  // call magmaEig once to get the optimal size of work_data
+  scalar_t work_query;
+  magmaEig<scalar_t, value_t>(jobvl, jobvr, n, input_data, lda, values_data,
+    lvectors_data, ldvl, rvectors_data, ldvr, &work_query, -1, rwork_data, &infos_data[0]);
+
+  magma_int_t lwork = std::max<magma_int_t>(1, static_cast<magma_int_t>(real_impl<scalar_t, value_t>(work_query)));
+  Tensor work = at::empty({lwork}, input.dtype());
+  auto work_data = work.data_ptr<scalar_t>();
+
+  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
+    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    scalar_t* values_working_ptr = &values_data[i * values_stride];
+    scalar_t* rvectors_working_ptr = compute_eigenvectors ? &rvectors_data[i * input_matrix_stride] : nullptr;
+    int* info_working_ptr = &infos_data[i];
+    magmaEig<scalar_t, value_t>(jobvl, jobvr, n, input_working_ptr, lda, values_working_ptr,
+      lvectors_data, ldvl, rvectors_working_ptr, ldvr, work_data, lwork, rwork_data, info_working_ptr);
+  }
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_linalg_eig'
+void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
+  // This function calculates the non-symmetric eigendecomposition in-place
+  // tensors should be in batched column major memory format
+  // the content of eigenvalues, eigenvectors and infos is overwritten by 'apply_linalg_eig'
+
+  // apply_linalg_eig modifies the provided input matrix in-place, therefore we need a copy
+  // MAGMA doesn't have GPU interface for the eigendecomposition and it forces us to transfer 'input' to CPU
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
+  Tensor input_working_copy = at::empty(input.sizes(), input.options().device(kCPU));
+  input_working_copy.transpose_(-2, -1);  // make input_working_copy to have Fortran contiguous memory layout
+  input_working_copy.copy_(input);
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "linalg_eig_out_cuda", [&]{
+    apply_linalg_eig<scalar_t>(eigenvalues, eigenvectors, input_working_copy, infos, compute_eigenvectors);
+  });
+}
+
+REGISTER_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
@@ -2519,13 +2621,13 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   TORCH_CHECK(info == 0, "MAGMA lu_solve : invalid argument: ", -info);
   return self_working_copy;
 }
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cuda(
-    const Tensor& a, const Tensor& b, double cond, c10::optional<std::string> driver_name) {
+
+Tensor& _lstsq_helper_cuda(
+  Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, const Tensor& a, double cond, std::string driver_name) {
 #ifndef USE_MAGMA
-AT_ERROR("torch.linalg.lstsq: MAGMA library not found in "
+TORCH_CHECK(false, "torch.linalg.lstsq: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "torch.linalg.lstsq_cuda", [&] {
@@ -2539,24 +2641,24 @@ AT_ERROR("torch.linalg.lstsq: MAGMA library not found in "
     auto lwork = (m - n + nb) * (nrhs + nb) + nrhs * nb;
     Tensor hwork = at::empty({static_cast<int64_t>(lwork)}, a.scalar_type());
     auto* hwork_ptr = hwork.data_ptr<scalar_t>();
-    magma_int_t info;
+
+    // MAGMA requires infos tensor to live on CPU
+    infos = infos.to(at::kCPU);
+    auto infos_data = infos.data_ptr<magma_int_t>();
 
     batch_iterator_with_broadcasting<scalar_t>(a, b,
       [&](scalar_t* a_working_ptr, scalar_t* b_working_ptr,
         int64_t a_linear_batch_idx) {
+        magma_int_t* infos_working_ptr = &infos_data[a_linear_batch_idx];
         magmaGels<scalar_t>(trans, m, n, nrhs,
           a_working_ptr, ldda, b_working_ptr, lddb,
-          hwork_ptr, lwork, &info);
-        singleCheckErrors(static_cast<int64_t>(info), "torch.linalg.lstsq_cuda");
+          hwork_ptr, lwork, infos_working_ptr);
       }
     );
   });
-
-  Tensor rank, singular_values;
-  return std::make_tuple(b, rank, singular_values);
+  return b;
 #endif
 }
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 }}  // namespace at::native
 
