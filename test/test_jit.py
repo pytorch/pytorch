@@ -10877,6 +10877,40 @@ dedent """
             return a, x
         self.checkScript(return_tuple, (torch.rand(4),))
 
+    def test_add_tuple_optional(self):
+        def foo(input: Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]) -> Optional[torch.Tensor]:
+            changed_input = input[0] + 1
+            value: Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]] = (changed_input,) + input[1:]
+            return value[2]
+        inp: Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]] = (torch.rand(4), None, None)
+        self.checkScript(foo, (inp,))
+
+    def test_add_tuple_non_optional(self):
+        def foo(input: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> torch.Tensor:
+            changed_input = input[0] + 1
+            value: Tuple[torch.Tensor, torch.Tensor, torch.Tensor] = (changed_input,) + input[1:]
+            return torch.sum(value[2]) + 4
+        inp: Tuple[torch.Tensor, torch.Tensor, torch.Tensor] = (torch.rand(4), torch.rand(4), torch.rand(4))
+        self.checkScript(foo, (inp,))
+
+    def test_add_tuple_different_types(self):
+        def foo(a: Tuple[int, float], b: Tuple[int]) -> int:
+            c: Tuple[int, float, int] = a + b
+            d: Tuple[int, float, int, int] = c + b
+            return d[3] + 1
+        a = (1, 2.0)
+        b = (3,)
+        self.checkScript(foo, (a, b))
+
+    def test_add_tuple_same_types(self):
+        def foo(a: Tuple[int, int], b: Tuple[int, int, int]) -> int:
+            c: Tuple[int, int, int, int, int] = a + b
+            d: Tuple[int, int, int, int, int, int, int, int] = c + b
+            return d[6] - 2
+        a = (1, 2)
+        b = (3, 4, 5)
+        self.checkScript(foo, (a, b))
+
     def test_method_no_self(self):
         with self.assertRaisesRegex(RuntimeError, 'methods must have a self argument'):
             class MethodNoSelf(torch.jit.ScriptModule):
