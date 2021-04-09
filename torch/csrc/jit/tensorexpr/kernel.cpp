@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -111,6 +112,79 @@ c10::optional<at::Device> pickDeviceType(
     }
   }
   return device;
+}
+
+// If v is a Tensor with concretely-known sizes, return them, else nullopt.
+c10::optional<std::vector<int64_t>> tensorSizes(torch::jit::Value* v) {
+  auto const& it = v->type()->cast<TensorType>();
+  if (!it) {
+    return c10::nullopt;
+  }
+  if (!it->isComplete()) {
+    return c10::nullopt;
+  }
+  return it->sizes().concrete_sizes();
+}
+
+// The fuser only supports conv2d with very specific properties:
+// - Static shapes: 4-d input and filter, 1-d bias.
+// - Constant strides/padding/dilation/groups
+// - Equal padding and strides, dilation == 1.
+// - Depthwise (groups == in_channels == out_channels)
+// - 3x3 kernel
+bool conv2dIsSupported(const torch::jit::Node* node) {
+  auto const& input = tensorSizes(node->input(0));
+  auto const& weight = tensorSizes(node->input(1));
+  auto const& bias = tensorSizes(node->input(2));
+  auto const& stride = constant_as<c10::List<int64_t>>(node->input(3));
+  auto const& pad = constant_as<c10::List<int64_t>>(node->input(4));
+  auto const& dilation = constant_as<c10::List<int64_t>>(node->input(5));
+  auto const& groups = constant_as<int64_t>(node->input(6));
+
+  // Everything should be statically known.
+  if (!input || !weight || !bias || !stride || !pad || !dilation || !groups) {
+    GRAPH_DEBUG("some params aren't static");
+    return false;
+  }
+
+  // Proper ndim for tensor inputs.
+  if (input->size() != 4 || weight->size() != 4 || bias->size() != 1) {
+    GRAPH_DEBUG("inputs are the wrong size");
+    return false;
+  }
+
+  // Depthwise.
+  auto Cin = (*input)[1];
+  auto Cout = (*weight)[0];
+  auto CperG = (*weight)[1];
+  if (Cin != Cout || Cin != *groups || CperG != 1) {
+    GRAPH_DEBUG("not depthwise");
+    return false;
+  }
+
+  // 3x3 kernel.
+  auto KH = (*weight)[2];
+  auto KW = (*weight)[3];
+  if (KH != 3 || KW != 3) {
+    GRAPH_DEBUG("not 3x3");
+    return false;
+  }
+
+  // Stride, pad, and dilation checks.
+  if (stride->size() != 2 || (*stride)[0] != (*stride)[1]) {
+    GRAPH_DEBUG("unsupported stride");
+    return false;
+  }
+  if (pad->size() != 2 || (*pad)[0] != (*pad)[1]) {
+    GRAPH_DEBUG("unsupported pad");
+    return false;
+  }
+  if (dilation->size() != 2 || (*dilation)[0] != 1 || (*dilation)[1] != 1) {
+    GRAPH_DEBUG("unsupported dilation");
+    return false;
+  }
+
+  return true;
 }
 
 } // namespace tensorexpr
@@ -1958,6 +2032,11 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   }
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int groups = toIValue(n->input(6))->toInt();
+
+  // Generate TE for depthwise convolutions.
+  if (conv2dIsSupported(n)) {
+    return conv2d_depthwise(inp, w, b, sH, pH, groups);
+  }
 
   // Once we have a performant TE representation for conv2d, we could use it
   // here instead of the external call!
