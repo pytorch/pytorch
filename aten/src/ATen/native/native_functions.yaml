@@ -488,15 +488,15 @@
 
 - func: acosh(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: acosh
+  structured_delegate: acosh.out
 
 - func: acosh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: acosh_
+  structured_delegate: acosh.out
 
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: acosh_out
 
@@ -1041,6 +1041,7 @@
   variants: method
   device_guard: False
   dispatch:
+    MkldnnCPU: copy_mkldnn_
     CompositeExplicitAutograd: copy_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
@@ -1048,29 +1049,29 @@
 
 - func: cos(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: cos
+  structured_delegate: cos.out
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: cos_
+  structured_delegate: cos.out
 
 - func: cos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: cos_out
 
 - func: cosh(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: cosh
+  structured_delegate: cosh.out
 
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: cosh_
+  structured_delegate: cosh.out
 
 - func: cosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: cosh_out
 
@@ -1324,15 +1325,15 @@
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
-- func: div.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+- func: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
   variants: function, method
   structured_delegate: div.out_mode
 
-- func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
+- func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
   structured_delegate: div.out_mode
 
-- func: div.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+- func: div.out_mode(Tensor self, Tensor other, *, str? rounding_mode, Tensor(a!) out) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -1349,12 +1350,12 @@
   dispatch:
     CompositeExplicitAutograd: div_
 
-- func: div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+- func: div.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: div
 
-- func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
+- func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
   dispatch:
     CompositeExplicitAutograd: div_
@@ -1374,18 +1375,18 @@
 - func: divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
 
-- func: divide.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+- func: divide.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
   variants: function, method
 
-- func: divide_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
+- func: divide_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
 
-- func: divide.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+- func: divide.out_mode(Tensor self, Tensor other, *, str? rounding_mode, Tensor(a!) out) -> Tensor(a!)
 
-- func: divide.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+- func: divide.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
   variants: function, method
 
-- func: divide_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
+- func: divide_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
 
   # true_divide, an alias for div
@@ -3200,16 +3201,16 @@
     CPU, CUDA: sinc_out
 
 - func: sinh(Tensor self) -> Tensor
+  structured_delegate: sinh.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: sinh
 
 - func: sinh_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: sinh.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: sinh_
 
 - func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sinh_out
 
@@ -4291,11 +4292,18 @@
     SparseCPU, SparseCUDA: _nnz_sparse
   device_guard: False
 
-- func: coalesce(Tensor self) -> Tensor
+# NOTE: [ coalesce autograd ]
+# coalesce returns self directly for already coalesced sparse tensors.
+# This means coalesce cannot have a derivative registered, otherwise it creates
+# circular references in the autograd graph (see gh-52874).
+# Instead, the derivative is registered on the slow-path "_coalesce"
+- func: coalesce(Tensor(a) self) -> Tensor(a)
   variants: method
+
+- func: _coalesce(Tensor self) -> Tensor
   dispatch:
-    SparseCPU: coalesce_sparse_cpu
-    SparseCUDA: coalesce_sparse_cuda
+    SparseCPU: _coalesce_sparse_cpu
+    SparseCUDA: _coalesce_sparse_cuda
 
 - func: is_coalesced(Tensor self) -> bool
   variants: method
@@ -4724,8 +4732,10 @@
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_put_
-    CUDA: legacy::cuda::_th_put_
+    CPU, CUDA: put_
+
+- func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
+  variants: function, method
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   variants: method
@@ -5424,18 +5434,12 @@
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: take_out_cpu
-    CUDA: take_out_cuda
+    CPU, CUDA: take_out
 
 - func: take(Tensor self, Tensor index) -> Tensor
   variants: method, function
   dispatch:
-    CPU: take_cpu
-    CUDA: take_cuda
-
-- func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
-  variants: function
-  device_guard: False
+    CPU, CUDA: take
 
 - func: take_along_dim.out(Tensor self, Tensor indices, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -6063,25 +6067,25 @@
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
     CPU: sort_out_cpu
-    CUDA: legacy::cuda::_th_sort_out
+    CUDA: sort_out_cuda
 
 - func: sort.values_stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
     CPU: sort_out_cpu_stable
-    CUDA: legacy::cuda::_th_sort_out_stable
+    CUDA: sort_out_stable_cuda
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
   dispatch:
     CPU: sort_cpu
-    CUDA: legacy::cuda::_th_sort
+    CUDA: sort_cuda
     QuantizedCPU: sort_quantized_cpu
 
 - func: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
   dispatch:
     CPU: sort_cpu_stable
-    CUDA: legacy::cuda::_th_sort_stable
+    CUDA: sort_stable_cuda
     QuantizedCPU: sort_quantized_cpu_stable
 
 - func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
@@ -7374,6 +7378,8 @@
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
   python_module: nn
+
+- func: _adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
   dispatch:
     CPU: adaptive_avg_pool3d_cpu
     CUDA: adaptive_avg_pool3d_cuda
@@ -7385,7 +7391,7 @@
     CPU: adaptive_avg_pool3d_backward_out_cpu
     CUDA: adaptive_avg_pool3d_backward_out_cuda
 
-- func: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
+- func: _adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool3d_backward_cpu
@@ -8379,6 +8385,21 @@
 - func: special_erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
+- func: special_logit(Tensor self, float? eps=None) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+
+- func: special_expit(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_expit.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
 ## Functions related to the fast Fourier transform and the torch.fft namespace
 # Note [FFT namespace binding]
 # Functions in the fft python module should have their names start with
@@ -8547,15 +8568,20 @@
   dispatch:
     CompositeExplicitAutograd: linalg_cholesky_out
 
-# torch.linalg.det, alias for torch.det
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_det
 
+- func: linalg_det.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    CompositeExplicitAutograd: linalg_det_out
+
+# torch.det, alias for torch.linalg.det
 - func: det(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: det
 
 - func: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   python_module: linalg
@@ -8579,6 +8605,28 @@
   python_module: linalg
   dispatch:
     CPU, CUDA: linalg_slogdet_out
+
+- func: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_eig
+
+- func: linalg_eig.out(Tensor self, *, Tensor(a!) eigenvalues, Tensor(b!) eigenvectors) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_eig_out
+
+- func: linalg_eigvals(Tensor self) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_eigvals
+
+- func: linalg_eigvals.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_eigvals_out
 
 - func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg
