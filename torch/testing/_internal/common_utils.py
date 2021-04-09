@@ -819,6 +819,8 @@ except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
 
+FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
+
 def fetch_and_cache(name: str, url: str) -> str:
     """
     Some tests run in a different process so globals like `slow_test_dict` won't
@@ -834,7 +836,7 @@ def fetch_and_cache(name: str, url: str) -> str:
         now = datetime.datetime.now()
         mtime = datetime.datetime.fromtimestamp(fname.stat().st_mtime)
         diff = now - mtime
-        return diff.total_seconds() < datetime.timedelta(hours=1).seconds
+        return diff.total_seconds() < FILE_CACHE_LIFESPAN_SECONDS
 
     if os.path.exists(path) and is_cached_file_valid():
         # Another test process already downloaded the file, so don't re-do it
