@@ -90,7 +90,7 @@ class TestClassType(JitTestCase):
                     self.foo = 10  # should error since int != Tensor
 
     def test_get_attr_not_initialized(self):
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "Tried to access nonexistent attribute", "self.asdf"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", "self.asdf"):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
@@ -466,7 +466,7 @@ class TestClassType(JitTestCase):
             else:
                 return B.f(x.t)
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "Tried to access nonexistent attribute or method", ""):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", ""):
             sc = torch.jit.script(fun)
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
@@ -783,7 +783,7 @@ class TestClassType(JitTestCase):
         for func in ops:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "nonexistent attribute", ""):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", ""):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
@@ -1470,3 +1470,28 @@ class TestClassType(JitTestCase):
                 return x + x
 
         self.checkModule(ShouldCompile(UnscriptableClass(4)), (4,))
+
+
+    def test_unresolved_attributes(self):
+        class Bar(object):
+            def __init__(self, x):
+                self.x = x
+                self._prop = 0
+
+            def getX(self):
+                return self.x
+
+            @property
+            def prop(self) -> int:
+                return self._prop
+
+            attr = ""
+
+        def fn(x):
+            bar = Bar(x)
+            bar.attr
+            return bar.getX()
+
+        error_message_regex = "object has no attribute or method.*is defined as a class attribute"
+        with self.assertRaisesRegex(RuntimeError, error_message_regex):
+            torch.jit.script(fn)

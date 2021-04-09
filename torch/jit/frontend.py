@@ -156,6 +156,10 @@ def get_class_properties(cls, self_name):
 
     return properties
 
+def get_unresolved_class_attributes(cls, ast):
+    resolved_names = set(ast.method_names())
+    resolved_names.update(ast.property_names())
+    return [name for name in cls.__dict__ if name not in resolved_names]
 
 def get_jit_class_def(cls, self_name):
     # Get defs for each method within the current class independently
@@ -170,10 +174,10 @@ def get_jit_class_def(cls, self_name):
     def is_classmethod(fn):
         return inspect.ismethod(fn) and getattr(fn, "__self__", None) == cls
 
-    methods = [get_jit_def(method[1],
-                           method[0],
+    methods = [get_jit_def(obj,
+                           name,
                            self_name=self_name,
-                           is_classmethod=is_classmethod(method[1])) for method in methods]
+                           is_classmethod=is_classmethod(obj)) for (name, obj) in methods]
 
     properties = get_class_properties(cls, self_name)
 

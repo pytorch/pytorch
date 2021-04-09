@@ -465,7 +465,7 @@ It leads to the following compile-time error:
 ::
 
     RuntimeError:
-    Tried to access nonexistent attribute or method 'name' of type '__torch__.MyClass'. Did you forget to initialize an attribute in __init__()?:
+    '__torch__.MyClass' object has no attribute or method 'name'. Did you forget to initialize an attribute in __init__()?:
         File "test-class2.py", line 10
     def fn(a: MyClass):
         return a.name

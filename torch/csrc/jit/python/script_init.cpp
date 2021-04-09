@@ -1490,7 +1490,8 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
          const ClassMethodDefaults& defaults,
-         const ResolutionCallback& rcb) {
+         const ResolutionCallback& rcb,
+         const std::vector<std::string>& unresolved_attr_names) {
         C10_LOG_API_USAGE_ONCE("torch.script.class");
         if (classDef.superclass().present()) {
           throw ErrorReport(classDef.range())
@@ -1501,7 +1502,8 @@ void initJitScriptBindings(PyObject* module) {
         if (cu->get_type(classname) != nullptr) {
           classname = cu->mangle(classname);
         }
-        auto classType = ClassType::create(classname, cu);
+        auto classType =
+            ClassType::create(classname, cu, false, "", unresolved_attr_names);
         cu->register_type(classType);
         std::vector<ResolverPtr> methodRcbs, propRcbs;
         std::vector<Def> methodDefs;
