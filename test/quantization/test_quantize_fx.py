@@ -1768,7 +1768,13 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = x.view(dims_list)
                 return x
 
-        for cls in (M1, M2):
+        class M3(torch.nn.Module):
+            def forward(self, x):
+                shape = x.shape
+                x = x.view(shape)
+                return x
+
+        for cls in (M1, M2, M3):
             m = cls().eval()
             m(torch.rand(4, 4, 4, 4))
             qconfig_dict = {'': torch.quantization.default_qconfig}
