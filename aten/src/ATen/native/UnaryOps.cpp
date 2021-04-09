@@ -9,6 +9,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/Math.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
@@ -35,6 +36,10 @@ namespace meta {
 // extra error checking/have a different signature, etc.
 CREATE_UNARY_META_FUNC(sin)
 CREATE_UNARY_META_FUNC(sinc)
+CREATE_UNARY_META_FUNC(sinh)
+CREATE_UNARY_META_FUNC(cosh)
+CREATE_UNARY_META_FUNC(acosh)
+CREATE_UNARY_META_FUNC(cos)
 
 } // namespace meta
 
@@ -92,7 +97,7 @@ static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, co
       stub(iter.device_type(), iter);
 
       // Copies the complex result to the actual result and returns it
-      result.resize_(complex_result.sizes());
+      at::native::resize_output(result, complex_result.sizes());
       result.copy_(at::real(complex_result));
       return result;
     }
@@ -405,24 +410,11 @@ Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
 CREATE_UNARY_TORCH_IMPL_FUNC(sin)
-
-Tensor& cos_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cos_stub); }
-Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
-Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
-
+CREATE_UNARY_TORCH_IMPL_FUNC(cos)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
-
-Tensor& sinh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, sinh_stub); }
-Tensor sinh(const Tensor& self) { return unary_op_impl_float(self, sinh_stub); }
-Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
-
-Tensor& cosh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cosh_stub); }
-Tensor cosh(const Tensor& self) { return unary_op_impl_float(self, cosh_stub); }
-Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
-
-Tensor& acosh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, acosh_stub); }
-Tensor acosh(const Tensor& self) { return unary_op_impl_float(self, acosh_stub); }
-Tensor& acosh_(Tensor& self) { return unary_op_impl_(self, at::acosh_out); }
+CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
+CREATE_UNARY_TORCH_IMPL_FUNC(cosh)
+CREATE_UNARY_TORCH_IMPL_FUNC(acosh)
 
 // arccosh, alias for acosh
 Tensor& arccosh_out(const Tensor& self, Tensor& result) { return at::acosh_out(result, self); }
@@ -473,6 +465,21 @@ Tensor& logit_(Tensor& self, c10::optional<double> eps) {
   return at::logit_out(self, self, eps);
 }
 
+Tensor& special_logit_out(const Tensor& self, c10::optional<double> eps, Tensor& result) {
+  return at::logit_out(result, self, eps);
+}
+Tensor special_logit(const Tensor& self, c10::optional<double> eps) {
+  return self.logit(eps);
+}
+
+// special_expit, alias for sigmoid
+Tensor& special_expit_out(const Tensor& self, Tensor& result) {
+  return at::sigmoid_out(result, self);
+}
+Tensor special_expit(const Tensor& self) {
+  return self.sigmoid();
+}
+
 Tensor& nan_to_num_out(const Tensor& self,
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
@@ -486,7 +493,7 @@ Tensor& nan_to_num_out(const Tensor& self,
       self.scalar_type());
 
   if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    result.resize_as_(self);
+    at::native::resize_output(result, self.sizes());
     result.copy_(self);
     return result;
   }
@@ -571,7 +578,7 @@ Tensor& logical_not_out(const Tensor& self, Tensor& result) {
 Tensor& signbit_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
   TORCH_CHECK(result.scalar_type() == at::kBool, "signbit does not support non-boolean outputs.");
-  result.resize_(self.sizes());
+  at::native::resize_output(result, self.sizes());
 
   if (self.dtype() == at::kBool) {
     return result.fill_(false);
