@@ -2453,7 +2453,7 @@ class TestFunctionalTracing(JitTestCase):
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)
                 # Remove from UNTRACEBLE
-                del self.UNTRACEABLE_FUNCTIONALS[func_name]
+                del TestFunctionalTracing.UNTRACEABLE_FUNCTIONALS[func_name]
             else:
                 symbolic_trace(fn)
         return functional_test
@@ -2478,6 +2478,9 @@ class TestFunctionalTracing(JitTestCase):
 
     @classmethod
     def tearDownClass(cls):
+        # Check if all UNTRACEABLE_FUNCTIONALS are covered
+        assert len(cls.UNTRACEABLE_FUNCTIONALS) == 0
+
         for name in cls.TO_PATCH.keys():
             setattr(torch.nn.functional, name, cls.TO_PATCH[name])
 
