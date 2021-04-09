@@ -179,6 +179,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
   void add_done_callback(py::function cb) {
     auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     fut->addCallback(std::bind(
         [pyFut(this->getPtr())](std::shared_ptr<PythonFunctionGuard> pf) {
           try {
@@ -195,13 +196,13 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               PyErr_Clear();
             }
             // Log and ignore exceptions raised through the callback
-            VLOG(1) << "Got the following error when running the callback: "
-                    << e.what();
+            LOG(ERROR) << "Got the following error when running the callback: "
+                       << e.what();
 
-          } catch (std::exception& e) {
+          } catch (const std::exception& e) {
             // Log and ignore exceptions raised through the callback
-            VLOG(1) << "Got the following error when running the callback: "
-                    << e.what();
+            LOG(ERROR) << "Got the following error when running the callback: "
+                       << e.what();
           }
         },
         std::move(pf)));
@@ -299,6 +300,7 @@ inline InferredType tryToInferType(py::handle input) {
   // Try basic types first
   if (py::isinstance<py::bool_>(input)) {
     return InferredType(BoolType::get());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (py::isinstance<py::int_>(input)) {
     return InferredType(IntType::get());
   } else if (py::isinstance<py::float_>(input)) {
@@ -334,17 +336,49 @@ inline InferredType tryToInferType(py::handle input) {
   py::bool_ isClass =
       py::module::import("inspect").attr("isclass")(input.get_type());
   if (py::cast<bool>(isClass)) {
-    py::str qualifiedName = py::module::import("torch._jit_internal")
-                                .attr("_qualified_name")(input.get_type());
-    auto pyClass = py::module::import("torch.jit._state")
-                       .attr("_get_script_class")(qualifiedName);
-    if (!pyClass.is_none()) {
-      auto cu = get_python_cu();
-      const auto classname =
-          c10::QualifiedName(py::cast<std::string>(qualifiedName));
-      auto class_type = cu->get_class(classname);
-      TORCH_INTERNAL_ASSERT(class_type);
-      return InferredType(class_type);
+    // Assume that the class is compiled already or will compile. Invalidate
+    // this later if needed.
+    bool class_compiled = true;
+
+    // Check if the type is already compiled.
+    py::object existing_ty = py::module::import("torch.jit._state")
+                                 .attr("_get_script_class")(input.get_type());
+
+    if (existing_ty.is_none()) {
+      // If not, try to compile it.
+      py::bool_ can_compile = py::module::import("torch._jit_internal")
+                                  .attr("can_compile_class")(input.get_type());
+
+      if (py::cast<bool>(can_compile)) {
+        // Try to compile the class. This is wrapped in a try-catch because
+        // compilation of class types can raise an Exception and in that case,
+        // we want to defer to other attempts at type inference below rather
+        // than fail compilation altogether.
+        try {
+          py::module::import("torch.jit._script")
+              .attr("_recursive_compile_class")(
+                  input.get_type(), SourceRange());
+        } catch (...) {
+          // Invalidate the assumption that the class compiled so that we don't
+          // look up and return its JIT type as the type for the input.
+          class_compiled = false;
+        }
+      }
+    }
+
+    // If the class compiled successfully, look up the existing JIT type by
+    // qualified name and return it.
+    if (class_compiled) {
+      auto script_class = py::module::import("torch.jit._state")
+                              .attr("_get_script_class")(input.get_type());
+
+      if (!script_class.is_none()) {
+        auto class_type = py::cast<ClassTypePtr>(script_class);
+
+        if (class_type && !class_type->is_module()) {
+          return InferredType(class_type);
+        }
+      }
     }
   }
 
@@ -630,13 +664,14 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   }
 }
 
-inline py::object getScriptedClassOrError(const std::string& name) {
-  auto py_class = py::module::import("torch.jit._state")
-                      .attr("_get_script_class")(name.c_str());
+inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
+  auto py_class =
+      py::module::import("torch.jit._state")
+          .attr("_get_python_class")(classType->name()->qualifiedName());
   if (py_class.is_none()) {
     std::stringstream err;
     err << "Unknown reference to ScriptClass ";
-    err << name;
+    err << classType->name()->qualifiedName();
     err << ". (Did you forget to import it?)";
     throw std::runtime_error(err.str());
   }
@@ -724,7 +759,7 @@ inline py::object toPyObject(IValue ivalue) {
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
-    auto pyClass = getScriptedClassOrError(obj->name());
+    auto pyClass = getScriptedClassOrError(obj->type());
     auto pyObj = pyClass.attr("__new__")(pyClass);
 
     const auto numAttrs = classType->numAttributes();
@@ -745,9 +780,7 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
   } else if (ivalue.isEnum()) {
     auto enum_holder = ivalue.toEnumHolder();
-    auto qualified_class_name = enum_holder->qualifiedClassName();
-
-    auto py_class = getScriptedClassOrError(qualified_class_name);
+    auto py_class = getScriptedClassOrError(enum_holder->type());
     return py_class.attr(enum_holder->name().c_str());
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
@@ -920,6 +953,7 @@ inline py::object runAndInsertCall(
     auto graph = tracing_state->graph;
     std::vector<NamedValue> named_values;
     for (Value* v : input_values) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       named_values.emplace_back(v);
     }
 
