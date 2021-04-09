@@ -3,7 +3,10 @@ import unittest
 
 from tools.translate_annotations import parse_annotation, parse_diff, translate
 
-example_regex = r'^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)'
+flake8_regex \
+    = r'^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)'
+clang_tidy_regex \
+    = r'^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]'
 
 # in the below example patch, note that the filenames differ, so the
 # translation should reflect that as well as the line numbers
@@ -246,8 +249,8 @@ class TestTranslateAnnotations(unittest.TestCase):
         self.assertEqual(translate(diff, 11), 14)
         self.assertEqual(translate(diff, 12), 15)
 
-    def test_parse_annotation(self) -> None:
-        regex = re.compile(example_regex)
+    def test_parse_annotation_flake8(self) -> None:
+        regex = re.compile(flake8_regex)
         self.assertEqual(
             parse_annotation(regex, 'README.md:1:3: R100 make a better title'),
             {
@@ -258,8 +261,11 @@ class TestTranslateAnnotations(unittest.TestCase):
                 'errorDesc': 'make a better title',
             },
         )
+
+    def test_parse_annotation_clang_tidy(self) -> None:
+        regex = re.compile(clang_tidy_regex)
         self.assertEqual(
-            parse_annotation(regex, 'README.md:2:1: R200 improve description'),
+            parse_annotation(regex, 'README.md:2:1: improve description [R200]'),
             {
                 'filename': 'README.md',
                 'lineNumber': 2,
