@@ -1016,6 +1016,7 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
         ((S, S, S), (S,),),
         ((S,), (S, S, S),),
         ((S, 1, S), (S, S),),
+        ((S, S), (S, S),),
         ((), (),),
         ((S, S, S), (),),
         ((), (S, S, S),),
@@ -2151,6 +2152,25 @@ def sample_inputs_unfold(op_info, device, dtype, requires_grad, **kwargs):
                                       args=arguments)]
     return sample_inputs
 
+
+def sample_inputs_atan2(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    cases = (
+        ((S, S, S), (S, S, S)),
+        ((), ()),
+        ((S, S, S), (S,)),
+        # Enable the cases below once gh-53014 is in
+        # ((S,), (S, S, S)),
+        # ((S, 1, S), (S, S)),
+    )
+
+    def generator():
+        for x_shape, y_shape in cases:
+            yield SampleInput(make_arg(x_shape), args=(make_arg(y_shape),))
+
+    return list(generator())
+
+
 def sample_inputs_lerp(op_info, device, dtype, requires_grad):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -2567,6 +2587,12 @@ op_db: List[OpInfo] = [
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
                    )),
+    OpInfo('atan2',
+           dtypes=all_types_and(torch.bool),
+           dtypesIfCPU=all_types_and(torch.bool),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+           sample_inputs_func=sample_inputs_atan2,
+           ),
     UnaryUfuncInfo('atanh',
                    aliases=('arctanh', ),
                    ref=np.arctanh,
@@ -2798,6 +2824,14 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
            sample_inputs_func=sample_inputs_diag),
+    OpInfo('fmax',
+           op=torch.fmax,
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('fmin',
+           op=torch.fmin,
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           sample_inputs_func=sample_inputs_max_min_binary,),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -3277,6 +3311,14 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
+    OpInfo('maximum',
+           op=torch.maximum,
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('minimum',
+           op=torch.minimum,
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           sample_inputs_func=sample_inputs_max_min_binary,),
     OpInfo('mode',
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -4306,11 +4348,6 @@ def method_tests():
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_complex', (S, S, 2), NO_ARGS),
         ('complex', (S, S, S), ((S, S, S),), ''),
-        ('atan2', (S, S, S), ((S, S, S),)),
-        ('atan2', (), ((),), 'scalar'),
-        ('atan2', (S, S, S), ((S,),), 'broadcast_rhs'),
-        ('atan2', (S,), ((S, S, S),), 'broadcast_lhs'),
-        ('atan2', (S, 1, S), ((S, S),), 'broadcast_all'),
         ('fmod', (S, S, S), (1.5,), '', (True,)),
         ('fmod', (), (1.5,), 'scalar', (True,)),
         ('fmod', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
@@ -4669,10 +4706,6 @@ def method_tests():
         ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', (), [0]),
         ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'alert_nondeterministic', (), [0],
             [expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')]),
-        ('maximum', (S, S), ((S, S),)),
-        ('minimum', (S, S), ((S, S),)),
-        ('fmax', (S, S), ((S, S),)),
-        ('fmin', (S, S), ((S, S),)),
         ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
         ('resize_', (), (dont_convert(()),), 'scalar'),
         ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
