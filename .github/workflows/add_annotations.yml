@@ -12,11 +12,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: flake8-py3
-            regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w+\d+) (?<errorDesc>.*)'
-          - name: clang-tidy
-            regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
+        name:
+          - flake8-py3
+          - clang-tidy
     if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-18.04
     steps:
@@ -62,8 +60,8 @@ jobs:
         uses: pytorch/add-annotations-github-action@master
         with:
           check_name: ${{ matrix.name }}
-          linter_output_path: warnings.txt
+          linter_output_path: annotations.json
           commit_sha: ${{ steps.unzip.outputs.commit-sha }}
-          regex: ${{ matrix.regex }}
+          mode: json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

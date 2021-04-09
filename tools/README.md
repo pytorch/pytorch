@@ -60,6 +60,11 @@ Developer tools which you might find useful:
   stdin, print names of nonempty files whose contents don't end in exactly one
   trailing newline, exit with status 1 if no output printed or 0 if some
   filenames were printed.
+* [translate_annotations.py](translate_annotations.py) - Read [Flake8][] or
+   [clang-tidy][] warnings (according to a `--regex`) from a `--file`, convert
+   to the JSON format accepted by [pytorch/add-annotations-github-action], and
+   translate line numbers from `HEAD` back in time to the given `--commit` by
+   running `git diff-index --unified=0` appropriately.
 
 Important if you want to run on AMD GPU:
 
@@ -80,5 +85,8 @@ Tools which are only situationally useful:
 * [run-clang-tidy-in-ci.sh](run-clang-tidy-in-ci.sh) - Responsible
   for checking that C++ code is clang-tidy clean in CI on Travis
 
+[clang-tidy]: https://clang.llvm.org/extra/clang-tidy/
+[flake8]: https://flake8.pycqa.org/en/latest/
 [github actions expressions]: https://docs.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#about-contexts-and-expressions
+[pytorch/add-annotations-github-action]: https://github.com/pytorch/add-annotations-github-action
 [shellcheck]: https://github.com/koalaman/shellcheck
