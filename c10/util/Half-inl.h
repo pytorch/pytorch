@@ -223,8 +223,18 @@ inline C10_HOST_DEVICE Half operator/(int64_t a, Half b) {
   return static_cast<Half>(a) / b;
 }
 
-/// NOTE: we do not define comparisons directly and instead rely on the implicit
-/// conversion from c10::Half to float.
+// Overloading < and > operators, because std::max and std::min use them.
+
+inline C10_HOST_DEVICE bool operator>(Half& lhs, Half& rhs) {
+  return float(lhs) > float(rhs);
+}
+
+inline C10_HOST_DEVICE bool operator<(Half& lhs, Half& rhs) {
+  return float(lhs) < float(rhs);
+}
+
+/// NOTE: we do not define all comparisons directly and instead
+/// rely on the implicit conversion from c10::Half to float.
 
 } // namespace c10
 
