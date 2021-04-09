@@ -10,7 +10,6 @@ from tools.codegen.api.types import *
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
-import tools.codegen.local as local
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
 # Generates Register{dispatch}.cpp (e.g., RegisterCPU.cpp).
@@ -168,14 +167,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
 
-                if local.use_c10_dispatcher() == UseC10Dispatcher.full:
-                    cuda_guard_from_tensor_options = """\
+                cuda_guard_from_tensor_options = """\
     const DeviceGuard device_guard(device_or_default(device));
-"""
-                else:
-                    assert local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
-                    cuda_guard_from_tensor_options = """\
-    const DeviceGuard device_guard(options.device());
 """
 
                 # TODO: There is probably a simpler version of this that
@@ -211,19 +204,7 @@ namespace {{
                 return None
             else:
                 dispatcher_sig = DispatcherSignature.from_schema(f.func)
-
-                # Figure out which signature the function is
-                if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                    payload = f"TORCH_FN({name})"
-                else:
-                    assert local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
-                    payload = f"""
-c10::impl::hacky_wrapper_for_legacy_signatures<
-    {dispatcher_sig.type()},
-    {len(f.func.arguments.out)}
->(TORCH_FN({name}))
-"""
-
+                payload = f"TORCH_FN({name})"
                 return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
             assert_never(self.target)
@@ -312,8 +293,15 @@ if (strides.empty()) {{
                 # We can add one in if for the perf if we need to. But it'll be easier when external backends
                 # have access to meta functions, and we can write one for resize_.
                 resize_impl = "resize_output"
+            # TODO: Provide a way of bypassing the tests here, if the meta
+            # function consulted maybe_get_output()
             return f"""
 {maybe_set_guard}
+const auto& out = outputs_[output_idx].get();
+TORCH_CHECK(options.dtype() == out.dtype(),
+    "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
+TORCH_CHECK(options.device() == out.device(),
+    "Expected out tensor to have device ", options.device(), ", but got ", out.device(), " instead");
 bool resized = at::native::{resize_impl}(outputs_[output_idx], sizes);
 // Only restride if a resize occurred; otherwise we ignore the (advisory)
 // strides from the meta function and directly use the output tensor's
@@ -551,7 +539,6 @@ generate_super=self.g.out.structured_inherits is not None
 """
 
         elif self.target is Target.REGISTRATION:
-            assert local.use_c10_dispatcher() is UseC10Dispatcher.full
             return f'm.impl("{f.func.name}", TORCH_FN({sig.name()}));'
         else:
             assert_never(self.target)

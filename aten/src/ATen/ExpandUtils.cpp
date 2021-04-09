@@ -4,12 +4,14 @@
 
 namespace at {
 
+namespace {
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
-std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
+template <typename Container>
+Container infer_size_impl(IntArrayRef a, IntArrayRef b) {
   size_t dimsA = a.size();
   size_t dimsB = b.size();
   size_t ndim = dimsA > dimsB ? dimsA : dimsB;
-  std::vector<int64_t> expandedSizes(ndim);
+  Container expandedSizes(ndim);
 
   // Use ptrdiff_t to ensure signed comparison.
   for (ptrdiff_t i = (ptrdiff_t)ndim - 1; i >= 0; --i) {
@@ -30,6 +32,15 @@ std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
   }
 
   return expandedSizes;
+}
+}
+
+std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
+  return infer_size_impl<std::vector<int64_t>>(a, b);
+}
+
+DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b) {
+  return infer_size_impl<DimVector>(a, b);
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t>> inferExpandGeometry(

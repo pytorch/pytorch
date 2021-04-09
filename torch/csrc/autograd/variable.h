@@ -501,17 +501,23 @@ struct TORCH_API ViewInfo {
 ///   exists. These are note considered as views for now for the view+inplace
 ///   logic! The graph won't be rewritten when an inplace is done, only a
 ///   warning will be thrown.
+/// - Inference_MODE should be set when a view of normal tensor is created in InferenceMode.
 /// - DEFAULT is for all other cases
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
-                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE };
+                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE, INFERENCE_MODE};
 
 /// Handles correctly propagating CreationMeta when a new view is created from a previous view.
 /// In general, we don't want the new view to be _less_ restrictive than the previous view
-/// (it's okay to be _more_ restrictive). A CreationMeta value of DEFAULT is currently the least
-/// restrictive, as the behavior for all other CreationMeta values is to error out for in-place ops.
+/// (it's okay to be _more_ restrictive).
+/// A CreationMeta value of DEFAULT is currently the least restrictive, as the behavior for
+/// all other CreationMeta values is to error out for in-place ops.
+/// A CreationMeta value of INFERENCE_MODE is currently the most restrictive, so it takes
+/// precedence in propagation.
 /// If this changes, the logic here will need to be updated to properly handle the new semantics.
 inline CreationMeta propagate_creation_meta(CreationMeta prev_view_creation_meta, CreationMeta new_view_creation_meta) {
-  return (new_view_creation_meta == CreationMeta::DEFAULT) ? prev_view_creation_meta : new_view_creation_meta;
+  return (new_view_creation_meta == CreationMeta::DEFAULT) ?
+      prev_view_creation_meta :
+      (prev_view_creation_meta == CreationMeta::INFERENCE_MODE ? prev_view_creation_meta : new_view_creation_meta);
 }
 
 /// Unified function to handle error checking when rebase happens

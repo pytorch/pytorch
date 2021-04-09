@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/cuda/TensorFactories.cuh>
+#include <ATen/native/cuda/Randperm.cuh>
 
 #include <cuda.h>
 #include <cuda_runtime.h>
