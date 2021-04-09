@@ -12,6 +12,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 // Uses a compressed index representation for faster comparisons
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 typedef c10::SparseBitVector<256> MemoryLocations;
 namespace torch {
 namespace jit {
@@ -29,6 +30,7 @@ class MemoryDAG;
  */
 class TORCH_API MemoryDAGBuilder {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   MemoryDAGBuilder() {}
   MemoryDAGBuilder(const MemoryDAGBuilder&) = delete;
   MemoryDAGBuilder& operator=(const MemoryDAGBuilder&) = delete;
@@ -126,20 +128,25 @@ struct Element {
   explicit Element(unsigned index_);
 
   // Index into the owning DAG's bit vector that represents this element.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   unsigned index;
 
   // All elements that this element *may* point to. It's possible to have
   // multiple elements that you might point to due to control flow/complex ops
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   MemoryLocations pointsTo;
   // Backreference for points-to.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   MemoryLocations pointedFrom;
 
   // Elements can contain other elements (e.g. List[Tensor])
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   MemoryLocations containedElements;
 
   // The values that this element corresponds to. May be empty if this element
   // doesn't represent a first-class value.
   // This is for debug information only.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_set<const Value*> values;
 
  private:
