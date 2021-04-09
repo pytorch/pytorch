@@ -85,13 +85,14 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
     'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv',
-    'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr',
+    'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
     'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d',
     'reflection_pad1d_backward', 'reflection_pad2d_backward',
-    'replication_pad1d', 'replication_pad2d', 'replication_pad3d',
+    'replication_pad1d', 'replication_pad2d', 'replication_pad3d', 'take', 'put_',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
-    'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum',
-    'eig', 'lerp', 'to_dense', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors', 'sparse_mask_helper_cuda'
+    'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
+    'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
+    'index', 'masked_fill', 'to_dense', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors', 'sparse_mask_helper_cuda'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -200,6 +201,10 @@ std::shared_ptr<${op}> grad_fn;
 SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
 auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
 (void)_any_requires_grad;
+""")
+
+SETUP_ASSERT_NO_INFERENCE_TENSOR = CodeTemplate("""\
+assert_no_inference_tensor( ${tensor_args} );
 """)
 
 SETUP_DERIVATIVE = CodeTemplate("""\
@@ -325,7 +330,7 @@ def gen_variable_type_shard(
         if name in MANUAL_AUTOGRAD_AND_TRACER or (fn.info and fn.info.has_derivatives):
             msg = (f'There\'s a formula for {name}(or its functional variant) in derivatives.yaml. '
                    f'It\'s required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA '
-                   f'or DefaultBackend in native_functions.yaml. Please see '
+                   f'or CompositeExplicitAutograd in native_functions.yaml. Please see '
                    f'https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword '
                    f'for instructions to choose the right dispatch keyword.')
             assert f.is_abstract, msg
@@ -658,6 +663,15 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         return [SETUP_ANY_REQUIRES_GRAD.substitute(
             args_with_derivatives=[arg.name for arg in args_with_derivatives]), ]
 
+    def emit_assert_no_inference_tensor() -> List[str]:
+        tensor_arg_names = []
+        for arg in f.func.arguments.tensor_args:
+            a = arg.argument if isinstance(arg, SelfArgument) else arg
+            tensor_arg_names.append(a.name)
+        return [SETUP_ASSERT_NO_INFERENCE_TENSOR.substitute(
+            tensor_args=tensor_arg_names
+        )]
+
     def emit_check_inplace() -> List[str]:
         if not inplace:
             return []
@@ -669,6 +683,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     body.extend(unpack_args_stats)
     if requires_derivative:
         body.extend(emit_any_requires_grad())
+        body.extend(emit_assert_no_inference_tensor())
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables(f))

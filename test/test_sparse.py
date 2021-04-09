@@ -10,7 +10,7 @@ import operator
 import random
 from collections import defaultdict
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
+from torch.testing._internal.common_utils import TestCase, make_tensor, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
@@ -218,6 +218,32 @@ class TestSparse(TestCase):
 
             t, _, _ = self._gen_sparse(len(sparse_size), nnz, sparse_size + dense_size, dtype=dtype, device=device)
             _test_coalesce(t)  # this tests correctness
+
+    @dtypes(torch.double)
+    def test_coalesce_reference_cycle(self, device, dtype):
+        # Test coalesce doesn't create autograd graph cycles (gh-52253)
+
+        # Sanity check that the helper class works as expected
+        t = torch.rand(2)
+        t_ref = torch._C._WeakTensorRef(t)
+        self.assertFalse(t_ref.expired())
+
+        del t
+        self.assertTrue(t_ref.expired())
+
+        def test_sparse_sum():
+            i = torch.tensor([[0], [4]], dtype=torch.long, device=device)
+            v = torch.tensor([[[-0.4567, -1.8797, 0.0380, 1.4316]]],
+                             dtype=dtype, device=device)
+            S = torch.sparse_coo_tensor(i, v)
+            S = S.coalesce()
+            S.requires_grad_(True)
+            S2 = S.coalesce()
+            self.assertTrue(S2.is_coalesced())
+            return torch._C._WeakTensorRef(S2)
+
+        ref = test_sparse_sum()
+        self.assertTrue(ref.expired())
 
     @dtypes(torch.double, torch.cdouble)
     def test_ctor_size_checks(self, device, dtype):
@@ -2451,6 +2477,16 @@ class TestSparse(TestCase):
         values = torch.FloatTensor(1, 0)
         test_tensor(indices, values, False, True)  # An empty tensor's data_ptr is always equal to 0
 
+        # complex support
+        indices = torch.tensor(([0], [2]), dtype=torch.int64)
+        values = make_tensor([1, ], dtype=torch.cdouble, device=device)
+        test_tensor(indices, values, True, False)
+
+        indices = torch.tensor(([0], [2]), dtype=torch.int32)
+        values = make_tensor([1, 1], dtype=torch.cdouble, device=device)
+        test_tensor(indices, values, False, False)
+
+
     @onlyCPU  # just run once, we test both cpu and cuda
     def test_constructor_device_legacy(self, device):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
@@ -3309,13 +3345,11 @@ class TestSparseUnaryUfuncs(TestCase):
 
         sample = samples[0]
 
-        if len(sample.input) > 1:
-            self.skipTest("Skipped! Testing unary ops, one input is expected")
-        sample = sample.input[0]
+        assert isinstance(sample.input, torch.Tensor)
 
-        expected = op(sample)
+        expected = op(sample.input)
         assert torch.is_tensor(expected)
-        output = op(sample.to_sparse())
+        output = op(sample.input.to_sparse())
         assert torch.is_tensor(output)
         self.assertEqual(output.to_dense(), expected)
 

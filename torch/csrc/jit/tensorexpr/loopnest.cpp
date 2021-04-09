@@ -45,35 +45,9 @@ LoopNest::LoopNest(
 }
 
 LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
-  // Find all tensors we need to compute (including dependencies) and put them
-  // in a topological order
-  std::vector<Tensor*> tensors_to_compute =
-      findAllNeededTensors(output_tensors);
-  initialize(output_tensors, tensors_to_compute);
+  initialize(output_tensors, output_tensors);
   verify(root_stmt_);
 }
-
-class FunctionCallUseCount : public IRVisitor {
- public:
-  std::unordered_map<const Buf*, size_t> findUses(Stmt* s) {
-    s->accept(this);
-    return uses_;
-  }
-
- private:
-  void visit(const FunctionCall* v) override {
-    if (function_calls_[v->tensor()->buf()].insert(v).second) {
-      uses_[v->tensor()->buf()] = uses_[v->tensor()->buf()] + 1;
-    }
-    IRVisitor::visit(v);
-  }
-
-  std::unordered_map<const Buf*, size_t> uses_;
-
-  // Sets of FunctionCalls in order to keep the results unique
-  std::unordered_map<const Buf*, std::unordered_set<const FunctionCall*>>
-      function_calls_;
-};
 
 const std::unordered_set<const Buf*> LoopNest::getIntermediateBufs() const {
   std::unordered_set<const Buf*> result;
@@ -348,10 +322,11 @@ class Vectorizer : public IRMutator {
     });
   }
 
-  const Expr* mutate(const BaseCallNode* v) override {
+  const Expr* mutate(const Intrinsics* v) override {
     std::vector<const Expr*> inputs = v->params();
-    return try_vectorize(
-        v, inputs, [&]() { return ExprHandle(DefaultMutator(v, inputs)); });
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(new Intrinsics(v->op_type(), inputs));
+    });
   }
 
   Stmt* mutate(const Store* v) override {
@@ -481,21 +456,6 @@ void LoopNest::vectorize(For* f) {
   b->replace_stmt(f, IRSimplifier::simplify(new_f));
 }
 
-class Flattener : public IRMutator {
- private:
-  Expr* mutate(const FunctionCall* v) override {
-    const Tensor* t = v->tensor();
-    const Buf* b = t->buf();
-    Placeholder buffer = Placeholder(BufHandle(b));
-    const std::vector<const Expr*>& params = v->params();
-    std::vector<ExprHandle> params_expr(params.size());
-    for (size_t i = 0; i < params.size(); i++) {
-      params_expr[i] = ExprHandle(params[i]);
-    }
-    return buffer.load(params_expr).node();
-  }
-};
-
 void LoopNest::initialize(
     const std::vector<Tensor*>& output_tensors,
     const std::vector<Tensor*>& tensors_to_compute) {
@@ -591,22 +551,6 @@ class FunctionInliner : public IRMutator {
       inline_mapping_.erase(v);
     }
     return result;
-  }
-
-  // For the target function, insert the caller/callee pair into the replacement
-  // mapping.
-  const Expr* mutate(const FunctionCall* v) override {
-    const Tensor* t = v->tensor();
-    const Buf* buf = t->buf();
-    if (buf != buf_) {
-      return IRMutator::mutate(v);
-    }
-
-    if (v->nparams() != buf->ndim()) {
-      throw malformed_input(
-          "Placeholder indexed access is inconsistent with its rank", v);
-    }
-    return mutate_loads(buf, v->params());
   }
 
   const Expr* mutate(const Load* v) override {
@@ -777,8 +721,6 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
   if (allow_duplicated_work) {
     bufs_to_inline.insert(intermediate_bufs.begin(), intermediate_bufs.end());
   } else {
-    FunctionCallUseCount fcu;
-    auto function_call_uses = fcu.findUses(root_stmt_);
     auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
     auto input_bufs = getInputBufs();
 
@@ -792,20 +734,23 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
       // tensors, always inline, bc we are not duplicating any work
       // and avoiding an intermediary buffer
       if (stores.size() == 1) {
-        auto store = dynamic_cast<Store*>(stores[0].s);
-        auto input_as_load = dynamic_cast<const Load*>(store->value());
-        if (input_as_load && input_bufs.count(input_as_load->buf())) {
-          bufs_to_inline.insert(buf);
-          continue;
+        if (auto store = dynamic_cast<Store*>(stores[0].s)) {
+          auto input_as_load = dynamic_cast<const Load*>(store->value());
+          if (input_as_load && input_bufs.count(input_as_load->buf())) {
+            bufs_to_inline.insert(buf);
+            continue;
+          }
+        } else {
+          // If S is not a store, it must be an ExternalCall.
+          TORCH_INTERNAL_ASSERT(dynamic_cast<ExternalCall*>(stores[0].s));
         }
       }
 
       // all bufs will have at least one store (if they have > 1 they cant be
       // inlined anyway)
       size_t reads = uses.size() - 1;
-      size_t function_call_reads = function_call_uses[buf];
       // if only one read, we can inline it without duplicating work
-      if ((reads + function_call_reads) <= 1) {
+      if (reads <= 1) {
         bufs_to_inline.insert(buf);
       }
     }
@@ -1023,10 +968,6 @@ void LoopNest::prepareForCodegen() {
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
 
-  // Flatten function calls.
-  Flattener flattener;
-  root_stmt_ = root_stmt_->accept_mutator(&flattener);
-
   root_stmt_ = FlattenIndexes(root_stmt_);
 
   // Add allocs and frees for intermediate buffers at the global level.
@@ -1136,6 +1077,10 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
 
   // TODO: record history of transformations
 }
+void LoopNest::sliceHead(For* f, int factor) {
+  For *head, *tail;
+  sliceHead(f, factor, &head, &tail);
+}
 
 void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
   if (dynamic_cast<const IntImm*>(f->start()) &&
@@ -1178,6 +1123,10 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
   }
 
   // TODO: record history of transformations
+}
+void LoopNest::sliceTail(For* f, int factor) {
+  For *head, *tail;
+  sliceTail(f, factor, &head, &tail);
 }
 
 void LoopNest::splitWithTail(For* f, int factor) {
@@ -1314,6 +1263,163 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
+}
+
+std::vector<For*> LoopNest::distributeLoop(
+    For* loop,
+    const std::unordered_set<Stmt*>& pivots) {
+  TORCH_INTERNAL_ASSERT(loop);
+  auto root = loop->get_parent();
+  if (root == nullptr) {
+    throw malformed_input("Loop without parent: ", loop);
+  }
+  auto root_block = dynamic_cast<Block*>(root);
+  if (root_block == nullptr) {
+    throw malformed_input(
+        "Loop's parent must be a Block, instead found ", root);
+  }
+
+  // Extract bodies for all the loops after distribution.
+  std::vector<Block*> new_loop_bodies;
+  auto new_loop_body = new Block({});
+  while (auto s = loop->body()->front()) {
+    loop->body()->remove_stmt(s);
+    new_loop_body->append_stmt(s);
+    if (pivots.count(s)) {
+      new_loop_bodies.push_back(new_loop_body);
+      new_loop_body = new Block({});
+    }
+  }
+  if (!new_loop_body->empty()) {
+    new_loop_bodies.push_back(new_loop_body);
+  }
+
+  // The first loop body has to be in the original loop.
+  loop->body()->splice(loop->body()->begin(), new_loop_bodies.front());
+  std::vector<For*> new_loops = {loop};
+
+  // Create loops for all the remaining blocks.
+  // Add all the new loops to the parent block.
+  for (size_t i = 1; i < new_loop_bodies.size(); ++i) {
+    auto new_loop = loop->cloneWithNewBody(new_loop_bodies[i]);
+    root_block->insert_stmt_after(new_loop, new_loops.back());
+    new_loops.push_back(new_loop);
+  }
+
+  return new_loops;
+}
+
+std::vector<For*> LoopNest::distributeLoop(For* loop) {
+  std::unordered_set<Stmt*> stmtsInBlock(
+      loop->body()->begin(), loop->body()->end());
+  return distributeLoop(loop, stmtsInBlock);
+}
+
+std::vector<For*> LoopNest::distributeLoopOverInnerLoops(For* loop) {
+  auto loops = NodeFinder<For>::find(loop);
+  std::unordered_set<Stmt*> loopsSet(loops.begin(), loops.end());
+  return distributeLoop(loop, loopsSet);
+}
+
+For* LoopNest::fuseLoops(const std::vector<For*>& loops) {
+  if (loops.empty()) {
+    return nullptr;
+  }
+  if (loops.size() == 1) {
+    return loops.front();
+  }
+
+  // Check if all the loops have the same parent.
+  auto root = loops.front()->get_parent();
+  for (auto l : loops) {
+    auto par = l->get_parent();
+    if (par == nullptr) {
+      throw malformed_input("Loop without parent: ", l);
+    }
+    if (par != root) {
+      throw malformed_input("Can't fuse loops with different parents: ", l);
+    }
+  }
+  auto root_block = dynamic_cast<Block*>(root);
+  if (root_block == nullptr) {
+    throw malformed_input(
+        "Loops' parent must be a Block, instead found ", root);
+  }
+
+  // Currently, we only handle cases where there are no statements between
+  // the given loops in their parents body. We can possibly relax this
+  // constraint by allowing statements that do not affect the loops being
+  // fused by performing some dependency analysis. TODO.
+  auto it = root_block->begin();
+  for (; it != root_block->end(); ++it) {
+    if (*it == loops.front()) {
+      break;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(it != root_block->end());
+  for (auto l : loops) {
+    if (*it != l) {
+      throw malformed_input(
+          "Only contiguous loops can be fused, found another stmt before", l);
+    }
+    ++it;
+  }
+
+  auto first_loop = loops.front();
+
+  // Check if bounds are the same for all the loops.
+  // TODO: The following check does not consider different expressions that
+  // evaluate to the same value as the same. Improve this by performing
+  // expression equality.
+  auto are_bounds_equal = [](const Expr* bound1, const Expr* bound2) {
+    if (bound1->isConstant() && bound2->isConstant()) {
+      return immediateAs<int>(bound1) == immediateAs<int>(bound2);
+    }
+    return bound1 == bound2;
+  };
+  auto first_loop_start = IRSimplifier::simplify(first_loop->start());
+  auto first_loop_stop = IRSimplifier::simplify(first_loop->stop());
+  for (size_t i = 1; i < loops.size(); ++i) {
+    auto curr_loop = loops[i];
+    auto curr_loop_start = IRSimplifier::simplify(curr_loop->start());
+    auto curr_loop_stop = IRSimplifier::simplify(curr_loop->stop());
+    if (!are_bounds_equal(curr_loop_start, first_loop_start)) {
+      throw malformed_input(
+          "Loops with different start bounds cannot be fused");
+    }
+    if (!are_bounds_equal(curr_loop_stop, first_loop_stop)) {
+      throw malformed_input("Loops with different stop bounds cannot be fused");
+    }
+  }
+
+  // Now, we fuse the incoming loops. This is done by taking all the statements
+  // from the second loops onwards and moving them into the first loop's body.
+  // This way the final fused loop will be the same as the first loop.
+  for (size_t i = 1; i < loops.size(); ++i) {
+    auto body = dynamic_cast<Block*>(Substitute(
+        Stmt::clone(loops[i]->body()), {{loops[i]->var(), first_loop->var()}}));
+    first_loop->body()->splice(first_loop->body()->end(), body);
+    root_block->remove_stmt(loops[i]);
+  }
+
+  analysis::MemDependencyChecker analyzer;
+  first_loop->accept(&analyzer);
+  for (auto it1 = first_loop->body()->begin(); it1 != first_loop->body()->end();
+       ++it1) {
+    for (auto it2 = std::next(it1); it2 != first_loop->body()->end(); ++it2) {
+      if (hasPartialOverlap(analyzer, *it2, *it1)) {
+        // Whenever there is a partial overlap between accesses in 2 statements
+        // in a loop, it results in a loop-carried dependence. NOTE: In
+        // general, this may not be true. But the semantics of TE IR is that all
+        // iterations of the loop can run in parallel, so there should be no
+        // loop-carried dependence in either direction (forward or backward).
+        throw malformed_input(
+            "Fusing given loops is not valid since it results in a loop carried dependence");
+      }
+    }
+  }
+
+  return first_loop;
 }
 
 For* findOuterFor(For* a, For* b) {
@@ -1754,17 +1860,6 @@ class LoopComputeAtRewriter : public IRMutator {
     }
     return new Load(v->dtype(), new_buf_, new_indices, v->mask());
   }
-  const Expr* mutate(const FunctionCall* v) override {
-    if (v->tensor()->buf() != buf_) {
-      return v;
-    }
-    std::vector<const Expr*> new_indices;
-    for (size_t i = 0; i < v->nparams(); i++) {
-      new_indices.push_back(
-          IRSimplifier::simplify(new Sub(v->param(i), offsets_[i])));
-    }
-    return new Load(v->dtype(), new_buf_, new_indices, new IntImm(1));
-  }
 };
 
 static Store* getStoreStmtOfProducer(Stmt* s) {
@@ -1802,27 +1897,6 @@ class CacheReplacer : public IRMutator {
       : buf_(buffer), cache_(cache), offsets_(offsets) {}
 
  private:
-  const Expr* mutate(const FunctionCall* v) override {
-    const Buf* buf = v->tensor()->buf();
-    if (buf != buf_) {
-      return IRMutator::mutate(v);
-    }
-
-    // for reductions the size of tensor->args() is not equal to the size of the
-    // output buffer, but they should be ordered so that the output args are at
-    // the beginning even if the loops are reordered later.
-    // Map indices to call-parameters.
-    std::vector<const Expr*> newIndices;
-    for (size_t i = 0; i < offsets_.size(); ++i) {
-      const Expr* index = v->param(i)->accept_mutator(this);
-      const Expr* offset = offsets_[i];
-      const Expr* sub = IRSimplifier::simplify(new Sub(index, offset));
-      newIndices.push_back(sub);
-    }
-
-    return new Load(cache_, newIndices, new IntImm(1));
-  }
-
   const Expr* mutate(const Load* v) override {
     const Buf* buf = v->buf();
     if (buf != buf_) {
