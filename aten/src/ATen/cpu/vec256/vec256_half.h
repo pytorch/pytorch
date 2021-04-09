@@ -29,7 +29,7 @@ static inline __m256i cvtfp32_f16(const __m256& a, const __m256& b) {
   __m128i first_half = _mm256_cvtps_ph(a, _MM_FROUND_NO_EXC);
   __m128i second_half = _mm256_cvtps_ph(b, _MM_FROUND_NO_EXC);
   // initialize to prevent compiler warning
-  __m256i all_halves = {0, 0, 0, 0, 0, 0, 0, 0};
+  __m256i all_halves = {0, 0, 0, 0};
   all_halves = _mm256_insertf128_si256(all_halves, first_half, 0);
   all_halves = _mm256_insertf128_si256(all_halves, second_half, 1);
   return all_halves;
