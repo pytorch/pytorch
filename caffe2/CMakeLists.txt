@@ -955,7 +955,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
       ${TORCH_ROOT}/aten/src
       ${CMAKE_CURRENT_BINARY_DIR}/aten/src
-      
+
       ${CMAKE_BINARY_DIR}/aten/src)
       target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
       endif()
