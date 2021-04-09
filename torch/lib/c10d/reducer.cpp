@@ -657,7 +657,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     } else {
       GradBucket grad_bucket(
           next_bucket_,
-          tensors,
+          tensors[0],
           // Since currently we do not support single-process multiple-device
           // mode, we can assume only one replica in the bucket.
           bucket.replicas[0].offsets,
@@ -1321,8 +1321,8 @@ bool Reducer::rebuild_buckets() {
   // has unused parameters for example, this will raise an error recommending to
   // run with find_unused_parameters=True, instead of the size mismatch
   // exception below.
-  ensure_prior_reduction_finished();
   std::lock_guard<std::mutex> lock(mutex_);
+  ensure_prior_reduction_finished();
   if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
     return false;
   }
@@ -1370,11 +1370,6 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_comm_hook or register_builtin_comm_hook can only be called once.");
-  // TODO(#42542): Single-process multiple-device mode support for DDP
-  // communication hook.
-  TORCH_CHECK(
-      replicas_.size() == 1,
-      "Communication hook does not support single-process multiple-device mode.");
 
   comm_hook_ = std::move(iface);
 }
@@ -1385,9 +1380,6 @@ void Reducer::register_builtin_comm_hook(
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_builtin_comm_hook or register_comm_hook can only be called once.");
-  TORCH_CHECK(
-      replicas_.size() == 1,
-      "Communication hook does not support single-process multiple-device mode.");
   // TODO: Support GLOO and MPI backends for DDP communication hook.
   TORCH_CHECK(
       process_group_->getBackendName() == "nccl",
