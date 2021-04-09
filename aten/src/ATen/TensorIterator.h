@@ -335,6 +335,7 @@ public:
 
   void build_binary_float_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  void build_borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   void build_unary_float_op(const Tensor& out, const Tensor& a);
   void build_unary_op(const Tensor& out, const Tensor& a);
 
