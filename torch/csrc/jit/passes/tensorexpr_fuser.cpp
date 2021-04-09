@@ -486,7 +486,9 @@ class TensorExprFuser {
       bool disable_shape_checks)
       : graph_(std::move(graph)),
         min_group_size_(min_group_size),
-        disable_shape_checks_(disable_shape_checks) {}
+        disable_shape_checks_(disable_shape_checks) {
+    parseTENotFuseOption();
+  }
 
   // Builds up expressions that compute shapes of all intermediates (and
   // outputs) of the fusion group, based on the sizes of inputs. You should run
@@ -713,7 +715,6 @@ class TensorExprFuser {
   // Merge fusible nodes into subgraphs in prim::TensorExprGroup nodes.
   void createFusionGroups(Block* block) {
     bool any_changed = true;
-    parseTENotFuseOption();
     while (any_changed) {
       any_changed = false;
       for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
@@ -1169,7 +1170,7 @@ class TensorExprFuser {
   // operators that are separated by ':'. e.g.,
   // 'PYTORCH_TENSOREXPR_DONT_FUSE="clamp:mul:add"' disables fusion on
   // aten::clamp, aten::mul and aten::add.
-  std::set<NodeKind> parseTENotFuseOption() {
+  void parseTENotFuseOption() {
     const char* option = std::getenv("PYTORCH_TENSOREXPR_DONT_FUSE");
     std::stringstream in_ss;
     if (option) {
@@ -1183,7 +1184,6 @@ class TensorExprFuser {
       }
       operators_not_to_fuse.insert(c10::Symbol::aten(line));
     }
-    return operators_not_to_fuse;
   }
 
   std::shared_ptr<Graph> graph_;
