@@ -402,7 +402,7 @@ def insert_observers_for_model(
 
         if node.op == 'placeholder':
             # skip adding observers at the graph input if the input is
-            # overriden to be quantized
+            # overridden to be quantized
             cur_placeholder_node_idx = placeholder_node_seen_cnt
             placeholder_node_seen_cnt += 1
             if cur_placeholder_node_idx in input_quantized_idxs:
