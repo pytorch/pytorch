@@ -14,6 +14,15 @@
 
 namespace c10d {
 
+class KeyUpdateCallback {
+  public:
+    // Invoke the callback.
+    void operator()(const c10::optional<std::string>& oldValue, 
+      const c10::optional<std::string>& newValue) const {
+
+    }
+};
+
 // Abstract base class to handle thread state
 class BackgroundThread {
   public:
