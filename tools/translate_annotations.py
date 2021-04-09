@@ -60,6 +60,11 @@ T = TypeVar('T')
 U = TypeVar('U')
 
 
+# we want to use bisect.bisect_right to find the closest hunk to a given
+# line number, but the bisect module won't have a key function until
+# Python 3.10 https://github.com/python/cpython/pull/20556 so we make an
+# O(1) wrapper around the list of hunks that makes it pretend to just be
+# a list of line numbers
 # https://gist.github.com/ericremoreynolds/2d80300dabc70eebc790
 class KeyifyList(Generic[T, U]):
     def __init__(self, inner: List[T], key: Callable[[T], U]) -> None:
