@@ -892,7 +892,7 @@ inline static uint64_t compute_min_topological_nr(const edge_list& outputs) {
   return min_topo_nr;
 }
 
-auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr) -> void {
+auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr) -> bool {
   // Computes the number of dependencies for each function which requires grad
   std::unordered_set<Node*> seen;
   std::vector<Node*> queue { root };
