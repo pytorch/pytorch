@@ -1867,5 +1867,27 @@ class TestTEFuser(JitTestCase):
         script = self.checkScript(eager_st, (s, b))
         self.assertAllFused(script.graph_for(s, b))
 
+    def test_conv2d_depthwise(self):
+        def eager(input, weight, bias):
+            return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=72)
+
+        input = torch.rand((1, 72, 56, 56), dtype=torch.float)
+        weight = torch.rand((72, 1, 3, 3), dtype=torch.float)
+        bias = torch.rand((72), dtype=torch.float)
+
+        script = self.checkScript(eager, (input, weight, bias))
+        self.assertAllFused(script.graph_for(input, weight, bias))
+
+    def test_conv2d(self):
+        def eager(input, weight, bias):
+            return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=1)
+
+        input = torch.rand((1, 64, 56, 56), dtype=torch.float)
+        weight = torch.rand((64, 64, 3, 3), dtype=torch.float)
+        bias = torch.rand((64), dtype=torch.float)
+
+        script = self.checkScript(eager, (input, weight, bias))
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
 if __name__ == '__main__':
     run_tests()

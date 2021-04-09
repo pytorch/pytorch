@@ -2,7 +2,7 @@
 from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Sequence, Dict, Callable
 import textwrap
 import torch
-from torch._C import TupleType, OptionalType, ListType
+from torch._C import TupleType, ListType
 
 
 T = TypeVar("T")
@@ -115,9 +115,7 @@ def augment_many_model_functions_with_bundled_inputs(
 
         function_arg_types = [arg.type for arg in function.schema.arguments[1:]]  # type: ignore
         deflated_inputs_type: ListType = ListType(TupleType(function_arg_types))
-        inflated_inputs_type: OptionalType[ListType] = OptionalType(deflated_inputs_type)
         model._c._register_attribute("_bundled_inputs_deflated_{name}".format(name=function_name), deflated_inputs_type, [])
-        model._c._register_attribute("_bundled_inputs_inflated_{name}".format(name=function_name), inflated_inputs_type, None)
 
         if hasattr(model, "_generate_bundled_inputs_for_" + function_name):
             if input_list is not None:
@@ -170,9 +168,7 @@ def augment_many_model_functions_with_bundled_inputs(
         # Define get_all_bundled_inputs_for_<function_name> that caches the generated inputs.
         model.define(textwrap.dedent("""
             def get_all_bundled_inputs_for_{name}(self):
-                if self._bundled_inputs_inflated_{name} is None:
-                    self._bundled_inputs_inflated_{name} = self._generate_bundled_inputs_for_{name}()
-                all_inputs = self._bundled_inputs_inflated_{name}
+                all_inputs = self._generate_bundled_inputs_for_{name}()
                 assert all_inputs is not None
                 return all_inputs
             """).format(name=function_name))
@@ -234,7 +230,7 @@ def _inflate_expr(arg: T, ref: str) -> Tuple[Union[T, torch.Tensor], str]:
         # These can be represented compactly.
         for fmt in [torch.contiguous_format, torch.channels_last]:
             if arg.is_contiguous(memory_format=fmt) and (arg == arg.flatten()[0]).all().item():
-                return (torch.tensor([arg.flatten()[0]]).expand(*arg.size()),
+                return (arg.flatten()[0].clone().expand(*arg.size()),
                         f"{ref}.contiguous(memory_format={fmt})")
         # Prevent big tensors from being bundled by default.
         # TODO: Provide more useful diagnostics.
