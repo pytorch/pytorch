@@ -129,7 +129,7 @@ class PackageImporter(Importer):
         """
 
         path = self._zipfile_path(package, resource)
-        return self.zip_reader.get_record(path)
+        return self._get_record(path)
 
     def load_text(
         self,
@@ -201,7 +201,7 @@ class PackageImporter(Importer):
                 f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
 
         # Load the data (which may in turn use `persistent_load` to load tensors)
-        data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
+        data_file = io.BytesIO(self._get_record(pickle_file))
         unpickler = self.Unpickler(data_file)
         unpickler.persistent_load = persistent_load
         result = unpickler.load()
@@ -240,10 +240,15 @@ class PackageImporter(Importer):
 
     def _read_extern(self):
         return (
-            self.zip_reader.get_record(".data/extern_modules")
+            self._get_record(".data/extern_modules")
             .decode("utf-8")
             .splitlines(keepends=False)
         )
+
+    def _get_record(self, key: str) -> bytes:
+        if not self.zip_reader.has_record(key):
+            raise ValueError("package has no such resource: {}".format(key))
+        return self.zip_reader.get_record(key)
 
     def _make_module(
         self, name: str, filename: Optional[str], is_package: bool, parent: str
@@ -296,7 +301,7 @@ class PackageImporter(Importer):
         return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore
 
     def _compile_source(self, fullpath: str, mangled_filename: str):
-        source = self.zip_reader.get_record(fullpath)
+        source = self._get_record(fullpath)
         source = _normalize_line_endings(source)
         return compile(source, mangled_filename, "exec", dont_inherit=True)
 
@@ -305,7 +310,7 @@ class PackageImporter(Importer):
     def get_source(self, module_name) -> str:
         # linecache calls `get_source` with the `module.__name__` as the argument, so we must demangle it here.
         module = self.import_module(demangle(module_name))
-        return self.zip_reader.get_record(demangle(module.__file__)).decode("utf-8")
+        return self._get_record(demangle(module.__file__)).decode("utf-8")
 
     # note: named `get_resource_reader` so that importlib.resources can find it.
     # This is otherwise considered an internal method.
