@@ -2322,11 +2322,6 @@ def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
                                     low=low,
                                     requires_grad=requires_grad)))
 
-def sample_inputs_real_imag(op_info, device, dtype, requires_grad):
-    return (SampleInput(make_tensor((S, S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad)),)
-
 def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
