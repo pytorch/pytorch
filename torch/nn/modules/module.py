@@ -808,7 +808,7 @@ class Module:
                     "if a complex module does not work as expected.")
 
         def convert(t):
-            if convert_to_format is not None and t.dim() == 4:
+            if convert_to_format is not None and t.dim() in (4, 5):
                 return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None,
                             non_blocking, memory_format=convert_to_format)
             return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
