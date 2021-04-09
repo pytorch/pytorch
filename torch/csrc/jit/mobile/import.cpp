@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/ScopeGuard.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/observer.h>
@@ -618,6 +619,21 @@ mobile::Module _load_for_mobile_impl(
   const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
+  std::string error_message;
+  bool has_exception = true;
+  c10::ScopeGuard guard([&]() {
+    if (!has_exception || !observer) {
+      return;
+    }
+    if (error_message.size() == 0) {
+      error_message = "Unknown exception";
+    }
+    observer->onFailLoadModel(
+      instance_key,
+      error_message.c_str(),
+      deserializer.deserializeMetadata(std::move(device)));
+  });
+
   try {
     mobile::Module result = deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
@@ -629,36 +645,11 @@ mobile::Module _load_for_mobile_impl(
     if (observer) {
       observer->onExitLoadModel(instance_key, copied_metadata);
     }
+    has_exception = false;
     return result;
   } catch (c10::Error& error) {
-    if (observer) {
-      observer->onFailLoadModel(
-          instance_key,
-          error.what(),
-          deserializer.deserializeMetadata(std::move(device)));
-    }
+    error_message = error.what();
     TORCH_RETHROW(error);
-  } catch (...) {
-    auto currentException = std::current_exception();
-    try {
-      if (!currentException) {
-        TORCH_CHECK(false, "Unknown exception");
-      } else {
-        try {
-          std::rethrow_exception(currentException);
-        } catch (const std::exception& e) {
-          TORCH_CHECK(false, e.what());
-        }
-      }
-    } catch (c10::Error& error) {
-      if (observer) {
-        observer->onFailLoadModel(
-            instance_key,
-            error.what(),
-            deserializer.deserializeMetadata(std::move(device)));
-      }
-      TORCH_RETHROW(error);
-    }
   }
 }
 
