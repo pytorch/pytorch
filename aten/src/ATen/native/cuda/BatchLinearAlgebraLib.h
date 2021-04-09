@@ -29,8 +29,11 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
 
 // entrance of calculations of `cholesky` using cusolver potrf and potrfBatched
 Tensor _cholesky_helper_cuda_cusolver(const Tensor& self, bool upper);
+Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A, bool upper);
 
 Tensor& orgqr_helper_cuda_lib(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns);
+
+void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors);
 
 #endif  // USE_CUSOLVER
 

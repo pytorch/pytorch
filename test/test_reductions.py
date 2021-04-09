@@ -462,6 +462,80 @@ class TestReductions(TestCase):
             # input unchanged
             self.assertEqual(x, x0, atol=0, rtol=0)
 
+    def _test_mode_intervals(self, shape, intervals, device, v=1):
+        x = torch.arange(0, shape[0] * shape[1], device=device)
+        x[v] = x.numel()
+        x = x.resize_(shape)
+
+        # Set the value of each interval to the mode "v"
+        for (beg, end) in intervals:
+            x[:, beg:end] = v
+
+        values, indices = torch.mode(x, -1, False)
+
+        # Check whether the returned indices correspond to the returned values
+        self.assertTrue((x.gather(1, indices.unsqueeze(1)).t() == values).all())
+        # Check whether the returned values are the mode
+        self.assertTrue((values == v).all().item())
+
+    @onlyCUDA
+    def test_mode_large(self, device):
+        # i should be less than (d - 2) / 2
+        def testset_for_shape(shape, i):
+            d = shape[-1]
+            # Mode only in the middle.
+            self._test_mode_intervals(shape, [(i, d - i)], device)
+            # Mode in discontiguous parts of the input.
+            self._test_mode_intervals(shape, [(0, i), (i + 1, d - i - 1), (d - i, d)], device)
+
+        # More than one line of (65535) thread blocks
+        testset_for_shape((65536, 10), 3)
+
+        # Max slice size (2048)
+        testset_for_shape((10, 2048), 10)
+
+        # Naive kernel for big slice sizes (> 2048)
+        testset_for_shape((10, 4096), 10)
+
+    @onlyOnCPUAndCUDA
+    def test_mode_wrong_dtype(self, device):
+        def test_for_dtypes(x_ty, v_ty, i_ty, message):
+            x = torch.ones(10, device=device, dtype=x_ty)
+            v = torch.ones(10, device=device, dtype=v_ty)
+            i = torch.ones(10, device=device, dtype=i_ty)
+
+            with self.assertRaisesRegex(RuntimeError, message):
+                torch.mode(x, -1, True, out=(v, i))
+
+        err_msg = "expected scalar type .* but got .* for "
+        values_err = err_msg + "values"
+        indices_err = err_msg + "indices"
+
+        test_for_dtypes(torch.uint8, torch.int8, torch.long, values_err)
+        test_for_dtypes(torch.int8, torch.int16, torch.long, values_err)
+        test_for_dtypes(torch.int32, torch.float32, torch.long, values_err)
+        test_for_dtypes(torch.float32, torch.float64, torch.long, values_err)
+
+        test_for_dtypes(torch.uint8, torch.uint8, torch.int8, indices_err)
+        test_for_dtypes(torch.int8, torch.int8, torch.int16, indices_err)
+        test_for_dtypes(torch.int32, torch.int32, torch.float32, indices_err)
+        test_for_dtypes(torch.float32, torch.float32, torch.float64, indices_err)
+
+    @onlyCUDA
+    def test_mode_wrong_device(self, device):
+        # CPU Input Tensor
+        x = torch.ones(2)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "expected device .* but got .* for values"):
+            values = torch.tensor([], device=device)
+            torch.mode(x, -1, True, out=(values, torch.tensor([], dtype=torch.long)))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "expected device .* but got .* for indices"):
+            indices = torch.tensor([], device=device)
+            torch.mode(x, -1, True, out=(torch.tensor([]), indices))
+
     # TODO: make work on CUDA, too
     @onlyCPU
     def test_accreal_type(self, device) -> None:
@@ -1863,14 +1937,17 @@ class TestReductions(TestCase):
             numpy_op = getattr(np, op)
 
             # Compute quantile along every dimension and flattened tensor
-            for dim in [None] + list(range(a.ndim)):
-                result = torch_op(a, q, dim, keepdim)
-                expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim, keepdims=keepdim)
+            interpolations = ('linear', 'lower', 'higher', 'midpoint', 'nearest')
+            for interpolation, dim in product(interpolations,
+                                              [None] + list(range(a.ndim))):
+                result = torch_op(a, q, dim=dim, keepdim=keepdim, interpolation=interpolation)
+                expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim,
+                                    interpolation=interpolation, keepdims=keepdim)
                 self.assertEqual(result.cpu(), torch.from_numpy(np.array(expected)).type(result.type()))
 
                 # Test out variation
                 out = torch.empty_like(result)
-                torch_op(a, q, dim, keepdim, out=out)
+                torch_op(a, q, dim=dim, keepdim=keepdim, interpolation=interpolation, out=out)
                 self.assertEqual(out.cpu(), result.cpu())
 
     def test_quantile_backward(self, device):
@@ -1902,8 +1979,10 @@ class TestReductions(TestCase):
         check([1.], [1], [], {}, r'q tensor must be same dtype as the input tensor')
         check([1.], -1., [], {}, r'q must be in the range \[0, 1\] but got -1')
         check([1.], 1.1, [], {}, r'q must be in the range \[0, 1\] but got 1.1')
-        check([1.], 0.5, [], {'out': torch.empty([], dtype=torch.float64, device=device)},
+        check([1.], 0.5, [], {'out': torch.empty([], dtype=torch.int32, device=device)},
               r'out tensor must be same dtype as the input tensor')
+        check([1.], [1.], [None, False], {'interpolation': 'random_mode'},
+              r"interpolation must be one of linear, lower, higher, midpoint or nearest, but got random_mode")
 
         if self.device_type == "cpu":
             check([1.], [0.5, 1.1, -1], [], {}, r'q values must be in the range \[0, 1\]')

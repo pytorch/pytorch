@@ -3,6 +3,7 @@ from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_na
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
 from dataclasses import dataclass
 from contextlib import contextmanager
+import copy
 import torch
 import keyword
 import re
@@ -119,13 +120,20 @@ class _Namespace:
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
+        match = self._name_suffix_regex.match(candidate)
+        if match is None:
+            base = candidate
+            num = None
+        else:
+            base, num_str = match.group(1, 2)
+            num = int(num_str)
+
+        candidate = base if num is None else f'{base}_{num}'
+        num = num if num else 0
+
         while candidate in self._used_names or self._is_illegal_name(candidate, obj):
-            match = self._name_suffix_regex.match(candidate)
-            if match is None:
-                candidate = candidate + '_1'
-            else:
-                base, num = match.group(1, 2)
-                candidate = f'{base}_{int(num) + 1}'
+            num += 1
+            candidate = f'{base}_{num}'
 
         self._used_names.setdefault(candidate)
         if obj is None:
@@ -671,7 +679,9 @@ class Graph:
         kwargs = map_arg(node.kwargs, arg_transform)
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
-        return self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node = self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node.meta = copy.copy(node.meta)
+        return result_node
 
     def output(self, result: 'Argument', type_expr: Optional[Any] = None):
         """
