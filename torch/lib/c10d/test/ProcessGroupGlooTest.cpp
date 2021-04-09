@@ -591,8 +591,8 @@ void testSetGet(const std::string& path) {
   std::vector<uint8_t> testVector = testVector(10, 1)
   auto& pg = tests[selfRank].getProcessGroup();
   pg.set("testKey", testVector);
-  std::vector<uint8_t> value = pg.get("testKey")
-  EXPECT_TRUE(value == testVector)
+  std::vector<uint8_t> value = pg.get("testKey");
+  EXPECT_TRUE(value == testVector);
 }
 
 #ifndef _WIN32
@@ -676,7 +676,7 @@ TEST(ProcessGroupGlooTest, testRecv) {
 
 TEST(ProcessGroupGlooTest, testSetGet) {
   TemporaryFile file;
-  testSetGet(file.path)
+  testSetGet(file.path);
 }
 
 TEST(ProcessGroupGlooTest, testWaitDelay) {
