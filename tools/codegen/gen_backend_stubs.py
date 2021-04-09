@@ -4,14 +4,21 @@ from tools.codegen.gen import *
 
 def parse_backend_yaml(backend_yaml_path: str, grouped_native_functions: List[Union[NativeFunction, NativeFunctionsGroup]], backend: str) -> List[Union[ExternalBackendFunction, ExternalBackendFunctionsGroup]]:
     with open(backend_yaml_path, 'r') as f:
-        es = yaml.load(f, Loader=LineLoader)
-    assert isinstance(es, list)
+        yaml_values = yaml.load(f, Loader=LineLoader)
+    assert isinstance(yaml_values, dict)
+
+    backend = yaml_values['backend']
+    supported = yaml_values['supported']
+    supported_autograd = yaml_values['autograd']
 
     metadata: Dict[OperatorName, ExternalBackendMetadata] = {}
-    for e in es:
-        assert isinstance(e.get('__line__'), int), e
-        loc = Location(backend_yaml_path, e['__line__'])
-        m = ExternalBackendMetadata.from_yaml(e, loc, backend)
+    for op in supported:
+        op_name = OperatorName.parse(op)
+        m = ExternalBackendMetadata(op_name, backend, is_autograd=False)
+        metadata[m.operator] = m
+    for op in supported_autograd:
+        op_name = OperatorName.parse(op)
+        m = ExternalBackendMetadata(op_name, backend, is_autograd=True)
         metadata[m.operator] = m
 
     def native_to_external(g: Union[NativeFunction, NativeFunctionsGroup]) -> Union[ExternalBackendFunction, ExternalBackendFunctionsGroup]:
@@ -72,6 +79,12 @@ def main() -> None:
     fm.write('aten_xla_type_default.cpp', lambda: {
         'dispatch_aten_fallback_definitions': list(concatMap(
             dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION), external_backend_functions
+        )),
+        'dispatch_registrations': list(concatMap(
+            dest.GenExternalAtenFallback(Target.REGISTRATION), [e for e in external_backend_functions if not e.is_autograd_kernel]
+        )),
+        'dispatch_autograd_registrations': list(concatMap(
+            dest.GenExternalAtenFallback(Target.REGISTRATION), [e for e in external_backend_functions if e.is_autograd_kernel]
         )),
     })
 

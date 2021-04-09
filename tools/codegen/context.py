@@ -25,13 +25,12 @@ def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunction, Exter
             external_f = g.primary
         else:
             external_f = g
-        external_loc = f'external yaml line {-1 if external_f.metadata is None else external_f.metadata.loc}, native yaml line'
         f = external_f.native_function
     elif isinstance(g, NativeFunctionsGroup):
         f = g.out
     else:
         f = g
-    with context(f'in {external_loc} {f.loc}:\n  {f.func}'):
+    with context(f'in native_functions.yaml line {f.loc}:\n  {f.func}'):
         with local.parametrize():
             yield
 

@@ -91,7 +91,7 @@ class PowerSGDState(object):
 
     2. ``start_powerSGD_iter`` defers PowerSGD compression until step ``start_powerSGD_iter``, and vanilla allreduce runs prior to step ``start_powerSGD_iter``. This hybrid scheme of **vanilla allreduce + PowerSGD** can effectively improve the accuracy, even a relatively small ``matrix_approximation_rank`` is used. This is because that, the beginning of training phase is usually very sensitive to inaccurate gradients, and compressing gradients too early may make the training quickly take a suboptimal trajectory, which can result in an irrecoverable impact on the accuracy.
 
-    To tune ``start_powerSGD_iter``, we suggest to start with 10% of total training steps, and increase it until a satisfactory accuracy is reached.
+    To tune ``start_powerSGD_iter``, we suggest to start with 10% of total training steps, and increase it until a satisfactory accuracy is reached. If there is a warm-up stage in the training, ``start_powerSGD_iter`` typically should be no less than the number of warm-up steps.
 
     3. ``min_compression_rate`` is the minimum compression rate required when a layer is compressed. Due to the computation overheads incurred by the compression, a tensor is worth compressing only if there can be sufficient saving in bandwidth, where `` (num_rows + num_cols) * matrix_approximation_rank * min_compression_rate < num_rows * num_cols``. If the specified compression rate threshold cannot be satisfied, the tensor will be directly allreduced without compression.
 
@@ -129,7 +129,7 @@ class PowerSGDState(object):
         self,
         process_group,
         matrix_approximation_rank=1,
-        start_powerSGD_iter=10,
+        start_powerSGD_iter=1_000,
         min_compression_rate=2,
         use_error_feedback=True,
         warm_start=True,
@@ -304,7 +304,7 @@ def powerSGD_hook(
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensors()[0]
+    input_tensor = bucket.get_tensor()
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
@@ -578,7 +578,7 @@ def batched_powerSGD_hook(
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensors()[0]
+    input_tensor = bucket.get_tensor()
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:

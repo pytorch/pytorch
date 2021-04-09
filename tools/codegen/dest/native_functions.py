@@ -34,8 +34,7 @@ def gen_unstructured_external(f: ExternalBackendFunction) -> List[str]:
     dispatcher_sig = DispatcherSignature.from_schema(f.native_function.func)
     if f.metadata is not None:
         # Only generate declarations for operators that xla has defined in the yaml
-        name = f.metadata.kernel
-        return [f"static {dispatcher_sig.decl(name=name)};"]
+        return [f"static {dispatcher_sig.decl()};"]
     else:
         return []
 

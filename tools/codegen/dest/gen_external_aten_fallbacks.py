@@ -1,29 +1,18 @@
 from typing import List, Optional, Union
-import itertools
 from typing_extensions import Literal
 from dataclasses import dataclass
 import re
-from functools import reduce
 
-# TODO: clean up imports
 from tools.codegen.context import *
 from tools.codegen.utils import *
 from tools.codegen.model import *
 from tools.codegen.api.types import *
-import tools.codegen.api.meta as meta
-import tools.codegen.api.structured as structured
-from tools.codegen.api.translate import translate
-import tools.codegen.local as local
-from tools.codegen.selective_build.selector import SelectiveBuilder
 
-# List of non-leaf ops we want to override both forward + backward.
-# TODO(https://github.com/pytorch/pytorch/issues/39959)
-_FN_AUTOGRAD_XLA = set([
-    'max_pool2d'
-    'max_pool3d'
-])
-
-# TODO: Consider moving these to yaml
+# TODO: Are these XLA specifc?
+# I have a feeling that the answer is no: we don't want to generate cpu fallbacks for these ops
+# for ANY backend, not just XLA.
+# If that's the case, I think it's fine to leave this list in codegen.
+# If the list of denied op is different per backend though, consider moving this into yaml.
 _FN_DENYLIST_REGEX = [
     # ATEN functions
     r'[^(]*cudnn',
@@ -35,6 +24,9 @@ _FN_DENYLIST_REGEX = [
     # XLA/TPU functions
 ]
 
+# TODO: remove this list.
+# Instead, the codegen will figure out which ops to generate _out wrappers for
+# entirely from the yaml. Maintaining the same behavior as current XLA codegen for now.
 _FN_OUT = [
     'abs',
     'add',
@@ -72,26 +64,31 @@ _FN_OUT = [
     'var',
 ]
 
+# TODO: I can split this out into two functions later: one for the cpu fallback codegen,
+# and one for the xla kernel wrapper codegen.
 def requires_backend_wrapper(f: ExternalBackendFunction) -> bool:
     # TODO: Need to keep this in sync with `default` in RegistrationDeclarations.yaml, until we kill it
     requires_lowering = not any(is_generic_dispatch_key(k) for k in f.native_function.dispatch)
     has_xla_lowering = f.metadata is not None
-    # TODO: Can't tell if this is a temporary hack, or intended longterm behavior.
-    # If it's longterm behavior, move the hardcoded list into yaml
-    has_autogradxla = f.native_function.func.name.name in _FN_AUTOGRAD_XLA
     in_denylist = any([re.match(frx, str(f.native_function.func.name)) for frx in _FN_DENYLIST_REGEX])
-    return not in_denylist and (requires_lowering or has_xla_lowering or has_autogradxla)
+    return not in_denylist and (requires_lowering or has_xla_lowering)
 
-def xla_tensor_creation_api(out_name: str, out_type: Type, device_param_name: str, *, tuple_idx: int = None) -> str:
-    if tuple_idx != None:
-        out_name = f"std::get<{tuple_idx}>({out_name})"
-    if out_type == BaseType(BaseTy.Tensor):
+def xla_tensor_creation_api(ret_name: str, ret: Return, device_param_name: str, *, tuple_idx: int = None) -> str:
+    if ret.type == BaseType(BaseTy.Tensor) and not ret.is_write:
+        # Only raw Tensor (non-reference) returns need to go through the XLA tensor creation API.
+        # Tensor references can be returned directly, since they've already been converted to XLA tensors.
+        # See Note [Tensor Copy Returns]
         bridge_api = 'CreateXlaTensor'
-    elif isinstance(out_type, ListType) and out_type.elem == BaseType(BaseTy.Tensor):
+    elif isinstance(ret.type, ListType) and ret.type.elem == BaseType(BaseTy.Tensor):
         bridge_api = 'CreateXlaTensors'
     else:
         # for non tensor-types, there's no need to wrap the output in an xla bridge api.
-        return out_name
+        return ret_name
+
+    out_name = 'x_result'
+    if tuple_idx is not None:
+        out_name = f"std::get<{tuple_idx}>(x_result)"
+
     return f"bridge::{bridge_api}({out_name}, bridge::GetXlaDevice({device_param_name}))"
 
 
@@ -112,7 +109,9 @@ def xla_tensor_creation_api(out_name: str, out_type: Type, device_param_name: st
 class GenExternalAtenFallback:
     target: Union[
         Literal[Target.NAMESPACED_DEFINITION],
-        Literal[Target.NAMESPACED_DECLARATION]
+        Literal[Target.NAMESPACED_DECLARATION],
+        # TODO: split registration out from aten fallbacks so they're in different files.
+        Literal[Target.REGISTRATION],
     ]
 
     @method_with_native_function
@@ -123,21 +122,24 @@ class GenExternalAtenFallback:
             name = dispatcher_sig.name()
 
             # TODO: keep this in sync with gen_unstructured_external
-            tensor_args = [a for a in dispatcher_sig.arguments() if (
-                           (isinstance(a.ctype, ConstRefCType) or isinstance(a.ctype, MutRefCType)) and
-                           isinstance(a.ctype.elem, BaseCType) and str(a.ctype.elem.type) == 'at::Tensor')]
-            print_args_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensor_args])
+            dispatcher_order_args = list(dispatcher.jit_arguments(f.native_function.func))
+            tensors = [a for a in dispatcher_order_args if a.type == BaseType(BaseTy.Tensor)]
+            print_args_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensors])
 
             func_name = f'AtenXlaTypeDefault::{name}'
-            return_names = cpp.return_names(f.native_function)
+            return_names = cpp.return_names(f.native_function, override_name="x_result")
             if len(return_names) > 1:
-                updates = '\n  '.join(f'bridge::XlaUpdateTensors({{{ret_name}}}, {{std::get<{i}>({name}_tmp)}}, {{0}});' for i, ret_name in enumerate(return_names))
-                returns = f'std::tuple<{",".join(["at::Tensor &"] * len(return_names))}>({", ".join(return_names)})'
+                updates = '\n  '.join(
+                    f'bridge::XlaUpdateTensors({{{ret_name}}}, {{std::get<{i}>({name}_tmp)}}, {{0}});'
+                    for i, ret_name in enumerate(return_names))
+                returns = f'{dispatcher_sig.returns_type().cpp_type()}({", ".join(return_names)})'
             else:
                 ret_name = return_names[0]
                 updates = f'bridge::XlaUpdateTensors({{{ret_name}}}, {{{name}_tmp}}, {{0}});'
                 returns = ret_name
 
+            # TODO: instead of hardcoding out wrappers that call into functional kernels,
+            # make that toggleable by the backend.
             functional_sig = DispatcherSignature.from_schema(g.functional.native_function.func)
 
             return f"""\
@@ -155,67 +157,23 @@ class GenExternalAtenFallback:
             if not requires_backend_wrapper(f):
                 return None
 
-            def get_device_param(binds: List[Binding]) -> str:
-                # TODO: xla codegen gives Tensor args higher precendence than Tensorlist args
+            def get_device_param(args: List[Argument]) -> str:
+                # TODO: xla codegen gives const / self Tensor args higher precendence other tensor args
                 # When deciding which argument to determine the device from.
                 # That's probably not necessary, and we can merge the two conditions.
-                tensor_like = [b for b in binds if b.argument.type.is_tensor_like() and not isinstance(b.argument.type, ListType)]
+                const_tensor_or_self = [
+                    a for a in args if (a.type == BaseType(BaseTy.Tensor) or a.type == OptionalType(BaseType(BaseTy.Tensor)))
+                    and not a.is_write]
+                if any(const_tensor_or_self):
+                    return const_tensor_or_self[0].name
+                tensor_like = [a for a in args if a.type.is_tensor_like()]
                 if any(tensor_like):
                     return tensor_like[0].name
-                tensor_list_like = [b for b in binds if b.argument.type.is_tensor_like() and isinstance(b.argument.type, ListType)]
-                if any(tensor_list_like):
-                    return tensor_list_like[0].name
-                device_like = [b for b in binds if b.argument.type == BaseType(BaseTy.Device)
-                               or b.argument.type == OptionalType(BaseType(BaseTy.Device))]
+                device_like = [a for a in args if a.type == BaseType(BaseTy.Device)
+                               or a.type == OptionalType(BaseType(BaseTy.Device))]
                 if any(device_like):
                     return device_like[0].name
                 assert_never("Need a tensor-like or device argument in order to determine the output device")
-
-            # This is an accumulator function used by itertools.reduce - Python's version of fold_left.
-            # It's used to compute several pieces of information used by the aten fallback:
-            #   `bindings` - The names of intermediate variables that each input arg maps to.
-            #   `tensorlist_args` - Intermediate TensorArg variables
-            #   `tensor_args` - Intermediate Tensor variables
-            #   `tensor_opt_args` - Intermediate optional Tensor variables
-            #   `annotated_tensor_indices` - The indices of the input Tensor arguments that are annotated
-            # Fold is useful here because we need to keep track of intermediate state as we loop through the arguments:
-            # Specifically, the number of optional/immutable/mutable tensors we've seen so far.
-            def map_xla_binding(acc: Tuple[List[Binding], List[str], List[str], List[str], List[int]], binding: Binding) -> Tuple[List[Binding], List[str], List[str], List[str], List[int]]:
-                bindings, tensorlist_args, tensor_args, tensor_opt_args, annotated_tensor_indices = acc
-                t = binding.type
-                # case: TensorList
-                if t == 'at::TensorList':
-                # if isinstance(binding.ctype, BaseCType) and binding.ctype.type == 'TensorList':
-                    new_bind = binding.with_name(name=f'l_{binding.name}')
-                    return (bindings + [new_bind], tensorlist_args + [binding.name], tensor_args, tensor_opt_args, annotated_tensor_indices)
-                # case: optional<Tensor>
-                elif t == 'c10::optional<at::Tensor>' or t == 'c10::optional<at::Tensor> &' or t == 'const c10::optional<at::Tensor> &':
-                # elif (isinstance(binding.ctype, OptionalCType) and isinstance(binding.ctype.elem, BaseCType) and
-                        # binding.ctype.elem.type == 'Tensor'):
-                    new_bind = binding.with_name(name=f'xlatens_opt[{len(tensor_opt_args)}]')
-                    return (bindings + [new_bind], tensorlist_args, tensor_args, tensor_opt_args + [binding.name], annotated_tensor_indices)
-                elif t == 'const at::Tensor &' or t == 'at::Tensor &' or t == 'at::Tensor':
-                # elif ((isinstance(binding.ctype, ConstRefCType) or isinstance(binding.ctype, MutRefCType)) and
-                        # isinstance(binding.ctype.elem, BaseCType) and binding.ctype.elem.type == 'Tensor'):
-                    new_bind = binding.with_name(name=f'xlatens[{len(tensor_args)}]')
-                    # case: Tensor (annotations)
-                    if binding.argument.annotation is not None and binding.argument.annotation.is_write:
-                        mutable_idx = len(tensor_args)
-                        return (bindings + [new_bind], tensorlist_args, tensor_args + [binding.name], tensor_opt_args, annotated_tensor_indices + [mutable_idx])
-                    # case: Tensor (no annotations)
-                    else:
-                        return (bindings + [new_bind], tensorlist_args, tensor_args + [binding.name], tensor_opt_args, annotated_tensor_indices)
-                else:
-                    return (bindings + [binding], tensorlist_args, tensor_args, tensor_opt_args, annotated_tensor_indices)
-            # tensor_count = 0
-            # opt_tensor_count = 0
-            # tensorlist_count = 0
-            # annotated_tensor_indices = []
-            # arg_renames = {}
-            # for binding in args:
-
-                # TODO: Confirm. xla codegen uses "which Tensor& vars are mutable" to determine which ones to update.
-                # But I think what they really want is "which Tensor& vars have type aliases"
 
             # XLA appears to have used the dispatcher convention to write their kernel signatures,
             # probably because they based their signatures off of our RegistrationDeclarations.h
@@ -228,45 +186,77 @@ class GenExternalAtenFallback:
                 # but explicit xla kernels to have custom names?
                 return f"  static {dispatcher_sig.decl()};"
 
+            elif self.target is Target.REGISTRATION:
+                if f.metadata is not None:
+                    # xla has their own kernel: register it
+                    namespace = 'AtenXlaType'
+                else:
+                    # xla doesn't have a kerne: register a cpu fallback
+                    namespace = 'AtenXlaTypeDefault'
+                payload = f"static_cast<{dispatcher_sig.decl(func_ptr_cast=True)}>(&{namespace}::{name})"
+                return f'  m.impl("{f.native_function.func.name}", {payload});\n'
+
             # TODO: we should generate out wrappers for ALL valid out kernels; not just ones in xla's hardcoded list
             # TODO: byte-for-byte compatibility. We should move out wrappers into a different file than cpu fallbacks
             if f.native_function.func.kind() is SchemaKind.out and str(f.native_function.func.name.name) in _FN_OUT:
                 return gen_out_wrapper(f)
 
-            updated_bindings, tensorlist_args, tensor_args, tensor_opt_args, annotated_tensor_indices = reduce(map_xla_binding, args, ([], [], [], [], []))
+            dispatcher_order_args = list(dispatcher.jit_arguments(f.native_function.func))
 
-            print_args_str = ''.join([f' << " {a}=" << {a}.toString()' for a in tensor_args])
+            # maps each argument to it's intermediate variable name in the fallback
+            name_ctx: Dict[Argument, str] = {}
+
+            tensorlist_args: Dict[Argument, str] = {
+                a: f'l_{a.name}' for a in dispatcher_order_args
+                if isinstance(a.type, ListType) and a.type.elem == BaseType(BaseTy.Tensor)}
+
+            opt_tensors = [
+                a for a in dispatcher_order_args
+                if isinstance(a.type, OptionalType) and a.type.elem == BaseType(BaseTy.Tensor)]
+            opt_tensor_args: Dict[Argument, str] = {a: f'xlatens_opt[{i}]' for i, a in enumerate(opt_tensors)}
+
+            tensors = [a for a in dispatcher_order_args if a.type == BaseType(BaseTy.Tensor)]
+            tensor_args: Dict[Argument, str] = {a: f'xlatens[{i}]' for i, a in enumerate(tensors)}
+            annotated_tensor_indices: List[int] = [
+                i for i, a in enumerate(tensors) if a.annotation is not None and a.annotation.is_write]
+
+            print_args_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensor_args.keys()])
 
 
             tensorlist_intermediates_str = ''
-            if any(tensorlist_args):
-                tensorlist_intermediates_str = '\n'.join([f'  auto l_{argname} = bridge::XlaCreateTensorList({argname});' for argname in tensorlist_args])
+            if len(tensorlist_args) > 0:
+                tensorlist_intermediates_str = '\n'.join([f'  auto {updated_name} = bridge::XlaCreateTensorList({arg.name});'
+                                                          for arg, updated_name in tensorlist_args.items()])
 
             opt_tensor_intermediates_str = ''
-            if any(tensor_opt_args):
-                opt_tensor_intermediates_str = f'\n  std::vector<c10::optional<at::Tensor>> xlatens_opt_tensors = {{{", ".join(tensor_opt_args)}}};'
+            if len(opt_tensor_args) > 0:
+                arg_str = ", ".join([a.name for a in opt_tensor_args.keys()])
+                opt_tensor_intermediates_str = f'\n  std::vector<c10::optional<at::Tensor>> xlatens_opt_tensors = {{{arg_str}}};'
                 opt_tensor_intermediates_str += '\n  auto xlatens_opt = bridge::XlaCreateOptTensorList(xlatens_opt_tensors);'
 
             intermediates = ''
             if tensorlist_intermediates_str != '':
                 intermediates += tensorlist_intermediates_str + '\n'
-            intermediates += f"  std::vector<at::Tensor> xlatens_tensors = {{{', '.join(tensor_args)}}};"
+            intermediates += f"  std::vector<at::Tensor> xlatens_tensors = {{{', '.join([a.name for a in tensor_args.keys()])}}};"
             intermediates += "\n  auto xlatens = bridge::XlaCreateTensorList(xlatens_tensors);"
             if opt_tensor_intermediates_str != '':
                 intermediates += opt_tensor_intermediates_str
 
 
-            # TODO: I'm using the CppSignature purely to get the faithful API.
-            # I'm not doing any translating from Dispatcher to cpp faithful. Do I need to?
             is_method = Variant.function not in f.native_function.variants
             func_name = f'AtenXlaTypeDefault::{name}'
 
 
-            at_call_name = CppSignatureGroup.from_native_function(f.native_function, method=is_method).most_faithful_signature().name()
+            # Just use the original binding names if we didn't create explicit intermediate variables
+            updated_bindings: List[str] = [
+                tensorlist_args.get(a, opt_tensor_args.get(a, tensor_args.get(a, a.name))) for a in dispatcher_order_args]
+            at_call_name = CppSignatureGroup.from_native_function(f.native_function, method=is_method) \
+                .most_faithful_signature().name()
+
             if is_method:
-                at_call = f'{updated_bindings[0].name}.{at_call_name}({", ".join(b.name for b in updated_bindings[1:])});'
+                at_call = f'{updated_bindings[0]}.{at_call_name}({", ".join(name for name in updated_bindings[1:])});'
             else:
-                at_call = f'at::{at_call_name}({", ".join(b.name for b in updated_bindings)});'
+                at_call = f'at::{at_call_name}({", ".join(name for name in updated_bindings)});'
             avoid_warning = ''
             if f.native_function.func.returns:
                 at_call = 'auto&& x_result = ' + at_call
@@ -275,31 +265,22 @@ class GenExternalAtenFallback:
             collect_mutated_tensors = ''
             update_tensors = ''
             if len(annotated_tensor_indices) > 0:
-                collect_mutated_tensors = f'\n  std::vector<size_t> xlatens_update_indices = {{{", ".join([str(i) for i in annotated_tensor_indices])}}};'
+                indices_str = ", ".join([str(i) for i in annotated_tensor_indices])
+                collect_mutated_tensors = f'\n  std::vector<size_t> xlatens_update_indices = {{{indices_str}}};'
                 update_tensors = '\n  bridge::XlaUpdateTensors(xlatens_tensors, xlatens, xlatens_update_indices);'
 
             returns = ''
             if f.native_function.func.returns:
-                return_names = cpp.return_names(f.native_function)
-                if len(return_names) == 1:
-                    if len(annotated_tensor_indices) > 0:
-                        return_args = return_names[0]
-                    else:
-                        return_args = xla_tensor_creation_api("x_result", f.native_function.func.returns[0].type, get_device_param(args))
-                    returns = f'\n  return {return_args};'
+                ret_names = cpp.return_names(f.native_function, override_name="x_result")
+                if len(ret_names) == 1:
+                    return_args = xla_tensor_creation_api(ret_names[0], f.native_function.func.returns[0], get_device_param(dispatcher_order_args))
+                    returns = return_args
                 else:
-                    if len(annotated_tensor_indices) > 0:
-                        return_args = ", ".join([a for (i, a) in enumerate(tensor_args) if i in annotated_tensor_indices])
-                        if len(annotated_tensor_indices) != len(return_names):
-                            import pdb; pdb.set_trace()
-                    else:
-                        return_args = ", ".join([xla_tensor_creation_api("x_result", f.native_function.func.returns[i].type, get_device_param(args), tuple_idx=i) for i in range(len(return_names))])
-                    returns = f'\n  return {dispatcher_sig.returns_type().cpp_type()}({return_args});'
-
-            # TODO: if I don't do a translate from dispatcher -> cpp, will I be shooting myself in the foot somewhere?
-            # sig_group = CppSignatureGroup.from_native_function(f.native_function, method=Variant.method in f.native_function.variants)
-            # cpp_sig = sig_group.faithful_signature if sig_group.faithful_signature is not None else sig_group.signature
-    # {store_result}at::{cpp_sig.name()}({', '.join(e.expr for e in translate(updated_bindings, [a.ctype for a in cpp_sig.arguments()]))});
+                    return_args = [xla_tensor_creation_api(ret_names[i], f.native_function.func.returns[i], get_device_param(dispatcher_order_args), tuple_idx=i) for i in range(len(f.native_function.func.returns))]
+                    returns = f'{dispatcher_sig.returns_type().cpp_type()}({", ".join(return_args)})'
+            return_str = ''
+            if returns != '':
+                return_str = f'\n  return {returns};'
 
             return f"""\
 {dispatcher_sig.defn(name=func_name)} {{
@@ -307,7 +288,7 @@ class GenExternalAtenFallback:
   XLA_COUNTER("aten::{name}", 1);
   TF_VLOG(3) << "XLA {name} :"{print_args_str};
 {intermediates}
-  {at_call}{collect_mutated_tensors}{update_tensors}{avoid_warning}{returns}
+  {at_call}{collect_mutated_tensors}{update_tensors}{avoid_warning}{return_str}
 }}
 
 """

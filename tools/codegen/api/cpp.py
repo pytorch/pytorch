@@ -116,6 +116,10 @@ def returntype_type(t: Type, *, mutable: bool) -> CType:
             if mutable:
                 return MutRefCType(BaseCType(tensorT))
             else:
+                # Note [Tensor Copy Returns]
+                # Currently, we use "Argument.is_write" to determine
+                # whether or not Tensor return types should be copies or references.
+                # If that ever changes, take a look at other locations of this note!
                 return BaseCType(tensorT)
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
@@ -139,7 +143,7 @@ def returns_type(rs: Sequence[Return]) -> CType:
     else:
         return TupleCType([return_type(r) for r in rs])
 
-def return_names(f: NativeFunction) -> Sequence[str]:
+def return_names(f: NativeFunction, *, override_name: str = None) -> Sequence[str]:
     returns: List[str] = []
     for i, r in enumerate(f.func.returns):
         # If we have an inplace function, the return argument is
@@ -164,7 +168,10 @@ def return_names(f: NativeFunction) -> Sequence[str]:
         # unless it's a multi-return, in which case it's result0,
         # result1, etc (zero-indexed)
         else:
-            name = 'result' if len(f.func.returns) == 1 else f'result{i}'
+            if override_name is not None:
+                name = override_name if len(f.func.returns) == 1 else f'{override_name}[{i}]'
+            else:
+                name = 'result' if len(f.func.returns) == 1 else f'result{i}'
         returns.append(name)
     return returns
 

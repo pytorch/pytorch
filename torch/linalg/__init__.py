@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import sys
 
 import torch
@@ -242,6 +243,102 @@ Example::
     tensor(nan)
     >>> torch.linalg.slogdet(A)
     torch.return_types.linalg_slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
+""")
+
+eig = _add_docstr(_linalg.linalg_eig, r"""
+linalg.eig(input, *, out=None) -> (Tensor, Tensor)
+
+Computes the eigenvalues and eigenvectors of a square
+matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
+
+For a single matrix :attr:`input`, the tensor of eigenvalues `w` and the tensor of eigenvectors
+`V` decompose the :attr:`input` such that `input = V diag(w) V⁻¹`, where `V⁻¹` is the inverse of `V`.
+
+The eigenvalues are not necessarily sorted.
+For real-valued input the resulting eigenvalues and eigenvectors will always be of complex type.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The eigenvalues and eigenvectors are computed using LAPACK's and MAGMA's `geev` routine.
+
+.. note:: The eigenvectors of matrices are not unique, so any eigenvector multiplied by a constant remains
+          a valid eigenvector. This function may compute different eigenvector representations on
+          different device types. Usually the difference is only in the sign of the eigenvector.
+
+.. note:: See :func:`torch.linalg.eigvals` for a related function that computes only eigenvalues.
+          However, that function is not differentiable.
+
+.. warning:: Differentiation support for this function is not implemented yet.
+
+Args:
+    input (Tensor): the `n \times n` matrix or the batch of such matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+
+Keyword args:
+    out (tuple, optional): tuple of two tensors to write the output to. Default is `None`.
+
+Returns:
+    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
+
+        - **eigenvalues** (*Tensor*): Shape `(*, n)`.
+        - **eigenvectors** (*Tensor*): Shape `(*, n, n)`.
+
+Examples::
+
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a
+    tensor([[ 0.9828+0.3889j, -0.4617+0.3010j],
+            [ 0.1662-0.7435j, -0.6139+0.0562j]], dtype=torch.complex128)
+    >>> w, v = torch.linalg.eig(a)
+    >>> w
+    tensor([ 1.1226+0.5738j, -0.7537-0.1286j], dtype=torch.complex128)
+    >>> v
+    tensor([[ 0.9218+0.0000j,  0.1882-0.2220j],
+            [-0.0270-0.3867j,  0.9567+0.0000j]], dtype=torch.complex128)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(w.diag_embed(), v.inverse())), a)
+    True
+
+    >>> a = torch.randn(3, 2, 2, dtype=torch.float64)
+    >>> w, v = torch.linalg.eig(a)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(w.diag_embed(), v.inverse())).real, a)
+    True
+""")
+
+eigvals = _add_docstr(_linalg.linalg_eigvals, r"""
+linalg.eigvals(input, *, out=None) -> Tensor
+
+Computes the eigenvalues of a square
+matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
+
+The eigenvalues are not necessarily sorted.
+For real-valued input the resulting eigenvalues will always be of complex type.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The eigenvalues are computed using LAPACK's and MAGMA's `geev` routine.
+
+.. note:: See :func:`torch.linalg.eig` for a related function that computes both eigenvalues and eigenvectors.
+
+Args:
+    input (Tensor): the `n \times n` matrix or the batch of such matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+
+Keyword args:
+    out (Tensor, optional): tensor to write the output to. Default is `None`.
+
+Examples::
+
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a
+    tensor([[ 0.9828+0.3889j, -0.4617+0.3010j],
+            [ 0.1662-0.7435j, -0.6139+0.0562j]], dtype=torch.complex128)
+    >>> w = torch.linalg.eigvals(a)
+    >>> w
+    tensor([ 1.1226+0.5738j, -0.7537-0.1286j], dtype=torch.complex128)
 """)
 
 eigh = _add_docstr(_linalg.linalg_eigh, r"""

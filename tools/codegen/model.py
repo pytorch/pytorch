@@ -1367,30 +1367,9 @@ class ExternalBackendMetadata:
 
     operator: OperatorName
     backend: str
-    kernel: str
-
-    # The location in the YAML file were this native function entry was
-    # defined.  This is for conveniently reporting error messages!
-    loc: 'Location'
+    is_autograd: bool
 
     structured: bool = False  # TODO: this will eventually become per-op metadata in the yaml file
-
-    @staticmethod
-    def from_yaml(ei: Dict[str, object], loc: 'Location', backend: str) -> 'ExternalBackendMetadata':
-        """
-        Parse an ExternalBackendMetadata from a dictionary as directly parsed
-        from an external backend's yaml file.
-        The metadata in this file is mapped to an in-tree NativeFunction.
-        """
-        e = ei.copy()
-
-        native_operator_str = e.pop('func')
-        native_operator = OperatorName.parse(native_operator_str)
-
-        kernel = e.pop('kernel')
-        assert isinstance(kernel, str), f'not a str: {kernel}'
-
-        return ExternalBackendMetadata(operator=native_operator, backend=backend, kernel=kernel, loc=loc)
 
 @dataclass(frozen=True)
 class ExternalBackendFunction:
@@ -1402,6 +1381,10 @@ class ExternalBackendFunction:
     def structured(self) -> bool:
         # An external backend op is only considered structured if it's been marked structured both in-tree and out-of-tree
         return self.native_function.structured and self.metadata is not None and self.metadata.structured
+
+    @property
+    def is_autograd_kernel(self) -> bool:
+        return self.metadata is not None and self.metadata.is_autograd
 
     def __post_init__(self) -> None:
         kind = self.native_function.func.kind()
@@ -1425,6 +1408,10 @@ class ExternalBackendFunctionsGroup:
         # TODO: hardcoding that XLA will only implement functional variants of structured kernel.
         # This will eventually by toggleable per backend.
         return self.functional
+
+    @property
+    def is_autograd_kernel(self) -> bool:
+        return self.primary.metadata is not None and self.primary.metadata.is_autograd
 
     def __post_init__(self) -> None:
         # TODO: the purpose of `from_function_group` is to make it so that you don't have to call the ctr directly.
