@@ -1015,6 +1015,7 @@ def gradcheck(
     Returns:
         True if all differences satisfy allclose condition
     """
+    # This is just a wrapper that handles the raise_exception logic
     args = locals()
     args.pop("raise_exception")
     if not raise_exception:
@@ -1026,19 +1027,8 @@ def gradcheck(
         return gradcheck_helper(**args)
 
 
-def gradcheck_helper(
-    func: Callable[..., Union[_TensorOrTensors]],
-    inputs: _TensorOrTensors,
-    eps: float = 1e-6,
-    atol: float = 1e-5,
-    rtol: float = 1e-3,
-    check_sparse_nnz: bool = False,
-    nondet_tol: float = 0.0,
-    check_undefined_grad: bool = True,
-    check_grad_dtypes: bool = False,
-    check_batched_grad: bool = False,
-    fast_mode: bool = False,
-) -> bool:
+def gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_tol, check_undefined_grad,
+                     check_grad_dtypes, check_batched_grad, fast_mode):
     tupled_inputs = _as_tuple(inputs)
     check_inputs(tupled_inputs, check_sparse_nnz)
     func_out = func(*tupled_inputs)
