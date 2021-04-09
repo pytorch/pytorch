@@ -9289,6 +9289,33 @@ class TestNN(NNTestCase):
                     input = torch.randn(1, 2, 2, 2, requires_grad=True)
                     gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
+    @unittest.skipIf(not TEST_CUDA, "torch.nn.interpolate for channels-last is currently only implemented on CUDA with some modes")
+    def test_interpolate_channels_last_cuda(self):
+        def helper(mode, input_size, out_size, align_corners):
+            memory_format_cl = torch.contiguous_format
+            ndim = len(input_size)
+            if ndim == 4:
+                memory_format_cl = torch.channels_last
+            elif ndim == 5:
+                memory_format_cl = torch.channels_last_3d
+
+            data = torch.randn(input_size, dtype=torch.float, device='cuda')
+            data_cl = data.to(memory_format=memory_format_cl)
+
+            out = F.interpolate(data, size=out_size, mode=mode, align_corners=align_corners)
+            self.assertTrue(out.is_contiguous())
+
+            out_cl = F.interpolate(data_cl, size=out_size, mode=mode, align_corners=align_corners)
+            self.assertTrue(out_cl.is_contiguous(memory_format=memory_format_cl))
+
+            self.assertEqual(out, out_cl.contiguous())
+
+        for out_size, align_corners in product(
+            [8, 16, 32],
+            [True, False]
+        ):
+            helper('bilinear', (2, 4, 16, 16), out_size, align_corners)
+
     def test_upsamplingBicubic2d(self):
         # test output against known input: align_corners=False result must match opencv
         in_t = torch.arange(8.).view(1, 2, 2, 2)
