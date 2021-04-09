@@ -133,7 +133,7 @@ def translate_all(
     ann_dict: DefaultDict[str, List[Annotation]] = defaultdict(list)
     for line in lines:
         annotation = parse_annotation(regex, line)
-        if annotation:
+        if annotation is not None:
             ann_dict[annotation['filename']].append(annotation)
     ann_list = []
     for filename, annotations in ann_dict.items():
