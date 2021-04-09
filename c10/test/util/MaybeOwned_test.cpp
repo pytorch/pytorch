@@ -2,6 +2,7 @@
 
 #include <c10/util/MaybeOwned.h>
 
+#include <memory>
 #include <string>
 
 template<typename T>
@@ -73,6 +74,43 @@ TEST(MaybeOwnedTest, CopyConstructor) {
   for (auto *mo : {&owned, &owned2, &copiedOwned, &copiedOwned2}) {
     assertOwn(*mo, x);
   }
+}
+
+TEST(MaybeOwnedTest, MoveDereferencingInt) {
+  int x = 123;
+  auto borrowed = MaybeOwned<int>::borrowed(x);
+  auto owned = MaybeOwned<int>::owned(c10::in_place, x);
+
+  // Moving from it gets the underlying int.
+  EXPECT_EQ(*std::move(borrowed), x);
+  EXPECT_EQ(*std::move(owned), x);
+
+  // Borrowed is unaffected.
+  EXPECT_EQ(*borrowed, x);
+  EXPECT_EQ(&*borrowed, &x);
+
+  // Owned is also unaffected because move is just copy for ints.
+  EXPECT_EQ(*owned, x);
+  EXPECT_NE(&*owned, &x);
+}
+
+// We use shared_ptr instead of string for this test because it has a
+// specified moved-from state (null), unlike string.
+TEST(MaybeOwnedTest, MoveDereferencingSharedPtr) {
+  using MO = MaybeOwned<std::shared_ptr<int>>;
+  std::shared_ptr<int> pBorrow = std::make_shared<int>(123);
+  auto borrowed = MO::borrowed(pBorrow);
+  auto owned = MO::owned(c10::in_place, std::make_shared<int>(456));
+
+  EXPECT_EQ(**std::move(borrowed), 123);
+  EXPECT_EQ(**std::move(owned), 456);
+
+  // Borrowed is unaffected.
+  EXPECT_EQ(**borrowed, 123);
+  EXPECT_EQ(&*borrowed, &pBorrow);
+
+  // Owned is a null shared_ptr<int>.
+  EXPECT_EQ(*owned, nullptr);
 }
 
 TEST(MaybeOwnedTest, MoveConstructor) {
