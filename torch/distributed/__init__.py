@@ -37,6 +37,7 @@ if is_available():
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
         _verify_model_across_ranks,
+        _verify_replicas_within_process,
         _test_python_store,
         _DistributedDebugLevel,
         _get_debug_mode
