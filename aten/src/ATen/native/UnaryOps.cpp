@@ -39,6 +39,7 @@ CREATE_UNARY_META_FUNC(sinc)
 CREATE_UNARY_META_FUNC(sinh)
 CREATE_UNARY_META_FUNC(cosh)
 CREATE_UNARY_META_FUNC(acosh)
+CREATE_UNARY_META_FUNC(cos)
 
 } // namespace meta
 
@@ -409,11 +410,7 @@ Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
 CREATE_UNARY_TORCH_IMPL_FUNC(sin)
-
-Tensor& cos_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cos_stub); }
-Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
-Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
-
+CREATE_UNARY_TORCH_IMPL_FUNC(cos)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
 CREATE_UNARY_TORCH_IMPL_FUNC(cosh)
