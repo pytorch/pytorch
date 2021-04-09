@@ -78,7 +78,7 @@ inline void check_gradout_shape_nll_loss2d(
       target.sizes());
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename accscalar_t>
 static void nll_loss2d_forward_out_frame(
     Tensor& output,
     Tensor& total_weight,
@@ -148,8 +148,8 @@ static void nll_loss2d_forward_out_frame(
   const int64_t map_size = input.size(2) * input.size(3);
   const int64_t sample_size = map_size * n_classes;
 
-  scalar_t total_weight_val = 0;
-  scalar_t output_val = 0;
+  accscalar_t total_weight_val = static_cast<accscalar_t>(0);
+  accscalar_t output_val = static_cast<accscalar_t>(0);
   for (int64_t b = 0; b < batch_size; b++) {
     for (int64_t elem = 0; elem < map_size; elem++) {
       const int64_t cur_target = target_data[b * map_size + elem];
@@ -164,11 +164,11 @@ static void nll_loss2d_forward_out_frame(
           cur_target,
           " is out of bounds.");
 
-      const scalar_t weight_val =
-          weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
+      const accscalar_t weight_val =
+          weight_data ? static_cast<accscalar_t>(weight_data[cur_target]) : static_cast<accscalar_t>(1);
       total_weight_val += weight_val;
-      output_val -= input_data[b * sample_size + cur_target * map_size + elem] *
-          weight_val;
+      output_val -= static_cast<accscalar_t>(
+        input_data[b * sample_size + cur_target * map_size + elem]) * weight_val;
     }
   }
 
@@ -178,8 +178,8 @@ static void nll_loss2d_forward_out_frame(
     output_val /= total_weight_val;
   }
 
-  *total_weight_data = total_weight_val;
-  *output.data_ptr<scalar_t>() = output_val;
+  *total_weight_data = static_cast<scalar_t>(total_weight_val);
+  *output.data_ptr<scalar_t>() = static_cast<scalar_t>(output_val);
 }
 
 void nll_loss2d_forward_out_cpu_template(
@@ -198,7 +198,8 @@ void nll_loss2d_forward_out_cpu_template(
       input.scalar_type(),
       "nll_loss2d_forward_out_frame",
       [&] {
-        nll_loss2d_forward_out_frame<scalar_t>(
+        using accscalar_t = at::acc_type<scalar_t, false>;
+        nll_loss2d_forward_out_frame<scalar_t, accscalar_t>(
             output,
             total_weight,
             input,
