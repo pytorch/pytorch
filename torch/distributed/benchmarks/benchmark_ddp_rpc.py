@@ -212,8 +212,11 @@ def run_worker(rank, world_size):
     if rank == (NUM_TRAINERS + NUM_PS):
 
         rpc.init_rpc(
-            "master", rank=rank, backend=BackendType.TENSORPIPE, world_size=world_size
+            "master", rank=rank,
+            backend=BackendType.TENSORPIPE,  # type: ignore[attr-defined]
+            world_size=world_size
         )
+
 
         # Build the Embedding tables on the Parameter Servers.
         emb_rref_list = []
@@ -278,7 +281,7 @@ def run_worker(rank, world_size):
             ps_name,
             rank=rank,
             world_size=world_size,
-            backend=BackendType.TENSORPIPE,
+            backend=BackendType.TENSORPIPE,  # type: ignore[attr-defined]
             rpc_backend_options=rpc_backend_options,
         )
         # parameter server do nothing
