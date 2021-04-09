@@ -172,14 +172,13 @@ class GlooStore : public ::gloo::rendezvous::Store {
  public:
   GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
 
-  void set(const std::string& key, const std::vector<char>& value) override {
-    std::vector<uint8_t> tmp(value.begin(), value.end());
-    store_->set(key, tmp);
+  void set(const std::string& key, const std::vector<uint8_t>& value) override {
+    store_->set(key, value);
   }
 
-  std::vector<char> get(const std::string& key) override {
+  std::vector<uint8_t> get(const std::string& key) override {
     auto value = store_->get(key);
-    return std::vector<char>(value.begin(), value.end());
+    return value;
   }
 
   void wait(const std::vector<std::string>& keys) override {
