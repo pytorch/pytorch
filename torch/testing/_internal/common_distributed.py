@@ -18,6 +18,7 @@ from functools import wraps
 
 import torch
 import torch.distributed as c10d
+import torch.cuda.nccl
 
 from functools import partial, reduce
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA

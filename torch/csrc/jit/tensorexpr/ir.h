@@ -40,26 +40,35 @@ inline int getPrecedence(IRNodeType ty) {
       return 2;
     case kAdd:
     case kSub:
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 6;
     case kMul:
     case kDiv:
     case kMod:
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 5;
     case kMax:
     case kMin:
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 99;
     case kAnd:
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 11;
     case kOr:
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 13;
     case kLshift:
     case kRshift:
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 7;
     case kXor:
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 12;
     case kCompareSelect:
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 16;
     default:
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       return 99;
   }
 }
@@ -432,7 +441,7 @@ class TORCH_API Load : public ExprNode<Load> {
   Load(
       Dtype dtype,
       const Buf* base_handle,
-      const std::vector<const Expr*>& indices,
+      std::vector<const Expr*> indices,
       const Expr* mask);
   Load(
       const Buf* base_handle,
