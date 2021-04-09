@@ -1056,3 +1056,34 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
         setattr(quantizer.modules[parent_name], name, quantized_standalone_module)
         quantizer.modules[node.target] = quantized_standalone_module
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=input_quantized_idxs))
+
+@register_quant_pattern(torch.nn.GELU)
+@register_quant_pattern(torch.nn.functional.gelu)
+class GELUModuleQuantizeHandler(QuantizeHandler):
+    def __init__(self, quantizer: QuantizerCls, node: Node):
+        super().__init__(quantizer, node)
+        self.gelu_node = node
+        if node.op == "call_module":
+            self.gelu = quantizer.modules[self.gelu_node.target]  # next node?
+        elif node.op == "call_function":
+            self.gelu = node.target
+
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
+                is_reference: bool = False,
+                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        if not is_reference:
+            warnings.warn("Only reference implementation support at this time")
+        args = load_arg(quantized=[0, 1])(self.gelu_node.args)
+        args = load_arg(quantized=False)(self.gelu_node.args)
+        kwargs = load_arg(quantized=False)(self.gelu_node.kwargs)
+        op_out = quantizer.quantized_graph.create_node(
+            "call_function", self.gelu, args, kwargs)
+        act_post_process_name = self.gelu_node.name
+        act_post_process_node = self.gelu_node
+        ur_idx = quantizer.activation_post_process_indexes[act_post_process_name]
+        activation_post_process = \
+            quantizer.modules[quantizer.activation_post_process_map[act_post_process_name][cur_idx]]
+        quantizer.activation_post_process_indexes[act_post_process_name] += 1
+        return quantize_node(
+            quantizer, op_out, activation_post_process,
+            act_post_process_node, is_input=False)
