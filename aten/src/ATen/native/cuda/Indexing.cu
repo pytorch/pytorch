@@ -7,6 +7,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/Resize.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDAUtils.h>
@@ -710,7 +711,7 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
   if (self.dim() > 0) {
     newSize[dim] = numIndices;
   }
-  at::native::resize_(out, newSize, {});
+  at::native::resize_output(out, newSize);
 
   ptrdiff_t outTotalSize = out.numel();
   if (outTotalSize == 0) {

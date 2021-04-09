@@ -39,6 +39,10 @@ using eig_fn = std::tuple<Tensor, Tensor> (*)(const Tensor&, bool&);
 
 DECLARE_DISPATCH(eig_fn, eig_stub);
 
+using linalg_eig_fn = void (*)(Tensor& /*eigenvalues*/, Tensor& /*eigenvectors*/, Tensor& /*infos*/, const Tensor& /*input*/, bool /*compute_eigenvectors*/);
+
+DECLARE_DISPATCH(linalg_eig_fn, linalg_eig_stub);
+
 /*
   The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
   from a sequence of elementary reflectors, such as produced by the geqrf function.

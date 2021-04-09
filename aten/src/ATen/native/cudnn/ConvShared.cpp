@@ -532,7 +532,7 @@ Tensor cudnn_convolution_relu(
       groups,
       false, // benchmark
       false, // deterministic
-      true // allow_tf32
+      input_t.dim() == 4 // enable allow_tf32 for conv2d
   );
 
   return output_t;
@@ -581,7 +581,7 @@ Tensor cudnn_convolution_add_relu(
       groups,
       false, // benchmark
       false, // deterministic
-      true // allow_tf32
+      input_t.dim() == 4 // enable allow_tf32 for conv2d
   );
 
   return output_t;

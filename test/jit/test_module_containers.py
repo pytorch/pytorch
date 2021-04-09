@@ -237,18 +237,7 @@ class TestModuleContainers(JitTestCase):
             def forward(self, v):
                 return self.mods[-11].forward(v)
 
-        with self.assertRaisesRegex(Exception, "Index -11 out of range"):
-            torch.jit.script(M2())
-
-
-        class M2(M):
-            def __init__(self):
-                super(M2, self).__init__()
-
-            def forward(self, v):
-                return self.mods[-11].forward(v)
-
-        with self.assertRaisesRegex(Exception, "Index -11 out of range"):
+        with self.assertRaisesRegexWithHighlight(Exception, "Index -11 out of range", "self.mods[-11]"):
             torch.jit.script(M2())
 
         class M3(M):
@@ -259,7 +248,7 @@ class TestModuleContainers(JitTestCase):
                 i = 3
                 return self.mods[i].forward(v)
 
-        with self.assertRaisesRegex(Exception, "Enumeration is supported"):
+        with self.assertRaisesRegexWithHighlight(Exception, "Enumeration is supported", "self.mods[i]"):
             torch.jit.script(M3())
 
     def test_module_interface_special_methods(self):
@@ -386,7 +375,7 @@ class TestModuleContainers(JitTestCase):
             def forward(self, input):
                 assert self.moduledict['blah'] == "blah", "this is a keyerror"
 
-        with self.assertRaisesRegex(RuntimeError, "Key Error, blah"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Key Error, blah", "self.moduledict['b"):
             b = BadModule()
             torch.jit.script(b)
 
@@ -400,8 +389,9 @@ class TestModuleContainers(JitTestCase):
                 idx = 'blah'
                 assert self.moduledict[idx] == "blah", "this is a string literal error"
 
-        with self.assertRaisesRegex(RuntimeError, "Unable to extract string literal index. "
-                                                  "ModuleDict indexing is only supported with string literals."):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Unable to extract string literal index. "
+                                                               "ModuleDict indexing is only supported with string literals.",
+                                                               "self.moduledict[idx]"):
             b = AnotherBadModule()
             torch.jit.script(b)
 
@@ -419,7 +409,7 @@ class TestModuleContainers(JitTestCase):
                 return len(self.a)
 
         error_msg = "Could not infer type of list element: Cannot infer concrete type of torch.nn.Module"
-        with self.assertRaisesRegex(RuntimeError, error_msg):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, error_msg, "self.a"):
             torch.jit.script(Mod())
 
     def test_empty_dict_override_contains(self):
@@ -503,7 +493,7 @@ class TestModuleContainers(JitTestCase):
                 submodule: ModuleInterface = self.d[key]
                 return submodule.forward(x)
 
-        with self.assertRaisesRegex(RuntimeError, r"Attribute module is not of annotated type"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"Attribute module is not of annotated type", "self.d[key]"):
             torch.jit.script(ModWithWrongAnnotation())
 
     def test_typed_module_list(self):
@@ -563,5 +553,5 @@ class TestModuleContainers(JitTestCase):
                 submodule: ModuleInterface = self.l[idx]
                 return submodule.forward(x)
 
-        with self.assertRaisesRegex(RuntimeError, r"Attribute 0 is not of annotated type"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"Attribute 0 is not of annotated type", "self.l[idx]"):
             torch.jit.script(ModWithWrongAnnotation())

@@ -2,7 +2,6 @@
 
 #include <exception>
 #include <map>
-#include <stdexcept>
 #include <tuple>
 #include <unordered_set>
 
@@ -470,6 +469,11 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   ncclCommWatchdogThread_.join();
 #endif
 
+  if (asyncErrorHandling_) {
+    workMetaListCV_.notify_one();
+    workCleanupThread_.join();
+  }
+
   {
     // Abort all NCCL Communicators on Process Group Destruction
     std::lock_guard<std::mutex> lock(mutex_);
@@ -482,10 +486,6 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     }
   }
 
-  if (asyncErrorHandling_) {
-    workMetaListCV_.notify_one();
-    workCleanupThread_.join();
-  }
 }
 
 void ProcessGroupNCCL::abortTimedOutCollectives(std::unordered_set<std::string>& abortedCommIds) {
@@ -670,25 +670,21 @@ void ProcessGroupNCCL::workCleanupLoop() {
           std::chrono::milliseconds(kWorkCleanupThreadSleepMillis),
           [&]() -> bool { return terminateProcessGroup_.load(); });
 
-      if (terminateProcessGroup_.load()) {
-        workMetaList_.clear();
-      } else {
-          for (auto it = workMetaList_.begin(); it != workMetaList_.end();
-            /* no increment*/) {
-          auto& work = *it;
-          if (work.isCompleted()) {
-            // Handle Exceptions on failed GPU operations and remove completed
-            // workNCCL objects from work vector.
-            if (!terminateProcessGroup_.load()) {
-              work.handleNCCLGuard();
-            }
-            doneWorks.push_back(std::move(*it));
-            it = workMetaList_.erase(it);
-          } else {
-            // Increment the iterator if the current WorkNCCL object is not
-            // completed.
-            ++it;
+      for (auto it = workMetaList_.begin(); it != workMetaList_.end();
+           /* no increment*/) {
+        auto& work = *it;
+        if (work.isCompleted()) {
+          // Handle Exceptions on failed GPU operations and remove completed
+          // workNCCL objects from work vector.
+          if (!terminateProcessGroup_.load()) {
+            work.handleNCCLGuard();
           }
+          doneWorks.push_back(std::move(*it));
+          it = workMetaList_.erase(it);
+        } else {
+          // Increment the iterator if the current WorkNCCL object is not
+          // completed.
+          ++it;
         }
       }
       done = workMetaList_.empty();

@@ -1,4 +1,4 @@
-#!/usr/bin/env/python3
+# -*- coding: utf-8 -*-
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -101,13 +101,22 @@ process:
    to participate in next rendezvous.
 """
 
-from .api import (  # noqa: F401
-    RendezvousClosedError,
-    RendezvousConnectionError,
-    RendezvousError,
-    RendezvousHandler,
-    RendezvousHandlerFactory,
-    RendezvousParameters,
-    RendezvousStateError,
-    RendezvousTimeoutError,
-)
+from .api import *
+from .registry import _register_default_handlers
+
+
+_register_default_handlers()
+
+
+__all__ = [
+    "RendezvousClosedError",
+    "RendezvousConnectionError",
+    "RendezvousError",
+    "RendezvousHandler",
+    "RendezvousHandlerCreator",
+    "RendezvousHandlerRegistry",
+    "RendezvousParameters",
+    "RendezvousStateError",
+    "RendezvousTimeoutError",
+    "rendezvous_handler_registry",
+]
