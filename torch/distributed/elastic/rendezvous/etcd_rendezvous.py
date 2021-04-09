@@ -9,7 +9,6 @@
 
 import json
 import logging
-import random
 import sys
 import threading
 import time
@@ -25,7 +24,7 @@ from torch.distributed.elastic.rendezvous import (
 )
 
 from .utils import _parse_rendezvous_endpoint
-from .etcd_store import EtcdStore
+from .etcd_store import EtcdStore, cas_delay
 
 
 _log_fmt = logging.Formatter("%(levelname)s %(asctime)s %(message)s")
@@ -73,12 +72,6 @@ CONST_WORKER_KEEPALIVE_TTL = 10
 # etcd server is persistent), and has no affect on correctnes, but should be
 # larger than any timeouts that a worker process is expected to survive:
 CONST_RUNID_SUBROOT_TTL = 7200  # 2 hours
-
-
-# Delay (sleep) for a small random amount to reduce CAS failures.
-# This does not affect correctness, but will reduce requests to etcd server.
-def cas_delay():
-    time.sleep(random.uniform(0, 0.1))
 
 
 class EtcdRendezvousHandler(RendezvousHandler):

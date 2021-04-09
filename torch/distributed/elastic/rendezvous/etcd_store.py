@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import datetime
+import random
 import time
 from base64 import b64decode, b64encode
 from typing import Optional
@@ -13,6 +14,13 @@ import etcd  # type: ignore[import]
 
 # pyre-ignore[21]: Could not find name `Store` in `torch.distributed`.
 from torch.distributed import Store
+
+
+# Delay (sleep) for a small random amount to reduce CAS failures.
+# This does not affect correctness, but will reduce requests to etcd server.
+def cas_delay():
+    time.sleep(random.uniform(0, 0.1))
+
 
 # pyre-fixme[11]: Annotation `Store` is not defined as a type.
 class EtcdStore(Store):
