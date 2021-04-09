@@ -314,6 +314,7 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
     ASSERT_EQ(out.requires_grad(), requires_grad);
     if (requires_grad) {
       // leaf inference tensor with requires_grad=true can still have gradient.
+      // Note this behavior is different from NoGradMode which has empty grad.
       out.backward(torch::ones_like(out));
       assert_tensor_equal(c.grad(), torch::ones_like(c));
     }
@@ -345,12 +346,12 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorInplaceOp) {
       ASSERT_THROWS_WITH(a.mul_(c), // go through kernels: VariableType(ERROR!), InferenceMode, CPU
         "Inference tensors cannot be saved for backward.");
 
-      ASSERT_THROWS_WITH(torch::mul_out(c, s, s), // go through kernels: VariableType(ERROR!), InplaceOrView, CPU
+      ASSERT_THROWS_WITH(torch::mul_out(/*out=*/c, s, s), // go through kernels: VariableType(ERROR!), InplaceOrView, CPU
         "out=... arguments don't support automatic differentiation, but one of the arguments requires grad")
     } else {
       a.mul_(c);
 
-      ASSERT_THROWS_WITH(torch::mul_out(c, s, s), // go through kernels: VariableType, InplaceOrView(ERROR!), CPU
+      ASSERT_THROWS_WITH(torch::mul_out(/*out=*/c, s, s), // go through kernels: VariableType, InplaceOrView(ERROR!), CPU
         "Inplace update to inference tensor outside InferenceMode is not allowed");
     }
   }
