@@ -176,11 +176,6 @@ bool isSupported(Node* node) {
     return isSupportedForBlock(node);
   }
 
-  static const OperatorSet cuda_only_operator_set{
-      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
-  };
-  static const OperatorSet cpu_only_operator_set{
-      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"};
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
@@ -204,28 +199,6 @@ bool isSupported(Node* node) {
     // Value is either an int or a float (can occur from .item())
     for (Value* v : node->inputs()) {
       if (v->type()->cast<NumberType>()) {
-        return false;
-      }
-    }
-
-    // Operator is only supported on CUDA.
-    if (node->isMemberOf(cuda_only_operator_set)) {
-      auto device = tensorexpr::pickDeviceType(node->inputs());
-      if (!device) {
-        device = tensorexpr::pickDeviceType(node->outputs());
-      }
-      if (!device || device->is_cpu()) {
-        return false;
-      }
-    }
-
-    // Operator is only supported on CPU.
-    if (node->isMemberOf(cpu_only_operator_set)) {
-      auto device = tensorexpr::pickDeviceType(node->inputs());
-      if (!device) {
-        device = tensorexpr::pickDeviceType(node->outputs());
-      }
-      if (!device || !device->is_cpu()) {
         return false;
       }
     }
@@ -917,8 +890,15 @@ class TensorExprFuser {
       "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
     };
+    static const OperatorSet cuda_only_operator_set{
+      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
+    };
+    static const OperatorSet cpu_only_operator_set{
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"
+    };
     // clang-format on
 
+    // Check types of input values.
     for (const Value* v : node->inputs()) {
       if (auto const& tt = v->type()->cast<TensorType>()) {
         auto const& st = tt->scalarType();
@@ -955,6 +935,29 @@ class TensorExprFuser {
         }
       }
     }
+
+    // Operator is only supported on CUDA.
+    if (node->isMemberOf(cuda_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || device->is_cpu()) {
+        return false;
+      }
+    }
+
+    // Operator is only supported on CPU.
+    if (node->isMemberOf(cpu_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || !device->is_cpu()) {
+        return false;
+      }
+    }
+
     if (node->kind() == aten::to) {
       // only support same-device conversion
       auto device = tensorexpr::pickDeviceType(node->inputs());
