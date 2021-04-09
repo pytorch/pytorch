@@ -281,78 +281,37 @@ FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion>&& fusion)
     : fusion_(std::move(fusion)) {
   FUSER_PERF_SCOPE("FusionExecutorCache::FusionExecutorCache");
 
-  // case of segmented fusion
-  // TODO: might be worthwhile re-using the SchedulerEntry infrastructure for
-  //       single-kernel fusion as well.
-  const bool segmented =
-      !SchedulerEntry::proposeHeuristics(fusion_.get()).has_value();
+  //! Try to schedule the complete fusion
+  const auto maybe_complete_fusion_scheduler =
+      SchedulerEntry::proposeHeuristics(fusion_.get());
+
+  //! Decide if this fusion is segmented or not
+  const bool segmented = !maybe_complete_fusion_scheduler.has_value();
 
   if (segmented) {
+    // Segment the fusion through FusionSegmenter and
+    //  initialize the caching for segmented heuristics
     fusion_segments_ = fusion_->segment();
-    fusion_segment_runtime_cache_.initCache(fusion_segments_.get());
+    fusion_kernel_runtime_cache_.initSegmentCache(fusion_segments_.get());
     if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
       fusion_segments_->print();
     }
-    return;
-  }
-
-  // In the case that the fusion isn't segmented but user
-  //  wants segmented fusion in the debug print. Will
-  //  print math of the composite fusion as placeholder
-  if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
-    fusion_->printMath();
-  }
-
-  // avoid putting `has_nontrivial_reduction_` in the initializer list
-  has_nontrivial_reduction_ = fusion_->hasReduction();
-
-  if (has_nontrivial_reduction_) {
-    FusionGuard fg(fusion_.get());
-
-    // Use dependency check to find the reduction tv as it returns used values
-    // instead of exprs.
-
-    // The call is relatively heavy weight, consider caching
-    auto all_values = DependencyCheck::getAllValsBetween(
-        {fusion_->inputs().begin(), fusion_->inputs().end()},
-        fusion_->outputs());
-
-    // Separate the reduction TensorViews from the other TensorViews
-    // Ignore input TensorViews
-    for (auto tv : ir_utils::filterByType<TensorView>(all_values)) {
-      if (tv->hasReduction()) {
-        reduction_tv_.push_back(tv);
-      }
+  } else {
+    // Initialize single kernel case
+    fusion_kernel_runtime_cache_.initSingleKernelCache(
+        fusion_.get(), maybe_complete_fusion_scheduler.value());
+    // In the case that the fusion isn't segmented but user
+    //  wants segmented fusion in the debug print. Will
+    //  print math of the composite fusion as placeholder
+    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
+      fusion_->printMath();
     }
-
-    TORCH_INTERNAL_ASSERT(
-        !reduction_tv_.empty(),
-        "Could not find any reduction TensorViews in the fusion.");
   }
 }
 
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("runFusionWithInputs");
-
-  // TODO: This seems overly conservative to send to normalization scheduler. We
-  // may want to check there's a "residual path" around the reduction.
-  auto detect_normalization_fusion = [&]() {
-    for (auto expr : fusion_->exprs()) {
-      if (expr->getExprType() == ExprType::BroadcastOp) {
-        auto output = expr->output(0);
-        auto input_def_expr = expr->input(0)->definition();
-        if (!fusion_->unordered_uses(output).empty() &&
-            input_def_expr != nullptr &&
-            input_def_expr->getExprType() == ExprType::ReductionOp) {
-          return true;
-        }
-      }
-    }
-    return false;
-  };
-
-  LaunchParams launch_params;
 
   // get unique id `unique_id` for given input set `inputs`;
   auto id_lookup_ret = inputs_id_lookup_.lookupId(inputs);
@@ -361,152 +320,68 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   }
 
   const size_t unique_id = id_lookup_ret.id;
-  const int device_index = getCommonDeviceCUDA(inputs);
-  TORCH_CHECK(device_index >= 0, "device is not coherent for fusion inputs");
-
-  // Manage Segmented Fusion through FusionSegmentRuntimeCache
-  if (isSegmented()) {
-    auto seg_runtime = fusion_segment_runtime_cache_.getRt(inputs, unique_id);
-    // Propagate the unique_id so the contained fusionExecutors in the runtime
-    //  entry will cache the buffer sizes and launch params based on this id.
-    return seg_runtime->runWithInput(inputs, unique_id);
-  }
-
-  if (code_to_fe_lookup_.count(unique_id) == 0) {
-    // enter when we get a new input set. We need to search for compatible
-    // entries in cached `FusionExecutor` or compile new one as needed.
-
-    // caching strategy is different for pw-fusion and reduction-fusion.
-    if (has_nontrivial_reduction_) {
-      bool isNormalizationFusion = detect_normalization_fusion();
-      // Generate the reduction parameters
-      auto reduction_params = (isNormalizationFusion)
-          ? getNormalizationHeuristics(fusion_.get(), inputs, reduction_tv_)
-          : getReductionHeuristics(
-                fusion_.get(), inputs, reduction_tv_.front());
-
-      TORCH_INTERNAL_ASSERT(
-          reduction_params.has_value(),
-          "Error getting reduction heuristics for scheduling.");
-
-      launch_params = reduction_params.value().lparams;
-
-      // cache based on launch parameters
-      auto fusion_executor =
-          &red_fusion_executor_cache_[device_index][reduction_params.value()];
-
-      if (!fusion_executor->compiled()) {
-        // HEURISTIC NOT COMPILED, COMPILE A KERNEL
-
-        // We clone *fusion_ to fusion so we can leave the unscheduled
-        // computational graph intact for future compilation.
-        Fusion fusion_clone = *fusion_;
-        FusionGuard fg(&fusion_clone);
-
-        // Separate the reduction TensorViews from the other TensorViews
-        // Ignore input TensorViews
-        std::vector<TensorView*> clone_reduction_tv;
-        std::vector<TensorView*> clone_other_tv;
-        auto all_values = DependencyCheck::getAllValsBetween(
-            {fusion_clone.inputs().begin(), fusion_clone.inputs().end()},
-            fusion_clone.outputs());
-
-        for (auto tv : ir_utils::filterByType<TensorView>(all_values)) {
-          if (tv->hasReduction()) {
-            clone_reduction_tv.push_back(tv);
-          } else if (!fusion_clone.hasInput(tv)) {
-            clone_other_tv.push_back(tv);
-          }
-        }
-
-        if (isNormalizationFusion) {
-          scheduleNormalization(
-              &fusion_clone,
-              reduction_params.value(),
-              clone_reduction_tv,
-              clone_other_tv);
-        } else {
-          auto single_reduction_tv = clone_reduction_tv.front();
-
-          // Heavy weight call
-          auto outputs_of_reduction =
-              DependencyCheck::getAllOutputsOf({single_reduction_tv});
-
-          auto tv_entries =
-              ir_utils::filterByType<TensorView>(outputs_of_reduction);
-
-          std::vector<TensorView*> tv_outputs_of_reduction(
-              tv_entries.begin(), tv_entries.end());
-
-          scheduleReduction(
-              &fusion_clone,
-              reduction_params.value(),
-              single_reduction_tv,
-              tv_outputs_of_reduction);
-        }
-
-        // This means we have not found a previously generated kernel that is
-        // compatible with the new reduction params. We need to finish codegen.
-        CompileOptions options;
-        options.device = c10::Device(DeviceType::CUDA, device_index);
-        fusion_executor->compileFusion(&fusion_clone, options);
-      }
-      // record new short cut to `FusionExecutor`
-      code_to_fe_lookup_[unique_id] = fusion_executor;
-
-    } else {
-      // Handle pointwise operations
-      if (pw_fusion_executor_cache_.count(device_index) == 0) {
-        pw_fusion_executor_cache_[device_index] =
-            std::make_unique<FusionExecutor>();
-        CompileOptions options;
-        options.device = c10::Device(DeviceType::CUDA, device_index);
-        // We do not need to copy fusion_ because we are not generating
-        // multiple kernels for point-wise operations.
-        auto fusion_clone = *fusion_;
-        scheduleFusion(&fusion_clone, inputs);
-        pw_fusion_executor_cache_[device_index]->compileFusion(
-            &fusion_clone, options);
-      }
-      // record new short cut to `FusionExecutor`
-      code_to_fe_lookup_[unique_id] =
-          pw_fusion_executor_cache_[device_index].get();
-    }
-  }
-
-  return code_to_fe_lookup_[unique_id]->runFusion(
-      inputs, launch_params, unique_id);
+  // Manage Segmented Fusion through FusionKernelRuntimeCache
+  auto fusion_kernel_runtime =
+      fusion_kernel_runtime_cache_.getRt(inputs, unique_id);
+  // Propagate the unique_id so the contained fusionExecutors in the runtime
+  //  entry will cache the buffer sizes and launch params based on this id.
+  return fusion_kernel_runtime->runWithInput(inputs, unique_id);
 }
 
-FusionSegmentRuntime::FusionSegmentRuntime(
+FusionKernelRuntime::FusionKernelRuntime(
     SegmentedFusion* segmented_fusion,
-    std::unique_ptr<SegmentHeuristics>& heuristics,
+    std::unique_ptr<FusionHeuristics>& heuristics,
     size_t input_id)
     : executors_(segmented_fusion->groups().size()),
       heuristics_(std::move(heuristics)),
       segmented_fusion_(segmented_fusion) {}
 
-// Largely duplicated from FusionExecutorCache
-std::vector<at::Tensor> FusionSegmentRuntime::runSegmentWithInput(
-    SegmentedGroup* sg,
+FusionKernelRuntime::FusionKernelRuntime(
+    Fusion* fusion,
+    std::unique_ptr<FusionHeuristics>& heuristics,
+    size_t input_id)
+    : executors_(1),
+      heuristics_(std::move(heuristics)),
+      is_segmented_(false),
+      complete_fusion_(fusion) {}
+
+std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     const at::ArrayRef<IValue>& inputs,
-    size_t input_id) {
-  auto group_id = sg->groupId();
+    size_t input_id,
+    SegmentedGroup* sg) {
+  // This function will be called once on un-segmented fusion,
+  //  for segmented fusion, this function will be called on each segment
+  //  In the case of segmented fusion, segmented group needs to be given so
+  //   a kernel is compiled and run for a segmented group
+  //  In the case of complete fusion, sg = nullptr, and the original fusion
+  //   is complied and run
+  auto group_id = sg ? sg->groupId() : 0;
   const int device_index = getCommonDeviceCUDA(inputs);
+  TORCH_CHECK(device_index >= 0, "device is not coherent for fusion inputs");
+
   LaunchParams launch_params;
 
   auto scheduler_entry = schedulers()[group_id].get();
 
-  // Check that the heuristics are matched
-  TORCH_INTERNAL_ASSERT(scheduler_entry->heuristc() == sg->heuristic());
+  // Check that the heuristics are matched, in the case of segmented fusion
+  TORCH_INTERNAL_ASSERT(!sg || scheduler_entry->heuristc() == sg->heuristic());
 
   if (!executors_[group_id].compiled()) {
-    std::unique_ptr<Fusion> fusion_seg = segmented_fusion_->makeFusion(sg);
+    std::unique_ptr<Fusion> fusion_to_run;
+    if (sg) {
+      // Running a segment group as a single kernel,
+      //  make a fusion to run from segmented fusion
+      fusion_to_run = segmented_fusion_->makeFusion(sg);
+    } else {
+      // Without a segmented group defaults to compiling the
+      //  complete fusion
+      fusion_to_run = std::make_unique<Fusion>(*complete_fusion_);
+    }
     CompileOptions options;
     options.device = c10::Device(DeviceType::CUDA, device_index);
-    FusionGuard fg(fusion_seg.get());
-    scheduler_entry->schedule(fusion_seg.get());
-    executors_[group_id].compileFusion(fusion_seg.get(), options);
+    FusionGuard fg(fusion_to_run.get());
+    scheduler_entry->schedule(fusion_to_run.get());
+    executors_[group_id].compileFusion(fusion_to_run.get(), options);
   }
 
   // Load launch params for reduction and normalization kernels
@@ -517,7 +392,7 @@ std::vector<at::Tensor> FusionSegmentRuntime::runSegmentWithInput(
   return executors_[group_id].runFusion(inputs, launch_params, input_id);
 }
 
-std::vector<at::Tensor> FusionSegmentRuntime::runWithInput(
+std::vector<at::Tensor> FusionKernelRuntime::runMultiKernelWithInput(
     const at::ArrayRef<IValue>& inputs,
     size_t input_id) {
   TORCH_INTERNAL_ASSERT(
@@ -584,7 +459,7 @@ std::vector<at::Tensor> FusionSegmentRuntime::runWithInput(
 
         // Run graph segment
         auto group_runtime_outputs =
-            runSegmentWithInput(group, group_runtime_inputs, input_id);
+            runKernelWithInput(group_runtime_inputs, input_id, group);
 
         const auto& group_outputs = group->outputs();
 
@@ -635,13 +510,13 @@ std::vector<at::Tensor> FusionSegmentRuntime::runWithInput(
   return fusion_output_tensors;
 }
 
-const std::vector<FusionSegmentRuntime::SchedulerEntryPtr>&
-FusionSegmentRuntime::schedulers() {
-  return heuristics_->heuristics();
+const std::vector<FusionKernelRuntime::SchedulerEntryPtr>& FusionKernelRuntime::
+    schedulers() {
+  return heuristics_->heuristicsList();
 }
 
 namespace {
-using HashType = FusionSegmentRuntime::HashType;
+using HashType = FusionKernelRuntime::HashType;
 // Use a slightly more nontrivial combine to avoid collision
 //  (from Boost)
 inline HashType combineHash(HashType a, HashType b) {
@@ -652,38 +527,38 @@ inline HashType combineHash(HashType a, HashType b) {
 }
 } // namespace
 
-FusionSegmentRuntime::HashType FusionSegmentRuntime::getHash(
-    SegmentHeuristics* sh) {
+FusionKernelRuntime::HashType FusionKernelRuntime::getHash(
+    FusionHeuristics* sh) {
   HashType h = 0;
-  for (auto& se_pt : sh->heuristics()) {
+  for (auto& se_pt : sh->heuristicsList()) {
     h = combineHash(h, SchedulerEntryHash()(*se_pt));
   }
   return h;
 }
 
-FusionSegmentRuntime::HeuristicTag::HeuristicTag(SegmentHeuristics* sh) {
+FusionKernelRuntime::HeuristicTag::HeuristicTag(FusionHeuristics* sh) {
   heuristics_ = sh;
-  hash_ = FusionSegmentRuntime::getHash(sh);
+  hash_ = FusionKernelRuntime::getHash(sh);
 }
 
-bool FusionSegmentRuntime::HeuristicTag::operator==(
-    const FusionSegmentRuntime::HeuristicTag& other) const {
-  if (heuristics_->heuristics().size() !=
-      other.heuristics_->heuristics().size()) {
+bool FusionKernelRuntime::HeuristicTag::operator==(
+    const FusionKernelRuntime::HeuristicTag& other) const {
+  if (heuristics_->heuristicsList().size() !=
+      other.heuristics_->heuristicsList().size()) {
     return false;
   }
 
-  auto& heuristics = heuristics_->heuristics();
+  auto& heuristics = heuristics_->heuristicsList();
   return std::equal(
       heuristics.begin(),
       heuristics.end(),
-      other.heuristics_->heuristics().begin(),
+      other.heuristics_->heuristicsList().begin(),
       [](const SchedulerEntryPtr& a, const SchedulerEntryPtr& b) {
         return a->sameAs(b.get());
       });
 }
 
-void FusionSegmentRuntimeCache::evictId(size_t input_id) {
+void FusionKernelRuntimeCache::evictId(size_t input_id) {
   TORCH_INTERNAL_ASSERT(id_to_rt_.count(input_id) != 0);
 
   // Evict the stored input tensor meta data
@@ -692,7 +567,7 @@ void FusionSegmentRuntimeCache::evictId(size_t input_id) {
   id_to_rt_.erase(input_id);
 }
 
-FusionSegmentRuntime* FusionSegmentRuntimeCache::getRt(
+FusionKernelRuntime* FusionKernelRuntimeCache::getRt(
     const at::ArrayRef<IValue>& inputs,
     size_t input_id) {
   // Look up by input_id first
@@ -705,26 +580,42 @@ FusionSegmentRuntime* FusionSegmentRuntimeCache::getRt(
   return seg_runtime;
 }
 
-FusionSegmentRuntime* FusionSegmentRuntimeCache::getRtById(size_t input_id) {
+FusionKernelRuntime* FusionKernelRuntimeCache::getRtById(size_t input_id) {
   if (id_to_rt_.count(input_id) == 0) {
     return nullptr;
   }
   return id_to_rt_.at(input_id);
 }
 
-FusionSegmentRuntime* FusionSegmentRuntimeCache::getRtByHeuristics(
+FusionKernelRuntime* FusionKernelRuntimeCache::getRtByHeuristics(
     const at::ArrayRef<IValue>& inputs,
     size_t input_id) {
   auto dev_id = getCommonDeviceCUDA(inputs);
-  auto heuristics = segmented_fusion_->makeHeuristics(inputs);
+  std::unique_ptr<FusionHeuristics> heuristics;
+  if (is_segmented_) {
+    heuristics = segmented_fusion_->makeHeuristics(inputs);
+  } else {
+    auto evaluator = executor_utils::bindFusionInputs(inputs, complete_fusion_);
+    heuristics = std::make_unique<FusionHeuristics>(
+        complete_fusion_heuristic_, evaluator);
+  }
+
   HeuristicTag tag(heuristics.get());
   auto rt = at(dev_id, tag);
 
   // Heuristics miss
   if (rt == nullptr) {
     // Construct new runtime instance
-    auto new_rt = std::make_unique<FusionSegmentRuntime>(
-        segmented_fusion_, heuristics, input_id);
+
+    std::unique_ptr<FusionKernelRuntime> new_rt;
+
+    if (is_segmented_) {
+      new_rt = std::make_unique<FusionKernelRuntime>(
+          segmented_fusion_, heuristics, input_id);
+    } else {
+      new_rt = std::make_unique<FusionKernelRuntime>(
+          complete_fusion_, heuristics, input_id);
+    }
     rt = new_rt.get();
 
     // Cache the new instance
@@ -737,11 +628,20 @@ FusionSegmentRuntime* FusionSegmentRuntimeCache::getRtByHeuristics(
   return rt;
 }
 
-void FusionSegmentRuntimeCache::initCache(SegmentedFusion* sf) {
-  segmented_fusion_ = sf;
+void FusionKernelRuntimeCache::initSegmentCache(
+    SegmentedFusion* segmented_fusion) {
+  is_segmented_ = true;
+  segmented_fusion_ = segmented_fusion;
 }
 
-FusionSegmentRuntime* FusionSegmentRuntimeCache::at(
+void FusionKernelRuntimeCache::initSingleKernelCache(
+    Fusion* fusion,
+    ScheduleHeuristic schedule_heuristic) {
+  complete_fusion_ = fusion;
+  complete_fusion_heuristic_ = schedule_heuristic;
+}
+
+FusionKernelRuntime* FusionKernelRuntimeCache::at(
     int dev_id,
     HeuristicTag tag) {
   // Get cache for the device id
@@ -764,7 +664,7 @@ FusionSegmentRuntime* FusionSegmentRuntimeCache::at(
   return cache_entry_ptr.get();
 }
 
-void FusionSegmentRuntimeCache::insertEntry(
+void FusionKernelRuntimeCache::insertEntry(
     int dev_id,
     HeuristicTag tag,
     SegRuntimePtr&& rt_pt) {

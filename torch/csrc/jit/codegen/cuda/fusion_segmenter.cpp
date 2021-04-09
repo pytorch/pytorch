@@ -2272,7 +2272,7 @@ inline void inferGroupInputs(
 }
 } // namespace
 
-FusionSegmentRuntime::SchedulerEntryPtr SegmentedFusion::makeSchedulerEntry(
+FusionKernelRuntime::SchedulerEntryPtr SegmentedFusion::makeSchedulerEntry(
     SegmentedGroup* sg,
     ExpressionEvaluator& ee) {
   ExpressionEvaluator local_ee(&fusion_);
@@ -2281,12 +2281,12 @@ FusionSegmentRuntime::SchedulerEntryPtr SegmentedFusion::makeSchedulerEntry(
   return SchedulerEntry::makeEntry(sg->heuristic(), &fusion_, local_ee);
 }
 
-std::unique_ptr<SegmentHeuristics> SegmentedFusion::makeHeuristics(
+std::unique_ptr<FusionHeuristics> SegmentedFusion::makeHeuristics(
     const at::ArrayRef<IValue>& inputs) {
-  auto ret = std::make_unique<SegmentHeuristics>();
+  auto ret = std::make_unique<FusionHeuristics>();
   auto evaluator = executor_utils::bindFusionInputs(inputs, &fusion_);
   for (auto g : groups()) {
-    ret->emplace_back(makeSchedulerEntry(g, evaluator));
+    ret->emplaceBack(makeSchedulerEntry(g, evaluator));
   }
   return ret;
 }

@@ -72,7 +72,7 @@ void GpuLower::replaceSymbolicSizes() {
       // TODO(kir): consider a different implementation which doesn't
       //  hijack the kir_val_map_
       // Currently turn off this part for inputs of segmented fusion,
-      //  since FusionSegmentRuntime will provide these as integer inputs
+      //  since FusionKernelRuntime will provide these as integer inputs
       if (kir_val_map_.find(orig_size) == kir_val_map_.end() &&
           !orig_size->isFusionInput()) {
         std::stringstream ss;
