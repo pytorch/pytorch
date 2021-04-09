@@ -229,7 +229,7 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
         return f"""
 void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
                 TensorOptions options, DimnameList names) override {{
-{textwrap.indent(self.gen_class_set_output_body(k), "    ")}
+{textwrap.indent(self.gen_class_set_output_body(k, parent_class), "    ")}
     if (!names.empty()) {{
       namedinference::propagate_names(outputs_[output_idx], names);
     }}
@@ -239,7 +239,7 @@ void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
 }}
 """
 
-    def gen_class_set_output_body(self, k: SchemaKind) -> str:
+    def gen_class_set_output_body(self, k: SchemaKind, parent_class: str) -> str:
         if self.dispatch_key in [DispatchKey.CUDA, DispatchKey.CompositeExplicitAutograd]:
             maybe_set_guard = """
 auto current_device = guard_.current_device();
@@ -278,6 +278,11 @@ if (strides.empty()) {
                     empty_strided_impl = "at::empty_strided"
                 else:
                     raise AssertionError("unsupported dispatch key")
+                structured_inherits = self.g.out.structured_inherits
+                if structured_inherits == "TensorIteratorBase":
+                    set_dtype_call_line = "set_output_current_dtype(output_idx);\n"
+                else:
+                    set_dtype_call_line = ""
                 return f"""{maybe_set_guard_line}
 if (strides.empty()) {{
     outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
@@ -285,7 +290,7 @@ if (strides.empty()) {{
     // TODO: assert options.memory_format_opt() is nullopt (debug only?)
     outputs_[output_idx] = {empty_strided_impl}(sizes, strides, {expanded_topts});
 }}
-"""
+{set_dtype_call_line}"""
         elif k is SchemaKind.inplace:
             return maybe_set_guard
         elif k is SchemaKind.out:
