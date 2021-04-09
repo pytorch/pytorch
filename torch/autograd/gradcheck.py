@@ -381,15 +381,12 @@ If the test
 
 
 def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_scale, check_grad_dtypes,
-                                         raise_exception, custom_vjp_fn=None, fast_mode=False,
-                                         v=None) -> Tuple[torch.Tensor, ...]:
+                                         fast_mode=False, v=None) -> Tuple[torch.Tensor, ...]:
     diff_input_list = list(iter_tensors(inputs, True))
 
-    def backward_fn(grad_output):
+    def vjp_fn(grad_output):
         return torch.autograd.grad(output, diff_input_list, grad_output,
                                    retain_graph=True, allow_unused=True)
-    vjp_fn = custom_vjp_fn if custom_vjp_fn is not None else backward_fn
-
     if fast_mode:
         jacobians_rows = compute_fast_analytical_jacobian_rows(vjp_fn, output.clone(), v, grad_out_scale)
         jacobians_rows_reentrant = compute_fast_analytical_jacobian_rows(vjp_fn, output.clone(), v, grad_out_scale)
@@ -406,19 +403,15 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_sc
     complex_str = '(calculated using complex valued grad output) ' \
         if isinstance(grad_out_scale, complex) else ''
 
-    def fail_test(msg):
-        if raise_exception:
-            raise RuntimeError(msg)
-
     if not correct_grad_types and check_grad_dtypes:
-        fail_test(f'Gradient{complex_str} has dtype mismatch')
+        raise RuntimeError(f'Gradient{complex_str} has dtype mismatch')
     if not correct_grad_sizes:
-        fail_test(f'Analytical gradient{complex_str} has incorrect size')
+        raise RuntimeError(f'Analytical gradient{complex_str} has incorrect size')
     if not reentrant:
-        fail_test(f'Backward{complex_str} is not reentrant, i.e., running backward with '
-                  'same input and grad_output multiple times gives different values, '
-                  'although analytical gradient matches numerical gradient.'
-                  f'The tolerance for nondeterminism was {nondet_tol}.' + FAILED_NONDET_MSG)
+        raise RuntimeError(f'Backward{complex_str} is not reentrant, i.e., running backward with '
+                           'same input and grad_output multiple times gives different values, '
+                           'although analytical gradient matches numerical gradient.'
+                           f'The tolerance for nondeterminism was {nondet_tol}.' + FAILED_NONDET_MSG)
     return jacobians
 
 
@@ -445,7 +438,7 @@ def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
 def _get_analytical_jacobian(inputs, outputs, input_idx, output_idx):
     # Computes the analytical jacobian in slow mode for a single input_idx, output_idx pair
     # without performing checks for dtype, shape, and reentrancy
-    jacobians = check_analytical_jacobian_attributes(inputs, outputs[output_idx], float('inf'), 1.0, False, False)
+    jacobians = check_analytical_jacobian_attributes(inputs, outputs[output_idx], float('inf'), 1.0, False)
     return jacobians[input_idx]
 
 
@@ -738,7 +731,7 @@ def transpose(matrix_of_tensors):
 
 
 def slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
-                   atol, raise_exception, check_grad_dtypes, nondet_tol):
+                   atol, check_grad_dtypes, nondet_tol):
     if not outputs:
         return check_no_differentiable_outputs(func, tupled_inputs, _as_tuple(func_out), eps)
 
@@ -747,11 +740,11 @@ def slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
         numerical_from_imag_grad_out = transpose(_get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps, grad_out=1j))
 
     for i, o in enumerate(outputs):
-        analytical = check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, 1.0, check_grad_dtypes, raise_exception)
+        analytical = check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, 1.0, check_grad_dtypes)
 
         if o.is_complex():
             analytical_from_imag_grad_out = check_analytical_jacobian_attributes(
-                tupled_inputs, o, nondet_tol, 1j, check_grad_dtypes, raise_exception)
+                tupled_inputs, o, nondet_tol, 1j, check_grad_dtypes)
 
         inp_tensors = iter_tensors(tupled_inputs, True)
 
@@ -868,7 +861,7 @@ def slow_mode_jacobian_message(func, tupled_inputs, outputs, input_idx, output_i
 
 
 def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
-                   atol, raise_exception, check_grad_dtypes, nondet_tol):
+                   atol, check_grad_dtypes, nondet_tol):
     # Perform the fast version of gradcheck
     # See https://github.com/pytorch/pytorch/issues/53876 for details
     inp_tensors = [t for t in tupled_inputs if is_tensor_like(t) and t.requires_grad]
@@ -910,13 +903,13 @@ def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
     # Analytically calculate (v^T J) u
     for i, (out, v) in enumerate(zip(outputs, all_v)):
         analytical = check_analytical_jacobian_attributes(tupled_inputs, out, nondet_tol, 1.0, check_grad_dtypes,
-                                                                  raise_exception, fast_mode=True, v=v)
+                                                          fast_mode=True, v=v)
         for a, u in zip(analytical, all_u_dense):
             all_analytical[i].append(a.T.squeeze(0).dot(u))
 
         if out.is_complex():
             analytical_from_imag_grad_out = check_analytical_jacobian_attributes(
-                tupled_inputs, out, nondet_tol, 1j, check_grad_dtypes, raise_exception, fast_mode=True, v=v)
+                tupled_inputs, out, nondet_tol, 1j, check_grad_dtypes, fast_mode=True, v=v)
 
             for j, (a, u) in enumerate(zip(analytical_from_imag_grad_out, all_u_dense)):
                 all_analytical_from_imag_grad_out[i].append(a.T.squeeze(0).dot(u))
@@ -1023,9 +1016,9 @@ def gradcheck(
         True if all differences satisfy allclose condition
     """
     args = locals()
+    args.pop("raise_exception")
     if not raise_exception:
         try:
-            args["raise_exception"] = True
             return gradcheck_helper(**args)
         except RuntimeError:
             return False
@@ -1039,7 +1032,6 @@ def gradcheck_helper(
     eps: float = 1e-6,
     atol: float = 1e-5,
     rtol: float = 1e-3,
-    raise_exception: bool = True,
     check_sparse_nnz: bool = False,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
@@ -1060,10 +1052,10 @@ def gradcheck_helper(
 
     if fast_mode:
         fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
-                       atol, raise_exception, check_grad_dtypes, nondet_tol)
+                       atol, check_grad_dtypes, nondet_tol)
     else:
         slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
-                       atol, raise_exception, check_grad_dtypes, nondet_tol)
+                       atol, check_grad_dtypes, nondet_tol)
 
     for i, o in enumerate(outputs):
         if check_batched_grad:
