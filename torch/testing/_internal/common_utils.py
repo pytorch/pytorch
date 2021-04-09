@@ -821,7 +821,7 @@ except ImportError:
 
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
-def fetch_and_cache(name: str, url: str) -> str:
+def fetch_and_cache(name: str, url: str):
     """
     Some tests run in a different process so globals like `slow_test_dict` won't
     always be filled even though the test file was already downloaded on this
