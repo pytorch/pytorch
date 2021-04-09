@@ -58,6 +58,7 @@ class BlockAnalysis : public IRVisitor {
   std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
   std::unordered_set<const Buf*> store_targets_;
   std::unordered_set<const Buf*> loads_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int block_size_ = 32;
 };
 
