@@ -488,15 +488,15 @@
 
 - func: acosh(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: acosh
+  structured_delegate: acosh.out
 
 - func: acosh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: acosh_
+  structured_delegate: acosh.out
 
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: acosh_out
 
