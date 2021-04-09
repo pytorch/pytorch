@@ -1850,8 +1850,9 @@ class TestFrozenOptimizations(JitTestCase):
                         g = parse_ir(graph_str)
                         m = self.createFunctionFromGraph(g)
                         x = torch.rand(size)
-                        x_copy = x.detach().clone()
-                        self.assertTrue(torch.allclose(aten_op(x, inplace=inplace), m(x_copy).to_dense()))
+                        # `inplace=False` is intentional, otherwise we modify the input
+                        # and we aren't testing aten impls anyways
+                        self.assertTrue(torch.allclose(aten_op(x, inplace=False), m(x).to_dense()))
 
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
@@ -1882,7 +1883,6 @@ class TestMKLDNNReinplacing(JitTestCase):
 
         mod_eager = nn.Sequential(self.getConv(), nn.Hardswish(), nn.ReLU())
         mod = self.freezeAndConvert(mod_eager)
-        print(mod.graph)
         FileCheck().check("mkldnn_convolution").check_next("prim::MKLDNNHardSwish_").check_next("aten::relu_").run(mod.graph)
         self.checkResults(mod_eager, mod)
 

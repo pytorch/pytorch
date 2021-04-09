@@ -1,10 +1,8 @@
 #include <ATen/Utils.h>
-
 #include <ATen/Config.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
-#include <dnnl_types.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -32,6 +30,7 @@
 #include <c10/util/StringUtil.h>
 
 #if AT_MKLDNN_ENABLED()
+#include <dnnl_types.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ideep.hpp>
 #endif
