@@ -1041,6 +1041,7 @@
   variants: method
   device_guard: False
   dispatch:
+    MkldnnCPU: copy_mkldnn_
     CompositeExplicitAutograd: copy_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
@@ -7377,6 +7378,8 @@
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
   python_module: nn
+
+- func: _adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
   dispatch:
     CPU: adaptive_avg_pool3d_cpu
     CUDA: adaptive_avg_pool3d_cuda
@@ -7388,7 +7391,7 @@
     CPU: adaptive_avg_pool3d_backward_out_cpu
     CUDA: adaptive_avg_pool3d_backward_out_cuda
 
-- func: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
+- func: _adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool3d_backward_cpu
