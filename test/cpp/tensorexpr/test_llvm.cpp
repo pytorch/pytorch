@@ -1567,25 +1567,19 @@ TEST(LLVM, RFactorVectorizedReduction) {
   Tensor* b = Reduce("sum", {{1, "K"}}, Sum(), a, {{M, "M"}, {N, "N"}});
   LoopNest loopnest({b});
   std::vector<For*> loops = loopnest.getLoopStmtsFor(b);
-  For* loop_k = loops.at(0);
-  For* loop_m = loops.at(1);
-  For* loop_n = loops.at(2);
-  auto b_body = const_cast<Stmt*>(loopnest.getAllWritesToBuf(b->buf())[1]);
-  ASSERT_TRUE(loopnest.rfactor(b_body, loop_n));
+  // Reorder n and m loops
+  loopnest.reorderAxis(loops.at(1), loops.at(2));
+  auto b_body = const_cast<Stmt*>(loopnest.getAllWritesToBuf(b->buf()).at(1));
+  auto all_loops = loopnest.getAllLoopNestsWritingToBuf(b->buf());
+  ASSERT_TRUE(all_loops.size() == 2 && all_loops[1].size() == 3);
+  ASSERT_TRUE(loopnest.rfactor(b_body, all_loops[1][1]));
+  auto distributed_loops = loopnest.distributeLoop(all_loops[1][1]);
 
-  loops = NodeFinder<For>::find(loopnest.root_stmt());
-  loop_k = loops.at(0);
-  // loop 1 is the initializer of tmp_buf
-  loop_m = loops.at(2);
-  loop_n = loops.at(3);
-  loopnest.reorderAxis(loop_n, loop_m);
-
-  // Case-III reductions
-  loops = NodeFinder<For>::find(loopnest.root_stmt());
-  // Vectorize initializer of tmp_buf
-  loopnest.vectorize(loops[1]);
-  // Vectorize producer of tmp_buf
-  loopnest.vectorize(loops[2]);
+  // Vectorize initializer of rfac_buf
+  loopnest.vectorize(distributed_loops[0]);
+  // Vectorize producer of rfac_buf
+  loopnest.vectorize(distributed_loops[1]);
+  loopnest.simplify();
 
   loopnest.prepareForCodegen();
 

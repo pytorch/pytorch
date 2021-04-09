@@ -34,7 +34,7 @@ class TORCH_API LoopNest {
 
   // A constructor for building a LoopNest from an Stmt and a list of output
   // buffers.
-  LoopNest(Stmt* stmt, const std::unordered_set<const Buf*>& output_bufs);
+  LoopNest(Stmt* stmt, std::unordered_set<const Buf*> output_bufs);
 
   // A constructor for building a LoopNest from another loopnest. It clones the
   // other loopnest's stmt.
@@ -233,8 +233,49 @@ class TORCH_API LoopNest {
   // the temporary buffer used in the computation.
   void computeAt(Stmt* s, For* at);
 
-  bool rfactor(Stmt* s, For* target_for);
-  bool rfactor(Stmt* s, For* target_for, Buf** tmp_buf_ptr);
+  // Rfactor a reduction axis into a normal axis.
+  //
+  // Requirements:
+  //  * S is the reduction store
+  //  * S is the only statement in the innermost loop
+  //  * There is at least two reduction arguments in S
+  //  * OUTER_REDUCTION_FOR loop corresponds to the outermost reduction variable
+  //  used in the store and all other reduction variables are index variables of
+  //  children loops of OUTER_REDUCTION_FOR
+  //  * OUTER_REDUCTION_FOR is a perfect loop nest, i.e. it has only loops
+  //  corresponding to the other reduction variables and the store, nested into
+  //  each other
+  //
+  // What it does:
+  //   * Introduce a new buffer with an extra dimension of a size equal to the
+  //   span of the loop OUTER_REDUCTION_FOR (the new buffer is returned via
+  //   RFAC_BUF_PTR)
+  //   * Insert an initialization store for the new buffer in
+  //   OUTER_REDUCTION_FOR before its nested loop
+  //   * Replace the reduction store to the original buffer with the reduction
+  //   store to the temp buffer, removing the index var of OUTER_REDUCTION_FOR
+  //   from reduction arguments
+  //   * Insert a final reduction store over the extra dimension of the new
+  //   buffer to the original buffer
+  //   * Returns TRUE if the transformation succeeded and FALSE otherwise
+  //
+  // Example:
+  // Original IR:
+  // S1: for i        # normal axis
+  // S2:   X[i] = 0
+  // S3:   for j    # reduction axis
+  // S4:     for k  # reduction axis
+  // S5:       X[i] = ReduceOp(X[i] + Y[i,j,k], reduce_axis={j,k})
+  //
+  // After RFACTOR(S5, S3)
+  // S1: for i        # normal axis
+  // S2:   X[i] = 0
+  // S3:   for j    # reduction axis for X, normal axis for X_rfac
+  // S4:     for k  # reduction axis
+  // S5:       X_rfac[i,j] = ReduceOp(X_rfac[i,j] + Y[i,j,k], reduce_axis={k})
+  // S6:     X[i] = ReduceOp(X[i] + X_rfac[j,k], reduce_axis={j})
+  bool rfactor(Stmt* s, For* outer_reduction_for);
+  bool rfactor(Stmt* s, For* outer_reduction_for, Buf** rfac_buf_ptr);
 
   void setBufferMap(
       For* f,

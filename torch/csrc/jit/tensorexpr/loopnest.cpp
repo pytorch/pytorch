@@ -30,13 +30,12 @@ LoopNest::LoopNest(const LoopNest& other)
   verify(root_stmt_);
 }
 
-LoopNest::LoopNest(
-    Stmt* stmt,
-    const std::unordered_set<const Buf*>& output_bufs)
-    : root_stmt_(stmt), output_bufs_(output_bufs) {
+LoopNest::LoopNest(Stmt* stmt, std::unordered_set<const Buf*> output_bufs)
+    : root_stmt_(stmt), output_bufs_(std::move(output_bufs)) {
   verify(root_stmt_);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(
     const std::vector<Tensor*>& output_tensors,
     const std::vector<Tensor*>& tensors_to_compute) {
@@ -44,6 +43,7 @@ LoopNest::LoopNest(
   verify(root_stmt_);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   initialize(output_tensors, output_tensors);
   verify(root_stmt_);
@@ -1020,8 +1020,11 @@ void LoopNest::vectorizeInnerLoops() {
 
   // vectorize inner loops.
   for (For* loop : innerLoops) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* outer1;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* split1;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* tail1;
 
     static const int kBodyVectorWidth = 8;
@@ -1029,8 +1032,11 @@ void LoopNest::vectorizeInnerLoops() {
     vectorize(split1);
 
     if (tail1) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       For* outer2;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       For* split2;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       For* tail2;
       static const int kTailVectorWidth = 4;
       splitWithTail(tail1, kTailVectorWidth, &outer2, &split2, &tail2);
@@ -1076,6 +1082,7 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
   }
 }
 void LoopNest::sliceHead(For* f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *head, *tail;
   sliceHead(f, factor, &head, &tail);
 }
@@ -1121,11 +1128,13 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
   }
 }
 void LoopNest::sliceTail(For* f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *head, *tail;
   sliceTail(f, factor, &head, &tail);
 }
 
 void LoopNest::splitWithTail(For* f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *outer, *inner, *tail;
   splitWithTail(f, factor, &outer, &inner, &tail);
 }
@@ -1198,6 +1207,7 @@ void LoopNest::splitWithTail(
 }
 
 void LoopNest::splitWithMask(For* f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *outer, *inner;
   splitWithMask(f, factor, &outer, &inner);
 }
@@ -1462,6 +1472,7 @@ void LoopNest::reorderAxis(For* a, For* b) {
       internal_axes.push_back(f);
     }
 
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     s = s->get_parent();
   }
 
@@ -1664,6 +1675,7 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
   // loop is normalized, the given pointers to inner loops point to old code.
   // For the same reason, we can't store the normalized inner loops until after
   // the outer-most loop is normalized.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* normalized;
   for (size_t i = 0; i < loops.size(); ++i) {
     size_t idx = loops.size() - i - 1;
@@ -1672,6 +1684,7 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
 
   // 'normalized' points to the outer-most loop in the normalized loopnest.
   // Collect all the normalized loops.
+  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   auto normalized_loops = getLoopStmtsInLoopNest(normalized, loops.size());
 
   auto flat_var = new Var(
@@ -2282,64 +2295,20 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   }
 }
 
-class SwapReduce : public IRMutator {
+class RfactorStoreRewriter : public IRMutator {
  public:
-  SwapReduce(
-      const ReduceOp* old_reduce,
-      ReduceOp* new_reduce,
-      const Buf* new_accumulator,
-      std::vector<const Expr*> new_indices)
-      : old_reduce_(old_reduce),
-        new_reduce_(new_reduce),
-        new_accumulator_(new_accumulator),
-        new_indices_(std::move(new_indices)) {}
-
-  Stmt* mutate(const Store* v) override {
-    if (const ReduceOp* op = dynamic_cast<const ReduceOp*>(v->value())) {
-      if (op == old_reduce_) {
-        return new Store(
-            new_accumulator_, new_indices_, new_reduce_, new IntImm(1));
-      }
-    }
-    return IRMutator::mutate(v);
-  }
-
- private:
-  const ReduceOp* old_reduce_;
-  ReduceOp* new_reduce_;
-  const Buf* new_accumulator_;
-  const std::vector<const Expr*> new_indices_;
-};
-
-class StoreFinder : public IRVisitor {
- public:
-  StoreFinder(Expr* t) : target_(t), store_(nullptr) {}
-  Store* store() {
-    return const_cast<Store*>(store_); // NOLINT: TODO fix up const correctness
-  }
-  void visit(const Store* s) override {
-    if (s->value() == target_) {
-      store_ = s;
-    }
-    IRVisitor::visit(s);
-  }
-
- private:
-  Expr* target_;
-  const Store* store_;
-};
-
-class BufReplacer : public IRMutator {
- public:
-  BufReplacer(
+  RfactorStoreRewriter(
       const Buf* old_buf,
       const std::vector<const Expr*>& old_indices,
       const Buf* new_buf,
-      const std::vector<const Expr*>& new_indices)
+      const Var* reduction_var)
       : old_buf_(old_buf),
         old_indices_(old_indices),
         new_buf_(new_buf),
-        new_indices_(new_indices) {}
+        reduction_var_(reduction_var),
+        new_indices_(old_indices) {
+    new_indices_.push_back(reduction_var_);
+  }
 
   const Expr* mutate(const Load* v) override {
     if (v->buf() != old_buf_) {
@@ -2361,6 +2330,19 @@ class BufReplacer : public IRMutator {
 
     const Expr* mask_new = v->mask()->accept_mutator(this);
     return new Load(new_buf_, new_indices_, mask_new);
+  }
+
+  const Expr* mutate(const ReduceOp* v) override {
+    const Expr* body_new = v->body()->accept_mutator(this);
+
+    std::vector<const Var*> new_reduce_args;
+    for (auto* r : v->reduce_args()) {
+      if (r != reduction_var_) {
+        new_reduce_args.push_back(r);
+      }
+    }
+
+    return new ReduceOp(body_new, new_reduce_args, v->reducer());
   }
 
   Stmt* mutate(const Store* v) override {
@@ -2390,157 +2372,112 @@ class BufReplacer : public IRMutator {
   const Buf* old_buf_;
   const std::vector<const Expr*>& old_indices_;
   const Buf* new_buf_;
-  const std::vector<const Expr*>& new_indices_;
+  const Var* reduction_var_;
+  std::vector<const Expr*> new_indices_;
 };
 
-bool LoopNest::rfactor(Stmt *st, For* target_for) {
+bool LoopNest::rfactor(Stmt* st, For* target_for) {
   Buf* tmp_buf;
   return rfactor(st, target_for, &tmp_buf);
 }
 
-bool LoopNest::rfactor(Stmt *st, For* target_for, Buf** tmp_buf_ptr) {
-  const Var* reduction_var = target_for->var();
-  Store *store = dynamic_cast<Store*>(st);
-  const ReduceOp* reduce_op = dynamic_cast<const ReduceOp*>(store->value());
+bool LoopNest::rfactor(Stmt* st, For* outer_reduction_for, Buf** rfac_buf_ptr) {
+  Store* reduction_store = dynamic_cast<Store*>(st);
+  const ReduceOp* reduce_op =
+      dynamic_cast<const ReduceOp*>(reduction_store->value());
   if (!reduce_op) {
     // Not a reduction store
     return false;
   }
 
-  auto old_acc = store->buf();
-  auto old_outer = store->indices();
-  auto new_outer = old_outer;
+  auto orig_buf = reduction_store->buf();
+  auto orig_buf_indices = reduction_store->indices();
+  const Var* reduction_var = outer_reduction_for->var();
 
-  For* root_for = nullptr;
-  target_for = nullptr;
   std::set<const Var*> reduce_args = {
       reduce_op->reduce_args().begin(), reduce_op->reduce_args().end()};
 
-  // Store loops below the target point.
-  std::vector<const For*> output_loops;
-  bool output_contains_target = false;
+  if (reduce_args.size() < 2) {
+    // Not enough reduction axis to do rfactor
+    return false;
+  }
 
-  while (st) {
-    if (For* f = dynamic_cast<For*>(st)) {
-      if (f->var() == reduction_var) {
-        target_for = f;
-      } else if (target_for && !output_contains_target) {
-        output_loops.push_back(target_for);
-        output_contains_target = true;
-      }
-      if (reduce_args.count(f->var())) {
-        reduce_args.erase(f->var());
-      } else {
-        output_loops.push_back(f);
-      }
-
-      if (reduce_args.empty()) {
-        root_for = f;
-        break;
-      }
+  // Verify that outer_reduction_for is a perfect loop nest with all loops being
+  // reductions
+  Stmt* cur = outer_reduction_for;
+  while (For* cur_for = dynamic_cast<For*>(cur)) {
+    if (!reduce_args.count(cur_for->var())) {
+      // output axis inside outer_reduction_for are not allowed
+      return false;
     }
-    st = st->get_parent();
-  };
+    reduce_args.erase(cur_for->var());
 
-  if (!target_for) {
-    // target_for does not correspond to the reduction
+    Block* b = cur_for->body();
+    if (b->nstmts() != 1) {
+      return false;
+    }
+    cur = b->stmts().front();
+  }
+  if (cur != st) {
+    // The reduction store is not a single stmt in the innermost loop - bail in
+    // that case
     return false;
   }
-  TORCH_INTERNAL_ASSERT(reduce_args.empty());
-  TORCH_INTERNAL_ASSERT(root_for);
-
-  auto& dims = reduce_op->reduce_args();
-  if (dims.size() < 2) {
-    // Cannot rfactor reduction with a single reduce variable
+  if (!reduce_args.empty()) {
+    // This is not the outermost reduction axis
     return false;
   }
 
-  std::vector<const Expr*> new_dims = {};
-  const Expr* init =
+  // assert: reduce_axis match loop vars from outer_reduction_for and inside
+  // assert: no other stmts in outer_reduction_for or its child loops
+
+  std::vector<const Expr*> rfac_dims = orig_buf->dims();
+  const Expr* extra_dim = IRSimplifier::simplify(
+      new Sub(outer_reduction_for->stop(), outer_reduction_for->start()));
+  rfac_dims.push_back(extra_dim);
+  const Expr* rfac_init =
       new Cast(reduce_op->dtype(), reduce_op->reducer().initializer());
-  TORCH_INTERNAL_ASSERT(init);
-  *tmp_buf_ptr = new Buf("tmp_buf", new_dims, reduce_op->dtype(), init);
-  Buf* tmp_buf = *tmp_buf_ptr;
 
-  auto new_inner = reduce_op->reduce_args();
-  bool found = false;
-  for (size_t i = 0; i < new_inner.size(); ++i) {
-    if (new_inner[i] == reduction_var) {
-      new_inner.erase(new_inner.begin() + i);
-      found = true;
-      break;
-    }
-  }
-  if (!found) {
-    // Could not find target reduction var in the reduce operation
-    return false;
-  }
-  new_outer.emplace_back(reduction_var);
+  *rfac_buf_ptr = new Buf(
+      orig_buf->name_hint() + "_rfac",
+      rfac_dims,
+      reduce_op->dtype(),
+      rfac_init);
+  Buf* rfac_buf = *rfac_buf_ptr;
 
-  BufReplacer bufReplacer(old_acc, old_outer, tmp_buf, new_outer);
-  const Expr* new_body = reduce_op->body()->accept_mutator(&bufReplacer);
+  // Rewrite the original reduction store to use the temporary rfac buffer:
+  //   1) X[*indexes] --> T[*indexes + {reduction_var}]
+  //   2) reduce_axis -= {reduction_var}
+  RfactorStoreRewriter rfac_rewriter(
+      orig_buf, orig_buf_indices, rfac_buf, reduction_var);
+  dynamic_cast<Block*>(st->get_parent())
+      ->replace_stmt(st, st->accept_mutator(&rfac_rewriter));
 
-  auto first_reduce = new ReduceOp(new_body, new_inner, reduce_op->reducer());
+  // Insert a store for the final reduction over the temp buffer into the
+  // original buffer:
+  //   X[*indexes] = ReduceOp(X[*indexes] + T[*indexes + {reduction_var}],
+  //                          reduce_axis={reduction_var})
 
-  auto second_reduce_load_indices = old_outer;
-  second_reduce_load_indices.emplace_back(reduction_var);
-  auto second_reduce_load = new Load(
-      reduce_op->dtype(), tmp_buf, second_reduce_load_indices, new IntImm(1));
-  auto second_reduce = reduce_op->reducer()(
-      old_acc, second_reduce_load, old_outer, {reduction_var});
+  Stmt* first_reduction_loop = singleStmtInLoop(outer_reduction_for);
+  auto rfac_buf_indices = orig_buf_indices;
+  rfac_buf_indices.emplace_back(reduction_var);
 
-  // 1) replace target for loop (which is a reduction loop)
-  // with an iterative for loop by removing the reduction var from the
-  // innermost op and creating a new temporary output buffer.
-  //
-  // 2) append a clone of the target for loop (which reduces over multiple
-  // variables) with a reduce over only its var by replacing the reduction op
-  // buffer input with the temporary output buffer and removing other reductions
-  // variables.
-  SwapReduce sr(reduce_op, first_reduce, tmp_buf, new_outer);
-  Block* parent_block = dynamic_cast<Block*>(root_for->get_parent());
-  TORCH_INTERNAL_ASSERT(parent_block);
-  For* new_root_for = dynamic_cast<For*>(root_for->accept_mutator(&sr));
-  TORCH_INTERNAL_ASSERT(new_root_for);
-  auto res = parent_block->replace_stmt(root_for, new_root_for);
-  TORCH_INTERNAL_ASSERT(res);
+  const Expr* final_reduce_load =
+      new Load(rfac_buf, rfac_buf_indices, new IntImm(1));
+  outer_reduction_for->body()->insert_stmt_after(
+      new Store(
+          orig_buf,
+          orig_buf_indices,
+          reduce_op->reducer()(
+              orig_buf, final_reduce_load, orig_buf_indices, {reduction_var}),
+          new IntImm(1)),
+      first_reduction_loop);
 
-  Stmt* init_stmt = new Store(tmp_buf, new_outer, init, new IntImm(1));
-
-  // Wrap it in any loops lower than the insertion point of the new reduction.
-  for (auto* ol : output_loops) {
-    init_stmt = ol->cloneWithNewBody(init_stmt);
-  }
-
-  if (output_contains_target) {
-    parent_block->insert_stmt_before(init_stmt, new_root_for);
-  } else {
-    new_root_for->body()->prepend_stmt(init_stmt);
-  }
-
-  auto second_buf = dynamic_cast<const Buf*>(old_acc);
-  auto const& second_indices = old_outer;
-  Stmt* body_stmt =
-      new Store(second_buf, second_indices, second_reduce, new IntImm(1));
-
-  for (auto* il : output_loops) {
-    body_stmt = il->cloneWithNewBody(body_stmt);
-  }
-  if (output_contains_target) {
-    parent_block->insert_stmt_after(body_stmt, new_root_for);
-  } else {
-    new_root_for->body()->append_stmt(body_stmt);
-  }
-
-  auto loop_bounds_info = inferBounds(root_stmt_);
-  auto bounds_it = loop_bounds_info.find(tmp_buf);
-  if (bounds_it == loop_bounds_info.end()) {
-    throw std::runtime_error(
-        "Hit undefined behavior in rfactor -- couldn't infer bounds.");
-  }
-
-  std::vector<const Expr*> tmp_dims = getBoundExtents(bounds_it->second);
-  tmp_buf->set_dims(tmp_dims);
+  // Insert an initialization store for the temp buffer:
+  //   T[a,b,c] = init
+  outer_reduction_for->body()->insert_stmt_before(
+      new Store(rfac_buf, rfac_buf_indices, rfac_init, new IntImm(1)),
+      first_reduction_loop);
   return true;
 }
 

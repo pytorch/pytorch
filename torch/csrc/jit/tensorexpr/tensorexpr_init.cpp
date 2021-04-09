@@ -275,6 +275,12 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
+          "get_all_loopnests_for",
+          [](const LoopNest& self, const BufHandle& b) {
+            return self.getAllLoopNestsWritingToBuf(b.node());
+          },
+          py::return_value_policy::reference)
+      .def(
           "split_with_tail",
           [](const LoopNest& self, For* f, int factor) {
             For *outer = nullptr, *inner = nullptr, *tail = nullptr;
@@ -365,7 +371,9 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "rfactor",
           [](LoopNest& self, Stmt* s, For* target_for) {
-            self.rfactor(s, target_for);
+            Buf* rfac_buf = nullptr;
+            self.rfactor(s, target_for, &rfac_buf);
+            return BufHandle(rfac_buf);
           },
           py::return_value_policy::reference)
       .def(
