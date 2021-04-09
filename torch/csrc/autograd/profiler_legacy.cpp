@@ -517,8 +517,7 @@ void enableProfilerLegacy(const ProfilerConfig& new_config) {
 
   pushProfilingCallbacksLegacy();
 
-  // Do not record_cuda for start/stop markers as they are not user operations
-  state->mark("__start_profile", /* include_cuda */ false);
+  state->mark("__start_profile", false);
 }
 
 thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> profilerDisableOptions) {
@@ -544,8 +543,7 @@ thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> p
     return thread_event_lists();
   }
 
-  // Do not record_cuda for start/stop markers as they are not user operations
-  state_ptr->mark("__stop_profile", /*include_cuda */ false);
+  state_ptr->mark("__stop_profile", false);
   // Note that this will erase the underlying events.
   return state_ptr->consolidate();
 }
