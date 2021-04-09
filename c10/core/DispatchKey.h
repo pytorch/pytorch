@@ -181,10 +181,6 @@ enum class DispatchKey : uint8_t {
   // to view/inplace ops to minimize its perf impact to real models.
   InplaceOrView,
 
-  // This key is post-autograd. For pre-autograd keys with backend fallbacks, we'd
-  // need to be careful because RecordFunction can't handle pre-autograd redispatches.
-  AlwaysCall,
-
   // Note [Alias Dispatch Key : Autograd]
   // All backends are oblivious to autograd; autograd is handled as a
   // layer which happens on top of all backends. It inspects the autograd
