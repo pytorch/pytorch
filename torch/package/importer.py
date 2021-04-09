@@ -184,3 +184,11 @@ class OrderedImporter(Importer):
             raise last_err
         else:
             raise ModuleNotFoundError(module_name)
+
+    def whichmodule(self, obj: Any, name: str) -> str:
+        for importer in self._importers:
+            module_name = importer.whichmodule(obj, name)
+            if module_name != "__main__":
+                return module_name
+
+        return "__main__"
