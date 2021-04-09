@@ -5283,7 +5283,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'mean', 'inverse', 'addcmul',
                 'addcdiv', 'linalg.tensorinv', 'matrix_exp',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split',
-                'baddbmm', 'addmv'] + complex_list_filter + separate_complex_tests
+                'baddbmm', 'addbmm', 'addmv'] + complex_list_filter + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
@@ -7071,8 +7071,8 @@ class TestAutogradDeviceType(TestCase):
             i = i.to(torch.long)
 
             inp = torch.randn(v_size, requires_grad=True)
-            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True)[0]
-            other = other.to(device)
+            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True, device=device,
+                                         dtype=torch.double)[0]
 
             def fn(v):
                 x = torch.sparse_coo_tensor(i, v, size, device=device)
