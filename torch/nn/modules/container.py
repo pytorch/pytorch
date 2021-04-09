@@ -250,9 +250,7 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
-    def forward(self):
-        raise NotImplementedError()
-
+    # fallback on nn.Module's _forward_unimplemented()
 
 class ModuleDict(Module):
     r"""Holds submodules in a dictionary.
@@ -393,8 +391,7 @@ class ModuleDict(Module):
                 # that's too cumbersome to type correctly with overloads, so we add an ignore here
                 self[m[0]] = m[1]  # type: ignore[assignment]
 
-    def forward(self):
-        raise NotImplementedError()
+    # fallback on nn.Module's _forward_unimplemented()
 
 
 class ParameterList(Module):
