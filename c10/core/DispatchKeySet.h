@@ -211,7 +211,6 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 constexpr DispatchKeySet default_included_set = DispatchKeySet({
     DispatchKey::BackendSelect,
     DispatchKey::InplaceOrView,
-    DispatchKey::AlwaysCall,
 });
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_InplaceOrView =
