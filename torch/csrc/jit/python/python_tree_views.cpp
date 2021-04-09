@@ -198,8 +198,8 @@ void initTreeViewBindings(PyObject* module) {
           "method_names",
           [](const ClassDef& classDef) {
             std::vector<std::string> ret;
-            for (const auto& m : classDef.body()) {
-              ret.push_back(Def(m.get()).name().name());
+            for (const auto& method : classDef.body()) {
+              ret.push_back(Def(method.get()).name().name());
             }
             return ret;
           })

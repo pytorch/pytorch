@@ -2247,9 +2247,6 @@ struct TORCH_API ClassType : public NamedType {
   // Never fill this without using the appropriate provideNewClassAttribute method
   std::vector<TypePtr> attributeTypes_;
 
-  // For error reporting accesses to class level attributes.
-  std::vector<std::string> unresolved_class_attributes_;
-
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
   std::vector<torch::jit::Function*> staticmethods_;
@@ -2265,6 +2262,9 @@ struct TORCH_API ClassType : public NamedType {
 
   // Doc string of class.
   std::string doc_string_ = "";
+
+  // For error reporting accesses to class level attributes.
+  std::vector<std::string> unresolved_class_attributes_;
 };
 
 struct InterfaceType;
