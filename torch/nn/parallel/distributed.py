@@ -419,7 +419,7 @@ class DistributedDataParallel(Module):
                     "but got device_ids {}, output_device {}, and module parameters {}.".format(
                         device_ids,
                         output_device,
-                        {p.device for p in module.parameters()}
+                        {p.device for p in module.parameters()},
                     )
                 )
 
