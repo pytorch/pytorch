@@ -771,6 +771,20 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
   }
 }
 
+// Weak reference to tensor, used to test a tensor isn't leaked
+class WeakTensorRef {
+  c10::weak_intrusive_ptr<c10::TensorImpl> weakref_;
+
+public:
+  WeakTensorRef(const at::Tensor& t):
+    weakref_(t.getIntrusivePtr()) {
+  }
+
+  bool expired() {
+    return weakref_.expired();
+  }
+};
+
 extern "C"
 #ifdef _WIN32
 __declspec(dllexport)
@@ -969,6 +983,12 @@ Call this whenever a new thread is created in order to propagate values from
       #endif
     }
   );
+
+  py::class_<WeakTensorRef>(py_module, "_WeakTensorRef")
+    .def(py::init([](py::object tensor) {
+      return WeakTensorRef(THPVariable_Unpack(tensor.ptr()));
+    }))
+    .def("expired", &WeakTensorRef::expired);
 
 #ifdef USE_CUDA
   PyObject *has_cuda = Py_True;
