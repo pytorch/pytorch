@@ -299,9 +299,6 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     // FIXME: the k/v inplace sort along slice only works for size <=
     // 2048 at the moment
     // Workaround:
-    // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
-    // and so for the double word types,
-    // we get "too many resources requested for launch" in the 2048 case
 #if defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_LONG)
     int maxSliceSize = 1024;
 #else
@@ -357,10 +354,10 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
 
 std::tuple<Tensor, Tensor> topk_cuda(const Tensor& self,
           int64_t k, int64_t dim, bool largest, bool sorted) {
-  //TORCH_CHECK(false);
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  ::topk_out_cuda(self, k, dim, largest, sorted, values, indices);
+  // be careful about argument order
+  at::topk_out(values, indices, self, k, dim, largest, sorted);
   return std::make_tuple(values, indices);
 }
 
