@@ -14,11 +14,9 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCGeneral.h>
-#include <THC/THCTensorSort.cuh>
+#include <THC/THCTensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCThrustAllocator.cuh>
-#include <thrust/execution_policy.h>
-#include <thrust/sort.h>
+#include <ATen/cuda/cub.cuh>
 #include <THC/THCAtomics.cuh>
 
 
@@ -184,6 +182,15 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
 
 
 namespace {
+
+int64_t largestIndex(const Tensor &self) {
+  int64_t result = 0;
+  for (int64_t i = 0; i < self.dim(); i++) {
+    result += (self.sizes()[i] - 1) * self.strides()[i];
+  }
+  return result;
+}
+
 void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
@@ -200,27 +207,18 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
       linearIndex = linearIndex.reshape(-1);
       auto sorted_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       auto orig_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      using device_ptr = thrust::device_ptr<int64_t>;
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
       linearIndex.divide_(sliceSize, "trunc");
+
       {
-      sorted_indices.copy_(linearIndex);
-      auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-      auto policy = thrust::cuda::par(allocator).on(stream);
-
-      // Fill sortedOrigIndices with sequential indices
-      const auto count_iter = thrust::counting_iterator<int64_t>(0);
-      auto orig_data = device_ptr(orig_indices.data_ptr<int64_t>());
-      thrust::copy(policy, count_iter, count_iter + num_indices, orig_data);
-
-      // Sort the inputs into sorted with the corresponding indices; we
-      // don't need a stable or multidimensional sort, so just use Thrust
-      // directly
-      // Sort; a stable sort is not required
-      // NB - not passing comparator causes thrust to use radix sort, and it hurts perf A LOT, at least for medium (few K) sized indices
-      auto sorted_data = device_ptr(sorted_indices.data_ptr<int64_t>());
-      thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
+      // Sort the inputs into sorted with the corresponding indices
+      auto range = at::arange(num_indices, linearIndex.options());
+      int64_t nbits = std::min<int64_t>(1, std::ceil(std::log2(largestIndex(self) / sliceSize)));
+      cuda::cub::sort_pairs(
+        linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
+        range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
+        num_indices, false, 0, nbits);
       }
       TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
       const int UNROLL = 4;
