@@ -317,7 +317,7 @@
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
 
-- name: coalesce(Tensor self) -> Tensor
+- name: _coalesce(Tensor self) -> Tensor
   self: grad
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
@@ -1096,6 +1096,9 @@
   self: symeig_backward(grads, self, /*eigenvectors=*/true, /*upper=*/true, eigenvalues, eigenvectors)
 
 - name: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
+  self: non_differentiable
+
+- name: linalg_eigvals(Tensor self) -> Tensor
   self: non_differentiable
 
 - name: t(Tensor(a) self) -> Tensor(a)

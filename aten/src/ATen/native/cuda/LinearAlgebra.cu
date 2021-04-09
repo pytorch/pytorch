@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/SharedReduceOps.h>
@@ -98,7 +99,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       mat2_sizes[0]);
 
   if (&result != &self) {
-    at::native::resize_as_(result, self_);
+    at::native::resize_output(result, self_.sizes());
     if (beta.toComplexDouble() != 0.0) {
       at::native::copy_(result, self_);
     }

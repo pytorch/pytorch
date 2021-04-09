@@ -79,6 +79,7 @@ allow_list = [
     ("aten::mkldnn_linear", datetime.date(2021, 3, 2)),
     ("aten::_mode*", datetime.date(2021, 5, 2)),
     ("aten::linalg_multi_dot", datetime.date(2021, 3, 25)),
+    ("aten::coalesce", datetime.date(2021, 4, 15)),
     ("aten::empty_meta", datetime.date(2021, 4, 1)),
     ("aten::div", datetime.date(2021, 4, 28)),
     ("aten::divide", datetime.date(2021, 4, 28)),
