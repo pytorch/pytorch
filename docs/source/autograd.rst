@@ -220,7 +220,7 @@ and nvprof based (registers both CPU and GPU activity) using
     profiler.profile.key_averages
     profiler.profile.self_cpu_time_total
     profiler.profile.total_average
- 
+
 .. autoclass:: torch.autograd.profiler.emit_nvtx
 
 
