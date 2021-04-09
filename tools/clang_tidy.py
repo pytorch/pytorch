@@ -31,6 +31,8 @@ try:
 except ImportError:
     from pipes import quote
 
+from typing import Any, Dict, Iterable, List, Set, Union
+
 Patterns = collections.namedtuple("Patterns", "positive, negative")
 
 
@@ -41,27 +43,27 @@ DEFAULT_FILE_PATTERN = re.compile(r".*\.c(c|pp)?")
 
 # @@ -start,count +start,count @@
 CHUNK_PATTERN = r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@"
+CLANG_WARNING_PATTERN = re.compile(r"([^:]+):(\d+):\d+:\s+warning:.*\[([^\]]+)\]")
 
 
 # Set from command line arguments in main().
 VERBOSE = False
 
 
-def run_shell_command(arguments):
+def run_shell_command(arguments: List[str]) -> str:
     """Executes a shell command."""
     if VERBOSE:
         print(" ".join(arguments))
     try:
         output = subprocess.check_output(arguments).decode().strip()
-    except subprocess.CalledProcessError:
-        _, error, _ = sys.exc_info()
+    except subprocess.CalledProcessError as error:
         error_output = error.output.decode().strip()
-        raise RuntimeError("Error executing {}: {}".format(" ".join(arguments), error_output))
+        raise RuntimeError(f"Error executing {' '.join(arguments)}: {error_output}")
 
     return output
 
 
-def split_negative_from_positive_patterns(patterns):
+def split_negative_from_positive_patterns(patterns: Iterable[str]) -> Patterns:
     """Separates negative patterns (that start with a dash) from positive patterns"""
     positive, negative = [], []
     for pattern in patterns:
@@ -73,15 +75,15 @@ def split_negative_from_positive_patterns(patterns):
     return Patterns(positive, negative)
 
 
-def get_file_patterns(globs, regexes):
+def get_file_patterns(globs: Iterable[str], regexes: Iterable[str]) -> Patterns:
     """Returns a list of compiled regex objects from globs and regex pattern strings."""
     # fnmatch.translate converts a glob into a regular expression.
     # https://docs.python.org/2/library/fnmatch.html#fnmatch.translate
     glob = split_negative_from_positive_patterns(globs)
-    regexes = split_negative_from_positive_patterns(regexes)
+    regexes_ = split_negative_from_positive_patterns(regexes)
 
-    positive_regexes = regexes.positive + [fnmatch.translate(g) for g in glob.positive]
-    negative_regexes = regexes.negative + [fnmatch.translate(g) for g in glob.negative]
+    positive_regexes = regexes_.positive + [fnmatch.translate(g) for g in glob.positive]
+    negative_regexes = regexes_.negative + [fnmatch.translate(g) for g in glob.negative]
 
     positive_patterns = [re.compile(regex) for regex in positive_regexes] or [
         DEFAULT_FILE_PATTERN
@@ -91,7 +93,7 @@ def get_file_patterns(globs, regexes):
     return Patterns(positive_patterns, negative_patterns)
 
 
-def filter_files(files, file_patterns):
+def filter_files(files: Iterable[str], file_patterns: Patterns) -> Iterable[str]:
     """Returns all files that match any of the patterns."""
     if VERBOSE:
         print("Filtering with these file patterns: {}".format(file_patterns))
@@ -104,7 +106,7 @@ def filter_files(files, file_patterns):
             print("{} omitted due to file filters".format(file))
 
 
-def get_changed_files(revision, paths):
+def get_changed_files(revision: str, paths: List[str]) -> List[str]:
     """Runs git diff to get the paths of all changed files."""
     # --diff-filter AMU gets us files that are (A)dded, (M)odified or (U)nmerged (in the working copy).
     # --name-only makes git diff return only the file paths, without any of the source changes.
@@ -113,13 +115,13 @@ def get_changed_files(revision, paths):
     return output.split("\n")
 
 
-def get_all_files(paths):
+def get_all_files(paths: List[str]) -> List[str]:
     """Returns all files that are tracked by git in the given paths."""
     output = run_shell_command(["git", "ls-files"] + paths)
     return output.split("\n")
 
 
-def get_changed_lines(revision, filename):
+def get_changed_lines(revision: str, filename: str) -> Dict[str, Union[str, List[List[int]]]]:
     """Runs git diff to get the line ranges of all file changes."""
     command = shlex.split("git diff-index --unified=0") + [revision, filename]
     output = run_shell_command(command)
@@ -148,22 +150,18 @@ build {i}: do_cmd
 """
 
 
-def run_shell_commands_in_parallel(commands):
+def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
     """runs all the commands in parallel with ninja, commands is a List[List[str]]"""
     build_entries = [build_template.format(i=i, cmd=' '.join([quote(s) for s in command]))
                      for i, command in enumerate(commands)]
 
     file_contents = ninja_template.format(build_rules='\n'.join(build_entries)).encode()
-    f = tempfile.NamedTemporaryFile(delete=False)
-    try:
+    with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(file_contents)
-        f.close()
         return run_shell_command(['ninja', '-f', f.name])
-    finally:
-        os.unlink(f.name)
 
 
-def run_clang_tidy(options, line_filters, files):
+def run_clang_tidy(options: Any, line_filters: Any, files: Iterable[str]) -> str:
     """Executes the actual clang-tidy command in the shell."""
     command = [options.clang_tidy_exe, "-p", options.compile_commands_dir]
     if not options.config_file and os.path.exists(".clang-tidy"):
@@ -197,7 +195,43 @@ def run_clang_tidy(options, line_filters, files):
     return output
 
 
-def parse_options():
+def extract_warnings(output: str, base_dir: str = ".") -> Dict[str, Dict[int, Set[str]]]:
+    rc: Dict[str, Dict[int, Set[str]]] = {}
+    for line in output.split("\n"):
+        p = CLANG_WARNING_PATTERN.match(line)
+        if p is None:
+            continue
+        if os.path.isabs(p.group(1)):
+            path = os.path.abspath(p.group(1))
+        else:
+            path = os.path.abspath(os.path.join(base_dir, p.group(1)))
+        line_no = int(p.group(2))
+        warnings = set(p.group(3).split(","))
+        if path not in rc:
+            rc[path] = {}
+        if line_no not in rc[path]:
+            rc[path][line_no] = set()
+        rc[path][line_no].update(warnings)
+    return rc
+
+
+def apply_nolint(fname: str, warnings: Dict[int, Set[str]]) -> None:
+    with open(fname, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    line_offset = -1  # As in .cpp files lines are numbered starting from 1
+    for line_no in sorted(warnings.keys()):
+        nolint_diagnostics = ','.join(warnings[line_no])
+        line_no += line_offset
+        indent = ' ' * (len(lines[line_no]) - len(lines[line_no].lstrip(' ')))
+        lines.insert(line_no, f'{indent}// NOLINTNEXTLINE({nolint_diagnostics})\n')
+        line_offset += 1
+
+    with open(fname, mode="w") as f:
+        f.write("".join(lines))
+
+
+def parse_options() -> Any:
     """Parses the command line options."""
     parser = argparse.ArgumentParser(description="Run Clang-Tidy (on your Git changes)")
     parser.add_argument(
@@ -262,13 +296,15 @@ def parse_options():
         action="store_true",
         help="Run clang tidy in parallel per-file (requires ninja to be installed).",
     )
+    parser.add_argument("-s", "--suppress-diagnostics", action="store_true",
+                        help="Add NOLINT to suppress clang-tidy violations")
     parser.add_argument(
         "extra_args", nargs="*", help="Extra arguments to forward to clang-tidy"
     )
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     options = parse_options()
 
     # This flag is pervasive enough to set it globally. It makes the code
@@ -294,10 +330,14 @@ def main():
     if options.diff:
         line_filters = [get_changed_lines(options.diff, f) for f in files]
 
-    pwd = os.getcwd() + "/"
     clang_tidy_output = run_clang_tidy(options, line_filters, files)
-    formatted_output = []
+    if options.suppress_diagnostics:
+        warnings = extract_warnings(clang_tidy_output, base_dir=options.compile_commands_dir)
+        for fname in warnings.keys():
+            print(f"Applying fixes to {fname}")
+            apply_nolint(fname, warnings[fname])
 
+    pwd = os.getcwd() + "/"
     for line in clang_tidy_output.splitlines():
         if line.startswith(pwd):
             print(line[len(pwd):])

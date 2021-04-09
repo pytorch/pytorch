@@ -371,15 +371,6 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 
     Tensor indices1D = flatten_indices(indices, sparse.sizes(), 0);
 
-    // FIXME: at some point we can wrap the scale into indexAdd
-    // NB: Purposely not inplace!
-    AT_DISPATCH_ALL_TYPES_AND2(
-      at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
-        if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
-          values = values.mul(value);
-        }
-      });
-
     int64_t view_rows = 1;
     int64_t view_columns = 1;
     for (int i = 0; i < nDimI; i++) {
@@ -391,7 +382,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 
     Tensor r_view = r.view({view_rows, view_columns});
     values = values.reshape({nnz, view_columns});
-    r_view.index_add_(0, indices1D, values);
+    r_view.index_add_(0, indices1D, values, value);
   }
   THCudaCheck(cudaGetLastError());
 
@@ -861,7 +852,7 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
 
   // First need to coalesce to get all of the first dimension indices
   // in order since we'll be sending each matrix into the MM operation
-  SparseTensor self_coalesced = coalesce_sparse_cuda(self);
+  SparseTensor self_coalesced = self.coalesce();
 
   int64_t nnz =        self_coalesced._nnz();
   Tensor indices = self_coalesced._indices();
