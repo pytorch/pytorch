@@ -28,7 +28,16 @@ if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
         TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
     )
 IS_WINDOWS = sys.platform == "win32"
-IS_LINUX = sys.platform == "linux"
+
+
+def check_breakpad():
+    try:
+        torch._C._get_minidump_directory()
+        return True
+    except RuntimeError as e:
+        return "Minidump handler is uninintialized, make sure to call" in str(e)
+
+HAS_BREAKPAD = check_breakpad()
 
 
 def remove_build_path():
@@ -868,7 +877,7 @@ class TestCppExtensionJIT(common.TestCase):
 
         gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
 
-    @unittest.skipIf(not IS_LINUX, "Crash handling only implemented on Linux")
+    @unittest.skipIf(not HAS_BREAKPAD, "Breakpad library must be present on system for crash handler")
     @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
     def test_crash_handler(self):
         def run_test(stderr_file, destination):
