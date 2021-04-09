@@ -27,7 +27,9 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Used so that only cuda specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
-  export PYTORCH_TESTING_ONLY_FOR="cuda"
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
+elif [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="xla"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then

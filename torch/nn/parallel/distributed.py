@@ -560,6 +560,7 @@ class DistributedDataParallel(Module):
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
+        # Verify model equivalence.
         self._ddp_init_helper(parameters, expect_sparse_gradient)
 
     def _build_params_for_reducer(self):
