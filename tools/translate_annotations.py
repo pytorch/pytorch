@@ -20,7 +20,7 @@ class Hunk(TypedDict):
 
 
 class Diff(TypedDict):
-    old_filename: str
+    old_filename: Optional[str]
     hunks: List[Hunk]
 
 
@@ -31,12 +31,11 @@ hunk_pattern = r'^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@'
 
 def parse_diff(diff: str) -> Diff:
     name = None
+    name_found = False
     hunks: List[Hunk] = []
     for line in diff.splitlines():
-        name_match = re.match(r'^--- a/(.*)$', line)
         hunk_match = re.match(hunk_pattern, line)
-        if name:
-            assert not name_match
+        if name_found:
             if hunk_match:
                 old_start, old_count, new_start, new_count = hunk_match.groups()
                 hunks.append({
@@ -47,9 +46,10 @@ def parse_diff(diff: str) -> Diff:
                 })
         else:
             assert not hunk_match
+            name_match = re.match(r'^--- (?:(?:/dev/null)|(?:a/(.*)))$', line)
             if name_match:
+                name_found = True
                 name, = name_match.groups()
-    assert name
     return {
         'old_filename': name,
         'hunks': hunks,
@@ -142,14 +142,18 @@ def translate_all(
             encoding='utf-8',
         )
         diff = parse_diff(raw_diff) if raw_diff.strip() else None
-        for annotation in annotations:
-            line_number: Optional[int] = annotation['lineNumber']
-            if diff:
-                annotation['filename'] = diff['old_filename']
-                line_number = translate(diff, cast(int, line_number))
-            if line_number:
-                annotation['lineNumber'] = line_number
-                ann_list.append(annotation)
+        # if there is a diff but it doesn't list an old filename, that
+        # means the file is absent in the commit we're targeting, so we
+        # skip it
+        if not (diff and not diff['old_filename']):
+            for annotation in annotations:
+                line_number: Optional[int] = annotation['lineNumber']
+                if diff:
+                    annotation['filename'] = cast(str, diff['old_filename'])
+                    line_number = translate(diff, cast(int, line_number))
+                if line_number:
+                    annotation['lineNumber'] = line_number
+                    ann_list.append(annotation)
     return ann_list
 
 

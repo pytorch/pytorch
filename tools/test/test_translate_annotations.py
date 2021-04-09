@@ -45,11 +45,50 @@ index 27a6dad..6fae323 100644
 -even more
 '''.lstrip()
 
+new_file_diff = '''
+diff --git a/torch/csrc/jit/tensorexpr/operators/conv2d.h b/torch/csrc/jit/tensorexpr/operators/conv2d.h
+new file mode 100644
+index 0000000000..a81eeae346
+--- /dev/null
++++ b/torch/csrc/jit/tensorexpr/operators/conv2d.h
+@@ -0,0 +1,19 @@
++#pragma once
++
++#include <torch/csrc/jit/tensorexpr/tensor.h>
++
++namespace torch {
++namespace jit {
++namespace tensorexpr {
++
++TORCH_API Tensor* conv2d_depthwise(
++    BufHandle input,
++    BufHandle weight,
++    BufHandle bias,
++    int stride,
++    int pad,
++    int groups);
++
++} // namespace tensorexpr
++} // namespace jit
++} // namespace torch
+'''.lstrip()
+
+# fun fact, this example fools VS Code's diff syntax highlighter
+haskell_diff = '''
+diff --git a/hello.hs b/hello.hs
+index ffb8d4ad14..0872ac9db6 100644
+--- a/hello.hs
++++ b/hello.hs
+@@ -1 +1 @@
+--- a/hello/world/example
++main = putStrLn "Hello, world!"
+'''.lstrip()
+
 
 class TestTranslateAnnotations(unittest.TestCase):
     maxDiff = None
 
-    def test_parse_diff(self) -> None:
+    def test_parse_diff_lao_tzu(self) -> None:
         self.assertEqual(
             parse_diff(lao_tzu_diff),
             {
@@ -72,6 +111,38 @@ class TestTranslateAnnotations(unittest.TestCase):
                         'old_count': 0,
                         'new_start': 11,
                         'new_count': 3,
+                    },
+                ],
+            },
+        )
+
+    def test_parse_diff_new_file(self) -> None:
+        self.assertEqual(
+            parse_diff(new_file_diff),
+            {
+                'old_filename': None,
+                'hunks': [
+                    {
+                        'old_start': 0,
+                        'old_count': 0,
+                        'new_start': 1,
+                        'new_count': 19,
+                    },
+                ],
+            },
+        )
+
+    def test_parse_diff_haskell(self) -> None:
+        self.assertEqual(
+            parse_diff(haskell_diff),
+            {
+                'old_filename': 'hello.hs',
+                'hunks': [
+                    {
+                        'old_start': 1,
+                        'old_count': 1,
+                        'new_start': 1,
+                        'new_count': 1,
                     },
                 ],
             },
