@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -108,7 +109,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
     3. ``job_id == 1234`` is used as the prefix in etcd (this allows one to
        share a common etcd server for multiple jobs so long as the
        ``job_ids`` are guaranteed to be unique). Note that the job id can be
-       any string (e.g. does not need to be a number) as long as it is
+       any string (e.g. does not need to be a number) as long as it is
        unique.
     4. ``min_workers=1`` and ``max_workers=3`` specifies a range for
        membership size - torchelastic starts running the job as long as the
