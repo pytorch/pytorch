@@ -476,24 +476,23 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
+    def split_if_not_empty(x):
+        return x.split(",") if len(x) != 0 else []
+
     # Derive defaults from environment variables if available, default is still none
     # Usage:
     # export PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda,cpu
     # export PYTORCH_TESTING_DEVICE_EXCEPT_FOR=xla
     if only_for is None:
-        only_for = os.getenv("PYTORCH_TESTING_DEVICE_ONLY_FOR", None)
-        if only_for is not None:
-            only_for = only_for.split(',')
+        only_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_ONLY_FOR", ''))
 
     if except_for is None:
-        except_for = os.getenv("PYTORCH_TESTING_DEVICE_EXCEPT_FOR", None)
-        if except_for is not None:
-            except_for = except_for.split(',')
+        except_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_EXCEPT_FOR", ''))
 
     # Creates device-specific test cases
     for base in device_type_test_bases:
         # Skips bases listed in except_for
-        if except_for is not None and only_for is not None:
+        if except_for != [] and only_for != []:
             assert base.device_type not in except_for or base.device_type not in only_for,\
                 "same device cannot appear in except_for and only_for"
         if except_for and base.device_type in except_for:
