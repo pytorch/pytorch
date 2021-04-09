@@ -14,7 +14,9 @@ coverage.xml
 .gradle
 .hypothesis
 .mypy_cache
+/.shellcheck_generated/
 **/.pytorch-test-times
+**/.pytorch-slow-tests
 */*.pyc
 */*.so*
 */**/__pycache__

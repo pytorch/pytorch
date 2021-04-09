@@ -55,6 +55,7 @@ std::shared_ptr<Graph> getSubgraph(Node* n);
 
 TORCH_API std::string generateNameForGraph(
     const std::shared_ptr<Graph>& graph,
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     size_t maxlen = 40,
     const std::string& prefix = "fused");
 
