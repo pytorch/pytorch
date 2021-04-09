@@ -346,6 +346,11 @@ T immediateAs(const Expr* e) {
 }
 
 template <typename T>
+T immediateAs(ExprHandle e) {
+  return immediateAs<T>(e.node());
+}
+
+template <typename T>
 bool immediateEquals(const Expr* e, T val) {
 #define TYPE_CASE(Type, Name)                                     \
   if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \

@@ -393,6 +393,10 @@ ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
   return Buf::make("", dims, dtype);
 }
 
+std::vector<ExprHandle> BufHandle::dims() const {
+  return ExprVectorToExprHandleVector(node()->dims());
+}
+
 ExprHandle expr_to_vec(ExprHandle v, int lanes) {
   if (lanes == 1) {
     return v;
