@@ -2264,6 +2264,9 @@ class TestFunctionalTracing(JitTestCase):
     IGNORE_FUNCS = ('has_torch_function', 'has_torch_function_unary',
                     'has_torch_function_variadic', 'handle_torch_function',
                     'boolean_dispatch')
+    TO_PATCH = {'has_torch_function': None,
+                'has_torch_function_unary': None,
+                'has_torch_function_variadic': None}
 
     BUILT_IN_FUNC = (AssertionError, '')
     PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
@@ -2406,17 +2409,8 @@ class TestFunctionalTracing(JitTestCase):
         "upsample_nearest",
     )
 
-    def _test_nn_functional(self, func_name, fn):
-        if func_name in self.UNTRACEABLE_FUNCTIONALS:
-            exc, err = self.UNTRACEABLE_FUNCTIONALS[func_name]
-            with self.assertRaisesRegex(exc, err):
-                symbolic_trace(fn)
-            # Remove from UNTRACEBLE
-            del self.UNTRACEABLE_FUNCTIONALS[func_name]
-        else:
-            symbolic_trace(fn)
-
-    def _get_functional(self):
+    @classmethod
+    def _get_functional(cls):
         functional_list = []
         for f in dir(torch.nn.functional):
             if not f.islower():
@@ -2425,7 +2419,7 @@ class TestFunctionalTracing(JitTestCase):
             if f.startswith('_'):
                 continue
             # Ignore supporting functions
-            if f in self.IGNORE_FUNCS:
+            if f in cls.IGNORE_FUNCS:
                 continue
             fn = getattr(torch.nn.functional, f)
             # Ignore non-callable object like modules
@@ -2435,7 +2429,7 @@ class TestFunctionalTracing(JitTestCase):
             #  if not hasattr(fn, '__module__') or fn.__module__ != 'torch.nn.functional':
             #      continue
             # Ignore functions without any Tensor argument
-            if f not in self.FUNCTIONALS_WITHOUT_ANNOTATION:
+            if f not in cls.FUNCTIONALS_WITHOUT_ANNOTATION:
                 try:
                     sig = inspect.signature(fn)
                     has_tensor_arg = False
@@ -2450,25 +2444,44 @@ class TestFunctionalTracing(JitTestCase):
             functional_list.append((f, fn))
         return functional_list
 
-    def test_nn_functional(self):
+    @classmethod
+    def generate_test_func(cls, func_name, fn):
+
+        def functional_test(self):
+            if func_name in self.UNTRACEABLE_FUNCTIONALS:
+                exc, err = self.UNTRACEABLE_FUNCTIONALS[func_name]
+                with self.assertRaisesRegex(exc, err):
+                    symbolic_trace(fn)
+                # Remove from UNTRACEBLE
+                del self.UNTRACEABLE_FUNCTIONALS[func_name]
+            else:
+                symbolic_trace(fn)
+        return functional_test
+
+    @classmethod
+    def generate_tests(cls):
+        functional_list = cls._get_functional()
+        for func_name, fn in functional_list:
+            test_name = 'test_nn_functional_' + func_name
+            functional_test = cls.generate_test_func(func_name, fn)
+            setattr(cls, test_name, functional_test)
+
+    @classmethod
+    def setUpClass(cls):
 
         def no(*args, **kwargs):
             return False
 
-        to_patch = ('has_torch_function', 'has_torch_function_unary', 'has_torch_function_variadic')
-        for name in to_patch:
-            locals()[name] = getattr(torch.nn.functional, name)
+        for name in cls.TO_PATCH.keys():
+            cls.TO_PATCH[name] = getattr(torch.nn.functional, name)
             setattr(torch.nn.functional, name, no)
 
-        functional_list = self._get_functional()
-        for func_name, fn in functional_list:
-            self._test_nn_functional(func_name, fn)
+    @classmethod
+    def tearDownClass(cls):
+        for name in cls.TO_PATCH.keys():
+            setattr(torch.nn.functional, name, cls.TO_PATCH[name])
 
-        # Check if all UNTRACEABLE_FUNCTIONALS are covered
-        self.assertTrue(len(self.UNTRACEABLE_FUNCTIONALS) == 0)
-
-        for name in to_patch:
-            setattr(torch.nn.functional, name, locals()[name])
+TestFunctionalTracing.generate_tests()
 
 
 instantiate_device_type_tests(TestOperatorSignatures, globals())
