@@ -14,8 +14,8 @@ class DimArg {
  public:
   // Intentionally leave out explicit to allow implicit conversions.
   DimArg(const ExprHandle& dim) : dim_(dim) {}
-  DimArg(const ExprHandle& dim, const std::string& name_hint)
-      : dim_(dim), name_hint_(name_hint) {}
+  DimArg(const ExprHandle& dim, std::string name_hint)
+      : dim_(dim), name_hint_(std::move(name_hint)) {}
   const ExprHandle& dim() const {
     return dim_;
   }

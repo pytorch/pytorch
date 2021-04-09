@@ -7,6 +7,7 @@
 #include <ATen/TracerMode.h>
 #include <ATen/RedispatchFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 using namespace at;
@@ -18,7 +19,7 @@ std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::
   std::vector<DeprecatedTypeProperties*> res;
   res.reserve(backends.size());
   for (auto p : backends) {
-    for (int64_t s = 0; s < static_cast<int64_t>(ScalarType::NumOptions); s++) {
+    for(const auto s : c10::irange(static_cast<int64_t>(ScalarType::NumOptions))) {
       auto& type = getDeprecatedTypeProperties(static_cast<Backend>(p), static_cast<ScalarType>(s));
       res.emplace_back(&type);
     }

@@ -38,7 +38,15 @@ def bundle_jpeg_image(img_tensor, quality):
     obj = torch.utils.bundled_inputs.InflatableArg(enc_img_tensor, "torch.ops.fb.decode_bundled_image({})")
     return obj
 
-class TestBundledInputs(TestCase):
+def get_tensor_from_raw_BGR(im) -> torch.Tensor:
+    raw_data = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+    raw_data = torch.from_numpy(raw_data).float()
+    raw_data = raw_data.permute(2, 0, 1)
+    raw_data = torch.div(raw_data, 255).unsqueeze(0)
+    return raw_data
+
+
+class TestBundledImages(TestCase):
     def test_single_tensors(self):
         class SingleTensorModel(torch.nn.Module):
             def forward(self, arg):
@@ -52,12 +60,20 @@ class TestBundledInputs(TestCase):
         loaded = save_and_load(sm)
         inflated = loaded.get_all_bundled_inputs()
         decoded_data = inflated[0][0]
+
         # raw image
-        raw_data = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-        raw_data = torch.from_numpy(raw_data).float()
-        raw_data = raw_data.permute(2, 0, 1)
-        raw_data = torch.div(raw_data, 255).unsqueeze(0)
+        raw_data = get_tensor_from_raw_BGR(im)
+
         self.assertEqual(len(inflated), 1)
         self.assertEqual(len(inflated[0]), 1)
         self.assertEqual(raw_data.shape, decoded_data.shape)
         self.assertTrue(torch.allclose(raw_data, decoded_data, atol=0.1, rtol=1e-01))
+
+        # Check if fb::jpeg_decode_to_NCHW works as expected
+        with open("caffe2/test/test_img/p1.jpg", "rb") as fp:
+            weight = torch.full((3,), 1.0 / 255.0).diag()
+            bias = torch.zeros(3)
+            byte_tensor = torch.tensor(list(fp.read())).byte()
+            im2_tensor = torch.ops.fb.jpeg_decode_to_NCHW(byte_tensor, weight, bias)
+            self.assertEqual(raw_data.shape, im2_tensor.shape)
+            self.assertTrue(torch.allclose(raw_data, im2_tensor, atol=0.1, rtol=1e-01))
