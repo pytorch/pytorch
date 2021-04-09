@@ -3491,16 +3491,12 @@ struct to_ir {
     if (named_values[0].type()->kind() == TupleType::Kind &&
         named_values[1].type()->kind() == TupleType::Kind &&
         kind == aten::add) {
-      auto first_tuple = createTupleUnpack(named_values[0].value(*graph));
-      auto second_tuple = createTupleUnpack(named_values[1].value(*graph));
-      std::vector<Value*> tuple_values;
-      for (auto i = 0; i < first_tuple.size(); i++) {
-        tuple_values.push_back(first_tuple.at(i));
-      }
-      for (auto i = 0; i < second_tuple.size(); i++) {
-        tuple_values.push_back(second_tuple.at(i));
-      }
-      return graph->insertNode(graph->createTuple(tuple_values))->output();
+      auto first_tuple = createTupleUnpack(named_values[0].value(*graph)).vec();
+      auto second_tuple =
+          createTupleUnpack(named_values[1].value(*graph)).vec();
+      first_tuple.insert(
+          first_tuple.end(), second_tuple.begin(), second_tuple.end());
+      return graph->insertNode(graph->createTuple(first_tuple))->output();
     }
 
     return asSimple(
