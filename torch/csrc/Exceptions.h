@@ -126,6 +126,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPException_FatalError;
 
 // Throwing this exception means that the python error flags have been already
@@ -163,6 +164,7 @@ struct python_error : public std::exception {
     }
   }
 
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual const char* what() const noexcept override {
     return message.c_str();
   }
@@ -245,6 +247,7 @@ THP_API bool get_cpp_stacktraces_enabled();
 
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   PyTorchError(const std::string& msg_ = std::string()): msg(msg_) {}
   virtual PyObject* python_type() = 0;
   const char* what() const noexcept override {
@@ -291,6 +294,7 @@ struct ValueError : public PyTorchError {
 
 // Translates to Python NotImplementedError
 struct NotImplementedError : public PyTorchError {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   NotImplementedError() {}
   PyObject* python_type() override {
     return PyExc_NotImplementedError;
@@ -307,6 +311,7 @@ struct AttributeError : public PyTorchError {
 
 struct WarningMeta {
   WarningMeta(const c10::SourceLocation& _source_location,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::string& _msg,
       const bool _verbatim) :
       source_location_{_source_location},
