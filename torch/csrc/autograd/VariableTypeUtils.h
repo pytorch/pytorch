@@ -49,7 +49,7 @@ namespace torch { namespace autograd {
 inline void check_inplace(const Tensor& tensor, bool requires_grad) {
   if (requires_grad && GradMode::is_enabled()) {
     auto diff_view_meta = impl::get_view_autograd_meta(tensor);
-    if (diff_view_meta) {
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
       // This can throw or warn
       handle_view_on_rebase(diff_view_meta);
       if (tensor.requires_grad() && tensor._base().is_leaf()) {
@@ -145,7 +145,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
     // a significant difference when measuring instruction count for a single "t.view(-1)" call from c++.
     if (is_bw_differentiable) {
       auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
-      if (diff_view_meta) {
+      if (diff_view_meta && diff_view_meta->has_bw_view()) {
         const auto& base_bw_info = diff_view_meta->get_backward_view();
         creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
         return make_variable_differentiable_view(tensor, base_bw_info.chain(base, tensor, view_func),
@@ -166,7 +166,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
 
   if (is_bw_differentiable) {
     auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
-    if (diff_view_meta) {
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
       const auto& base_bw_info = diff_view_meta->get_backward_view();
       new_bw_info = base_bw_info.chain(base, tensor, view_func);
     } else {
@@ -190,7 +190,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
 
   if (is_fw_differentiable || is_bw_differentiable) {
     auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
-    if (diff_view_meta) {
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
       creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
     }
     return make_variable_differentiable_view(tensor, std::move(new_bw_info), std::move(new_fw_info),
@@ -208,7 +208,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
 
   if (is_bw_differentiable) {
     auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
-    if (diff_view_meta) {
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
       const auto& base_bw_info = diff_view_meta->get_backward_view();
       TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
                             "Functions that result multiple view must have a creation meta reflecting this behavior.");
