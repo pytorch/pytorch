@@ -972,16 +972,17 @@ if(USE_TBB)
 endif()
 
 
-find_library(BREAKPAD_LIB breakpad_client)
-find_path(BREAKPAD_INCLUDE_DIR breakpad)
-if(NOT BREAKPAD_LIB OR NOT BREAKPAD_INCLUDE_DIR)
-  message(STATUS "breakpad library not found")
-else()
-  target_link_libraries(torch_cpu PRIVATE ${BREAKPAD_LIB})
-  add_compile_definitions(ADD_BREAKPAD_SIGNAL_HANDLER)
-  target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
+if(NOT MSVC)
+  find_library(BREAKPAD_LIB breakpad_client)
+  find_path(BREAKPAD_INCLUDE_DIR breakpad)
+  if(NOT BREAKPAD_LIB OR NOT BREAKPAD_INCLUDE_DIR)
+    message(STATUS "breakpad library not found")
+  else()
+    target_link_libraries(torch_cpu PRIVATE ${BREAKPAD_LIB})
+    add_compile_definitions(ADD_BREAKPAD_SIGNAL_HANDLER)
+    target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
+  endif()
 endif()
-
 
   target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
