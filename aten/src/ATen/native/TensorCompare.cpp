@@ -317,7 +317,7 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
   dim = maybe_wrap_dim(dim, self.dim());
   if (self.numel() == 0) {
     zero_numel_tensor_resize(values, indices, self, dim, keepdim);
-    return std::forward_as_tuple(values, indices);
+    return std::tie(values, indices);
   }
   else if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
     AT_ASSERT(values.dim() == 0);
@@ -337,8 +337,8 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
 
 std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
   if (self.numel() == 0) {
-    Tensor max = at::empty(self.sizes(), self.options());
-    Tensor max_indices = at::empty(self.sizes(), self.options().dtype(kLong));
+    Tensor max = at::empty({0}, self.options());
+    Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
 
     return at::native::max_out(self, dim, keepdim, max, max_indices);
   }
@@ -372,7 +372,7 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
   dim = maybe_wrap_dim(dim, self.dim());
   if (self.numel() == 0) {
     zero_numel_tensor_resize(max, max_indices, self, dim, keepdim);
-    return std::forward_as_tuple(max, max_indices);
+    return std::tie(max, max_indices);
   }
   else if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
     // case where self.numel() == 1. The result does not need to be reshaped
@@ -399,8 +399,8 @@ std::tuple<Tensor&,Tensor&> max_out(const Tensor& self, int64_t dim, bool keepdi
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
   if (self.numel() == 0) {
-    Tensor min = at::empty(self.sizes(), self.options());
-    Tensor min_indices = at::empty(self.sizes(), self.options().dtype(kLong));
+    Tensor min = at::empty({0}, self.options());
+    Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
 
     return at::native::min_out(self, dim, keepdim, min, min_indices);
   }
@@ -466,7 +466,7 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
   dim = maybe_wrap_dim(dim, self.dim());
   if (self.numel() == 0) {
     zero_numel_tensor_resize(min, min_indices, self, dim, keepdim);
-    return std::forward_as_tuple(min, min_indices);
+    return std::tie(min, min_indices);
   }
   else if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {
     TORCH_CHECK(!self.is_complex(), "min does not support complex inputs.");

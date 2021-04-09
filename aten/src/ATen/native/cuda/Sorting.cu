@@ -278,15 +278,14 @@ void kthvalue_cuda_template(
   // Based on required index size, run the algorithm with the
   // appropriate index type
   if (self.numel() != 0) {
-    if (cuda::detail::canUse32BitIndexMath(self) &&
+    AT_DISPATCH_INDEX_TYPES(
+        cuda::detail::canUse32BitIndexMath(self) &&
         cuda::detail::canUse32BitIndexMath(values) &&
-        cuda::detail::canUse32BitIndexMath(indices)) {
-      run_launcher<scalar_t, uint32_t>(
-        values, indices, self, dim, KthValueLauncher(k));
-    } else {
-      run_launcher<scalar_t, uint64_t>(
-        values, indices, self, dim, KthValueLauncher(k));
-    }
+        cuda::detail::canUse32BitIndexMath(indices) ? ScalarType::Int : ScalarType::Long,
+        "kth_value_launcher", [&] {
+          run_launcher<scalar_t, index_t>(
+            values, indices, self, dim, KthValueLauncher(k));
+        });
   }
 
   if (!keepdim) {

@@ -11,21 +11,21 @@ DEFINE_DISPATCH(max_all_stub);
 DEFINE_DISPATCH(_aminmax_all_stub);
 
 Tensor min(const Tensor &self) {
-  TORCH_CHECK(self.numel() > 0, "Expected reduction dim to have non-zero numel.");
+  TORCH_CHECK(self.numel() > 0, "min(): Expected reduction dim to have non-zero numel.");
   Tensor result = at::empty({}, self.options());
   min_all_stub(self.device().type(), result, self.contiguous());
   return result;
 }
 
 Tensor max(const Tensor &self) {
-  TORCH_CHECK(self.numel() > 0, "Expected reduction dim to have non-zero numel.");
+  TORCH_CHECK(self.numel() > 0, "max(): Expected reduction dim to have non-zero numel.");
   Tensor result = at::empty({}, self.options());
   max_all_stub(self.device().type(), result, self.contiguous());
   return result;
 }
 
 std::tuple<Tensor, Tensor> _aminmax_all(const Tensor &self) {
-  TORCH_CHECK(self.numel() > 0, "Expected reduction dim to have non-zero numel.");
+  TORCH_CHECK(self.numel() > 0, "_aminmax_all(): Expected reduction dim to have non-zero numel.");
   Tensor min_result = at::empty({}, self.options());
   Tensor max_result = at::empty({}, self.options());
   _aminmax_all_stub(self.device().type(), min_result, max_result, self.contiguous());

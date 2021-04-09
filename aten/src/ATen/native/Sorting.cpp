@@ -404,7 +404,7 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
   // Clone the input tensor so we can partition it around the median value
   Tensor in = self.clone();
   Tensor out = at::empty({}, self.options());
-  int64_t size = self.numel();
+  const int64_t size = self.numel();
 
   AT_DISPATCH_ALL_TYPES(in.scalar_type(), "median_cpu", [&] {
     scalar_t* op = out.data_ptr<scalar_t>();

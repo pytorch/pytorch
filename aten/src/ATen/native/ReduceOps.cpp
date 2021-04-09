@@ -1113,9 +1113,10 @@ Tensor &any_out(const Tensor &self, int64_t dim, bool keepdim, Tensor &result) {
 }
 
 Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:",
+    self.scalar_type(), result.scalar_type());
   zero_numel_check_dims(self, dim);
 
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
   auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {
     min_values_stub(iter.device_type(), iter);

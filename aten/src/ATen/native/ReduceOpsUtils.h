@@ -257,16 +257,16 @@ static TensorIterator make_reduction(
   return make_reduction(name, result1, result2, self, dim, keepdim, dtype, dtype);
 }
 
-static void zero_numel_check_dims(const Tensor& self, int64_t dim) {
+static void zero_numel_check_dims(const Tensor& self, const int64_t dim) {
   if (self.ndimension() == 0) {
-    TORCH_CHECK_INDEX(dim == 0 || dim == -1, "Expected reduction dim -1 or 0 for scalar but got ", dim);
+    TORCH_CHECK_INDEX(dim == 0 || dim == -1, "zero_numel_check_dims(): Expected reduction dim -1 or 0 for scalar but got ", dim);
   }
   else {
-    TORCH_CHECK_INDEX(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
+    TORCH_CHECK_INDEX(self.size(dim) != 0, "zero_numel_check_dims(): Expected reduction dim ", dim, " to be non-zero.");
   }
 }
 
-static void zero_numel_check_dims(const Tensor& self, IntArrayRef dim) {
+static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim) {
   for (const int64_t d : dim) {
     zero_numel_check_dims(self, d);
   }
@@ -276,8 +276,8 @@ static void zero_numel_check_dims(const Tensor& self, IntArrayRef dim) {
 // dim and keepdim for returning tensors containing reduction results.
 // This function should be called when you are reducing a zero-dim tensor and want to
 // simply resize the output and return it.
-static void zero_numel_tensor_resize(const Tensor& result, const Tensor& result_indices, const Tensor& self, int64_t dim,
-                              bool keepdim) {
+static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
+                                     const Tensor& self, const int64_t dim, const bool keepdim) {
   zero_numel_check_dims(self, dim);
   std::vector<int64_t> sizes;
   if (keepdim) {
@@ -291,8 +291,8 @@ static void zero_numel_tensor_resize(const Tensor& result, const Tensor& result_
       }
     }
   }
-  result.resize_(sizes);
-  result_indices.resize_(sizes);
+  at::native::resize_output(result, sizes);
+  at::native::resize_output(result_indices, sizes);
 }
 
 }}  // at::native
