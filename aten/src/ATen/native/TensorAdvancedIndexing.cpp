@@ -738,7 +738,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   if (self.dim() > 0) {
     result_size[dim] = numel;
   }
-  result.resize_(result_size);
+  at::native::resize_output(result, result_size);
 
   auto index_contig = index.contiguous();
 
@@ -951,7 +951,7 @@ Tensor& gather_out_cpu_cuda(
     const Tensor& index,
     bool sparse_grad,
     Tensor& result) {
-  resize_output(result, index.sizes());
+  at::native::resize_output(result, index.sizes());
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_partial_overlap(result, index);
@@ -1153,7 +1153,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
 
   auto shape = _self.sizes();
   int64_t numel = _mask.sum().item().toLong();
-  result.resize_({numel});
+  at::native::resize_output(result, {numel});
   if (numel == 0) {
     return result;
   }

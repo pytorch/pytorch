@@ -2255,13 +2255,16 @@ class TestBinaryUfuncs(TestCase):
                                lambda: torch.add(m1, m2, alpha=1.0))
 
         # mismatched alpha, float / double tensor and complex alpha
+        msg = r"For non-complex input tensors, argument alpha must not be a complex number\."
         m1 = torch.tensor([3., 4.], device=device)
         m2 = torch.tensor([4., 3.], device=device)
-        self.assertRaises(RuntimeError, lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2)))
+        self.assertRaisesRegex(RuntimeError, msg,
+                               lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2)))
 
         m1 = torch.tensor([3., 4.], dtype=torch.double, device=device)
         m2 = torch.tensor([4., 3.], dtype=torch.double, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2)))
+        self.assertRaisesRegex(RuntimeError, msg,
+                               lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2)))
 
         # complex
         m1 = torch.tensor((4.0000 + 4.0000j), dtype=torch.complex64)

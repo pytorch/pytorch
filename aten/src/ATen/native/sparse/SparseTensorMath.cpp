@@ -224,6 +224,10 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, const Scalar& value) {
 // --------------------------------------------------------------------
 
 static SparseTensor& coalesce_(SparseTensor& tensor) {
+  if (tensor.is_coalesced()) {
+    return tensor;
+  }
+
   SparseTensor coalesced = tensor.coalesce();
   tensor._values().resize_as_(coalesced._values());
   tensor._indices().resize_as_(coalesced._indices());
