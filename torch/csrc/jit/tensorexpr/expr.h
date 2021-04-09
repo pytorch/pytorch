@@ -246,8 +246,19 @@ class TORCH_API BufHandle : public ExprHandle {
   const std::string& name_hint() const {
     return this->node()->name_hint();
   }
+
   bool empty() const {
     return (this->node() == nullptr);
+  }
+
+  size_t ndim() const {
+    return node()->ndim();
+  }
+
+  std::vector<ExprHandle> dims() const;
+
+  ExprHandle dim(size_t index) const {
+    return ExprHandle(node()->dim(index));
   }
 };
 
