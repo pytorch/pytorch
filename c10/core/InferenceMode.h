@@ -46,7 +46,9 @@ struct TORCH_API InferenceMode {
   //    }
   //    `k.add_(2)` still need to go through InplaceOrView kernel so that it's
   //    prepared for future autograd.
-  InferenceMode(bool enabled=true): prev_keyset(c10::impl::tls_local_dispatch_key_set()) {
+  InferenceMode(bool enabled=true): prev_mode(InferenceMode::is_enabled()),
+      prev_keyset(c10::impl::tls_local_dispatch_key_set()) {
+    this->set_enabled(enabled);
     DispatchKeySet included = enabled ? prev_keyset.included_.remove(c10::DispatchKey::InplaceOrView)
          : prev_keyset.included_.add(c10::DispatchKey::InplaceOrView);
     DispatchKeySet excluded = enabled ? (prev_keyset.excluded_ | c10::autograd_dispatch_keyset)
@@ -58,11 +60,14 @@ struct TORCH_API InferenceMode {
   }
 
   ~InferenceMode() {
+    this->set_enabled(prev_mode);
     c10::impl::_force_tls_local_dispatch_key_set(prev_keyset);
   }
   static bool is_enabled();
 
   private:
+    static void set_enabled(bool enabled);
+    bool prev_mode;
     c10::impl::LocalDispatchKeySet prev_keyset;
 };
 } // namespace c10

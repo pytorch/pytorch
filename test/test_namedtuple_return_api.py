@@ -15,7 +15,7 @@ all_operators_with_namedtuple_return = {
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
     '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
-    'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq',
+    'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig',
     'frexp'
 }
 
@@ -70,6 +70,7 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
             op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
+            op(operators=['linalg_eig'], input=(), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
             op(operators=['fake_quantize_per_tensor_affine_cachemask'],

@@ -22,8 +22,7 @@ from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qpa
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantizeBase) or
-            isinstance(module, torch.quantization.Logger))  # type: ignore
+            isinstance(module, torch.quantization.FakeQuantizeBase))
 
 def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
                               qconfig_parent=None, prefix=''):
