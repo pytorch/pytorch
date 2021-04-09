@@ -544,15 +544,16 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   TORCH_CHECK(chunks > 0,
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
-  int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
+  const auto dim_size = self.size(dim);
+  int64_t split_size = (dim_size + chunks - 1) / chunks;
 
   // We need to call split_with_sizes in the case where split_size and dimension size are 0, because
   // a call to split would discard the number of chunks (because we can have an arbitrary number of
   // 0-sized chunks adding up to 0).  So, call split_with_sizes with the correct number of chunks,
   // eventually we will do this for all cases.
-  if (split_size == 0 && self.size(dim) == 0) {
+  if (split_size == 0 && dim_size == 0) {
     std::vector<int64_t> split_sizes(chunks, split_size);
-    split_sizes[chunks - 1] = split_size - (split_size * chunks - self.size(dim));
+    split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
     return self.split_with_sizes(split_sizes, dim);
   } else {
     return self.split(split_size, dim);
@@ -563,9 +564,10 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
+  const auto dim_size = self.size(dim_);
   std::vector<Tensor> splits(sections);
-  int64_t min_split_size = self.size(dim_) / sections;
-  int64_t num_splits_one_extra = self.size(dim_) % sections;
+  int64_t min_split_size = dim_size / sections;
+  int64_t num_splits_one_extra = dim_size % sections;
   int64_t start_idx = 0;
   for (const auto split_idx : c10::irange(sections)) {
     int64_t split_size = (split_idx < num_splits_one_extra) ? (min_split_size + 1) : min_split_size;
@@ -619,12 +621,13 @@ std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
   std::vector<Tensor> result;
-  int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
+  const auto dim_size = self.size(dim);
+  int64_t split_size = (dim_size + chunks - 1) / chunks;
 
   // See the comment above in chunk(...)
-  if (split_size == 0 && self.size(dim) == 0) {
+  if (split_size == 0 && dim_size == 0) {
     std::vector<int64_t> split_sizes(chunks, split_size);
-    split_sizes[chunks - 1] = split_size - (split_size * chunks - self.size(dim));
+    split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
     return self.unsafe_split_with_sizes(split_sizes, dim);
   } else {
     return self.unsafe_split(split_size, dim);
@@ -731,11 +734,10 @@ Tensor expand(const Tensor& self, IntArrayRef size, bool implicit) {
            "must be greater or equal to the number of dimensions in the tensor (",
            self.dim(), ")");
 
-  std::vector<int64_t> expandedSizes;
-  std::vector<int64_t> expandedStrides;
-  std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self.sizes(), self.strides(), size);
+  auto expandedSizesAndStrides = inferExpandGeometry_dimvector(self.sizes(), self.strides(), size);
 
-  auto result = self.as_strided(expandedSizes, expandedStrides);
+  auto result = self.as_strided(
+      std::get<0>(expandedSizesAndStrides), std::get<1>(expandedSizesAndStrides));
   namedinference::propagate_names_for_expand(result, self);
   return result;
 }
@@ -1291,7 +1293,7 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   TORCH_CHECK(split_size >= 0,  "split expects split_size be non-negative, but got split_size=", split_size);
   int64_t dim_size = self.size(dim);
-  TORCH_CHECK(split_size > 0 || self.size(dim) == 0,
+  TORCH_CHECK(split_size > 0 || dim_size == 0,
            "split_size can only be 0 if dimension size is 0, "
            "but got dimension size of ", dim_size);
   // if split_size is 0 and dimension size is 0, there is 1 split.
@@ -2130,19 +2132,22 @@ Tensor alias(const Tensor& self) {
 Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
   // some special handling to deal with allow dimension == 0 when self.dim() == 0
   dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
-  int64_t max_size = self.dim() == 0 ? 1 : self.size(dimension);
+
+  const auto sizes = self.sizes();
+  const auto strides = self.strides();
+  int64_t max_size = self.dim() == 0 ? 1 : sizes[dimension];
   TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
 
-  std::vector<int64_t> new_size(self.dim() + 1);
-  std::vector<int64_t> new_stride(self.dim() + 1);
+  DimVector new_size(self.dim() + 1);
+  DimVector new_stride(self.dim() + 1);
 
   new_size[self.dim()] = size;
-  new_stride[self.dim()] = self.dim() == 0 ? 1 : self.stride(dimension);
+  new_stride[self.dim()] = self.dim() == 0 ? 1 : strides[dimension];
   for(const auto d : c10::irange(self.dim())) {
-    auto self_size = self.size(d);
-    auto self_stride = self.stride(d);
+    const auto self_size = sizes[d];
+    const auto self_stride = strides[d];
     if(d == dimension) {
       new_size[d] = (self_size - size) / step + 1;
       new_stride[d] = step*self_stride;
@@ -2165,7 +2170,7 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     auto self_stride = self.stride(0);
     int64_t sz = self_size + std::abs(dimension);
 
-    result.resize_({sz, sz});
+    at::native::resize_output(result, {sz, sz});
     result.zero_();
     auto r_data = result.data_ptr<scalar_t>();
     auto r_stride_0 = result.stride(0);
@@ -2186,7 +2191,7 @@ void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
       sz = std::min(self.size(0) + dimension, self.size(1));
     }
 
-    result.resize_({sz});
+    at::native::resize_output(result, {sz});
     result.zero_();
     auto r_data = result.data_ptr<scalar_t>();
     auto r_stride_0 = result.stride(0);
