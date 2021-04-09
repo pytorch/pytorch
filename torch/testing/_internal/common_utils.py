@@ -821,7 +821,7 @@ slow_tests_dict: Optional[Dict[str, float]] = None
 def check_slow_test_from_stats(test):
     global slow_tests_dict
     if slow_tests_dict is None:
-        url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/.pytorch-slow-tests'
+        url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json'
         try:
             contents = urlopen(url, timeout=1).read().decode('utf-8')
             slow_tests_dict = json.loads(contents)
@@ -844,7 +844,7 @@ def check_disabled(test_name):
         _disabled_test_from_issues: Dict = {}
 
         def read_and_process():
-            url = 'https://raw.githubusercontent.com/zdevito/pytorch_disabled_tests/master/result.json'
+            url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/disabled-tests.json'
             contents = urlopen(url, timeout=1).read().decode('utf-8')
             the_response = json.loads(contents)
             for item in the_response['items']:
