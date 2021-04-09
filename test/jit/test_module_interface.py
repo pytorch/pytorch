@@ -59,7 +59,6 @@ class TestModuleInterface(JitTestCase):
             def forward(self, input: Tensor) -> Tensor:
                 return self.proxy_mod.two(input)
 
-
         with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", "self.proxy_mod.two"):
             torch.jit.script(TestNotModuleInterfaceCall())
 
@@ -125,7 +124,6 @@ class TestModuleInterface(JitTestCase):
             return mod_interface.forward2(x)
 
         # ensure error out when we call the module on the method other than the interface specified.
-
         with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", "mod_interface.forward2"):
             self.checkScript(call_module_interface_on_other_method, (scripted_bar_mod, torch.rand(3, 4),))
 
