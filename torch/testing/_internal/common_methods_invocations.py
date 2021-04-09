@@ -3221,7 +3221,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_select),
     OpInfo('matrix_exp',
-           dtypesIfCPU=floating_and_complex_types_and(torch.float16),
+           dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
            sample_inputs_func=sample_inputs_matrix_exp,
            supports_out=False),
