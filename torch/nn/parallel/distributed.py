@@ -834,7 +834,7 @@ class DistributedDataParallel(Module):
         def to_map(obj):
             if isinstance(obj, torch.Tensor):
                 if obj.device == torch.device("cuda", target_gpu):
-                    return obj
+                    return (obj,)
                 if not self.use_side_stream_for_tensor_copies:
                     return (obj.to(target_gpu),)
                 else:
