@@ -23,6 +23,13 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  # Used so that only cuda specific versions of tests are generated
+  # mainly used so that we're not spending extra cycles testing cpu
+  # devices on expensive gpu machines
+  export PYTORCH_TESTING_ONLY_FOR="cuda"
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
@@ -437,6 +444,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
   install_torchvision
+  install_monkeytype
   test_python
   test_aten
   test_vec256
