@@ -629,9 +629,9 @@ mobile::Module _load_for_mobile_impl(
       error_message = "Unknown exception";
     }
     observer->onFailLoadModel(
-      instance_key,
-      error_message.c_str(),
-      deserializer.deserializeMetadata(std::move(device)));
+        instance_key,
+        error_message.c_str(),
+        deserializer.deserializeMetadata(std::move(device)));
   });
 
   try {
