@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
+#include <ATen/core/interned_strings.h>
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
@@ -712,6 +713,7 @@ class TensorExprFuser {
   // Merge fusible nodes into subgraphs in prim::TensorExprGroup nodes.
   void createFusionGroups(Block* block) {
     bool any_changed = true;
+    parseTENotFuseOption();
     while (any_changed) {
       any_changed = false;
       for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
@@ -996,6 +998,8 @@ class TensorExprFuser {
   bool canHandle(Node* node) {
     REQ(disable_shape_checks_ || allShapesAreKnown(node));
     REQ(isFusableOnDevice(node));
+    REQ(operators_not_to_fuse.find(node->kind()) ==
+        operators_not_to_fuse.end());
 
     for (Value* input : node->inputs()) {
       if (auto const& tt = input->type()->cast<TensorType>()) {
@@ -1159,9 +1163,33 @@ class TensorExprFuser {
     }
   }
 
+  // This function parses the option provided by the environment variable
+  // "PYTORCH_TENSOREXPR_DONT_FUSE".
+  // This variable allows users to disable fusion on a list of specified
+  // operators that are separated by ':'. e.g.,
+  // 'PYTORCH_TENSOREXPR_DONT_FUSE="clamp:mul:add"' disables fusion on
+  // aten::clamp, aten::mul and aten::add.
+  std::set<NodeKind> parseTENotFuseOption() {
+    const char* option = std::getenv("PYTORCH_TENSOREXPR_DONT_FUSE");
+    std::stringstream in_ss;
+    if (option) {
+      in_ss << option;
+    }
+
+    std::string line;
+    while (std::getline(in_ss, line, ':')) {
+      if (line.size() == 0) {
+        continue;
+      }
+      operators_not_to_fuse.insert(c10::Symbol::aten(line));
+    }
+    return operators_not_to_fuse;
+  }
+
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
 
+  std::set<NodeKind> operators_not_to_fuse;
   // Minimal size of a fusion group
   size_t min_group_size_;
   // If true, shapes are ignored
