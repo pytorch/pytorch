@@ -288,18 +288,29 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
           within_producer_compute_at.insert(p_tv->axis((int)p_i));
         }
 
-        // Map the entire replay map
-        for (auto entry : c2p_map) {
-          auto c_id = entry.first;
-          auto p_id = entry.second;
-          // If outside CA point and we're creating parallel map, do not map the
-          // axis
-          if (mapping_mode_ == MappingMode::PARALLEL &&
-              right_of_ca_point.find(p_id) != right_of_ca_point.end()) {
-            continue;
+        // If we're creating parallel map, only map the leaf
+        // axes. Also, the producer axis must be left of the CA
+        // point.
+        // Otherwise, map the entire replay map.
+        if (mapping_mode_ == MappingMode::PARALLEL) {
+          for (auto c_id : c_tv->domain()->domain()) {
+            auto it = c2p_map.find(c_id);
+            if (it == c2p_map.end()) {
+              continue;
+            }
+            auto p_id = it->second;
+            if (right_of_ca_point.find(p_id) != right_of_ca_point.end()) {
+              continue;
+            }
+            mapIds(p_id, c_id);
           }
-          // Map the id's together
-          mapIds(p_id, c_id);
+        } else {
+          for (auto entry : c2p_map) {
+            auto c_id = entry.first;
+            auto p_id = entry.second;
+            // Map the id's together
+            mapIds(p_id, c_id);
+          }
         }
       }
     }
