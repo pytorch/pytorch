@@ -479,7 +479,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertTrue(res is output)
             self.assertEqual(output, expected.to(output.dtype))
 
-    @ops(list(filter(lambda op: op.supports_out, unary_ufuncs)), dtypes=OpDTypes.supported)
+    @ops(unary_ufuncs, dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
         if not op.supports_out:
             self.skipTest("Skipped! Op doesn't support out= kwarg.")

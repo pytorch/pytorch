@@ -3860,7 +3860,12 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=complex_types(),
                    dtypesIfROCM=complex_types(),
                    supports_out=False,
-                   supports_autograd=False),
+                   supports_autograd=False,
+                   skips=(
+                       # Skip since real and imag don't have out variants.
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                   )),
     UnaryUfuncInfo('imag',
                    ref=np.imag,
                    dtypes=complex_types(),
@@ -3868,7 +3873,12 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=complex_types(),
                    dtypesIfROCM=complex_types(),
                    supports_out=False,
-                   supports_autograd=False),
+                   supports_autograd=False,
+                   skips=(
+                       # Skip since real and imag don't have out variants.
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                   )),
     OpInfo('rsub',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
            variant_test_name='rsub_tensor',
