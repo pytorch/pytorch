@@ -1611,11 +1611,6 @@ def min(g, self, dim_or_y=None, keepdim=None):
         return min, indices
 
 
-def prim_min(g, self):
-    ten = stack(g, self, g.op("Constant", value_t=torch.tensor([0])))
-    return min(g, ten)
-
-
 def exp(g, self):
     return g.op("Exp", self)
 

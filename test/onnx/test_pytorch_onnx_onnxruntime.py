@@ -4669,8 +4669,6 @@ class TestONNXRuntime(unittest.TestCase):
                 batch_size = x.shape[0]
                 cur_len = 0
                 max_len = x.shape[1]
-                # TODO: fix this
-                # done = torch.tensor([False for _ in range(batch_size)], dtype=torch.bool)
                 done = torch.zeros(batch_size, dtype=torch.bool)
                 while cur_len < max_len:
                     beam_hyps, done = self.process(beam_hyps, done, x[:, 0, :])
@@ -7534,7 +7532,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (random_data, empty_tensor))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    # TODO: test input size with (0, 0, 0, 0, 0) doesn't work with current ort rel
+    # TODO: test input size with (0, 0, 0, 0, 0) doesn't work with current ort rel (1.7)
     def test_index_put_if_2(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
