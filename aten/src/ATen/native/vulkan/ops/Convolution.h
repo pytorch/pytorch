@@ -10,6 +10,14 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
+enum Conv2dMethod {
+  Conv2dDepthwise,
+  Conv2dPointwise,
+  Conv2dOld,
+  Conv2dSlidingWindow,
+  Conv2dWinograd_2_3,
+};
+
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
  public:
   static Conv2dOpContext create(
@@ -49,6 +57,7 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
       bool transposed,
       IntArrayRef output_padding,
       int64_t groups,
+      const Conv2dMethod method,
       const c10::optional<Scalar>& output_min = c10::nullopt,
       const c10::optional<Scalar>& output_max = c10::nullopt);
 
@@ -76,6 +85,8 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
     c10::optional<Scalar> output_min;
     c10::optional<Scalar> output_max;
   } unpacked_;
+
+  Conv2dMethod method_;
 };
 
 Tensor conv2d_clamp_run(
