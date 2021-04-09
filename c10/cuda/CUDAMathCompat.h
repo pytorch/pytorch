@@ -6,6 +6,7 @@
 #if defined(__CUDACC__) || defined(__HIPCC__)
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 
 #ifdef __HIPCC__
 #define __MATH_FUNCTIONS_DECL__ inline C10_DEVICE
