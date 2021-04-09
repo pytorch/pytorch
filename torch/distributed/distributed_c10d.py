@@ -2653,7 +2653,10 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         # default devices and messes up NCCL internal state.
         _store_based_barrier(global_rank, default_store, timeout)
         # Set sequence numbers for gloo and nccl process groups.
-        if get_backend(pg) in [Backend.GLOO, Backend.NCCL]:
+        if pg != GroupMember.NON_GROUP_MEMBER and get_backend(pg) in [
+            Backend.GLOO,
+            Backend.NCCL,
+        ]:
             pg._set_sequence_number_for_group()
 
     return pg
