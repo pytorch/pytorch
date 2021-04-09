@@ -437,6 +437,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
   install_torchvision
+  install_monkeytype
   test_python
   test_aten
   test_vec256
