@@ -3153,6 +3153,8 @@ class TestSparse(TestCase):
         test_op(3, 100, [3, 4, 2, 3, 5, 2], coalesced)
         test_op(4, 100, [3, 4, 2, 3, 5, 2], coalesced)
 
+    # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
+    @skipIfRocm
     @coalescedonoff
     @dtypes(torch.double)
     def test_sparse_matmul(self, device, dtype, coalesced):
@@ -3262,15 +3264,7 @@ class TestSparse(TestCase):
 
             # cpp implementation
             r2 = torch.sparse.mm(a, b)
-            if a.is_cuda:
-                if r1._nnz() != r2._nnz():
-                    # Note: This is because  cusparseXcsrgemm2Nnz ROCm function doesn't return
-                    # the same nnz as CUDA version
-                    self.assertEqual(r1.to_dense(), r2.to_dense())
-                else:
-                    self.assertEqual(r1, r2)
-            else:
-                self.assertEqual(r1, r2)
+            self.assertEqual(r1, r2)
 
             a.requires_grad_(True)
             b.requires_grad_(True)
