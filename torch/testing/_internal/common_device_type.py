@@ -492,7 +492,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     # Creates device-specific test cases
     for base in device_type_test_bases:
         # Skips bases listed in except_for
-        if except_for != [] and only_for != []:
+        if except_for and only_for:
             assert base.device_type not in except_for or base.device_type not in only_for,\
                 "same device cannot appear in except_for and only_for"
         if except_for and base.device_type in except_for:
