@@ -406,7 +406,7 @@ class MinTerm : public ExprNode<MinTerm> {
 // Stmt simplification should occur in both modes.
 class TORCH_API IRSimplifierBase : public IRMutator {
  public:
-  virtual ~IRSimplifierBase() {}
+  ~IRSimplifierBase() override = default;
 
   Stmt* mutate(const Block* v) override;
 
@@ -422,6 +422,7 @@ class TORCH_API IRSimplifierBase : public IRMutator {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   HashProvider hasher_;
 };
 
@@ -580,6 +581,7 @@ class TORCH_API IRSimplifier {
     // There may be terms left in the IR, expand them.
     TermExpander expander(&simplifier);
     e = e->accept_mutator(&expander);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     if (!expander.check_safe()) {
       throw malformed_input("eliminated null Allocation without free");
     }

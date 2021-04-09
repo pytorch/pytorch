@@ -22,6 +22,8 @@ Functions
 .. autofunction:: erf
 .. autofunction:: erfc
 .. autofunction:: erfinv
+.. autofunction:: expit
 .. autofunction:: expm1
 .. autofunction:: exp2
 .. autofunction:: gammaln
+.. autofunction:: logit
