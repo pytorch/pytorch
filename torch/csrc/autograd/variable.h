@@ -624,13 +624,16 @@ inline Variable make_variable_differentiable_view(
     // allocation happens in view ops.
     if (data.getIntrusivePtr().unique() && data.getIntrusivePtr()->unique_version()) {
       at::TensorImpl* data_impl = data.unsafeGetTensorImpl();
+      if (backward_info) {
+        data_impl->set_version_counter(impl::version_counter(backward_info->base_));
+      }
       data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
       data_impl, std::move(backward_info), std::move(forward_info),
       creation_meta));
       return data;
     } else {
       c10::intrusive_ptr<at::TensorImpl> data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/0,
+        backward_info ? impl::version_counter(backward_info->base_) : c10::VariableVersion(0),
         /*allow_tensor_metadata_change=*/true);
       data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
       data_impl_copy.get(), std::move(backward_info), std::move(forward_info),

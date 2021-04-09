@@ -38,9 +38,9 @@ DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
       forward_info_(std::move(forward_info)),
       creation_meta_(creation_meta) {
   is_view_ = true;
-  if (backward_info_.has_value()) {
-    self_impl->set_version_counter(impl::version_counter(backward_info_.value().base_));
-    attr_version_ = self_impl->version_counter().current_version();
+  const auto& version_counter = self_impl->version_counter();
+  if (version_counter.enabled()) {
+    attr_version_ = version_counter.current_version();
   }
 }
 
