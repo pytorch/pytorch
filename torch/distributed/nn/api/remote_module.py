@@ -17,7 +17,7 @@ import torch
 import torch.distributed.rpc as rpc
 from torch import Tensor, device, dtype, nn
 from torch.distributed.nn.jit import instantiator
-from torch.distributed.rpc.utils import _parse_remote_device
+from torch.distributed.utils import _parse_remote_device
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
