@@ -62,29 +62,35 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             o2 = torch.relu(o)
             o3 = o1 + o2
 
-            _ = o1.add_(1.0)
-            _ = o2.add_(1.0)
-            o = o1 * 1.0
-            oo1 = torch.relu(o)
-            o = o2 * 2.0
-            oo2 = torch.relu(o)
-            oo3 = oo1 + oo2
+            if flag:
+              o = o1 + 1.0
+              oo1 = torch.relu(o)
+              o = o2 + 2.5
+              oo2 = torch.relu(o)
+              oo3 = oo1 + oo2
+            else:
+              o = o1 * 1.0
+              oo1 = torch.relu(o)
+              o = o2 * 2.0
+              oo2 = torch.relu(o)
+              oo3 = oo1 + oo2
+
             return o1, o2, o3, oo1, oo2, oo3
 
         with enable_profiling_mode_for_profiling_tests():
 
             t_jit = torch.jit.script(t)
-            jit_o = t_jit(x, y)
-            jit_o = t_jit(x, y)
-            o = t(x, y)
+            jit_o = t_jit(x, y, False)
+            jit_o = t_jit(x, y, False)
+            o = t(x, y, False)
 
-            FileCheck().check("prim::DifferentiableGraph").run(t_jit.graph_for(x, y))
+            FileCheck().check("prim::DifferentiableGraph").run(t_jit.graph_for(x, y, False))
             # validate the differentiableGraphOps are marking proper requires_grad
             for oo, jit_oo in zip(o, jit_o):
                 self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
                 self.assertEqual(oo, jit_oo)
             # one more runs to trigger fusion
-            jit_o = t_jit(x, y)
+            jit_o = t_jit(x, y, False)
             for oo, jit_oo in zip(o, jit_o):
                 self.assertEqual(oo.dtype, jit_oo.dtype)
                 self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
