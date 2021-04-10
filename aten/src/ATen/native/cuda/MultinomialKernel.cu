@@ -280,19 +280,21 @@ __global__ void sampleMultinomialOnce(
       __syncthreads();
     }
 
-    if (threadIdx.x == 0 && found) {
-        dest[curDist] = foundPos;
-    } else if (!found) {
-      // This should address a rare bug where we don't select a valid index. This likely occurs when
-      // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
-      // and our uniform sample is greater than this value. In this case we likely have unitialized memory
-      // in dest[curDist]. So basically we will loop through the distribution and pick the largest index
-      // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
-      // rarity in which this occurs, this should not be an issue.
-      for (int cat = categories - 1; cat >= 0; --cat) {
-        if (dist[curDist * stride_dist + cat * stride_categories] > zero) {
-          dest[curDist] = cat;
-          break;
+    if (threadIdx.x == 0) {
+      if (found) {
+          dest[curDist] = foundPos;
+      } else {
+        // This should address a rare bug where we don't select a valid index. This likely occurs when
+        // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
+        // and our uniform sample is greater than this value. In this case we likely have unitialized memory
+        // in dest[curDist]. So basically we will loop through the distribution and pick the largest index
+        // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
+        // rarity in which this occurs, this should not be an issue.
+        for (int cat = categories - 1; cat >= 0; --cat) {
+          if (dist[curDist * stride_dist + cat * stride_categories] > zero) {
+            dest[curDist] = cat;
+            break;
+          }
         }
       }
     }
