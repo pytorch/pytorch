@@ -666,15 +666,17 @@ static TensorIterator build_addr_iter(Tensor& result,
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
 
+  const auto vec1_size0 = vec1.sizes()[0];
+  const auto vec2_size0 = vec2.sizes()[0];
   auto self_ = &result == &self
     ? c10::MaybeOwned<Tensor>::borrowed(self)
-    : expand_size(self, {vec1.size(0), vec2.size(0)}, "addr");
+    : expand_size(self, {vec1_size0, vec2_size0}, "addr");
   TORCH_CHECK(
     self_->dim() == 2,
     "2D tensor expected, got ", self_->dim(), "D tensor for input"
   );
   TORCH_CHECK(
-    self_->size(0) == vec1.size(0) && self_->size(1) == vec2.size(0),
+    self_->sizes()[0] == vec1_size0 && self_->sizes()[1] == vec2_size0,
     "size mismatch, input: ", self_->sizes(),
     ", v1: ", vec1.sizes(),
     ", v2: ", vec2.sizes()
@@ -684,7 +686,7 @@ static TensorIterator build_addr_iter(Tensor& result,
     .set_check_mem_overlap(true)
     .add_output(result)
     .add_input(*self_)
-    .add_input(vec1.reshape({vec1.size(0), 1}))
+    .add_input(vec1.reshape({vec1_size0, 1}))
     .add_input(vec2)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
