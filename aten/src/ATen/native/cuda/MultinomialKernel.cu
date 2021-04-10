@@ -8,6 +8,7 @@
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 
 #include <THC/THCReduceApplyUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -196,7 +197,7 @@ __global__ void sampleMultinomialOnce(
     }
 
     // threadIdx.x == 0 has the sum value from this
-    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<accscalar_t>(), accZero);
+    sum = cuda_utils::BlockReduceSum(sum, smem);
 
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
@@ -239,7 +240,7 @@ __global__ void sampleMultinomialOnce(
       __syncthreads();
 
       // Perform an inclusive prefix sum of the shared memory contents
-      for (unsigned offset = 1; offset < blockDim.x; offset *= 2) {
+      for (int offset = 1; offset < blockDim.x; offset *= 2) {
         accscalar_t val = accZero;
 
         if (threadIdx.x >= offset) {
@@ -281,7 +282,7 @@ __global__ void sampleMultinomialOnce(
 
     if (threadIdx.x == 0 && found) {
         dest[curDist] = foundPos;
-    } else if (threadIdx.x == 0 && !found) {
+    } else if (!found) {
       // This should address a rare bug where we don't select a valid index. This likely occurs when
       // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
       // and our uniform sample is greater than this value. In this case we likely have unitialized memory
@@ -323,8 +324,8 @@ void multinomial_with_replacement_kernel_impl(
     int numSM = props->multiProcessorCount;
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
-    int requiredShared = (numCategories < maxThreads ? numCategories : maxThreads)
-                         * (sizeof(accscalar_t) + 1);
+    int requiredShared = (numCategories < maxThreads ? numCategories + 1 : maxThreads)
+                         * sizeof(accscalar_t);
 
     if (n_sample == 1 && maxShared >= requiredShared) {
       // Optimized allocation-free implementation
