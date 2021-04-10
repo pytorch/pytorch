@@ -2,7 +2,6 @@ from io import BytesIO
 from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
-import torch
 
 from torch.package import (
     DeniedModuleError,
@@ -118,24 +117,6 @@ class TestDependencyAPI(PackageTestCase):
                         """
                     ),
                 )
-
-    def test_automock(self):
-        import automock
-
-        obj = automock.SumMod()
-
-        buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
-            he.extern("sys")
-            he.mock_trace(obj, [(torch.randn(4),)])
-            he.save_pickle("obj", "obj.pkl", obj)
-
-        buffer.seek(0)
-        hi = PackageImporter(buffer)
-        mod = hi.import_module("yaml")
-        fn = mod.parse
-        with self.assertRaisesRegex(NotImplementedError, "was mocked out"):
-            fn()
 
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_mock(self):
