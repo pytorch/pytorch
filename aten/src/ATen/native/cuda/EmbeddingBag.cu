@@ -251,6 +251,9 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
                                    const Tensor &max_indices,
                                    int64_t num_weights,
                                    int64_t padding_idx) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("embedding_bag_backward_cuda_max");
 
   auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
 
@@ -396,10 +399,6 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
-
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("_embedding_bag_dense_backward_cuda");
 
   // indices and offset2bag are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward in
