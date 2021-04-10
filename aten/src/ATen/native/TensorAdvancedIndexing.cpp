@@ -1353,10 +1353,9 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
   TORCH_CHECK(mask.device().type() == at::kCPU, "device type of mask (", mask.device().type(), ") is not CPU");
   TORCH_CHECK(source.device().type() == at::kCPU, "device type of source (", source.device().type(), ") is not CPU");
 
-  Tensor b_mask;
-  std::tie(b_mask) = expand_inplace(self, mask, "masked_scatter_");
+  c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_scatter_");
 
-  if (b_mask.dtype() == ScalarType::Byte) {
+  if (b_mask->dtype() == ScalarType::Byte) {
     TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
   }
@@ -1368,7 +1367,7 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self)
-      .add_input(b_mask)
+      .add_input(*b_mask)
       .build();
 
   masked_scatter_stub(iter.device_type(), iter, src_cont);
