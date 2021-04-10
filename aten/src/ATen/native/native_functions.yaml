@@ -1861,15 +1861,14 @@
 # Standard complex to complex FFT (forward or backward)
 - func: _fft_c2c(Tensor self, int[] dim, int normalization, bool forward) -> Tensor
   variants: function
-  dispatch:
-    CPU: _fft_c2c_mkl
-    CUDA: _fft_c2c_cufft
+  structured_delegate: _fft_c2c.out
 
 - func: _fft_c2c.out(Tensor self, int[] dim, int normalization, bool forward, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
+  structured: True
   dispatch:
-    CPU: _fft_c2c_mkl_out
-    CUDA: _fft_c2c_cufft_out
+    CPU: _fft_c2c_mkl
+    CUDA: _fft_c2c_cufft
 
 - func: _cufft_get_plan_cache_size(int device_index) -> int
 

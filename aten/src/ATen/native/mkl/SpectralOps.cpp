@@ -7,6 +7,11 @@
 
 #if !AT_MKL_ENABLED()
 
+namespace at { namespace meta {
+TORCH_META_FUNC(_fft_c2c)
+(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {}
+}} // namespace at::meta
+
 namespace at { namespace native {
 
 REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub, fft_fill_with_conjugate_symmetry_fn);
@@ -19,7 +24,12 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
+TORCH_IMPL_FUNC(_fft_c2c_mkl)
+(const Tensor& self,
+ IntArrayRef dim,
+ int64_t normalization,
+ bool onesided,
+ Tensor& out) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
@@ -32,12 +42,6 @@ Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
                          int64_t last_dim_size, Tensor& out) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
-
-Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool forward, Tensor& out) {
-  AT_ERROR("fft: ATen not compiled with MKL support");
-}
-
 }}
 
 #else // AT_MKL_ENABLED
@@ -61,6 +65,12 @@ Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
 #include <ATen/mkl/Descriptors.h>
 #include <ATen/mkl/Limits.h>
 
+namespace at { namespace meta {
+TORCH_META_FUNC(_fft_c2c)
+(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
+  set_output(self.sizes(), self.options());
+}
+}} // namespace at::meta
 
 namespace at { namespace native {
 
@@ -290,7 +300,7 @@ static DftiDescriptor _plan_mkl_fft(
 }
 
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
-static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
+static Tensor& _exec_fft(const Tensor& out, const Tensor& self, IntArrayRef out_sizes,
                          IntArrayRef dim, int64_t normalization, bool forward) {
   const auto ndim = self.dim();
   const int64_t signal_ndim = dim.size();
@@ -375,6 +385,20 @@ static DimVector _sort_dims(const Tensor& self, IntArrayRef dim, bool exclude_la
   return sorted_dims;
 }
 
+// n-dimensional complex to complex FFT/IFFT
+TORCH_IMPL_FUNC(_fft_c2c_mkl)
+(const Tensor& self,
+ IntArrayRef dim,
+ int64_t normalization,
+ bool forward,
+ const Tensor& out) {
+  const auto sorted_dims = _sort_dims(self, dim);
+  auto result =
+      _exec_fft(out, self, self.sizes(), sorted_dims, normalization, forward);
+  resize_output(out, result.sizes());
+  out.copy_(result);
+}
+
 // n-dimensional complex to real IFFT
 Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
   TORCH_CHECK(self.is_complex());
@@ -387,7 +411,8 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   auto input = self;
   if (dim.size() > 1) {
     auto c2c_dims = dim.slice(0, dim.size() - 1);
-    input = _fft_c2c_mkl(self, c2c_dims, normalization, /*foward=*/false);
+    auto out = at::empty(self.sizes(), self.options());
+    input = _fft_c2c_mkl(self, c2c_dims, normalization, /*foward=*/false, out);
     dim = dim.slice(dim.size() - 1);
   }
 
@@ -443,22 +468,6 @@ Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
   at::native::_fft_fill_with_conjugate_symmetry_(out, dim);
   return out;
 }
-
-// n-dimensional complex to complex FFT/IFFT
-Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
-  TORCH_CHECK(self.is_complex());
-  const auto sorted_dims = _sort_dims(self, dim);
-  auto out = at::empty(self.sizes(), self.options());
-  return _exec_fft(out, self, self.sizes(), sorted_dims, normalization, forward);
-}
-
-Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool forward, Tensor& out) {
-  auto result = _fft_c2c_mkl(self, dim, normalization, forward);
-  resize_output(out, result.sizes());
-  return out.copy_(result);
-}
-
 }} // namespace at::native
 
 #endif
