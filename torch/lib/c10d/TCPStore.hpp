@@ -14,15 +14,6 @@
 
 namespace c10d {
 
-class KeyUpdateCallback {
-  public:
-    // Invoke the callback.
-    void operator()(const c10::optional<std::string>& oldValue, 
-      const c10::optional<std::string>& newValue) const {
-
-    }
-};
-
 // Abstract base class to handle thread state
 class BackgroundThread {
   public:
@@ -90,13 +81,14 @@ class ListenThread : public BackgroundThread {
   public:
     explicit ListenThread(int listenSocket);
     // Adds a callback to run key change
-    void addCallback(std::string key, std::function<void(std::string, std::string)> cb);
+    void addCallback(std::string key, std::function<void(c10::optional<std::string>, c10::optional<std::string>)> cb);
 
   protected:
     void run();
     void callbackHandler(int socket);
     // List of callbacks map each watched key
-    std::unordered_map<std::string, std::function<void(std::string, std::string)>> keyToCallbacks_;
+    std::unordered_map<std::string, 
+      std::function<void(c10::optional<std::string>, c10::optional<std::string>)>> keyToCallbacks_;
   private:
     std::mutex keyToCallbacksLock;
 };
@@ -127,7 +119,8 @@ class TCPStore : public Store {
   bool deleteKey(const std::string& key) override;
 
   // callback function takes arguments (string oldValue, string newValue)
-  void watchKey(const std::string& key, std::function<void(std::string, std::string)> callback) override;
+  void watchKey(const std::string& key, 
+    std::function<void(c10::optional<std::string>, c10::optional<std::string>)> callback) override;
 
   bool check(const std::vector<std::string>& keys) override;
 

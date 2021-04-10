@@ -112,7 +112,7 @@ ListenThread::ListenThread(int listenSocket) : BackgroundThread(listenSocket) {
 
 void ListenThread::addCallback(
     std::string key,
-    std::function<void(std::string, std::string)> cb) {
+    std::function<void(c10::optional<std::string>, c10::optional<std::string>)> cb) {
   keyToCallbacksLock.lock();
   keyToCallbacks_[key] = cb;
   keyToCallbacksLock.unlock();
@@ -689,7 +689,7 @@ bool TCPStore::deleteKey(const std::string& key) {
 
 void TCPStore::watchKey(
     const std::string& key,
-    std::function<void(std::string, std::string)> callback) {
+    std::function<void(c10::optional<std::string>, c10::optional<std::string>)> callback) {
   std::string regKey = regularPrefix_ + key;
 
   watchListener_->addCallback(regKey, callback);
