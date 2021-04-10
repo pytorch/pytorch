@@ -734,11 +734,10 @@ Tensor expand(const Tensor& self, IntArrayRef size, bool implicit) {
            "must be greater or equal to the number of dimensions in the tensor (",
            self.dim(), ")");
 
-  std::vector<int64_t> expandedSizes;
-  std::vector<int64_t> expandedStrides;
-  std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self.sizes(), self.strides(), size);
+  auto expandedSizesAndStrides = inferExpandGeometry_dimvector(self.sizes(), self.strides(), size);
 
-  auto result = self.as_strided(expandedSizes, expandedStrides);
+  auto result = self.as_strided(
+      std::get<0>(expandedSizesAndStrides), std::get<1>(expandedSizesAndStrides));
   namedinference::propagate_names_for_expand(result, self);
   return result;
 }
