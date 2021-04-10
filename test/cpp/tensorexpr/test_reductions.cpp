@@ -573,11 +573,8 @@ TEST(Reductions, SplitReduceAxis) {
 
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
-  For* x_outer;
-  For* x_inner;
-  For* x_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[1], 2, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(loops[1], 2);
 
   l.prepareForCodegen();
 
@@ -847,8 +844,7 @@ TEST(Reductions, ReduceSplitTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner, *tail;
-    loop.splitWithTail(loops[i], 8, &outer, &inner, &tail);
+    loop.splitWithTail(loops[i], 8);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -880,8 +876,7 @@ TEST(Reductions, ReduceSplitNoTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner, *tail;
-    loop.splitWithTail(loops[i], 5, &outer, &inner, &tail);
+    loop.splitWithTail(loops[i], 5);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -915,8 +910,7 @@ TEST(Reductions, ReduceOverSplitTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner, *tail;
-    loop.splitWithTail(loops[i], 16, &outer, &inner, &tail);
+    loop.splitWithTail(loops[i], 16);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -949,8 +943,7 @@ TEST(Reductions, ReduceSplitMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner;
-    loop.splitWithMask(loops[i], 8, &outer, &inner);
+    loop.splitWithMask(loops[i], 8);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -982,8 +975,7 @@ TEST(Reductions, ReduceSplitNoMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner;
-    loop.splitWithMask(loops[i], 5, &outer, &inner);
+    loop.splitWithMask(loops[i], 5);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1016,8 +1008,7 @@ TEST(Reductions, ReduceOverSplitMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner;
-    loop.splitWithMask(loops[i], 16, &outer, &inner);
+    loop.splitWithMask(loops[i], 16);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1053,8 +1044,7 @@ TEST(Reductions, ReduceSplitRfactor) {
   Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  For *o, *i, *t;
-  loop.splitWithTail(loops[2], SPLIT_FACTOR, &o, &i, &t);
+  loop.splitWithTail(loops[2], SPLIT_FACTOR);
 
   auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[2]);
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
@@ -1437,9 +1427,7 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
 
   LoopNest l({e}, {c, d, e});
 
-  For* outer;
-  For* inner;
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &outer, &inner);
+  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4);
 
   Stmt* e_loop = l.getLoopStmtsFor(e)[1];
   l.cacheAccesses(d->buf(), "sum_local", e_loop);
