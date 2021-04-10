@@ -6804,7 +6804,7 @@ else:
         sample_indices = torch.multinomial(prob_dist, n_sample, True)
         self.assertEqual(sample_indices.dim(), 2, msg="wrong number of dimensions")
         self.assertEqual(sample_indices.size(1), n_sample, msg="wrong number of samples")
-        
+
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half)
     def test_multinomial_deterministic(self, device, dtype):
