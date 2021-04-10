@@ -78,10 +78,9 @@ Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
   if (!self.device().is_cpu()) {
     throw TypeError("map_ is only implemented on CPU tensors");
   }
-  Tensor other;
-  std::tie(other) = expand_inplace(self, other_, "map_");
+  c10::MaybeOwned<Tensor> other = expand_inplace(self, other_, "map_");
   auto scalarType = self.scalar_type();
-  recursive_apply<2>(self.sizes(), scalarType, 0, fn, {{ self, other }});
+  recursive_apply<2>(self.sizes(), scalarType, 0, fn, {{ self, *other }});
   return self;
 }
 
@@ -100,10 +99,9 @@ Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn
   if (!self.device().is_cpu() || !x_.device().is_cpu() || !y_.device().is_cpu()) {
     throw TypeError("map2_ is only implemented on CPU tensors");
   }
-  Tensor other1, other2;
-  std::tie(other1, other2) = expand_inplace(self, x_, y_, "map2_");
+  auto others = expand_inplace(self, x_, y_, "map2_");
   auto scalarType = self.scalar_type();
-  recursive_apply<3>(self.sizes(), scalarType, 0, fn, {{ self, other1, other2 }});
+  recursive_apply<3>(self.sizes(), scalarType, 0, fn, {{ self, *std::get<0>(others), *std::get<1>(others) }});
   return self;
 }
 
