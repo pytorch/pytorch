@@ -5,6 +5,7 @@
 #include <ostream>
 #include <fstream>
 #include <algorithm>
+#include <stdexcept>
 
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
@@ -188,8 +189,8 @@ size_t getPadding(
 }
 }
 
-bool PyTorchStreamReader::hasRecord(const std::string& name) {
-  std::lock_guard<std::mutex> guard(reader_lock_);
+// Non-thread safe version
+bool PyTorchStreamReader::hasRecordImpl(const std::string& name) {
   std::string ss = archive_name_plus_slash_ + name;
   mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
   bool result = ar_->m_last_error != MZ_ZIP_FILE_NOT_FOUND;
@@ -198,6 +199,12 @@ bool PyTorchStreamReader::hasRecord(const std::string& name) {
   }
   valid("attempting to locate file ", name.c_str());
   return result;
+}
+
+
+bool PyTorchStreamReader::hasRecord(const std::string& name) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
+  return hasRecordImpl(name);
 }
 
 std::vector<std::string> PyTorchStreamReader::getAllRecords() {
@@ -239,6 +246,8 @@ size_t PyTorchStreamReader::getRecordID(const std::string& name) {
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
+  TORCH_CHECK_VALUE(
+      hasRecordImpl(name), "PyTorch container has no resource: '", name, "'");
   size_t key = getRecordID(name);
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
