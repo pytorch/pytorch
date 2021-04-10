@@ -183,7 +183,7 @@ class GlooStore : public ::gloo::rendezvous::Store {
 
   // Note: The second argument is just a placeholder because C++ does not allow
   // overloading when only return types are different
-  std::vector<uint8_t> get(const std::string& key, , int /* unused */ = -1)) override {
+  std::vector<uint8_t> get(const std::string& key, int /* unused */ = -1) override {
     auto value = store_->get(key);
     return value;
   }
@@ -201,6 +201,10 @@ class GlooStore : public ::gloo::rendezvous::Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override {
     store_->wait(keys, timeout);
+  }
+
+  c10::intrusive_ptr<::c10d::Store> getStore() {
+    return store_;
   }
 
  protected:
