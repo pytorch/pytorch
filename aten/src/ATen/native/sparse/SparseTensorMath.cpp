@@ -782,7 +782,7 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTen
       s_i++;
     }
   } else {
-    AT_DISPATCH_ALL_TYPES(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
         commonDtype, "mul_out_sparse", [&] {
           auto r_accessor = r_buffer.accessor<scalar_t, 1>();
           auto t_accessor = t_values.accessor<scalar_t, 1>();
@@ -818,9 +818,9 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
   // r_ = alpha * sparse * dense
   scalar_t cast_alpha = alpha.to<scalar_t>();
   scalar_t cast_beta = beta.to<scalar_t>();
-  if (cast_beta == 0) {
+  if (cast_beta == static_cast<scalar_t>(0)) {
     r.zero_();
-  } else if (cast_beta == 1) {
+  } else if (cast_beta == static_cast<scalar_t>(1)) {
     if (!is_same_tensor(r, t)) {
       r.copy_(t);
     }
@@ -899,7 +899,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   Tensor indices = sparse_._indices();
   Tensor values      = sparse_._values();
 
-  AT_DISPATCH_ALL_TYPES(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
       values.scalar_type(), "addmm_sparse_dense", [&] {
         s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, indices, values, dense);
       }
@@ -1148,7 +1148,7 @@ SparseTensor& _sspaddmm_out_cpu(
   int64_t dense_stride1 = dense.stride(1);
   int64_t newv_stride0 = newv.stride(0);
 
-  AT_DISPATCH_ALL_TYPES(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
       values.scalar_type(), "sspmm", [&] {
         auto values_accessor = values.accessor<scalar_t, 1>();
         scalar_t* dense_ptr = dense.data_ptr<scalar_t>();
@@ -1565,7 +1565,7 @@ Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor&
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each one.
   int64_t start_mat_num = indices_dim0_accessor[0];
-  AT_DISPATCH_ALL_TYPES(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
     values.scalar_type(), "bmm_sparse_dense", [&] {
       for (int64_t cur_mat_num = 0;
         (cur_mat_num < num_matrices);
@@ -1622,5 +1622,24 @@ Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor&
   );
   return result;
 }
+
+Tensor conj_sparse(const Tensor& input) {
+  Tensor result = at::native::empty_like(input);
+  return conj_out_sparse(input, result);
+}
+
+Tensor& conj_out_sparse(const Tensor& input, Tensor& result) {
+  TORCH_INTERNAL_ASSERT(input.is_sparse());
+  if (input.numel() == 0) {
+    return result;
+  }
+  if (!is_same_tensor(result, input)) {
+    copy_sparse_to_sparse_(result, input);
+  }
+  Tensor conj_values = at::conj(input._values());
+  result._values().copy_(conj_values);
+  return result;
+}
+
 
 }} // namespace at::native
