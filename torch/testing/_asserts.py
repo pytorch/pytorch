@@ -5,7 +5,7 @@ from typing import Any, Optional, Tuple, Type
 import torch
 from ._core import _unravel_index
 
-__all__ = ["assert_tensors_equal", "assert_tensors_allclose"]
+__all__ = ["assert_tensors_equal", "assert_tensors_close"]
 
 
 # The UsageError should be raised in case the test function is not used correctly. With this the user is able to
@@ -221,7 +221,7 @@ def _check_values_equal(a: torch.Tensor, b: torch.Tensor) -> Optional[AssertionE
     )
 
 
-def _check_values_allclose(
+def _check_values_close(
     a: torch.Tensor,
     b: torch.Tensor,
     *,
@@ -290,7 +290,7 @@ def assert_tensors_equal(
     .. seealso::
 
         To assert that the values in two tensors are are close but are not required to be bitwise equal, use
-        :func:`assert_tensors_allclose` instead.
+        :func:`assert_tensors_close` instead.
     """
     exc: Optional[Exception] = _check_are_tensors(a, b)
     if exc:
@@ -310,7 +310,7 @@ def assert_tensors_equal(
         raise exc
 
 
-def assert_tensors_allclose(
+def assert_tensors_close(
     a: torch.Tensor,
     b: torch.Tensor,
     *,
@@ -405,6 +405,6 @@ def assert_tensors_allclose(
     if (rtol == 0.0) and (atol == 0.0):
         exc = _check_values_equal(a, b)
     else:
-        exc = _check_values_allclose(a, b, rtol=rtol, atol=atol)
+        exc = _check_values_close(a, b, rtol=rtol, atol=atol)
     if exc:
         raise exc
