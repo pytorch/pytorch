@@ -109,7 +109,7 @@ inline std::tuple<Tensor, Tensor> expand_outplace(const Tensor &to_expand1, cons
     return std::make_tuple(to_expand1, to_expand2);
   }
 
-  auto expanded_size = infer_size(to_expand1.sizes(), to_expand2.sizes());
+  auto expanded_size = infer_size_dimvector(to_expand1.sizes(), to_expand2.sizes());
   return std::make_tuple(
       to_expand1.expand(expanded_size, /*implicit=*/true), // see [expand implicit]
       to_expand2.expand(expanded_size, /*implicit=*/true));
@@ -127,8 +127,8 @@ inline std::tuple<Tensor, Tensor, Tensor> expand_outplace(const Tensor &to_expan
     return std::make_tuple(to_expand1, to_expand2, to_expand3);
   }
 
-  auto expanded_size12 = infer_size(to_expand1.sizes(), to_expand2.sizes());
-  auto expanded_size = infer_size(expanded_size12, to_expand3.sizes());
+  auto expanded_size12 = infer_size_dimvector(to_expand1.sizes(), to_expand2.sizes());
+  auto expanded_size = infer_size_dimvector(expanded_size12, to_expand3.sizes());
   return std::make_tuple(
       to_expand1.expand(expanded_size, /*implicit=*/true), // see [expand implicit]
       to_expand2.expand(expanded_size, /*implicit=*/true),
@@ -159,15 +159,15 @@ inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntArrayRef sizes
 inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   // expands a list of Tensors; ignores undefined (null) tensors
   bool first = true;
-  std::vector<int64_t> sizes;
+  DimVector sizes;
   for (size_t i = 0; i < to_expand.size(); ++i) {
     if (!to_expand[i].defined()) {
       continue;
     } else if (first) {
-      sizes = to_expand[i].sizes().vec();
+      sizes = to_expand[i].sizes();
       first = false;
     } else {
-      sizes = infer_size(sizes, to_expand[i].sizes());
+      sizes = infer_size_dimvector(sizes, to_expand[i].sizes());
     }
   }
 
