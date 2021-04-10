@@ -103,45 +103,127 @@ inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> expand_inpla
 inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> expand_inplace(const Tensor &tensor, const Tensor &to_expand1, Tensor &&to_expand2, const char *api_name) = delete;
 inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> expand_inplace(const Tensor &tensor, Tensor &&to_expand1, Tensor &&to_expand2, const char *api_name) = delete;
 
-
-inline std::tuple<Tensor, Tensor> expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2) {
+// See NOTE [ ExpandUtils Borrowing ] above for `MaybeOwned` explanation.
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2) {
   if (to_expand1.sizes().equals(to_expand2.sizes())) {
-    return std::make_tuple(to_expand1, to_expand2);
+    return std::make_tuple(
+        c10::MaybeOwned<Tensor>::borrowed(to_expand1),
+        c10::MaybeOwned<Tensor>::borrowed(to_expand2));
   }
 
   auto expanded_size = infer_size_dimvector(to_expand1.sizes(), to_expand2.sizes());
   return std::make_tuple(
-      to_expand1.expand(expanded_size, /*implicit=*/true), // see [expand implicit]
-      to_expand2.expand(expanded_size, /*implicit=*/true));
+      c10::MaybeOwned<Tensor>::owned(to_expand1.expand(expanded_size, /*implicit=*/true)), // see [expand implicit]
+      c10::MaybeOwned<Tensor>::owned(to_expand2.expand(expanded_size, /*implicit=*/true)));
 }
 
-inline std::tuple<Tensor, Tensor> expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2, const char *api_name) {
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1, const Tensor &to_expand2) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1, Tensor &&to_expand2) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1, Tensor &&to_expand2) = delete;
+
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2, const char *api_name) {
   check_defined({to_expand1, to_expand2}, api_name);
   return expand_outplace(to_expand1, to_expand2);
 }
 
-inline std::tuple<Tensor, Tensor, Tensor> expand_outplace(const Tensor &to_expand1,
-                                                          const Tensor &to_expand2,
-                                                          const Tensor &to_expand3) {
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1, const Tensor &to_expand2, const char *api_name) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1, Tensor &&to_expand2, const char *api_name) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1, Tensor &&to_expand2, const char *api_name) = delete;
+
+
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1,
+                const Tensor &to_expand2,
+                const Tensor &to_expand3) {
   if (to_expand1.sizes().equals(to_expand2.sizes()) && to_expand1.sizes().equals(to_expand3.sizes())) {
-    return std::make_tuple(to_expand1, to_expand2, to_expand3);
+    return std::make_tuple(
+        c10::MaybeOwned<Tensor>::borrowed(to_expand1),
+        c10::MaybeOwned<Tensor>::borrowed(to_expand2),
+        c10::MaybeOwned<Tensor>::borrowed(to_expand3));
   }
 
   auto expanded_size12 = infer_size_dimvector(to_expand1.sizes(), to_expand2.sizes());
   auto expanded_size = infer_size_dimvector(expanded_size12, to_expand3.sizes());
   return std::make_tuple(
-      to_expand1.expand(expanded_size, /*implicit=*/true), // see [expand implicit]
-      to_expand2.expand(expanded_size, /*implicit=*/true),
-      to_expand3.expand(expanded_size, /*implicit=*/true));
+      c10::MaybeOwned<Tensor>::owned(to_expand1.expand(expanded_size, /*implicit=*/true)), // see [expand implicit]
+      c10::MaybeOwned<Tensor>::owned(to_expand2.expand(expanded_size, /*implicit=*/true)),
+      c10::MaybeOwned<Tensor>::owned(to_expand3.expand(expanded_size, /*implicit=*/true)));
 }
 
-inline std::tuple<Tensor, Tensor, Tensor> expand_outplace(const Tensor &to_expand1,
-                                                          const Tensor &to_expand2,
-                                                          const Tensor &to_expand3,
-                                                          const char *api_name) {
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1,
+                const Tensor &to_expand2,
+                const Tensor &to_expand3) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1,
+                Tensor &&to_expand2,
+                const Tensor &to_expand3) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1,
+                Tensor &&to_expand2,
+                const Tensor &to_expand3) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1,
+                const Tensor &to_expand2,
+                Tensor &&to_expand3) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1,
+                const Tensor &to_expand2,
+                Tensor &&to_expand3) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1,
+                Tensor &&to_expand2,
+                Tensor &&to_expand3) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1,
+                Tensor &&to_expand2,
+                Tensor &&to_expand3) = delete;
+
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1,
+                const Tensor &to_expand2,
+                const Tensor &to_expand3,
+                const char *api_name) {
   check_defined({to_expand1, to_expand2, to_expand3}, api_name);
   return expand_outplace(to_expand1, to_expand2, to_expand3);
 }
+
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1,
+                const Tensor &to_expand2,
+                const Tensor &to_expand3, const char *api_name) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1,
+                Tensor &&to_expand2,
+                const Tensor &to_expand3, const char *api_name) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1,
+                Tensor &&to_expand2,
+                const Tensor &to_expand3, const char *api_name) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1,
+                const Tensor &to_expand2,
+                Tensor &&to_expand3, const char *api_name) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1,
+                const Tensor &to_expand2,
+                Tensor &&to_expand3, const char *api_name) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(const Tensor &to_expand1,
+                Tensor &&to_expand2,
+                Tensor &&to_expand3, const char *api_name) = delete;
+inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
+expand_outplace(Tensor &&to_expand1,
+                Tensor &&to_expand2,
+                Tensor &&to_expand3, const char *api_name) = delete;
 
 inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntArrayRef sizes) {
   if(to_expand.sizes().equals(sizes)) {
