@@ -4,8 +4,11 @@
 
 namespace c10 {
 
+/**
+ * Basic ScopeGuard class to allow executing a custom lambda on scope exit.
+ */
 class ScopeGuard {
- public:
+public:
   explicit ScopeGuard(std::function<void()> cb) : callback(std::move(cb)) {}
 
   // Disallow copy, move, assignment, and move assignment.
@@ -14,11 +17,18 @@ class ScopeGuard {
   ScopeGuard &operator=(ScopeGuard &&) = delete;
   ScopeGuard &operator=(const ScopeGuard &) = delete;
 
-  ~ScopeGuard() {
-    callback();
+  void disallow() {
+    this->allowed = false;
   }
 
- private:
+  ~ScopeGuard() {
+    if (allowed) {
+      callback();
+    }
+  }
+
+private:
+  bool allowed = true;
   std::function<void()> callback;
 };
 

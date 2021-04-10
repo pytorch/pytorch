@@ -620,9 +620,8 @@ mobile::Module _load_for_mobile_impl(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
   std::string error_message;
-  bool has_exception = true;
   c10::ScopeGuard guard([&]() {
-    if (!has_exception || !observer) {
+    if (!observer) {
       return;
     }
     if (error_message.size() == 0) {
@@ -631,7 +630,7 @@ mobile::Module _load_for_mobile_impl(
     observer->onFailLoadModel(
         instance_key,
         error_message.c_str(),
-        deserializer.deserializeMetadata(std::move(device)));
+        deserializer.deserializeMetadata(device));
   });
 
   try {
@@ -645,7 +644,7 @@ mobile::Module _load_for_mobile_impl(
     if (observer) {
       observer->onExitLoadModel(instance_key, copied_metadata);
     }
-    has_exception = false;
+    guard.disallow();
     return result;
   } catch (c10::Error& error) {
     error_message = error.what();
