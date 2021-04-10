@@ -133,6 +133,12 @@ if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
 fi
 
+# Build lite interpreter, instead of full jit
+CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
+if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
+fi
+
 # Android specific flags
 CMAKE_ARGS+=("-DANDROID_NDK=$ANDROID_NDK")
 CMAKE_ARGS+=("-DANDROID_ABI=$ANDROID_ABI")
