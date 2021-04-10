@@ -36,10 +36,8 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& out) {
-  Tensor expand_self;
   AT_ASSERT(op1.is_sparse_csr());
-  std::tie(expand_self) =
-      expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_csr");
+  Tensor expand_self = *expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_csr");
 
   AT_ASSERT(expand_self.device().type() == kCPU);
   TORCH_CHECK(
