@@ -852,7 +852,7 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
 
   // First need to coalesce to get all of the first dimension indices
   // in order since we'll be sending each matrix into the MM operation
-  SparseTensor self_coalesced = coalesce_sparse_cuda(self);
+  SparseTensor self_coalesced = self.coalesce();
 
   int64_t nnz =        self_coalesced._nnz();
   Tensor indices = self_coalesced._indices();
