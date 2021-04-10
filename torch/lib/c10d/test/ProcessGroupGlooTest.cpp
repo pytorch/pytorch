@@ -588,11 +588,11 @@ void testSetGet(const std::string& path) {
   constexpr uint64_t tag = 0x1337;
   // test that get() gets the same value as the one that was set()
   auto selfRank = 0;
-  std::vector<uint8_t> testVector = testVector(10, 1)
-  auto& pg = tests[selfRank].getProcessGroup();
-  pg.set("testKey", testVector);
-  std::vector<uint8_t> value = pg.get("testKey")
-  EXPECT_TRUE(value == testVector)
+  std::vector<uint8_t> testVector = testVector(10, 1);
+  auto& store = tests[selfRank].getProcessGroup().store_;
+  store.set("testKey", testVector);
+  std::vector<uint8_t> value = store.get("testKey");
+  EXPECT_TRUE(value == testVector);
 }
 
 #ifndef _WIN32
@@ -676,7 +676,7 @@ TEST(ProcessGroupGlooTest, testRecv) {
 
 TEST(ProcessGroupGlooTest, testSetGet) {
   TemporaryFile file;
-  testSetGet(file.path)
+  testSetGet(file.path);
 }
 
 TEST(ProcessGroupGlooTest, testWaitDelay) {
