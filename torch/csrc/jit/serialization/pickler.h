@@ -14,6 +14,13 @@
 namespace torch {
 namespace jit {
 
+// Example tensor_str: "Columns 1 to 26 1  1  1  1  1  1  1  1  1  1  1  1  1  1
+// 1  1  1  1  1  1  1  1  1  1  1  1\n\nColumns 27 to 52 1  1  1  1  1  1  1  1
+// 1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1\n\nColumns 53 to 78 1  1
+// 1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1
+// 1\n\nColumns 79 to 104 1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1
+// 1  1  1  1  1  1  1  1\n\nColumns 105 to 115 1  1  1  1  1  1  1  1  1  1
+// 1\n[ CPULongType{1,115} ]"
 struct tensor_value_hash {
   std::size_t operator()(const at::Tensor& tensor) const {
     std::stringstream tensor_stream;
