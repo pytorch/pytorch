@@ -1053,9 +1053,9 @@ Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
-  Tensor _mask, _self;
+  c10::MaybeOwned<Tensor> _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
-  return _self.clone(at::MemoryFormat::Contiguous).masked_scatter_(_mask, source);
+  return _self->clone(at::MemoryFormat::Contiguous).masked_scatter_(*_mask, source);
 }
 
 static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const Scalar& value) {
@@ -1108,9 +1108,9 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Scalar& sourc
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-    Tensor _mask, _self;
+    c10::MaybeOwned<Tensor> _mask, _self;
     std::tie(_mask, _self) = expand_outplace(mask, self);
-    result = _self.clone(at::MemoryFormat::Contiguous);
+    result = _self->clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
@@ -1122,9 +1122,9 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-    Tensor _mask, _self;
+    c10::MaybeOwned<Tensor> _mask, _self;
     std::tie(_mask, _self) = expand_outplace(mask, self);
-    result = _self.clone(at::MemoryFormat::Contiguous);
+    result = _self->clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
@@ -1148,11 +1148,11 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
             "please use a mask with dtype torch.bool instead.");
   }
 
-  Tensor _mask, _self;
+  c10::MaybeOwned<Tensor> _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
 
-  auto shape = _self.sizes();
-  int64_t numel = _mask.sum().item().toLong();
+  auto shape = _self->sizes();
+  int64_t numel = _mask->sum().item().toLong();
   at::native::resize_output(result, {numel});
   if (numel == 0) {
     return result;
@@ -1169,15 +1169,15 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   // answers. A sufficient condition that no reorder happened is that both _self and _mask is contiguous.
   // If it is not satisfied, use parallel kernel that handles permutations correctly
   bool use_serial_kernel = (self.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ) &&
-  _self.is_contiguous() && _mask.is_contiguous();
+  _self->is_contiguous() && _mask->is_contiguous();
   if (use_serial_kernel) {
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)  // result is intenionally zero-strided above
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(result_strided)
-      .add_input(_self)
-      .add_input(_mask)
+      .add_input(*_self)
+      .add_input(*_mask)
       .build();
 
     masked_select_serial_stub(iter.device_type(), iter, orig_stride);
@@ -1186,7 +1186,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
 
   // Use a prefix sum to record the output locations of the masked elements,
   // so as to parallel with TensorIterator.
-  auto mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
+  auto mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(*_mask);
   auto mask_prefix_sum = at::empty(shape, self.options().dtype(at::kLong));
   auto mask_long_data = mask_long.data_ptr<int64_t>();
   auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();
@@ -1200,8 +1200,8 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(result_strided)
-    .add_input(_self)
-    .add_input(_mask)
+    .add_input(*_self)
+    .add_input(*_mask)
     .add_input(mask_prefix_sum)
     .build();
 
