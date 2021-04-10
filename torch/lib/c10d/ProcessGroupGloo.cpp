@@ -181,7 +181,9 @@ class GlooStore : public ::gloo::rendezvous::Store {
     store_->set(key, tmp);
   }
 
-  std::vector<uint8_t> get(const std::string& key) override {
+  // Note: The second argument is just a placeholder because C++ does not allow
+  // overloading when only return types are different
+  std::vector<uint8_t> get(const std::string& key, , int /* unused */ = -1)) override {
     auto value = store_->get(key);
     return value;
   }
@@ -190,8 +192,6 @@ class GlooStore : public ::gloo::rendezvous::Store {
     auto value = store_->get(key);
     return std::vector<char>(value.begin(), value.end());
   }
-
-
 
   void wait(const std::vector<std::string>& keys) override {
     store_->wait(keys, Store::kDefaultTimeout);
