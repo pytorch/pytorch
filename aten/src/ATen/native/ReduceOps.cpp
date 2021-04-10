@@ -1165,7 +1165,7 @@ Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
     in = self;
   } else {
     if (self.numel() == 0) {
-      TORCH_CHECK_INDEX(false, "Expected reduction dim for self.numel() == 0.");
+      TORCH_CHECK_INDEX(false, "argmax_out(): Expected reduction dim for self.numel() == 0.");
     }
     in = self.reshape({-1});
     keepdim = false;
@@ -1203,7 +1203,7 @@ Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
     in = self;
   } else {
     if (self.numel() == 0) {
-      TORCH_CHECK_INDEX(false, "Expected reduction dim for self.numel() == 0.");
+      TORCH_CHECK_INDEX(false, "argmin_out(): Expected reduction dim for self.numel() == 0.");
     }
     in = self.reshape({-1});
     keepdim = false;
