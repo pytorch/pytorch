@@ -612,6 +612,12 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small_v5.ptl",
   //      {},
   //      caffe2::serialize::kProducedBytecodeVersion);
+  //  Module m =
+  //  load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/prod_models/model_GD3KrQiyNkGTdbACACg60Fjyy8VLbmQwAAAA_4.ptl");
+  //    m._save_for_mobile(
+  //        "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/model_GD3_tmp.ptl",
+  //        {},
+  //        caffe2::serialize::kProducedBytecodeVersion);
 
   //  c._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/test.ptl");
   //  mobile::Module cc = _load_for_mobile(

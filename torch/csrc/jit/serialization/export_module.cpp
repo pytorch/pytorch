@@ -406,14 +406,6 @@ class ScriptModuleSerializer {
         kArchiveNameConstants, c10::ivalue::Tuple::create(ivalue_constants));
     // Only generate bytecode when a valid bytecode_version is given.
     if (bytecode_version.has_value()) {
-      for (size_t i = 0; i < ivalue_constants.size(); i++) {
-        if (ivalue_constants[i].isTensor() &&
-            tensors_archive_table_.find(ivalue_constants[i].toTensor()) ==
-                tensors_archive_table_.end()) {
-          tensors_archive_table_[ivalue_constants[i].toTensor()] =
-              std::make_pair(kArchiveNameConstants, i);
-        }
-      }
       writeByteCode(module, save_mobile_debug_info, bytecode_version.value());
       writeMobileMetadata(module, extra_files);
     }
@@ -446,6 +438,17 @@ class ScriptModuleSerializer {
     data_pickle.stop();
     size_t i = 0;
     std::string prefix = archive_name + "/";
+
+    // Store all tensors from constant archive to tensors_archive_table_
+    // In the future, if other tensors would like to adapt to the storage
+    // format {archive_name}/{index}, just expand the if statement here.
+    if (archive_name == kArchiveNameConstants) {
+      const auto tensor_from_jit = data_pickle.tensorData();
+      for (size_t i = 0; i < tensor_from_jit.size(); i++) {
+        tensors_archive_table_[tensor_from_jit[i]] =
+            std::make_pair(kArchiveNameConstants, i);
+      }
+    }
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
@@ -663,7 +666,7 @@ class ScriptModuleSerializer {
 
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
-  bool use_tensors_archive_table_;
+  bool use_tensors_archive_table_ = false;
   TensorIndexMap tensors_archive_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
