@@ -597,13 +597,21 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
 
   //  mobile::Module bc =
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example.ptl");
-  //  Module m =
-  //  load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
+  //    Module m =
+  //    load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
   //  m._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
   //  Module m =
   //  load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/prod_models/model_GEvf3Ai5k7F7yyQDAHSqkcT3BphpbmQwAAAA.ptl");
-  //  Module m = load(
-  //      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
+  //    Module m = load(
+  //        "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
+  //  Module m_4 =
+  //  load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/prod_models/model_GIUuJgnMqK6yz3cBAHIwqieH2f4PbmQwAAAA_4.ptl");
+  //  Module m_5 =
+  //  load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/prod_models/model_GIUuJgnMqK6yz3cBAHIwqieH2f4PbmQwAAAA_5.ptl");
+  //  mobile::Module m_m_4 =
+  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/prod_models/model_GIUuJgnMqK6yz3cBAHIwqieH2f4PbmQwAAAA_4.ptl");
+  //  mobile::Module m_m_5 =
+  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/prod_models/model_GIUuJgnMqK6yz3cBAHIwqieH2f4PbmQwAAAA_5.ptl");
   //  m._save_for_mobile(
   //      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small_v4.ptl",
   //      {},

@@ -444,9 +444,10 @@ class ScriptModuleSerializer {
     // format {archive_name}/{index}, just expand the if statement here.
     if (archive_name == kArchiveNameConstants) {
       const auto tensor_from_jit = data_pickle.tensorData();
-      for (size_t i = 0; i < tensor_from_jit.size(); i++) {
-        tensors_archive_table_[tensor_from_jit[i]] =
-            std::make_pair(kArchiveNameConstants, i);
+      for (size_t tensor_index = 0; tensor_index < tensor_from_jit.size();
+           tensor_index++) {
+        tensors_archive_table_[tensor_from_jit[tensor_index]] =
+            std::make_pair(kArchiveNameConstants, tensor_index);
       }
     }
     for (const auto& td : data_pickle.tensorData()) {
