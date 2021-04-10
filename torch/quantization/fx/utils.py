@@ -369,7 +369,7 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
         result = False
     elif node.op == 'get_attr':
         result = False
-    elif node.target is getattr and node.args[1] == 'ndim':
+    elif node.target is getattr and node.args[1] in ['ndim', 'shape']:
         # x1 = x0.ndim
         result = True
     elif node.op == 'call_method' and node.target == 'size':
