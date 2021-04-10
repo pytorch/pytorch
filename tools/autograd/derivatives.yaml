@@ -317,7 +317,7 @@
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
 
-- name: coalesce(Tensor self) -> Tensor
+- name: _coalesce(Tensor self) -> Tensor
   self: grad
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
@@ -1486,8 +1486,8 @@
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
 
-- name: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
-  self: adaptive_avg_pool3d_backward(grad, self)
+- name: _adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
+  self: _adaptive_avg_pool3d_backward(grad, self)
 
 - name: adaptive_max_pool2d(Tensor self, int[2] output_size) -> (Tensor, Tensor)
   self: adaptive_max_pool2d_backward(grad, self, result1)
@@ -1595,8 +1595,8 @@
   grad_output: _adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
   self: zeros_like(self)
 
-- name: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
-  grad_output: adaptive_avg_pool3d(grad, { grad_output.size(-3), grad_output.size(-2), grad_output.size(-1) })
+- name: _adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
+  grad_output: _adaptive_avg_pool3d(grad, { grad_output.size(-3), grad_output.size(-2), grad_output.size(-1) })
   self: zeros_like(self)
 
 - name: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
