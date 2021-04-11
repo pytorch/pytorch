@@ -253,7 +253,9 @@ class TestTypeSharing(JitTestCase):
                 return self.foo
 
         m = M()
-        with self.assertRaisesRegex(RuntimeError, "failed to convert Python type"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "failed to convert Python type",
+                                                 "self.foo"):
             torch.jit.script(m)
 
     def test_script_function_attribute_different(self):

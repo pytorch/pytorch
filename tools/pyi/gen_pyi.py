@@ -462,8 +462,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                  'def set_(self, storage: Storage) -> Tensor: ...'],
         'split': ['def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...',
                   'def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...'],
-        'div': ['def div(self, other: Union[Tensor, Number], *, '
-                'rounding_mode: Optional[str] = None, out: Optional[Tensor]=None) -> Tensor: ...'],
+        'div': ['def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
         'div_': ['def div_(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
     })
     for binop in ['mul', 'true_divide', 'floor_divide']:
