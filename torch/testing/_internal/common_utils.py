@@ -1633,9 +1633,8 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 
 # Methods for matrix and tensor generation
 
-# Used in test_autograd.py and test_torch.py
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
-                requires_grad: bool = False, discontiguous: bool = False) -> torch.Tensor:
+                requires_grad: bool = False, noncontiguous: bool = False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
         By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
@@ -1644,9 +1643,9 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         For unsigned types the values are in the range[0, 9] and for complex types the real and imaginary
         parts are each in the range [-9, 9].
 
-        If discontiguous=True, a discontiguous tensor with the given size will be returned unless the size
-        specifies a tensor with a 1 or 0 elements in which case the discontiguous parameter is ignored because
-        it is not possible to create a discontiguous Tensor with a single element.
+        If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
+        specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
+        it is not possible to create a noncontiguous Tensor with a single element.
     """
 
     assert low is None or low < 9, "low value too high!"
@@ -1681,7 +1680,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
         result = torch.complex(real, imag)
 
-    if discontiguous and result.numel() > 1:
+    if noncontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
 
@@ -1724,6 +1723,7 @@ def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001)
         .sort(-1, descending=True).values.to(dtype)
     return (u * s.unsqueeze(-2)) @ v.transpose(-2, -1).conj()
 
+# TODO: remove this (prefer make_symmetric_matrices below)
 def random_symmetric_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
@@ -1731,6 +1731,13 @@ def random_symmetric_matrix(l, *batches, **kwargs):
     A = (A + A.transpose(-2, -1)).div_(2)
     return A
 
+# Creates a symmetric matrix or batch of symmetric matrices
+# Shape must be a square matrix or batch of square matrices
+def make_symmetric_matrices(*shape, device, dtype):
+    assert shape[-1] == shape[-2]
+    t = make_tensor(shape, device=device, dtype=dtype)
+    t = t + t.transpose(-2, -1).div_(2)
+    return t
 
 def random_hermitian_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
@@ -1758,6 +1765,7 @@ def random_hermitian_psd_matrix(matrix_size, *batch_dims, dtype=torch.double, de
     return torch.matmul(A, A.conj().transpose(-2, -1))
 
 
+# TODO: remove this (prefer make_symmetric_pd_matrices below)
 def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
@@ -1766,6 +1774,15 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
     return torch.matmul(A, A.transpose(-2, -1)) \
         + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
 
+
+# Creates a symmetric positive-definite matrix or batch of
+#   such matrices
+def make_symmetric_pd_matrices(*shape, device, dtype):
+    assert shape[-1] == shape[-2]
+    t = make_tensor(shape, device=device, dtype=dtype)
+    t = torch.matmul(t, t.transpose(-2, -1))
+    i = torch.eye(shape[-1], device=device, dtype=dtype) * 1e-5
+    return t + i
 
 def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     """
@@ -1780,24 +1797,7 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
         + torch.eye(matrix_size, dtype=dtype, device=device)
 
 
-def make_nonzero_det(A, sign=None, min_singular_value=0.1):
-    u, s, v = A.svd()
-    s.clamp_(min=min_singular_value)
-    A = torch.matmul(u, torch.matmul(torch.diag_embed(s), v.transpose(-2, -1)))
-    det = A.det()
-    if sign is not None:
-        if A.dim() == 2:
-            det = det.item()
-            if (det < 0) ^ (sign < 0):
-                A[0, :].neg_()
-        else:
-            cond = ((det < 0) ^ (sign < 0)).nonzero()
-            if cond.size(0) > 0:
-                for i in range(cond.size(0)):
-                    A[list(cond[i])][0, :].neg_()
-    return A
-
-
+# TODO: remove this (prefer make_fullrank_matrices_with_distinct_singular_values below)
 def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
                                                    **kwargs):
     dtype = kwargs.get('dtype', torch.double)
@@ -1811,6 +1811,20 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
     real_dtype = A.real.dtype if A.dtype.is_complex else A.dtype
     s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
     return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).to(A.dtype).matmul(v.transpose(-2, -1)))
+
+
+# Creates a full rank matrix with distinct signular values or
+#   a batch of such matrices
+# Shape must be a square matrix or batch of square matrices
+def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype):
+    assert shape[-1] == shape[-2]
+    t = make_tensor(shape, device=device, dtype=dtype)
+    u, _, v = t.svd()
+    # TODO: improve the handling of complex tensors here
+    real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
+    s = torch.arange(1., shape[-1] + 1, dtype=real_dtype, device=device).mul_(1.0 / (shape[-1] + 1)).diag()
+    u.matmul(s.expand(*shape).to(t.dtype).matmul(v.transpose(-2, -1)))
+    return t
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
