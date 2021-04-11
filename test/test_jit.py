@@ -12657,7 +12657,7 @@ dedent """
             if isinstance(t, tuple):
                 a, b = t
             return a + b
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "Provided tuple is not fully refined", "t"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Provided tuple is not fully defined/refined", "t"):
             s = torch.jit.script(fn)
 
     def test_augmented_assign(self):
