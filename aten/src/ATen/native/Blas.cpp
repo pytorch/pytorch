@@ -96,12 +96,22 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
 }
 
 Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
+  //self arg sent to addmv_out cannot be resized
+  //here we use result as self argument for addmv, and result is user supplied and can be wrong size
+  //it's not a hard error, because we allow resizing result, but it becomes a hard error
+  //in addmv, because addmv expects self to satisfy proper conditions
+  //to avoid this, supply correctly sized self, its contents doesn't matter because beta is 0
+  if (result.dim() > 1 || (result.numel() != self.size(0) || result.numel() !=1)) {
+    Tensor self_addmv = at::empty({self.size(0)}, self.options());
+    return at::addmv_out(result, self_addmv, self, vec, 0, 1);
+  }
   return at::addmv_out(result, result, self, vec, 0, 1);
 }
 
 Tensor mv(const Tensor &self, const Tensor &vec) {
   Tensor result = at::empty({self.size(0)}, self.options());
-  return native::mv_out(self, vec, result);
+  //inplace version is more efficient if we can use it
+  return at::addmv_(result, self, vec, 0, 1);
 }
 
 inline void dot_check(const Tensor& self, const Tensor& other) {
