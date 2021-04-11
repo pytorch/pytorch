@@ -18,7 +18,10 @@ class _BatchNormBase(torch.nn.modules.batchnorm._BatchNorm):
     @classmethod
     def from_float(cls, mod):
         activation_post_process = mod.activation_post_process
-        if type(mod) == cls._INTRINSIC_MODULE:
+        if hasattr(mod, '__getitem__') and type(mod[0]) == cls._FLOAT_MODULE:
+            # Intrinsic (fused) modules are treated as a sequential set.
+            # However, we need to treat them as fused, and will only take the
+            # batch norm layer.
             mod = mod[0]
         scale, zero_point = activation_post_process.calculate_qparams()
         new_mod = cls(mod.num_features, mod.eps)
@@ -40,7 +43,7 @@ class _BatchNormBase(torch.nn.modules.batchnorm._BatchNorm):
 class BatchNorm2d(_BatchNormBase):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`.
     """
-    _INTRINSIC_MODULE = torch.nn.intrinsic.BNReLU2d
+    _FLOAT_MODULE = torch.nn.BatchNorm2d
     _DIM = 2
     _NAME = 'QuantizedBatchNorm2d'
 
@@ -52,7 +55,7 @@ class BatchNorm2d(_BatchNormBase):
 class BatchNorm3d(_BatchNormBase):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm3d`.
     """
-    _INTRINSIC_MODULE = torch.nn.intrinsic.BNReLU3d
+    _FLOAT_MODULE = torch.nn.BatchNorm3d
     _DIM = 3
     _NAME = 'QuantizedBatchNorm3d'
 
