@@ -12652,6 +12652,14 @@ dedent """
             return e
         self.checkScript(foo, (torch.rand(3), torch.rand(3)))
 
+    def test_tuple_error_msg(self):
+        def fn(t: Any):
+            if isinstance(t, tuple):
+                a, b = t
+            return a + b
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Provided tuple is not fully defined/refined", "t"):
+            s = torch.jit.script(fn)
+
     def test_augmented_assign(self):
         def foo(a, b):
             a += b
