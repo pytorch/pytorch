@@ -463,15 +463,8 @@ struct MethodValue : public SugaredValue {
                 dynamic_cast<OverloadedFunction*>(method)) {
           auto matched = overloaded_method->matchOverloadedSchemas(
               loc, class_type, *f.graph(), argsWithSelf, kwargs);
-          // When we import the graph back (serialization), we will sometimes
-          // receive mangled names. Therefore we need to make sure we don't add
-          // extra __[number] tag again.
-          auto mangled_name = method_name;
-          if (method_name.find("__" + std::to_string(matched.first)) ==
-              std::string::npos) {
-            mangled_name = method_name + "__" + std::to_string(matched.first);
-          }
-
+          auto mangled_name =
+              method_name + "__" + std::to_string(matched.first);
           Value* output =
               f.graph()->insertMethodCall(mangled_name, matched.second);
           output->node()->setSourceRange(loc);

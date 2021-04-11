@@ -115,8 +115,7 @@ struct FooOverloadInit : torch::CustomClassHolder {
   int x, y;
   FooOverloadInit() : x(0), y(0) {}
   FooOverloadInit(int x_, int y_) : x(x_), y(y_) {}
-  FooOverloadInit(int x_, int y_, const std::string& val) : x(x_), y(0) {}
-
+  FooOverloadInit(int x_, int y_, const std::string& val) : x(x_ + 2), y(0) {}
   int64_t increment(int64_t z) {
     return (x + y) * z;
   }
@@ -350,6 +349,10 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
 
   m.class_<FooOverload>("_FooOverload")
       .def(torch::init<int64_t, int64_t>())
+      .def(
+          "increment",
+          (int64_t(FooOverload::*)(int64_t, int64_t))(&FooOverload::increment))
+      // to test if Torchbind doesn't register same method twice
       .def(
           "increment",
           (int64_t(FooOverload::*)(int64_t, int64_t))(&FooOverload::increment))

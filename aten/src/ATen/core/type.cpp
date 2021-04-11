@@ -1072,6 +1072,13 @@ void ClassType::addMethod(torch::jit::Function* method) {
 }
 
 void ClassType::addOverloadedMethod(torch::jit::Function* method) {
+  // we can't use old findMethod because it searches based on the string name of
+  // function
+  for (auto added_method : methods_) {
+    if (method == added_method) {
+      return;
+    }
+  }
   auto it = overloaded_methods_.insert(
       std::pair<std::string, std::vector<torch::jit::Function*>>(
           method->name(), std::vector<torch::jit::Function*>()));
