@@ -51,52 +51,62 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 
 
-    def test_optional_linear(self):
+    def test_bias_as_module_attr(self):
 
         with enable_profiling_mode_for_profiling_tests():
             class M(torch.nn.Module):
-                def __init__(self):
+                def __init__(self, has_bias):
                     super(M, self).__init__()
-                    self.ll = torch.nn.Linear(10, 10, False)
+                    self.ll = torch.nn.Linear(10, 10, has_bias)
 
                 def forward(self, x, y):
                     return self.ll(x + y) * x + y
 
             x = torch.rand(10, 10, requires_grad=True)
-            scripted = torch.jit.script(M())
-            scripted(x, x)
-            scripted(x, x)
-            scripted(x, x)
+            no_bias = M(False)
+            scripted_no_bias = torch.jit.script(no_bias)
+            scripted_no_bias(x, x)
+            scripted_no_bias(x, x)
+            scripted_no_bias(x, x)
+            has_bias = M(True)
+            check_against_reference(self, scripted_no_bias, no_bias, lambda x: x, (x, x,), check_types=False)
+            scripted_has_bias = torch.jit.script(has_bias)
+            scripted_has_bias(x, x)
+            scripted_has_bias(x, x)
+            scripted_has_bias(x, x)
+            check_against_reference(self, scripted_has_bias, has_bias, lambda x: x, (x, x,), check_types=False)
 
-        #x = torch.rand(10, 10, requires_grad=True)
-        #scripted = self.checkScript(M, (x,))
+    def test_constructed_bias(self):
 
+        with enable_profiling_mode_for_profiling_tests():
+            def method1(x, weight, b1, b2):
+                bias = b1 * b2
+                return torch.nn.functional.linear(x, weight, bias)
+            N = 10
+            x = torch.rand(N, N, requires_grad=True)
+            weight = torch.rand(N, N, requires_grad=True)
+            b1 = torch.rand(N, N, requires_grad=True)
+            b2 = torch.rand(N, N, requires_grad=True)
+            scripted = self.checkScript(method1, (x, weight, b1, b2))
+            # check_types requires last_graph on scripted to be set, so we just skip it
+            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, b1, b2), check_types=False)
 
-    def test_optional_gradient(self):
+    def test_bias_as_arg(self):
 
-        def method1(x, weight, b1, b2):
-            bias = b1 * b2
-            return torch.nn.functional.linear(x, weight, bias)
-        N = 10
-        x = torch.rand(N, N, requires_grad=True)
-        weight = torch.rand(N, N, requires_grad=True)
-        b1 = torch.rand(N, N, requires_grad=True)
-        b2 = torch.rand(N, N, requires_grad=True)
-        scripted = self.checkScript(method1, (x, weight, b1, b2))
-        # check_types requires last_graph on scripted to be set, so we just skip it
-        check_against_reference(self, scripted, method1, lambda x: x, (x, weight, b1, b2), check_types=False)
-
-    def test_bias_none(self):
-
-        def method1(x, weight, bias: Optional[torch.Tensor]):
-            return torch.nn.functional.linear(x, weight, bias).relu() + 2
-        N = 10
-        x = torch.rand(N, N, requires_grad=True)
-        weight = torch.rand(N, N, requires_grad=True)
-        bias = None
-        scripted = self.checkScript(method1, (x, weight, bias))
-        # check_types requires last_graph on scripted to be set, so we just skip it
-        #check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
+        with enable_profiling_mode_for_profiling_tests():
+            def method1(x, weight, bias: Optional[torch.Tensor]):
+                return torch.nn.functional.linear(x, weight, bias).relu() + 2
+            N = 10
+            x = torch.rand(N, N, requires_grad=True)
+            weight = torch.rand(N, N, requires_grad=True)
+            bias = None
+            scripted = self.checkScript(method1, (x, weight, bias))
+            # check_types requires last_graph on scripted to be set, so we just skip it
+            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
+            bias = torch.rand(N, N, requires_grad=True)
+            scripted = self.checkScript(method1, (x, weight, bias))
+            # check_types requires last_graph on scripted to be set, so we just skip it
+            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
 
     def test_simple_merge(self):
         # o --> o
