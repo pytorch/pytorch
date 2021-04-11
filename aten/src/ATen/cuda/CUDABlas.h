@@ -94,6 +94,49 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
 #endif
+
+#define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
+  cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, \
+      cublasOperation_t trans, cublasDiagType_t diag, int m, int n,    \
+      const Dtype *alpha, const Dtype *A, int lda, Dtype *B, int ldb
+
+template <typename Dtype>
+inline void trsm(CUDABLAS_TRSM_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::blas::trsm: not implemented for ", typeid(Dtype).name());
+}
+
+template <>
+void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float));
+template <>
+void trsm<double>(CUDABLAS_TRSM_ARGTYPES(double));
+template <>
+void trsm<c10::complex<float>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<float>));
+template <>
+void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>));
+
+#define CUDABLAS_TRSM_BATCHED_ARGTYPES(Dtype)                          \
+  cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, \
+      cublasOperation_t trans, cublasDiagType_t diag, int m, int n,    \
+      const Dtype *alpha, Dtype *A[], int lda, Dtype *B[], int ldb,    \
+      int batchCount
+
+template <typename Dtype>
+inline void trsmBatched(CUDABLAS_TRSM_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::blas::trsmBatched: not implemented for ",
+      typeid(Dtype).name());
+}
+
+template <>
+void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float));
+template <>
+void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double));
+template <>
+void trsmBatched<c10::complex<float>>(CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>));
+template <>
+void trsmBatched<c10::complex<double>>(CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>));
+
 /* LEVEL 2 BLAS FUNCTIONS */
 
 #define CUDABLAS_GEMV_ARGTYPES(Dtype)                                         \

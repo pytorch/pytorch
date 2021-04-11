@@ -1,5 +1,11 @@
 #include "caffe2/operators/load_save_op.h"
 
+#if CAFFE2_HAVE_RE2
+#include <re2/re2.h>
+#else
+#include <regex>
+#endif
+
 namespace caffe2 {
 
 template <>
@@ -51,10 +57,7 @@ SaveOpImpl::SaveOpImpl(
       strip_prefix_(op->template GetSingleArgument<string>("strip_prefix", "")),
       db_type_(op->template GetSingleArgument<string>("db_type", "")),
       blob_names_(
-          op->template GetRepeatedArgument<string>("blob_name_overrides")),
-      chunk_size_(op->template GetSingleArgument<int>(
-          "chunk_size",
-          kDefaultChunkSize)) {
+          op->template GetRepeatedArgument<string>("blob_name_overrides")) {
   CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
   CAFFE_ENFORCE(
       blob_names_.empty() || blob_names_.size() == op->Inputs().size(),
@@ -68,6 +71,34 @@ SaveOpImpl::SaveOpImpl(
   auto db_name = op->template GetSingleArgument<string>("db", "");
   CAFFE_ENFORCE_GT(db_name.size(), 0, "Must specify a db name.");
   full_db_name_ = absolute_path ? db_name : (ws->RootFolder() + "/" + db_name);
+
+  auto options_data = op->template GetSingleArgument<string>("options", "");
+  if (!options_data.empty()) {
+    if (!options_.ParseFromString(options_data)) {
+      CAFFE_ENFORCE(false, "unable to parse serialization options");
+    }
+  }
+  if (op->template HasSingleArgumentOfType<int>("chunk_size")) {
+    // The chunk size argument pre-dates the options argument.
+    // If it was passed in, add it to the options list as a final default
+    // setting.
+    auto chunk_size_argument =
+        op->template GetSingleArgument<int>("chunk_size", kDefaultChunkSize);
+    // The chunk_size argument used 0 to mean "no chunking", and -1 to mean
+    // "default chunk size".  This is backwards from the behavior of the
+    // chunk_size field in the BlobSerializationOptions, so swap these values if
+    // we see them.  (BlobSerializationOptions uses 0 to mean "default chunk
+    // size" since protobuf v3 does not support custom default values, and so we
+    // need to use 0 to mean the default behavior.)
+    constexpr int kOldDefaultChunkSize = -1;
+    constexpr int kOldNoChunking = 0;
+    if (chunk_size_argument == kOldDefaultChunkSize) {
+      chunk_size_argument = kDefaultChunkSize;
+    } else if (chunk_size_argument == kOldNoChunking) {
+      chunk_size_argument = kNoChunking;
+    }
+    options_.mutable_options()->Add()->set_chunk_size(chunk_size_argument);
+  }
 
   if (blob_names_.empty()) {
     std::set<std::string> input_names;
@@ -91,6 +122,38 @@ SaveOpImpl::SaveOpImpl(
     }
   }
 }
+
+namespace {
+const BlobSerializationOptions& GetBlobOptions(
+    c10::string_view blob_name,
+    const SerializationOptions& options_list,
+    const BlobSerializationOptions& default_options) {
+  for (const auto& options : options_list.options()) {
+    const auto& name_regex = options.blob_name_regex();
+    if (name_regex.empty()) {
+      return options;
+    }
+
+#if CAFFE2_HAVE_RE2
+    // If we have re2, prefer it over std::regex.
+    re2::RE2 regex(name_regex);
+    if (re2::RE2::FullMatch(
+        re2::StringPiece(blob_name.data(), blob_name.size()), regex)) {
+      return options;
+    }
+#else
+    // std::regex should be avoided if at all possible, but use it as a fallback
+    // if we don't have re2 (e.g., for some issues with it see
+    // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61582)
+    if (std::regex_match(
+            blob_name.begin(), blob_name.end(), std::regex(name_regex))) {
+      return options;
+    }
+#endif
+  }
+  return default_options;
+}
+} // namespace
 
 bool SaveOpImpl::RunOnDevice() {
   std::unique_ptr<DB> out_db(
@@ -116,8 +179,13 @@ bool SaveOpImpl::RunOnDevice() {
   const vector<const Blob*>& inputs = operator_->OperatorBase::Inputs();
   VLOG(0) << "Saving " << inputs.size() << " inputs to " << db_type_ << ": "
           << full_db_name_;
+  BlobSerializationOptions default_options;
   for (int i = 0; i < inputs.size(); ++i) {
-    SerializeBlob(*inputs[i], blob_names_[i], acceptor, chunk_size_);
+    SerializeBlob(
+        *inputs[i],
+        blob_names_[i],
+        acceptor,
+        GetBlobOptions(blob_names_[i], options_, default_options));
   }
   out_db->Close();
   return true;
@@ -376,4 +444,5 @@ SHOULD_NOT_DO_GRADIENT(DBExists);
 SHOULD_NOT_DO_GRADIENT(Save);
 SHOULD_NOT_DO_GRADIENT(Checkpoint);
 SHOULD_NOT_DO_GRADIENT(Snapshot);
+
 }  // namespace caffe2

@@ -43,8 +43,13 @@ constexpr auto kChunkIdSeparator = "#%";
 TORCH_API void SerializeBlob(
     const Blob& blob,
     const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor);
+
+TORCH_API void SerializeBlob(
+    const Blob& blob,
+    const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
-    int chunk_size = kDefaultChunkSize);
+    const BlobSerializationOptions& options);
 
 /**
  * @brief Convenience function to serialize a blob to a string.
@@ -107,19 +112,30 @@ class TORCH_API TensorSerializer : public BlobSerializerBase {
       TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override;
-  void SerializeWithChunkSize(
+  void SerializeWithOptions(
       const void* pointer,
       TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor,
-      int chunk_size) override;
+      const BlobSerializationOptions& options) override;
+
+  void Serialize(
+      const Tensor& tensor,
+      const string& name,
+      TensorProto* proto,
+      const BlobSerializationOptions& options,
+      size_t chunkBegin,
+      int32_t chunkSize);
 
   void Serialize(
       const Tensor& tensor,
       const string& name,
       TensorProto* proto,
       size_t chunkBegin,
-      int32_t chunkSize);
+      int32_t chunkSize) {
+    BlobSerializationOptions options;
+    Serialize(tensor, name, proto, options, chunkBegin, chunkSize);
+  }
 
  private:
   // A utility function to store the device context detauls.

@@ -1,4 +1,5 @@
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -42,7 +43,8 @@ std::string stringSlice(
 
   int64_t i = start_val;
   std::string result = "";
-  for (int64_t j = 0; j < num_vals; j++) {
+  for (const auto j : c10::irange(num_vals)) {
+    (void)j; // Suppress unused variable warning
     result += string[i];
     i += step;
   }
@@ -144,18 +146,22 @@ RegisterOperators reg(
                out_ty = FloatType::get();
              } else if (elem_ty_val == 2) {
                out_ty = BoolType::get();
+             } else if (elem_ty_val == 3) {
+               out_ty = ComplexType::get();
              } else {
                TORCH_CHECK(
                    false,
-                   "Unsupported element type for tolist; only int, float and bool are supported");
+                   "Unsupported element type for tolist; only int, float, complex and bool are supported");
              }
 
              // Check that type of the Tensor matches that of the annotation.
              // Make an exception for the case in which the annotated type is
-             // float and the Tensor data type is also float; the elements will
-             // be casted to double later.
+             // float/complex and the Tensor data type is also float/complex;
+             // the elements will be casted to double/c10::complex<double>
+             // later.
              TORCH_CHECK(
                  (out_ty == FloatType::get() && t.is_floating_point()) ||
+                     (out_ty == ComplexType::get() && t.is_complex()) ||
                      tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
                  "Output annotation element type and runtime tensor element type must match for tolist()");
 
@@ -232,6 +238,15 @@ RegisterOperators reg(
            pop(stack, a);
            checkImplicitTensorToNum(a, /*to int*/ true);
            push(stack, a.item<int64_t>());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::ComplexImplicit(Tensor a) -> complex"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           checkImplicitTensorToNum(a, /*to int*/ false);
+           push(stack, a.item<c10::complex<double>>());
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -344,6 +359,8 @@ RegisterOperators reg(
            pop(stack, scalar);
            if (scalar.isDouble()) {
              push(stack, std::move(scalar));
+           } else if (scalar.isComplexDouble()) {
+             push(stack, scalar.toComplexDouble().real());
            } else {
              push(stack, static_cast<double>(scalar.toInt()));
            }
@@ -379,6 +396,30 @@ RegisterOperators reg(
                        << "to float: '" << s->string() << "'";
              throw std::runtime_error(error_str.str());
            }
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Complex.Scalar(Scalar a) -> complex"),
+         [](Stack* stack) {
+           IValue scalar;
+           pop(stack, scalar);
+           if (scalar.isComplexDouble()) {
+             push(stack, std::move(scalar));
+           } else if (scalar.isDouble()) {
+             push(stack, c10::complex<double>(scalar.toDouble(), 0));
+           } else {
+             push(stack, c10::complex<double>(scalar.toInt(), 0));
+           }
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::Complex.Tensor_Tensor(Tensor a, Tensor b) -> complex"),
+         [](Stack* stack) {
+           at::Tensor a, b;
+           pop(stack, a, b);
+           push(
+               stack, c10::complex<double>(a.item<double>(), b.item<double>()));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -736,7 +777,7 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA("aten::dequantize.any(Any tensors) -> Any"),
          [](Stack* stack) { dequantize(*stack); },
          aliasAnalysisFromSchema()),
-     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
+     DEFINE_UNARY_OP_WITH_COMPLEX(aten::log, std::log(a), float, float),
      DEFINE_STRING_OP(aten::add, a + b, str),
      DEFINE_COMPARISON_OP(aten::eq, a == b),
      DEFINE_COMPARISON_OP(aten::ne, a != b),
@@ -744,17 +785,17 @@ RegisterOperators reg(
      DEFINE_COMPARISON_OP(aten::gt, a > b),
      DEFINE_COMPARISON_OP(aten::le, a <= b),
      DEFINE_COMPARISON_OP(aten::ge, a >= b),
-     DEFINE_BINARY_OP(aten::add, a + b),
-     DEFINE_BINARY_OP(aten::sub, a - b),
-     DEFINE_BINARY_OP(aten::mul, a* b),
+     DEFINE_BINARY_OP_WITH_COMPLEX(aten::add, a + b),
+     DEFINE_BINARY_OP_WITH_COMPLEX(aten::sub, a - b),
+     DEFINE_BINARY_OP_WITH_COMPLEX(aten::mul, a* b),
      DEFINE_BOOL_OP(aten::__and__, a&& b),
      DEFINE_BOOL_OP(aten::__or__, a || b),
      DEFINE_BOOL_OP(aten::__xor__, a != b),
      DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
      DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
      DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
-     DEFINE_UNARY_OP(aten::neg, -a, int, float),
-     DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
+     DEFINE_UNARY_OP_WITH_COMPLEX(aten::neg, -a, int, float),
+     DEFINE_UNARY_OP_WITH_COMPLEX(aten::exp, std::exp(a), float, float),
      // Pass in two ops for handling int and float separately as % in C++ only
      // works for int The modulus calculation is different between C++ and
      // Python (on negative), we preserve the python behavior as it's more

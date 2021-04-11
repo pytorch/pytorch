@@ -8,6 +8,8 @@
 
 #include <immintrin.h>
 
+#include <c10/util/irange.h>
+
 using namespace std;
 
 namespace dnnlowp {
@@ -306,7 +308,7 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
   }
 
   float total_sum = 0;
-  for (int i = 0; i < bins_f.size(); ++i) {
+  for (const auto i : c10::irange(bins_f.size())) {
     total_sum += bins_f[i];
   }
   float selected_sum = 0;

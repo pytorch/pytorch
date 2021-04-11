@@ -49,11 +49,11 @@ class SignalTest {
   c10::intrusive_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
     auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
-    ::c10d::ProcessGroupGloo::Options options;
+    auto options = ::c10d::ProcessGroupGloo::Options::create();
     // Set a timeout that is small enough to make this test run fast, but also
     // make sure that we don't get timeouts in the ProcessGroupGloo constructor.
-    options.timeout = std::chrono::milliseconds(1000);
-    options.devices.push_back(
+    options->timeout = std::chrono::milliseconds(1000);
+    options->devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
     ::c10d::ProcessGroupGloo pg(store, rank, size, options);
@@ -106,7 +106,7 @@ class ProcessGroupGlooDelayed : public ::c10d::ProcessGroupGloo {
       const c10::intrusive_ptr<::c10d::Store>& store,
       int rank,
       int size,
-      Options options)
+      c10::intrusive_ptr<Options> options)
       : ProcessGroupGloo(store, rank, size, options) {}
 
   c10::intrusive_ptr<::c10d::ProcessGroup::Work> send(
@@ -157,9 +157,9 @@ class CollectiveTest {
 
     // Set a timeout that is small enough to make this test run fast, but also
     // make sure that we don't get timeouts in the ProcessGroupGloo constructor.
-    ::c10d::ProcessGroupGloo::Options options;
-    options.timeout = std::chrono::milliseconds(1000);
-    options.devices.push_back(
+    auto options = ::c10d::ProcessGroupGloo::Options::create();
+    options->timeout = std::chrono::milliseconds(1000);
+    options->devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
     if (!delayed) {
@@ -426,6 +426,44 @@ void testBarrier(const std::string& path) {
           std::move(event_lists), GLOO_STR, size, allShapes, /* verify_shapes */ false);
 }
 
+void testMonitoredBarrier(const std::string& path) {
+  const auto size = 2;
+  auto tests = CollectiveTest::initialize(path, size);
+  // Non-failure case: all ranks pass the blocking monitored barrier.
+  auto runMonitoredBarrier = [&](int i) {
+      tests[i].getProcessGroup().monitoredBarrier();
+  };
+  std::vector<std::thread> threads;
+  threads.reserve(size);
+  for (int r = 0; r < size; r++) {
+    threads.emplace_back(std::thread([=]() { runMonitoredBarrier(r); }));
+  }
+  for (auto & t : threads) {
+    t.join();
+  }
+  // Failure case: Only rank 0 calls into monitored barrier, should result in error
+  auto runMonitoredBarrierWithException = [&](int i) {
+      if (i != 0) {
+        return;
+      }
+
+      try {
+          tests[i].getProcessGroup().monitoredBarrier();
+          FAIL() << "Exception should have been thrown.";
+      } catch (const std::exception& e) {
+          auto pos = std::string(e.what()).find("Rank 1");
+          EXPECT_TRUE(pos != std::string::npos);
+      }
+  };
+  threads.clear();
+  for (int r = 0; r < size; r++) {
+      threads.emplace_back(std::thread([=]() { runMonitoredBarrierWithException(r); }));
+  }
+  for (auto & t : threads) {
+      t.join();
+  }
+}
+
 void testWaitDelay(const std::string& path) {
   const auto size = 2;
   auto tests = CollectiveTest::initialize(path, size, /* delay */ true);
@@ -601,6 +639,11 @@ TEST(ProcessGroupGlooTest, testBarrier) {
     TemporaryFile file;
     testBarrier(file.path);
   }
+}
+
+TEST(ProcessGroupGlooTest, testMonitoredBarrier) {
+  TemporaryFile file;
+  testMonitoredBarrier(file.path);
 }
 
 TEST(ProcessGroupGlooTest, testSend) {

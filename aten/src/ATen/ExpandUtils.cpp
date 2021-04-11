@@ -1,13 +1,17 @@
 #include <ATen/ExpandUtils.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 
+namespace {
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
-std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
+template <typename Container>
+Container infer_size_impl(IntArrayRef a, IntArrayRef b) {
   size_t dimsA = a.size();
   size_t dimsB = b.size();
   size_t ndim = dimsA > dimsB ? dimsA : dimsB;
-  std::vector<int64_t> expandedSizes(ndim);
+  Container expandedSizes(ndim);
 
   // Use ptrdiff_t to ensure signed comparison.
   for (ptrdiff_t i = (ptrdiff_t)ndim - 1; i >= 0; --i) {
@@ -28,6 +32,15 @@ std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
   }
 
   return expandedSizes;
+}
+}
+
+std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
+  return infer_size_impl<std::vector<int64_t>>(a, b);
+}
+
+DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b) {
+  return infer_size_impl<DimVector>(a, b);
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t>> inferExpandGeometry(
@@ -149,9 +162,10 @@ std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef t
   // all dimensions with 0 stride won't move. This is the same behavior as TensorIterator.
   // eg. Given tensor with size/stride (6, 5, 4, 3, 2)/(6, 0, 120, 0, 1), the initial `perm`
   //     is (4, 3, 2, 1, 0) and the sorted `perm` will be (4, 3, 0, 1, 2)
-  for (int i = 1; i < ndim; ++i) {
-    int dim1 = i;
-    for (int dim0 = i - 1; dim0 >= 0; --dim0) {
+  for (const auto i : c10::irange(1, ndim)) {
+    auto dim1 = i;
+    for (const auto j : c10::irange(1, i + 1)) {
+      auto dim0 = i - j;
       int comparison = should_swap(perm[dim0], perm[dim1]);
       if (comparison > 0) {
         std::swap(perm[dim0], perm[dim1]);

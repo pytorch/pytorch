@@ -615,6 +615,7 @@ mobile::Module _load_for_mobile_impl(
   if (observer) {
     observer->onEnterLoadModel(instance_key);
   }
+  const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
   try {
@@ -624,6 +625,7 @@ mobile::Module _load_for_mobile_impl(
     if (result.metadata().find("model_name") == result.metadata().end()) {
       copied_metadata["model_name"] = result.name();
     }
+    copied_metadata["model_size"] = c10::guts::to_string(model_size);
     if (observer) {
       observer->onExitLoadModel(instance_key, copied_metadata);
     }

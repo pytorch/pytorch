@@ -6,7 +6,9 @@ import warnings
 import random
 from functools import reduce
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+import numpy as np
+
+from torch.testing._internal.common_utils import TestCase, run_tests, make_tensor
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyOnCPUAndCUDA)
@@ -844,15 +846,13 @@ class TestIndexing(TestCase):
         true = torch.tensor(1, dtype=torch.uint8, device=device)
         false = torch.tensor(0, dtype=torch.uint8, device=device)
 
-        tensors = [torch.randn(2, 3, device=device), torch.tensor(3, device=device)]
+        tensors = [torch.randn(2, 3, device=device), torch.tensor(3., device=device)]
 
         for a in tensors:
             self.assertNotEqual(a.data_ptr(), a[True].data_ptr())
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(torch.empty(0, *a.shape), a[False])
+            self.assertEqual(torch.empty(0, *a.shape), a[False])
             self.assertNotEqual(a.data_ptr(), a[true].data_ptr())
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(torch.empty(0, *a.shape), a[false])
+            self.assertEqual(torch.empty(0, *a.shape), a[false])
             self.assertEqual(a.data_ptr(), a[None].data_ptr())
             self.assertEqual(a.data_ptr(), a[...].data_ptr())
 
@@ -988,11 +988,9 @@ class TestIndexing(TestCase):
             self.assertEquals(len(w), 1)
 
         self.assertEqual(x[0], value)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(x[1], torch.arange(4, 8, device=device))
+        self.assertEqual(x[1], torch.arange(4., 8, device=device))
         self.assertEqual(x[2], value)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(x[3], torch.arange(12, 16, device=device))
+        self.assertEqual(x[3], torch.arange(12., 16, device=device))
 
     def test_variable_slicing(self, device):
         x = torch.arange(0, 16, device=device).view(4, 4)
@@ -1041,6 +1039,88 @@ class TestIndexing(TestCase):
         for accumulate in [True, False]:
             self.assertRaises(RuntimeError, lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate))
 
+    @dtypes(torch.long, torch.float32)
+    def test_take_along_dim(self, device, dtype):
+        def _test_against_numpy(t, indices, dim):
+            actual = torch.take_along_dim(t, indices, dim=dim)
+            t_np = t.cpu().numpy()
+            indices_np = indices.cpu().numpy()
+            expected = np.take_along_axis(t_np, indices_np, axis=dim)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
+        for shape in [(3, 2), (2, 3, 5), (2, 4, 0), (2, 3, 1, 4)]:
+            for discontiguous in [True, False]:
+                t = make_tensor(shape, device=device, dtype=dtype, discontiguous=discontiguous)
+                for dim in list(range(t.ndim)) + [None]:
+                    if dim is None:
+                        indices = torch.argsort(t.view(-1))
+                    else:
+                        indices = torch.argsort(t, dim=dim)
+
+                _test_against_numpy(t, indices, dim)
+
+        # test broadcasting
+        t = torch.ones((3, 4, 1), device=device)
+        indices = torch.ones((1, 2, 5), dtype=torch.long, device=device)
+
+        _test_against_numpy(t, indices, 1)
+
+        # test empty indices
+        t = torch.ones((3, 4, 5), device=device)
+        indices = torch.ones((3, 0, 5), dtype=torch.long, device=device)
+
+        _test_against_numpy(t, indices, 1)
+
+    @dtypes(torch.long, torch.float)
+    def test_take_along_dim_invalid(self, device, dtype):
+        shape = (2, 3, 1, 4)
+        dim = 0
+        t = make_tensor(shape, device=device, dtype=dtype)
+        indices = torch.argsort(t, dim=dim)
+
+        # dim of `t` and `indices` does not match
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input and indices should have the same number of dimensions"):
+            torch.take_along_dim(t, indices[0], dim=0)
+
+        # invalid `indices` dtype
+        with self.assertRaisesRegex(RuntimeError, r"dtype of indices should be Long"):
+            torch.take_along_dim(t, indices.to(torch.bool), dim=0)
+
+        with self.assertRaisesRegex(RuntimeError, r"dtype of indices should be Long"):
+            torch.take_along_dim(t, indices.to(torch.float), dim=0)
+
+        with self.assertRaisesRegex(RuntimeError, r"dtype of indices should be Long"):
+            torch.take_along_dim(t, indices.to(torch.int32), dim=0)
+
+        # invalid axis
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch.take_along_dim(t, indices, dim=-7)
+
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch.take_along_dim(t, indices, dim=7)
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_gather_take_along_dim_cross_device(self, device, dtype):
+        shape = (2, 3, 1, 4)
+        dim = 0
+        t = make_tensor(shape, device=device, dtype=dtype)
+        indices = torch.argsort(t, dim=dim)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            torch.gather(t, 0, indices.cpu())
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Expected tensor to have .* but got tensor with .* torch.take_along_dim()"):
+            torch.take_along_dim(t, indices.cpu(), dim=0)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            torch.gather(t.cpu(), 0, indices)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Expected tensor to have .* but got tensor with .* torch.take_along_dim()"):
+            torch.take_along_dim(t.cpu(), indices, dim=0)
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:
@@ -1117,8 +1197,7 @@ class NumpyTests(TestCase):
     def test_empty_fancy_index(self, device):
         # Empty list index creates an empty array
         a = tensor([1, 2, 3], device=device)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(a[[]], torch.tensor([], device=device))
+        self.assertEqual(a[[]], torch.tensor([], dtype=torch.long, device=device))
 
         b = tensor([], device=device).long()
         self.assertEqual(a[[]], torch.tensor([], dtype=torch.long, device=device))
@@ -1300,9 +1379,8 @@ class NumpyTests(TestCase):
         v = torch.arange(0., 100, device=device)[:, None]
         b = torch.arange(99, -1, -1, device=device).long()
         a[b] = v
-        expected = b.double().unsqueeze(1).expand(100, 100)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(a, expected)
+        expected = b.float().unsqueeze(1).expand(100, 100)
+        self.assertEqual(a, expected)
 
 instantiate_device_type_tests(TestIndexing, globals())
 instantiate_device_type_tests(NumpyTests, globals())

@@ -292,6 +292,13 @@ struct TORCH_API IValue final {
     if (this->isTensor()) {
       const auto& thisTensor = this->toTensor();
       const auto& rhsTensor = rhs.toTensor();
+      // mkldnn tensors dont have views or storage, so we compare
+      // based on tensor impl. //TODO: find a way to use mkldnn storage
+      if (thisTensor.is_mkldnn() || rhsTensor.is_mkldnn()) {
+        return thisTensor.unsafeGetTensorImpl() ==
+            rhsTensor.unsafeGetTensorImpl();
+      }
+
       return thisTensor.is_alias_of(rhsTensor);
     }
 
@@ -446,6 +453,14 @@ struct TORCH_API IValue final {
               guts::negation<std::is_constructible<IValue, Args>>...>::value,
           std::nullptr_t> = nullptr>
   IValue(const std::tuple<Args...>& t);
+  template <
+      typename... Args,
+      std::enable_if_t<
+          !guts::disjunction<
+              std::is_lvalue_reference<Args>...,
+              guts::negation<std::is_constructible<IValue, Args>>...>::value,
+          std::nullptr_t> = nullptr>
+  IValue(std::tuple<Args...>&& t);
   bool isTuple() const {
     return Tag::Tuple == tag;
   }
@@ -667,18 +682,22 @@ struct TORCH_API IValue final {
   }
 
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
-  IValue(at::Scalar s) : IValue() {
+  IValue(const at::Scalar& s) : IValue() {
     if (s.isFloatingPoint()) {
       *this = s.toDouble();
     } else if (s.isComplex()) {
       *this = s.toComplexDouble();
-    } else {
+    } else if (s.isBoolean()) {
+      *this = s.toBool();
+    } else if (s.isIntegral(false)) {
       *this = s.toLong();
+    } else {
+      TORCH_CHECK(false, "Unknown type in Scalar");
     }
   }
 
   bool isScalar() const {
-    return isDouble() || isInt() || isComplexDouble();
+    return isDouble() || isInt() || isComplexDouble() || isBool();
   }
 
   at::Scalar toScalar() const {
@@ -688,6 +707,8 @@ struct TORCH_API IValue final {
       return toInt();
     else if (isComplexDouble())
       return toComplexDouble();
+    else if (isBool())
+      return toBool();
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -849,8 +870,15 @@ struct TORCH_API IValue final {
   struct HashAliasedIValue {
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        return reinterpret_cast<size_t>(
-            val.toTensor().storage().unsafeGetStorageImpl());
+        if (val.toTensor().is_mkldnn()) {
+          // MKLDNN tensors dont have storage and dont create views
+          // or aliasing so we can just use Tensor pointer, TODO: find way
+          // to use mkldnn storage
+          return reinterpret_cast<size_t>(val.toTensor().unsafeGetTensorImpl());
+        } else {
+          return reinterpret_cast<size_t>(
+              val.toTensor().storage().unsafeGetStorageImpl());
+        }
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
       // if they are the same pointer.

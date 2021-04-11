@@ -54,7 +54,8 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
         // ensures that profiling callbacks have ran. To ensure that this is
         // transparent, we must make this future propagate the value of the RPC
         // future.
-        return fut->constValue();
+        // Use value() here instead of constValue() to ensure we propagate errors.
+        return fut->value();
       };
   // Define a future that completes after the profiling callbacks are run.
   auto profiledFut = fut->then(at::wrapPropagateTLSState<c10::IValue>(

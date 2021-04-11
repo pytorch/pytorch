@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+#include "ATen/core/jit_type_base.h"
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -28,6 +29,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/hash.h>
 
 #include <atomic>
 #include <climits>
@@ -146,7 +148,7 @@ struct CondValue {
       c10::optional<bool> static_if)
       : value_(value),
         refinements_(std::move(refinements)),
-        static_if_(static_if) {}
+        static_if_(static_if){}
   CondValue(
       Graph& g,
       const SourceRange& loc,
@@ -167,6 +169,7 @@ struct CondValue {
 
  private:
   Value* value_;
+
   RefinementSet refinements_;
   c10::optional<bool>
       static_if_; // certain expression cause us to emit a static if statement
@@ -445,6 +448,10 @@ struct Environment {
            makeMagic(
                "__float__",
                std::make_shared<CastValue>(FloatType::get(), aten::Float))},
+          {"complex",
+           makeMagic(
+               "__complex__",
+               std::make_shared<CastValue>(ComplexType::get(), aten::Complex))},
           {"int",
            makeMagic(
                "__int__",
@@ -496,8 +503,6 @@ struct Environment {
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
           {"pow", std::make_shared<BuiltinFunction>(aten::pow, at::nullopt)},
-          {"complex",
-           std::make_shared<BuiltinFunction>(aten::complex, at::nullopt)},
           {"range", SpecialFormValue::create(prim::range)},
           {"zip", SpecialFormValue::create(prim::zip)},
           {"enumerate", SpecialFormValue::create(prim::enumerate)},
@@ -573,12 +578,12 @@ struct Environment {
   ValueTable value_table;
 };
 
-template <class T>
+template <class T, class Hash>
 static Value* materializeConstant(
     T val,
     Graph& graph,
     const SourceRange& r,
-    std::unordered_map<T, Value*>& map) {
+    std::unordered_map<T, Value*, Hash>& map) {
   auto existing_constant = map.find(val);
   if (existing_constant != map.end()) {
     return existing_constant->second;
@@ -665,8 +670,13 @@ struct to_ir {
   Function& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
-  std::unordered_map<int64_t, Value*> integral_constants;
-  std::unordered_map<double, Value*> fp_constants;
+  std::unordered_map<int64_t, Value*, std::hash<int64_t>> integral_constants;
+  std::unordered_map<double, Value*, std::hash<double>> fp_constants;
+  std::unordered_map<
+      c10::complex<double>,
+      Value*,
+      c10::hash<c10::complex<double>>>
+      complex_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
   LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;
@@ -1229,16 +1239,17 @@ struct to_ir {
             }
           }
         }
-        auto expr_out = emitToBool(expr.range(), emitExpr(expr));
+        auto expr_out = emitExpr(expr);
+        auto expr_out_bool = emitToBool(expr.range(), expr_out);
         c10::optional<bool> static_if = c10::nullopt;
-        auto kind = expr_out->node()->kind();
+        auto kind = expr_out_bool->node()->kind();
         if (kind == aten::is_scripting) {
           static_if = true;
         } else if (kind == aten::has_torch_function) {
           static_if = false;
         }
         // MetaCompile on boolean literals and constants
-        if (auto maybe_ivalue = toIValue(expr_out)) {
+        if (auto maybe_ivalue = toIValue(expr_out_bool)) {
           static_if = maybe_ivalue->toBool();
         }
         return CondValue(expr_out, RefinementSet({}), static_if);
@@ -1392,7 +1403,8 @@ struct to_ir {
 
     // if it's an OR the first expr is emitted in the true branch
     // and the second expr in the false branch, if it's an AND the opposite
-    auto get_const_expr = [&] { return graph->insertConstant(is_or, loc); };
+    // auto get_const_expr = [&] { return graph->insertConstant(is_or, loc); };
+    auto get_const_expr = [&] { return lhs.value(); };
 
     c10::optional<CondValue> rhs;
     auto get_continue_expr = [&] {
@@ -2291,13 +2303,14 @@ struct to_ir {
   NamedValue emitValueToTensor(
       const NamedValue& value,
       const NamedValue& matchTypeOf) {
-    // Add implicit conversion of int/float/bool/number types to tensors
+    // Add implicit conversion of int/float/complex/bool/number types to tensors
     // Used in emitSubscriptAssign to convert:
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
     if (kind == c10::TypeKind::NumberType || kind == c10::TypeKind::IntType ||
-        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType) {
+        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType ||
+        kind == c10::TypeKind::ComplexType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
@@ -2339,7 +2352,7 @@ struct to_ir {
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
 
-      // rhs must be a tensor, implicitly convert int/float/bool
+      // rhs must be a tensor, implicitly convert int/float/complex/bool
       const auto convertedRhs = emitValueToTensor(rhs, slicedArg);
 
       if (tensorIndices.size() == 0) {
@@ -2682,6 +2695,8 @@ struct to_ir {
       case '&':
         return "__and__";
       case '|':
+        return "__or__";
+      case TK_OR:
         return "__or__";
       case '^':
         return "__xor__";
@@ -3531,13 +3546,15 @@ struct to_ir {
       case TK_ISNOT:
       case TK_AND:
       case TK_OR: {
-        auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
-                       ->asValue(tree->tree(0)->range(), method);
-        auto rhs = emitSugaredExpr(Expr(tree->tree(1)), 0)
-                       ->asValue(tree->tree(1)->range(), method);
-
-        return emitBuiltinCall(
-            tree->range(), *method.graph(), aten::__or__, {lhs, rhs}, {});
+        auto expr = Expr(tree);
+        auto binop = BinOp(expr);
+        if (type_hint != nullptr) {
+          std::cout << "HINT: " << c10::typeKindToString(type_hint->kind()) << std::endl;
+        }
+        auto cond =  emitShortCircuitLogical(
+            binop.range(), binop.lhs(), binop.rhs(), expr.kind() == TK_OR);
+        std::cout << "HI: " << c10::typeKindToString(cond.value()->type()->kind()) << std::endl;
+        return cond.value();
       }
       case TK_NOT: {
         return emitCondExpr(Expr(tree)).value();
@@ -3686,6 +3703,9 @@ struct to_ir {
     if (c.isFloatingPoint())
       return materializeConstant(
           c.asFloatingPoint(), *graph, c.range(), fp_constants);
+    else if (c.isComplex())
+      return materializeConstant(
+          c.asComplex(), *graph, c.range(), complex_constants);
     else
       return materializeConstant(
           c.asIntegral(), *graph, c.range(), integral_constants);

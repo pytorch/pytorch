@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta)
 
 # TODO: refactor tri_tests_args, _compare_trilu_indices, run_additional_tri_tests
 from torch.testing._internal.common_methods_invocations import (
@@ -694,13 +694,55 @@ class TestTensorCreation(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     "input tensors must be on the same device"):
             torch.cat((cuda0, cuda1))
-        cpu = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "all input tensors and out must be on the same device"):
+            torch.cat((cuda0, cuda0), out=cuda1)
+
+    @onlyCUDA
+    def test_cat_stack_cross_devices(self, device):
+        cuda = torch.randn((3, 3), device=device)
+        cpu = torch.randn((3, 3), device='cpu')
+        out_cpu = cpu.clone()
+        out_cuda = cuda.clone()
         with self.assertRaisesRegex(RuntimeError,
                                     "input tensors must be on the same device"):
-            torch.cat((cuda0, cpu))
+            torch.cat((cuda, cpu))
         with self.assertRaisesRegex(RuntimeError,
                                     "input tensors must be on the same device"):
-            torch.cat((cpu, cuda0))
+            torch.cat((cpu, cuda))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.cat((cpu, cuda), out=out_cuda)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "all input tensors and out must be on the same device"):
+            torch.cat((cpu, cpu), out=out_cuda)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "all input tensors and out must be on the same device"):
+            torch.cat((cuda, cuda), out=out_cpu)
+
+        # Stack
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.stack((cuda, cpu))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.stack((cpu, cuda))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input tensors must be on the same device"):
+            torch.stack((cpu, cuda), out=out_cuda)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "all input tensors and out must be on the same device"):
+            torch.stack((cpu, cpu), out=out_cuda)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "all input tensors and out must be on the same device"):
+            torch.stack((cuda, cuda), out=out_cpu)
 
     # TODO: reconcile with other cat tests
     # TODO: Compare with a NumPy reference instead of CPU
@@ -2260,6 +2302,8 @@ class TestTensorCreation(TestCase):
                                    torch.tensor(1, dtype=torch.int16)).dtype)
         torch.set_default_dtype(saved_dtype)
 
+    # cannot call storage() on meta tensor
+    @skipMeta
     def test_empty_strided(self, device):
         for shape in [(2, 3, 4), (0, 2, 0)]:
             # some of these cases are pretty strange, just verifying that if as_strided
@@ -2693,12 +2737,12 @@ class TestTensorCreation(TestCase):
     # See NOTE [Linspace+Logspace precision override]
     @skipCPUIf(True, "compares with CPU")
     @precisionOverride({torch.half: 0.0039 + LINSPACE_LOGSPACE_EXTRA_EPS})
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
+    @dtypes(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
     def test_linspace_device_vs_cpu(self, device, dtype):
         self._test_linspace(device, dtype, steps=10)
 
     @skipCPUIf(True, "compares with CPU")
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
+    @dtypes(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
     def test_linspace_special_steps(self, device, dtype):
         for steps in self.LINSPACE_LOGSPACE_SPECIAL_STEPS:
             self._test_linspace(device, dtype, steps=steps)
@@ -2936,6 +2980,36 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(t_transform(r).mean(), 2, atol=0.3, rtol=0)
             self.assertEqual(t_transform(r).std(), std_transform(3), atol=0.3, rtol=0)
 
+            # float std 0 with float mean
+            r.fill_(42)
+            torch.normal(2, 0, (10, 10), dtype=dtype, device=device, out=r)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertTrue(r.eq(2).all())
+
+            # float std 0 with tensor mean
+            r.fill_(42)
+            mean_rand = torch.randn(10, 10, dtype=dtype, device=device)
+            torch.normal(mean_rand, 0, out=r)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(mean_rand, r, atol=0, rtol=0)
+
+            # tensor std 0 with float mean
+            r.fill_(42)
+            std_zeros = torch.zeros(10, 10, dtype=dtype, device=device)
+            torch.normal(2, std_zeros, out=r)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertTrue(r.eq(2).all())
+
+            # tensor std 0 with tensor mean
+            r.fill_(42)
+            torch.normal(mean_rand, std_zeros, out=r)
+            self.assertEqual(r.dtype, dtype)
+            self.assertEqual(str(r.device), device)
+            self.assertEqual(mean_rand, r, atol=0, rtol=0)
+
         if dtype.is_complex:
             helper(self, device, dtype, lambda x: complex(x, x),
                    lambda t: torch.real(t).to(torch.float), lambda mean: mean / math.sqrt(2))
@@ -2950,6 +3024,18 @@ class TestRandomTensorCreation(TestCase):
                 lambda: torch.normal(0, torch.empty(100, 100, dtype=dtype, device=device), out=out))
         else:
             helper(self, device, dtype, lambda x: x, lambda t: t, lambda mean: mean)
+
+    # Ensure that normal raises appropriate error when `std` < 0
+    def test_normal_std_error(self, device):
+        a = torch.tensor(0, dtype=torch.float32, device=device)
+        std = torch.tensor(-1, dtype=torch.float32, device=device)
+
+        for input in [0, a]:
+            with self.assertRaisesRegex(RuntimeError, r'normal_ expects std >= 0.0'):
+                torch.normal(input, -1, (10,))
+
+            with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
+                torch.normal(input, std)
 
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
@@ -3085,7 +3171,7 @@ class TestRandomTensorCreation(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @slowTest
+    @onlyCUDA
     def test_randperm(self, device):
         if device == 'cpu':
             rng_device = None
@@ -3105,6 +3191,7 @@ class TestRandomTensorCreation(TestCase):
                 res2 = torch.empty(0, dtype=dtype, device=device)
                 torch.randperm(n, out=res2, dtype=dtype, device=device)
                 self.assertEqual(res1, res2, atol=0, rtol=0)
+                self.assertEqual(res1.sort().values.long(), torch.arange(n, device=device))
 
         # Default type is long
         for n in (100, 10000):
@@ -3134,6 +3221,7 @@ class TestRandomTensorCreation(TestCase):
                 res = torch.randperm(n, dtype=torch.long, device=device)
             torch.randperm(n, out=non_contiguous_tensor)
             self.assertEqual(non_contiguous_tensor, res)
+            self.assertEqual(res.sort().values.long(), torch.arange(n, device=device))
 
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA

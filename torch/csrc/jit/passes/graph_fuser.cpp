@@ -187,8 +187,9 @@ struct GraphFuser {
       return canFuseOnGPU();
     } else if ((*device).is_xpu()) {
       return false;
+    } else {
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "Unknown device for graph fuser");
     }
-    throw std::runtime_error("Unknown device");
   }
 
   // Default fusability check - used when the user doesn't pass in

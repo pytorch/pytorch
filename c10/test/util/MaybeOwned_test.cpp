@@ -35,6 +35,17 @@ TEST(MaybeOwnedTest, SimpleDereferencingString) {
   EXPECT_EQ(owned2->size(), x.size());
 }
 
+TEST(MaybeOwnedTest, DefaultCtorInt) {
+  int x = 123;
+  MaybeOwned<int> borrowed, owned;
+  borrowed = MaybeOwned<int>::borrowed(x);
+  owned = MaybeOwned<int>::owned(c10::in_place, x);
+  EXPECT_EQ(*borrowed, x);
+  EXPECT_EQ(*owned, x);
+  EXPECT_EQ(&*borrowed, &x);
+  EXPECT_NE(&*owned, &x);
+}
+
 TEST(MaybeOwnedTest, MoveConstructor) {
   std::string x = "hello";
   auto borrowed = MaybeOwned<std::string>::borrowed(x);
