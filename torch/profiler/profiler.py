@@ -93,7 +93,7 @@ class profile(object):
         with_stack (bool): record source information (file and line number) for the ops.
         with_flops (bool): use formula to estimate the FLOPS of specific operators
             (matrix multiplication and 2D convolution).
-        use_cuda (bool): 
+        use_cuda (bool):
             .. deprecated:: use ``activities`` instead.
 
     .. note::
