@@ -13,6 +13,7 @@ from functools import partial
 from unittest import mock
 
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
@@ -480,6 +481,20 @@ def async_add_multi_fanout(to, x, num, step):
         fut.then(inc_and_set)
 
     return ret_future
+
+
+def MyConvNetForMNIST(device):
+    return nn.Sequential(
+            nn.Conv2d(1, 32, 3, 1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 3, 1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Flatten(1),
+            nn.Linear(9216, 128),
+            nn.ReLU(),
+            nn.Linear(128, 10),
+        ).to(device)
 
 
 class AsyncExecutionClass:
@@ -5548,3 +5563,18 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def test_rref_proxy_timeout(self):
         for rpc_api in ["rpc_sync", "rpc_async", "remote"]:
             self._test_rref_proxy_timeout(rpc_api)
+
+    @dist_init
+    def test_rref_to_here_synchronization(self):
+        # This test compares rref.rpc_sync().forward(x) vs rref.remote().forward(x).to_here()
+        # If to_here() is properly synchronized with forward(x) the results must be identical
+        # This test needs multiple iterations and significant batch size to simulate real
+        # training of a CNN of MNIST-like data.
+        # see https://github.com/pytorch/pytorch/issues/54771
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, MyConvNetForMNIST, args=("cuda:0",))
+        for _ in range(100):
+            x = torch.randn(100, 1, 28, 28).to("cuda:0")
+            actual = rref.remote().forward(x).to_here()
+            expected = rref.rpc_sync().forward(x)
+            assert((expected == actual).all())
