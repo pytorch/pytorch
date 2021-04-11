@@ -1,6 +1,9 @@
 // ${generated_comment}
 
+#include <array>
+
 #include <ATen/Functions.h>
+#include <ATen/Utils.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/adaption.h>
@@ -63,14 +66,15 @@ at::Tensor conv3d(
 
 namespace detail {
 
-void noopDelete(void*)
-{}
+void noopDelete(void*) {}
 
-}  // namespace detail
+} // namespace detail
 
 Tensor TensorMaker::make_tensor() {
   AutoNonVariableTypeMode guard{}; // TODO: Remove.
   tracer::impl::NoTracerDispatchMode tracer_guard{};
+
+  check_size_nonnegative(sizes_);
 
   TORCH_CHECK_VALUE(
       !deleter_ || !ctx_,
@@ -99,16 +103,17 @@ Tensor TensorMaker::make_tensor() {
 
   Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr)};
 
-  at::Tensor tensor = makeEmptyTensor();
+  Tensor tensor = detail::make_tensor<TensorImpl>(
+      std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
 
-  c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+  if (sizes_.size() != 1 || sizes_[0] != 0) {
+    TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
-  tensor_impl->set_storage_keep_dtype(std::move(storage));
-
-  if (strides_) {
-    tensor_impl->set_sizes_and_strides(sizes_, *strides_);
-  } else {
-    tensor_impl->set_sizes_contiguous(sizes_);
+    if (strides_) {
+      tensor_impl->set_sizes_and_strides(sizes_, *strides_);
+    } else {
+      tensor_impl->set_sizes_contiguous(sizes_);
+    }
   }
 
   return tensor;
@@ -122,8 +127,8 @@ std::size_t TensorMaker::computeStorageSize() const noexcept {
   }
 
   std::size_t size = 1;
-  for (std::size_t s : sizes_) {
-    size *= s;
+  for (std::int64_t s : sizes_) {
+    size *= static_cast<std::size_t>(s);
   }
   return size * itemsize;
 }
@@ -137,7 +142,7 @@ inline DataPtr TensorMaker::makeDataPtrFromContext() noexcept {
 }
 
 IntArrayRef TensorMaker::makeTempSizes() const noexcept {
-  static int64_t zeros[5] = {0, 0, 0, 0, 0};
+  static std::int64_t zeros[5] = {0, 0, 0, 0, 0};
   if (opts_.has_memory_format()) {
     MemoryFormat format = *opts_.memory_format_opt();
     if (format == MemoryFormat::ChannelsLast) {
@@ -148,10 +153,6 @@ IntArrayRef TensorMaker::makeTempSizes() const noexcept {
     }
   }
   return IntArrayRef(zeros, 1);
-}
-
-inline Tensor TensorMaker::makeEmptyTensor() const {
-  return empty(makeTempSizes(), opts_);
 }
 
 ${function_definitions}
