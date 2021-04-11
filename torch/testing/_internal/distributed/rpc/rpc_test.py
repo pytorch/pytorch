@@ -5564,6 +5564,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         for rpc_api in ["rpc_sync", "rpc_async", "remote"]:
             self._test_rref_proxy_timeout(rpc_api)
 
+    @skip_if_lt_x_gpu(1)
     @dist_init
     def test_rref_to_here_synchronization(self):
         # This test compares rref.rpc_sync().forward(x) vs rref.remote().forward(x).to_here()
@@ -5577,4 +5578,4 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             x = torch.randn(100, 1, 28, 28).to("cuda:0")
             actual = rref.remote().forward(x).to_here()
             expected = rref.rpc_sync().forward(x)
-            assert((expected == actual).all())
+            self.assertEqual(actual, expected)
