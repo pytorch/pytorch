@@ -1322,10 +1322,7 @@ def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
     for shape in symmetric_shapes:
         _helper(make_symmetric_matrices, *shape)
         _helper(make_symmetric_pd_matrices, *shape)
-
-        # only adds batched fullrank distinct sv cases if not ROCm
-        if torch.device(device).type != 'cuda' or not TEST_WITH_ROCM or len(shape) <= 2:
-            _helper(make_fullrank_matrices_with_distinct_singular_values, *shape, min_singular_value=0)
+        _helper(make_fullrank_matrices_with_distinct_singular_values, *shape, min_singular_value=0)
 
     return tuple(samples)
 
@@ -4202,7 +4199,7 @@ op_db: List[OpInfo] = [
         'logdet',
         supports_out=False,
         sample_inputs_func=sample_inputs_logdet,
-        decorators=(skipCPUIfNoLapack, skipCUDAIfNoMagma)),
+        decorators=(skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm)),
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
                    domain=(0, 1),
