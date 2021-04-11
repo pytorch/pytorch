@@ -485,16 +485,16 @@ def async_add_multi_fanout(to, x, num, step):
 
 def MyConvNetForMNIST(device):
     return nn.Sequential(
-            nn.Conv2d(1, 32, 3, 1),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 3, 1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Flatten(1),
-            nn.Linear(9216, 128),
-            nn.ReLU(),
-            nn.Linear(128, 10),
-        ).to(device)
+        nn.Conv2d(1, 32, 3, 1),
+        nn.ReLU(),
+        nn.Conv2d(32, 64, 3, 1),
+        nn.ReLU(),
+        nn.MaxPool2d(2),
+        nn.Flatten(1),
+        nn.Linear(9216, 128),
+        nn.ReLU(),
+        nn.Linear(128, 10),
+    ).to(device)
 
 
 class AsyncExecutionClass:
