@@ -587,11 +587,13 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
 
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
       auto index_data = index_contig.data_ptr<index_t>();
+      auto self_data = static_cast<char*>(selfSlice.data_ptr());
+      auto source_data = static_cast<char*>(sourceSlice.data_ptr());
       for (auto i = 0; i < numel; i++) {
           auto self_i = index_data[i];
           TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-          auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
-          auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
+          self_data += self_stride_bytes;
+          source_data += source_stride_bytes;
           iter.unsafe_replace_operand(0, self_data);
           iter.unsafe_replace_operand(1, self_data);
           iter.unsafe_replace_operand(2, source_data);
