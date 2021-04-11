@@ -259,7 +259,8 @@ void OwnerRRef::setError(std::exception_ptr eptr) {
   future_->setErrorIfNeeded(std::move(eptr));
 }
 
-void OwnerRRef::recordAllStreams(const std::shared_ptr<LazyStreamContext>& ctx) {
+void OwnerRRef::recordAllStreams(
+    const std::shared_ptr<LazyStreamContext>& ctx) {
 #ifdef USE_CUDA_NOT_ROCM
   if (ctx) {
     for (auto stream : ctx->getReservedStreams()) {

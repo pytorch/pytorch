@@ -1163,7 +1163,8 @@ if(USE_DISTRIBUTED)
       USE_TENSORPIPE
     )
     # This is needed for torch/csrc/distributed/rpc/macros.h to work
-    # in other than tensorpipe_agent source files, like rref_impl.cpp
+    # in libtorch_distributed_sources source files, e.g., rref_impl.cpp.
+    # See tools/build_variables.bzl
     if(USE_CUDA)
       target_compile_definitions(torch_cpu PUBLIC USE_CUDA)
     endif()

@@ -798,6 +798,9 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
+            // The `ctx` needs to be propagated to `process***Call` methods
+            // to synchronize CUDA streams there to make sure that we fetch
+            // the correct value from `to_here()` call.
             futureResponseMessage = cb_->operator()(requestMessage, ctx);
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =

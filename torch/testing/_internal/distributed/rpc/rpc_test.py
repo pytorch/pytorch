@@ -5591,3 +5591,31 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             self.assertEqual(actual, expected)
 
         rpc.shutdown()
+
+    @skip_if_lt_x_gpu(2)
+    def test_rref_to_here_synchronization_cross_device(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {1: 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        # This test compares rref.rpc_sync().forward(x) vs rref.remote().forward(x).to_here()
+        # If to_here() is properly synchronized with forward(x) the results must be identical
+        # This test needs multiple iterations and significant batch size to simulate real
+        # training of a CNN of MNIST-like data.
+        # see https://github.com/pytorch/pytorch/issues/54771
+        rref = rpc.remote(dst, MyConvNetForMNIST, args=("cuda:0",))
+        for _ in range(100):
+            x = torch.randn(100, 1, 28, 28).to("cuda:1")
+            actual = rref.remote().forward(x).to_here()
+            expected = rref.rpc_sync().forward(x)
+            self.assertEqual(actual, expected)
+
+        rpc.shutdown()
