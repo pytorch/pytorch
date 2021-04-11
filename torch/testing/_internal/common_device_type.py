@@ -344,6 +344,11 @@ class DeviceTypeTestBase(TestCase):
             result.stop()
 
 
+# All available device types, this list must match
+# the derived *TestBase classes below
+ALL_AVAILABLE_DEVICE_TYPES = ['meta', 'cpu', 'cuda']
+
+
 class CPUTestBase(DeviceTypeTestBase):
     device_type = 'cpu'
 
@@ -427,6 +432,22 @@ def get_device_type_test_bases():
 device_type_test_bases = get_device_type_test_bases()
 
 
+def filter_desired_device_types(device_types: List[str],
+                                except_for: List[str] = None, only_for: List[str] = None):
+    filtered_device_types: List[str] = list()
+    for device_type in device_types:
+        # Skips bases listed in except_for
+        if except_for and only_for:
+            assert device_type not in except_for or device_type not in only_for,\
+                "same device cannot appear in except_for and only_for"
+        if except_for and device_type in except_for:
+            continue
+        if only_for and device_type not in only_for:
+            continue
+        filtered_device_types.append(device_type)
+    return filtered_device_types
+
+
 # Note [How to extend DeviceTypeTestBase to add new test device]
 # The following logic optionally allows downstream projects like pytorch/xla to
 # add more test devices.
@@ -474,30 +495,30 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     # Acquires members names
     # See Note [Overriding methods in generic tests]
     generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
-    generic_tests = [x for x in generic_members if x.startswith('test')]
+    generic_tests = [x for x in generic_members if x.startswith('test')]\
 
-    def split_if_not_empty(x):
+    # Filter out the device types based on user inputs
+    desired_device_types = filter_desired_device_types(ALL_AVAILABLE_DEVICE_TYPES,
+                                                       except_for, only_for)
+
+    def split_if_not_empty(x: str):
         return x.split(",") if len(x) != 0 else []
 
-    # Derive defaults from environment variables if available, default is still none
+    # Filter out the device types based on environment variables if available
     # Usage:
     # export PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda,cpu
     # export PYTORCH_TESTING_DEVICE_EXCEPT_FOR=xla
-    if only_for is None:
-        only_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_ONLY_FOR", ''))
+    env_only_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_ONLY_FOR", ''))
+    env_except_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_EXCEPT_FOR", ''))
 
-    if except_for is None:
-        except_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_EXCEPT_FOR", ''))
+    desired_device_types = filter_desired_device_types(desired_device_types,
+                                                       env_except_for, env_only_for)
+
 
     # Creates device-specific test cases
     for base in device_type_test_bases:
-        # Skips bases listed in except_for
-        if except_for and only_for:
-            assert base.device_type not in except_for or base.device_type not in only_for,\
-                "same device cannot appear in except_for and only_for"
-        if except_for and base.device_type in except_for:
-            continue
-        if only_for and base.device_type not in only_for:
+        # Skips bases if not listed in desired_device_types
+        if base.device_type not in desired_device_types:
             continue
         # Special-case for ROCm testing -- only test for 'cuda' i.e. ROCm device by default
         # The except_for and only_for cases were already checked above. At this point we only need to check 'cuda'.
