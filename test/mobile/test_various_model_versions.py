@@ -8,6 +8,7 @@ import pathlib
 import tempfile
 import torch.utils.show_pickle
 import shutil
+import fnmatch
 
 class testVariousModelVersions(TestCase):
     def test_save_load_model_v5(self):
@@ -34,7 +35,7 @@ class testVariousModelVersions(TestCase):
 
             expected_result = '''
 (5,
- ('__torch__.___torch_mangle_12.TestModule.forward',
+ ('__torch__.*.TestModule.forward',
   (('instructions',
     (('STOREN', 1, 2),
      ('DROPR', 1, 0),
@@ -58,15 +59,16 @@ class testVariousModelVersions(TestCase):
    ('register_size', 2)),
   (('arguments',
     ((('name', 'self'),
-      ('type', '__torch__.___torch_mangle_12.TestModule'),
+      ('type', '__torch__.*.TestModule'),
       ('default_value', None)),
      (('name', 'y'), ('type', 'int'), ('default_value', None)))),
    ('returns',
     ((('name', ''), ('type', 'Tensor'), ('default_value', None)),)))))
         '''
-
-            assert("".join(expected_result.split()) == "".join(output.split()))
-
+            acutal_result_clean = "".join(output.split())
+            expected_result_clean = "".join(expected_result.split())
+            isMatch = fnmatch.fnmatch(acutal_result_clean, expected_result_clean)
+            assert(isMatch)
 
             # Load model v5 and run forward method
             mobile_module = _load_for_lite_interpreter(str(output_model_path))
@@ -101,7 +103,7 @@ class testVariousModelVersions(TestCase):
 
             expected_result = '''
 (4,
- ('__torch__.___torch_mangle_5.TestModule.forward',
+ ('__torch__.*.TestModule.forward',
   (('instructions',
     (('STOREN', 1, 2),
      ('DROPR', 1, 0),
@@ -125,14 +127,16 @@ class testVariousModelVersions(TestCase):
    ('register_size', 2)),
   (('arguments',
     ((('name', 'self'),
-      ('type', '__torch__.___torch_mangle_5.TestModule'),
+      ('type', '__torch__.*.TestModule'),
       ('default_value', None)),
      (('name', 'y'), ('type', 'int'), ('default_value', None)))),
    ('returns',
     ((('name', ''), ('type', 'Tensor'), ('default_value', None)),)))))
         '''
-            assert("".join(expected_result.split()) == "".join(output.split()))
-
+            acutal_result_clean = "".join(output.split())
+            expected_result_clean = "".join(expected_result.split())
+            isMatch = fnmatch.fnmatch(acutal_result_clean, expected_result_clean)
+            assert(isMatch)
 
             # Load model v4 and run forward method
             mobile_module = _load_for_lite_interpreter(str(output_model_path))
