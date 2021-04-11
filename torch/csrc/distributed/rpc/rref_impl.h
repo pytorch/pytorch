@@ -3,6 +3,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/rref_interface.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/types.h>
@@ -415,10 +416,6 @@ class TORCH_API OwnerRRef final : public RRef {
 #ifdef USE_CUDA_NOT_ROCM
   // a storage for CUDA events for synchronization.
   std::vector<at::cuda::CUDAEvent> cudaEvents_;
-#else
-  // if CUDA is not available we still need a dummy field
-  // to prevent segfaults because of different class size
-  std::vector<int> cudaEvents_;
 #endif
 };
 
