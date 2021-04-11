@@ -40,6 +40,18 @@ class _BatchNormBase(torch.nn.modules.batchnorm._BatchNorm):
             raise ValueError(f'Expected {self._DIM}D input (got {x.dim()}D)')
 
 
+class BatchNorm1d(_BatchNormBase):
+    r"""This is the quantized version of :class:`~torch.nn.BatchNorm1d`.
+    """
+    _FLOAT_MODULE = torch.nn.BatchNorm1d
+    _DIM = 1
+    _NAME = 'QuantizedBatchNorm1d'
+
+    def forward(self, input):
+        return torch.ops.quantized.batch_norm1d(input, self.weight, self.bias, self.running_mean,
+                                                self.running_var, self.eps, self.scale, self.zero_point)
+
+
 class BatchNorm2d(_BatchNormBase):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`.
     """

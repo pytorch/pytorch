@@ -9,6 +9,7 @@ from .fused import ConvReLU1d
 from .fused import ConvReLU2d
 from .fused import ConvReLU3d
 from .fused import LinearReLU
+from .fused import BNReLU1d
 from .fused import BNReLU2d
 from .fused import BNReLU3d
 

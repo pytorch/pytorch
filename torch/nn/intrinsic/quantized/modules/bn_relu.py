@@ -5,6 +5,26 @@ import torch.nn.intrinsic.qat
 import torch.nn.quantized as nnq
 
 
+class BNReLU1d(nnq.BatchNorm1d):
+    r"""
+    A BNReLU1d module is a fused module of BatchNorm1d and ReLU
+
+    We adopt the same interface as :class:`torch.nn.quantized.BatchNorm1d`.
+
+    Attributes:
+        Same as torch.nn.quantized.BatchNorm1d
+
+    """
+    # TODO: Add qat support for BNReLU1d
+    _NAME = 'QuantizedBNReLU1d'
+
+    def forward(self, input):
+        self._check_input_dim(input)
+        return torch.ops.quantized.batch_norm1d_relu(
+            input, self.weight, self.bias, self.running_mean,
+            self.running_var, self.eps, self.scale, self.zero_point)
+
+
 class BNReLU2d(nnq.BatchNorm2d):
     r"""
     A BNReLU2d module is a fused module of BatchNorm2d and ReLU

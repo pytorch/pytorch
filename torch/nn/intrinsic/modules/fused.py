@@ -96,6 +96,15 @@ class ConvBnReLU3d(_FusedModule):
         super().__init__(conv, bn, relu)
 
 
+class BNReLU1d(_FusedModule):
+    r"""This is a sequential container which calls the BatchNorm 1d and ReLU modules.
+    During quantization this will be replaced with the corresponding fused module."""
+    def __init__(self, batch_norm, relu):
+        assert type(batch_norm) == BatchNorm1d and type(relu) == ReLU, \
+            'Incorrect types for input modules{}{}'.format(
+                type(batch_norm), type(relu))
+        super().__init__(batch_norm, relu)
+
 class BNReLU2d(_FusedModule):
     r"""This is a sequential container which calls the BatchNorm 2d and ReLU modules.
     During quantization this will be replaced with the corresponding fused module."""
