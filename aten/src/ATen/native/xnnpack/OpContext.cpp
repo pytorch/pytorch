@@ -11,8 +11,8 @@ c10::intrusive_ptr<LinearOpContext>
 XNNPackLinearOpContext::create_context(
     at::Tensor&& weight,
     c10::optional<at::Tensor>&& bias,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   auto linear_op_context =
       c10::make_intrusive<XNNPackLinearOpContext>(
           std::move(weight),
@@ -51,8 +51,8 @@ XNNPackConv2dOpContext::create_context(at::Tensor&& weight,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   auto op_context =
       xnnpack::internal::convolution2d::create(
           weight,
@@ -95,8 +95,8 @@ XNNPackTransposeConv2dOpContext::create_context(at::Tensor&& weight,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   auto op_context =
       xnnpack::internal::convolution2d::create(
           weight,

@@ -1,3 +1,4 @@
+from io import BytesIO
 from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
@@ -25,13 +26,14 @@ class TestDependencyAPI(PackageTestCase):
     """
 
     def test_extern(self):
-        filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
             he.extern(["package_a.subpackage", "module_a"])
             he.require_module("package_a.subpackage")
             he.require_module("module_a")
             he.save_module("package_a")
-        hi = PackageImporter(filename)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
         import module_a
         import package_a.subpackage
 
@@ -44,8 +46,8 @@ class TestDependencyAPI(PackageTestCase):
         self.assertIs(package_a.subpackage, package_a_im.subpackage)
 
     def test_extern_glob(self):
-        filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
             he.extern(["package_a.*", "module_*"])
             he.save_module("package_a")
             he.save_source_string(
@@ -57,7 +59,8 @@ class TestDependencyAPI(PackageTestCase):
                     """
                 ),
             )
-        hi = PackageImporter(filename)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
         import module_a
         import package_a.subpackage
 
@@ -74,9 +77,9 @@ class TestDependencyAPI(PackageTestCase):
         Test that an error is thrown when a extern glob is specified with allow_empty=True
         and no matching module is required during packaging.
         """
-        filename = self.temp()
+        buffer = BytesIO()
         with self.assertRaisesRegex(EmptyMatchError, r"did not match any modules"):
-            with PackageExporter(filename, verbose=False) as exporter:
+            with PackageExporter(buffer, verbose=False) as exporter:
                 exporter.extern(include=["package_a.*"], allow_empty=False)
                 exporter.save_module("package_b.subpackage")
 
@@ -84,13 +87,13 @@ class TestDependencyAPI(PackageTestCase):
         """
         Test marking packages as "deny" during export.
         """
-        filename = self.temp()
+        buffer = BytesIO()
 
         with self.assertRaisesRegex(
             DeniedModuleError,
             "required during packaging but has been explicitly blocklisted",
         ):
-            with PackageExporter(filename, verbose=False) as exporter:
+            with PackageExporter(buffer, verbose=False) as exporter:
                 exporter.deny(["package_a.subpackage", "module_a"])
                 exporter.require_module("package_a.subpackage")
 
@@ -98,12 +101,12 @@ class TestDependencyAPI(PackageTestCase):
         """
         Test marking packages as "deny" using globs instead of package names.
         """
-        filename = self.temp()
+        buffer = BytesIO()
         with self.assertRaisesRegex(
             DeniedModuleError,
             "required during packaging but has been explicitly blocklisted",
         ):
-            with PackageExporter(filename, verbose=False) as exporter:
+            with PackageExporter(buffer, verbose=False) as exporter:
                 exporter.deny(["package_a.*", "module_*"])
                 exporter.save_source_string(
                     "test_module",
@@ -117,13 +120,14 @@ class TestDependencyAPI(PackageTestCase):
 
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_mock(self):
-        filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
             he.mock(["package_a.subpackage", "module_a"])
             he.save_module("package_a")
             he.require_module("package_a.subpackage")
             he.require_module("module_a")
-        hi = PackageImporter(filename)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
         import package_a.subpackage
 
         _ = package_a.subpackage
@@ -138,8 +142,8 @@ class TestDependencyAPI(PackageTestCase):
 
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_mock_glob(self):
-        filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
             he.mock(["package_a.*", "module*"])
             he.save_module("package_a")
             he.save_source_string(
@@ -151,7 +155,8 @@ class TestDependencyAPI(PackageTestCase):
                     """
                 ),
             )
-        hi = PackageImporter(filename)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
         import package_a.subpackage
 
         _ = package_a.subpackage
@@ -169,9 +174,9 @@ class TestDependencyAPI(PackageTestCase):
         Test that an error is thrown when a mock glob is specified with allow_empty=True
         and no matching module is required during packaging.
         """
-        filename = self.temp()
+        buffer = BytesIO()
         with self.assertRaisesRegex(EmptyMatchError, r"did not match any modules"):
-            with PackageExporter(filename, verbose=False) as exporter:
+            with PackageExporter(buffer, verbose=False) as exporter:
                 exporter.mock(include=["package_a.*"], allow_empty=False)
                 exporter.save_module("package_b.subpackage")
 
@@ -217,12 +222,14 @@ class TestDependencyAPI(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
         obj2 = package_a.PackageAObject(obj)
 
-        filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
             he.mock(include="package_a.subpackage")
             he.save_pickle("obj", "obj.pkl", obj2)
 
-        hi = PackageImporter(filename)
+        buffer.seek(0)
+
+        hi = PackageImporter(buffer)
         with self.assertRaises(NotImplementedError):
             hi.load_pickle("obj", "obj.pkl")
 

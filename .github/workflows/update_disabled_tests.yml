@@ -1,0 +1,30 @@
+name: Update disabled tests
+
+on:
+  issues:
+    types: [opened, edited, labeled, unlabeled, closed, reopened]
+  # Have the ability to trigger this job manually through the API
+  workflow_dispatch:
+
+jobs:
+  update-disabled-tests:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Generate new disabled test list
+        run: |
+          # score changes every request, so we strip it out to avoid creating a commit every time we query.
+          curl 'https://api.github.com/search/issues?q=is%3Aissue+is%3Aopen+label%3A%22module%3A+flaky-tests%22+repo:pytorch/pytorch+in%3Atitle+DISABLED' \
+          | sed 's/"score": [0-9\.]*/"score": 0.0/g' > disabled-tests.json
+      - name: Push file to test-infra repository
+        uses: dmnemec/copy_file_to_another_repo_action@5f40763ccee2954067adba7fb8326e4df33bcb92
+        env:
+           API_TOKEN_GITHUB: ${{ secrets.TEST_INFRA_TOKEN }}
+        with:
+          source_file: 'disabled-tests.json'
+          destination_repo: 'pytorch/test-infra'
+          destination_folder: 'stats'
+          destination_branch: master
+          user_email: 'test-infra@pytorch.org'
+          user_name: 'Pytorch Test Infra'
+          commit_message: 'Updating disabled tests stats'

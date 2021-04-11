@@ -16,6 +16,8 @@ from torch.testing._internal.distributed.distributed_test import (
     DistributedTest, TestDistBackend
 )
 
+torch.backends.cuda.matmul.allow_tf32 = False
+
 CPP_EXTENSIONS_WARNING = """
 Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
 but it could not be found. Install ninja with `pip install ninja`
@@ -49,6 +51,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         def setUp(self):
             super().setUp()
             self._fork_processes()
+            torch.backends.cudnn.flags(allow_tf32=False).__enter__()
 
 
 elif BACKEND == "mpi":

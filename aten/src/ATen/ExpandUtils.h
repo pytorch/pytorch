@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/DimVector.h>
 #include <ATen/Tensor.h>
 #include <c10/util/Exception.h>
 
@@ -10,6 +11,7 @@
 namespace at {
 
 TORCH_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b);
+TORCH_API DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b);
 TORCH_API std::tuple<std::vector<int64_t>, std::vector<int64_t>>
 inferExpandGeometry(
     IntArrayRef tensor_sizes,

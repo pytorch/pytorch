@@ -2767,7 +2767,7 @@ TEST(MemDependency, MemDependencyCheckerComputeAPI) {
         return c->call(m, n, k) + 1;
       });
 
-  LoopNest l({d});
+  LoopNest l({d}, {c, d});
 
   MemDependencyChecker analyzer({a_buf.data(), b_buf.data()}, {d->buf()});
 
@@ -2814,7 +2814,7 @@ TEST(MemDependency, MemDependencyCheckerComputeInline) {
         return c->call(m, n, k) + 1;
       });
 
-  LoopNest l({d});
+  LoopNest l({d}, {c, d});
   l.computeInline(c->buf());
 
   MemDependencyChecker analyzer({a_buf.data(), b_buf.data()}, {d->buf()});
@@ -2964,7 +2964,7 @@ TEST(MemDependency, MemDependencyCheckerComputeReduce) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
   Tensor* d = Reduce("sum", {{2, "l1"}}, Sum(), c, {{3, "n1"}, {6, "m1"}});
-  LoopNest l({d});
+  LoopNest l({d}, {c, d});
 
   MemDependencyChecker analyzer({a.data(), b.data()}, {d->buf()});
 

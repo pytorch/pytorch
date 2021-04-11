@@ -483,9 +483,37 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Tensors with non-trivial strides are not contiguous.  See
    * compute_contiguous() for the exact definition of whether or not
    * a tensor is contiguous or not.
+   *
+   * NOTE: is_contiguous is only `TENSORIMPL_MAYBE_VIRTUAL` for
+   * backward compatibility. See `set_has_contiguity_policy` and
+   * `is_contiguous_custom` for the encouraged customization point.
    */
-  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const;
+  TENSORIMPL_MAYBE_VIRTUAL bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+    if (C10_UNLIKELY(has_contiguity_ != static_cast<uint8_t>(HasContiguityPolicy::Default))) {
+      return is_contiguous_nondefault_policy_impl(memory_format);
+    }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
+    if (memory_format == at::MemoryFormat::ChannelsLast) {
+      return is_channels_last_contiguous_;
+    }
+    else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+      return is_channels_last_3d_contiguous_;
+    }
+    return is_contiguous_;
+  }
 
+ private:
+  bool is_contiguous_nondefault_policy_impl(at::MemoryFormat) const;
+
+ protected:
+  /**
+   * Customization point for is_contiguous; must also
+   * set_has_contiguity_policy(HasContiguityPolicy::Custom) for this
+   * to be called.
+   */
+  virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
+
+ public:
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::SparseCPU) ||
@@ -504,6 +532,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_meta() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::Meta);
+  }
+
+  bool is_cpu() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    return key_set_.has(DispatchKey::CPU) ||
+        key_set_.has(DispatchKey::SparseCPU) ||
+        key_set_.has(DispatchKey::QuantizedCPU) ||
+        key_set_.has(DispatchKey::MkldnnCPU);
   }
 
   bool is_cuda() const {
@@ -553,6 +589,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // file aten/src/ATen/core/boxing/impl/test_helpers.h
   void remove_autograd_key() {
     key_set_ = key_set_ - autograd_dispatch_keyset;
+  }
+
+  // Inference tensor doesn't have autograd or InplaceOrView key.
+  bool is_inference_tensor() {
+    bool no_InplaceOrView = !key_set_.has(c10::DispatchKey::InplaceOrView);
+    bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(no_InplaceOrView == no_Autograd,
+      "InplaceOrView and Autograd keys must be on/off at the same time.");
+    return no_InplaceOrView && no_Autograd;
   }
 
   int64_t get_device() const {
@@ -674,7 +719,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "self" should represent the Tensor whose forward grad is accessed. It is
    *     required when dealing with view.
    */
-  const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const;
+  const at::Tensor& _fw_grad(uint64_t level, const at::Tensor& self) const;
 
   /**
    * Sets the forward gradient for this Tensor.
@@ -694,7 +739,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "is_inplace_op" is a boolean flag that tells if this gradient was generated
    *     by an inplace operation or an out of place one. This allows better error checking.
    */
-  void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
+  void _set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
@@ -1702,8 +1747,28 @@ protected:
   // See NOTE [ Metadata Change for a Detached Tensor ] for details.
   static const char * const err_msg_tensor_metadata_change_not_allowed;
 
+public:
   void set_storage_access_should_throw() {
     storage_access_should_throw_ = true;
+  }
+
+protected:
+  // Policy for adjusting the behavior of is_contiguous(). Allows
+  // subclass customization while still being able to inline
+  // is_contiguous() in the common case.
+  enum class HasContiguityPolicy : uint8_t {
+    // Default behavior: check is_contiguous_ and similar bitflags.
+    Default,
+    // Throw a generic error message that this tensor type does not
+    // support is_contiguous.
+    ContiguityNotSupported,
+    // Call virtual is_contiguous_custom method to implement custom
+    // is_contiguous behavior.
+    CustomBehavior,
+  };
+
+  void set_has_contiguity_policy(HasContiguityPolicy p) {
+    has_contiguity_ = static_cast<uint8_t>(p);
   }
 
   Storage storage_;
@@ -1782,13 +1847,19 @@ protected:
   c10::optional<c10::Device> device_opt_;
 
   // Tensor is contiguous
-  bool is_contiguous_ = true;
+  bool is_contiguous_ : 1;
+  // gcc doesn't like enum class bitfields; see
+  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61414
+  /* HasContiguityPolicy */ uint8_t has_contiguity_ : 2;
 
   // Tensor is a subclass that does not permit storage access.
   bool storage_access_should_throw_ = false;
 
   // default member initializers for bit-fields only available with -std=c++2a or -std=gnu++2a
   inline void init_bitfields() {
+    is_contiguous_ = true;
+    has_contiguity_ = static_cast<uint8_t>(HasContiguityPolicy::Default);
+
     is_channels_last_ = false;
     is_channels_last_contiguous_ = false;
     is_channels_last_3d_ = false;

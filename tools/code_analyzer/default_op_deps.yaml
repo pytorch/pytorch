@@ -10184,12 +10184,6 @@
   - name: aten::eq
   - name: aten::is_nonzero
   - name: aten::resize_
-- name: aten::take_backward
-  depends:
-  - name: aten::eq
-  - name: aten::is_nonzero
-  - name: aten::put_
-  - name: aten::zeros_like
 - name: aten::tan
   depends:
   - name: aten::as_strided_

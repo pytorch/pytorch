@@ -135,16 +135,16 @@ constexpr int64_t kMultiplexedUvChannelPriority = 100;
 constexpr int64_t kBasicChannelPriority = 0;
 
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaIpcChannelPriority = 300;
+constexpr int64_t kCudaIpcChannelPriority = 301;
 #endif
 
 #if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaGdrChannelPriority = 200;
+constexpr int64_t kCudaGdrChannelPriority = 201;
 #endif
 
 #ifdef USE_CUDA_NOT_ROCM
-constexpr int64_t kCudaXthChannelPriority = 400;
-constexpr int64_t kCudaBasicChannelPriority = 100;
+constexpr int64_t kCudaXthChannelPriority = 401;
+constexpr int64_t kCudaBasicChannelPriority = 101;
 #endif
 
 std::unique_ptr<TransportRegistration> makeUvTransport() {
@@ -676,11 +676,40 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     Message&& responseMessage =
         std::move(*futureResponseMessage->value().toCustomClass<Message>());
     responseMessage.setId(messageId);
+
     std::vector<c10::DeviceIndex> devices;
     try {
       devices = getDevicesForRemote(pipe->getRemoteName(), responseMessage);
     } catch (const std::exception& e) {
       responseMessage = createExceptionResponse(e.what(), messageId);
+    }
+
+    auto ctxDevices = ctx->devices();
+    if (!ctxDevices.empty()) {
+      // FIXME: skipping this check when ctxDevices is empty to allow
+      // RRef.to_here().
+      for (const auto& tensor : responseMessage.tensors()) {
+        const auto device = tensor.device().index();
+        if (device != -1 && ctxDevices.find(device) == ctxDevices.end()) {
+          std::ostringstream oss;
+          std::copy(
+              ctxDevices.begin(),
+              ctxDevices.end(),
+              // interpreting c10::DeviceIndex as int32_t to avoid printing
+              // it as a char.
+              std::ostream_iterator<int32_t>(oss, ", "));
+          responseMessage = createExceptionResponse(
+              c10::str(
+                  "RPC detected that a user-function output tensor on device ",
+                  int32_t(device),
+                  ". This device is not one of the input tensor devices: ",
+                  oss.str(),
+                  "which is not yet supported. Please file a feature request "
+                  "issue in PyTorch GitHub repo."),
+              messageId);
+          break;
+        }
+      }
     }
 
     pipeWrite(
