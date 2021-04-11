@@ -1994,24 +1994,22 @@ def sample_inputs_masked_select(op_info, device, dtype, requires_grad, **kwargs)
 
 
 def sample_inputs_matmul(op_info, device, dtype, requires_grad):
-    test_cases = [((L,), (L,), '', (True,)),
-                  ((S, M), (M,), "2d_1d", (True,)),
-                  ((M,), (M, S), "1d_2d", (True,)),
-                  ((S, M), (M, S), "2d_2d", (True,)),
-                  ((S, S, M), (M,), "3d_1d", (True,)),
-                  ((S, S, M), (M, S), "3d_2d", (True,)),
-                  ((M,), (S, M, S), "1d_3d", (True,)),
-                  ((S, M), (S, M, S), "2d_3d", (True,)),
-                  ((S, S, M, M), (S, S, M, S), "4d_4d", (True,)),
-                  ((S, S, M, M), (M,), "4d_1d", (True,)),
-                  ((M,), (S, S, M, S), "1d_4d", (True,))]
+    test_cases = (((L,), (L,)),
+                  ((S, M), (M,)),
+                  ((M,), (M, S)),
+                  ((S, M), (M, S)),
+                  ((S, S, M), (M,)),
+                  ((S, S, M), (M, S)),
+                  ((M,), (S, M, S)),
+                  ((S, M), (S, M, S)),
+                  ((S, S, M, M), (S, S, M, S)),
+                  ((S, S, M, M), (M,)),
+                  ((M,), (S, S, M, S)))
     sample_inputs = []
-    for input_args in test_cases:
-        args = (make_tensor(input_args[0], device, dtype, low=None, high=None, requires_grad=requires_grad),
-                make_tensor(input_args[1], device, dtype, low=None, high=None, requires_grad=requires_grad))
-        name, flags = input_args[2], input_args[3]
-        sample_inputs.append(SampleInput(args[0], args=(args[1], )))
-
+    for lhs_shape, rhs_shape in test_cases:
+        lhs = make_tensor(lhs_shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
+        rhs = make_tensor(rhs_shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(lhs, args=(rhs,)))
     return tuple(sample_inputs)
 
 
