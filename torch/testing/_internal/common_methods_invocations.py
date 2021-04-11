@@ -3270,10 +3270,10 @@ op_db: List[OpInfo] = [
            skips=(
                # matmul does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
-               # matmul on complex128 doesn't work
+               # https://github.com/pytorch/pytorch/issues/55754
                SkipInfo('TestGradients', 'test_fn_grad',
                         device_type='cpu', dtypes=(torch.complex128,)),
-               # some how it doesn't throw on cpu, and crash when enabled
+               # https://github.com/pytorch/pytorch/issues/55755
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                         device_type='cpu', dtypes=(torch.float16,)),)),
     OpInfo('max',
