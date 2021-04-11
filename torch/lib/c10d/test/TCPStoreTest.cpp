@@ -9,20 +9,26 @@
 #include <c10d/PrefixStore.hpp>
 #include <c10d/TCPStore.hpp>
 
+std::condition_variable cv;
+std::mutex cv_m;
 constexpr int64_t kShortStoreTimeoutMillis = 100;
+
+c10::intrusive_ptr<c10d::TCPStore> _createServer(int numWorkers = 1, int timeout = 15) {
+  return c10::make_intrusive<c10d::TCPStore>(
+      "127.0.0.1",
+      0,
+      numWorkers,
+      true,
+      std::chrono::seconds(timeout),
+      /* wait */ false);
+}
 
 // Different ports for different tests.
 void testHelper(const std::string& prefix = "") {
   const auto numThreads = 16;
   const auto numWorkers = numThreads + 1;
 
-  auto serverTCPStore = c10::make_intrusive<c10d::TCPStore>(
-      "127.0.0.1",
-      0,
-      numWorkers,
-      true,
-      std::chrono::seconds(30),
-      /* wait */ false);
+  auto serverTCPStore = _createServer(numWorkers, 30);
 
   auto serverStore =
       c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
@@ -154,13 +160,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
 
   const auto numThreads = 16;
   const auto numWorkers = numThreads + 1;
-  auto serverTCPStore = c10::make_intrusive<c10d::TCPStore>(
-      "127.0.0.1",
-      0,
-      numWorkers,
-      true,
-      std::chrono::seconds(15),
-      /* wait */ false);
+  auto serverTCPStore = _createServer(numWorkers, 15);
   auto serverStore =
       c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
 
@@ -211,16 +211,6 @@ void testWatchKeyCallback(const std::string& prefix = "") {
 
   // Check number of callbacks executed equal to number of key change operations
   EXPECT_EQ(keyChangeOperationCount, numCallbacksExecuted);
-
-  // Test the correctness of new_value and old_value
-  std::function<void(c10::optional<std::string>, c10::optional<std::string>)> checkCallback1 =
-    [](c10::optional<std::string> old_value, c10::optional<std::string> new_value) {
-        // EXPECT_EQ("val1", old_value);
-        // EXPECT_EQ("val2", new_value);
-    };
-  c10d::test::set(*serverStore, "testKey1", "val1");
-  serverStore->watchKey("testKey1", checkCallback1);
-  c10d::test::set(*serverStore, "testKey1", "val2");
 }
 
 TEST(TCPStoreTest, testHelper) {
@@ -237,6 +227,79 @@ TEST(TCPStoreTest, testWatchKeyCallback) {
 
 TEST(TCPStoreTest, testWatchKeyCallbackWithPrefix) {
   testWatchKeyCallback("testPrefix");
+}
+
+// Helper function to create a key on the store, watch it, and run the callback
+void _setCallback(
+  c10d::Store& store,
+  std::string key,
+  std::exception_ptr& eptr,
+  const c10::optional<std::string>& expectedOldValue,
+  const c10::optional<std::string>& expectedNewValue) {
+    // Test the correctness of new_value and old_value
+    std::function<void(c10::optional<std::string>, c10::optional<std::string>)> callback =
+    [&](c10::optional<std::string> oldValue, c10::optional<std::string> newValue) {
+      try {
+        EXPECT_EQ(expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
+        EXPECT_EQ(expectedNewValue.value_or("NONE"), newValue.value_or("NONE"));
+        cv.notify_one();
+      } catch(...) {
+        eptr = std::current_exception();
+        cv.notify_one();
+      }
+    };
+    store.watchKey(key, callback);
+}
+
+void _waitFinish(int durationInMilliseconds) {
+  std::unique_lock<std::mutex> lk(cv_m);
+  cv.wait_for(lk, std::chrono::duration<int, std::milli>(durationInMilliseconds));
+}
+
+TEST(TCPStoreTest, testWatchKeyUpdate) {
+  auto store = _createServer();
+
+  std::exception_ptr eptr = nullptr;
+  std::string key = "testEmptyKeyValue";
+  c10d::test::set(*store, key, "");
+  // set does not block so wait for key to be set first
+  store->get(key);
+  _setCallback(*store, key, eptr, "", "2");
+  c10d::test::set(*store, key, "2");
+  _waitFinish(300);
+  if (eptr) std::rethrow_exception(eptr);
+
+  key = "testRegularKeyValue";
+  c10d::test::set(*store, key, "1");
+  // set does not block so wait for key to be set first
+  store->get(key);
+  _setCallback(*store, key, eptr, "1", "2");
+  c10d::test::set(*store, key, "2");
+  _waitFinish(300);
+  if (eptr) std::rethrow_exception(eptr);
+}
+
+TEST(TCPStoreTest, testWatchKeyCreate) {
+  auto store = _createServer();
+
+  std::exception_ptr eptr = nullptr;
+  std::string key = "testWatchKeyCreate";
+  _setCallback(*store, key, eptr, c10::nullopt, "2");
+  c10d::test::set(*store, key, "2");
+  _waitFinish(300);
+  if (eptr) std::rethrow_exception(eptr);
+}
+
+TEST(TCPStoreTest, testWatchKeyDelete) {
+  auto store = _createServer();
+
+  std::exception_ptr eptr = nullptr;
+  std::string key = "testWatchKeyDelete";
+  c10d::test::set(*store, key, "1");
+  _setCallback(*store, key, eptr, "1", c10::nullopt);
+  store->deleteKey(key);
+  _waitFinish(300);
+  if (eptr) std::rethrow_exception(eptr);
 }
 
 TEST(TCPStoreTest, testCleanShutdown) {

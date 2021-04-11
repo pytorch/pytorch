@@ -14,6 +14,8 @@
 
 namespace c10d {
 
+enum class WatchResponseType : uint8_t { KEY_UPDATED, KEY_CREATED, KEY_DELETED };
+
 // Abstract base class to handle thread state
 class BackgroundThread {
   public:
@@ -60,6 +62,7 @@ class TCPStoreDaemon : public BackgroundThread {
   bool checkKeys(const std::vector<std::string>& keys) const;
   void wakeupWaitingClients(const std::string& key);
   void sendKeyUpdatesToClients(const std::string& key,
+      const enum WatchResponseType& type,
       std::vector<uint8_t>& oldData,
       std::vector<uint8_t>& newData);
 
@@ -87,7 +90,7 @@ class ListenThread : public BackgroundThread {
     void run();
     void callbackHandler(int socket);
     // List of callbacks map each watched key
-    std::unordered_map<std::string, 
+    std::unordered_map<std::string,
       std::function<void(c10::optional<std::string>, c10::optional<std::string>)>> keyToCallbacks_;
   private:
     std::mutex keyToCallbacksLock;
@@ -119,7 +122,7 @@ class TCPStore : public Store {
   bool deleteKey(const std::string& key) override;
 
   // callback function takes arguments (string oldValue, string newValue)
-  void watchKey(const std::string& key, 
+  void watchKey(const std::string& key,
     std::function<void(c10::optional<std::string>, c10::optional<std::string>)> callback) override;
 
   bool check(const std::vector<std::string>& keys) override;

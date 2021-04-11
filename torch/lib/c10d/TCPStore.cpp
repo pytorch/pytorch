@@ -32,8 +32,6 @@ enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
 enum class WaitResponseType : uint8_t { STOP_WAITING };
 
-enum class WatchResponseType : uint8_t { KEY_UPDATED };
-
 } // anonymous namespace
 
 // Background thread parent class methods
@@ -123,11 +121,19 @@ void ListenThread::callbackHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   std::vector<uint8_t> currentValueVec = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> newValueVec = tcputil::recvVector<uint8_t>(socket);
-  std::string currentValue =
-      std::string(currentValueVec.begin(), currentValueVec.end());
-  std::string newValue = std::string(newValueVec.begin(), newValueVec.end());
-  if (watchResponse != WatchResponseType::KEY_UPDATED) {
-    throw std::runtime_error("KEY_UPDATED response is expected");
+  c10::optional<std::string> currentValue;
+  if (watchResponse == WatchResponseType::KEY_CREATED) {
+    currentValue = c10::nullopt;
+  }
+  else {
+    currentValue = std::string(currentValueVec.begin(), currentValueVec.end());
+  }
+  c10::optional<std::string> newValue;
+  if (watchResponse == WatchResponseType::KEY_DELETED) {
+    newValue =  c10::nullopt;
+  }
+  else {
+    newValue = std::string(newValueVec.begin(), newValueVec.end());
   }
   keyToCallbacksLock.lock();
   keyToCallbacks_.at(key)(currentValue, newValue);
@@ -275,7 +281,6 @@ void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {
 void TCPStoreDaemon::query(int socket) {
   QueryType qt;
   tcputil::recvBytes<QueryType>(socket, &qt, 1);
-
   if (qt == QueryType::SET) {
     setHandler(socket);
 
@@ -323,11 +328,12 @@ void TCPStoreDaemon::wakeupWaitingClients(const std::string& key) {
 
 void TCPStoreDaemon::sendKeyUpdatesToClients(
     const std::string& key,
+    const enum WatchResponseType& type,
     std::vector<uint8_t>& oldData,
     std::vector<uint8_t>& newData) {
   for (int socket : watchedSockets_[key]) {
     tcputil::sendValue<WatchResponseType>(
-        socket, WatchResponseType::KEY_UPDATED);
+        socket, type);
     tcputil::sendString(socket, key, true);
     tcputil::sendVector<uint8_t>(socket, oldData);
     tcputil::sendVector<uint8_t>(socket, newData);
@@ -338,15 +344,18 @@ void TCPStoreDaemon::setHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   std::vector<uint8_t> newData = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> oldData;
+  bool newKey = true;
   auto it = tcpStore_.find(key);
   if (it != tcpStore_.end()) {
     oldData = it->second;
+    newKey = false;
   }
   tcpStore_[key] = newData;
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
   // Send key update to all watching clients
-  sendKeyUpdatesToClients(key, oldData, newData);
+  newKey ? sendKeyUpdatesToClients(key, WatchResponseType::KEY_CREATED, oldData, newData)
+         : sendKeyUpdatesToClients(key, WatchResponseType::KEY_UPDATED, oldData, newData);
 }
 
 void TCPStoreDaemon::compareSetHandler(int socket) {
@@ -364,7 +373,7 @@ void TCPStoreDaemon::compareSetHandler(int socket) {
       pos->second = std::move(newValue);
 
       // Send key update to all watching clients
-      sendKeyUpdatesToClients(key, currentValue, pos->second);
+      sendKeyUpdatesToClients(key, WatchResponseType::KEY_UPDATED, currentValue, pos->second);
     }
     tcputil::sendVector<uint8_t>(socket, pos->second);
   }
@@ -374,6 +383,7 @@ void TCPStoreDaemon::addHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   int64_t addVal = tcputil::recvValue<int64_t>(socket);
 
+  bool newKey = true;
   std::vector<uint8_t> oldData;
   auto it = tcpStore_.find(key);
   if (it != tcpStore_.end()) {
@@ -381,6 +391,7 @@ void TCPStoreDaemon::addHandler(int socket) {
     auto buf = reinterpret_cast<const char*>(it->second.data());
     auto len = it->second.size();
     addVal += std::stoll(std::string(buf, len));
+    newKey = false;
   }
   auto addValStr = std::to_string(addVal);
   std::vector<uint8_t> newData =
@@ -391,7 +402,8 @@ void TCPStoreDaemon::addHandler(int socket) {
   // On "add", wake up all clients that have been waiting
   wakeupWaitingClients(key);
   // Send key update to all watching clients
-  sendKeyUpdatesToClients(key, oldData, newData);
+  newKey ? sendKeyUpdatesToClients(key, WatchResponseType::KEY_CREATED, oldData, newData)
+         : sendKeyUpdatesToClients(key, WatchResponseType::KEY_UPDATED, oldData, newData);
 }
 
 void TCPStoreDaemon::getHandler(int socket) const {
@@ -406,10 +418,15 @@ void TCPStoreDaemon::getNumKeysHandler(int socket) const {
 
 void TCPStoreDaemon::deleteHandler(int socket) {
   std::string key = tcputil::recvString(socket);
+  auto it = tcpStore_.find(key);
+  if (it != tcpStore_.end()) {
+    std::vector<uint8_t> oldData = it->second;
+    // Send key update to all watching clients
+    std::vector<uint8_t> newData;
+    sendKeyUpdatesToClients(key, WatchResponseType::KEY_DELETED, oldData, newData);
+  }
   auto numDeleted = tcpStore_.erase(key);
   tcputil::sendValue<int64_t>(socket, numDeleted);
-  // Remove all clients watching the key
-  watchedSockets_.erase(key);
 }
 
 void TCPStoreDaemon::checkHandler(int socket) const {

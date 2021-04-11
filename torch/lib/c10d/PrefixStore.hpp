@@ -40,7 +40,7 @@ class PrefixStore : public Store {
 
   void setTimeout(const std::chrono::milliseconds& timeout) override;
 
-  void watchKey(const std::string& key, 
+  void watchKey(const std::string& key,
     std::function<void(c10::optional<std::string>, c10::optional<std::string>)> callback) override;
 
  protected:
