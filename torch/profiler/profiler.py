@@ -94,7 +94,8 @@ class profile(object):
         with_flops (bool): use formula to estimate the FLOPS of specific operators
             (matrix multiplication and 2D convolution).
         use_cuda (bool):
-            .. deprecated:: use ``activities`` instead.
+            .. deprecated:: 1.8.1
+                use ``activities`` instead.
 
     .. note::
         Use :func:`~torch.profiler.schedule` to generate the callable schedule.
