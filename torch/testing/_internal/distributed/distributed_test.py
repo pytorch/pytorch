@@ -5069,6 +5069,7 @@ class DistributedTest:
                 net = torch.nn.parallel.DistributedDataParallel(
                     net.to(self.rank), device_ids=[self.rank]
                 )
+                dist.barrier()
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
