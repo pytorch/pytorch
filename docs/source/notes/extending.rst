@@ -223,9 +223,9 @@ This is how a ``Linear`` module can be implemented::
             # won't be converted when e.g. .cuda() is called. You can use
             # .register_buffer() to register buffers.
             # nn.Parameters require gradients by default.
-            self.weight = nn.Parameter(torch.Tensor(output_features, input_features))
+            self.weight = nn.Parameter(torch.empty(output_features, input_features))
             if bias:
-                self.bias = nn.Parameter(torch.Tensor(output_features))
+                self.bias = nn.Parameter(torch.empty(output_features))
             else:
                 # You should always register all possible parameters, but the
                 # optional ones can be None if you want.
@@ -494,7 +494,7 @@ will return subclass instances instead of ``torch.Tensor`` instances::
   ...     pass
   >>> type(torch.add(SubTensor([0]), SubTensor([1]))).__name__
   'SubTensor'
-  >>> type(torch.add(SubTensor([0]), torch.Tensor([1]))).__name__
+  >>> type(torch.add(SubTensor([0]), torch.tensor([1]))).__name__
   'SubTensor'
 
 If multiple subclasses exist, the lowest one in the hierarchy will be chosen by
@@ -503,7 +503,7 @@ default. If there is no unique way to determine such a case, then a
 
   >>> type(torch.add(SubTensor2([0]), SubTensor([1]))).__name__
   'SubTensor2'
-  >>> type(torch.add(SubTensor2([0]), torch.Tensor([1]))).__name__
+  >>> type(torch.add(SubTensor2([0]), torch.tensor([1]))).__name__
   'SubTensor2'
   >>> torch.add(SubTensor([0]), OtherSubTensor([1]))
   Traceback (most recent call last):

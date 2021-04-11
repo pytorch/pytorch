@@ -1333,7 +1333,7 @@ The above code results in the below RuntimeError
     a : torch.jit.final[Bool] = True
 
     if a:
-        return torch.Tensor(2,3)
+        return torch.empty(2,3)
     else:
         return []
 
