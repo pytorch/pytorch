@@ -250,15 +250,6 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
         // consumer/producer as their thread mappings could change as long as
         // it's across shared/global memory.
 
-        // Mark axes outside compute at point for parallel type tracking
-        std::unordered_set<IterDomain*> right_of_ca_point;
-        if (mapping_mode_ == MappingMode::PARALLEL &&
-            p_tv->getComputeAtPosition() < p_tv->nDims()) {
-          right_of_ca_point.insert(
-              p_tv->domain()->domain().begin() + p_tv->getComputeAtPosition(),
-              p_tv->domain()->domain().end());
-        }
-
         auto c2p_root_map =
             PairwiseRootDomainMap(p_tv, c_tv)
                 .mapConsumerToProducer(c_tv->domain(), p_tv->domain());
@@ -280,26 +271,23 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
 
         auto c2p_map = replay_PasC.getReplay();
 
-        // Find this computeAt position in consumer. This could be removed if we
-        // changed computeAt of TensorViews to always have a this computeAt
-        // position even for terminating outputs
-        std::unordered_set<IterDomain*> within_producer_compute_at;
-        for (unsigned int p_i = 0; p_i < p_tv->getComputeAtPosition(); p_i++) {
-          within_producer_compute_at.insert(p_tv->axis((int)p_i));
-        }
-
         // If we're creating parallel map, only map the leaf
         // axes. Also, the producer axis must be left of the CA
         // point.
         // Otherwise, map the entire replay map.
         if (mapping_mode_ == MappingMode::PARALLEL) {
+          // Mark axes left of compute at point for parallel type tracking
+          std::unordered_set<IterDomain*> producer_axes_to_map(
+              p_tv->domain()->domain().begin(),
+              p_tv->domain()->domain().begin() + p_tv->getComputeAtPosition());
+
           for (auto c_id : c_tv->domain()->domain()) {
             auto it = c2p_map.find(c_id);
             if (it == c2p_map.end()) {
               continue;
             }
             auto p_id = it->second;
-            if (right_of_ca_point.find(p_id) != right_of_ca_point.end()) {
+            if (producer_axes_to_map.find(p_id) == producer_axes_to_map.end()) {
               continue;
             }
             mapIds(p_id, c_id);
