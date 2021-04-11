@@ -5003,7 +5003,7 @@ Alias for :func:`torch.linalg.matrix_power`
 add_docstr(torch.matrix_exp, r"""
 matrix_exp(input) -> Tensor
 
-Returns the matrix exponential. Supports batched input.
+Computes the matrix exponential of a square matrix or of each square matrix in a batch.
 For a matrix :attr:`input`, the matrix exponential is defined as
 
 .. math::
