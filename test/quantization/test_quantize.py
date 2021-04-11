@@ -1516,13 +1516,13 @@ class TestFusion(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
         # Test step by step fusion
-        model = fuse_modules(model, ['conv1', 'bn1', 'relu1'])
+        model = fuse_modules(model, ['cbr_2d_conv', 'cbr_2d_bn', 'cbr_2d_relu'])
         model = fuse_modules(model, ['sub1.conv', 'sub1.bn'])
-        self.assertEqual(type(model.conv1), nni.ConvBnReLU2d,
+        self.assertEqual(type(model.cbr_2d_conv), nni.ConvBnReLU2d,
                          msg="Fused Conv + BN + Relu first layer")
-        self.assertEqual(type(model.bn1), torch.nn.Identity,
+        self.assertEqual(type(model.cbr_2d_bn), torch.nn.Identity,
                          msg="Fused Conv + BN + Relu (skipped BN)")
-        self.assertEqual(type(model.relu1), torch.nn.Identity,
+        self.assertEqual(type(model.cbr_2d_relu), torch.nn.Identity,
                          msg="Fused Conv + BN + Relu (skipped Relu)")
 
         self.assertEqual(type(model.sub1.conv), nni.ConvBn2d,
@@ -1537,9 +1537,9 @@ class TestFusion(QuantizationTestCase):
         self.checkObservers(model)
 
         def checkQAT(model):
-            self.assertEqual(type(model.conv1), nniqat.ConvBnReLU2d)
-            self.assertEqual(type(model.bn1), nn.Identity)
-            self.assertEqual(type(model.relu1), nn.Identity)
+            self.assertEqual(type(model.cbr_2d_conv), nniqat.ConvBnReLU2d)
+            self.assertEqual(type(model.cbr_2d_bn), nn.Identity)
+            self.assertEqual(type(model.cbr_2d_relu), nn.Identity)
             self.assertEqual(type(model.sub1.conv), nniqat.ConvBn2d)
             self.assertEqual(type(model.sub1.bn), nn.Identity)
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
@@ -1550,9 +1550,9 @@ class TestFusion(QuantizationTestCase):
         model = convert(model)
 
         def checkQuantized(model):
-            self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
-            self.assertEqual(type(model.bn1), nn.Identity)
-            self.assertEqual(type(model.relu1), nn.Identity)
+            self.assertEqual(type(model.cbr_2d_conv), nniq.ConvReLU2d)
+            self.assertEqual(type(model.cbr_2d_bn), nn.Identity)
+            self.assertEqual(type(model.cbr_2d_relu), nn.Identity)
             self.assertEqual(type(model.sub1.conv), nnq.Conv2d)
             self.assertEqual(type(model.sub1.bn), nn.Identity)
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
@@ -1564,8 +1564,8 @@ class TestFusion(QuantizationTestCase):
             checkQuantized(model)
 
         model = ModelForFusion(default_qat_qconfig).train()
-        model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
-                             ['sub1.conv', 'sub1.bn']])
+        model = fuse_modules(model, [['cbr_2d_conv', 'cbr_2d_bn', 'cbr_2d_relu'],
+                                     ['sub1.conv', 'sub1.bn']])
         model = quantize_qat(model, test_only_train_fn, [self.img_data_1d_train])
         with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
             checkQuantized(model)
@@ -1574,42 +1574,33 @@ class TestFusion(QuantizationTestCase):
     def test_fuse_module_eval(self):
         model = ModelForFusion(default_qconfig)
         model.eval()
-        model = fuse_modules(model, [['conv3', 'bn3', 'relu4'],
-                             ['conv1', 'bn1', 'relu1'],
-                             ['conv2', 'relu2'],
-                             ['bn2', 'relu3'],
-                             ['sub1.conv', 'sub1.bn']])
-        self.assertEqual(type(model.conv1), nni.ConvReLU2d,
-                         msg="Fused Conv + BN + Relu first layer (BN is folded)")
-        self.assertEqual(type(model.conv1[0]), nn.Conv2d,
-                         msg="Fused Conv + BN + Relu (Conv + folded BN only)")
-        self.assertEqual(type(model.conv1[1]), nn.ReLU,
-                         msg="Fused Conv + BN + Relu second layer (Relu only)")
-        self.assertEqual(type(model.bn1), nn.Identity,
-                         msg="Fused Conv + BN + Relu second layer (Skipped BN)")
-        self.assertEqual(type(model.relu1), nn.Identity,
-                         msg="Fused Conv + BN + Relu second layer (Skipped Relu)")
-        self.assertEqual(type(model.conv2), nni.ConvReLU3d,
-                         msg="Fused Conv + BN + Relu first layer (BN is folded)")
-        self.assertEqual(type(model.bn2), nni.BNReLU3d,
-                         msg="Fused BN + Relu first layer (Relu is folded))")
-        self.assertEqual(type(model.relu3), nn.Identity,
-                         msg="Fused BN + Relu second layer (Skipped Relu)")
-        self.assertEqual(type(model.conv2[0]), nn.Conv3d,
-                         msg="Fused Conv + BN + Relu (Conv + folded BN only)")
-        self.assertEqual(type(model.conv2[1]), nn.ReLU,
-                         msg="Fused Conv + BN + Relu second layer (Relu only)")
-        self.assertEqual(type(model.relu2), nn.Identity,
-                         msg="Fused Conv + BN + Relu second layer (Skipped Relu)")
-
-        self.assertEqual(type(model.conv3), nni.ConvReLU1d,
+        model = fuse_modules(
+            model, [['cbr_1d_conv', 'cbr_1d_bn', 'cbr_1d_relu'],
+                    ['cbr_2d_conv', 'cbr_2d_bn', 'cbr_2d_relu'],
+                    ['cr_3d_conv', 'cr_3d_relu'],
+                    ['br_3d_bn', 'br_3d_relu'],
+                    ['sub1.conv', 'sub1.bn']])
+        self.assertEqual(type(model.cbr_1d_conv), nni.ConvReLU1d,
                          msg="Fused Conv + Relu for Conv1d (folded BN)")
-        self.assertEqual(type(model.conv3[0]), nn.Conv1d,
+        self.assertEqual(type(model.cbr_1d_conv[0]), nn.Conv1d,
                          msg="Fused Conv + Relu for Conv1d ")
-        self.assertEqual(type(model.conv3[1]), nn.ReLU,
+        self.assertEqual(type(model.cbr_1d_conv[1]), nn.ReLU,
                          msg="Fused Conv + Relu for Conv1d")
-        self.assertEqual(type(model.bn3), nn.Identity,
+        self.assertEqual(type(model.cbr_1d_bn), nn.Identity,
                          msg="Fused Conv + BN + Relu for Conv1d (Skipped BN)")
+        self.assertEqual(type(model.cbr_1d_relu), nn.Identity,
+                         msg="Fused Conv + BN + Relu for Conv1d (Skipped ReLU)")
+
+        self.assertEqual(type(model.cbr_2d_conv), nni.ConvReLU2d,
+                         msg="Fused Conv + BN + Relu first layer (BN is folded)")
+        self.assertEqual(type(model.cbr_2d_conv[0]), nn.Conv2d,
+                         msg="Fused Conv + BN + Relu (Conv + folded BN only)")
+        self.assertEqual(type(model.cbr_2d_conv[1]), nn.ReLU,
+                         msg="Fused Conv + BN + Relu second layer (Relu only)")
+        self.assertEqual(type(model.cbr_2d_bn), nn.Identity,
+                         msg="Fused Conv + BN + Relu second layer (Skipped BN)")
+        self.assertEqual(type(model.cbr_2d_relu), nn.Identity,
+                         msg="Fused Conv + BN + Relu second layer (Skipped Relu)")
 
         self.assertEqual(type(model.sub1.conv), nn.Conv2d,
                          msg="Fused submodule Conv + folded BN")
@@ -1620,32 +1611,60 @@ class TestFusion(QuantizationTestCase):
         self.assertEqual(type(model.sub2.relu), torch.nn.ReLU,
                          msg="Non-fused submodule ReLU")
 
+        self.assertEqual(type(model.fc), torch.nn.Linear,
+                         msg="Non-fused Linear")
+
+        self.assertEqual(type(model.cr_3d_conv), nni.ConvReLU3d,
+                         msg="Fused Conv + BN + Relu first layer (BN is folded)")
+        self.assertEqual(type(model.cr_3d_conv[0]), nn.Conv3d,
+                         msg="Fused Conv + BN + Relu (Conv + folded BN only)")
+        self.assertEqual(type(model.cr_3d_conv[1]), nn.ReLU,
+                         msg="Fused Conv + BN + Relu second layer (Relu only)")
+        self.assertEqual(type(model.cr_3d_relu), nn.Identity,
+                         msg="Fused Conv + BN + Relu second layer (Skipped Relu)")
+
+        self.assertEqual(type(model.br_3d_bn), nni.BNReLU3d,
+                         msg="Fused BN + Relu first layer (Relu is folded))")
+        self.assertEqual(type(model.br_3d_bn[0]), nn.BatchNorm3d,
+                         msg="Fused BN + Relu first layer (Relu is folded))")
+        self.assertEqual(type(model.br_3d_bn[1]), nn.ReLU,
+                         msg="Fused BN + Relu first layer (Relu is folded))")
+        self.assertEqual(type(model.br_3d_relu), nn.Identity,
+                         msg="Fused BN + Relu second layer (Skipped Relu)")
+
         model = prepare(model)
         self.checkObservers(model)
         test_only_eval_fn(model, self.img_data_1d)
         model = convert(model)
 
         def checkQuantized(model):
-            self.assertEqual(type(model.conv3), nniq.ConvReLU1d)
-            self.assertEqual(type(model.conv1), nniq.ConvReLU2d)
-            self.assertEqual(type(model.bn1), nn.Identity)
-            self.assertEqual(type(model.relu1), nn.Identity)
+            self.assertEqual(type(model.cbr_1d_conv), nniq.ConvReLU1d)
+            self.assertEqual(type(model.cbr_1d_bn), nn.Identity)
+            self.assertEqual(type(model.cbr_1d_relu), nn.Identity)
+            self.assertEqual(type(model.cbr_2d_conv), nniq.ConvReLU2d)
+            self.assertEqual(type(model.cbr_2d_bn), nn.Identity)
+            self.assertEqual(type(model.cbr_2d_relu), nn.Identity)
             self.assertEqual(type(model.sub1.conv), nnq.Conv2d)
             self.assertEqual(type(model.sub1.bn), nn.Identity)
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
-            self.assertEqual(type(model.bn2), nniq.BNReLU3d)
+            self.assertEqual(type(model.fc), nn.Linear)
+            self.assertEqual(type(model.cr_3d_conv), nniq.ConvReLU3d)
+            self.assertEqual(type(model.cr_3d_relu), nn.Identity)
+            self.assertEqual(type(model.br_3d_bn), nniq.BNReLU3d)
+            self.assertEqual(type(model.br_3d_relu), nn.Identity)
+
             test_only_eval_fn(model, self.img_data_1d)
             self.checkNoQconfig(model)
 
         checkQuantized(model)
 
         model = ModelForFusion(default_qconfig).eval()
-        model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
-                             ['conv2', 'relu2'],
-                             ['bn2', 'relu3'],
-                             ['sub1.conv', 'sub1.bn'],
-                             ['conv3', 'bn3', 'relu4']])
+        model = fuse_modules(model, [['cbr_1d_conv', 'cbr_1d_bn', 'cbr_1d_relu'],
+                                     ['cbr_2d_conv', 'cbr_2d_bn', 'cbr_2d_relu'],
+                                     ['cr_3d_conv', 'cr_3d_relu'],
+                                     ['br_3d_bn', 'br_3d_relu'],
+                                     ['sub1.conv', 'sub1.bn']])
         model = quantize(model, test_only_eval_fn, [self.img_data_1d])
         checkQuantized(model)
 
@@ -1818,16 +1837,16 @@ class TestFusion(QuantizationTestCase):
             counter['forwards'] += 1
 
         # Registering two pre and two post forward hooks, thus expecting counter increment by two each inference
-        model.conv1.register_forward_pre_hook(lambda *args: fw_pre_hook(nni.ConvBnReLU2d, *args))
+        model.cbr_2d_conv.register_forward_pre_hook(lambda *args: fw_pre_hook(nni.ConvBnReLU2d, *args))
         model.sub1.conv.register_forward_pre_hook(lambda *args: fw_pre_hook(nni.ConvBn2d, *args))
-        model.relu1.register_forward_hook(lambda *args: fw_hook(nni.ConvBnReLU2d, *args))
+        model.cbr_2d_relu.register_forward_hook(lambda *args: fw_hook(nni.ConvBnReLU2d, *args))
         model.sub1.bn.register_forward_hook(lambda *args: fw_hook(nni.ConvBn2d, *args))
 
         test_only_eval_fn(model, self.img_data_1d)
         self.assertEqual(counter['pre_forwards'], 2 * len(self.img_data_1d))
         self.assertEqual(counter['forwards'], 2 * len(self.img_data_1d))
 
-        model = fuse_modules(model, ['conv1', 'bn1', 'relu1'])
+        model = fuse_modules(model, ['cbr_2d_conv', 'cbr_2d_bn', 'cbr_2d_relu'])
         model = fuse_modules(model, ['sub1.conv', 'sub1.bn'])
 
         fused = True

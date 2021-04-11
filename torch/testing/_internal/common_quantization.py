@@ -1359,22 +1359,30 @@ class SubModelWithoutFusion(nn.Module):
 class ModelForFusion(nn.Module):
     def __init__(self, qconfig):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 2, 1, bias=None).to(dtype=torch.float)
-        self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
-        self.relu1 = nn.ReLU(inplace=True).to(dtype=torch.float)
+        self.qconfig = qconfig
+        self.quant = QuantStub()
+
+        self.cbr_1d_conv = nn.Conv1d(3, 3, 2).to(dtype=torch.float)
+        self.cbr_1d_bn = nn.BatchNorm1d(3).to(dtype=torch.float)
+        self.cbr_1d_relu = nn.ReLU(inplace=True).to(dtype=torch.float)
+
+        self.cbr_2d_conv = nn.Conv2d(3, 2, 1, bias=None).to(dtype=torch.float)
+        self.cbr_2d_bn = nn.BatchNorm2d(2).to(dtype=torch.float)
+        self.cbr_2d_relu = nn.ReLU(inplace=True).to(dtype=torch.float)
+
         self.sub1 = SubModelForFusion()
         self.sub2 = SubModelWithoutFusion()
+
         self.fc = nn.Linear(36, 10).to(dtype=torch.float)
-        self.quant = QuantStub()
+
+        self.cr_3d_conv = nn.Conv3d(3, 2, (1, 1, 1), bias=None).to(dtype=torch.float)
+        self.cr_3d_relu = nn.ReLU(inplace=False).to(dtype=torch.float)
+
+        self.br_3d_bn = nn.BatchNorm3d(2).to(dtype=torch.float)
+        self.br_3d_relu = nn.ReLU(inplace=True).to(dtype=torch.float)
+
         self.dequant = DeQuantStub()
-        self.qconfig = qconfig
-        self.conv2 = nn.Conv3d(3, 2, (1, 1, 1), bias=None).to(dtype=torch.float)
-        self.relu2 = nn.ReLU(inplace=False).to(dtype=torch.float)
-        self.bn2 = nn.BatchNorm3d(2).to(dtype=torch.float)
-        self.relu3 = nn.ReLU(inplace=True).to(dtype=torch.float)
-        self.conv3 = nn.Conv1d(3, 3, 2).to(dtype=torch.float)
-        self.bn3 = nn.BatchNorm1d(3).to(dtype=torch.float)
-        self.relu4 = nn.ReLU(inplace=True).to(dtype=torch.float)
+
         # don't quantize sub2
         self.sub2.qconfig = None
         self.fc.qconfig = None
@@ -1382,23 +1390,38 @@ class ModelForFusion(nn.Module):
     def forward(self, x):
         x = x.squeeze(2)
         x = self.quant(x)
-        x = self.conv3(x)
-        x = self.bn3(x)
-        x = self.relu4(x)
+
+        # ConvBNReLU1d
+        x = self.cbr_1d_conv(x)
+        x = self.cbr_1d_bn(x)
+        x = self.cbr_1d_relu(x)
+
         x = x.unsqueeze(2)
         y = x.unsqueeze(2)
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu1(x)
+
+        # ConvBNReLU2d
+        x = self.cbr_2d_conv(x)
+        x = self.cbr_2d_bn(x)
+        x = self.cbr_2d_relu(x)
+
+        # Submodule: ConvBN2d
         x = self.sub1(x)
         x = self.dequant(x)
+
+        # Submodule: ConvReLU2d (no fusion)
         x = self.sub2(x)
+
         x = x.view(-1, 36).contiguous()
         x = self.fc(x)
-        y = self.conv2(y)
-        y = self.relu2(y)
-        y = self.bn2(y)
-        y = self.relu3(y)
+
+        # ConvReLU3d
+        y = self.cr_3d_conv(y)
+        y = self.cr_3d_relu(y)
+
+        # BNReLU3d
+        y = self.br_3d_bn(y)
+        y = self.br_3d_relu(y)
+
         y = self.dequant(y)
         return x
 
