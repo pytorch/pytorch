@@ -28,12 +28,17 @@ using value_set = std::unordered_set<Value*>;
 struct InlineExprsInBwdPasses {
   std::vector<std::function<void(std::shared_ptr<Graph>, Block* )>> passes_;
   std::mutex mutex_;
-} inline_passes_;
+};
+
+static InlineExprsInBwdPasses& getInlineExprsInBwdPasses() {
+  static InlineExprsInBwdPasses inline_passes;
+  return inline_passes;
+}
 
 void registerInlineExprsInBwdPass(std::function<void(std::shared_ptr<Graph>, Block*)> pass) {
-  std::lock_guard<std::mutex> lock(inline_passes_.mutex_);
-  std::cerr << "registerInlineExprsInBwdPass\n";
-  inline_passes_.passes_.push_back(std::move(pass));
+  auto& inline_passes = getInlineExprsInBwdPasses();
+  std::lock_guard<std::mutex> lock(inline_passes.mutex_);
+  inline_passes.passes_.push_back(std::move(pass));
 }
 
 RegisterInlineExprsInBwdPass::RegisterInlineExprsInBwdPass(std::function<void(std::shared_ptr<Graph>, Block*)> pass) {
@@ -69,12 +74,11 @@ static void runInlineExprsInBwdPasses(std::shared_ptr<Graph> fwd, Block* reverse
   // TODO this can be registered as a bwd pass
   inlineProfileNodes(reverse_block);
   
-  std::lock_guard<std::mutex> lock(inline_passes_.mutex_);
-  for (auto p: inline_passes_.passes_) {
-    std::cerr << "runInlineExprsInBwdPasses\n";
+  auto&inline_passes = getInlineExprsInBwdPasses();
+  std::lock_guard<std::mutex> lock(inline_passes.mutex_);
+  for (auto p: inline_passes.passes_) {
     p(fwd, reverse_block);
   }
-
   reverse_block->owningNode()->removeFromList();  
 }
 

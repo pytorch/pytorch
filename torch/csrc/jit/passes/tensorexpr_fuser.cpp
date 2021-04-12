@@ -154,7 +154,7 @@ std::vector<Use> fwd_values;
   GRAPH_DUMP("@@@Reverse block after", fwd);
 }
 
-RegisterInlineExprsInBwdPass riebp(InlineExprsInBwd);
+static RegisterInlineExprsInBwdPass riebp(InlineExprsInBwd);
 
 namespace tensorexpr {
 
