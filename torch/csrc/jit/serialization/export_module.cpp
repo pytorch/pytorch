@@ -372,8 +372,6 @@ void SetExportModuleMobileInfoConverter(
   GetMobileInfoConverter() = std::move(converter);
 }
 
-////// START SHARED GOOD ///////
-
 void ScriptModuleSerializer::convertNamedType(
     const c10::NamedTypePtr& class_type) {
   if (converted_types_.count(class_type)) {
@@ -512,26 +510,6 @@ void ScriptModuleSerializer::writeByteCode(
         "mobile_debug/",
         next_tensor_id);
   }
-}
-
-//// SHARED NOT GOOD:
-uint64_t ScriptModuleSerializer::get_starting_tensor_id() {
-  const std::vector<std::string>& all_records = writer_.getAllWrittenRecords();
-  uint64_t max_storage_num_seen;
-  for (auto& item : all_records) {
-    if (item.size() >= std::string(".data/0.storage").size()) {
-      if (item.compare(0, 6, ".data/") == 0 &&
-          item.compare(item.size() - 8, 8, ".storage") == 0) {
-        uint64_t storage_int;
-        std::istringstream iss(item.substr(6, item.size() - 14));
-        iss >> storage_int;
-        max_storage_num_seen = storage_int > max_storage_num_seen
-            ? storage_int
-            : max_storage_num_seen;
-      }
-    }
-  }
-  return max_storage_num_seen;
 }
 
 std::tuple<uint64_t, uint64_t> ScriptModuleSerializer::serialize_unified_format(
