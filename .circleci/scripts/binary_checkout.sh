@@ -5,6 +5,10 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
+cat /proc/cpuinfo
+
+exit 1
+
 
 # This step runs on multiple executors with different envfile locations
 if [[ "$(uname)" == Darwin ]]; then
