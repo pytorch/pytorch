@@ -1832,7 +1832,8 @@ class TestFrozenOptimizations(JitTestCase):
         with set_default_dtype(torch.float):
             op_map = {
                 'prim::MKLDNNHardSwish' : F.hardswish,
-                'prim::MKLDNNHardSigmoid' : F.hardsigmoid
+                'prim::MKLDNNHardSigmoid' : F.hardsigmoid,
+                'prim::MKLDNNRelu6' : F.relu6
             }
 
             input_sizes = ([0], [1], [3], [1, 3, 8, 8])
