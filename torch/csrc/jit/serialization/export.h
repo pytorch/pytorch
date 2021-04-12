@@ -55,8 +55,7 @@ TORCH_API std::string serialize_model_proto_to_string(
 
 TORCH_API void check_onnx_proto(const std::string& proto_string);
 
-// Base serializer to hold shared serialization logic for original TS
-// format and unified serialization format
+// Serializer for both oldsyle and unified format TS serialization
 class ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(
@@ -89,7 +88,6 @@ class ScriptModuleSerializer {
       const std::string& archive_dir,
       const std::string& tensor_dir,
       uint64_t next_tensor_id);
-  uint64_t get_starting_tensor_id();
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
   std::vector<at::IValue> constant_table_;
