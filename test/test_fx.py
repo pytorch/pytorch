@@ -19,6 +19,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
+import torch._C._fx  # type: ignore
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -468,7 +469,7 @@ class TestFX(JitTestCase):
                             # Pull out constants. These constants will later be
                             # fed to the interpreter C++ object via add_constant()
                             arg_name = f'constant_{constant_idx}'
-                            constants[arg_name] = torch.Tensor(
+                            constants[arg_name] = torch.tensor(
                                 [arg] if isinstance(arg, numbers.Number) else arg)
                             arg_names.append(arg_name)
                             constant_idx += 1
@@ -1049,15 +1050,18 @@ class TestFX(JitTestCase):
         # Make sure we're testing all opcodes
         opcodes = set()
         output_shape : Optional[torch.Shape] = None
+        output_stride : Optional[Tuple[int]] = None
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
             if node.op == 'output':
-                output_shape = node.args[0].shape
+                output_shape = node.args[0].meta['shape']
+                output_stride = node.args[0].meta['stride']
         self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
                                        'call_module', 'output']))
 
         # Test shape propogation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
+        self.assertEqual(output_stride, ref_out.stride())
 
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
@@ -1856,7 +1860,7 @@ class TestFX(JitTestCase):
                 traced(5)
 
         self.assertIn("Call using an FX-traced Module, line 4 of the "
-                      "traced Module’s generated forward function:",
+                      "traced Module's generated forward function:",
                       captured[0])
 
     def test_custom_traceback_not_raised_when_exception_source_is_submodule(self):
@@ -1878,7 +1882,7 @@ class TestFX(JitTestCase):
             captured = traceback.format_exc()
 
         self.assertNotIn("Call using an FX-traced Module, line 4 of the"
-                         " traced Module’s generated forward function:",
+                         " traced Module's generated forward function:",
                          captured)
 
     def test_ast_rewriter_rewrites_assert(self):
@@ -2164,6 +2168,59 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
+    @skipIfNoTorchVision
+    def test_cpatcher(self):
+
+        cnt = 0
+
+        def patched_impl(to_patch, args, kwargs):
+            nonlocal cnt
+            cnt += 1
+            return to_patch(*args, **kwargs)
+
+        c_patch_enabled = True
+
+        def patched_in(to_patch, args, kwargs):
+            nonlocal c_patch_enabled
+            try:
+                c_patch_enabled = False
+                r = patched_impl(to_patch, args, kwargs)
+            finally:
+                c_patch_enabled = True
+            return r
+
+
+        def trace_func(frame, action, arg):
+            if action == 'c_call':
+                if c_patch_enabled:
+                    torch._C._fx.patch_function(arg, patched_in)
+
+
+        import torch
+        from torchvision.models.resnet import resnet18
+        rn = resnet18()
+
+        try:
+            sys.setprofile(trace_func)
+            rn(torch.rand(1, 3, 224, 224))
+            print("testing print patch")
+        finally:
+            sys.setprofile(None)
+        assert(cnt != 0)
+
+    def test_randn(self):
+        def f():
+            return torch.randn(3, 3)
+
+        fx_f = symbolic_trace(f, enable_cpatching=True)
+        assert(any(i.target == torch.randn for i in fx_f.graph.nodes))
+
+        fx_f = symbolic_trace(f, enable_cpatching=False)
+        assert(all(i.target != torch.randn for i in fx_f.graph.nodes))
+
+        fx_f = symbolic_trace(f, enable_cpatching=True)
+        assert(any(i.target == torch.randn for i in fx_f.graph.nodes))
+
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
     _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
@@ -2177,7 +2234,7 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__'}
+        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat', '__getitem__', 'linalg.multi_dot'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)

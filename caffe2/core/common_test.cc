@@ -41,5 +41,3 @@ TEST(CommonTest, TestStod) {
 #endif // __ANDROID__
 
 }  // namespace caffe2
-
-

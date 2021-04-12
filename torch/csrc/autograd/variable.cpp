@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/InferenceMode.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
@@ -135,7 +136,7 @@ namespace impl {
   void rebase_history(const Variable& self, Edge gradient_edge) {
     TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
     auto diff_view_meta = get_view_autograd_meta(self);
-    if (diff_view_meta) {
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
       // See NOTE [ View + Inplace detection ]
       auto creation_meta = diff_view_meta->get_creation_meta();
       if (creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
@@ -237,7 +238,7 @@ namespace impl {
     // operations can happen on a given Tensor before its gradient edge is set when
     // exiting the custom Function.
     auto diff_view_meta = get_view_autograd_meta(self);
-    if (diff_view_meta) {
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
       diff_view_meta->set_attr_version(self._version());
     }
   }
@@ -527,7 +528,7 @@ namespace {
 
 const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tensor& self) const {
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
-  if (diff_view_meta) {
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
     // See NOTE [ View + Inplace detection ]
     if (diff_view_meta->get_creation_meta() != CreationMeta::MULTI_OUTPUT_SAFE) {
       std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
@@ -631,6 +632,8 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     if (grad_fn) {
       msg = c10::str("Output ", diff_view_meta->output_nr_, " of ", grad_fn->name(), " is a view and ",
                      modified_obj, " modified inplace.");
+    } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
+      msg = c10::str("A view was created in inference mode and ", modified_obj, " modified inplace in normal mode.");
     } else {
       msg = c10::str("A view was created in no_grad mode and ", modified_obj, " modified inplace with grad mode enabled.");
     }
@@ -647,6 +650,13 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
                        " can clarify your code and remove this warning by moving both the view and the inplace either both"
                        " inside the no_grad block (if you don't want the inplace to be tracked) or both outside (if you want"
                        " the inplace to be tracked).");
+      } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
+        TORCH_INTERNAL_ASSERT(!grad_fn);
+        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is forbidden. "
+                       " You can clarify your code by moving both the view and the inplace either both"
+                       " inside the inference_mode block (if you don't want the inplace to be tracked) or both outside (if you want"
+                       " the inplace to be tracked).");
+        TORCH_CHECK(false, msg);
       } else if (creation_meta == CreationMeta::IN_CUSTOM_FUNCTION) {
         msg = c10::str(msg, " This view was created inside a custom Function (or because an input was returned as-is) and the"
                        " autograd logic to handle view+inplace would override the custom backward associated with the custom"
