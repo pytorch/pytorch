@@ -49,7 +49,7 @@ def _parse_rendezvous_config(config_str: str) -> Dict[str, str]:
 
 
 def _try_parse_port(port_str: str) -> Optional[int]:
-    """Tries to extract the port number from `port_str`."""
+    """Tries to extract the port number from ``port_str``."""
     if port_str and re.match(r"^[0-9]{1,5}$", port_str):
         return int(port_str)
     return None
@@ -103,11 +103,12 @@ def _parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tu
 
 
 def _matches_machine_hostname(host: str) -> bool:
-    """Indicates whether `host` matches the hostname of this machine.
+    """Indicates whether ``host`` matches the hostname of this machine.
 
-    This function compares `host` to the hostname as well as to the IP addresses
-    of this machine. Note that it may return false negatives if this machine has
-    CNAME records beyond its FQDN or IP addresses assigned to secondary NICs.
+    This function compares ``host`` to the hostname as well as to the IP
+    addresses of this machine. Note that it may return a false negative if this
+    machine has CNAME records beyond its FQDN or IP addresses assigned to
+    secondary NICs.
     """
     if host == "localhost":
         return True
