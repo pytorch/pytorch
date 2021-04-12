@@ -4,6 +4,52 @@
 #include <algorithm>
 
 namespace at {
+
+namespace meta {
+
+TORCH_META_FUNC(replication_pad1d) (
+  const Tensor& input, IntArrayRef paddingSize  // no out argument!
+) {
+
+  int64_t dimw = 1;
+  int64_t dimslices = 0;
+  int64_t nbatch = 1;
+
+  TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
+
+  int64_t pad_l = paddingSize[0];
+  int64_t pad_r = paddingSize[1];
+
+  // allow empty batch size but not other dimensions.
+  TORCH_CHECK((input.dim() == 2 && input.size(0) != 0 && input.size(1) != 0) ||
+              (input.dim() == 3 && input.size(1) != 0 && input.size(2) != 0),
+              "Expected 2D or 3D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+              input.sizes());
+
+  if (input.ndimension() == 3) {
+    nbatch = input.size(0);
+    dimw++;
+    dimslices++;
+  }
+
+  /* sizes */
+  int64_t nslices = input.size(dimslices);
+  int64_t iwidth = input.size(dimw);
+  int64_t owidth = iwidth + pad_l + pad_r;
+
+  TORCH_CHECK(owidth >= 1,
+      "input (W: ", iwidth, ") is too small."
+      " Calculated output W: ", owidth);
+
+  if (input.ndimension() == 2) {
+    set_output({nslices, owidth}, input.options());
+  } else {
+    set_output({nbatch, nslices, owidth}, input.options());
+  }
+}
+
+} // namespace meta
+
 namespace native {
 
 namespace {
@@ -57,79 +103,6 @@ static void replication_pad1d_out_batch(
       replication_pad1d_out_frame(input_p, output_p, nslices, iwidth, owidth, pad_l, pad_r);
     }
   });
-}
-
-void replication_pad1d_out_cpu_template(
-    Tensor& output,
-    const Tensor& input_,
-    IntArrayRef paddingSize)
-{
-  int dimw = 1;
-  int dimslices = 0;
-  long nbatch = 1;
-  TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
-  int pad_l = paddingSize[0];
-  int pad_r = paddingSize[1];
-
-  // allow empty batch size but not other dimensions.
-  TORCH_CHECK((input_.dim() == 2 && input_.size(0) != 0 && input_.size(1) != 0) ||
-              (input_.dim() == 3 && input_.size(1) != 0 && input_.size(2) != 0),
-              "Expected 2D or 3D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
-              input_.sizes());
-
-  if (input_.ndimension() == 3)
-  {
-    nbatch = input_.size(0);
-    dimw++;
-    dimslices++;
-  }
-
-  /* sizes */
-  long nslices = input_.size(dimslices);
-  long iwidth = input_.size(dimw);
-  long owidth  = iwidth + pad_l + pad_r;
-
-  TORCH_CHECK(owidth >= 1,
-      "input (W: ", iwidth, ") is too small."
-      " Calculated output W: ", owidth);
-
-  /* get contiguous input */
-  auto input = input_.contiguous();
-
-  /* resize output */
-  if (input.ndimension() == 2)
-  {
-    output.resize_({nslices, owidth});
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      replication_pad1d_out_frame<scalar_t>(
-        input_data,
-        output_data,
-        nslices,
-        iwidth,
-        owidth,
-        pad_l, pad_r);
-      }
-    );
-  }
-  else
-  {
-    output.resize_({nbatch, nslices, owidth});
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      replication_pad1d_out_batch<scalar_t>(
-        input_data,
-        output_data,
-        nslices,
-        iwidth,
-        owidth,
-        pad_l, pad_r,
-        nbatch);
-      }
-    );
-  }
 }
 
 template <typename scalar_t>
@@ -933,23 +906,59 @@ Tensor& replication_pad3d_backward_out_cpu_template(
 }
 } // namespace
 
-Tensor& replication_pad1d_out_cpu(const Tensor& input,
-    IntArrayRef paddingSize,
-    Tensor& output)
-{
-  replication_pad1d_out_cpu_template(
-      output, input, paddingSize);
-  return output;
-}
+TORCH_IMPL_FUNC(replication_pad1d_out_cpu) (
+  const Tensor& input_, IntArrayRef paddingSize, const Tensor& output
+) {
+  constexpr int64_t dimw = -1;
+  constexpr int64_t dimslices = -2;
 
-Tensor replication_pad1d_cpu(
-    const Tensor& input,
-    IntArrayRef paddingSize)
-{
-  auto output = at::empty({0}, input.options());
-  replication_pad1d_out_cpu_template(
-      output, input, paddingSize);
-  return output;
+  int64_t pad_l = paddingSize[0];
+  int64_t pad_r = paddingSize[1];
+
+  /* get contiguous input */
+  auto input = input_.contiguous();
+
+  int64_t nbatch = 1;
+  if (input.ndimension() == 3) {
+    nbatch = input.size(0);
+  }
+
+  /* sizes */
+  long nslices = input.size(dimslices);
+  long iwidth = input.size(dimw);
+  long owidth = output.size(dimw);
+
+  if (input.ndimension() == 2)
+  {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
+      auto input_data = input.data_ptr<scalar_t>();
+      auto output_data = output.data_ptr<scalar_t>();
+      replication_pad1d_out_frame<scalar_t>(
+        input_data,
+        output_data,
+        nslices,
+        iwidth,
+        owidth,
+        pad_l, pad_r);
+      }
+    );
+  }
+  else
+  {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
+      auto input_data = input.data_ptr<scalar_t>();
+      auto output_data = output.data_ptr<scalar_t>();
+      replication_pad1d_out_batch<scalar_t>(
+        input_data,
+        output_data,
+        nslices,
+        iwidth,
+        owidth,
+        pad_l, pad_r,
+        nbatch);
+      }
+    );
+  }
 }
 
 Tensor& replication_pad1d_backward_out_cpu(const Tensor& gradOutput,
