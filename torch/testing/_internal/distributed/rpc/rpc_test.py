@@ -5578,7 +5578,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        if rank == 1:
+        if self.rank == 1:
             # This test compares rref.rpc_sync().forward(x) vs rref.remote().forward(x).to_here()
             # If to_here() is properly synchronized with forward(x) the results must be identical
             # This test needs multiple iterations and significant batch size to simulate real
@@ -5607,7 +5607,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        if rank == 1:
+        if self.rank == 1:
             # This test compares rref.rpc_sync().forward(x) vs rref.remote().forward(x).to_here()
             # If to_here() is properly synchronized with forward(x) the results must be identical
             # This test needs multiple iterations and significant batch size to simulate real
