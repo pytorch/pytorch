@@ -359,11 +359,15 @@ class TORCH_API Tensor {
     return !at::impl::variable_excluded_from_dispatch();
   }
 
-  /// Returns a `Tensor`'s layout. Defined in Type.h
-  Layout layout() const noexcept;
+  /// Returns a `Tensor`'s layout.
+  Layout layout() const noexcept {
+    return impl_->layout();
+  }
 
-  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.cpp
-  caffe2::TypeMeta dtype() const noexcept;
+  /// Returns a `Tensor`'s dtype (`TypeMeta`).
+  caffe2::TypeMeta dtype() const noexcept {
+    return impl_->dtype();
+  }
 
   /// Returns a `Tensor`'s device.
   inline Device device() const {
@@ -371,51 +375,96 @@ class TORCH_API Tensor {
   }
 
   /// Returns a `Tensor`'s device index.
-  int64_t get_device() const;
+  int64_t get_device() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->get_device();
+  }
+
 
   /// Returns if a `Tensor` has CPU backend.
-  bool is_cpu() const;
+  bool is_cpu() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_cpu();
+  }
 
   /// Returns if a `Tensor` has CUDA backend.
-  bool is_cuda() const;
+  bool is_cuda() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_cuda();
+  }
 
   /// Returns if a `Tensor` has XPU backend.
-  bool is_xpu() const;
+  bool is_xpu() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_xpu();
+  }
 
   /// Returns if a `Tensor` has XLA backend.
-  bool is_xla() const;
+  bool is_xla() const {
+    return impl_->is_xla();
+  }
 
   /// Returns if a `Tensor` has HIP backend.
-  bool is_hip() const;
+  bool is_hip() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_hip();
+  }
 
   /// Returns if a `Tensor` has sparse backend.
-  bool is_sparse() const;
+  bool is_sparse() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_sparse();
+  }
 
   /// Returns if a `Tensor` is mkldnn tensor.
-  bool is_mkldnn() const;
+  bool is_mkldnn() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_mkldnn();
+  }
 
   /// Returns if a `Tensor` is mlc tensor.
-  bool is_mlc() const;
+  bool is_mlc() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_mlc();
+  }
 
   /// Returns if a `Tensor` is vulkan tensor.
-  bool is_vulkan() const;
+  bool is_vulkan() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_vulkan();
+  }
 
   /// Returns if a `Tensor` is metal tensor.
-  bool is_metal() const;
+  bool is_metal() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_metal();
+  }
 
   /// Returns if a `Tensor` has quantized backend.
-  bool is_quantized() const;
+  bool is_quantized() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_quantized();
+  }
 
   /// Returns if a `Tensor` is a meta tensor.  Meta tensors can
   /// also have other designations.
-  bool is_meta() const;
+  bool is_meta() const {
+    return impl_->is_meta();
+  }
 
   /// If a tensor is a quantized tensor, returns its quantizer
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
   QuantizerPtr quantizer() const;
 
   /// Returns if a `Tensor` has any dimension names
-  bool has_names() const;
+  bool has_names() const {
+    // If a user is using unnamed tensors, then we can short-circuit right here.
+    // Otherwise, impl::has_names attempts to retrieve names.
+    if (!impl_->has_named_tensor_meta()) {
+      return false;
+    }
+    return impl::has_names(unsafeGetTensorImpl());
+  }
 
   /// Returns a `Tensor`'s dimension names data structure
   const NamedTensorMeta* get_named_tensor_meta() const;
@@ -661,6 +710,14 @@ class TORCH_API Tensor {
     impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
   }
 
+  /// This function returns if the forward gradient for this tensor exists at any level
+  /// it is safe to use as a guard against _fw_grad in code where autograd may not be
+  /// be built
+  bool _has_fw_grad() const {
+    return impl_->_has_fw_grad();
+  }
+
+
 
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
@@ -784,6 +841,25 @@ public:
   /// Remove hook at given position
   void remove_hook(unsigned pos) const;
 
+  // Variable methods
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  bool is_leaf() const;
+
+  int64_t output_nr() const;
+
+  void set_data(const Tensor & new_data) const;
+
+  Tensor data() const;
+
+  int64_t _version() const;
+
+  void retain_grad() const;
+
+  void _backward(TensorList inputs, const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
+
+  Tensor& requires_grad_(bool _requires_grad=true) const;
+
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -812,14 +888,17 @@ protected:
 #pragma warning( pop )
 #endif
 
-int64_t get_device(Tensor self);
+inline int64_t get_device(const Tensor& self) {
+  return self.get_device();
+}
 
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Tensor return type
-  std::function<void(Tensor)> fn(hook);
-  return _register_hook([fn](const Tensor& grad) {
+  static_assert(std::is_same<decltype(hook(Tensor())), void>::value,
+                "Expected hook to return void");
+  return _register_hook([fn=std::forward<T>(hook)](const Tensor& grad) {
     fn(grad);
     return Tensor();
   });
@@ -827,7 +906,7 @@ auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
 
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
-  return _register_hook(hook);
+  return _register_hook(std::forward<T>(hook));
 }
 
 namespace detail {

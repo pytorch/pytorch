@@ -185,7 +185,8 @@ class ExecMode(Enum):
     RPC_ASYNC = 4  # Run the operation using rpc_async
 
 
-class DistAutogradTest(RpcAgentTestFixture):
+# Common utils for both CPU and CUDA test suites
+class CommonDistAutogradTest(RpcAgentTestFixture):
     def _exec_func_with_dst(self, dst, exec_mode, method, *args):
         if ExecMode.LOCAL == exec_mode:
             if len(args) == 1 and isinstance(args[0], list):
@@ -218,6 +219,32 @@ class DistAutogradTest(RpcAgentTestFixture):
     def _check_rpc_done(self, rank_distance):
         _check_rpc_done(rank_distance)
 
+    def _verify_backwards(self, exec_mode, tensors, context_id, local_grads, *args):
+        if exec_mode == ExecMode.LOCAL:
+            torch.autograd.backward(tensors)
+            return [arg.grad for arg in args]
+        else:
+            self._verify_backwards_remote(tensors, context_id, local_grads, *args)
+
+    def _verify_backwards_remote(self, tensors, context_id, local_grads, *args):
+        dist_autograd.backward(context_id, tensors)
+
+        # Verify grads were accumulated appropriately.
+        grads = dist_autograd.get_gradients(context_id)
+        nargs = len(args)
+        ngrads = 0
+        for i in range(0, nargs):
+            if local_grads[i] is not None:
+                self.assertIn(args[i], grads)
+                self.assertEqual(local_grads[i], grads[args[i]])
+                ngrads += 1
+            else:
+                self.assertNotIn(args[i], grads)
+
+        self.assertEqual(ngrads, len(grads))
+
+
+class DistAutogradTest(CommonDistAutogradTest):
     @dist_init
     def test_autograd_context(self):
         # Verify max possible id.
@@ -849,30 +876,6 @@ class DistAutogradTest(RpcAgentTestFixture):
                     worker_name(self._next_rank()), torch.matmul, args=(t1, t2)
                 )
 
-    def _verify_backwards(self, exec_mode, tensors, context_id, local_grads, *args):
-        if exec_mode == ExecMode.LOCAL:
-            torch.autograd.backward(tensors)
-            return [arg.grad for arg in args]
-        else:
-            self._verify_backwards_remote(tensors, context_id, local_grads, *args)
-
-    def _verify_backwards_remote(self, tensors, context_id, local_grads, *args):
-        dist_autograd.backward(context_id, tensors)
-
-        # Verify grads were accumulated appropriately.
-        grads = dist_autograd.get_gradients(context_id)
-        nargs = len(args)
-        ngrads = 0
-        for i in range(0, nargs):
-            if local_grads[i] is not None:
-                self.assertIn(args[i], grads)
-                self.assertEqual(local_grads[i], grads[args[i]])
-                ngrads += 1
-            else:
-                self.assertNotIn(args[i], grads)
-
-        self.assertEqual(ngrads, len(grads))
-
     @dist_init
     def test_backward_no_grad_on_tensor(self):
         t1 = torch.rand((3, 3), requires_grad=True)
@@ -1091,7 +1094,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC, ExecMode.REMOTE]:
             with dist_autograd.context() as context_id:
                 val = self._exec_func(exec_mode, torch.matmul, t1, t2)
-                val = self._exec_func(exec_mode, torch.chain_matmul, [val, t3, t4])
+                val = self._exec_func(exec_mode, torch.linalg.multi_dot, (val, t3, t4))
                 loss = val.sum()
 
                 ret = self._verify_backwards(
@@ -1132,7 +1135,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 t2 = tensor_list[2]
                 t3 = tensor_list[4]
 
-                val = self._exec_func(exec_mode, torch.chain_matmul, [t1, t2, t3])
+                val = self._exec_func(exec_mode, torch.linalg.multi_dot, (t1, t2, t3))
 
                 loss = val.sum()
                 ret = self._verify_backwards(
@@ -1368,7 +1371,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         t3 = torch.nn.functional.linear(t1, t2)
         t4 = torch.nn.functional.linear(t2, t3)
         t5 = torch.nn.functional.linear(t3, t4)
-        return torch.chain_matmul(t1, t2, t3, t4, t5)
+        return torch.linalg.multi_dot([t1, t2, t3, t4, t5])
 
     @dist_init
     def test_backward_complex_python_udf(self):
@@ -1391,7 +1394,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     def _python_udf_with_backward_error(t1, t2):
         t3 = t1 + t2
         t4 = SimulateBackwardError.apply(t3)
-        return torch.chain_matmul(t1, t2, t3, t4)
+        return torch.linalg.multi_dot([t1, t2, t3, t4])
 
     @staticmethod
     def _nested_rpc_call_backward_error(t1, t2, dst):
@@ -1402,7 +1405,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             DistAutogradTest._python_udf_with_backward_error,
             args=(t1, t2),
         )
-        return torch.chain_matmul(t1, t2, res)
+        return torch.linalg.multi_dot([t1, t2, res])
 
     @dist_init
     def test_backward_python_udf_error(self):
@@ -1472,7 +1475,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         t3 = t1 * t2
         t4 = t1 + t2
         res = rpc.rpc_sync(worker_name(dst), my_py_add, args=(t3, t4))
-        return torch.chain_matmul(t1, t2, t3, t4, res)
+        return torch.linalg.multi_dot([t1, t2, t3, t4, res])
 
     @dist_init
     def test_backwards_nested_python_udf(self):
@@ -1482,7 +1485,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         t3 = t1 * t2
         t4 = t1 + t2
         res = t3 + t4
-        loss = torch.chain_matmul(t1, t2, t3, t4, res).sum()
+        loss = torch.linalg.multi_dot([t1, t2, t3, t4, res]).sum()
         torch.autograd.backward([loss])
 
         # Now run distributed autograd.
@@ -2131,6 +2134,8 @@ class DistAutogradTest(RpcAgentTestFixture):
                 )
             )
 
+
+class CudaDistAutogradTest(CommonDistAutogradTest):
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_gpu_simple(self):
@@ -2237,7 +2242,7 @@ class FaultyAgentDistAutogradTest(RpcAgentTestFixture):
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
 
-class TensorPipeDistAutogradTest(RpcAgentTestFixture):
+class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(4)
     def test_device_maps_backward_pass(self):

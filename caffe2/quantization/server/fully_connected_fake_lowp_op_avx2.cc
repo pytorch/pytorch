@@ -1,5 +1,7 @@
 #include <immintrin.h>
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 namespace {
@@ -80,7 +82,7 @@ void fp32_to_bfp14(const float* source, size_t size, float* dest) {
 
 void fp32_to_bfp16_scalar(const float* source, size_t size, float* dest) {
   constexpr int mask = 0xFFFF0000;
-  for (auto i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     *(int*)(dest + i) = *(int*)(source + i) & mask;
   }
 }

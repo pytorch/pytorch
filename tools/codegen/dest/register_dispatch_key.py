@@ -10,7 +10,6 @@ from tools.codegen.api.types import *
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
-import tools.codegen.local as local
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
 # Generates Register{dispatch}.cpp (e.g., RegisterCPU.cpp).
@@ -50,23 +49,26 @@ class RegisterDispatchKey:
     rocm: bool
 
     @method_with_native_function
-    def __call__(self, f: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
-        if isinstance(f, StructuredNativeFunctions):
-            return self.gen_structured(f)
+    def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
+        if isinstance(f, NativeFunctionsGroup):
+            if f.structured:
+                return self.gen_structured(f)
+            else:
+                return list(mapMaybe(self.gen_unstructured, f.functions()))
         elif isinstance(f, NativeFunction):
             r = self.gen_unstructured(f)
             return [] if r is None else [r]
         else:
             assert_never(f)
 
-    def gen_structured(self, g: StructuredNativeFunctions) -> List[str]:
+    def gen_structured(self, g: NativeFunctionsGroup) -> List[str]:
         if self.dispatch_key == DispatchKey.Meta:
             assert self.dispatch_key not in g.out.dispatch, \
                 "Do not explicitly specify Meta dispatch key on structured " \
                 "functions, they will be automatically generated for you"
-        elif self.dispatch_key == DispatchKey.DefaultBackend:
+        elif self.dispatch_key == DispatchKey.CompositeExplicitAutograd:
             assert self.dispatch_key not in g.out.dispatch, \
-                "Do not explicitly specify DefaultBackend dispatch key on structured " \
+                "Do not explicitly specify CompositeExplicitAutograd dispatch key on structured " \
                 "functions, they will be automatically generated for you"
         elif not is_structured_dispatch_key(self.dispatch_key):
             return list(mapMaybe(self.gen_unstructured, g.functions()))
@@ -84,8 +86,18 @@ class RegisterDispatchKey:
 
     @method_with_native_function
     def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
+        inplace_meta = False
         if self.dispatch_key not in f.dispatch:
-            return None
+            if (self.dispatch_key == DispatchKey.Meta and
+                    f.func.kind() is SchemaKind.inplace and
+                    # Defer to composites for meta implementation
+                    DispatchKey.CompositeImplicitAutograd not in f.dispatch and
+                    DispatchKey.CompositeExplicitAutograd not in f.dispatch and
+                    # Inplace list operations are not supported
+                    len(f.func.returns) == 1):
+                inplace_meta = True
+            else:
+                return None
         if f.manual_kernel_registration:
             return None
 
@@ -119,62 +131,58 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 result += generate_defn(cpp_sig_group.faithful_signature)
             return result
         elif self.target is Target.ANONYMOUS_DEFINITION:
+            # short circuit for inplace_meta
+            if inplace_meta:
+                assert f.func.arguments.self_arg is not None
+                self_arg_name = f.func.arguments.self_arg.argument.name
+                # TODO: handle in place on tensor list
+                return f"""
+{returns_type} {name}({args_str}) {{
+  TORCH_CHECK_NOT_IMPLEMENTED({self_arg_name}.is_meta(),
+    "Cannot inplace into non-meta tensor with meta tensor argument");
+  return {self_arg_name};
+}}
+"""
+
             impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
 
             args_exprs_str = ', '.join(a.name for a in args)
 
-            return_kw = "    return "
+            init_cuda = ""
+            device_guard = "// DeviceGuard omitted"  # default
 
-            cuda_guard = ""
-            if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
-                self_arg = [f.func.arguments.self_arg.argument] if f.func.arguments.self_arg is not None else []
-
-                # There is precedence for which argument we use to do
-                # device guard.  This describes the precedence order.
-                candidate_args = itertools.chain(
-                    self_arg,
-                    f.func.arguments.out,
-                    f.func.arguments.flat_positional
-                )
-
-                # Only tensor like arguments are eligible
-                device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
-
+            if (is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key)) and f.device_guard:
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
+                if has_tensor_options:
+                    # kernel is creating a tensor
+                    device_guard = "const DeviceGuard device_guard(device_or_default(device));"
 
-                if local.use_c10_dispatcher() == UseC10Dispatcher.full:
-                    cuda_guard_from_tensor_options = """\
-    const DeviceGuard device_guard(device_or_default(device));
-"""
+                    if is_cuda_dispatch_key(self.dispatch_key):
+                        # initialize CUDA on construction of CUDA tensors
+                        init_cuda = "globalContext().lazyInitCUDA();\n"
                 else:
-                    assert local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
-                    cuda_guard_from_tensor_options = """\
-    const DeviceGuard device_guard(options.device());
-"""
+                    # kernel is operating on existing tensors
 
-                # TODO: There is probably a simpler version of this that
-                # works just as well.
-                if f.device_guard and is_generic_dispatch_key(self.dispatch_key) and has_tensor_options:
-                    cuda_guard = cuda_guard_from_tensor_options
-                elif f.device_guard and is_cuda_dispatch_key(self.dispatch_key) and has_tensor_options:
-                    cuda_guard = f"""\
-    globalContext().lazyInitCUDA();
-    {cuda_guard_from_tensor_options}
-"""
-                elif f.device_guard and device_of is not None:
-                    cuda_guard = f"""\
-    const OptionalDeviceGuard device_guard(device_of({device_of}));
-"""
-                else:
-                    cuda_guard = """\
-    // DeviceGuard omitted
-"""
+                    # There is precedence for which argument we use to do
+                    # device guard.  This describes the precedence order.
+                    self_arg = [f.func.arguments.self_arg.argument] if f.func.arguments.self_arg is not None else []
+                    candidate_args = itertools.chain(
+                        self_arg,
+                        f.func.arguments.out,
+                        f.func.arguments.flat_positional
+                    )
+
+                    # Only tensor like arguments are eligible
+                    device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
+                    if device_of is not None:
+                        device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
 
             return f"""\
 namespace {{
 
 {returns_type} {name}({args_str}) {{
-{cuda_guard}{return_kw}{impl_name}({args_exprs_str});
+  {init_cuda}{device_guard}
+  return {impl_name}({args_exprs_str});
 }}
 
 }} // anonymous namespace
@@ -185,19 +193,7 @@ namespace {{
                 return None
             else:
                 dispatcher_sig = DispatcherSignature.from_schema(f.func)
-
-                # Figure out which signature the function is
-                if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                    payload = f"TORCH_FN({name})"
-                else:
-                    assert local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
-                    payload = f"""
-c10::impl::hacky_wrapper_for_legacy_signatures<
-    {dispatcher_sig.type()},
-    {len(f.func.arguments.out)}
->(TORCH_FN({name}))
-"""
-
+                payload = f"TORCH_FN({name})"
                 return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
             assert_never(self.target)
@@ -211,7 +207,7 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
 
 @dataclass(frozen=True)
 class StructuredRegisterDispatchKey(RegisterDispatchKey):
-    g: StructuredNativeFunctions
+    g: NativeFunctionsGroup
 
     def gen_class_set_output(self, k: SchemaKind, parent_class: str, generate_super: bool) -> str:
         if generate_super:
@@ -230,7 +226,7 @@ void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
 """
 
     def gen_class_set_output_body(self, k: SchemaKind) -> str:
-        if self.dispatch_key in [DispatchKey.CUDA, DispatchKey.DefaultBackend]:
+        if self.dispatch_key in [DispatchKey.CUDA, DispatchKey.CompositeExplicitAutograd]:
             maybe_set_guard = """
 auto current_device = guard_.current_device();
 if (C10_UNLIKELY(current_device.has_value())) {
@@ -245,11 +241,12 @@ if (C10_UNLIKELY(current_device.has_value())) {
 
         if k is SchemaKind.functional:
             if self.dispatch_key == DispatchKey.Meta:
+                # TODO: dedupe this with below
                 return """
 if (strides.empty()) {
     outputs_[output_idx] = at::empty(sizes, options.device(at::kMeta));
 } else {
-    TORCH_INTERNAL_ASSERT(0, "not implemented yet");
+    outputs_[output_idx] = at::empty_strided(sizes, strides, options.device(at::kMeta));
 }
 """
             else:
@@ -261,7 +258,7 @@ if (strides.empty()) {
                 elif self.dispatch_key == DispatchKey.CUDA:
                     empty_impl = "at::native::empty_cuda"
                     empty_strided_impl = "at::native::empty_strided_cuda"
-                elif self.dispatch_key == DispatchKey.DefaultBackend:
+                elif self.dispatch_key == DispatchKey.CompositeExplicitAutograd:
                     empty_impl = "at::empty"
                     empty_strided_impl = "at::empty_strided"
                 else:
@@ -285,8 +282,15 @@ if (strides.empty()) {{
                 # We can add one in if for the perf if we need to. But it'll be easier when external backends
                 # have access to meta functions, and we can write one for resize_.
                 resize_impl = "resize_output"
+            # TODO: Provide a way of bypassing the tests here, if the meta
+            # function consulted maybe_get_output()
             return f"""
 {maybe_set_guard}
+const auto& out = outputs_[output_idx].get();
+TORCH_CHECK(options.dtype() == out.dtype(),
+    "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
+TORCH_CHECK(options.device() == out.device(),
+    "Expected out tensor to have device ", options.device(), ", but got ", out.device(), " instead");
 bool resized = at::native::{resize_impl}(outputs_[output_idx], sizes);
 // Only restride if a resize occurred; otherwise we ignore the (advisory)
 // strides from the meta function and directly use the output tensor's
@@ -334,7 +338,7 @@ if (resized) {{
                 guard_field = 'c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;'
             else:
                 guard_field = 'c10::cuda::OptionalCUDAGuard guard_;'
-        elif self.dispatch_key == DispatchKey.DefaultBackend:
+        elif self.dispatch_key == DispatchKey.CompositeExplicitAutograd:
             guard_field = 'c10::OptionalDeviceGuard guard_;'
         else:
             guard_field = ''
@@ -359,7 +363,7 @@ struct {class_name} final : public {parent_class} {{
             return None
 
         # TODO: Now, there is something interesting going on here.  In the code below,
-        # we generate DefaultBackend implementations of functional and inplace
+        # we generate CompositeExplicitAutograd implementations of functional and inplace
         # based on the out implementation.  But in fact, out is definable by
         # functional too (just not very efficiently), and this is honestly the
         # MORE likely situation for a backend implementor.  How do we pick?
@@ -369,7 +373,7 @@ struct {class_name} final : public {parent_class} {{
         # someone to implement one or the other.  We'd have to do a little bit
         # of work to not register one of these "weak" definitions unless there
         # is a strong definition somewhere in the DAG!  So it's not implemented yet.
-        if self.dispatch_key == DispatchKey.DefaultBackend and f.func.kind() is SchemaKind.out:
+        if self.dispatch_key == DispatchKey.CompositeExplicitAutograd and f.func.kind() is SchemaKind.out:
             # Never generate a default implementation for out, that's what you
             # have to define as a backend implementor
             return None
@@ -418,7 +422,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             if self.dispatch_key is DispatchKey.Meta:
                 class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
                 parent_class = f"at::meta::{meta.name(self.g)}"
-            elif self.dispatch_key is DispatchKey.DefaultBackend:
+            elif self.dispatch_key is DispatchKey.CompositeExplicitAutograd:
                 # TODO: dedup this branch
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
                 parent_class = f"at::meta::{meta.name(self.g)}"
@@ -461,7 +465,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             # With the expanded context, do the impl call (if not a meta
             # function)
-            if self.dispatch_key == DispatchKey.DefaultBackend:
+            if self.dispatch_key == DispatchKey.CompositeExplicitAutograd:
                 # TODO: https://github.com/pytorch/pytorch/issues/53023
                 out_sig_group = CppSignatureGroup.from_native_function(
                     self.g.out, method=False, fallback_binding=f.manual_cpp_binding)
@@ -524,7 +528,6 @@ generate_super=self.g.out.structured_inherits is not None
 """
 
         elif self.target is Target.REGISTRATION:
-            assert local.use_c10_dispatcher() is UseC10Dispatcher.full
             return f'm.impl("{f.func.name}", TORCH_FN({sig.name()}));'
         else:
             assert_never(self.target)

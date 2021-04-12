@@ -42,6 +42,7 @@ typedef short int  int16_t;
 typedef long long int int64_t;
 typedef unsigned long long int uint64_t;
 ${HalfHeader}
+${BFloat16Header}
 ${RandHeader}
 
 #define NAN __int_as_float(0x7fffffff)
@@ -260,6 +261,79 @@ constexpr auto half_support_literal =
 typedef __half half;
 )";
 #endif
+
+constexpr auto bfloat16_support_literal =
+    R"(
+#define __BFLOAT16_TO_US(var) *(reinterpret_cast<unsigned short*>(&(var)))
+#define __BFLOAT16_TO_CUS(var) \
+  *(reinterpret_cast<const unsigned short*>(&(var)))
+
+typedef struct __align__(2) {
+  unsigned short x;
+}
+__nv_bfloat16_raw;
+
+#if defined(__cplusplus)
+struct __align__(2) __nv_bfloat16 {
+  __host__ __device__ __nv_bfloat16() {}
+
+  __host__ __device__ __nv_bfloat16& operator=(const __nv_bfloat16_raw& hr) {
+    __x = hr.x;
+    return *this;
+  }
+
+ protected:
+  unsigned short __x;
+};
+
+#if defined(__CUDACC__)
+__device__ unsigned short __internal_float2bfloat16(
+    const float f,
+    unsigned int& sign,
+    unsigned int& remainder) {
+  unsigned int x;
+
+  x = __float_as_uint(f);
+
+  if ((x & 0x7fffffffU) > 0x7f800000U) {
+    sign = 0U;
+    remainder = 0U;
+    return static_cast<unsigned short>(0x7fffU);
+  }
+  sign = x >> 31;
+  remainder = x << 16;
+  return static_cast<unsigned short>(x >> 16);
+}
+
+/* Definitions of intrinsics */
+__device__ __nv_bfloat16 __float2bfloat16(const float a) {
+  __nv_bfloat16 val;
+#if __CUDA_ARCH__ >= 800
+  asm("{  cvt.rn.bf16.f32 %0, %1;}\n" : "=h"(__BFLOAT16_TO_US(val)) : "f"(a));
+#else
+  __nv_bfloat16_raw r;
+  unsigned int sign;
+  unsigned int remainder;
+  r.x = __internal_float2bfloat16(a, sign, remainder);
+  if ((remainder > 0x80000000U) ||
+      ((remainder == 0x80000000U) && ((r.x & 0x1U) != 0U))) {
+    r.x++;
+  }
+  val = r;
+#endif
+  return val;
+}
+
+__device__ float __bfloat162float(const __nv_bfloat16 a) {
+  float val;
+  asm("{ mov.b32 %0, {0,%1};}\n" : "=f"(val) : "h"(__BFLOAT16_TO_CUS(a)));
+  return val;
+}
+#endif /* defined(__CUDACC__) */
+#endif /* defined(__cplusplus) */
+#undef __BFLOAT16_TO_US
+#undef __BFLOAT16_TO_CUS
+)";
 
 } // namespace cuda
 } // namespace fuser

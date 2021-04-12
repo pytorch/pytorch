@@ -27,7 +27,7 @@ constexpr int kUnsetDivFactor = -1;
 } // namespace
 
 Reducer::Reducer(
-    std::vector<std::vector<torch::autograd::Variable>> replicas,
+    std::vector<std::vector<at::Tensor>> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<std::vector<bool>> expect_sparse_gradients,
@@ -52,7 +52,7 @@ Reducer::Reducer(
       comm_hook_(nullptr),
       thread_local_state_(at::ThreadLocalState()) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
-  TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
+  TORCH_CHECK(replicas_.size() == 1, "Expected exactly one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
 
   // Check whether the module is multi_device_module
@@ -577,9 +577,20 @@ void Reducer::mark_variable_ready(VariableIndex index) {
           //
           // ** In the hoped-for case where all params are used, DDP itself won't do any
           // blocking work between now and the re-zeroing, so the danger is real.
-          auto local_used_maps_tmp = local_used_maps_[i].pin_memory();
-          // Defensively ensures a deep copy to a pinned temporary
-          TORCH_INTERNAL_ASSERT(local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr())
+          //
+          // Defensively ensures local_used_maps_tmp is distinct from local_used_maps_[i]
+          auto local_used_maps_tmp = at::native::empty_like(
+              local_used_maps_[i],
+              optTypeMetaToScalarType(
+                  local_used_maps_[i].options().dtype_opt()),
+              local_used_maps_[i].options().layout_opt(),
+              local_used_maps_[i].options().device_opt(),
+              true /* pinned_memory */);
+          // Paranoid asserts here because in some workloads, the pinned allocator behaves in a way we
+          // don't understand, and may be bugged. See https://github.com/pytorch/pytorch/pull/54474
+          TORCH_INTERNAL_ASSERT(local_used_maps_tmp.is_pinned());
+          TORCH_INTERNAL_ASSERT(local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr());
+          local_used_maps_tmp.copy_(local_used_maps_[i]);
           local_used_maps_dev_[i].copy_(local_used_maps_tmp, true);
         } else {
           local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
@@ -646,7 +657,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     } else {
       GradBucket grad_bucket(
           next_bucket_,
-          tensors,
+          tensors[0],
           // Since currently we do not support single-process multiple-device
           // mode, we can assume only one replica in the bucket.
           bucket.replicas[0].offsets,
@@ -916,7 +927,7 @@ void Reducer::prepare_for_forward() {
 // done immediately because the model output may be ignored, and we only
 // want to start performing reductions on `torch.autograd.backward()`.
 void Reducer::prepare_for_backward(
-    const std::vector<torch::autograd::Variable>& outputs) {
+    const std::vector<at::Tensor>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
@@ -999,7 +1010,7 @@ void Reducer::prepare_for_backward(
 }
 
 void Reducer::copy_bucket_to_grad(
-    torch::autograd::Variable& variable,
+    at::Tensor& variable,
     Reducer::BucketReplica& replica,
     size_t intra_bucket_index,
     bool global_unused) {
@@ -1207,7 +1218,7 @@ void Reducer::finalize_backward() {
 }
 
 void Reducer::runGradCallbackForVariable(
-    torch::autograd::Variable& variable,
+    at::Tensor& variable,
     GradCallback&& cb) {
   auto context_ptr = rpc_context_.context_ptr.load();
   if (context_ptr == nullptr) {
@@ -1310,8 +1321,8 @@ bool Reducer::rebuild_buckets() {
   // has unused parameters for example, this will raise an error recommending to
   // run with find_unused_parameters=True, instead of the size mismatch
   // exception below.
-  ensure_prior_reduction_finished();
   std::lock_guard<std::mutex> lock(mutex_);
+  ensure_prior_reduction_finished();
   if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
     return false;
   }
@@ -1359,11 +1370,6 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_comm_hook or register_builtin_comm_hook can only be called once.");
-  // TODO(#42542): Single-process multiple-device mode support for DDP
-  // communication hook.
-  TORCH_CHECK(
-      replicas_.size() == 1,
-      "Communication hook does not support single-process multiple-device mode.");
 
   comm_hook_ = std::move(iface);
 }
@@ -1374,9 +1380,6 @@ void Reducer::register_builtin_comm_hook(
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_builtin_comm_hook or register_comm_hook can only be called once.");
-  TORCH_CHECK(
-      replicas_.size() == 1,
-      "Communication hook does not support single-process multiple-device mode.");
   // TODO: Support GLOO and MPI backends for DDP communication hook.
   TORCH_CHECK(
       process_group_->getBackendName() == "nccl",
@@ -1665,59 +1668,11 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   return result;
 }
 
-// Verifies replicas in this process treat the same number of params,
-// all params require grad, and corresponding params across replicas
-// have the same dtype/size/layout.
-void verify_replicas_within_process(
-    std::vector<std::vector<torch::autograd::Variable>> model_replicas,
-    std::vector<std::vector<bool>> expect_sparse_gradients) {
-  const auto replica_count = model_replicas.size();
-  if (replica_count == 1) {
-    // Single device per process, nothing to check.
-    return;
-  }
-  for (size_t replica_index = 0; replica_index < replica_count;
-       replica_index++) {
-    const auto variable_count = model_replicas[replica_index].size();
-    TORCH_CHECK(
-        model_replicas[replica_index].size() == model_replicas[0].size(),
-        "Model replicas must have an equal number of parameters.");
-    TORCH_CHECK(
-        expect_sparse_gradients[replica_index].size() ==
-            expect_sparse_gradients[0].size(),
-        "Expected number of entries in expect_sparse_gradients ",
-        "to be equal across replicas.");
-    for (size_t variable_index = 0; variable_index < variable_count;
-         variable_index++) {
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].requires_grad(),
-          "Variables must require gradients (have `requires_grad` set).");
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].sizes() ==
-              model_replicas[0][variable_index].sizes(),
-          "Variables across model replicas must have identical sizes.");
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].strides() ==
-              model_replicas[0][variable_index].strides(),
-          "Variables across model replicas must have identical strides.");
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].dtype() ==
-              model_replicas[0][variable_index].dtype(),
-          "Variables across model replicas must have identical dtype.");
-      TORCH_CHECK(
-          expect_sparse_gradients[replica_index][variable_index] ==
-              expect_sparse_gradients[0][variable_index],
-          "Expected the same variables across replicas to either both ",
-          "or neither expect a sparse gradient.");
-    }
-  }
-}
-
 // Verifies corresponding params in replica 0 have the same sizes/strides
 // across processes.
 void verify_replica0_across_processes(
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
-    std::vector<std::vector<torch::autograd::Variable>> model_replicas) {
+    std::vector<std::vector<at::Tensor>> model_replicas) {
   size_t i = 0;
   for (const auto& t : model_replicas[0]) {
     i += 2 * t.dim();
