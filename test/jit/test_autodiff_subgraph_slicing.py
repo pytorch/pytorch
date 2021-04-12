@@ -2,6 +2,7 @@ import os
 import sys
 import unittest
 from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, enable_profiling_mode_for_profiling_tests
+from torch.testing._internal.common_jit import check_against_reference
 import torch
 
 # Make the helper files in test/ importable
@@ -10,6 +11,8 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import num_profiled_runs
+
+from typing import Optional
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
