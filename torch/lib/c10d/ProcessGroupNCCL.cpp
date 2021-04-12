@@ -1419,7 +1419,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
       " using best-guess GPU ",
       deviceIdx,
       " to perform barrier as devices used by this process are currently unknown. ",
-      "This can potentially cause a hang if this rank to GPU mapping is incorrect."
+      "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
       "Specify device_ids in barrier() to force use of a particular device."
     );
     devices.emplace_back(at::DeviceType::CUDA, deviceIdx);
