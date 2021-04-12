@@ -74,7 +74,7 @@ class ScriptModuleSerializer {
 
   ~ScriptModuleSerializer() = default;
 
- protected:
+ private:
   void convertNamedType(const c10::NamedTypePtr& class_type);
   void convertTypes(const at::NamedTypePtr& root_type);
   void writeExtraFiles(const Module& module, const ExtraFilesMap& extra_files);
