@@ -234,6 +234,7 @@ class _DataPipeMeta(GenericMeta):
     Metaclass for `DataPipe`. Add `type` attribute and `__init_subclass__` based
     on the type, and validate the return hint of `__iter__`.
     """
+    type: _DataPipeType
 
     def __new__(cls, name, bases, namespace, **kargs):
         # For Python > 3.6
