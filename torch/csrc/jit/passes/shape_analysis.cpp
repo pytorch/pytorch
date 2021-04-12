@@ -2193,7 +2193,7 @@ TypePtr getOrCreateUnshapedType(TypePtr type, TypeCache& unshaped_type_cache) {
   if (maybe_cached_type != unshaped_type_cache.end()) {
     return maybe_cached_type->second;
   }
-  auto unshaped_type = unshapedTypeImpl(type);
+  auto unshaped_type = unshapedTypeImpl(type, unshaped_type_cache);
   unshaped_type_cache[type] = unshaped_type;
   return unshaped_type;
 }
