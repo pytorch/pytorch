@@ -469,7 +469,7 @@ class TestFX(JitTestCase):
                             # Pull out constants. These constants will later be
                             # fed to the interpreter C++ object via add_constant()
                             arg_name = f'constant_{constant_idx}'
-                            constants[arg_name] = torch.Tensor(
+                            constants[arg_name] = torch.tensor(
                                 [arg] if isinstance(arg, numbers.Number) else arg)
                             arg_names.append(arg_name)
                             constant_idx += 1
@@ -1050,15 +1050,18 @@ class TestFX(JitTestCase):
         # Make sure we're testing all opcodes
         opcodes = set()
         output_shape : Optional[torch.Shape] = None
+        output_stride : Optional[Tuple[int]] = None
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
             if node.op == 'output':
                 output_shape = node.args[0].meta['shape']
+                output_stride = node.args[0].meta['stride']
         self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
                                        'call_module', 'output']))
 
         # Test shape propogation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
+        self.assertEqual(output_stride, ref_out.stride())
 
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
@@ -1857,7 +1860,7 @@ class TestFX(JitTestCase):
                 traced(5)
 
         self.assertIn("Call using an FX-traced Module, line 4 of the "
-                      "traced Module’s generated forward function:",
+                      "traced Module's generated forward function:",
                       captured[0])
 
     def test_custom_traceback_not_raised_when_exception_source_is_submodule(self):
@@ -1879,7 +1882,7 @@ class TestFX(JitTestCase):
             captured = traceback.format_exc()
 
         self.assertNotIn("Call using an FX-traced Module, line 4 of the"
-                         " traced Module’s generated forward function:",
+                         " traced Module's generated forward function:",
                          captured)
 
     def test_ast_rewriter_rewrites_assert(self):
