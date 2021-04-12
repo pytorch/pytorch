@@ -9,9 +9,11 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
+#include <ATen/core/op_registration/adaption.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+
+${static_dispatch_extra_headers}
 
 namespace at {
 
@@ -55,42 +57,6 @@ TensorOptions Tensor::options() const {
 
 ${tensor_method_definitions}
 
-caffe2::TypeMeta Tensor::dtype() const noexcept {
-  return impl_->dtype();
-}
-
-Layout Tensor::layout() const noexcept {
-  return impl_->layout();
-}
-
-Device Tensor::device() const {
-  return impl_->device();
-}
-
-int64_t Tensor::get_device() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->get_device();
-}
-
-int64_t get_device(Tensor self) {
-  return self.get_device();
-}
-
-bool Tensor::is_cuda() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_cuda();
-}
-
-bool Tensor::is_xpu() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_xpu();
-}
-
-bool is_xpu(Tensor self) {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return self.is_xpu();
-}
-
 NamedTensorMeta* Tensor::get_named_tensor_meta() {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
@@ -99,88 +65,16 @@ const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
 
-bool Tensor::has_names() const {
-  // If a user is using unnamed tensors, then we can short-circuit right here.
-  // Otherwise, impl::has_names attempts to retrieve names.
-  if (!impl_->has_named_tensor_meta()) {
-    return false;
-  }
-  return impl::has_names(unsafeGetTensorImpl());
-}
-
-bool is_cuda(Tensor self) {
-  return self.is_cuda();
-}
-
-bool Tensor::is_hip() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_hip();
-}
-
-bool is_hip(Tensor self) {
-  return self.is_hip();
-}
-
-bool Tensor::is_sparse() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_sparse();
-}
-
-bool is_sparse(Tensor self) {
-  return self.is_sparse();
-}
-
-bool Tensor::is_mkldnn() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_mkldnn();
-}
-
-bool is_mkldnn(Tensor self) {
-  return self.is_mkldnn();
-}
-
-bool Tensor::is_vulkan() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_vulkan();
-}
-
-bool Tensor::is_metal() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_metal();
-}
-
-
-bool is_vulkan(Tensor self) {
-  return self.is_vulkan();
-}
-
-bool is_metal(Tensor self) {
-  return self.is_metal();
-}
-
-bool Tensor::is_quantized() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_quantized();
-}
-
-bool Tensor::is_meta() const {
-  return impl_->is_meta();
-}
-
-bool is_quantized(Tensor self) {
-  return self.is_quantized();
-}
-
-#define DEFINE_CAST(T, name)                     \
-  template <>                                    \
-  TORCH_API T* Tensor::data_ptr() const {           \
-    TORCH_CHECK(                                 \
-        scalar_type() == ScalarType::name,       \
-        "expected scalar type ",                 \
-        #name,                                   \
-        " but found ",                           \
-        c10::toString(scalar_type()));           \
-    return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
+#define DEFINE_CAST(T, name)                                        \
+  template <>                                                       \
+  TORCH_API T* Tensor::data_ptr() const {                           \
+    TORCH_CHECK(                                                    \
+        scalar_type() == ScalarType::name,                          \
+        "expected scalar type "                                     \
+        #name                                                       \
+        " but found ",                                              \
+        scalar_type());                                             \
+    return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)

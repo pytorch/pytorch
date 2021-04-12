@@ -53,6 +53,33 @@ static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
 
+#ifdef USE_DEPLOY
+// used only in libtorch_deployinterpreter.so
+// there are muliple copies of the python interpreter that
+// can shared Tensors, so rather than use their internal pointer
+// to a PyObject use a library-local map.
+static std::unordered_map<void*, PyObject*> impl_to_pyobj;
+
+void set_pyobj(const Variable& self, PyObject* pyobj) {
+  TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
+  void* key = self.unsafeGetTensorImpl();
+  if (!pyobj) {
+    impl_to_pyobj.erase(key);
+    return;
+  }
+  impl_to_pyobj[key] = pyobj;
+}
+
+PyObject* pyobj(const Variable& self) {
+  TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
+  auto it = impl_to_pyobj.find(self.unsafeGetTensorImpl());
+  return it == impl_to_pyobj.end() ? nullptr : it->second;
+}
+#else
+using torch::autograd::impl::pyobj;
+using torch::autograd::impl::set_pyobj;
+#endif
+
 // Creates a new Python object for a Variable. The Variable must not already
 // have a PyObject* associated with it.
 static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
@@ -61,7 +88,7 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
   if (obj) {
     auto v = (THPVariable*) obj;
     new (&v->cdata) Variable(std::move(var));
-    torch::autograd::impl::set_pyobj(v->cdata, obj);
+    set_pyobj(v->cdata, obj);
   }
   return obj;
 }
@@ -72,7 +99,7 @@ PyObject * THPVariable_Wrap(Variable var)
     Py_RETURN_NONE;
   }
 
-  if (auto obj = torch::autograd::impl::pyobj(var)) {
+  if (auto obj = pyobj(var)) {
     Py_INCREF(obj);
     return obj;
   }
@@ -127,7 +154,7 @@ static int THPVariable_clear(THPVariable *self)
     // objects stay live, buster!  See
     // https://github.com/pytorch/pytorch/issues/22884 for an example of
     // this actually showing up.
-    torch::autograd::impl::set_pyobj(self->cdata, nullptr);
+    set_pyobj(self->cdata, nullptr);
   }
   self->cdata.reset();
   return 0;
@@ -583,6 +610,17 @@ PyObject *THPVariable_is_mkldnn(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_mlc(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_mlc");
+  }
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.is_mlc());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_vulkan(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -724,6 +762,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
+  {"is_mlc", (getter)THPVariable_is_mlc, nullptr, nullptr, nullptr},
   {"is_vulkan", (getter)THPVariable_is_vulkan, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},

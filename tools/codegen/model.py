@@ -2,8 +2,10 @@ import re
 
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
-from enum import Enum
+from enum import Enum, auto
 import itertools
+
+from tools.codegen.utils import *
 
 # A little trick from https://github.com/python/mypy/issues/6366
 # for getting mypy to do exhaustiveness checking
@@ -47,9 +49,103 @@ class Location:
 # Valid values of the 'variants' field in native_functions.yaml
 Variant = Enum('Variant', ('function', 'method'))
 
-class UseC10Dispatcher(Enum):
-    full = 0
-    hacky_wrapper_for_legacy_signatures = 2
+# NOTE: Keep the list in sync with `DispatchKey` in c10/core/DispatchKey.h
+class DispatchKey(Enum):
+    Undefined = 0
+    CatchAll = Undefined
+
+    CPU = auto()
+    CUDA = auto()
+    HIP = auto()
+    FPGA = auto()
+    MSNPU = auto()
+    XLA = auto()
+    Vulkan = auto()
+    Metal = auto()
+    XPU = auto()
+    MKLDNN = auto()
+    OpenGL = auto()
+    OpenCL = auto()
+    IDEEP = auto()
+    QuantizedCPU = auto()
+    QuantizedCUDA = auto()
+    QuantizedXPU = auto()
+    CustomRNGKeyId = auto()
+    MkldnnCPU = auto()
+    SparseCPU = auto()
+    SparseCUDA = auto()
+    SparseHIP = auto()
+    SparseXPU = auto()
+    NestedTensor = auto()
+    PrivateUse1 = auto()
+    PrivateUse2 = auto()
+    PrivateUse3 = auto()
+    EndOfBackendKeys = PrivateUse3
+
+    Meta = auto()
+    BackendSelect = auto()
+    Named = auto()
+    AutogradOther = auto()
+    AutogradCPU = auto()
+    AutogradCUDA = auto()
+    AutogradXLA = auto()
+    AutogradNestedTensor = auto()
+    AutogradXPU = auto()
+    AutogradPrivateUse1 = auto()
+    AutogradPrivateUse2 = auto()
+    AutogradPrivateUse3 = auto()
+    Tracer = auto()
+    Autocast = auto()
+    Batched = auto()
+    VmapMode = auto()
+    TESTING_ONLY_GenericWrapper = auto()
+    TESTING_ONLY_GenericMode = auto()
+    NumDispatchKeys = auto()
+    Autograd = auto()
+    CompositeImplicitAutograd = auto()
+    CompositeExplicitAutograd = auto()
+    EndOfAliasKeys = CompositeExplicitAutograd
+
+    CPUTensorId = CPU
+    CUDATensorId = CUDA
+    PrivateUse1_PreAutograd = AutogradPrivateUse1
+    PrivateUse2_PreAutograd = AutogradPrivateUse2
+    PrivateUse3_PreAutograd = AutogradPrivateUse3
+
+    def __str__(self) -> str:
+        return self.name
+
+    def lower(self) -> str:
+        return str(self).lower()
+
+    @staticmethod
+    def parse(value: str) -> 'DispatchKey':
+        for k, v in DispatchKey.__members__.items():
+            if k == value:
+                return v
+        raise AssertionError(f'unknown dispatch key {value}')
+
+STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
+
+# Dispatch keys that "support all backends".  These codegen slightly differently
+# then backend specific keys.
+def is_generic_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {DispatchKey.CompositeExplicitAutograd, DispatchKey.CompositeImplicitAutograd}
+
+# CUDA specific dispatch keys
+def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {
+        DispatchKey.CUDA,
+        DispatchKey.QuantizedCUDA,
+        DispatchKey.SparseCUDA,
+        DispatchKey.AutogradCUDA,
+        DispatchKey.CUDATensorId,
+    }
+
+# Structured kernel generation is only supported for certain key types;
+# otherwise use old-style
+def is_structured_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in STRUCTURED_DISPATCH_KEYS
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -71,10 +167,6 @@ class NativeFunction:
     # defined later in the file.  I opted for this ordering of the
     # classes for expository clarity.)
     func: 'FunctionSchema'
-
-    # Corresponds to the 'use_c10_dispatcher' field.  The default
-    # is 'full'
-    use_c10_dispatcher: UseC10Dispatcher
 
     # Whether or not to omit automatic generation of a DeviceGuard
     device_guard: bool
@@ -105,10 +197,8 @@ class NativeFunction:
     # case, that is equivalent to having written:
     #
     #   dispatch:
-    #       Math: $operator_name
-    #
-    # TODO: str key could be replaced with more explicit enum
-    dispatch: Dict[str, str]
+    #       CompositeImplicitAutograd: $operator_name
+    dispatch: Dict[DispatchKey, str]
 
     # The location in the YAML file were this native function entry was
     # defined.  This is for conveniently reporting error messages!
@@ -151,7 +241,7 @@ class NativeFunction:
             # Structured functions MUST have a dispatch table
             return True
         else:
-            return self.dispatch.keys() != {'Math'}
+            return self.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -172,15 +262,6 @@ class NativeFunction:
         cpp_no_default_args_list = e.pop('cpp_no_default_args', [])
         assert isinstance(cpp_no_default_args_list, list)
         cpp_no_default_args = set(cpp_no_default_args_list)
-
-        use_c10_dispatcher_s = e.pop('use_c10_dispatcher', 'full')
-        if use_c10_dispatcher_s == 'full':
-            use_c10_dispatcher = UseC10Dispatcher.full
-        elif use_c10_dispatcher_s == 'hacky_wrapper_for_legacy_signatures':
-            use_c10_dispatcher = UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
-        else:
-            raise AssertionError(
-                f'use_c10_dispatcher must be full or hacky_wrapper_for_legacy_signatures, got {use_c10_dispatcher}')
 
         variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
@@ -220,9 +301,11 @@ class NativeFunction:
         category_override = e.pop('category_override', None)
         assert category_override is None or isinstance(category_override, str), f'not a str: {category_override}'
 
+        from tools.codegen.api import cpp
+
         raw_dispatch = e.pop('dispatch', None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
-        dispatch: Dict[str, str] = {}
+        dispatch: Dict[DispatchKey, str] = {}
         if raw_dispatch is not None:
             assert not manual_kernel_registration, \
                 "cannot specify both manual_kernel_registration and dispatch; with " \
@@ -233,22 +316,28 @@ class NativeFunction:
                 assert isinstance(ks, str), e
                 assert isinstance(v, str), e
                 for k in ks.split(","):
-                    dispatch[k.strip()] = v
-        else:
-            from tools.codegen.api import cpp
-            dispatch['Math'] = cpp.name(func)
+                    dispatch_key = DispatchKey.parse(k.strip())
+                    dispatch[dispatch_key] = v
+            assert dispatch != {DispatchKey.CompositeImplicitAutograd: cpp.name(func)}, \
+                "unnecessary dispatch table for this function; just delete the dispatch " \
+                "key entirely"
+            assert dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}, \
+                f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} " \
+                f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected " \
+                "name, then delete the dispatch table"
+        elif not structured and structured_delegate is None:
+            dispatch[DispatchKey.CompositeImplicitAutograd] = cpp.name(func)
 
-        assert not ('DefaultBackend' in dispatch and 'Math' in dispatch), \
-            "cannot specify both DefaultBackend and Math on a single kernel; each " \
+        assert not (DispatchKey.CompositeExplicitAutograd in dispatch and DispatchKey.CompositeImplicitAutograd in dispatch), \
+            "cannot specify both CompositeExplicitAutograd and CompositeImplicitAutograd on a single kernel; each " \
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
-            "implementation, specify DefaultBackend; otherwise specify Math only"
+            "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
 
         e.pop('__line__')
         assert not e, f"leftover entries: {e}"
 
         return NativeFunction(
             func=func,
-            use_c10_dispatcher=use_c10_dispatcher,
             variants=variants,
             structured=structured,
             structured_delegate=structured_delegate,
@@ -300,40 +389,55 @@ class NativeFunction:
                                if a.default is not None}
         invalid_args = set.difference(self.cpp_no_default_args, defaulted_arguments)
         assert len(invalid_args) == 0, f'Invalid cpp_no_default_args: {invalid_args}'
-        if self.structured or self.structured_delegate:
-            assert self.use_c10_dispatcher is UseC10Dispatcher.full, \
-                "Structured kernels MUST be use_c10_dispatcher: full; port your argument order"
+        if self.structured_inherits is not None:
+            assert self.structured, "structured_inherits must also imply structured: True"
+        if self.structured_delegate is not None:
+            for k in STRUCTURED_DISPATCH_KEYS:
+                assert k not in self.dispatch, \
+                    f"if structured_delegate, then must not have {k} in dispatch dictionary " \
+                    "(it is delegated!)"
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
+#
+# NB: we create NativeFunctionsGroup *even if* the function is not
+# actually annotated structured.  Test the structured boolean to see if it
+# actually is structured or not.
 @dataclass(frozen=True)
-class StructuredNativeFunctions:
+class NativeFunctionsGroup:
     functional: NativeFunction
     inplace: Optional[NativeFunction]
     out: NativeFunction
+
+    @property
+    def structured(self) -> bool:
+        return self.out.structured
 
     def __post_init__(self) -> None:
         test_sig: FunctionSchema = self.functional.func.signature()
         for f in self.functions():
             if test_sig != f.func.signature():
                 raise AssertionError(
-                    "StructuredNativeFunctions constructed from two NativeFunctions "
+                    "NativeFunctionsGroup constructed from two NativeFunctions "
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
                 )
         assert self.functional.func.kind() == SchemaKind.functional
-        assert self.functional.structured_delegate == self.out.func.name, \
-            f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
-            f"but its actual delegate is {self.out.func.name}"
         assert self.out.func.kind() == SchemaKind.out
-        assert self.out.structured
-        # For now, structured composite kernels are not supported (need some
-        # design work to figure out how to make the composite case work)
-        assert self.out.dispatch.keys() != {'Math'}
         if self.inplace is not None:
             assert self.inplace.func.kind() == SchemaKind.inplace
-            assert self.inplace.structured_delegate == self.out.func.name
+
+        if self.structured:
+            # For now, structured composite kernels are not supported (need some
+            # design work to figure out how to make the composite case work)
+            assert self.out.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+
+            assert self.functional.structured_delegate == self.out.func.name, \
+                f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
+                f"but its actual delegate is {self.out.func.name}"
+            if self.inplace is not None:
+                assert self.inplace.structured_delegate == self.out.func.name
 
     def signature(self) -> 'FunctionSchema':
         return self.out.func.signature()
@@ -345,17 +449,74 @@ class StructuredNativeFunctions:
             yield self.inplace
 
     @staticmethod
-    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['StructuredNativeFunctions']:
-        functional = d.get(SchemaKind.functional)
-        inplace = d.get(SchemaKind.inplace)
-        out = d.get(SchemaKind.out)
-        if functional is None or out is None or not out.structured:
+    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['NativeFunctionsGroup']:
+        assert d
+        if len(d) == 1:
             return None
-        return StructuredNativeFunctions(
+        d = dict(d)  # non-destructive updates please
+        functional = d.pop(SchemaKind.functional, None)
+        inplace = d.pop(SchemaKind.inplace, None)
+        out = d.pop(SchemaKind.out, None)
+        assert not d
+        assert functional is not None
+        # There are a few operators which only have functional/inplace variants;
+        # these don't count as structured for our purposes here
+        if out is None:
+            return None
+        return NativeFunctionsGroup(
             functional=functional,
             inplace=inplace,
             out=out,
         )
+
+def is_foreach_op(name: str) -> bool:
+    return str(name) in set([
+        '_amp_foreach_non_finite_check_and_unscale_',
+        '_foreach_add_.ScalarList',
+        '_foreach_sub_.ScalarList',
+        '_foreach_mul_.ScalarList',
+        '_foreach_div_.ScalarList',
+        '_foreach_add_.Scalar',
+        '_foreach_sub_.Scalar',
+        '_foreach_mul_.Scalar',
+        '_foreach_div_.Scalar',
+        '_foreach_add_.List',
+        '_foreach_sub_.List',
+        '_foreach_mul_.List',
+        '_foreach_div_.List',
+        '_foreach_exp_',
+        '_foreach_sqrt_',
+        '_foreach_abs_',
+        '_foreach_acos_',
+        '_foreach_asin_',
+        '_foreach_atan_',
+        '_foreach_ceil_',
+        '_foreach_cos_',
+        '_foreach_cosh_',
+        '_foreach_erf_',
+        '_foreach_erfc_',
+        '_foreach_expm1_',
+        '_foreach_floor_',
+        '_foreach_log_',
+        '_foreach_log10_',
+        '_foreach_log1p_',
+        '_foreach_log2_',
+        '_foreach_neg_',
+        '_foreach_tan_',
+        '_foreach_tanh_',
+        '_foreach_sin_',
+        '_foreach_sinh_',
+        '_foreach_round_',
+        '_foreach_lgamma_',
+        '_foreach_frac_',
+        '_foreach_reciprocal_',
+        '_foreach_sigmoid_',
+        '_foreach_trunc_',
+        '_foreach_addcmul_.Scalar',
+        '_foreach_addcdiv_.Scalar',
+        '_foreach_addcmul_.ScalarList',
+        '_foreach_addcdiv_.ScalarList',
+        '_foreach_zero_'])
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
@@ -466,53 +627,7 @@ class FunctionSchema:
                 "Must return as many arguments as there are out arguments"
         if self.name.name.inplace:
             # TODO: fixme
-            if str(self.name) not in [
-                    '_amp_foreach_non_finite_check_and_unscale_',
-                    '_foreach_add_.ScalarList',
-                    '_foreach_sub_.ScalarList',
-                    '_foreach_mul_.ScalarList',
-                    '_foreach_div_.ScalarList',
-                    '_foreach_add_.Scalar',
-                    '_foreach_sub_.Scalar',
-                    '_foreach_mul_.Scalar',
-                    '_foreach_div_.Scalar',
-                    '_foreach_add_.List',
-                    '_foreach_sub_.List',
-                    '_foreach_mul_.List',
-                    '_foreach_div_.List',
-                    '_foreach_exp_',
-                    '_foreach_sqrt_',
-                    '_foreach_abs_',
-                    '_foreach_acos_',
-                    '_foreach_asin_',
-                    '_foreach_atan_',
-                    '_foreach_ceil_',
-                    '_foreach_cos_',
-                    '_foreach_cosh_',
-                    '_foreach_erf_',
-                    '_foreach_erfc_',
-                    '_foreach_expm1_',
-                    '_foreach_floor_',
-                    '_foreach_log_',
-                    '_foreach_log10_',
-                    '_foreach_log1p_',
-                    '_foreach_log2_',
-                    '_foreach_neg_',
-                    '_foreach_tan_',
-                    '_foreach_tanh_',
-                    '_foreach_sin_',
-                    '_foreach_sinh_',
-                    '_foreach_round_',
-                    '_foreach_lgamma_',
-                    '_foreach_frac_',
-                    '_foreach_reciprocal_',
-                    '_foreach_sigmoid_',
-                    '_foreach_trunc_',
-                    '_foreach_addcmul_.Scalar',
-                    '_foreach_addcdiv_.Scalar',
-                    '_foreach_addcmul_.ScalarList',
-                    '_foreach_addcdiv_.ScalarList',
-                    '_foreach_zero_']:
+            if not is_foreach_op(str(self.name)):
                 assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:

@@ -1,4 +1,4 @@
-from typing import Dict, Sequence, List, NoReturn
+from typing import Dict, Sequence, List, NoReturn, Union
 from tools.codegen.api.types import *
 
 # This file implements a small program synthesis engine that implements
@@ -45,13 +45,50 @@ class UnsatError(RuntimeError):
 #
 # and you need to generate "exprs".
 #
-# TODO: Don't need full Binding for goals, CType will do
-# TODO: Don't need full Binding for bindings, list of Expr will do
-def translate(bindings: Sequence[Binding], goals: Sequence[Binding], *, method: bool = False) -> List[Expr]:
+# Typically, a list of Bindings is convenient to get (you usually call something
+# like arguments() to get them); but technically you only need less information:
+# for 'bindings' an (un-ordered) list of Exprs is sufficient; similarly, for
+# 'goals', an (ordered) list of CType goals is sufficient.  If you are doing
+# something more complicated, e.g., tracking the set of bindings in a context,
+# you may find using these smaller types more convenient.
+def translate(
+    bindings: Sequence[Union[Expr, Binding]],
+    goals: Sequence[Union[CType, Binding]],
+    *, method: bool = False
+) -> List[Expr]:
+
+    binding_exprs: List[Expr] = []
+    for b in bindings:
+        if isinstance(b, Binding):
+            binding_exprs.append(Expr(
+                expr=b.name,
+                type=b.ctype,
+            ))
+        else:
+            binding_exprs.append(b)
+
+    goal_ctypes: List[CType] = []
+    for g in goals:
+        if isinstance(g, Binding):
+            goal_ctypes.append(g.ctype)
+        else:
+            goal_ctypes.append(g)
+
     # Add all the bindings to the context
     ctx: Dict[CType, str] = {}
-    for b in bindings:
-        ctx[b.ctype] = b.name
+    for b in binding_exprs:
+        ctx[b.type] = b.expr
+
+        # While we're at it, do some simple forward inference, looking through
+        # constructors.
+        # TODO: My kingdom for a pattern matcher
+        # https://www.python.org/dev/peps/pep-0634/
+        # TODO: This could get us in recomputation trouble if b.expr is nontrivial
+        t = b.type
+        if isinstance(t, ConstRefCType) and isinstance(t.elem, OptionalCType) and \
+                isinstance(t.elem.elem, BaseCType) and t.elem.elem.type == 'Tensor':
+            ctx[ConstRefCType(BaseCType("Tensor", t.elem.elem.name))] = \
+                f'({b.expr}.has_value() ? *{b.expr} : at::Tensor())'
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
@@ -61,17 +98,9 @@ def translate(bindings: Sequence[Binding], goals: Sequence[Binding], *, method: 
         # ctx[ConstRefCType(BaseCType("Tensor", "self"))] = "*this"
 
     def unsat(goal: CType) -> NoReturn:
-        ctx_desc = '\n'.join(f"  {t.cpp_type()} {e};" for t, e in ctx.items())
+        ctx_desc = '\n'.join(f"  {t.cpp_type()} {t.name}; // {e}" for t, e in ctx.items())
         raise UnsatError(f'''
-Failed to synthesize the expression "{goal.cpp_type()} {goal.name}"
-while trying to translate from:
-
-  from_func({', '.join(b.defn() for b in bindings)})
-
-to:
-
-  to_func({', '.join(g.defn() for g in goals)})
-
+Failed to synthesize the expression "{goal.cpp_type()} {goal.name}".
 When I failed, the following bindings were available in the context:
 
 {ctx_desc}
@@ -94,8 +123,18 @@ Check this module for more information.
             # Trivial
             return ctx[goal]
 
-        # If the goal is a const&, try solving for the value type first
+        # const & is satisfied with mutable &
         if isinstance(goal, ConstRefCType):
+            try:
+                # WARNING: not strictly decreasing; be careful not
+                # to add a direct conversion that goes satisfies
+                # mutable& with const&
+                return solve(MutRefCType(goal.elem), direct=direct)
+            except UnsatError:
+                pass
+
+        # mutable & is satisfied with value
+        if isinstance(goal, MutRefCType):
             try:
                 return solve(goal.elem, direct=direct)
             except UnsatError:
@@ -109,6 +148,10 @@ Check this module for more information.
             memory_format = direct_solve(
                 OptionalCType(BaseCType("MemoryFormat", SpecialArgName.possibly_redundant_memory_format))
             )
+            # No need to join "memory_format" and "options" if the target API takes "options" directly.
+            # Otherwise it will cause the redundant memory_format error.
+            if options_ctype in goal_ctypes:
+                return memory_format
             try:
                 options = direct_solve(options_ctype)
                 return f"c10::impl::check_tensor_options_and_extract_memory_format({options}, {memory_format})"
@@ -140,4 +183,4 @@ Check this module for more information.
 
         unsat(goal)
 
-    return [Expr(solve(g.ctype, direct=False), g.ctype) for g in goals]
+    return [Expr(solve(g, direct=False), g) for g in goal_ctypes]

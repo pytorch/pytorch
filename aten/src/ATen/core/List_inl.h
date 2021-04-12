@@ -13,6 +13,10 @@ List<T>::List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements)
 : impl_(std::move(elements)) {}
 
 template<class T>
+List<T>::List(const c10::intrusive_ptr<c10::detail::ListImpl>& elements)
+: impl_(elements) {}
+
+template<class T>
 List<T>::List()
 : List(make_intrusive<c10::detail::ListImpl>(
   typename c10::detail::ListImpl::list_type(),
@@ -65,8 +69,12 @@ List<T> toTypedList(impl::GenericList list) {
 }
 
 template<class T>
-impl::GenericList toList(List<T> list) {
+impl::GenericList toList(List<T>&& list) {
   return GenericList(std::move(list.impl_));
+}
+template<class T>
+impl::GenericList toList(const List<T>& list) {
+  return GenericList(list.impl_);
 }
 }
 
@@ -168,21 +176,9 @@ list_element_to_const_ref(const IValue& element) {
 }
 
 template<>
-inline typename ListElementConstReferenceTraits<std::string>::const_reference
-list_element_to_const_ref<std::string>(const IValue& element) {
-  return element.toStringRef();
-}
-
-template<>
 inline typename ListElementConstReferenceTraits<c10::optional<std::string>>::const_reference
 list_element_to_const_ref<c10::optional<std::string>>(const IValue& element) {
   return element.toOptionalStringRef();
-}
-
-template<>
-inline typename ListElementConstReferenceTraits<at::Tensor>::const_reference
-list_element_to_const_ref<at::Tensor>(const IValue& element) {
-  return element.toTensor();
 }
 
 } // namespace impl

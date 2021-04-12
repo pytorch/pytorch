@@ -1,13 +1,15 @@
 
 
-#include <tuple>
 #include <ATen/ATen.h>
-#include <ATen/Utils.h>
-#include <ATen/native/im2col.h>
-#include <ATen/native/vol2col.h>
-
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/DilatedConvolutionUtils.h>
+#include <ATen/native/im2col.h>
+#include <ATen/native/vol2col.h>
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
+
+#include <tuple>
 
 namespace at {
 namespace native {
@@ -182,8 +184,8 @@ void slow_conv_dilated_all_cpu_template(
   // Temporary buffer:
   Tensor columns = at::empty({0}, options);
   if (output.defined() || grad_weight.defined() || grad_input.defined()) {
-    const int64_t m = prod_intlist(kernel_size);
-    const int64_t n = prod_intlist(output_size);
+    const int64_t m = c10::multiply_integers(kernel_size);
+    const int64_t n = c10::multiply_integers(output_size);
     columns.resize_({nInputPlane * m, n});
   }
   // Initialize
@@ -203,7 +205,7 @@ void slow_conv_dilated_all_cpu_template(
 
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(), "slow_conv_dilated<>", [&] {
     // For each elt in batch, do:
-    for (int elt = 0; elt < batchSize; elt++) {
+    for (const auto elt : c10::irange(batchSize)) {
       // Matrix multiply per output:
       Tensor input_n = input.select(0, elt);
 
@@ -233,7 +235,7 @@ void slow_conv_dilated_all_cpu_template(
           */
           // The following for-loop is equivalent to the above
           // gemm setup but avoids allocation of ones tensor:
-          for (int n = 0; n < nOutputPlane; n++) {
+          for (const auto n : c10::irange(nOutputPlane)) {
             output_n.select(0, n).fill_(bias[n]);
           }
         }
@@ -434,11 +436,13 @@ void slow_conv_dilated_all_cpu_template(
 Tensor slow_conv_dilated2d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<2>(
       input,
@@ -537,11 +541,13 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
 Tensor slow_conv_dilated3d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<3>(
       input,

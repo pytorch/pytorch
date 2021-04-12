@@ -226,14 +226,28 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
   const std::unordered_set<std::string> cuda_ops = {
       "current_stream",
       "default_stream",
-      "_current_device",
-      "_set_device",
+      "current_device",
+      "set_device",
       "device_index",
       "device_count",
       "set_stream"};
 
   if (cuda_ops.find(field) != cuda_ops.end()) {
-    return std::make_shared<BuiltinFunction>(Symbol::cuda(field), c10::nullopt);
+    // Both current_device and set_device API's are a part of c10::cuda
+    // namespace. Hence, to resolve the conflict for jit, we append _ to both
+    // these APIs.
+    if (field == "current_device" || field == "set_device") {
+      return std::make_shared<BuiltinFunction>(
+          Symbol::cuda("_" + field), c10::nullopt);
+    } else {
+      return std::make_shared<BuiltinFunction>(
+          Symbol::cuda(field), c10::nullopt);
+    }
+  }
+
+  if (field == "Stream" || field == "Event") {
+    auto class_type = getCustomClass("__torch__.torch.classes.cuda." + field);
+    return std::make_shared<ClassValue>(class_type);
   }
 
   py::object member = getattr(loc, field);
@@ -258,14 +272,55 @@ SugaredValuePtr ModuleValue::asTupleValue(const SourceRange& loc, Function& m) {
       << "Only ModuleList or Sequential modules can be used as tuple";
 }
 
+bool ModuleValue::areAllSubmodulesSubtypeOf(
+    const TypePtr& ty,
+    std::ostream* why_not) const {
+  const auto& self_type = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < self_type->numAttributes(); ++i) {
+    const auto& attr_type = self_type->getAttribute(i);
+    if (attr_type->is_module()) {
+      std::stringstream ss;
+      if (!attr_type->isSubtypeOfExt(ty, &ss)) {
+        if (why_not) {
+          *why_not << "Attribute " << self_type->getAttributeName(i)
+                   << " is not of annotated type " << ty->annotation_str()
+                   << ": " << ss.str();
+        }
+
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 SugaredValuePtr ModuleValue::getitem(
     const SourceRange& loc,
     Function& m,
     Value* idx,
     TypePtr type_hint) {
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
-    return getSugaredDict(loc, m)->getModules()->getitem(
-        loc, m, idx, type_hint);
+    if (type_hint) {
+      // Check that all submodules comply with the type hint.
+      std::stringstream ss;
+      if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
+        throw ErrorReport(loc) << ss.str();
+      }
+
+      // Emit a prim::ModuleContainerIndex operator. This is needed because
+      // it's difficult to construct a list in the graph representing the
+      // ModuleList and use aten::__getitem__ ops to index into it because
+      // any call to ModuleList.setitem would invalidate that emitted list.
+      auto graph = m.graph();
+      auto* getitem_node = graph->insertNode(
+          graph->create(prim::ModuleContainerIndex, {self_, idx}));
+      getitem_node->output(0)->setType(type_hint);
+      return std::make_shared<SimpleValue>(getitem_node->output(0));
+    } else {
+      return getSugaredDict(loc, m)->getModules()->getitem(
+          loc, m, idx, type_hint);
+    }
   } else if (
       concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (auto ivalue = toIValue(idx)) {
@@ -283,28 +338,18 @@ SugaredValuePtr ModuleValue::getitem(
       throw ErrorReport(loc) << "Key Error, " << idx_str;
     } else if (type_hint) {
       // Check that all submodules comply with the type hint.
-      const auto& self_type = concreteType_->getJitType()->expect<ClassType>();
-      for (size_t i = 0; i < self_type->numAttributes(); ++i) {
-        const auto& attr_type = self_type->getAttribute(i);
-        if (attr_type->is_module()) {
-          std::stringstream ss;
-          if (!attr_type->isSubtypeOfExt(type_hint, &ss)) {
-            auto loc = self_->node()->sourceRange();
-            throw ErrorReport(loc)
-                << "Attribute " << self_type->getAttributeName(i)
-                << " is not of annotated type " << type_hint->annotation_str()
-                << ": " << ss.str();
-          }
-        }
+      std::stringstream ss;
+      if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
+        throw ErrorReport(loc) << ss.str();
       }
 
-      // Emit a prim::ModuleDictIndex operator. This is needed because it's
-      // difficult to construct a dict in the graph representing the ModuleDict
-      // and use aten::__getitem__ ops to index into it because any call to
-      // ModuleDict.setAttr would invalidate that emitted dict.
+      // Emit a prim::ModuleContainerIndex operator. This is needed because
+      // it's difficult to construct a dict in the graph representing the
+      // ModuleDict and use aten::__getitem__ ops to index into it because
+      // any call to ModuleDict.setAttr would invalidate that emitted dict.
       auto graph = m.graph();
-      auto* getitem_node =
-          graph->insertNode(graph->create(prim::ModuleDictIndex, {self_, idx}));
+      auto* getitem_node = graph->insertNode(
+          graph->create(prim::ModuleContainerIndex, {self_, idx}));
       getitem_node->output(0)->setType(type_hint);
       return std::make_shared<SimpleValue>(getitem_node->output(0));
     }
@@ -359,7 +404,7 @@ void recurseThroughNestedModules(
     if (prefix != "") {
       submodule_prefix = prefix + ".";
     }
-    submodule_prefix = submodule_prefix + key_string;
+    submodule_prefix += key_string;
     recurseThroughNestedModules(
         loc, m, keys, values, module_value, submodule_prefix, field);
   };
@@ -382,7 +427,7 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
   for (const auto& name : paramNames) {
     auto name_v =
         std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
-    Value* tensor_v = m.graph()->insertGetAttr(self_, name);
+    m.graph()->insertGetAttr(self_, name);
     values.push_back(tryGetAttr(loc, m, name));
     keys.push_back(name_v);
   }
@@ -765,6 +810,9 @@ std::shared_ptr<SugaredValue> PythonClassValue::attr(
     const std::string& field) {
   // Resolve values from the Python object first (e.g. for static methods on
   // this type, resolve them as functions)
+  if (auto* fn = type_->findStaticMethod(field)) {
+    return std::make_shared<FunctionValue>(fn);
+  }
   auto py_attr = py::getattr(py_type_, field.c_str(), py::none());
   if (!py_attr.is_none()) {
     return toSugaredValue(py_attr, m, loc);
@@ -967,9 +1015,9 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
     return given;
   };
 
-  Value* start;
-  Value* stop;
-  Value* step;
+  Value* start = nullptr;
+  Value* stop = nullptr;
+  Value* step = nullptr;
   size_t n = args.size();
   // Slice's constructor signature is Slice(start=None, stop, step=None)
   if (n == 1) {
@@ -998,7 +1046,7 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
-    SourceRange loc,
+    const SourceRange& loc,
     bool is_constant) {
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
@@ -1013,6 +1061,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
       return toSimple(g.insertConstant(py::cast<double>(obj), loc));
+    } else if (PyComplex_CheckExact(obj.ptr())) {
+      auto c_obj = py::cast<std::complex<double>>(obj.ptr());
+      return toSimple(
+          g.insertConstant(static_cast<c10::complex<double>>(c_obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
       return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {
@@ -1036,10 +1088,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
       const auto v = static_cast<uint8_t>(qscheme->qscheme);
       return toSimple(g.insertConstant(v, loc));
-    } else if (THPLayout_Check(obj.ptr())) {
-      auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
-      const auto l = static_cast<int8_t>(layout->layout);
-      return toSimple(g.insertConstant(l, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       py::tuple tup = obj;
       std::vector<Value*> values;

@@ -43,7 +43,7 @@ class HalfCauchy(TransformedDistribution):
 
     @property
     def mean(self):
-        return self.base_dist.mean
+        return torch.full(self._extended_shape(), math.inf, dtype=self.scale.dtype, device=self.scale.device)
 
     @property
     def variance(self):

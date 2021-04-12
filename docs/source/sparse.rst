@@ -405,27 +405,37 @@ matrix arguments.
    applications can still compute this using the matrix relation ``D @
    S == (S.t() @ D.t()).t()``.
 
-.. class:: Tensor()
-   :noindex:
 
-   The following methods are specific to :ref:`sparse tensors <sparse-docs>`:
 
-    .. autoattribute:: is_sparse
-    .. automethod:: dense_dim
-    .. automethod:: sparse_dim
-    .. automethod:: sparse_mask
-    .. automethod:: sparse_resize_
-    .. automethod:: sparse_resize_and_clear_
-    .. automethod:: to_dense
-    .. automethod:: to_sparse
-    .. The following methods are specific to :ref:`sparse COO tensors <sparse-coo-docs>`:
-    .. automethod:: coalesce
-    .. automethod:: is_coalesced
-    .. automethod:: indices
-    .. automethod:: values
+Tensor methods and sparse
++++++++++++++++++++++++++
 
-The following :class:`torch.Tensor` methods support :ref:`sparse COO
-tensors <sparse-coo-docs>`:
+The following Tensor methods are related to sparse tensors:
+
+.. autosummary::
+    :nosignatures:
+
+    Tensor.is_sparse
+    Tensor.dense_dim
+    Tensor.sparse_dim
+    Tensor.sparse_mask
+    Tensor.to_sparse
+    Tensor.indices
+    Tensor.values
+
+The following Tensor methods are specific to sparse COO tensors:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Tensor.coalesce
+    Tensor.sparse_resize_
+    Tensor.sparse_resize_and_clear_
+    Tensor.is_coalesced
+    Tensor.to_dense
+
+The following Tensor methods support sparse COO tensors:
 
 :meth:`~torch.Tensor.add`
 :meth:`~torch.Tensor.add_`
@@ -479,24 +489,26 @@ tensors <sparse-coo-docs>`:
 :meth:`~torch.Tensor.transpose_`
 :meth:`~torch.Tensor.zero_`
 
+Torch functions specific to sparse Tensors
+++++++++++++++++++++++++++++++++++++++++++
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-Sparse tensor functions
-+++++++++++++++++++++++
-
-.. autofunction:: torch.sparse_coo_tensor
-.. autofunction:: torch.sparse.sum
-.. autofunction:: torch.sparse.addmm
-.. autofunction:: torch.sparse.mm
-.. autofunction:: torch.sspaddmm
-.. autofunction:: torch.hspmm
-.. autofunction:: torch.smm
-.. autofunction:: torch.sparse.softmax
-.. autofunction:: torch.sparse.log_softmax
+    sparse_coo_tensor
+    sparse.sum
+    sparse.addmm
+    sparse.mm
+    sspaddmm
+    hspmm
+    smm
+    sparse.softmax
+    sparse.log_softmax
 
 Other functions
 +++++++++++++++
 
-The following :mod:`torch` functions support :ref:`sparse COO tensors <sparse-coo-docs>`:
+The following :mod:`torch` functions support sparse tensors:
 
 :func:`~torch.cat`
 :func:`~torch.dstack`

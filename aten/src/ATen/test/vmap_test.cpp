@@ -17,7 +17,7 @@ TEST(VmapTest, TestBatchedTensor) {
     ASSERT_EQ(x.numel(), 8);
     ASSERT_EQ(x.is_contiguous(), false);
     ASSERT_THROW(x.storage(), c10::Error);
-    ASSERT_THROW(x.storage_offset(), c10::Error);
+    ASSERT_EQ(x.storage_offset(), 0);
   }
   {
     // Test multiple batch dims

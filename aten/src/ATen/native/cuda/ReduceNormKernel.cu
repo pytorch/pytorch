@@ -11,7 +11,7 @@ namespace at { namespace native {
 // `scalar_t` is complex, `acc_t` is the downgraded real number type.
 // Otherwise, `acc_t` and `scalar_t` are the same type.
 template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>::type, typename out_t=typename scalar_value_type<scalar_t>::type>
-void norm_kernel_cuda_impl(TensorIterator& iter, Scalar val) {
+void norm_kernel_cuda_impl(TensorIterator& iter, const Scalar& val) {
   double p;
   if (val.isIntegral(false)) {
      p = val.to<int64_t>();
@@ -36,7 +36,7 @@ void norm_kernel_cuda_impl(TensorIterator& iter, Scalar val) {
   }
 }
 
-static void norm_kernel_cuda(TensorIterator& iter, Scalar p) {
+static void norm_kernel_cuda(TensorIterator& iter, const Scalar& p) {
   if (iter.input_dtype() == kHalf) {
     return norm_kernel_cuda_impl<at::Half, float>(iter, p);
   } else if (iter.dtype(1) == kHalf && iter.input_dtype() == kFloat) {

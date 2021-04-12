@@ -33,11 +33,13 @@
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
     true,
     "If this flag is set to false TorchScript will be using the legacy/original executor");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     torch_jit_disable_warning_prints,
     false,
@@ -46,10 +48,12 @@ C10_DEFINE_bool(
 constexpr size_t kDefaultNumProfiledRuns = 1;
 constexpr size_t kDefaultBailoutDepth = 20;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     torch_jit_num_profiled_runs,
     kDefaultNumProfiledRuns,
     "Number of profiling runs");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     torch_jit_bailout_depth,
     kDefaultBailoutDepth,
@@ -59,14 +63,20 @@ namespace torch {
 namespace jit {
 
 #if defined(C10_MOBILE)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> executor_mode{true};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> profiling_mode{false};
 #else
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> executor_mode{true};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> profiling_mode{true};
 #endif
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
 
 std::atomic<bool>& getProfilingMode() {
@@ -119,6 +129,66 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
+// `prim::RequiresGradCheck` guarantees that requires_grad properties
+// of input tensors will match the profiled, otherwise a fallback path
+// will be triggered. This allow us to prune off gradients in backward
+// graph for inputs that don't need gradients. We transfer requires_grad
+// properties from inputs to the `prim::DifferentiableGraph` onto inputs to the
+// differentiable graph. Autodiff will inspect these properties and prune
+// off gradients that aren't required
+// `requires_grad` properties from `dnode->outputs()` will also be transferred
+static void setRequiresGradOnDiffGraph(Node* dnode) {
+  auto gi = dnode->g(attr::Subgraph)->inputs();
+  for (size_t i = 0; i < dnode->inputs().size(); i++) {
+    if (auto ty = dnode->input(i)->type()->cast<TensorType>()) {
+      auto gi_ty = gi[i]->type()->expect<TensorType>();
+      gi[i]->setType(gi_ty->withRequiresGrad(ty->requires_grad()));
+      GRAPH_DEBUG(
+          "Setting ",
+          *gi_ty->withRequiresGrad(ty->requires_grad()),
+          " on ",
+          gi[i],
+          " ",
+          gi[i]->debugName());
+    }
+  }
+
+  // We also need to put requires_grad on outputs within subgraph, so autodiff
+  // can  set df_input_vjps and DifferentiableGraphOp can set `requires_grad=`
+  // properly
+  auto go = dnode->g(attr::Subgraph)->outputs();
+  for (size_t i = 0; i < go.size(); i++) {
+    auto ty = go[i]->type()->cast<TensorType>();
+    if (ty) {
+      auto n = go[i]->node();
+      auto dno = dnode->outputs().at(i);
+      auto dno_use0 = dno->uses().at(0);
+      GRAPH_DEBUG("found first user of ", i, " as ", *dno_use0.user);
+      if (n->kind() == prim::profile) {
+        GRAPH_DEBUG(
+            "setting output ", i, " to type ", *n->ty(attr::profiled_type));
+        go[i]->setType(n->ty(attr::profiled_type));
+      } else if (dno_use0.user->kind() == prim::profile) {
+        GRAPH_DEBUG(
+            "setting output ",
+            i,
+            " to type ",
+            *dno_use0.user->ty(attr::profiled_type));
+        go[i]->setType(dno_use0.user->ty(attr::profiled_type));
+      } else if (dno_use0.user->kind() == prim::DifferentiableGraph) {
+        Value* o =
+            dno_use0.user->g(attr::Subgraph)->inputs().at(dno_use0.offset);
+        auto nn = o->uses().at(0).user;
+        if (nn->kind() == prim::profile) {
+          GRAPH_DEBUG(
+              "setting output ", i, " to type ", *nn->ty(attr::profiled_type));
+          go[i]->setType(nn->ty(attr::profiled_type));
+        }
+      }
+    }
+  }
+}
+
 bool guardDifferentiableGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   bool all_inputs_seen = true;
@@ -152,6 +222,7 @@ bool guardDifferentiableGraph(Node* dnode) {
     }
   }
   if (all_inputs_seen) {
+    setRequiresGradOnDiffGraph(dnode);
     // we may have seen both true and false for requires_grad. In this case
     // we guard with true here and the other case is in the fallback. This
     // will give us trouble when we get "alternating patterns" of gradients
@@ -452,13 +523,14 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       GRAPH_DEBUG("After guardDifferentiableGraph:\n", *copy);
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
+      RemoveTensorTypeSpecializations(gradient.f);
+      RemoveProfilingNodes(gradient.f);
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
       GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
       // just like inside autograd.Functions, the forward of a differentiable
       // graph is essentially in a torch.no_grad context.
       UpdateDifferentiableGraphRequiresGrad(gradient.f, false);
       GRAPH_DEBUG("After UpdateDifferentiableGraphRequiresGrad ", *gradient.f);
-      runDiffGraphPasses(gradient.f);
       // replaces fallback graphs inserted by TE Fuser
       replaceFallbackGraphWithFallbackFunction(gradient.f->block());
       packGradient(gradient, dnode);
@@ -587,6 +659,12 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     pr_ = ProfilingRecord::instrumentGraph(copy);
+    // `InsertProfileNodesForSpecializeAutogradZero` profiles a definition vs a
+    // use and it doesn't expect any profile nodes between a graph input and its
+    // consumer, `aten::_grad_sum_to_size`. This means we need to run it first,
+    // before any other pass that could insert `prim::iprofile_value` node on
+    // `aten::_grad_sum_to_size` input.
+    InsertProfileNodesForSpecializeAutogradZero(pr_.get());
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through

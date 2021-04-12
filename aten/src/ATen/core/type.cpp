@@ -3,6 +3,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/function.h>
 #include <iostream>
@@ -89,16 +90,16 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "[Undefined]";
     }
   } else if(t.kind() == TypeKind::ListType) {
-    auto prim = t.cast<ListType>()->getElementType();
+    auto prim = t.castRaw<ListType>()->getElementType();
     out << *prim << "[]";
   } else if (t.kind() == TypeKind::OptionalType) {
-    auto prim = t.cast<OptionalType>()->getElementType();
+    auto prim = t.castRaw<OptionalType>()->getElementType();
     out << *prim << "?";
   } else if(t.kind() == TypeKind::FutureType) {
-    auto elem = t.cast<FutureType>()->getElementType();
+    auto elem = t.castRaw<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
   } else if(t.kind() == TypeKind::RRefType) {
-    auto elem = t.cast<RRefType>()->getElementType();
+    auto elem = t.castRaw<RRefType>()->getElementType();
     out << "RRef[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
     if (tup->schema()) {
@@ -143,6 +144,10 @@ IntTypePtr IntType::get() {
 }
 FloatTypePtr FloatType::get() {
   static auto value = FloatType::create();
+  return value;
+}
+ComplexTypePtr ComplexType::get() {
+  static auto value = ComplexType::create();
   return value;
 }
 BoolTypePtr BoolType::get() {
@@ -207,6 +212,10 @@ ListTypePtr ListType::ofTensors() {
 }
 ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
+  return value;
+}
+ListTypePtr ListType::ofComplexDoubles() {
+  static auto value = ListType::create(ComplexType::get());
   return value;
 }
 ListTypePtr ListType::ofFloats() {
@@ -296,8 +305,8 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
 
   if (t1->cast<FutureType>() && t2->cast<FutureType>()) {
     if (auto elem = unifyTypes(
-            t1->cast<FutureType>()->getElementType(),
-            t2->cast<FutureType>()->getElementType())) {
+            t1->castRaw<FutureType>()->getElementType(),
+            t2->castRaw<FutureType>()->getElementType())) {
       return FutureType::create(*elem);
     }
   }
@@ -1099,7 +1108,7 @@ torch::jit::Function* ClassType::findForwardHook(const std::string& name) const 
 std::string getSchemaInputTypesString(const FunctionSchema& schema) {
   std::stringstream input_types;
   const std::vector<Argument>& forward_args = schema.arguments();
-  for (int i = 1; i < forward_args.size(); ++i) {
+  for (const auto i : c10::irange(1, forward_args.size())) {
     input_types << forward_args[i].type()->annotation_str();
     if (forward_args.size() - 1 != i) {
       input_types << ", ";
@@ -1116,12 +1125,12 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
   const FunctionSchema& forward_schema = getMethod("forward").getSchema();
   std::string input_types = getSchemaInputTypesString(forward_schema);
   const std::vector<Argument>& forward_args = forward_schema.arguments();
-   
+
   std::string single_output = "";
   if (forward_args.size() == 2 &&
       forward_args[1].type()->cast<TupleType>() == nullptr) {
     // if the output type is a single tuple, it needs to be wrapped in an outer tuple
-    // to match eager's behavior 
+    // to match eager's behavior
     single_output = ", '" + forward_args[1].type()->annotation_str() + "',";
   }
   std::string pre_hook_schema =
@@ -1130,9 +1139,9 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
       "This error occured while scripting the forward pre-hook '" +
       pre_hook_name + "' on module '" + name()->name() +
       "'. If you did not want to script this pre-hook remove it from the "
-      "original NN module before scripting. Pre-hooks for module '" + 
-      name()->name() + "' are expected to have the following signature: " 
-      + pre_hook_schema + " with a return type of either 'None'" + 
+      "original NN module before scripting. Pre-hooks for module '" +
+      name()->name() + "' are expected to have the following signature: "
+      + pre_hook_schema + " with a return type of either 'None'" +
       single_output + " or 'Tuple[" + input_types + "]'.";
   return return_string;
 }
@@ -1140,7 +1149,7 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
 std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   const std::string& hook_name = forward_hooks_[hook_idx]->name();
   const FunctionSchema& forward_schema = getMethod("forward").getSchema();
-  std::string input_types = getSchemaInputTypesString(forward_schema); 
+  std::string input_types = getSchemaInputTypesString(forward_schema);
 
   // create expected output types string
   const Argument& pre_output =
@@ -1152,37 +1161,37 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   std::string hook_schema = hook_name + "(self, input: Tuple[" +
                             input_types + "], output: " + output_types + ")";
   std::string return_string =
-      "This error occured while scripting the forward hook '" 
+      "This error occured while scripting the forward hook '"
       + hook_name + "' on module " + name()->name() +
       ". If you did not want to script this hook remove it from" +
       " the original NN module before scripting. This hook was" +
       " expected to have the following signature: " + hook_schema +
-      ". The type of the output arg is the returned type from" + 
-      " either the forward method or the previous hook if it exists. " + 
-      "Note that hooks can return anything, but if the hook is " + 
+      ". The type of the output arg is the returned type from" +
+      " either the forward method or the previous hook if it exists. " +
+      "Note that hooks can return anything, but if the hook is " +
       "on a submodule the outer module is expecting" +
       " the same return type as the submodule's forward.";
   return return_string;
 }
 
 void checkForwardHookInputArguments(
-    const FunctionSchema& forward_schema, 
-    const FunctionSchema& hook_schema, 
-    const std::string& hook_id, 
+    const FunctionSchema& forward_schema,
+    const FunctionSchema& hook_schema,
+    const std::string& hook_id,
     const std::string& hook_err_msg) {
   // check for proper tuple input types
   const std::vector<Argument>& forward_args = forward_schema.arguments();
   const Argument input_arg = hook_schema.arguments()[1];
   TORCH_CHECK(
-      input_arg.type()->cast<TupleType>() != nullptr, 
+      input_arg.type()->cast<TupleType>() != nullptr,
       hook_id,
       "expected the input argument to be typed as a Tuple but found type: '",
-      input_arg.type()->annotation_str(), 
-      "' instead.\n", 
+      input_arg.type()->annotation_str(),
+      "' instead.\n",
       hook_err_msg
    );
 
-  const at::ArrayRef<TypePtr> input_tuple_types = input_arg.type()->cast<TupleType>()->elements();
+  const at::ArrayRef<TypePtr> input_tuple_types = input_arg.type()->castRaw<TupleType>()->elements();
   if (forward_args.size() == 1) {
     // check for empty forward case
     TORCH_CHECK(
@@ -1205,7 +1214,7 @@ void checkForwardHookInputArguments(
         hook_err_msg
     );
 
-    for (int i = 1; i < forward_args.size(); ++i) {
+    for (const auto i : c10::irange(1, forward_args.size())) {
       if (*forward_args[i].type() != *input_tuple_types[i - 1]) {
         TORCH_CHECK(
             false,
@@ -1221,7 +1230,7 @@ void checkForwardHookInputArguments(
 }
 
 void ClassType::checkForwardPreHookSchema(
-    int pre_hook_idx, 
+    int pre_hook_idx,
     const FunctionSchema& pre_hook_schema) const {
   const torch::jit::Function* pre_hook = forward_pre_hooks_[pre_hook_idx];
   std::string hook_id =
@@ -1253,7 +1262,7 @@ void ClassType::checkForwardPreHookSchema(
             pre_hook_err_msg
   );
   const Argument return_arg = pre_hook_schema.returns()[0];
-  std::string wrong_type_returned_err_msg = hook_id + 
+  std::string wrong_type_returned_err_msg = hook_id +
       "returned the wrong type of: '" +
       return_arg.type()->annotation_str() + "'.";
 
@@ -1261,9 +1270,9 @@ void ClassType::checkForwardPreHookSchema(
     return;
   }
   if (forward_args.size() == 2 && *forward_args[1].type() == *return_arg.type()) {
-    // TORCH_CHECK below is for the edge case where forward's input is a tuple and the 
+    // TORCH_CHECK below is for the edge case where forward's input is a tuple and the
     // pre-hook returns a matching tuple. Eager doesn't support this- the working eager return
-    // for a tuple type is the forward's input tuple wrapped inside of another tuple. 
+    // for a tuple type is the forward's input tuple wrapped inside of another tuple.
     TORCH_CHECK(
         return_arg.type()->cast<TupleType>() == nullptr,
         wrong_type_returned_err_msg,
@@ -1284,7 +1293,7 @@ void ClassType::checkForwardPreHookSchema(
       pre_hook_err_msg
   );
   const at::ArrayRef<TypePtr> return_tuple_types =
-      return_arg.type()->cast<TupleType>()->elements();
+      return_arg.type()->castRaw<TupleType>()->elements();
   // check for edge case of Tuple[()] for when forward has no arguments
   if (forward_args.size() == 1) {
     TORCH_CHECK(
@@ -1305,10 +1314,10 @@ void ClassType::checkForwardPreHookSchema(
       pre_hook_err_msg
   );
   // check that contained types match forward types
-  for (int i = 1; i < forward_args.size(); ++i) {
+  for (const auto i : c10::irange(1, forward_args.size())) {
     if (*forward_args[i].type() != *return_tuple_types[i - 1]) {
       TORCH_CHECK(
-          false, 
+          false,
           wrong_type_returned_err_msg,
           " The returned tuple contains the wrong inner types.\n",
           pre_hook_err_msg);
@@ -1317,7 +1326,7 @@ void ClassType::checkForwardPreHookSchema(
 }
 
 void ClassType::checkForwardHookSchema(
-      int hook_idx, 
+      int hook_idx,
       const FunctionSchema& hook_schema) const {
   const torch::jit::Function* hook = forward_hooks_[hook_idx];
   std::string hook_id =
@@ -1380,8 +1389,8 @@ torch::jit::Function& ClassType::getMethod(const std::string& name) const {
 torch::jit::Function* ClassType::findHook(const std::string& name) const {
   auto hook = findForwardHook(name);
   if (hook == nullptr) {
-    hook = findForwardPreHook(name); 
-  } 
+    hook = findForwardPreHook(name);
+  }
   return hook;
 }
 
@@ -1399,6 +1408,25 @@ torch::jit::Function& ClassType::getHook(const std::string& name) const {
 
 bool ClassType::hasMethod(const std::string& name) const {
   return findMethod(name) != nullptr;
+}
+
+void ClassType::addStaticMethod(torch::jit::Function* method) {
+  TORCH_CHECK(
+      findStaticMethod(method->name()) == nullptr &&
+          findMethod(method->name()) == nullptr, "Can't redefine method: ",
+      method->name(),
+      " on class: ",
+      repr_str());
+  staticmethods_.emplace_back(method);
+}
+
+torch::jit::Function* ClassType::findStaticMethod(const std::string& name) const {
+  for (auto method : staticmethods_) {
+    if (name == method->name()) {
+      return method;
+    }
+  }
+  return nullptr;
 }
 
 void ClassType::unsafeRemoveMethod(const std::string& name) {

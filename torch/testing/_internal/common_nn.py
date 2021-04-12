@@ -16,11 +16,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    TEST_WITH_ROCM
+    TEST_WITH_ROCM, gradcheck, gradgradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import expectedAlertNondeterministic
-from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, \
-    gradcheck, gradgradcheck
+from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
@@ -283,6 +282,8 @@ module_tests = [
         cpp_constructor_args='torch::nn::CrossMapLRN2dOptions(5).alpha(5e-3).beta(1e-3).k(2)',
         input_size=(2, 3, 6, 6),
         check_gradgrad=False,
+        # TODO(#50743): Figure out the error. "RuntimeError: Unrecognized tensor type ID: Batched"
+        check_batched_grad=False,
     ),
     dict(
         module_name='PReLU',
@@ -651,7 +652,7 @@ def mseloss_no_reduce_scalar_test():
 
 
 def nllloss_no_reduce_test():
-    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
     kwargs = {'reduction': 'none'}
     return dict(
         fullname='NLLLoss_no_reduce',
@@ -667,7 +668,7 @@ def nllloss_no_reduce_test():
 
 
 def nllloss_no_reduce_ignore_index_test():
-    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
     kwargs: Dict[str, Union[int, str]] = {'ignore_index': 2, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss_no_reduce_ignore_index',
@@ -684,7 +685,7 @@ def nllloss_no_reduce_ignore_index_test():
 
 
 def nllloss_no_reduce_weights_test():
-    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
     weight = torch.rand(10)
 
     def kwargs(i):
@@ -705,7 +706,7 @@ def nllloss_no_reduce_weights_test():
 
 
 def nllloss_no_reduce_weights_ignore_index_test():
-    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
     weight = torch.rand(10)
 
     def kwargs(i):
@@ -727,7 +728,7 @@ def nllloss_no_reduce_weights_ignore_index_test():
 
 
 def nllloss_no_reduce_weights_ignore_index_neg_test():
-    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
     weight = torch.rand(10)
 
     def kwargs(i):
@@ -913,6 +914,21 @@ def smoothl1loss_zero_beta_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none', beta=0),
+        pickle=False)
+
+
+def huberloss_delta_test():
+    t = torch.randn(2, 3, 4)
+    return dict(
+        fullname='HuberLoss_delta',
+        constructor=wrap_functional(
+            lambda i: F.huber_loss(i, t.type_as(i), reduction='none', delta=0.5)),
+        cpp_function_call='''F::huber_loss(
+            i, t.to(i.options()), F::HuberLossFuncOptions().reduction(torch::kNone).delta(0.5))''',
+        input_fn=lambda: torch.randn(2, 3, 4),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_:
+            loss_reference_fns['HuberLoss'](i, t.type_as(i), reduction='none', delta=0.5),
         pickle=False)
 
 
@@ -1292,6 +1308,7 @@ new_module_tests = [
     smoothl1loss_no_reduce_scalar_test(),
     smoothl1loss_beta_test(),
     smoothl1loss_zero_beta_test(),
+    huberloss_delta_test(),
     multilabelmarginloss_0d_no_reduce_test(),
     multilabelmarginloss_1d_no_reduce_test(),
     multilabelmarginloss_index_neg_test(),
@@ -1704,7 +1721,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad1',
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='Conv1d',
@@ -1759,6 +1776,42 @@ new_module_tests = [
         constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 6, 3).groups(2)',
         input_size=(2, 4, 6),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv1d_pad_valid',
+        constructor=lambda: nn.Conv1d(4, 5, 3, padding="valid"),
+        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kValid)',
+        input_size=(2, 4, 10),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv1d_pad_same',
+        constructor=lambda: nn.Conv1d(4, 5, 3, padding="same"),
+        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kSame)',
+        input_size=(2, 4, 10),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv1d_pad_same2',
+        constructor=lambda: nn.Conv1d(4, 5, 4, padding="same"),
+        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 4).padding(torch::kSame)',
+        input_size=(2, 4, 10),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv1d_pad_same_dilated',
+        constructor=lambda: nn.Conv1d(4, 5, 4, padding="same", dilation=2),
+        cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kSame).dilation(2)',
+        input_size=(2, 4, 10),
         cudnn=True,
         with_tf32=True,
         tf32_precision=0.005,
@@ -1898,6 +1951,33 @@ new_module_tests = [
         with_tf32=True,
     ),
     dict(
+        fullname='Conv2d_pad_valid',
+        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="valid"),
+        cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kValid)',
+        input_size=(2, 2, 6, 5),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv2d_pad_same',
+        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same"),
+        cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kSame)',
+        input_size=(2, 2, 6, 5),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv2d_pad_same_dilated',
+        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same", dilation=2),
+        cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kSame).dilation(2)',
+        input_size=(2, 2, 6, 5),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
         cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
@@ -1945,6 +2025,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.01,
     ),
     dict(
         fullname='Conv2d_depthwise',
@@ -2119,6 +2200,14 @@ new_module_tests = [
         module_name='ReflectionPad1d',
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
+        input_fn=lambda: torch.rand(2, 3, 8, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
+        module_name='ReflectionPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
         input_size=(2, 3, 8),
         desc='alert_nondeterministic',
         test_cpu=False,
@@ -2129,6 +2218,14 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
         input_size=(2, 3, 8, 8),
+    ),
+    dict(
+        module_name='ReflectionPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
+        input_fn=lambda: torch.rand(2, 3, 8, 8, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
     ),
     dict(
         module_name='ReflectionPad2d',
@@ -2149,6 +2246,14 @@ new_module_tests = [
         module_name='ReplicationPad1d',
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
+        input_fn=lambda: torch.rand(2, 3, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
+        module_name='ReplicationPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
         input_size=(2, 3, 4),
         desc='alert_nondeterministic',
         test_cpu=False,
@@ -2159,6 +2264,14 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ReplicationPad2dOptions({1, 2, 3, 4})',
         input_size=(2, 3, 4, 4),
+    ),
+    dict(
+        module_name='ReplicationPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ReplicationPad2dOptions({1, 2, 3, 4})',
+        input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
     ),
     dict(
         module_name='ReplicationPad2d',
@@ -2177,6 +2290,14 @@ new_module_tests = [
     ),
     dict(
         module_name='ZeroPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ZeroPad2dOptions({1, 2, 3, 4})',
+        input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
+        module_name='ZeroPad2d',
         constructor_args=((-1, -1, -1, -2),),
         cpp_constructor_args='torch::nn::ZeroPad2dOptions({-1, -1, -1, -2})',
         input_size=(2, 3, 4, 4),
@@ -2189,16 +2310,40 @@ new_module_tests = [
         input_size=(2, 3, 4),
     ),
     dict(
+        module_name='ConstantPad1d',
+        constructor_args=((1, 2), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad1dOptions({1, 2}, 2.)',
+        input_fn=lambda: torch.rand(2, 3, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
         module_name='ConstantPad2d',
         constructor_args=((1, 2, 3, 4), 2.),
         cpp_constructor_args='torch::nn::ConstantPad2dOptions({1, 2, 3, 4}, 2.)',
         input_size=(2, 3, 4, 4),
     ),
     dict(
+        module_name='ConstantPad2d',
+        constructor_args=((1, 2, 3, 4), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad2dOptions({1, 2, 3, 4}, 2.)',
+        input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
         module_name='ConstantPad3d',
         constructor_args=((1, 2, 3, 4, 1, 0), 2.),
         cpp_constructor_args='torch::nn::ConstantPad3dOptions({1, 2, 3, 4, 1, 0}, 2.)',
         input_size=(2, 3, 4, 4, 5),
+    ),
+    dict(
+        module_name='ConstantPad3d',
+        constructor_args=((1, 2, 3, 4, 1, 0), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad3dOptions({1, 2, 3, 4, 1, 0}, 2.)',
+        input_fn=lambda: torch.rand(2, 3, 4, 4, 5, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
     ),
     dict(
         module_name='Conv3d',
@@ -2231,7 +2376,7 @@ new_module_tests = [
         cudnn=True,
         desc='1x1x1_no_bias',
         check_with_long_tensor=False,
-        with_tf32=False,
+        with_tf32=True,
         tf32_precision=0.05,
     ),
     dict(
@@ -2291,6 +2436,33 @@ new_module_tests = [
         input_size=(2, 3, 5, 5, 5),
         with_tf32=True,
         tf32_precision=0.05
+    ),
+    dict(
+        fullname='Conv3d_pad_valid',
+        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="valid"),
+        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kValid)',
+        input_size=(2, 3, 6, 5, 4),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv3d_pad_same',
+        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same"),
+        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kSame)',
+        input_size=(2, 3, 6, 5, 4),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
+    dict(
+        fullname='Conv3d_pad_same_dilated',
+        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same", dilation=2),
+        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kSame).dilation(2)',
+        input_size=(2, 3, 6, 5, 4),
+        cudnn=True,
+        with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -2455,6 +2627,14 @@ new_module_tests = [
     ),
     dict(
         module_name='ReplicationPad3d',
+        constructor_args=((1, 2, 3, 3, 2, 1),),
+        cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
+        input_fn=lambda: torch.rand(2, 3, 2, 2, 2, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
+        module_name='ReplicationPad3d',
         constructor_args=((1, 2, 3, 4, 5, 6),),
         cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 4, 5, 6})',
         input_size=(2, 3, 5, 5, 5),
@@ -2479,13 +2659,14 @@ new_module_tests = [
     ),
     dict(
         module_name='EmbeddingBag',
-        constructor_args=(4, 3),
-        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3)',
+        constructor_args=(4, 3, None, 2., False, 'max'),
+        cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax)''',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
         desc='alert_nondeterministic',
         test_cpu=False,
-        decorator=expectedAlertNondeterministic('_embedding_bag_dense_backward_cuda', fn_has_device_arg=False)
+        decorator=expectedAlertNondeterministic('embedding_bag_backward_cuda_max', fn_has_device_arg=False)
     ),
     dict(
         module_name='EmbeddingBag',
@@ -2587,7 +2768,7 @@ new_module_tests = [
         fullname='interpolate_linear_1d_alert_nondeterministic',
         pickle=False,
         test_cpu=False,
-        decorator=expectedAlertNondeterministic('upsample_linear1d_backward_cuda', fn_has_device_arg=False)
+        decorator=expectedAlertNondeterministic('upsample_linear1d_backward_out_cuda', fn_has_device_arg=False)
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=(4, ), scale_factor=None, mode='linear', align_corners=False),
@@ -2716,7 +2897,7 @@ new_module_tests = [
         fullname='interpolate_bilinear_2d_alert_nondeterministic',
         pickle=False,
         test_cpu=False,
-        decorator=expectedAlertNondeterministic('upsample_bilinear2d_backward_cuda', fn_has_device_arg=False)
+        decorator=expectedAlertNondeterministic('upsample_bilinear2d_backward_out_cuda', fn_has_device_arg=False)
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
@@ -2822,7 +3003,7 @@ new_module_tests = [
         fullname='interpolate_bicubic_2d_alert_nondeterministic',
         pickle=False,
         test_cpu=False,
-        decorator=expectedAlertNondeterministic('upsample_bicubic2d_backward_cuda', fn_has_device_arg=False)
+        decorator=expectedAlertNondeterministic('upsample_bicubic2d_backward_out_cuda', fn_has_device_arg=False)
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
@@ -2967,7 +3148,7 @@ new_module_tests = [
         fullname='interpolate_trilinear_3d_alert_nondeterministic',
         pickle=False,
         test_cpu=False,
-        decorator=expectedAlertNondeterministic('upsample_trilinear3d_backward_cuda', fn_has_device_arg=False)
+        decorator=expectedAlertNondeterministic('upsample_trilinear3d_backward_out_cuda', fn_has_device_arg=False)
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
@@ -3603,6 +3784,10 @@ new_module_tests = [
         desc='relu_activation',
         with_tf32=True,
         tf32_precision=0.1,
+        # TODO(#50743): figure out the error
+        # RuntimeError: The size of tensor a (6) must match the size of tensor b (4)
+        # at non-singleton dimension 2
+        check_batched_grad=False,
     ),
     dict(
         module_name='TransformerEncoderLayer',
@@ -3615,7 +3800,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='TransformerDecoderLayer',
@@ -3627,7 +3812,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='relu_activation',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='TransformerDecoderLayer',
@@ -3640,7 +3825,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Transformer',
@@ -3748,6 +3933,15 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
     return output
 
 
+def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, reduction='mean'):
+    return nlllossNd_reference(
+        torch.log_softmax(input, 1),
+        target,
+        weight,
+        ignore_index=ignore_index,
+        reduction=reduction)
+
+
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
                       reduction='mean'):
 
@@ -3779,6 +3973,18 @@ def smoothl1loss_reference(input, target, reduction='mean', beta=1.0):
         output = abs_diff
     else:
         output = ge_beta_mask * (abs_diff - 0.5 * beta) + lt_beta_mask * 0.5 * (abs_diff ** 2) / beta
+    if reduction == 'mean':
+        return output.mean()
+    elif reduction == 'sum':
+        return output.sum()
+    return output
+
+
+def huberloss_reference(input, target, reduction='mean', delta=1.0):
+    abs_diff = (input - target).abs()
+    ge_delta_mask = (abs_diff >= delta)
+    lt_delta_mask = (abs_diff < delta)
+    output = ge_delta_mask * delta * (abs_diff - 0.5 * delta) + lt_delta_mask * 0.5 * (abs_diff ** 2)
     if reduction == 'mean':
         return output.mean()
     elif reduction == 'sum':
@@ -4039,6 +4245,7 @@ loss_reference_fns: Dict['str', Callable] = {
     'NLLLoss': nllloss_reference,
     'NLLLossNd': nlllossNd_reference,
     'SmoothL1Loss': smoothl1loss_reference,
+    'HuberLoss': huberloss_reference,
     'MultiLabelMarginLoss': multilabelmarginloss_reference,
     'HingeEmbeddingLoss': hingeembeddingloss_reference,
     'SoftMarginLoss': softmarginloss_reference,
@@ -4047,6 +4254,7 @@ loss_reference_fns: Dict['str', Callable] = {
     'TripletMarginLoss': tripletmarginloss_reference,
     'MarginRankingLoss': marginrankingloss_reference,
     'CTCLoss': ctcloss_reference,
+    'CrossEntropyLoss': cross_entropy_loss_reference
 }
 
 
@@ -4062,7 +4270,7 @@ criterion_tests = [
     dict(
         module_name='NLLLoss',
         input_fn=lambda: torch.rand(15, 10).log(),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
@@ -4073,7 +4281,7 @@ criterion_tests = [
         constructor_args=(None, None, 2),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight({}).ignore_index(2)',
         input_fn=lambda: torch.rand(15, 10).log(),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, _: nllloss_reference(i, t, ignore_index=2),
         desc='ignore_index',
         check_bfloat16=True,
@@ -4083,7 +4291,7 @@ criterion_tests = [
         constructor_args_fn=lambda: (torch.rand(10),),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m)),
         desc='weights',
@@ -4094,7 +4302,7 @@ criterion_tests = [
         constructor_args_fn=lambda: (torch.rand(10), None, 2),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10)).ignore_index(2)',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=2),
         desc='weights_ignore_index',
@@ -4105,7 +4313,7 @@ criterion_tests = [
         constructor_args_fn=lambda: (torch.rand(10), None, -1),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10)).ignore_index(-1)',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10 + 1).floor().long() - 1,
+        target_fn=lambda: torch.empty(15).uniform_().mul(10 + 1).floor().long() - 1,
         reference_fn=lambda i, t, m:
             nllloss_reference(i, t, weight=get_weight(m), ignore_index=-1),
         desc='weights_ignore_index_neg',
@@ -4158,14 +4366,14 @@ criterion_tests = [
     dict(
         module_name='CrossEntropyLoss',
         input_size=(15, 10),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
     ),
     dict(
         module_name='CrossEntropyLoss',
         constructor_args_fn=lambda: (torch.rand(10),),
         cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(10))',
         input_size=(15, 10),
-        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
         desc='weights',
     ),
     dict(
@@ -4279,6 +4487,16 @@ criterion_tests = [
         check_sum_reduction=True,
         reference_fn=lambda i, t, m, b=1.0:
             smoothl1loss_reference(i, t, reduction=get_reduction(m), beta=b),
+    ),
+    dict(
+        module_name='HuberLoss',
+        input_size=(5, 10),
+        target_fn=lambda: torch.randn((5, 10), requires_grad=True),
+        check_sum_reduction=True,
+        check_half=True,
+        check_bfloat16=True,
+        reference_fn=lambda i, t, m:
+            huberloss_reference(i, t, reduction=get_reduction(m)),
     ),
     dict(
         module_name='SoftMarginLoss',
@@ -4410,6 +4628,58 @@ criterion_tests = [
         check_sum_reduction=True,
         desc='dim_is_3',
         check_bfloat16=True,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        input_size=(2, 3, 5, 5),
+        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='2d',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        constructor_args_fn=lambda: (torch.rand(3),),
+        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
+        input_size=(2, 3, 5, 5),
+        target=torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, weight=get_weight(m)),
+        desc='2d_weights',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        constructor_args=(None, None, 1),
+        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight({}).ignore_index(1)',
+        input_size=(2, 3, 5, 5),
+        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, ignore_index=1),
+        desc='2d_ignore_index',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        input_size=(2, 3, 5, 5, 2, 2),
+        target_fn=lambda: torch.rand(2, 5, 5, 2, 2).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='higher_dim',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        input_size=(2, 3, 5),
+        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        desc='dim_is_3',
+        check_bfloat16=False,
     ),
     dict(
         module_name='PoissonNLLLoss',  # Default is log_input=True, full=False
@@ -4968,7 +5238,7 @@ class ModuleTest(TestBase):
         # Run backwards on CPU and GPU and compare results
         for _ in range(5):
             cpu_gradOutput = cpu_output.clone().normal_()
-            gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
+            gpu_gradOutput = cpu_gradOutput.type_as(gpu_output)
             cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
             gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
@@ -5042,10 +5312,12 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.check_inplace = kwargs.get('check_inplace', False)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.skip_double = kwargs.get('skip_double', False)
+        self.skip_half = kwargs.get('skip_half', False)
         self.with_tf32 = kwargs.get('with_tf32', False)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
         self.test_cpu = kwargs.get('test_cpu', True)
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
+        self.check_batched_grad = kwargs.get('check_batched_grad', True)
 
     def _check_gradients(self, test_case, module, input_tuple):
         params = tuple(x for x in module.parameters())
@@ -5064,10 +5336,12 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             test_input_jacobian = torch.is_floating_point(input_tuple[0])
             test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
         else:
-            test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params))
+            test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params,
+                                           check_batched_grad=self.check_batched_grad))
 
         if self.check_gradgrad:
-            test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params))
+            test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
+                                               check_batched_grad=self.check_batched_grad))
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()
@@ -5105,6 +5379,9 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             if input.grad is not None:
                 with torch.no_grad():
                     input.grad.zero_()
+            if input_ip.grad is not None:
+                with torch.no_grad():
+                    input_ip.grad.zero_()
             output.backward(grad)
             output_ip.backward(grad)
             test_case.assertEqual(input.grad, input_ip.grad)
@@ -5131,15 +5408,32 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
                 assert_module_parameters_are(torch.cuda.FloatTensor, 1)  # type: ignore[attr-defined]
         else:
             # check that float()/double() casters work correctly
+            def to_type(tensor, real, complex):
+                if tensor.is_complex():
+                    return tensor.to(complex)
+                elif tensor.is_floating_point():
+                    return tensor.to(real)
+                else:
+                    return tensor
+
+            def to_half(x):
+                # TODO: torch.complex32 when properly supported
+                return to_type(x, torch.float16, None)
+
+            def to_single(x):
+                return to_type(x, torch.float32, torch.complex64)
+
+            def to_double(x):
+                return to_type(x, torch.float64, torch.complex128)
 
             # to float
-            input_tuple = tuple(t.float() if not isinstance(t, torch.LongTensor) else t for t in input_tuple)
+            input_tuple = tuple(to_single(t) for t in input_tuple)
             module.float()
             module(*input_tuple)
             assert_module_parameters_are(torch.FloatTensor)
 
             # and back to double
-            input_tuple = tuple(t.double() if not isinstance(t, torch.LongTensor) else t for t in input_tuple)
+            input_tuple = tuple(to_double(t) for t in input_tuple)
             module.double()
             module(*input_tuple)
             assert_module_parameters_are(torch.DoubleTensor)
@@ -5149,8 +5443,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
                 # and that float() casts parameters correctly
 
                 # to GPU0
-                input_tuple = tuple(
-                    t.float().cuda() if not isinstance(t, torch.LongTensor) else t.cuda() for t in input_tuple)
+                input_tuple = tuple(to_single(t).cuda() for t in input_tuple)
                 module.float().cuda()
                 module(*input_tuple)
                 assert_module_parameters_are(torch.cuda.FloatTensor, 0)  # type: ignore[attr-defined]
@@ -5184,18 +5477,17 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
 
                 if not self.skip_double:
                     # test double()
-                    input_tuple = tuple(
-                        t.double().cuda() if not isinstance(t, torch.LongTensor) else t.cuda() for t in input_tuple)
+                    input_tuple = tuple(to_double(t).cuda() for t in input_tuple)
                     module.double().cuda()
                     module(*input_tuple)
                     assert_module_parameters_are(torch.cuda.DoubleTensor, 0)  # type: ignore[attr-defined]
 
                 # test half()
-                input_tuple = tuple(
-                    t.half().cuda() if not isinstance(t, torch.LongTensor) else t.cuda() for t in input_tuple)
-                module.half().cuda()
-                module(*input_tuple)
-                assert_module_parameters_are(torch.cuda.HalfTensor, 0)  # type: ignore[attr-defined]
+                if not self.skip_half:
+                    input_tuple = tuple(to_half(t).cuda() for t in input_tuple)
+                    module.half().cuda()
+                    module(*input_tuple)
+                    assert_module_parameters_are(torch.cuda.HalfTensor, 0)  # type: ignore[attr-defined]
         torch.set_num_threads(num_threads)
 
     def _get_target(self):
@@ -5222,6 +5514,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         self.test_cpu = kwargs.get('test_cpu', True)
         self.with_tf32 = kwargs.get('with_tf32', True)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
+        self.check_batched_grad = kwargs.get('check_batched_grad', True)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -5254,10 +5547,10 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             def apply_fn(input1, input2, target, *params):  # type: ignore[misc]
                 return module(input1, input2, target)
 
-        gradcheck(apply_fn, inputs)
+        gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
         if self.check_gradgrad:
-            gradgradcheck(apply_fn, inputs)
+            gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
     def test_cuda(self, test_case, dtype, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):

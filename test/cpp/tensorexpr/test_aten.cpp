@@ -735,7 +735,7 @@ TEST(ATen, logFloat) {
 
 TEST(ATen, fastLogFloat) {
   KernelScope kernel_scope;
-  const int kTotalSize = 128 * 128;
+  const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
@@ -761,6 +761,71 @@ TEST(ATen, fastLogFloat) {
       ASSERT_EQ(std::isnan(test), true);
     } else {
       ASSERT_FLOAT_EQ(test, ref);
+    }
+  }
+}
+
+TEST(ATen, fastTanhFloat) {
+  KernelScope kernel_scope;
+  const int kTotalSize = 128;
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+
+  VarHandle index = VarHandle("index", kInt);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, fast_tanh(load_a));
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+
+  PaddedBuffer<float> a_v(kTotalSize);
+  PaddedBuffer<float> b_v(kTotalSize);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    a_v(i) = at::randn({1}).item().to<float>();
+  }
+
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
+  ir_eval(a_v, b_v);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    auto test = b_v(i);
+    auto ref = std::tanh(a_v(i));
+    if (std::isnan(ref)) {
+      ASSERT_EQ(std::isnan(test), true);
+    } else {
+      ASSERT_NEAR(test, ref, 1e-6);
+    }
+  }
+}
+
+TEST(ATen, fastSigmoidFloat) {
+  KernelScope kernel_scope;
+  const int kTotalSize = 128;
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+
+  VarHandle index = VarHandle("index", kInt);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, fast_sigmoid(load_a));
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+
+  PaddedBuffer<float> a_v(kTotalSize);
+  PaddedBuffer<float> b_v(kTotalSize);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    a_v(i) = at::randn({1}).item().to<float>();
+  }
+
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
+  ir_eval(a_v, b_v);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    auto test = b_v(i);
+    at::Tensor t = at::ones({1}) * a_v(i);
+    float ref = at::sigmoid(t).item().to<float>();
+    if (std::isnan(ref)) {
+      ASSERT_EQ(std::isnan(test), true);
+    } else {
+      ASSERT_NEAR(test, ref, 1e-6);
     }
   }
 }

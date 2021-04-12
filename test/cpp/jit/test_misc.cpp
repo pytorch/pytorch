@@ -4,6 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 
 #include <test/cpp/jit/test_utils.h>
 
@@ -690,10 +691,10 @@ at::Tensor invokeTestRecordFunctionJIT(at::Tensor& t) {
   return module->forward({t}).toTensor();
 }
 
-using TracedTestInputs =
+using TracedTestValues =
     std::vector<std::tuple<std::string, std::vector<std::vector<int64_t>>>>;
 
-void checkTracedInputs(const TracedTestInputs& inputs) {
+void checkTracedInputs(const TracedTestValues& inputs) {
   bool found_test = false;
   bool found_pow = false;
   bool found_mul = false;
@@ -713,6 +714,32 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
     } else if (fn == "aten::mul") {
       found_mul = true;
       TORCH_CHECK(sizes.size() > 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    }
+  }
+  TORCH_CHECK(found_test);
+  TORCH_CHECK(found_pow);
+  TORCH_CHECK(found_mul);
+}
+
+void checkTracedOutputs(const TracedTestValues& outputs) {
+  bool found_test = false;
+  bool found_pow = false;
+  bool found_mul = false;
+  for (const auto& output : outputs) {
+    const auto& fn = std::get<0>(output);
+    const auto& sizes = std::get<1>(output);
+
+    if (fn == "test") {
+      found_test = true;
+      TORCH_CHECK(sizes.empty());
+    } else if (fn == "aten::pow") {
+      found_pow = true;
+      TORCH_CHECK(sizes.size() == 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    } else if (fn == "aten::mul") {
+      found_mul = true;
+      TORCH_CHECK(sizes.size() == 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
     }
   }
@@ -802,8 +829,10 @@ static bool shouldRunCallback(const RecordFunctionCallback&) {
   return should_run;
 }
 
-static TracedTestInputs traced_inputs;
-static std::unordered_set<std::string> ts_names;
+static TracedTestValues traced_inputs;
+static TracedTestValues traced_outputs;
+static std::unordered_set<std::string> ts_input_names;
+static std::unordered_set<std::string> ts_output_names;
 
 std::unique_ptr<at::ObserverContext> tracedInputsCallback(
     const RecordFunction& fn) {
@@ -819,43 +848,71 @@ std::unique_ptr<at::ObserverContext> tracedInputsCallback(
     }
     traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
   } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-    ts_names.insert(fn.name().str());
+    ts_input_names.insert(fn.name().str());
   }
   return nullptr;
 }
 
-TEST(RecordFunctionTest, TracedTestInputs) {
+void tracedOutputsCallback(const RecordFunction& fn, ObserverContext* ctx_ptr) {
+  if (fn.scope() == RecordScope::FUNCTION) {
+    auto outputs = fn.outputs();
+    std::vector<std::vector<int64_t>> sizes;
+    for (const auto& output : outputs) {
+      if (output.isTensor()) {
+        sizes.push_back(output.toTensor().sizes().vec());
+      } else if (output.isScalar()) {
+        sizes.emplace_back();
+      }
+    }
+    traced_outputs.push_back(std::make_tuple(fn.name().str(), sizes));
+  } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
+    ts_output_names.insert(fn.name().str());
+  }
+}
+
+TEST(RecordFunctionTest, TracedTestInputsOutputs) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
   // [(fn, [[sizes], [sizes], ...]), ...]
   addGlobalCallback(
-      RecordFunctionCallback(tracedInputsCallback).needsInputs(true));
+      RecordFunctionCallback(tracedInputsCallback, tracedOutputsCallback)
+          .needsInputs(true)
+          .needsOutputs(true));
 
-  TracedTestInputs eager_inputs, jit_inputs;
+  TracedTestValues eager_inputs, eager_outputs, jit_inputs, jit_outputs;
   {
     auto t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     auto t2 = invokeTestRecordFunction(t);
     t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
     eager_inputs = traced_inputs;
+    eager_outputs = traced_outputs;
     traced_inputs.clear();
+    traced_outputs.clear();
 
-    TORCH_CHECK(ts_names.empty());
+    TORCH_CHECK(ts_input_names.empty());
+    TORCH_CHECK(ts_output_names.empty());
 
     t = torch::randn({1, 2, 3}, at::kCPU);
     t.set_requires_grad(true);
     t2 = invokeTestRecordFunctionJIT(t);
     t2.backward(torch::ones_like(t2, at::MemoryFormat::Preserve));
     jit_inputs = traced_inputs;
+    jit_outputs = traced_outputs;
     traced_inputs.clear();
+    traced_outputs.clear();
   }
 
-  TORCH_CHECK(ts_names.find("forward") != ts_names.end());
-  TORCH_CHECK(ts_names.find("foo") != ts_names.end());
+  TORCH_CHECK(ts_input_names.find("forward") != ts_input_names.end());
+  TORCH_CHECK(ts_input_names.find("foo") != ts_input_names.end());
+  TORCH_CHECK(ts_output_names.find("forward") != ts_output_names.end());
+  TORCH_CHECK(ts_output_names.find("foo") != ts_output_names.end());
 
   checkTracedInputs(eager_inputs);
+  checkTracedOutputs(eager_outputs);
   checkTracedInputs(jit_inputs);
+  checkTracedOutputs(jit_outputs);
   at::clearCallbacks();
 }
 
@@ -2153,9 +2210,8 @@ TEST(FuturesTest, CollectAll) {
   s4->setError(
       std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
   ASSERT_TRUE(c5->completed());
-  ASSERT_EQ(c5->value().toList().size(), 4);
   try {
-    (void)c5->value().toList().get(3).toFuture()->value();
+    c5->value();
     ASSERT_TRUE(false); // supposed to throw
   } catch (const std::exception& e) {
     ASSERT_EQ(std::string(e.what()), "Failed");
@@ -2321,29 +2377,40 @@ TEST(ComputeFlopsTest, Basic) {
 
   // Test aten::conv2d
   extra_args.clear();
-  std::vector<int64_t> input_sizes = {4, 5, 6, 7};
-  std::vector<int64_t> weight_sizes = {3, 5, 2, 1};
-  extra_args["input_size"] = at::IValue(at::IntArrayRef(input_sizes));
-  extra_args["weight_size"] = at::IValue(at::IntArrayRef(weight_sizes));
-  extra_args["stride"] = 1;
-  extra_args["dilation"] = 0;
+  std::vector<int64_t> input_size = {4, 5, 6, 7};
+  std::vector<int64_t> weight_size = {3, 5, 2, 1};
+  std::vector<int64_t> padding = {1, 0};
+  std::vector<int64_t> stride = {1, 1};
+  std::vector<int64_t> dilation = {0, 0};
+  extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
+  extra_args["weight_size"] = at::IValue(at::IntArrayRef(weight_size));
   extra_args["groups"] = 1;
+  extra_args["padding"] = at::IValue(at::IntArrayRef(padding));
+  extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
+  extra_args["dilation"] = at::IValue(at::IntArrayRef(dilation));
   flops = computeFlops(std::string("aten::conv2d"), extra_args);
-  ASSERT_EQ(flops, 10080);
+  ASSERT_EQ(flops, 13440);
 
   // Test aten::conv2d fail
-  extra_args.clear();
-  input_sizes = {4, 5, 6, 7};
-  weight_sizes = {4, 5, 6};
-  extra_args["input_size"] = at::IValue(at::IntArrayRef(input_sizes));
-  extra_args["weight_size"] = at::IValue(at::IntArrayRef(weight_sizes));
+  input_size = {4, 5, 6, 7};
+  weight_size = {4, 5, 6};
+  extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
+  extra_args["weight_size"] = at::IValue(at::IntArrayRef(weight_size));
   flops = computeFlops(std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d fail 2
+  weight_size = {3, 5, 2, 1};
+  stride = {0, 0};
+  extra_args["weight_size"] = at::IValue(at::IntArrayRef(input_size));
+  extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
+  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  ASSERT_EQ(flops, 0);
+
+  // Test aten::conv2d fail 3
   extra_args.clear();
-  input_sizes = {4, 5, 6, 7};
-  extra_args["input_size"] = at::IValue(at::IntArrayRef(input_sizes));
+  input_size = {4, 5, 6, 7};
+  extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
   flops = computeFlops(std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
@@ -2354,7 +2421,7 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
   flops = computeFlops(std::string("aten::mm"), extra_args);
-  ASSERT_EQ(flops, 21600);
+  ASSERT_EQ(flops, 43200);
 
   // Test mm out of range
   extra_args.clear();
@@ -2365,15 +2432,35 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args.clear();
   std::vector<int64_t> mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
-  flops = computeFlops(std::string("aten::add.Tensor"), extra_args);
+  flops = computeFlops(std::string("aten::add"), extra_args);
   ASSERT_EQ(flops, 360);
 
   // Test aten::mul.Tensor
   extra_args.clear();
   mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
-  flops = computeFlops(std::string("aten::mul.Tensor"), extra_args);
+  flops = computeFlops(std::string("aten::mul"), extra_args);
   ASSERT_EQ(flops, 360);
+}
+
+TEST(TestMutation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %9 : int = prim::Constant[value=4]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %7 : Tensor = aten::add_(%x.3, %2, %2)
+  %y.1 : Tensor = aten::add(%x.3, %9, %2)
+  return (%y.1))IR",
+      &*graph,
+      vmap);
+  RemoveTensorMutation(graph, [](Node*) { return false; });
+  testing::FileCheck().check("aten::add_")->run(*graph);
+  RemoveTensorMutation(graph, [](Node*) { return true; });
+  testing::FileCheck().check_not("aten::add_")->run(*graph);
 }
 
 } // namespace jit

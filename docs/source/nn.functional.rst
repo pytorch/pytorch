@@ -9,532 +9,186 @@ torch.nn.functional
 Convolution functions
 ----------------------------------
 
-:hidden:`conv1d`
-~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: conv1d
-
-:hidden:`conv2d`
-~~~~~~~~~~~~~~~~
-
-.. autofunction:: conv2d
-
-:hidden:`conv3d`
-~~~~~~~~~~~~~~~~
-
-.. autofunction:: conv3d
-
-:hidden:`conv_transpose1d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: conv_transpose1d
-
-:hidden:`conv_transpose2d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: conv_transpose2d
-
-:hidden:`conv_transpose3d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: conv_transpose3d
-
-:hidden:`unfold`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: unfold
-
-:hidden:`fold`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: fold
+    conv1d
+    conv2d
+    conv3d
+    conv_transpose1d
+    conv_transpose2d
+    conv_transpose3d
+    unfold
+    fold
 
 Pooling functions
 ----------------------------------
 
-:hidden:`avg_pool1d`
-~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: avg_pool1d
-
-:hidden:`avg_pool2d`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: avg_pool2d
-
-:hidden:`avg_pool3d`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: avg_pool3d
-
-:hidden:`max_pool1d`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_pool1d
-
-:hidden:`max_pool2d`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_pool2d
-
-:hidden:`max_pool3d`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_pool3d
-
-:hidden:`max_unpool1d`
-~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_unpool1d
-
-:hidden:`max_unpool2d`
-~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_unpool2d
-
-:hidden:`max_unpool3d`
-~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: max_unpool3d
-
-:hidden:`lp_pool1d`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: lp_pool1d
-
-:hidden:`lp_pool2d`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: lp_pool2d
-
-:hidden:`adaptive_max_pool1d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_max_pool1d
-
-:hidden:`adaptive_max_pool2d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_max_pool2d
-
-:hidden:`adaptive_max_pool3d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_max_pool3d
-
-:hidden:`adaptive_avg_pool1d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_avg_pool1d
-
-:hidden:`adaptive_avg_pool2d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_avg_pool2d
-
-:hidden:`adaptive_avg_pool3d`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: adaptive_avg_pool3d
-
+    avg_pool1d
+    avg_pool2d
+    avg_pool3d
+    max_pool1d
+    max_pool2d
+    max_pool3d
+    max_unpool1d
+    max_unpool2d
+    max_unpool3d
+    lp_pool1d
+    lp_pool2d
+    adaptive_max_pool1d
+    adaptive_max_pool2d
+    adaptive_max_pool3d
+    adaptive_avg_pool1d
+    adaptive_avg_pool2d
+    adaptive_avg_pool3d
+    fractional_max_pool2d
+    fractional_max_pool3d
 
 Non-linear activation functions
 -------------------------------
 
-:hidden:`threshold`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: threshold
-.. autofunction:: threshold_
-
-
-:hidden:`relu`
-~~~~~~~~~~~~~~
-
-.. autofunction:: relu
-.. autofunction:: relu_
-
-:hidden:`hardtanh`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: hardtanh
-.. autofunction:: hardtanh_
-
-:hidden:`hardswish`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: hardswish
-
-:hidden:`relu6`
-~~~~~~~~~~~~~~~
-
-.. autofunction:: relu6
-
-:hidden:`elu`
-~~~~~~~~~~~~~
-
-.. autofunction:: elu
-.. autofunction:: elu_
-
-:hidden:`selu`
-~~~~~~~~~~~~~~
-
-.. autofunction:: selu
-
-:hidden:`celu`
-~~~~~~~~~~~~~~
-
-.. autofunction:: celu
-
-:hidden:`leaky_relu`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: leaky_relu
-.. autofunction:: leaky_relu_
-
-:hidden:`prelu`
-~~~~~~~~~~~~~~~
-
-.. autofunction:: prelu
-
-:hidden:`rrelu`
-~~~~~~~~~~~~~~~
-
-.. autofunction:: rrelu
-.. autofunction:: rrelu_
-
-:hidden:`glu`
-~~~~~~~~~~~~~~~
-
-.. autofunction:: glu
-
-:hidden:`gelu`
-~~~~~~~~~~~~~~~
-
-.. autofunction:: gelu
-
-:hidden:`logsigmoid`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: logsigmoid
-
-:hidden:`hardshrink`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: hardshrink
-
-:hidden:`tanhshrink`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: tanhshrink
-
-:hidden:`softsign`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: softsign
-
-:hidden:`softplus`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: softplus
-
-:hidden:`softmin`
-~~~~~~~~~~~~~~~~~
-
-.. autofunction:: softmin
-
-:hidden:`softmax`
-~~~~~~~~~~~~~~~~~
-
-.. autofunction:: softmax
-
-:hidden:`softshrink`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: softshrink
-
-:hidden:`gumbel_softmax`
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: gumbel_softmax
-
-:hidden:`log_softmax`
-~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: log_softmax
-
-:hidden:`tanh`
-~~~~~~~~~~~~~~
-
-.. autofunction:: tanh
-
-:hidden:`sigmoid`
-~~~~~~~~~~~~~~~~~
-
-.. autofunction:: sigmoid
-
-:hidden:`hardsigmoid`
-~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: hardsigmoid
-
-:hidden:`silu`
-~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: silu
-
-
-Normalization functions
------------------------
-
-:hidden:`batch_norm`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: batch_norm
-
-:hidden:`instance_norm`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: instance_norm
-
-:hidden:`layer_norm`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: layer_norm
-
-:hidden:`local_response_norm`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: local_response_norm
-
-:hidden:`normalize`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: normalize
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    threshold
+    threshold_
+    relu
+    relu_
+    hardtanh
+    hardtanh_
+    hardswish
+    relu6
+    elu
+    elu_
+    selu
+    celu
+    leaky_relu
+    leaky_relu_
+    prelu
+    rrelu
+    rrelu_
+    glu
+    gelu
+    logsigmoid
+    hardshrink
+    tanhshrink
+    softsign
+    softplus
+    softmin
+    softmax
+    softshrink
+    gumbel_softmax
+    log_softmax
+    tanh
+    sigmoid
+    hardsigmoid
+    silu
+    batch_norm
+    group_norm
+    instance_norm
+    layer_norm
+    local_response_norm
+    normalize
+
+.. _Link 1: https://arxiv.org/abs/1611.00712
+.. _Link 2: https://arxiv.org/abs/1611.01144
 
 Linear functions
 ----------------
 
-:hidden:`linear`
-~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: linear
-
-:hidden:`bilinear`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: bilinear
+    linear
+    bilinear
 
 Dropout functions
 -----------------
 
-:hidden:`dropout`
-~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: dropout
-
-:hidden:`alpha_dropout`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: alpha_dropout
-
-:hidden:`feature_alpha_dropout`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: feature_alpha_dropout
-
-:hidden:`dropout2d`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: dropout2d
-
-:hidden:`dropout3d`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: dropout3d
+    dropout
+    alpha_dropout
+    feature_alpha_dropout
+    dropout2d
+    dropout3d
 
 Sparse functions
 ----------------------------------
 
-:hidden:`embedding`
-~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: embedding
-
-:hidden:`embedding_bag`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: embedding_bag
-
-:hidden:`one_hot`
-~~~~~~~~~~~~~~~~~
-
-.. autofunction:: one_hot
+    embedding
+    embedding_bag
+    one_hot
 
 Distance functions
 ----------------------------------
 
-:hidden:`pairwise_distance`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: pairwise_distance
-
-:hidden:`cosine_similarity`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: cosine_similarity
-
-:hidden:`pdist`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: pdist
+    pairwise_distance
+    cosine_similarity
+    pdist
 
 
 Loss functions
 --------------
 
-:hidden:`binary_cross_entropy`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: binary_cross_entropy
-
-:hidden:`binary_cross_entropy_with_logits`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: binary_cross_entropy_with_logits
-
-:hidden:`poisson_nll_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: poisson_nll_loss
-
-:hidden:`cosine_embedding_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: cosine_embedding_loss
-
-:hidden:`cross_entropy`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: cross_entropy
-
-:hidden:`ctc_loss`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: ctc_loss
-
-:hidden:`hinge_embedding_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: hinge_embedding_loss
-
-:hidden:`kl_div`
-~~~~~~~~~~~~~~~~
-
-.. autofunction:: kl_div
-
-:hidden:`l1_loss`
-~~~~~~~~~~~~~~~~~
-
-.. autofunction:: l1_loss
-
-:hidden:`mse_loss`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: mse_loss
-
-:hidden:`margin_ranking_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: margin_ranking_loss
-
-:hidden:`multilabel_margin_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: multilabel_margin_loss
-
-:hidden:`multilabel_soft_margin_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: multilabel_soft_margin_loss
-
-:hidden:`multi_margin_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: multi_margin_loss
-
-:hidden:`nll_loss`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: nll_loss
-
-:hidden:`smooth_l1_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: smooth_l1_loss
-
-:hidden:`soft_margin_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: soft_margin_loss
-
-:hidden:`triplet_margin_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: triplet_margin_loss
-
-:hidden:`triplet_margin_with_distance_loss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: triplet_margin_with_distance_loss
+    binary_cross_entropy
+    binary_cross_entropy_with_logits
+    poisson_nll_loss
+    cosine_embedding_loss
+    cross_entropy
+    ctc_loss
+    hinge_embedding_loss
+    kl_div
+    l1_loss
+    mse_loss
+    margin_ranking_loss
+    multilabel_margin_loss
+    multilabel_soft_margin_loss
+    multi_margin_loss
+    nll_loss
+    huber_loss
+    smooth_l1_loss
+    soft_margin_loss
+    triplet_margin_loss
+    triplet_margin_with_distance_loss
 
 Vision functions
 ----------------
 
-:hidden:`pixel_shuffle`
-~~~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-.. autofunction:: pixel_shuffle
-
-:hidden:`pixel_unshuffle`
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: pixel_unshuffle
-
-:hidden:`pad`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: pad
-
-:hidden:`interpolate`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: interpolate
-
-:hidden:`upsample`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: upsample
-
-:hidden:`upsample_nearest`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: upsample_nearest
-
-:hidden:`upsample_bilinear`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: upsample_bilinear
-
-:hidden:`grid_sample`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: grid_sample
-
-:hidden:`affine_grid`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: affine_grid
+    pixel_shuffle
+    pixel_unshuffle
+    pad
+    interpolate
+    upsample
+    upsample_nearest
+    upsample_bilinear
+    grid_sample
+    affine_grid
 
 DataParallel functions (multi-GPU, distributed)
 -----------------------------------------------
@@ -542,4 +196,8 @@ DataParallel functions (multi-GPU, distributed)
 :hidden:`data_parallel`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: torch.nn.parallel.data_parallel
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    torch.nn.parallel.data_parallel

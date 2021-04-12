@@ -135,6 +135,7 @@ __all__ = [
     'HalfNormal',
     'Independent',
     'Kumaraswamy',
+    'LKJCholesky',
     'Laplace',
     'LogNormal',
     'LogisticNormal',

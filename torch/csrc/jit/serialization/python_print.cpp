@@ -45,6 +45,8 @@ const static std::unordered_set<std::string> reserved_names = {
     "getattr",
     "inf",
     "nan",
+    "infj",
+    "nanj",
     "ops",
     "__torch__",
     // the python keywords
@@ -823,14 +825,14 @@ struct PythonPrintImpl {
         body_ << "):\n";
         printBody(graph->block());
       } break;
-      case prim::ModuleDictIndex: {
-        const auto dict = node->inputs().at(0);
+      case prim::ModuleContainerIndex: {
+        const auto container = node->inputs().at(0);
         const auto key = node->inputs().at(1);
         const auto out = node->outputs().at(0);
         assignValuesToTheirUniqueNames(out);
         indent();
         body_ << useOf(out) << " : " << out->type()->annotation_str() << " = "
-              << useOf(dict) << "[" << useOf(key) << "]\n";
+              << useOf(container) << "[" << useOf(key) << "]\n";
       } break;
       default:
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);

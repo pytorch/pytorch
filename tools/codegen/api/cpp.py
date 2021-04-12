@@ -13,9 +13,6 @@ from typing import Optional, Sequence, Union, List, Set
 #     for the C++ API; it makes calling kwarg factory functions
 #     pleasant)
 #
-#   - for 'use_c10_dispatcher: full' functions, optional tensors are
-#     represented explicitly using c10::optional
-#
 #   - defaulting lives here (in fact, the dispatcher is completely
 #     oblivious of defaults!)
 #
@@ -37,7 +34,7 @@ def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False)
 # types.  Returns None if the type in question is not a value type.
 def valuetype_type(t: Type, *, binds: ArgName) -> Optional[CType]:
     if isinstance(t, BaseType):
-        if t.name == BaseTy.Tensor:
+        if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:
             return None
         elif t.name == BaseTy.int:
             return BaseCType('int64_t', binds)
@@ -80,6 +77,8 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
                 return MutRefCType(BaseCType('Tensor', binds))
             else:
                 return ConstRefCType(BaseCType('Tensor', binds))
+        elif t.name == BaseTy.Scalar:
+            return ConstRefCType(BaseCType('Scalar', binds))
         else:
             raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
@@ -88,6 +87,8 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
                 return MutRefCType(BaseCType('Tensor', binds))  # TODO: fix this discrepancy
             else:
                 return ConstRefCType(OptionalCType(BaseCType('Tensor', binds)))
+        elif str(t.elem) == 'Scalar':
+            return ConstRefCType(OptionalCType(BaseCType('Scalar', binds)))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return OptionalCType(elem)
     elif isinstance(t, ListType):
@@ -98,6 +99,8 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
             return BaseCType("IntArrayRef", binds)
         elif str(t.elem) == 'Tensor':
             return BaseCType("TensorList", binds)
+        elif str(t.elem) == 'Scalar':
+            return BaseCType("ArrayRef<Scalar>", binds)
         elif str(t.elem) == 'Dimname':
             return BaseCType("DimnameList", binds)
         elif str(t.elem) == 'Tensor?':
@@ -128,6 +131,8 @@ def returntype_type(t: Type, *, mutable: bool) -> str:
                 return 'Tensor &'
             else:
                 return 'Tensor'
+        elif t.name == BaseTy.Scalar:
+            return 'Scalar'
     elif isinstance(t, ListType):
         elem = returntype_type(t.elem, mutable=mutable)
         assert t.size is None, f"fixed size list returns not supported: {t}"
@@ -268,7 +273,7 @@ def argument(
             elif a.dtype.default == "long":
                 default = 'at::kLong'  # TODO: this is wrong
             return [Binding(
-                ctype=ConstRefCType(BaseCType('TensorOptions', 'options')),
+                ctype=BaseCType('TensorOptions', 'options'),
                 name='options',
                 default=default,
                 argument=a,

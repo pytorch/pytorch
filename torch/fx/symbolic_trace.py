@@ -1,16 +1,27 @@
 import builtins
+import functools
 import inspect
-from types import CodeType, FunctionType
+import math
+import os
+from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
+from itertools import chain
 import torch
+import torch._C._fx  # type: ignore
 from torch._C import ScriptObject  # type: ignore
 
+import sys
 from .node import Argument, map_aggregate
 from .graph import Graph
 from .graph_module import GraphModule
 from .proxy import TracerBase, Proxy
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
+
+# These need to run in global scope to handle nested calls correctly
+_orig_module_call : Callable = torch.nn.Module.__call__
+_orig_module_getattr : Callable = torch.nn.Module.__getattr__
+
 
 def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     co = fn.__code__
@@ -39,6 +50,43 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normal variables
 
+class _CPatchManager(object):
+    """
+    Calls patch_function in order to intercept functions at the C-extension level
+    """
+    def __init__(self, tracer):
+        self.tracer = tracer
+        patched_fns = [torch.randn, torch.rand, torch.randint]
+
+        def patched_impl(to_patch, args, kwargs):
+            return tracer.create_proxy('call_function', to_patch, args, kwargs)
+
+        c_patch_enabled = True
+
+        def patched_in(to_patch, args, kwargs):
+            nonlocal c_patch_enabled
+            try:
+                c_patch_enabled = False
+                r = patched_impl(to_patch, args, kwargs)
+            finally:
+                c_patch_enabled = True
+            return r
+
+        def trace_func(frame, action, arg):
+            if action == 'c_call':
+                if c_patch_enabled:
+                    if arg in patched_fns:
+                        torch._C._fx.patch_function(arg, patched_in)
+
+        self.func = trace_func
+
+    def __enter__(self):
+        if self.tracer.enable_cpatching:
+            sys.setprofile(self.func)
+
+    def __exit__(self, type, value, tb):
+        sys.setprofile(None)
+
 class Tracer(TracerBase):
     """
     ``Tracer`` is the class that implements the symbolic tracing functionality
@@ -49,8 +97,41 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self):
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), enable_cpatching: bool = False) -> None:
+        """
+        Construct a Tracer object.
+
+        Args:
+
+            autowrap_modules (List[ModuleType]): defaults to `[math]`,
+                Python modules whose functions should be wrapped automatically
+                without needing to use fx.wrap().
+
+            enable_cpatching (bool): defaults to `False`,
+                Allows you to enable/disable monkeypatching of torch functions at the
+                C-level (which captures functins like randn).
+
+                C-level monkeypatching works by directly modifying the PyCFunctionObject*
+                so that calling it returns a different function.
+
+                Turning this on is likely to slow down tracing by 1.5-3x.
+
+        """
+
         super().__init__()
+
+        # Functions we will eagerly wrap when we see them while tracing
+        # this captures both `math.sqrt()` and `from math import sqrt` automatically
+        self._autowrap_function_ids: Set[int] = {
+            id(value) for name, value in chain(*[m.__dict__.items() for m in autowrap_modules])
+            if not name.startswith("_") and callable(value)}
+
+        # Python modules to apply autowrap to at the start, in addition to
+        # modules we see while tracing
+        self._autowrap_search: List[ModuleType] = list(autowrap_modules)
+        self.enable_cpatching = enable_cpatching
+
+        self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
 
     def create_arg(self, a: Any) -> 'Argument':
         """
@@ -155,10 +236,21 @@ class Tracer(TracerBase):
 
             mod (str): The ``Module`` to retrieve the qualified name for.
         """
-        for n, p in self.root.named_modules():
-            if mod is p:
-                return n
-        raise NameError('module is not installed as a submodule')
+        # Prefer the O(1) algorithm
+        if self.submodule_paths:
+            path = self.submodule_paths.get(mod)
+            if path is None:
+                raise NameError('module is not installed as a submodule')
+            assert isinstance(path, str)
+            return path
+        # O(N^2) fallback in the case that we didn't store the submodule
+        # paths. (This happens e.g. in using NormalizeArgs. See
+        #  `test/test_fx_experimental:test_normalize_args`)
+        else:
+            for n, p in self.root.named_modules():
+                if mod is p:
+                    return n
+            raise NameError('module is not installed as a submodule')
 
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
         """
@@ -172,7 +264,6 @@ class Tracer(TracerBase):
 
         This method can be overridden to--for example--create nested traced
         GraphModules, or any other behavior you would want while tracing across
-        ``Module`` boundaries.
         ``Module`` boundaries.
 
         Args:
@@ -193,7 +284,7 @@ class Tracer(TracerBase):
             return forward(*args, **kwargs)
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
-    def create_args_for_root(self, root_fn, is_module):
+    def create_args_for_root(self, root_fn, is_module, concrete_args=None):
         """
         Create ``placeholder`` nodes corresponding to the signature of the ``root``
         Module. This method introspects root's signature and emits those
@@ -219,6 +310,8 @@ class Tracer(TracerBase):
         sig = inspect.signature(fn_for_analysis)
 
         def proxy_placeholder(name: str):
+            if concrete_args is not None and name in concrete_args:
+                return concrete_args[name]
             if name[0] == '*':
                 default = ()    # type: ignore
             else:
@@ -239,7 +332,7 @@ class Tracer(TracerBase):
 
         return root_fn, args
 
-    def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
+    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
         can either be an ``nn.Module`` instance or a Python callable.
@@ -254,6 +347,7 @@ class Tracer(TracerBase):
 
             root (Union[Module, Callable]): Either a ``Module`` or a function to be
                 traced through.
+            concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
 
         Returns:
 
@@ -262,6 +356,7 @@ class Tracer(TracerBase):
         if isinstance(root, torch.nn.Module):
             self.root = root
             fn = type(root).forward
+            self.submodule_paths = {mod: name for name, mod in root.named_modules()}
         else:
             self.root = torch.nn.Module()
             fn = root
@@ -284,14 +379,16 @@ class Tracer(TracerBase):
 
         assert isinstance(fn, FunctionType)
 
-        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
+        fn_globals = fn.__globals__  # run before it gets patched
+        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module), concrete_args)
 
         parameter_proxy_cache : Dict[str, Proxy] = {}  # Reduce number of get_attr calls
 
         # Method dispatch on parameters is not recorded unless it's directly used.
         # Thus, we need to insert a proxy when __getattr__ requests a parameter.
+        @functools.wraps(_orig_module_getattr)
         def module_getattr_wrapper(mod, attr):
-            attr_val = orig_getattr(mod, attr)
+            attr_val = _orig_module_getattr(mod, attr)
             if isinstance(attr_val, torch.nn.Parameter):
                 for n, p in self.root.named_parameters():
                     if attr_val is p:
@@ -300,36 +397,68 @@ class Tracer(TracerBase):
                         return parameter_proxy_cache[n]
             return attr_val
 
+        @functools.wraps(_orig_module_call)
         def module_call_wrapper(mod, *args, **kwargs):
             def forward(*args, **kwargs):
-                return orig_call(mod, *args, **kwargs)
+                return _orig_module_call(mod, *args, **kwargs)
 
+            _autowrap_check(patcher, getattr(getattr(mod, "forward", mod), "__globals__", {}),
+                            self._autowrap_function_ids)
             return self.call_module(mod, forward, args, kwargs)
 
-        orig_call = torch.nn.Module.__call__
-        orig_getattr = torch.nn.Module.__getattr__
-        orig_fns : List[PatchedFn] = []
+        with _CPatchManager(self):
+            with _Patcher() as patcher:
+                # allow duplicate patches to support the case of nested calls
+                patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
+                patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
+                _patch_wrapped_functions(patcher)
+                _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
+                for module in self._autowrap_search:
+                    _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
 
-        try:
-            # Seems to be a mypy limitation: https://github.com/python/mypy/issues/2427
-            torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
-            torch.nn.Module.__call__ = module_call_wrapper
+                self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
+                                 type_expr=fn.__annotations__.get('return', None))
 
-            _patch_wrapped_functions(orig_fns)
+        self.submodule_paths = None
 
-            self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
-                             type_expr=fn.__annotations__.get('return', None))
-        finally:
-            _unpatch_wrapped_functions(orig_fns)
-            torch.nn.Module.__call__ = orig_call
-            torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
+
 
 # List of pairs of (global dict, function name) functions
 # to patch for the purposes of the wrap() API.
 _wrapped_fns_to_patch : List[Tuple[dict, str]] = []
 
+# List of methods on classes to wrap (class type, function name)
+# this currently only works for Tensor.* methods that aren't traced properly
+_wrapped_methods_to_patch : List[Tuple[type, str]] = []
+
+if os.environ.get("FX_PATCH_GETITEM") == "1":
+    # This change is needed to trace models like PositionalEmbedding from BERT:
+    # https://github.com/pytorch/benchmark/blob/master/torchbenchmark/models/BERT_pytorch/bert_pytorch/model/embedding/position.py  # noqa
+    # but causes issues in quantization documented here:
+    # https://github.com/pytorch/pytorch/issues/50710
+    # once that is fixed we can make this the default behavior.
+    _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
+
+
+def _find_proxy(*objects_to_search):
+    """
+    Recursively search a data structure for a Proxy() and return it,
+    return None if not found.
+    """
+    proxy = None
+
+    def find_proxy(x):
+        nonlocal proxy
+        if isinstance(x, Proxy):
+            proxy = x
+
+    map_aggregate(objects_to_search, find_proxy)
+    return proxy
+
+
 def _create_wrapped_func(orig_fn):
+    @functools.wraps(orig_fn)
     def wrapped(*args, **kwargs):
         """
         Given an closed-over ``orig_function`` to invoke, search the args and kwargs for
@@ -337,77 +466,136 @@ def _create_wrapped_func(orig_fn):
         call to this leaf function directly. Otherwise, just return the results of
         this function call, as this function is not being traced.
         """
-        proxy = None
-
-        def find_proxy(x):
-            nonlocal proxy
-            if isinstance(x, Proxy):
-                proxy = x
-
-        map_aggregate(args, find_proxy)
-        map_aggregate(kwargs, find_proxy)
-
+        proxy = _find_proxy(args, kwargs)
         if proxy is not None:
             return proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
-        else:
-            return orig_fn(*args, **kwargs)
+        return orig_fn(*args, **kwargs)
 
     return wrapped
 
-class PatchedFn(NamedTuple):
-    frame_dict : Dict[str, Any]
+
+def _create_wrapped_method(cls, name):
+    orig_fn = getattr(cls, name)
+
+    @functools.wraps(orig_fn)
+    def wrapped(*args, **kwargs):
+        """
+        Search the args and kwargs for a Proxy object. If there is one,
+        emit a ``call_method`` node to preserve the call to this method
+        directly. Otherwise, just return the results of this function
+        call, as this function is not being traced.
+        """
+        proxy = _find_proxy(args, kwargs)
+        if proxy is not None:
+            return proxy.tracer.create_proxy('call_method', name, args, kwargs)
+        return orig_fn(*args, **kwargs)
+
+    return wrapped
+
+
+class _PatchedFn(NamedTuple):
+    frame_dict : Any
     fn_name : str
     orig_fn : Any
 
-# isinstance(orig_fn, NoneSentinel) if the original global namespace
-# did not contain this function at the time of patching. This can
-# occur, for example, when patching a builtin function
-class PatchedFnNoneSentinel:
-    pass
+    def revert(self):
+        raise NotImplementedError()
 
-def _patch_wrapped_functions(orig_fns : List[PatchedFn]):
+
+class _PatchedFnSetItem(_PatchedFn):
+    def revert(self):
+        self.frame_dict[self.fn_name] = self.orig_fn
+
+
+class _PatchedFnDel(_PatchedFn):
+    def revert(self):
+        del self.frame_dict[self.fn_name]
+
+
+class _PatchedFnSetAttr(_PatchedFn):
+    def revert(self):
+        setattr(self.frame_dict, self.fn_name, self.orig_fn)
+
+
+class _Patcher(object):
+    def __init__(self):
+        super(_Patcher, self).__init__()
+        self.patches_made : List[_PatchedFn] = []
+        self.visited : Set[int] = set()
+
+    def patch(self, frame_dict : Dict[str, Any], name : str, new_fn : Callable,
+              deduplicate : bool = True):
+        """
+        Replace frame_dict[name] with new_fn until we exit the context manager.
+        """
+        new_fn.__fx_already_patched = deduplicate  # type: ignore
+        if name not in frame_dict and hasattr(builtins, name):
+            self.patches_made.append(_PatchedFnDel(frame_dict, name, None))
+        elif getattr(frame_dict[name], "__fx_already_patched", False):
+            return  # already patched, no need to do it again
+        else:
+            self.patches_made.append(_PatchedFnSetItem(frame_dict, name, frame_dict[name]))
+        frame_dict[name] = new_fn
+
+    def patch_method(self, cls: type, name : str, new_fn : Callable,
+                     deduplicate : bool = True):
+        """
+        Replace object_or_dict.name with new_fn until we exit the context manager.
+        """
+        new_fn.__fx_already_patched = deduplicate  # type: ignore
+        orig_fn = getattr(cls, name)
+        if getattr(orig_fn, "__fx_already_patched", False):
+            return  # already patched, no need to do it again
+        self.patches_made.append(_PatchedFnSetAttr(cls, name, orig_fn))
+        setattr(cls, name, new_fn)
+
+    def visit_once(self, thing: Any):
+        """ Return True on the first call to with thing, otherwise false """
+        idx = id(thing)
+        if idx in self.visited:
+            return False
+        self.visited.add(idx)
+        return True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Undo all the changes made via self.patch() and self.patch_method()
+        """
+        while self.patches_made:
+            # unpatch in reverse order to handle duplicates correctly
+            self.patches_made.pop().revert()
+        self.visited.clear()
+
+
+def _patch_wrapped_functions(patcher : _Patcher):
     """
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
-    the listed global functions in the `_create_wrapped_func` wrapper. Returns
-    a list of PatchedFn, which is a record specifiying a single function
-    entry that was patched and contains the original function for unpatching
-
-    Note orig_fns is taken by reference and updated as we go to facilitate
-    reverting patching if this function itself throws an exception.
+    the listed global functions in the `_create_wrapped_func` wrapper.
     """
-    # Set to deduplicate entries. Wrapping a function multiple times would
-    # be an error, since it would cause a `call_function` node for the
-    # wrapper to be emitted rather than the actual underlying function
-    #
-    # Use id(frame_dict) as a hashable identity here since none of the
-    # frame dicts should be destroyed during symtracing
-    processed_entries : Set[Tuple[int, str]] = set()
-
     for frame_dict, name in _wrapped_fns_to_patch:
-        if (id(frame_dict), name) in processed_entries:
-            continue
         if name not in frame_dict and hasattr(builtins, name):
             orig_fn = getattr(builtins, name)
-            orig_fns.append(PatchedFn(frame_dict, name, PatchedFnNoneSentinel()))
         else:
             orig_fn = frame_dict[name]
-            orig_fns.append(PatchedFn(frame_dict, name, orig_fn))
+        patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
 
-        frame_dict[name] = _create_wrapped_func(orig_fn)
+    for cls, name in _wrapped_methods_to_patch:
+        patcher.patch_method(cls, name, _create_wrapped_method(cls, name))
 
-        processed_entries.add((id(frame_dict), name))
 
-def _unpatch_wrapped_functions(orig_fns : List[PatchedFn]):
+def _autowrap_check(patcher : _Patcher, frame_dict : Dict[str, Any], function_ids : Set[int]):
     """
-    Given the ``orig_fns`` dict that ``_patch_wrapped_functions``,
-    replace all of the global functions with the original global functions
-    that were there before symbolic tracing.
+    Some methods, like `math.sqrt` are common enough we want to automatically wrap them as we see them.
+    This method searches a scope for them and patches them if found.
     """
-    for frame_dict, fn_name, orig_fn in orig_fns:
-        if isinstance(orig_fn, PatchedFnNoneSentinel):
-            del frame_dict[fn_name]
-        else:
-            frame_dict[fn_name] = orig_fn
+    if patcher.visit_once(frame_dict):
+        for name, value in frame_dict.items():
+            if not name.startswith("_") and callable(value) and id(value) in function_ids:
+                patcher.patch(frame_dict, name, _create_wrapped_func(value))
+
 
 def wrap(fn_or_name : Union[str, Callable]):
     """
@@ -442,11 +630,7 @@ def wrap(fn_or_name : Union[str, Callable]):
         fn_or_name (Union[str, Callable]): The function or name of the global function to insert into the
             graph when it's called
     """
-    if callable(fn_or_name):
-        fn_name = fn_or_name.__code__.co_name
-    elif isinstance(fn_or_name, str):
-        fn_name = fn_or_name
-    else:
+    if not callable(fn_or_name) and not isinstance(fn_or_name, str):
         raise RuntimeError('Unsupported type for global function! Must be either a callable or '
                            'string name')
 
@@ -464,10 +648,13 @@ def wrap(fn_or_name : Union[str, Callable]):
     if f.f_code.co_name != '<module>':
         raise NotImplementedError('wrap must be called at the top level of a module')
 
+    # consider implementing Callable version of this via _autowrap_function_ids / _autowrap_search
+    # semantics would be slightly different, but would add support `from x import wrapped_function`
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
 
-def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
+def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None,
+                   enable_cpatching: bool = False) -> GraphModule:
     """Symbolic tracing API
 
     Given an ``nn.Module`` or function instance ``root``, this function will return a ``GraphModule``
@@ -476,11 +663,14 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
     Args:
         root (Union[torch.nn.Module, Callable]): Module or function to be traced and converted
             into a Graph representation.
+        concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
+        enable_cpatching: Enables C-level patching of functions (captures things like `torch.randn`)
 
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
 
     """
-    tracer = Tracer()
-    graph = tracer.trace(root)
-    return GraphModule(tracer.root, graph)
+    tracer = Tracer(enable_cpatching=enable_cpatching)
+    graph = tracer.trace(root, concrete_args)
+    name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
+    return GraphModule(tracer.root, graph, name)

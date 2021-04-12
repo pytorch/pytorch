@@ -22,16 +22,20 @@ from typing import List, Optional, Union
 from setuptools.command.build_ext import build_ext
 from pkg_resources import packaging  # type: ignore
 
-
 IS_WINDOWS = sys.platform == 'win32'
 LIB_EXT = '.pyd' if IS_WINDOWS else '.so'
 EXEC_EXT = '.exe' if IS_WINDOWS else ''
+CLIB_PREFIX = '' if IS_WINDOWS else 'lib'
+CLIB_EXT = '.dll' if IS_WINDOWS else '.so'
 SHARED_FLAG = '/DLL' if IS_WINDOWS else '-shared'
 
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
 
+
+BUILD_SPLIT_CUDA = os.getenv('BUILD_SPLIT_CUDA') or (os.path.exists(os.path.join(
+    TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cu{CLIB_EXT}')) and os.path.exists(os.path.join(TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cpp{CLIB_EXT}')))
 
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
@@ -876,7 +880,11 @@ def CUDAExtension(name, sources, *args, **kwargs):
     else:
         libraries.append('cudart')
         libraries.append('c10_cuda')
-        libraries.append('torch_cuda')
+        if BUILD_SPLIT_CUDA:
+            libraries.append('torch_cuda_cu')
+            libraries.append('torch_cuda_cpp')
+        else:
+            libraries.append('torch_cuda')
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
@@ -1106,7 +1114,7 @@ def load_inline(name,
     identical to :func:`load`.
 
     See `the
-    tests <https://github.com/pytorch/pytorch/blob/master/test/test_cpp_extensions.py>`_
+    tests <https://github.com/pytorch/pytorch/blob/master/test/test_cpp_extensions_jit.py>`_
     for good examples of using this function.
 
     Sources may omit two required parts of a typical non-inline C++ extension:
@@ -1430,7 +1438,15 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if with_cuda:
             extra_ldflags.append('c10_cuda.lib')
         extra_ldflags.append('torch_cpu.lib')
-        if with_cuda:
+        if BUILD_SPLIT_CUDA and with_cuda:
+            extra_ldflags.append('torch_cuda_cu.lib')
+            # /INCLUDE is used to ensure torch_cuda_cu is linked against in a project that relies on it.
+            extra_ldflags.append('-INCLUDE:?searchsorted_cuda@native@at@@YA?AVTensor@2@AEBV32@0_N1@Z')
+            extra_ldflags.append('torch_cuda_cpp.lib')
+            # /INCLUDE is used to ensure torch_cuda_cpp is linked against in a project that relies on it.
+            # Related issue: https://github.com/pytorch/pytorch/issues/31611
+            extra_ldflags.append('-INCLUDE:?warp_size@cuda@at@@YAHXZ')
+        elif with_cuda:
             extra_ldflags.append('torch_cuda.lib')
             # /INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
             # Related issue: https://github.com/pytorch/pytorch/issues/31611
@@ -1447,7 +1463,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if with_cuda:
             extra_ldflags.append('-lc10_hip' if IS_HIP_EXTENSION else '-lc10_cuda')
         extra_ldflags.append('-ltorch_cpu')
-        if with_cuda:
+        if BUILD_SPLIT_CUDA and with_cuda:
+            extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda_cu -ltorch_cuda_cpp')
+        elif with_cuda:
             extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda')
         extra_ldflags.append('-ltorch')
         if not is_standalone:
@@ -1570,14 +1588,13 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         for flag in cflags:
             if 'amdgpu-target' in flag:
                 return ['-fno-gpu-rdc']
-    return [
-        '--amdgpu-target=gfx803',
-        '--amdgpu-target=gfx900',
-        '--amdgpu-target=gfx906',
-        '--amdgpu-target=gfx908',
-        '-fno-gpu-rdc'
-    ]
-
+    # Use same defaults from file cmake/public/LoadHIP.cmake.
+    # Must keep in sync if defaults change.
+    # Allow env var to override, just like during initial cmake build.
+    archs = os.environ.get('PYTORCH_ROCM_ARCH', 'gfx803;gfx900;gfx906;gfx908')
+    flags = ['--amdgpu-target=%s' % arch for arch in archs.split(';')]
+    flags += ['-fno-gpu-rdc']
+    return flags
 
 def _get_build_directory(name: str, verbose: bool) -> str:
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
@@ -1707,8 +1724,12 @@ def _write_ninja_file_to_build_library(path,
 
     # include_paths() gives us the location of torch/extension.h
     system_includes = include_paths(with_cuda)
-    # sysconfig.get_paths()['include'] gives us the location of Python.h
-    system_includes.append(sysconfig.get_paths()['include'])
+    # sysconfig.get_path('include') gives us the location of Python.h
+    # Explicitly specify 'posix_prefix' scheme on non-Windows platforms to workaround error on some MacOS
+    # installations where default `get_path` points to non-existing `/Library/Python/M.m/include` folder
+    python_include_path = sysconfig.get_path('include', scheme='nt' if IS_WINDOWS else 'posix_prefix')
+    if python_include_path is not None:
+        system_includes.append(python_include_path)
 
     # Windows does not understand `-isystem`.
     if IS_WINDOWS:

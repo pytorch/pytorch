@@ -1,10 +1,11 @@
+#include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/metal/MetalPrepackOpContext.h>
-#include <ATen/ATen.h>
+#include <c10/util/accumulate.h>
 
 
 #if (C10_IOS || TARGET_OS_MAC)
-#import <ATen/native/metal/mpscnn/MPSCNNOps.h>
+#import <ATen/native/metal/ops/MetalConvolution.h>
 #endif
 
 namespace at {
@@ -18,13 +19,13 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   const Tensor weightContig = weight.contiguous();
   const auto ws = weightContig.sizes();
   auto packed_buffer = permuteWeights(weightContig.data_ptr<float>(), ws.vec());
   auto packedWeight = at::empty(ws);
-  int64_t size_bytes = at::prod_intlist(ws) * sizeof(float);
+  int64_t size_bytes = c10::multiply_integers(ws) * sizeof(float);
   memcpy(packedWeight.data_ptr(), packed_buffer.data(), size_bytes);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(packedWeight),
@@ -77,8 +78,8 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   TORCH_CHECK(weight.dim() == 4);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(weight),
@@ -95,18 +96,9 @@ Tensor conv2d_prepack_run(
     const Tensor& input,
     const c10::intrusive_ptr<Conv2dOpContext>& op_context) {
 #if (C10_IOS || TARGET_OS_MAC)
-  return mpscnn::conv2d(input, *op_context);
+  return prepack::conv2d(input, *op_context);
 #else
   TORCH_CHECK(false, "conv2d_prepack_run can only be invoked on iOS and MacOS");
-  return input;
-#endif
-}
-
-Tensor copy_to_host(const Tensor& input) {
-#if (C10_IOS || TARGET_OS_MAC)
-  return mpscnn::copy_to_host(input);
-#else
-  TORCH_CHECK(false, "copy_to_host can only be invoked on iOS and MacOS");
   return input;
 #endif
 }
@@ -117,10 +109,6 @@ TORCH_LIBRARY_IMPL(metal_prepack, CPU, m) {
 
 TORCH_LIBRARY_IMPL(metal_prepack, Metal, m) {
   m.impl("conv2d_run", conv2d_prepack_run);
-}
-
-TORCH_LIBRARY_IMPL(metal, Metal, m) {
-  m.impl("copy_to_host", copy_to_host);
 }
 
 } // namespace metal

@@ -174,7 +174,7 @@ def preprocess_file_and_save_result(
     result = preprocessor(output_directory, filepath, all_files, includes, stats,
                           hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
 
-    fin_path = os.path.join(output_directory, filepath)
+    fin_path = os.path.abspath(os.path.join(output_directory, filepath))
     # Show what happened
     if show_progress:
         print(
@@ -711,7 +711,7 @@ def preprocessor(
         clean_ctx: GeneratedFileCleaner,
         show_progress: bool) -> HipifyResult:
     """ Executes the CUDA -> HIP conversion on the specified file. """
-    fin_path = os.path.join(output_directory, filepath)
+    fin_path = os.path.abspath(os.path.join(output_directory, filepath))
 
     with open(fin_path, 'r', encoding='utf-8') as fin:
         if fin.readline() == HIPIFY_C_BREADCRUMB:
@@ -721,7 +721,7 @@ def preprocessor(
 
     orig_output_source = output_source
 
-    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, is_pytorch_extension))
+    fout_path = os.path.abspath(os.path.join(output_directory, get_hip_file_path(filepath, is_pytorch_extension)))
     if not os.path.exists(os.path.dirname(fout_path)):
         clean_ctx.makedirs(os.path.dirname(fout_path))
 
@@ -829,9 +829,14 @@ def preprocessor(
         with open(fout_path, 'r', encoding='utf-8') as fout_old:
             do_write = fout_old.read() != output_source
     if do_write:
-        with clean_ctx.open(fout_path, 'w', encoding='utf-8') as fout:
-            fout.write(output_source)
-        return {"hipified_path": fout_path, "status": "ok"}
+        try:
+            with clean_ctx.open(fout_path, 'w', encoding='utf-8') as fout:
+                fout.write(output_source)
+            return {"hipified_path": fout_path, "status": "ok"}
+        except PermissionError as e:
+            print(f"{bcolors.WARNING}Failed to save {fout_path} with \"{e.strerror}\", leaving {fin_path} unchanged.{bcolors.ENDC}",
+                  file=sys.stderr)
+            return {"hipified_path": fin_path, "status": "skipped"}
     else:
         return {"hipified_path": fout_path, "status": "skipped"}
 

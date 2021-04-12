@@ -125,7 +125,7 @@ binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'tru
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
               'and', 'or', 'xor',                   # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
-              'ior', 'irshift', 'isub', 'ixor',  # inplace ops
+              'ior', 'irshift', 'isub', 'ixor', 'ifloordiv', 'imod',  # inplace ops
               )
 comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
 unary_ops = ('neg', 'abs', 'invert')
@@ -322,10 +322,38 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                  ' layout: _layout=strided, {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS)],
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...'],
-        'nonzero': ['def nonzero(input: Tensor, *, out: Optional[Tensor]=None) -> Tensor: ...',
-                    'def nonzero(input: Tensor, *, as_tuple: bool=...) -> Tensor: ...'],
+        'nonzero': ['def nonzero(input: Tensor, *, as_tuple: Literal[False]=False, out: Optional[Tensor]=None) -> Tensor: ...',
+                    'def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...'],
+        'binary_cross_entropy_with_logits': ['def binary_cross_entropy_with_logits(input: Tensor, target: Tensor, '
+                                             'weight: Optional[Tensor] = None, size_average: Optional[bool] = None, '
+                                             'reduce: Optional[bool] = None, reduction: str = ..., '
+                                             'pos_weight: Optional[Tensor] = None) -> Tensor: ...'],
+        'cosine_embedding_loss': ['def cosine_embedding_loss(input1: Tensor, input2: Tensor, '
+                                  'target: Tensor, margin: float = ..., size_average: Optional[bool] = ..., '
+                                  'reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...'],
+        'ctc_loss': ['def ctc_loss(log_probs: Tensor, targets: Tensor, input_lengths: Tensor, target_lengths: Tensor,'
+                     ' blank: int = ..., reduction: str = ..., zero_infinity: bool = ...) -> Tensor: ...'],
+        'hinge_embedding_loss': ['def hinge_embedding_loss(input: Tensor, target: Tensor, margin: float = ...,'
+                                 ' size_average: Optional[bool] = ..., reduce: Optional[bool] = ..., '
+                                 'reduction: str = ...) -> Tensor: ...'],
+        'kl_div': ['def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., '
+                   'reduce: Optional[bool] = ..., reduction: str = ..., log_target: bool = ...) -> Tensor: ...'],
+        'margin_ranking_loss': ['def margin_ranking_loss(input1: Tensor, input2: Tensor, target: Tensor,'
+                                ' margin: float = ..., size_average: Optional[bool] = ..., '
+                                ' reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...'],
+        'triplet_margin_loss': ['def triplet_margin_loss(anchor: Tensor, positive: Tensor, negative: Tensor, '
+                                'margin: float = ..., p: float = ..., eps: float = ..., swap: bool = ..., '
+                                'size_average: Optional[bool] = ..., '
+                                'reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...'],
+        'dsmm': ['def dsmm(input: Tensor, mat2: Tensor) -> Tensor: ...'],
+        'hsmm': ['def hsmm(input: Tensor, mat2: Tensor) -> Tensor: ...'],
+        'saddmm': ['def saddmm(input: Tensor, mat1: Tensor, mat2: Tensor, *, beta: Number=1, '
+                   'alpha: Number=1, out: Optional[Tensor]=None) -> Tensor: ...'],
+        'spmm': ['def spmm(input: Tensor, mat2: Tensor) -> Tensor: ...'],
+        'div': ['def div(input: Union[Tensor, Number], other: Union[Tensor, Number], *, '
+                'rounding_mode: Optional[str] = None, out: Optional[Tensor]=None) -> Tensor: ...'],
     })
-    for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
+    for binop in ['mul', 'true_divide', 'floor_divide']:
         unsorted_function_hints[binop].append(
             'def {}(input: Union[Tensor, Number],'
             ' other: Union[Tensor, Number],'
@@ -382,6 +410,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                      'def __init__(self, size: _size, *, {}) -> None: ...'.format(DEVICE_PARAM),
                      ],
         'as_subclass': ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
+        '_make_subclass': ["def _make_subclass(cls, data: Tensor, require_grad: _bool = False) -> Tensor: ..."],
         # clamp has no default values in the Declarations
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
@@ -394,7 +423,8 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'element_size': ['def element_size(self) -> _int: ...'],
         'data_ptr': ['def data_ptr(self) -> _int: ...'],
         'dim': ['def dim(self) -> _int: ...'],
-        'nonzero': ['def nonzero(self, *, as_tuple: _bool=...) -> Tensor: ...'],
+        'nonzero': ['def nonzero(self, *, as_tuple: Literal[False]=False) -> Tensor: ...',
+                    'def nonzero(self, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...'],
         'numel': ['def numel(self) -> _int: ...'],
         'ndimension': ['def ndimension(self) -> _int: ...'],
         'nelement': ['def nelement(self) -> _int: ...'],
@@ -402,13 +432,17 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'numpy': ['def numpy(self) -> Any: ...'],
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
         'map_': ['def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ...'],
+        'map2_': ['def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ...'],
         'storage': ['def storage(self) -> Storage: ...'],
+        'storage_type': ['def storage_type(self) -> Storage: ...'],
         'type': ['def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...',
                  'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',
                  ],
         'get_device': ['def get_device(self) -> _int: ...'],
         'contiguous': ['def contiguous(self, memory_format=torch.contiguous_format) -> Tensor: ...'],
+        'has_names': ['def has_names(self) -> _bool: ...'],
         'is_contiguous': ['def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ...'],
+        '_is_view': ['def _is_view(self) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
         'is_sparse': ['is_sparse: _bool'],
@@ -428,8 +462,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                  'def set_(self, storage: Storage) -> Tensor: ...'],
         'split': ['def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...',
                   'def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...'],
+        'div': ['def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
+        'div_': ['def div_(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
     })
-    for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
+    for binop in ['mul', 'true_divide', 'floor_divide']:
         for inplace in [False, True]:
             out_suffix = ', *, out: Optional[Tensor]=None'
             if inplace:

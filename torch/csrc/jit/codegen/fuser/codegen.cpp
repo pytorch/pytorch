@@ -65,6 +65,9 @@ static const char* scalarTypeName(const at::ScalarType type) {
   if (type == at::ScalarType::Half) {
     return "half";
   }
+  if (type == at::ScalarType::BFloat16) {
+    return "__nv_bfloat16";
+  }
 
   switch (type) {
 #define DEFINE_CASE(ctype, name) \
@@ -79,6 +82,9 @@ static const char* scalarTypeName(const at::ScalarType type) {
 
 static const char* calcScalarTypeName(const at::ScalarType type) {
   if (type == at::ScalarType::Half) {
+    return "float";
+  }
+  if (type == at::ScalarType::BFloat16) {
     return "float";
   }
   return scalarTypeName(type);
@@ -436,6 +442,7 @@ std::string generateKernel(
 
   // Acquires input values
   bool has_half_tensor = false;
+  bool has_bfloat_tensor = false;
   size_t formal_count = 0;
   for (const auto& input : inputs) {
     auto p = input.first;
@@ -449,6 +456,8 @@ std::string generateKernel(
     if (input.second.has_value()) {
       const auto is_half = input.second.has_value() &&
           ((*input.second).scalar_type == at::ScalarType::Half);
+      const auto is_bfloat = input.second.has_value() &&
+          ((*input.second).scalar_type == at::ScalarType::BFloat16);
       const auto is_bool = input.second.has_value() &&
           ((*input.second).scalar_type == at::ScalarType::Bool);
       if (is_half) {
@@ -458,6 +467,15 @@ std::string generateKernel(
             format("__half2float(t${formal}.data[t${formal}_offset])", env));
         env.s("access_vec4", format("__half2float(t${formal}_buf[i])", env));
         has_half_tensor = true;
+      } else if (is_bfloat) {
+        AT_ASSERT(use_cuda);
+        env.s(
+            "access",
+            format(
+                "__bfloat162float(t${formal}.data[t${formal}_offset])", env));
+        env.s(
+            "access_vec4", format("__bfloat162float(t${formal}_buf[i])", env));
+        has_bfloat_tensor = true;
       } else if (use_cuda) {
         // No __ldg overload for bool
         if (is_bool) {
@@ -518,7 +536,9 @@ std::string generateKernel(
   // Note: Random number generation is only supported for CUDA kernels.
   // Note: Constant None node is ignored and we will handle it in the
   //       places where the constant None node is used
-  for (const auto& n : graph.nodes()) {
+  // Note: No need to iterate over reference as n is a pointer
+  for (const auto n : graph.nodes()) {
+    static_assert(std::is_pointer<decltype(n)>::value, "n must be a pointer");
     // Note: FusedConcat nodes work by narrowing the output Tensors before the
     // kernel runs
     if (n->kind() == prim::FusedConcat)
@@ -569,11 +589,18 @@ std::string generateKernel(
     // Acquires and converts (if needed) outputs
     // Note: conversion to half is only supported for CUDA kernels.
     const auto is_half = (output.second.scalar_type == at::ScalarType::Half);
+    const auto is_bfloat =
+        (output.second.scalar_type == at::ScalarType::BFloat16);
     if (is_half) {
       AT_ASSERT(use_cuda);
       body << format("${access} = __float2half(${node});\n", env);
       body_vec4 << format("${access_vec4} = __float2half(${node});\n", env);
       has_half_tensor = true;
+    } else if (is_bfloat) {
+      AT_ASSERT(use_cuda);
+      body << format("${access} = __float2bfloat16(${node});\n", env);
+      body_vec4 << format("${access_vec4} = __float2bfloat16(${node});\n", env);
+      has_bfloat_tensor = true;
     } else {
       body << format("${access} = ${node};\n", env);
       body_vec4 << format("${access_vec4} = ${node};\n", env);
@@ -615,6 +642,11 @@ std::string generateKernel(
     env.s("HalfHeader", cuda::half_support_literal);
   } else {
     env.s("HalfHeader", "");
+  }
+  if (has_bfloat_tensor) {
+    env.s("BFloat16Header", cuda::bfloat16_support_literal);
+  } else {
+    env.s("BFloat16Header", "");
   }
 
   if (has_random) {
