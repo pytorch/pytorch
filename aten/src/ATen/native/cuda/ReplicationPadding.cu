@@ -530,88 +530,6 @@ static inline void shapeAndGradOutputCheck3d(
       gradOutput.size(dimd));
 }
 
-void replication_pad3d_out_cuda_template(
-    Tensor& output,
-    const Tensor& input,
-    IntArrayRef paddingSize)
-{
-  TORCH_CHECK(paddingSize.size() == 6, "padding Size is expected to be 6");
-  int pleft = paddingSize[0];
-  int pright = paddingSize[1];
-  int ptop = paddingSize[2];
-  int pbottom = paddingSize[3];
-  int pfront = paddingSize[4];
-  int pback = paddingSize[5];
-  shapeCheck3d(input, pleft, pright, ptop,
-      pbottom, pfront, pback);
-
-  int planeDim = 0;
-  int dimd = 1;
-  int dimh = 2;
-  int dimw = 3;
-  int numBatch = 1;
-
-  int numInputDims = input.dim();
-
-  if (numInputDims == 5) {
-    numBatch = input.size(0);
-    planeDim++;
-    dimd++;
-    dimh++;
-    dimw++;
-  }
-
-  int numPlanes = input.size(planeDim);
-  int inputD = input.size(dimd);
-  int inputH = input.size(dimh);
-  int inputW = input.size(dimw);
-  int outputD = inputD + pfront + pback;
-  int outputH = inputH + ptop + pbottom;
-  int outputW  = inputW + pleft + pright;
-
-  if (numInputDims == 4) {
-    output.resize_({numPlanes, outputD, outputH, outputW});
-  } else {
-    output.resize_({numBatch, numPlanes, outputD, outputH, outputW});
-  }
-
-  if (input.numel() == 0) {
-    return;
-  }
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
-    input.scalar_type(), "replication_pad3d_cuda", [&] {
-      at::Tensor input_ = input;
-      at::Tensor output_ = output;
-      if (numInputDims == 4) {
-        auto input_ = input.unsqueeze(0);
-        auto output_ = output.unsqueeze(0);
-      }
-
-      auto devInput = input_.packed_accessor64<scalar_t, 5>();
-      auto devOutput = output_.packed_accessor64<scalar_t, 5>();
-
-      int64_t outputPlaneSize = devOutput.size(2) * devOutput.size(3) * devOutput.size(4);
-      int64_t size1 = devOutput.size(1);
-      int64_t size0 = devOutput.size(0);
-
-      for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
-        int64_t block_y_size = std::min(size1 - block_y, static_cast<int64_t>(65535));
-        for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
-          int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
-
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
-          dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
-
-          replication_pad_forward_kernel3d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
-              devInput, devOutput, pfront, pback, ptop, pbottom, pleft, pright, block_y, block_z);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        }
-      }
-    }
-  );
-}
-
 void replication_pad3d_backward_out_cuda_template(
     Tensor& gradInput,
     const Tensor& gradOutput,
@@ -812,23 +730,76 @@ Tensor replication_pad2d_backward_cuda(
   return gradInput;
 }
 
-Tensor& replication_pad3d_out_cuda(const Tensor& input,
-    IntArrayRef paddingSize,
-    Tensor& output)
-{
-  replication_pad3d_out_cuda_template(
-      output, input, paddingSize);
-  return output;
-}
 
-Tensor replication_pad3d_cuda(
-    const Tensor& input,
-    IntArrayRef paddingSize)
-{
-  auto output = at::empty({0}, input.options());
-  replication_pad3d_out_cuda_template(
-      output, input, paddingSize);
-  return output;
+TORCH_IMPL_FUNC(replication_pad3d_out_cuda) (
+  const Tensor& input, IntArrayRef paddingSize, const Tensor& output
+) {
+  int pleft = paddingSize[0];
+  int pright = paddingSize[1];
+  int ptop = paddingSize[2];
+  int pbottom = paddingSize[3];
+  int pfront = paddingSize[4];
+  int pback = paddingSize[5];
+
+  int planeDim = 0;
+  int dimd = 1;
+  int dimh = 2;
+  int dimw = 3;
+  int numBatch = 1;
+
+  int numInputDims = input.dim();
+
+  if (numInputDims == 5) {
+    numBatch = input.size(0);
+    planeDim++;
+    dimd++;
+    dimh++;
+    dimw++;
+  }
+
+  int numPlanes = input.size(planeDim);
+  int inputD = input.size(dimd);
+  int inputH = input.size(dimh);
+  int inputW = input.size(dimw);
+  int outputD = output.size(dimd);
+  int outputH = output.size(dimh);
+  int outputW = output.size(dimw);
+
+  if (input.numel() == 0) {
+    return;
+  }
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+    input.scalar_type(), "replication_pad3d_cuda", [&] {
+      at::Tensor input_ = input;
+      at::Tensor output_ = output;
+      if (numInputDims == 4) {
+        auto input_ = input.unsqueeze(0);
+        auto output_ = output.unsqueeze(0);
+      }
+
+      auto devInput = input_.packed_accessor64<scalar_t, 5>();
+      auto devOutput = output_.packed_accessor64<scalar_t, 5>();
+
+      int64_t outputPlaneSize = devOutput.size(2) * devOutput.size(3) * devOutput.size(4);
+      int64_t size1 = devOutput.size(1);
+      int64_t size0 = devOutput.size(0);
+
+      for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
+        int64_t block_y_size = std::min(size1 - block_y, static_cast<int64_t>(65535));
+        for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
+          int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
+
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
+          dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
+
+          replication_pad_forward_kernel3d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+              devInput, devOutput, pfront, pback, ptop, pbottom, pleft, pright, block_y, block_z);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        }
+      }
+    }
+  );
 }
 
 Tensor& replication_pad3d_backward_out_cuda(const Tensor& gradOutput,
