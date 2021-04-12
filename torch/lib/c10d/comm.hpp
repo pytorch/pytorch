@@ -13,20 +13,17 @@ void broadcast_coalesced(
     size_t buffer_size,
     int rank = 0);
 
-// This class passes bucket contents tensor (for multiple replicas) to
-// DDP communication hook.
-// Optionally in the future this can be enhanced with parameter to bucket
-// mappings as well.
+// This class passes bucket contents tensor to DDP communication hook.
 class GradBucket {
  public:
   explicit GradBucket(
       size_t index,
-      const std::vector<at::Tensor>& tensors,
+      const at::Tensor& tensor,
       const std::vector<size_t>& offsets,
       const std::vector<size_t>& lengths,
       const std::vector<c10::IntArrayRef>& sizes_vec)
       : index_(index),
-        tensors_(tensors),
+        tensor_(tensor),
         offsets_(offsets),
         lengths_(lengths),
         sizes_vec_(sizes_vec) {}
@@ -36,25 +33,22 @@ class GradBucket {
     return index_;
   }
 
-  // Each tensor in the list that getTensors returns refers to the replica on
-  // each device. There will be multiple replicas only in the case of single
-  // process multiple device mode. In the single process single device mode,
-  // this list would consist of only a single tensor.
-  const std::vector<at::Tensor>& getTensors() const {
-    return tensors_;
+  const at::Tensor& getTensor() const {
+    return tensor_;
   }
 
-  // Returns a mutable tensor vector compared with the above method.
-  std::vector<at::Tensor>& getTensorsRef() {
-    return tensors_;
+  // Returns a mutable tensor compared with the above method.
+  at::Tensor& getTensorRef() {
+    return tensor_;
   }
 
   // Overwrites tensors at a specific index.
-  void setTensor(at::Tensor& tensor, int i) {
-    tensors_[i] = tensor;
+  void setTensor(at::Tensor& tensor) {
+    tensor_ = tensor;
   }
 
-  // Each tensor in the list that getPerParameterTensors corresponds to a parameter.
+  // Each tensor in the list that getPerParameterTensors corresponds to a
+  // parameter.
   std::vector<at::Tensor> getPerParameterTensors() const;
 
   // Returns whther this bucket is the last bucket to allreduce in an iteration.
@@ -64,7 +58,7 @@ class GradBucket {
 
  private:
   size_t index_;
-  std::vector<at::Tensor> tensors_;
+  at::Tensor tensor_;
 
   // Per-variable info in tensors_[0].
   std::vector<size_t> offsets_;

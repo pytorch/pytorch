@@ -153,7 +153,7 @@ def maybe_insert_observer_for_special_module(
         observed_standalone_module = \
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
         standalone_module_input_idxs = observed_standalone_module.\
-            _standalone_module_input_quantized_idxs.int().tolist()
+            _standalone_module_input_quantized_idxs.int().tolist()  # type: ignore
         observed_standalone_module = ObservedStandaloneGraphModule(
             observed_standalone_module, observed_standalone_module.graph)
         parent_name, name = _parent_name(node.target)
@@ -402,7 +402,7 @@ def insert_observers_for_model(
 
         if node.op == 'placeholder':
             # skip adding observers at the graph input if the input is
-            # overriden to be quantized
+            # overridden to be quantized
             cur_placeholder_node_idx = placeholder_node_seen_cnt
             placeholder_node_seen_cnt += 1
             if cur_placeholder_node_idx in input_quantized_idxs:
@@ -428,6 +428,7 @@ def handle_copy_nodes(
     observed_nodes: Set[Node] = set()
     copy_nodes: Set[Node] = set()
     non_tensor_input_binary_op_nodes: Set[Node] = set()
+    unmatched_nodes: Set[Node] = set()
     app_to_remove: Set[Node] = set()
     env: Dict[Any, Any] = {}
 
@@ -442,6 +443,7 @@ def handle_copy_nodes(
         return False
 
     result_graph = Graph()
+    cache_for_no_tensor_check: Dict[Node, bool] = dict()
     for node in observed_graph.nodes:
         root_node, matched_nodes, pattern, quantize_handler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
@@ -464,9 +466,33 @@ def handle_copy_nodes(
                 copy_nodes.add(node)
                 # if previous node is observed, the copy node will be observed as well
                 if in_nodes(node.args[0], observed_nodes):
-                    observed_nodes.add(node)
-        if all_node_args_have_no_tensors(node, modules):
+                    prev_node = node.args[0]
+                    if (
+                        isinstance(prev_node, Node) and
+                        prev_node.op == "call_module" and
+                        is_activation_post_process(modules[prev_node.target])  # type: ignore
+                    ):
+                        prev_prev_node = prev_node.args[0]
+                        # If previous node is unmatched, the input to copy node should not
+                        # be observed. For example, in the pattern of
+                        #
+                        # user_node_unmatched -> obs -> copy_node_matched -> next_node
+                        #
+                        # we delete `obs`, because user_node_unmatched is not quantizeable,
+                        # and the input to copy_node_matched does not need observation.
+                        if in_nodes(prev_prev_node, unmatched_nodes):
+                            app_to_remove.add(prev_node)
+                            observed_nodes.remove(prev_node)
+                        else:
+                            observed_nodes.add(node)
+                    else:
+                        observed_nodes.add(node)
+
+
+        if all_node_args_have_no_tensors(node, modules, cache_for_no_tensor_check):
             non_tensor_input_binary_op_nodes.add(node)
+        if root_node is None and node.op != 'placeholder':
+            unmatched_nodes.add(node)
 
         # rule 3: for special node, we'll just remove observer for its input
         special_nodes = [
@@ -1188,8 +1214,9 @@ class Quantizer:
                         # and all it's inputs.
                         if len(quant_uses) == 1:
                             quantized.graph.erase_node(node)
-                            for arg in quant_args[1 :]:
-                                quantized.graph.erase_node(arg)
+                            for arg in quant_args[1:]:
+                                if isinstance(arg, Node):
+                                    quantized.graph.erase_node(arg)
         return quantized
 
     def convert(self, model: GraphModule, is_reference: bool = False,
@@ -1253,13 +1280,14 @@ class Quantizer:
             else:
                 matched.append(node)
 
+        cache_for_no_tensor_check: Dict[Node, bool] = dict()
         for node in reversed(graph.nodes):
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
                     if is_match(modules, node, pattern):
                         skip_this_match = False
                         if value is BinaryOpQuantizeHandler:
-                            use_copy_node = all_node_args_have_no_tensors(node, modules)
+                            use_copy_node = all_node_args_have_no_tensors(node, modules, cache_for_no_tensor_check)
                             if use_copy_node:
                                 # TODO(future PR): update the pattern to quantize
                                 # handler logic to take this into account.
@@ -1340,13 +1368,14 @@ class Quantizer:
          int8 and then float16
         """
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]] = defaultdict(list)
+        cache_for_no_tensor_check: Dict[Node, bool] = dict()
 
         def visit(node, matched_pattern, qconfig):
             def visit_arg(arg):
                 is_weight = node_arg_is_weight(node, arg)
                 is_bias = node_arg_is_bias(node, arg)
                 is_activation = not (is_weight or is_bias)
-                no_tensors = all_node_args_have_no_tensors(arg, modules)
+                no_tensors = all_node_args_have_no_tensors(arg, modules, cache_for_no_tensor_check)
                 # bias needs to be quantized if activation is fp16 and weight is fp16
                 # this is the case for glow
                 should_add_handler = qconfig is not None and (
