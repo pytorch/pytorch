@@ -115,10 +115,11 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      - name: Install nvidia driver, nvidia-docker runtime
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') }}
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
+          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts
         with:
@@ -126,7 +127,10 @@ jobs:
       - name: Test PyTorch
         run: |
           unzip artifacts.zip
+          # Used for GPU_FLAG since that doesn't play nice
+          # shellcheck disable=SC2086
           docker run \
+            ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e IN_CI \
             --security-opt seccomp=unconfined \
