@@ -9,7 +9,7 @@ install_nvidia_docker2_amzn2() {
     (
         set -x
         curl -fsL \
-            https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.repo | \
+            "https://nvidia.github.io/nvidia-docker/${DISTRIBUTION}/nvidia-docker.repo" | \
             sudo tee /etc/yum.repos.d/nvidia-docker.repo
         sudo yum makecache && yum install -y nvidia-docker2
         sudo systemctl restart docker
