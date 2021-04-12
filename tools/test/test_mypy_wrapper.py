@@ -62,7 +62,7 @@ class TestMypyWrapper(unittest.TestCase):
             filename='tools/autograd/deprecated.yaml',
         ))
 
-    def test_is_match_wildcards_dont_expand_or_collapse(self):
+    def test_is_match_wildcards_dont_expand_or_collapse(self) -> None:
         self.assertFalse(mypy_wrapper.is_match(
             pattern='benchmarks/instruction_counts/*.py',
             filename='benchmarks/instruction_counts/core/utils.py',
