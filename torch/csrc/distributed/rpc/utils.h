@@ -2,6 +2,7 @@
 
 #include <c10/core/Device.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/utils/byte_order.h>
