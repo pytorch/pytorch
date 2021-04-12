@@ -179,7 +179,8 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   for (Node* node : graph->nodes()) {
     auto k = node->kind();
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
-        k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid) {
+        k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
+        k == prim::MKLDNNRelu6) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -302,6 +303,14 @@ const RegisterOperators MKLDNNHardSwishOpReg({
             true),
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
+        "prim::MKLDNNRelu6_(Tensor(a!) self) -> Tensor(a!)",
+        createUnaryOp(
+            [](at::Tensor output, at::Tensor input) {
+              at::hardtanh_out(output, input, 0.f, 6.f);
+            },
+            true),
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
         "prim::MKLDNNHardSwish(Tensor a) -> Tensor",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
@@ -314,6 +323,14 @@ const RegisterOperators MKLDNNHardSwishOpReg({
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
               at::hardsigmoid_out(output, input);
+            },
+            false),
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::MKLDNNRelu6(Tensor(a!) self) -> Tensor(a!)",
+        createUnaryOp(
+            [](at::Tensor output, at::Tensor input) {
+              at::hardtanh_out(output, input, 0.f, 6.f);
             },
             false),
         AliasAnalysisKind::FROM_SCHEMA),
@@ -537,22 +554,23 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       body_node->replaceInput(1, node->outputs().at(1));
     }
 
-    if (body_node->kind() == aten::hardswish) {
-      body_node->replaceWithNewSymbol(prim::MKLDNNHardSwish);
-      body_node->destroy();
-    }
+    auto true_pred = [](Node*) { return true; };
+    auto no_pad = [](Node* n) {
+      return !n->namedInput("padding")->type()->cast<StringType>();
+    };
+    const static std::
+        map<c10::Symbol, std::pair<std::function<bool(Node*)>, c10::Symbol>>
+            aten_to_mkldnn_ops = {
+                {aten::hardswish, {true_pred, prim::MKLDNNHardSwish}},
+                {aten::hardsigmoid, {true_pred, prim::MKLDNNHardSigmoid}},
+                {aten::relu6, {true_pred, prim::MKLDNNRelu6}},
+                {aten::conv2d, {no_pad, Symbol::prim("mkldnn_convolution")}},
+                {aten::conv3d, {no_pad, Symbol::prim("mkldnn_convolution")}},
+            };
 
-    // TODO: maybe add a mapping for names
-    if (body_node->kind() == aten::hardsigmoid) {
-      body_node->replaceWithNewSymbol(prim::MKLDNNHardSigmoid);
-      body_node->destroy();
-    }
-
-    if (body_node->kind() == aten::conv2d ||
-        body_node->kind() == aten::conv3d) {
-      // this node doesnt handle string padding yet...
-      if (!body_node->namedInput("padding")->type()->cast<StringType>()) {
-        body_node->replaceWithNewSymbol(Symbol::prim("mkldnn_convolution"));
+    for (auto rp : aten_to_mkldnn_ops) {
+      if (rp.first == body_node->kind() && rp.second.first(body_node)) {
+        body_node->replaceWithNewSymbol(rp.second.second);
         body_node->destroy();
       }
     }
@@ -716,6 +734,7 @@ class MKLDNNSubgraphSlicer {
     // the input is mkldnn supported
     switch (n->kind()) {
       case aten::relu:
+      case aten::relu6:
       case aten::sigmoid:
       case aten::hardsigmoid:
       case aten::hardswish:
@@ -851,6 +870,7 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
           aten::add_,
           aten::mul_,
           aten::relu_,
+          aten::relu6_,
           aten::hardswish_,
           aten::dropout_,
           aten::sigmoid_,

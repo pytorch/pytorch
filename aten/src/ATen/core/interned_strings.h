@@ -36,6 +36,7 @@ namespace c10 {
   _(prim, MKLDNNGroup)               \
   _(prim, MKLDNNHardSwish)           \
   _(prim, MKLDNNHardSigmoid)         \
+  _(prim, MKLDNNRelu6)               \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
@@ -99,6 +100,8 @@ namespace c10 {
   _(aten, is_pinned)                 \
   _(aten, Delete)                    \
   _(aten, relu_)                     \
+  _(aten, relu6)                     \
+  _(aten, relu6_)                    \
   _(aten, dropout_)                  \
   _(aten, sigmoid_)                  \
   _(prim, device)                    \
