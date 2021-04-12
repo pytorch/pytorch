@@ -348,7 +348,10 @@ class SummaryWriter(object):
         summary = scalar(tag, scalar_value, new_style=new_style)
         self._get_file_writer().add_summary(summary, global_step, walltime)
 
-    def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
+    def add_scalars(
+        self, main_tag, tag_scalar_dict, global_step=None, walltime=None,
+        new_style: bool = False
+    ):
         """Adds many scalar data to summary.
 
         Args:
@@ -357,6 +360,8 @@ class SummaryWriter(object):
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
+            new_style (boolean): Whether to use new style (tensor field) or old
+              style (simple_value field). New style could lead to faster data loading.
 
         Examples::
 
@@ -392,7 +397,7 @@ class SummaryWriter(object):
             if self._check_caffe2_blob(scalar_value):
                 from caffe2.python import workspace
                 scalar_value = workspace.FetchBlob(scalar_value)
-            fw.add_summary(scalar(main_tag, scalar_value),
+            fw.add_summary(scalar(main_tag, scalar_value, new_style=new_style),
                            global_step, walltime)
 
     def add_histogram(self, tag, values, global_step=None, bins='tensorflow', walltime=None, max_bins=None):
