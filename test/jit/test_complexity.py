@@ -9,10 +9,13 @@ torch.set_default_dtype(torch.double)
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, enable_profiling_mode
-from torch.testing._internal.jit_metaprogramming_utils import try_get_nn_module_compiled_mod_and_inputs, \
-    get_nn_mod_test_name, get_all_nn_module_tests, nn_functional_tests, get_nn_functional_compiled_fn_and_inputs
 from torch.testing._internal.common_utils import run_tests, suppress_warnings
+from torch.testing._internal.jit_metaprogramming_utils import (
+    get_all_nn_module_tests, get_nn_functional_compiled_fn_and_inputs,
+    get_nn_mod_test_name, nn_functional_tests,
+    try_get_nn_module_compiled_mod_and_inputs)
+from torch.testing._internal.jit_utils import (JitTestCase,
+                                               enable_profiling_mode)
 
 
 def num_ifs_loops(graph):

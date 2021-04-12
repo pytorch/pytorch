@@ -18,13 +18,12 @@
 
 
 
-import numpy as np
-
-from hypothesis import given
 import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given
 
-from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, workspace
 
 
 class TestTTContraction(hu.HypothesisTestCase):

@@ -1,10 +1,11 @@
 import io
-import numpy as np
 import os
 import shutil
 import sys
 import unittest
 import uuid
+
+import numpy as np
 
 TEST_TENSORBOARD = True
 try:
@@ -39,7 +40,9 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import (TEST_WITH_ASAN, TestCase,
+                                                  run_tests)
+
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -67,14 +70,16 @@ class BaseTestCase(TestCase):
 
 
 if TEST_TENSORBOARD:
-    from tensorboard.compat.proto.graph_pb2 import GraphDef
-    from torch.utils.tensorboard import summary, SummaryWriter
-    from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
-    from torch.utils.tensorboard._convert_np import make_np
-    from torch.utils.tensorboard import _caffe2_graph as c2_graph
-    from torch.utils.tensorboard._pytorch_graph import graph
     from google.protobuf import text_format
     from PIL import Image
+    from tensorboard.compat.proto.graph_pb2 import GraphDef
+
+    from torch.utils.tensorboard import SummaryWriter
+    from torch.utils.tensorboard import _caffe2_graph as c2_graph
+    from torch.utils.tensorboard import summary
+    from torch.utils.tensorboard._convert_np import make_np
+    from torch.utils.tensorboard._pytorch_graph import graph
+    from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
 
 class TestTensorBoardPyTorchNumpy(BaseTestCase):
     def test_pytorch_np(self):

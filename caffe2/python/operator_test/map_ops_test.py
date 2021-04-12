@@ -4,13 +4,14 @@
 
 
 import itertools
-import numpy as np
+import os
 import tempfile
 import unittest
-import os
 
-from caffe2.python import core, workspace
+import numpy as np
+
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, workspace
 
 
 class TestMap(hu.HypothesisTestCase):

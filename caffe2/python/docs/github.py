@@ -6,9 +6,10 @@
 
 import argparse
 import os
+
 from caffe2.python.docs.formatter import Markdown
-from caffe2.python.docs.generator import OpDocGenerator, DocUploader
-from caffe2.python.docs.generator import OperatorDoc, OperatorEngine
+from caffe2.python.docs.generator import (DocUploader, OpDocGenerator,
+                                          OperatorDoc, OperatorEngine)
 
 
 class GHOpDocUploader(DocUploader):

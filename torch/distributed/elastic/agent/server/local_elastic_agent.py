@@ -12,16 +12,13 @@ import shutil
 import tempfile
 from typing import Any, Dict, Optional, Tuple
 
-from torch.distributed.elastic.agent.server.api import (
-    RunResult,
-    SimpleElasticAgent,
-    WorkerGroup,
-    WorkerSpec,
-    WorkerState,
-)
+from torch.distributed.elastic.agent.server.api import (RunResult,
+                                                        SimpleElasticAgent,
+                                                        WorkerGroup,
+                                                        WorkerSpec,
+                                                        WorkerState)
 from torch.distributed.elastic.metrics.api import prof
 from torch.distributed.elastic.multiprocessing import start_processes
-
 
 log = logging.getLogger(__name__)
 

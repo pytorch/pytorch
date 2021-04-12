@@ -4,7 +4,6 @@ import struct
 import sys
 from itertools import chain
 
-
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')

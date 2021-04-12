@@ -1,6 +1,7 @@
-from tools.codegen.model import *
+from typing import List, Optional, Sequence, Set, Union
+
 from tools.codegen.api.types import *
-from typing import Optional, Sequence, Union, List, Set
+from tools.codegen.model import *
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.

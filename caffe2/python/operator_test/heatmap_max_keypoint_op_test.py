@@ -3,17 +3,17 @@
 
 
 
-import numpy as np
-import torch
 import sys
 import unittest
+
+import numpy as np
 from scipy import interpolate
 
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core, utils
-from caffe2.proto import caffe2_pb2
-
 import caffe2.python.operator_test.detectron_keypoints as keypoint_utils
+import torch
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, utils
 
 NUM_TEST_ROI = 14
 NUM_KEYPOINTS = 19

@@ -1,8 +1,9 @@
-from typing import List, Optional, Dict
+from typing import Dict, List, Optional
+
 import torch
 import torch.optim._functional as F
-
 from torch import Tensor
+
 
 # Define a TorchScript compatible Functional SGD Optimizer
 # where we use these optimizer in a functional way.

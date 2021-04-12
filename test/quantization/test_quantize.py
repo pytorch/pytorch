@@ -1,93 +1,55 @@
-import torch
-import torch.nn as nn
-import torch.nn.quantized as nnq
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.qat as nniqat
-from torch.nn.utils.rnn import PackedSequence
-from torch.quantization import (
-    quantize,
-    prepare,
-    convert,
-    prepare_qat,
-    quantize_qat,
-    fuse_modules,
-    quantize_dynamic,
-    QuantWrapper,
-    QuantStub,
-    DeQuantStub,
-    QConfig,
-    default_qconfig,
-    default_qat_qconfig,
-    default_dynamic_qconfig,
-    per_channel_dynamic_qconfig,
-    float16_dynamic_qconfig,
-    float_qparams_weight_only_qconfig,
-    PerChannelMinMaxObserver,
-    QConfigDynamic,
-    default_dynamic_quant_observer,
-    FixedQParamsFakeQuantize,
-)
-
-from torch.testing._internal.common_quantization import (
-    QuantizationTestCase,
-    AnnotatedSingleLayerLinearModel,
-    QuantStubModel,
-    ModelForFusion,
-    ModelWithSequentialFusion,
-    ModelForLinearBNFusion,
-    ManualLinearQATModel,
-    ManualConvLinearQATModel,
-    ModelWithFunctionals,
-    ModelMultipleOps,
-    ModelMultipleOpsNoAvgPool,
-    SingleLayerLinearDynamicModel,
-    TwoLayerLinearModel,
-    NestedModel,
-    ResNetBase,
-    RNNDynamicModel,
-    RNNCellDynamicModel,
-    ModelForFusionWithBias,
-    ActivationsTestModel,
-    NormalizationTestModel,
-    test_only_eval_fn,
-    test_only_train_fn,
-    prepare_dynamic,
-    convert_dynamic,
-    skipIfNoFBGEMM,
-    EmbeddingBagModule,
-    EmbeddingModule,
-    EmbeddingWithLinear,
-)
-
-# annotated models
-from torch.testing._internal.common_quantization import (
-    AnnotatedTwoLayerLinearModel,
-    AnnotatedNestedModel,
-    AnnotatedSubNestedModel,
-    AnnotatedCustomConfigNestedModel,
-    AnnotatedSkipQuantModel,
-)
-
-from torch.testing._internal.common_quantized import (
-    override_quantized_engine,
-    supported_qengines,
-    override_qengines,
-)
-from torch.testing._internal.common_utils import TemporaryFileName
-from torch.testing._internal.common_utils import suppress_warnings
-from torch.testing._internal.jit_utils import JitTestCase
 from hypothesis import given
 from hypothesis import strategies as st
+
+import torch
+import torch.nn as nn
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.qat as nniqat
+import torch.nn.intrinsic.quantized as nniq
+import torch.nn.quantized as nnq
 import torch.testing._internal.hypothesis_utils as hu
+from torch.nn.utils.rnn import PackedSequence
+from torch.quantization import (DeQuantStub, FixedQParamsFakeQuantize,
+                                PerChannelMinMaxObserver, QConfig,
+                                QConfigDynamic, QuantStub, QuantWrapper,
+                                convert, default_dynamic_qconfig,
+                                default_dynamic_quant_observer,
+                                default_qat_qconfig, default_qconfig,
+                                float16_dynamic_qconfig,
+                                float_qparams_weight_only_qconfig,
+                                fuse_modules, per_channel_dynamic_qconfig,
+                                prepare, prepare_qat, quantize,
+                                quantize_dynamic, quantize_qat)
+# annotated models
+from torch.testing._internal.common_quantization import (
+    ActivationsTestModel, AnnotatedCustomConfigNestedModel,
+    AnnotatedNestedModel, AnnotatedSingleLayerLinearModel,
+    AnnotatedSkipQuantModel, AnnotatedSubNestedModel,
+    AnnotatedTwoLayerLinearModel, EmbeddingBagModule, EmbeddingModule,
+    EmbeddingWithLinear, ManualConvLinearQATModel, ManualLinearQATModel,
+    ModelForFusion, ModelForFusionWithBias, ModelForLinearBNFusion,
+    ModelMultipleOps, ModelMultipleOpsNoAvgPool, ModelWithFunctionals,
+    ModelWithSequentialFusion, NestedModel, NormalizationTestModel,
+    QuantizationTestCase, QuantStubModel, ResNetBase, RNNCellDynamicModel,
+    RNNDynamicModel, SingleLayerLinearDynamicModel, TwoLayerLinearModel,
+    convert_dynamic, prepare_dynamic, skipIfNoFBGEMM, test_only_eval_fn,
+    test_only_train_fn)
+from torch.testing._internal.common_quantized import (
+    override_qengines, override_quantized_engine, supported_qengines)
+from torch.testing._internal.common_utils import (TemporaryFileName,
+                                                  suppress_warnings)
+from torch.testing._internal.jit_utils import JitTestCase
+
 hu.assert_deadline_disabled()
 
-# Standard library
-from typing import Tuple
 import copy
 import io
 import unittest
+# Standard library
+from typing import Tuple
+
 import numpy as np
+
 
 class TestPostTrainingStatic(QuantizationTestCase):
 

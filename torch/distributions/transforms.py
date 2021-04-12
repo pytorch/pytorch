@@ -11,8 +11,7 @@ from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        lazy_property, tril_matrix_to_vec,
                                        vec_to_tril_matrix)
-from torch.nn.functional import pad
-from torch.nn.functional import softplus
+from torch.nn.functional import pad, softplus
 
 __all__ = [
     'AbsTransform',

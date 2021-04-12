@@ -1,22 +1,17 @@
-from torch.testing._internal.jit_utils import JitTestCase
 import io
 import os
 import sys
 import unittest
+from pathlib import Path
 
 import torch
 import torch._C
 from torch.testing import FileCheck
-from pathlib import Path
+from torch.testing._internal.common_utils import (IS_FBCODE, IS_MACOS,
+                                                  IS_SANDCASTLE, IS_WINDOWS,
+                                                  TEST_WITH_ROCM, skipIfRocm)
+from torch.testing._internal.jit_utils import JitTestCase
 
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    TEST_WITH_ROCM,
-    skipIfRocm,
-)
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)

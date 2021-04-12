@@ -137,13 +137,13 @@ will not pass ``--local_rank`` when you specify this flag.
 """
 
 
-import time
-import signal
-import sys
-import subprocess
 import os
-from argparse import ArgumentParser, REMAINDER
-from typing import Optional, IO, List, Any
+import signal
+import subprocess
+import sys
+import time
+from argparse import REMAINDER, ArgumentParser
+from typing import IO, Any, List, Optional
 
 node_local_rank_stdout_filename = "node_{}_local_rank_{}_stdout"
 node_local_rank_stderr_filename = "node_{}_local_rank_{}_stderr"

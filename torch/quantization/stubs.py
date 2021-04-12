@@ -1,6 +1,7 @@
 
 from torch import nn
 
+
 class QuantStub(nn.Module):
     r"""Quantize stub module, before calibration, this is same as an observer,
     it will be swapped as `nnq.Quantize` in `convert`.

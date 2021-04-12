@@ -1,9 +1,10 @@
 import functools
 import os
 import warnings
+from typing import (Any, Callable, Dict, Iterator, List, Optional, Sized,
+                    Tuple, TypeVar)
 
 from torch.utils.data import IterDataPipe, functional_datapipe
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
 

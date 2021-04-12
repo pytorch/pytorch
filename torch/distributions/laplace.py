@@ -1,4 +1,5 @@
 from numbers import Number
+
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution

@@ -10,7 +10,6 @@ import unittest
 
 import torch.distributed.elastic.utils.logging as logging
 
-
 log = logging.get_logger()
 
 

@@ -5,12 +5,13 @@
 
 import errno
 import os
-import tempfile
 import shutil
+import tempfile
 
-from caffe2.distributed.python import StoreHandlerTimeoutError  # type: ignore[import]
+from caffe2.distributed.python import \
+    StoreHandlerTimeoutError  # type: ignore[import]
 from caffe2.distributed.store_ops_test_util import StoreOpsTests
-from caffe2.python import core, workspace, dyndep
+from caffe2.python import core, dyndep, workspace
 from caffe2.python.test_util import TestCase
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")

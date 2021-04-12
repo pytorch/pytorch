@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
 import argparse
-import sys
 import os
+import sys
+
 from tools.codegen.code_template import CodeTemplate
 
 H_NAME = "glsl.h"

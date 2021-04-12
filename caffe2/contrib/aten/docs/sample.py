@@ -1,11 +1,11 @@
 import numpy as np
-
-from torch import nn
-from torch.autograd import Variable, Function
-import torch.onnx
-
 import onnx
+
 import caffe2.python.onnx.backend
+import torch.onnx
+from torch import nn
+from torch.autograd import Function, Variable
+
 
 class MyFunction(Function):
     @staticmethod

@@ -1,9 +1,8 @@
-from tools.codegen.model import *
+from typing import List, Optional, Sequence, Union
 
-from tools.codegen.api.types import *
 from tools.codegen.api import cpp
-
-from typing import Union, Sequence, List, Optional
+from tools.codegen.api.types import *
+from tools.codegen.model import *
 
 # This file describes the translation of JIT schema to the native functions API.
 # This looks a lot like the C++ API (which makes historical sense, because the

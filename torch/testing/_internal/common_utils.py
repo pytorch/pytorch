@@ -5,57 +5,56 @@ no CUDA calls shall be made, including torch.cuda.device_count(), etc.
 torch.testing._internal.common_cuda.py can freely initialize CUDA context when imported.
 """
 
-import sys
-import os
-import platform
-import re
+import argparse
+import contextlib
+import copy
+import datetime
+import errno
 import gc
-import types
-import math
-from functools import partial
 import inspect
 import io
-import copy
+import json
+import math
 import operator
-import argparse
-import unittest
-import warnings
-import random
-import contextlib
-import shutil
-import datetime
+import os
 import pathlib
+import platform
+import random
+import re
+import shutil
 import socket
 import subprocess
+import sys
+import tempfile
 import time
+import types
+import unittest
+import warnings
 from collections import OrderedDict
 from collections.abc import Sequence
-from contextlib import contextmanager, closing
-from functools import wraps
-from itertools import product
+from contextlib import closing, contextmanager
 from copy import deepcopy
+from enum import Enum
+from functools import partial, wraps
+from itertools import product
 from numbers import Number
-import tempfile
-import json
+from typing import Any, Dict, Iterable, Iterator, Optional, cast
 from urllib.request import urlopen
-import __main__  # type: ignore[import]
-import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional
 
+import __main__  # type: ignore[import]
 import numpy as np
 
-from torch.testing import floating_types_and, integral_types, complex_types
-from torch.testing._internal import expecttest
-from .._core import \
-    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
-
 import torch
-import torch.cuda
-from torch._utils_internal import get_writable_path
-from torch._six import string_classes
 import torch.backends.cudnn
 import torch.backends.mkl
-from enum import Enum
+import torch.cuda
+from torch._six import string_classes
+from torch._utils_internal import get_writable_path
+from torch.testing import complex_types, floating_types_and, integral_types
+from torch.testing._internal import expecttest
+
+from .._core import (_compare_return_type, _compare_scalars_internal,
+                     _compare_tensors_internal)
 
 torch.backends.disable_global_flags()
 
@@ -744,7 +743,8 @@ class CudaMemoryLeakCheck():
 
         # initialize context & RNG to prevent false positive detections
         # when the test is the first to initialize those
-        from torch.testing._internal.common_cuda import initialize_cuda_context_rng
+        from torch.testing._internal.common_cuda import \
+            initialize_cuda_context_rng
         initialize_cuda_context_rng()
 
     @staticmethod
@@ -1585,8 +1585,8 @@ class TestCase(expecttest.TestCase):
 
 
 def download_file(url, binary=True):
+    from urllib import error, request
     from urllib.parse import urlsplit
-    from urllib import request, error
 
     filename = os.path.basename(urlsplit(url)[2])
     data_dir = get_writable_path(os.path.join(os.path.dirname(__file__), 'data'))

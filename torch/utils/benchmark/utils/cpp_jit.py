@@ -10,9 +10,9 @@ import uuid
 from typing import Any, List, Optional
 
 import torch
-from torch.utils.benchmark.utils._stubs import CallgrindModuleType, TimeitModuleType
 from torch.utils import cpp_extension
-
+from torch.utils.benchmark.utils._stubs import (CallgrindModuleType,
+                                                TimeitModuleType)
 
 LOCK = threading.Lock()
 SOURCE_ROOT = os.path.split(os.path.abspath(__file__))[0]

@@ -1,14 +1,10 @@
-import enum
-import struct
 import array
+import enum
 import logging
-from typing import (
-    Tuple,
-    NamedTuple,
-)
+import struct
+from typing import NamedTuple, Tuple
 
 import torch
-
 
 # TODO: Add type annotations
 # TODO: Check tensor types for ops

@@ -23,21 +23,17 @@ import torch
 import torch.distributed as dist
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 import torch.distributed.rpc as rpc
-from torch.distributed.elastic.agent.server.api import (
-    RunResult,
-    WorkerSpec,
-    WorkerState,
-)
-from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
+from torch.distributed.elastic.agent.server.api import (RunResult, WorkerSpec,
+                                                        WorkerState)
+from torch.distributed.elastic.agent.server.local_elastic_agent import \
+    LocalElasticAgent
 from torch.distributed.elastic.multiprocessing import Std
-from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
+from torch.distributed.elastic.multiprocessing.errors import (ChildFailedError,
+                                                              record)
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.rpc.backend_registry import BackendType
-from torch.testing._internal.common_utils import (
-    TEST_WITH_ASAN,
-    TEST_WITH_TSAN,
-)
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_TSAN
 
 
 def init_rpc(name, backend):

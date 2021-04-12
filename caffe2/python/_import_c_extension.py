@@ -3,6 +3,7 @@
 import atexit
 import logging
 import sys
+
 from caffe2.python import extension_loader
 
 # We will first try to load the gpu-enabled caffe2. If it fails, we will then
@@ -21,6 +22,7 @@ with extension_loader.DlopenGuard():
         logging.info('Failed to import cuda module: {}'.format(gpu_e))
         try:
             from caffe2.python.caffe2_pybind11_state_hip import *  # noqa
+
             # we stop checking whether we have AMD GPU devices on the host,
             # because we may be constructing a net on a machine without GPU,
             # and run the net on another one with GPU

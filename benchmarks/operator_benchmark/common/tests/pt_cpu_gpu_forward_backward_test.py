@@ -1,6 +1,6 @@
 import operator_benchmark as op_bench
-import torch
 
+import torch
 
 add_configs = op_bench.cross_product_configs(
     M=[8],

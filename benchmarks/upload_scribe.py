@@ -7,12 +7,13 @@ checking is only here to encourage reusing existing fields and avoiding typos.
 """
 
 import argparse
-import time
 import json
 import os
-import requests
 import subprocess
+import time
 from collections import defaultdict
+
+import requests
 
 
 class ScribeUploader:

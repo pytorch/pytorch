@@ -6,13 +6,14 @@
 # LICENSE file in the root directory of this source tree.
 """The Pipe interface."""
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union, cast, Sequence
+from typing import (TYPE_CHECKING, Any, Iterable, List, Optional, Sequence,
+                    Tuple, Union, cast)
 
 import torch
-from torch import Tensor, nn
-from torch.distributed.rpc import RRef
 import torch.autograd
 import torch.cuda
+from torch import Tensor, nn
+from torch.distributed.rpc import RRef
 
 from . import microbatch
 from .batchnorm import DeferredBatchNorm

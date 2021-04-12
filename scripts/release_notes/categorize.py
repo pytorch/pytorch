@@ -1,8 +1,10 @@
 import argparse
 import os
 import textwrap
-from common import categories, topics, CommitDataCache
+
 from commitlist import CommitList
+from common import CommitDataCache, categories, topics
+
 
 class Categorizer:
     def __init__(self, path, category='Uncategorized'):

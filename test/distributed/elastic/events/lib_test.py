@@ -9,7 +9,8 @@ import logging
 import unittest
 from unittest.mock import patch
 
-from torch.distributed.elastic.events import _get_or_create_logger, Event, EventSource
+from torch.distributed.elastic.events import (Event, EventSource,
+                                              _get_or_create_logger)
 
 
 class EventLibTest(unittest.TestCase):

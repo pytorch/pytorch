@@ -1,5 +1,6 @@
 
 import sys
+
 import torch
 
 
@@ -11,19 +12,13 @@ if is_available() and not torch._C._dist_autograd_init():
     raise RuntimeError("Failed to initialize torch.distributed.autograd")
 
 if is_available():
-    from torch._C._distributed_autograd import (
-        get_gradients,
-        backward,
-        _init,
-        _new_context,
-        _release_context,
-        _get_max_id,
-        _is_valid_context,
-        _retrieve_context,
-        _current_context,
-        _get_debug_info,
-        DistAutogradContext,
-    )
+    from torch._C._distributed_autograd import (DistAutogradContext,
+                                                _current_context,
+                                                _get_debug_info, _get_max_id,
+                                                _init, _is_valid_context,
+                                                _new_context, _release_context,
+                                                _retrieve_context, backward,
+                                                get_gradients)
 
 class context(object):
     '''

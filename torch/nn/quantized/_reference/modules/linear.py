@@ -1,7 +1,9 @@
-import torch
-import torch.nn.quantized as nnq
-import torch.nn.functional as F
 from typing import Optional
+
+import torch
+import torch.nn.functional as F
+import torch.nn.quantized as nnq
+
 
 class Linear(nnq.Linear):
     """ A backend independent version of nn.quantized.Linear

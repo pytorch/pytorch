@@ -1,9 +1,9 @@
-from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
-from . import constants as rpc_contants
+from typing import Dict, List
 
 import torch
+from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
 
-from typing import Dict, List
+from . import constants as rpc_contants
 
 
 class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):

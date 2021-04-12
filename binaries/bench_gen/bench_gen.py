@@ -3,9 +3,9 @@
 import argparse
 import ast
 
+from caffe2.python import brew, workspace
 from caffe2.python.model_helper import ModelHelper
 from caffe2.python.predictor import mobile_exporter
-from caffe2.python import workspace, brew
 
 
 def parse_kwarg(kwarg_str):

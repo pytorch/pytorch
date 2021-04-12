@@ -5,10 +5,8 @@ import itertools
 import torch
 from torch.autograd.profiler import profile
 
-from . import (
-    _disable_server_process_global_profiler,
-    _enable_server_process_global_profiler,
-)
+from . import (_disable_server_process_global_profiler,
+               _enable_server_process_global_profiler)
 
 
 class _server_process_global_profile(profile):

@@ -1,17 +1,7 @@
 #!/usr/bin/python3
 import types
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterator,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import (Any, Callable, Dict, Iterator, List, Optional, Set, Tuple,
+                    TypeVar, Union)
 
 import torch
 import torch.distributed.rpc as rpc
@@ -21,7 +11,6 @@ from torch.distributed.rpc.utils import _parse_remote_device
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
-
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use

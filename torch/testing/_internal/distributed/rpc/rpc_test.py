@@ -4,45 +4,36 @@ import json
 import logging
 import os
 import sys
-from threading import Event
-from threading import Lock
 import time
 import unittest
 from collections import namedtuple
 from functools import partial
+from threading import Event, Lock
 from unittest import mock
 
 import torch
 import torch.distributed as dist
-import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
-from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
-from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all
-from torch.distributed.rpc.internal import (
-    PythonUDF,
-    RPCExecMode,
-    _internal_rpc_pickler,
-    _build_rpc_profiling_key,
-)
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
-    captured_output,
-)
-from torch.testing._internal.common_utils import IS_MACOS, load_tests
+import torch.distributed.rpc as rpc
+from torch.distributed.rpc import (RRef, _get_debug_info,
+                                   _rref_context_get_debug_info)
+from torch.distributed.rpc.api import (
+    _delete_all_user_and_unforked_owner_rrefs, _thread_local_var,
+    _use_rpc_pickler, _wait_all)
+from torch.distributed.rpc.internal import (PythonUDF, RPCExecMode,
+                                            _build_rpc_profiling_key,
+                                            _internal_rpc_pickler)
+from torch.testing._internal.common_distributed import (captured_output,
+                                                        skip_if_lt_x_gpu)
+from torch.testing._internal.common_utils import (IS_MACOS, TemporaryFileName,
+                                                  load_tests)
 from torch.testing._internal.dist_utils import (
-    dist_init,
-    get_function_event,
-    initialize_pg,
-    wait_until_node_failure,
-    wait_until_pending_futures_and_users_flushed,
+    dist_init, get_function_event, initialize_pg,
+    single_threaded_process_group_agent, wait_until_node_failure,
     wait_until_owners_and_forks_on_rank,
-    worker_name,
-    single_threaded_process_group_agent,
-)
-from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
-    RpcAgentTestFixture,
-)
-from torch.testing._internal.common_utils import TemporaryFileName
+    wait_until_pending_futures_and_users_flushed, worker_name)
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import \
+    RpcAgentTestFixture
 
 
 def foo_add():

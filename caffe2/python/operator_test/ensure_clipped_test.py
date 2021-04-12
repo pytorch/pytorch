@@ -1,11 +1,12 @@
 
 
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
-from caffe2.python import core, workspace
 from hypothesis import given
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, workspace
 
 
 class TestEnsureClipped(hu.HypothesisTestCase):

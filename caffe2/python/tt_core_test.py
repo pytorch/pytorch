@@ -3,11 +3,12 @@
 
 
 
-import numpy as np
 import unittest
 
-from caffe2.python import core, workspace, tt_core
+import numpy as np
+
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, tt_core, workspace
 
 
 class TestTTSVD(hu.HypothesisTestCase):

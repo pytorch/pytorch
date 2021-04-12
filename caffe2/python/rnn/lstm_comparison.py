@@ -2,8 +2,10 @@
 
 
 
-from caffe2.python import workspace, core, lstm_benchmark, utils
 from copy import copy
+
+from caffe2.python import core, lstm_benchmark, utils, workspace
+
 
 @utils.debug
 def Compare(args):

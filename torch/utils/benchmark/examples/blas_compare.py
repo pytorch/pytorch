@@ -4,18 +4,17 @@ import itertools as it
 import multiprocessing
 import multiprocessing.dummy
 import os
-import queue
 import pickle
+import queue
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-from typing import Tuple, Dict
+from typing import Dict, Tuple
 
 from . import blas_compare_setup
-
 
 MIN_RUN_TIME = 1
 NUM_REPLICATES = 20

@@ -1,7 +1,9 @@
-import torch
-from pathlib import Path
-from scipy import sparse
 import math
+from pathlib import Path
+
+from scipy import sparse
+
+import torch
 
 
 def to_coo_scipy(x):

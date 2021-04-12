@@ -1,13 +1,14 @@
-import torch
 import numbers
+from typing import List, Tuple, Union
+
+import torch
+from torch import Size, Tensor
 from torch.nn.parameter import Parameter
-from .module import Module
-from ._functions import CrossMapLRN2d as _cross_map_lrn2d
+
 from .. import functional as F
 from .. import init
-
-from torch import Tensor, Size
-from typing import Union, List, Tuple
+from ._functions import CrossMapLRN2d as _cross_map_lrn2d
+from .module import Module
 
 
 class LocalResponseNorm(Module):

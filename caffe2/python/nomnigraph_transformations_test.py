@@ -3,14 +3,15 @@
 
 
 
-from caffe2.python import core, workspace
-from caffe2.python import test_util as tu
-import caffe2.python.nomnigraph as ng
-from caffe2.python.nomnigraph_transformations import transpose_network
-
+import hypothesis.strategies as st
 import numpy as np
 from hypothesis import given
-import hypothesis.strategies as st
+
+import caffe2.python.nomnigraph as ng
+from caffe2.python import core
+from caffe2.python import test_util as tu
+from caffe2.python import workspace
+from caffe2.python.nomnigraph_transformations import transpose_network
 
 
 class TestNomnigraphTransformations(tu.TestCase):

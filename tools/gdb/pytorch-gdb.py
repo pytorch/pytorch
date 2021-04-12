@@ -1,5 +1,7 @@
-import gdb
 import textwrap
+
+import gdb
+
 
 class DisableBreakpoints:
     """

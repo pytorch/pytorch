@@ -1,5 +1,6 @@
-import torch
 from typing import Any
+
+import torch
 # The _get_device_index has been moved to torch.utils._get_device_index
 from torch._utils import _get_device_index as _torch_get_device_index
 

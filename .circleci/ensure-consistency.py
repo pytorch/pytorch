@@ -7,7 +7,6 @@ import tempfile
 
 import generate_config_yml
 
-
 CHECKED_IN_FILE = "config.yml"
 REGENERATION_SCRIPT = "regenerate.sh"
 

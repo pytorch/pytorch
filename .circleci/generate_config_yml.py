@@ -12,6 +12,7 @@ from collections import namedtuple
 
 import cimodel.data.binary_build_definitions as binary_build_definitions
 import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
+import cimodel.data.simple.anaconda_prune_defintions
 import cimodel.data.simple.android_definitions
 import cimodel.data.simple.bazel_definitions
 import cimodel.data.simple.binary_smoketest
@@ -22,7 +23,6 @@ import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
-import cimodel.data.simple.anaconda_prune_defintions
 import cimodel.data.windows_build_definitions as windows_build_definitions
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.miniyaml as miniyaml

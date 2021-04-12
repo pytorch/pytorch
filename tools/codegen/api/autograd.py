@@ -1,11 +1,12 @@
-from dataclasses import dataclass
 import re
-from typing import Optional, Sequence, List, Tuple
+from dataclasses import dataclass
+from typing import List, Optional, Sequence, Tuple
 
 from tools.codegen.api import cpp
 from tools.codegen.api.types import *
 from tools.codegen.model import *
 from tools.codegen.utils import IDENT_REGEX
+
 
 # Represents a saved attribute involved in backward calculation.
 # Note that it can be a derived property of an input argument, e.g.:

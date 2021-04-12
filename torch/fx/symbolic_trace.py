@@ -3,18 +3,20 @@ import functools
 import inspect
 import math
 import os
-from types import CodeType, FunctionType, ModuleType
-from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
+import sys
 from itertools import chain
+from types import CodeType, FunctionType, ModuleType
+from typing import (Any, Callable, Dict, List, NamedTuple, Optional, Set,
+                    Tuple, Union)
+
 import torch
 import torch._C._fx  # type: ignore
 from torch._C import ScriptObject  # type: ignore
 
-import sys
-from .node import Argument, map_aggregate
 from .graph import Graph
 from .graph_module import GraphModule
-from .proxy import TracerBase, Proxy
+from .node import Argument, map_aggregate
+from .proxy import Proxy, TracerBase
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 

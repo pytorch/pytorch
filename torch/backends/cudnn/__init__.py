@@ -1,8 +1,10 @@
 import sys
-import torch
 import warnings
 from contextlib import contextmanager
-from torch.backends import ContextProp, PropModule, __allow_nonbracketed_mutation
+
+import torch
+from torch.backends import (ContextProp, PropModule,
+                            __allow_nonbracketed_mutation)
 
 try:
     from torch._C import _cudnn

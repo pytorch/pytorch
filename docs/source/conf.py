@@ -17,12 +17,14 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
+
+import torch
+
 # import sys
 
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
 
-import torch
 
 try:
     import torchvision  # noqa: F401
@@ -267,6 +269,7 @@ def setup(app):
 
 from sphinx.writers import html, html5
 
+
 def replace(Klass):
     old_call = Klass.visit_reference
 
@@ -355,10 +358,10 @@ intersphinx_mapping = {
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------
 # See http://stackoverflow.com/a/41184353/3343043
 
-from docutils import nodes
-from sphinx.util.docfields import TypedField
-from sphinx import addnodes
 import sphinx.ext.doctest
+from docutils import nodes
+from sphinx import addnodes
+from sphinx.util.docfields import TypedField
 
 # Without this, doctest adds any example with a `>>>` as a test
 doctest_test_doctest_blocks = ''

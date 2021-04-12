@@ -1,13 +1,12 @@
 import atexit
-import shutil
 import re
+import shutil
 import tempfile
 import textwrap
 from typing import List, Optional, Tuple
 
 from core.api import GroupedBenchmark, TimerArgs
 from core.types import Definition, FlatIntermediateDefinition, Label
-
 
 _TEMPDIR: Optional[str] = None
 def get_temp_dir() -> str:

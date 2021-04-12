@@ -5,13 +5,13 @@
 
 
 
-from caffe2.proto import caffe2_pb2
-from onnx.backend.base import namedtupledict
-
-from caffe2.python.onnx.workspace import Workspace
 import logging
 import time
 
+from onnx.backend.base import namedtupledict
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python.onnx.workspace import Workspace
 
 log = logging.getLogger(__name__)
 

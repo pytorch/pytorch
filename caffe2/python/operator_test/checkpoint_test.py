@@ -3,11 +3,12 @@
 
 
 
-from caffe2.python import core, workspace, test_util
 import os
 import shutil
 import tempfile
 import unittest
+
+from caffe2.python import core, test_util, workspace
 
 
 class CheckpointTest(test_util.TestCase):

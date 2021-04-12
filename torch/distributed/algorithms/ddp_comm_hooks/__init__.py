@@ -4,11 +4,9 @@ from functools import partial
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
-from . import (
-    default_hooks as default,
-    powerSGD_hook as powerSGD,
-    quantization_hooks as quantization,
-)
+from . import default_hooks as default
+from . import powerSGD_hook as powerSGD
+from . import quantization_hooks as quantization
 
 
 def _ddp_comm_hook_wrapper(comm_hook, model, state):

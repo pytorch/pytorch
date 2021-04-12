@@ -4,12 +4,14 @@
 
 
 import unittest
-from hypothesis import given
+
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, workspace
+from hypothesis import given
+
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
+from caffe2.python import core, workspace
 
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")

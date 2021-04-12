@@ -1,12 +1,13 @@
 import argparse
 import glob
-import onnx.backend.test
 import os
 import shutil
-from test_caffe2_common import run_generated_test
-import google.protobuf.text_format
-import test_onnx_common
 import traceback
+
+import google.protobuf.text_format
+import onnx.backend.test
+import test_onnx_common
+from test_caffe2_common import run_generated_test
 
 _fail_test_dir = os.path.join(os.path.dirname(
     os.path.realpath(__file__)), "fail", "generated")

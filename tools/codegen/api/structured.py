@@ -1,9 +1,8 @@
-from tools.codegen.model import *
+from typing import List, Union
 
-from tools.codegen.api.types import *
 from tools.codegen.api import cpp
-
-from typing import Union, List
+from tools.codegen.api.types import *
+from tools.codegen.model import *
 
 # This file describes the translation of JIT schema to the structured functions API.
 # This is similar to native API, but a number of historical problems with native

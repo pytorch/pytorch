@@ -3,13 +3,14 @@
 
 
 
-from caffe2.python import core, test_util
-from caffe2.proto import caffe2_pb2
-import caffe2.python.nomnigraph as ng
-
-from hypothesis import given
-import hypothesis.strategies as st
 import random
+
+import hypothesis.strategies as st
+from hypothesis import given
+
+import caffe2.python.nomnigraph as ng
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, test_util
 
 
 class TestBindings(test_util.TestCase):

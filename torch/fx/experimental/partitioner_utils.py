@@ -1,6 +1,9 @@
-from typing import NamedTuple, Dict, List, Set
-from torch.fx.node import Node, map_arg
 from enum import Enum
+from typing import Dict, List, NamedTuple, Set
+
+from torch.fx.node import Node, map_arg
+
+
 class Partition:
     """Partition class contains all the information about an individual partition.
     It also provides necessary methods for manipulation the partition.

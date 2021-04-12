@@ -4,19 +4,18 @@
 
 
 
-from collections import OrderedDict
-from future.utils import viewitems, viewkeys, viewvalues
-import logging
 import copy
-
+import logging
+import warnings
+from collections import OrderedDict
 from multiprocessing import cpu_count
 
-from caffe2.python import \
-    model_helper, dyndep, scope, workspace, core, memonger, utils
-from caffe2.proto import caffe2_pb2
-
 import numpy as np
-import warnings
+from future.utils import viewitems, viewkeys, viewvalues
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import (core, dyndep, memonger, model_helper, scope, utils,
+                           workspace)
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops")
 

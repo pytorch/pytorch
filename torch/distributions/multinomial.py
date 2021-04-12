@@ -1,8 +1,7 @@
 import torch
 from torch._six import inf
+from torch.distributions import Categorical, constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions import Categorical
-from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all
 
 

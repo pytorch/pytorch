@@ -1,23 +1,17 @@
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
 import torch
 from torch.fx import GraphModule, map_arg
 from torch.fx.graph import Graph, Node
 from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.fx.utils import get_new_attr_name_with_prefix
 
-from .utils import (
-    get_node_first_input_and_output_type,
-    getattr_from_fqn,
-    NodeInputOrOutputType,
-    return_first_non_observer_node,
-    get_number_of_non_param_args,
-)
+from .ns_types import NSSingleResultValuesType, NSSubgraph
+from .utils import (NodeInputOrOutputType,
+                    get_node_first_input_and_output_type,
+                    get_number_of_non_param_args, getattr_from_fqn,
+                    return_first_non_observer_node)
 
-from .ns_types import (
-    NSSingleResultValuesType,
-    NSSubgraph,
-)
-
-from typing import Dict, Tuple, Callable, List, Any, Union, Optional
 
 def _insert_logger_after_node(
     node: Node,

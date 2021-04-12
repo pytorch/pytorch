@@ -1,15 +1,12 @@
 import itertools
-from typing import Any
+import math
+from collections import defaultdict, namedtuple
+from operator import attrgetter
+from typing import Any, Dict, List, Optional, Tuple
+
 import torch
 from torch.autograd import DeviceType
 from torch.futures import Future
-
-from collections import defaultdict, namedtuple
-from operator import attrgetter
-
-from typing import Dict, List, Tuple, Optional
-
-import math
 
 try:
     # Available in Python >= 3.2

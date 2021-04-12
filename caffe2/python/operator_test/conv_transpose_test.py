@@ -2,14 +2,14 @@
 
 
 
+import hypothesis.strategies as st
 import numpy as np
 from hypothesis import assume, given, settings
-import hypothesis.strategies as st
 
+import caffe2.python.hip_test_util as hiputl
+import caffe2.python.hypothesis_test_util as hu
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, utils
-import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.hip_test_util as hiputl
 
 
 class TestConvolutionTranspose(hu.HypothesisTestCase):

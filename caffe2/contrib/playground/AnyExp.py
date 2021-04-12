@@ -3,22 +3,20 @@
 
 
 
-from abc import abstractmethod
-
-from caffe2.python import workspace
-from caffe2.python import timeout_guard
-from caffe2.python import data_parallel_model
-from . import checkpoint as checkpoint
-
-from . import ModuleRegister as ModuleRegister
-from . import module_map as module_map
-
+import inspect
+import logging
 # instantiate logger outside of distributed operators may trigger error
 # logger need to be created in each idividual operator instead.
 import os
-import inspect
 import time
-import logging
+from abc import abstractmethod
+
+from caffe2.python import data_parallel_model, timeout_guard, workspace
+
+from . import ModuleRegister as ModuleRegister
+from . import checkpoint as checkpoint
+from . import module_map as module_map
+
 logging.basicConfig()
 log = logging.getLogger("AnyExp")
 log.setLevel(logging.DEBUG)

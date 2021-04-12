@@ -1,24 +1,26 @@
-import sys
 import os
+import random
 import re
 import shutil
-import random
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
+from urllib.error import URLError
+
 import torch
-import torch.nn as nn
-import torch.utils.data
-from torch.utils.data import DataLoader
 import torch.cuda
-from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-import torch.utils.cpp_extension
 import torch.hub as hub
+import torch.nn as nn
+import torch.utils.cpp_extension
+import torch.utils.data
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS
-from urllib.error import URLError
+from torch.testing._internal.common_utils import (IS_SANDCASTLE, IS_WINDOWS,
+                                                  load_tests, retry)
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+from torch.utils.data import DataLoader
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -410,7 +412,8 @@ test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 class TestFFI(TestCase):
     def test_deprecated(self):
         with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension  # type: ignore  # noqa: F401
+            from torch.utils.ffi import \
+                create_extension  # type: ignore  # noqa: F401
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
@@ -704,7 +707,7 @@ class TestHub(TestCase):
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
-        from torch.utils.hipify import hipify_python # noqa
+        from torch.utils.hipify import hipify_python  # noqa
 
 
 class TestAssert(TestCase):

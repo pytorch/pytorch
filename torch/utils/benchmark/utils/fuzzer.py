@@ -3,8 +3,8 @@ import itertools as it
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-import torch
 
+import torch
 
 __all__ = [
     "Fuzzer",

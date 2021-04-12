@@ -67,15 +67,8 @@ import os
 from typing import Callable, Dict, Tuple, Union
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa F401
-    MultiprocessContext,
-    PContext,
-    ProcessFailure,
-    RunProcsResult,
-    Std,
-    SubprocessContext,
-    _validate_full_rank,
-    to_map,
-)
+    MultiprocessContext, PContext, ProcessFailure, RunProcsResult, Std,
+    SubprocessContext, _validate_full_rank, to_map)
 
 
 def start_processes(

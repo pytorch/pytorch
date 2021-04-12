@@ -3,8 +3,10 @@ import ast
 import inspect
 import sys
 import textwrap
-import torch
 import warnings
+
+import torch
+
 
 class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
     """

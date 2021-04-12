@@ -2,16 +2,15 @@
 
 import functools
 
-import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import HealthCheck, given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from caffe2.python import core
 from caffe2.python.operator_test.adagrad_test_helper import (
-    adagrad_sparse_test_helper,
-    ref_adagrad,
-)
-from hypothesis import HealthCheck, given, settings
+    adagrad_sparse_test_helper, ref_adagrad)
 
 
 class TestAdagrad(serial.SerializedTestCase):

@@ -1,22 +1,21 @@
+from typing import List, Optional, Sequence, Tuple
+
 from tools.codegen.api import cpp
 from tools.codegen.api.autograd import (
-    NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
-    dispatch_strategy,
-)
-from tools.codegen.api.types import Binding, DispatcherSignature, CppSignatureGroup
+    NativeFunctionWithDifferentiabilityInfo, dispatch_strategy,
+    gen_differentiable_outputs)
+from tools.codegen.api.types import (Binding, CppSignatureGroup,
+                                     DispatcherSignature)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
-from tools.codegen.model import (
-    Type, NativeFunction, SelfArgument, TensorOptionsArguments, Variant,
-    SchemaKind, is_foreach_op,
-)
-from typing import List, Optional, Sequence, Tuple
 from tools.codegen.gen import FileManager
+from tools.codegen.model import (NativeFunction, SchemaKind, SelfArgument,
+                                 TensorOptionsArguments, Type, Variant,
+                                 is_foreach_op)
 from tools.codegen.utils import mapMaybe
-from .gen_trace_type import (
-    MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
-)
 
+from .gen_trace_type import (MANUAL_AUTOGRAD, get_return_value,
+                             tie_return_values, type_wrapper_name)
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,

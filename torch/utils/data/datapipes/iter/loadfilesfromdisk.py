@@ -1,7 +1,10 @@
-from torch.utils.data import IterDataPipe
-from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames
-from typing import Iterable, Iterator, Tuple
 from io import BufferedIOBase
+from typing import Iterable, Iterator, Tuple
+
+from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.utils.common import \
+    get_file_binaries_from_pathnames
+
 
 class LoadFilesFromDiskIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     r""" :class:`LoadFilesFromDiskIterDataPipe`.

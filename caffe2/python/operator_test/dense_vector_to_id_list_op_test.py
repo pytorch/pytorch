@@ -3,13 +3,13 @@
 
 
 
-from caffe2.python import core
-from hypothesis import given
-import caffe2.python.hypothesis_test_util as hu
-
 import hypothesis.extra.numpy as hnp
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core
 
 
 @st.composite

@@ -9,9 +9,9 @@ and it will directly output root ops as the allowlist.
 """
 
 import argparse
-import yaml
-
 from collections import defaultdict
+
+import yaml
 
 
 def canonical_name(opname):

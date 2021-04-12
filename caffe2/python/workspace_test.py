@@ -3,19 +3,19 @@
 
 
 
-import numpy as np
 import os
 import shutil
 import tempfile
 import unittest
 
-import torch
-from caffe2.proto import caffe2_pb2
-from caffe2.python import core, test_util, workspace, model_helper, brew
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as htu
-import hypothesis.strategies as st
-from hypothesis import given, settings
+import torch
+from caffe2.proto import caffe2_pb2
+from caffe2.python import brew, core, model_helper, test_util, workspace
 
 
 class TestWorkspace(unittest.TestCase):

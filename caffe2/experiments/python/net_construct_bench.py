@@ -24,10 +24,8 @@ import argparse
 import logging
 import time
 
-from caffe2.python import workspace, data_parallel_model
-from caffe2.python import cnn
-
 import caffe2.python.models.resnet as resnet
+from caffe2.python import cnn, data_parallel_model, workspace
 
 '''
 Simple benchmark that creates a data-parallel resnet-50 model

@@ -1,5 +1,6 @@
 import torch
 
+
 @torch.jit.script
 class MyScriptClass:  # flake8: noqa
     """Intended to be scripted."""

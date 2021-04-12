@@ -1,9 +1,10 @@
+from typing import Callable, Dict, Optional, Tuple, Type, Union
+
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 
-from typing import Union, Callable, Tuple, Dict, Optional, Type
-
 from .utils import get_combined_dict
+
 
 def fuse_conv_bn(conv, bn):
     r"""Given the conv and bn modules, fuses them and returns the fused module

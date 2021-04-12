@@ -3,10 +3,10 @@
 
 
 
-from caffe2.python import scope
-
 import contextlib
 import logging
+
+from caffe2.python import scope
 
 logger = logging.getLogger(__name__)
 

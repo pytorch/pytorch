@@ -1,4 +1,5 @@
-from typing import Dict, Tuple, List
+from typing import Dict, List, Tuple
+
 
 def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, float]) -> List[Tuple[float, List[str]]]:
     filtered_job_times: Dict[str, float] = dict()

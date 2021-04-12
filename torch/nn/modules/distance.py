@@ -1,7 +1,7 @@
-from .module import Module
-from .. import functional as F
-
 from torch import Tensor
+
+from .. import functional as F
+from .module import Module
 
 
 class PairwiseDistance(Module):

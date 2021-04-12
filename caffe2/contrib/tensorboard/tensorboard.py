@@ -3,23 +3,25 @@
 
 
 
-import click
 import collections
 import logging
-import numpy as np
 import os
 
+import click
+import numpy as np
+
+import caffe2.contrib.tensorboard.tensorboard_exporter as tb_exporter
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
-import caffe2.contrib.tensorboard.tensorboard_exporter as tb_exporter
 
 try:
     # tensorboard>=1.14.0
-    from tensorboard.compat.proto.summary_pb2 import Summary, HistogramProto
     from tensorboard.compat.proto.event_pb2 import Event
-    from tensorboard.summary.writer.event_file_writer import EventFileWriter as FileWriter
+    from tensorboard.compat.proto.summary_pb2 import HistogramProto, Summary
+    from tensorboard.summary.writer.event_file_writer import \
+        EventFileWriter as FileWriter
 except ImportError:
-    from tensorflow.core.framework.summary_pb2 import Summary, HistogramProto
+    from tensorflow.core.framework.summary_pb2 import HistogramProto, Summary
     from tensorflow.core.util.event_pb2 import Event
     try:
         # tensorflow>=1.0.0

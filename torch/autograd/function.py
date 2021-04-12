@@ -1,12 +1,13 @@
-import torch
-import torch._C as _C
-from torch._C import _functions
-import torch.utils.hooks as hooks
-from torch._six import with_metaclass
 import functools
 import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional
+
+import torch
+import torch._C as _C
+import torch.utils.hooks as hooks
+from torch._C import _functions
+from torch._six import with_metaclass
 
 
 class _ContextMethodMixin(object):

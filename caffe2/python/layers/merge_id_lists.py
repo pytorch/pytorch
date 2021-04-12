@@ -3,14 +3,11 @@
 
 
 
-from caffe2.python import schema
-from caffe2.python.layers.layers import (
-    get_categorical_limit,
-    ModelLayer,
-    IdList
-)
-
 import numpy as np
+
+from caffe2.python import schema
+from caffe2.python.layers.layers import (IdList, ModelLayer,
+                                         get_categorical_limit)
 
 
 class MergeIdLists(ModelLayer):

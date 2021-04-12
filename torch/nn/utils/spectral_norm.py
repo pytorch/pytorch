@@ -1,9 +1,11 @@
 """
 Spectral Normalization from https://arxiv.org/abs/1802.05957
 """
+from typing import Any, Optional, TypeVar
+
 import torch
 from torch.nn.functional import normalize
-from typing import Any, Optional, TypeVar
+
 from ..modules import Module
 
 

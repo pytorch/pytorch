@@ -4,7 +4,6 @@ import torch
 from torch.utils import benchmark
 from torch.utils.benchmark import FuzzedParameter, FuzzedTensor, ParameterAlias
 
-
 __all__ = ['SpectralOpFuzzer']
 
 MIN_DIM_SIZE = 16

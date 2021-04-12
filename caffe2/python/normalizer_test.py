@@ -2,9 +2,9 @@
 
 
 
-from caffe2.python.normalizer_context import UseNormalizer, NormalizerContext
-from caffe2.python.normalizer import BatchNormalizer
 from caffe2.python.layer_test_util import LayersTestCase
+from caffe2.python.normalizer import BatchNormalizer
+from caffe2.python.normalizer_context import NormalizerContext, UseNormalizer
 
 
 class TestNormalizerContext(LayersTestCase):

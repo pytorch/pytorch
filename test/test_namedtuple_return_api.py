@@ -1,12 +1,12 @@
 import os
 import re
-import yaml
 import textwrap
-import torch
-
-from torch.testing._internal.common_utils import TestCase, run_tests
 from collections import namedtuple
 
+import yaml
+
+import torch
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')

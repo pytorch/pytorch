@@ -6,7 +6,7 @@
 import numpy as np
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
-from caffe2.python import core, workspace, timeout_guard, test_util
+from caffe2.python import core, test_util, timeout_guard, workspace
 
 
 class BlobsQueueDBTest(test_util.TestCase):

@@ -4,14 +4,15 @@ import os
 import time
 
 from benchmark_dataset import BenchmarkLMDataset, collate_sentences_lm
-import torch
-from torch.distributed import rpc
-import torch.nn as nn
-from torch.utils.data import DataLoader
 
+import torch
+import torch.nn as nn
+from torch.distributed import rpc
 from torch.distributed.pipeline.sync import Pipe
 from torch.distributed.pipeline.sync.utils import partition_model
 from torch.optim import Adam  # type: ignore
+from torch.utils.data import DataLoader
+
 
 def sizeof_fmt(num, suffix='B'):
     for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti']:

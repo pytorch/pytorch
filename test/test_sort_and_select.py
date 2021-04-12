@@ -1,15 +1,15 @@
-import torch
-import numpy as np
-
 import random
-from torch._six import nan
 from itertools import permutations
 
-from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, make_tensor, slowTest)
-from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU, largeTensorTest)
+import numpy as np
+
+import torch
+from torch._six import nan
+from torch.testing._internal.common_device_type import (
+    dtypes, dtypesIfCUDA, instantiate_device_type_tests, largeTensorTest,
+    onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm)
+from torch.testing._internal.common_utils import (TestCase, make_tensor,
+                                                  run_tests, slowTest)
 
 # TODO: remove this
 SIZE = 100

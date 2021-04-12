@@ -8,6 +8,7 @@
 
 from onnx.backend.base import BackendRep, namedtupledict
 
+
 # This is a wrapper around C++ Caffe2BackendRep,
 # mainly to handle the different input and output types for convenience of Python
 class Caffe2CppRep(BackendRep):

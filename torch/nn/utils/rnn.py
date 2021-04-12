@@ -1,10 +1,10 @@
-from collections import namedtuple
 import warnings
+from collections import namedtuple
 
 import torch
+
 from ... import _VF
 from ..._jit_internal import Optional
-
 
 PackedSequence_ = namedtuple('PackedSequence',
                              ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])

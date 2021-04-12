@@ -9,16 +9,10 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
-    TensorPipeRpcAgentTestFixture,
-)
+from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import \
+    TensorPipeRpcAgentTestFixture
 from torch.testing._internal.distributed.rpc_utils import (
-    GENERIC_CUDA_TESTS,
-    TENSORPIPE_CUDA_TESTS,
-    MultiProcess,
-    generate_tests,
-)
-
+    GENERIC_CUDA_TESTS, TENSORPIPE_CUDA_TESTS, MultiProcess, generate_tests)
 
 globals().update(
     generate_tests(

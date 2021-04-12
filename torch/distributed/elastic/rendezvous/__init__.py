@@ -104,7 +104,6 @@ process:
 from .api import *
 from .registry import _register_default_handlers
 
-
 _register_default_handlers()
 
 

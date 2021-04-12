@@ -4,13 +4,16 @@
 
 
 import unittest
+
 import hypothesis.strategies as st
-from hypothesis import given
 import numpy as np
-from caffe2.python import core, workspace
+from hypothesis import given
+
+import caffe2.proto.caffe2_pb2 as pb2
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.mkl_test_util as mu
-import caffe2.proto.caffe2_pb2 as pb2
+from caffe2.python import core, workspace
+
 
 @unittest.skipIf(not workspace.C.has_mkldnn,
                  "Skipping as we do not have mkldnn.")

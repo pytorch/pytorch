@@ -15,7 +15,6 @@ import torch.distributed.elastic.timer as timer
 import torch.multiprocessing as torch_mp
 from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_TSAN
 
-
 logging.basicConfig(
     level=logging.INFO, format="[%(levelname)s] %(asctime)s %(module)s: %(message)s"
 )

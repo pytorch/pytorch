@@ -1,15 +1,16 @@
 import math
-import warnings
 import numbers
-from typing import List, Tuple, Optional, overload, Union
+import warnings
+from typing import List, Optional, Tuple, Union, overload
 
 import torch
 from torch import Tensor
-from .module import Module
+
+from ... import _VF
+from .. import init
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
-from .. import init
-from ... import _VF
+from .module import Module
 
 _rnn_impls = {
     'RNN_TANH': _VF.rnn_tanh,

@@ -1,8 +1,9 @@
-import torch
-import numpy as np
 import argparse
-
 from typing import Dict
+
+import numpy as np
+
+import torch
 
 # debug print
 DEBUG_PRINT = False

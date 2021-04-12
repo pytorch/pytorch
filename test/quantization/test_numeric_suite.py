@@ -1,33 +1,19 @@
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-from torch.quantization import (
-    DeQuantStub,
-    QuantStub,
-    convert,
-    default_qconfig,
-    prepare,
-    quantize,
-    quantize_dynamic,
-)
-from torch.quantization._numeric_suite import (
-    OutputLogger,
-    Shadow,
-    ShadowLogger,
-    compare_model_outputs,
-    compare_model_stub,
-    compare_weights,
-)
+from torch.quantization import (DeQuantStub, QuantStub, convert,
+                                default_qconfig, prepare, quantize,
+                                quantize_dynamic)
+from torch.quantization._numeric_suite import (OutputLogger, Shadow,
+                                               ShadowLogger,
+                                               compare_model_outputs,
+                                               compare_model_stub,
+                                               compare_weights)
 from torch.testing._internal.common_quantization import (
-    AnnotatedConvBnReLUModel,
-    AnnotatedConvModel,
-    AnnotatedSingleLayerLinearModel,
-    LSTMwithHiddenDynamicModel,
-    AnnotatedTwoLayerLinearModel,
-    QuantizationTestCase,
-    SingleLayerLinearDynamicModel,
-    test_only_eval_fn,
-)
+    AnnotatedConvBnReLUModel, AnnotatedConvModel,
+    AnnotatedSingleLayerLinearModel, AnnotatedTwoLayerLinearModel,
+    LSTMwithHiddenDynamicModel, QuantizationTestCase,
+    SingleLayerLinearDynamicModel, test_only_eval_fn)
 from torch.testing._internal.common_quantized import override_qengines
 
 

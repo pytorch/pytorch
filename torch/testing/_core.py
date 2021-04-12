@@ -2,12 +2,13 @@
 The testing package contains testing-specific utilities.
 """
 
-import torch
-import random
-import math
 import cmath
-from typing import cast, List, Optional, Tuple, Union
+import math
 import operator
+import random
+from typing import List, Optional, Tuple, Union, cast
+
+import torch
 
 FileCheck = torch._C.FileCheck
 

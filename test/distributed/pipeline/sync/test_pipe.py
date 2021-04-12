@@ -4,14 +4,14 @@
 #
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
+import time
 from collections import OrderedDict
 from copy import deepcopy
-import time
 
 import pytest
+
 import torch
 from torch import nn
-
 from torch.distributed.pipeline.sync import Pipe
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")

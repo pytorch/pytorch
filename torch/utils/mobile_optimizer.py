@@ -2,10 +2,12 @@
 This module contains utility method for mobile model optimization and lint.
 """
 
-import torch
 from enum import Enum
+from typing import AnyStr, List, Set
+
+import torch
 from torch._C import MobileOptimizerType
-from typing import Set, List, AnyStr
+
 
 class LintCode(Enum):
     BUNDLED_INPUT = 1

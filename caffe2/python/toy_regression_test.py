@@ -1,7 +1,8 @@
-import numpy as np
 import unittest
 
-from caffe2.python import core, workspace, test_util
+import numpy as np
+
+from caffe2.python import core, test_util, workspace
 
 
 class TestToyRegression(test_util.TestCase):

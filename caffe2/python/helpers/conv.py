@@ -9,6 +9,7 @@ from caffe2.python import core
 from caffe2.python.modeling import initializers
 from caffe2.python.modeling.parameter_info import ParameterTags
 
+
 def _ConvBase(
     model,
     is_nd,

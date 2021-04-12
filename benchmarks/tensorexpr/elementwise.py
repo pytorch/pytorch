@@ -1,8 +1,12 @@
-from . import benchmark
 import itertools
+
 import numpy as np
-import torch
 import scipy.special
+
+import torch
+
+from . import benchmark
+
 
 # A template class for elementwise operations.
 # A derived class will override the class instance to customize its behavior.

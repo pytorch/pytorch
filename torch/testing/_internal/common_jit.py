@@ -1,22 +1,23 @@
 # Torch
+import io
+# Standard library
+from itertools import chain
+from typing import List, Union
+
 import torch
 import torch.cuda
 import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 import torch.jit.quantized
-
 # Testing utils
 from torch.testing import floating_and_complex_types_and
-from torch.testing._internal.common_utils import TestCase, \
-    freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, is_iterable_of_tensors
-from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
+from torch.testing._internal.common_utils import \
+    enable_profiling_mode  # noqa: F401
+from torch.testing._internal.common_utils import (
+    TemporaryFileName, TestCase, enable_profiling_mode_for_profiling_tests,
+    freeze_rng_state, is_iterable_of_tensors)
 
-# Standard library
-from itertools import chain
-from typing import List, Union
-
-import io
 
 def check_output_types(self, func, ref_outputs, args, kwargs):
     graph = getattr(func, 'last_graph', None)

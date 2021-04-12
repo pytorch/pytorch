@@ -1,14 +1,12 @@
-import torch
+import itertools
+import operator
+from typing import Dict, List
 
+import torch
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.symbolic_trace import symbolic_trace
-
-import itertools
-import operator
-
-from typing import Dict, List
 
 
 def get_first_dim(t: torch.Tensor) -> int:

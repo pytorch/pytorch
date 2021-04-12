@@ -5,10 +5,12 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 import tempfile
+
 import pytest
 
 import torch
 import torch.distributed as dist
+
 
 @pytest.fixture(autouse=True)
 def manual_seed_zero():

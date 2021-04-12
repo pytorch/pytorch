@@ -1,8 +1,8 @@
 import os
 import sys
-
-from typing import Any, List, Tuple
 from collections import OrderedDict
+from typing import Any, List, Tuple
+
 import torch
 import torch.nn as nn
 from torch.testing._internal.jit_utils import JitTestCase

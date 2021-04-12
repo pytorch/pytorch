@@ -3,28 +3,15 @@ import os
 import time
 from typing import Any, Dict, List, Set, Tuple
 
-from ..util.setting import (
-    JSON_FOLDER_BASE_DIR,
-    CompilerType,
-    TestList,
-    TestPlatform,
-    TestStatusType,
-)
-from ..util.utils import (
-    detect_compiler_type,
-    print_error,
-    print_time,
-    related_to_test_list,
-)
+from ..util.setting import (JSON_FOLDER_BASE_DIR, CompilerType, TestList,
+                            TestPlatform, TestStatusType)
+from ..util.utils import (detect_compiler_type, print_error, print_time,
+                          related_to_test_list)
 from .parser.coverage_record import CoverageRecord
 from .parser.gcov_coverage_parser import GcovCoverageParser
 from .parser.llvm_coverage_parser import LlvmCoverageParser
-from .print_report import (
-    file_oriented_report,
-    html_oriented_report,
-    line_oriented_report,
-)
-
+from .print_report import (file_oriented_report, html_oriented_report,
+                           line_oriented_report)
 
 # coverage_records: Dict[str, LineInfo] = dict()
 covered_lines: Dict[str, Set[int]] = {}

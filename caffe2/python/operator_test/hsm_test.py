@@ -2,14 +2,15 @@
 
 
 
-from hypothesis import given, settings
-import numpy as np
 import unittest
 
-from caffe2.proto import caffe2_pb2, hsm_pb2
-from caffe2.python import workspace, core, gradient_checker
-import caffe2.python.hypothesis_test_util as hu
+import numpy as np
+from hypothesis import given, settings
+
 import caffe2.python.hsm_util as hsmu
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2, hsm_pb2
+from caffe2.python import core, gradient_checker, workspace
 
 # User inputs tree using protobuf file or, in this case, python utils
 # The hierarchy in this test looks as shown below. Note that the final subtrees

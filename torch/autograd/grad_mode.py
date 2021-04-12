@@ -1,9 +1,9 @@
-import sys
-import torch
 import functools
 import inspect
+import sys
 from typing import Any, Callable, TypeVar, cast
 
+import torch
 
 __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled']
 

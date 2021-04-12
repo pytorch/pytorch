@@ -1,9 +1,11 @@
-from typing import Tuple, Dict, Optional, List, Any, overload
-from datetime import timedelta
 import enum
+from datetime import timedelta
+from typing import Any, Dict, List, Optional, Tuple, overload
+
 import torch
+
 from . import Future
-from ._autograd import ProfilerConfig, ProfilerState, ProfilerEvent
+from ._autograd import ProfilerConfig, ProfilerEvent, ProfilerState
 from ._distributed_c10d import ProcessGroup, Store
 
 # This module is defined in torch/csrc/distributed/rpc/init.cpp

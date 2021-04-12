@@ -7,10 +7,7 @@
 from unittest import TestCase
 
 from torch.distributed.elastic.rendezvous.utils import (
-    _parse_rendezvous_config,
-    _parse_rendezvous_endpoint,
-    _try_parse_port,
-)
+    _parse_rendezvous_config, _parse_rendezvous_endpoint, _try_parse_port)
 
 
 class UtilsTest(TestCase):

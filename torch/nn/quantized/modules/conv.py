@@ -1,19 +1,17 @@
 # coding=utf-8
 r"""Quantized convolution modules."""
 
-from typing import Optional, List, TypeVar
+from typing import List, Optional, TypeVar
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
-
 from torch._ops import ops
 from torch.nn.common_types import _size_1_t
-from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.quantized.modules.utils import _pair_from_first
-from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.nn.modules.utils import _pair, _single, _triple
+from torch.nn.quantized.modules.utils import _pair_from_first, _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
 _SUPPORTED_PADDING = {

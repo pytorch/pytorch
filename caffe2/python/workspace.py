@@ -6,22 +6,22 @@
 
 import collections
 import contextlib
-from google.protobuf.message import Message
-from multiprocessing import Process
-import os
-from collections import defaultdict
 import logging
-import numpy as np
-from past.builtins import basestring
+import os
 import shutil
 import socket
 import tempfile
+from collections import defaultdict
+from multiprocessing import Process
 
+import numpy as np
+from google.protobuf.message import Message
+from past.builtins import basestring
+
+import caffe2.python._import_c_extension as C
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils
 from caffe2.python.lazy import TriggerLazyImport
-
-import caffe2.python._import_c_extension as C
 
 logger = logging.getLogger(__name__)
 

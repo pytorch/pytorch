@@ -1,11 +1,14 @@
-import torch
-import torch._C._te as te
+import argparse
 import time
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
-import argparse
+
+import torch
+import torch._C._te as te
+
 
 class kernel_arena_scope(object):
     def __enter__(self):

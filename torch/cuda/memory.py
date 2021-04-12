@@ -4,8 +4,10 @@ import warnings
 from typing import Any, Dict, Union
 
 import torch
-from . import is_initialized, _get_device_index, _lazy_init
 from torch.types import Device
+
+from . import _get_device_index, _lazy_init, is_initialized
+
 
 def _host_allocator():
     _lazy_init()

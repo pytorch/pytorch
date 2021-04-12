@@ -1,57 +1,56 @@
 import contextlib
 import gc
-import sys
 import io
+import json
 import math
 import random
+import sys
 import tempfile
-import time
 import threading
+import time
 import unittest
 import warnings
-from copy import deepcopy
 from collections import OrderedDict
-from itertools import product, permutations
+from copy import deepcopy
+from functools import partial, reduce
+from itertools import permutations, product
 from operator import mul
-from functools import reduce, partial
+
 import torch
-import json
 
 # TODO: remove this global setting
 # Autograd tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
+import torch.autograd.forward_ad as fwAD
+import torch.autograd.functional as autogradF
 from torch import nn
 from torch._six import inf, nan
-from torch.autograd.function import once_differentiable
-from torch.autograd.profiler import (profile, format_time, EventList,
-                                     FunctionEvent, FunctionEventAvg,
-                                     record_function, emit_nvtx)
-import torch.autograd.functional as autogradF
-from torch.utils.checkpoint import checkpoint
-from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
-from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
-                                                  suppress_warnings, slowTest,
-                                                  load_tests,
-                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
-                                                  TemporaryFileName, TEST_WITH_ROCM,
-                                                  gradcheck, gradgradcheck)
-from torch.autograd import Variable, Function, detect_anomaly, kineto_available
-from torch.autograd.function import InplaceFunction
-import torch.autograd.forward_ad as fwAD
+from torch.autograd import Function, Variable, detect_anomaly, kineto_available
+from torch.autograd.function import InplaceFunction, once_differentiable
+from torch.autograd.profiler import (EventList, FunctionEvent,
+                                     FunctionEventAvg, emit_nvtx, format_time,
+                                     profile, record_function)
 from torch.testing import randn_like
-from torch.testing._internal.common_methods_invocations import (method_tests,
-                                                                create_input, unpack_variables,
-                                                                EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
-                                                                EXCLUDE_GRADGRADCHECK,
-                                                                EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
-                                                                exclude_tensor_method,
-                                                                mask_not_all_zeros,
-                                                                S)
-from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                                        onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
-                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
-                                                        skipCUDAIf)
+from torch.testing._internal.common_cuda import (TEST_CUDA,
+                                                 _get_torch_cuda_version)
+from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast, dtypes, dtypesIfCUDA, instantiate_device_type_tests,
+    onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIf,
+    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm)
+from torch.testing._internal.common_methods_invocations import (
+    EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK, EXCLUDE_GRADGRADCHECK,
+    EXCLUDE_GRADGRADCHECK_BY_TEST_NAME, S, create_input, exclude_tensor_method,
+    mask_not_all_zeros, method_tests, unpack_variables)
+from torch.testing._internal.common_utils import (IS_MACOS, IS_WINDOWS,
+                                                  TEST_WITH_ROCM,
+                                                  CudaMemoryLeakCheck,
+                                                  TemporaryFileName, TestCase,
+                                                  gradcheck, gradgradcheck,
+                                                  load_tests, run_tests,
+                                                  skipIfNoLapack, slowTest,
+                                                  suppress_warnings)
+from torch.utils.checkpoint import checkpoint
 
 _END_SENTINEL = object()
 

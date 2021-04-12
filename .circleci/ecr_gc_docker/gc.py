@@ -2,10 +2,11 @@
 
 import argparse
 import datetime
+import re
+import sys
+
 import boto3
 import pytz
-import sys
-import re
 
 
 def save_to_s3(project, data):

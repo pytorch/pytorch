@@ -1,15 +1,16 @@
-import torch
+import random
+import unittest
+from functools import partial
+from itertools import combinations, permutations, product
+
 import numpy as np
 
-import unittest
-from itertools import product, permutations, combinations
-from functools import partial
-import random
+import torch
+from torch.testing._internal.common_device_type import (
+    dtypes, instantiate_device_type_tests, onlyCPU, onlyOnCPUAndCUDA)
+from torch.testing._internal.common_utils import (TestCase, make_tensor,
+                                                  run_tests, suppress_warnings)
 
-from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, suppress_warnings, make_tensor)
-from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes, onlyOnCPUAndCUDA)
 
 # TODO: replace this with make_tensor() in common_utils.py
 def _generate_input(shape, dtype, device, with_extremal):

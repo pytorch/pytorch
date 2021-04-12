@@ -1,7 +1,7 @@
 import os
+import random
 import sys
 import tempfile
-import random
 from textwrap import dedent
 
 import torch

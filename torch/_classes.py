@@ -1,5 +1,7 @@
 import types
+
 import torch._C
+
 
 class _ClassNamespace(types.ModuleType):
     def __init__(self, name):

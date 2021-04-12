@@ -19,11 +19,14 @@ from xml.dom import minidom  # type: ignore[import]
 
 import requests
 from typing_extensions import TypedDict
-from tools.stats_utils.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
-                                              Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
-                                              Version1Report, Version2Report, ReportMetaMeta)
 
-
+from tools.stats_utils.s3_stat_parser import (HAVE_BOTO3, Commit, Report,
+                                              ReportMetaMeta, Status,
+                                              Version1Report, Version2Case,
+                                              Version2Report, VersionedReport,
+                                              get_S3_object_from_bucket,
+                                              get_test_stats_summaries_for_job,
+                                              newify_case)
 
 SimplerSuite = Dict[str, Version2Case]
 SimplerFile = Dict[str, SimplerSuite]

@@ -12,15 +12,17 @@ Example usage:
 Note that running cuda-memcheck could be very slow.
 """
 
-import asyncio
-import torch
-import multiprocessing
 import argparse
-import subprocess
-import tqdm
+import asyncio
+import multiprocessing
 import os
+import subprocess
 import sys
+
 import cuda_memcheck_common as cmc
+import tqdm
+
+import torch
 
 ALL_TESTS = []
 GPUS = torch.cuda.device_count()

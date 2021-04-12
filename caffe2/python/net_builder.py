@@ -5,9 +5,9 @@
 
 
 
-from caffe2.python import core, context
-from caffe2.python.task import Task, TaskGroup
+from caffe2.python import context, core
 from caffe2.python.control_ops_util import add_if_op, add_while_op
+from caffe2.python.task import Task, TaskGroup
 
 
 class NetBuilder(context.Managed):

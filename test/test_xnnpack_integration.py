@@ -1,18 +1,19 @@
+import io
+import itertools
 import unittest
+
+from hypothesis import assume, given
+from hypothesis import strategies as st
 
 import torch
 import torch.backends.xnnpack
-from torch.nn import functional as F
-from torch.utils.mobile_optimizer import optimize_for_mobile
-from torch.testing import FileCheck
 import torch.testing._internal.hypothesis_utils as hu
-from torch.testing._internal.common_utils import TestCase, run_tests, slowTest
-from hypothesis import given, assume
-from hypothesis import strategies as st
-import io
-import itertools
+from torch.nn import functional as F
+from torch.testing import FileCheck
+from torch.testing._internal.common_utils import (TEST_WITH_TSAN, TestCase,
+                                                  run_tests, slowTest)
+from torch.utils.mobile_optimizer import optimize_for_mobile
 
-from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
                      " XNNPACK must be enabled for these tests."

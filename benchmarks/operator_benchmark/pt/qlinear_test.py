@@ -1,11 +1,10 @@
 
 import operator_benchmark as op_bench
+from pt import configs
 
 import torch
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-
-from pt import configs
 
 """
 Microbenchmarks for Quantized Linear operators.

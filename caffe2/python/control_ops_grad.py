@@ -272,7 +272,8 @@ def _prepare_gradient_while_ops(
 
     cond_net_arg = caffe2_pb2.Argument()
     cond_net_arg.name = "cond_net"
-    from caffe2.python.core import Net, BlobReference
+    from caffe2.python.core import BlobReference, Net
+
     # Construct condition net - check that there're still forward workspaces
     # left using HasScope op
     cond_net = Net('gradient_loop_cond_net')

@@ -3,11 +3,14 @@ import torch
 torch.set_default_dtype(torch.double)
 
 import functools
-import random
 import operator
-import numpy as np
+import random
 import warnings
-from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
+
+import numpy as np
+
+from torch.testing._internal.common_utils import (TestCase, load_tests,
+                                                  run_tests)
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

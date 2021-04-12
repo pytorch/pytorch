@@ -9,7 +9,6 @@ except ImportError:
     pass  # skip if opencv is not available
 import numpy as np
 
-
 # === copied from utils/keypoints.py as reference ===
 _NUM_KEYPOINTS = -1  # cfg.KRCNN.NUM_KEYPOINTS
 _INFERENCE_MIN_SIZE = 0  # cfg.KRCNN.INFERENCE_MIN_SIZE

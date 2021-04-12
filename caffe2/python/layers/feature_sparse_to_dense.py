@@ -5,6 +5,7 @@
 from collections import defaultdict
 
 import numpy as np
+
 from caffe2.python import schema
 from caffe2.python.layers.layers import AccessedFeatures, ModelLayer
 

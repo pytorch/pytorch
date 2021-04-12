@@ -15,15 +15,14 @@ import itertools
 import logging
 import re
 
-from caffe2.python import core as caffe2_core
-from onnx import (checker, helper, numpy_helper, mapping,
-                  GraphProto, NodeProto, TensorProto, OperatorSetIdProto)
-from onnx.helper import make_tensor_value_info, make_model
 import numpy as np
-
-from caffe2.python.onnx.helper import c2_native_run_net
+from onnx import (GraphProto, NodeProto, OperatorSetIdProto, TensorProto,
+                  checker, helper, mapping, numpy_helper)
+from onnx.helper import make_model, make_tensor_value_info
 
 import caffe2.python._import_c_extension as C
+from caffe2.python import core as caffe2_core
+from caffe2.python.onnx.helper import c2_native_run_net
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

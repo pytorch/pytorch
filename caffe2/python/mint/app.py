@@ -1,12 +1,13 @@
 ## @package app
 # Module caffe2.python.mint.app
 import argparse
-import flask
 import glob
-import numpy as np
-import nvd3
 import os
 import sys
+
+import flask
+import numpy as np
+import nvd3
 import tornado.httpserver
 # pyre-fixme[21]: Could not find a module corresponding to import `tornado.wsgi`
 import tornado.wsgi

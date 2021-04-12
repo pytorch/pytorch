@@ -10,7 +10,6 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 from execution.work import PYTHON_CMD, SHELL, InProgress, WorkOrder
 from worker.main import WorkerFailure, WorkerOutput
 
-
 CPU_COUNT: int = multiprocessing.cpu_count()
 
 

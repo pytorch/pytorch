@@ -8,23 +8,21 @@
 import functools
 import inspect
 import logging
-import numpy as np
 import random
+
+import numpy as np
 from future.utils import viewkeys
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python.attention import (
-    apply_dot_attention,
-    apply_recurrent_attention,
-    apply_regular_attention,
-    apply_soft_coverage_attention,
-    AttentionType,
-)
-from caffe2.python import core, recurrent, workspace, brew, scope, utils
-from caffe2.python.modeling.parameter_sharing import ParameterSharing
-from caffe2.python.modeling.parameter_info import ParameterTags
-from caffe2.python.modeling.initializers import Initializer
+from caffe2.python import brew, core, recurrent, scope, utils, workspace
+from caffe2.python.attention import (AttentionType, apply_dot_attention,
+                                     apply_recurrent_attention,
+                                     apply_regular_attention,
+                                     apply_soft_coverage_attention)
 from caffe2.python.model_helper import ModelHelper
+from caffe2.python.modeling.initializers import Initializer
+from caffe2.python.modeling.parameter_info import ParameterTags
+from caffe2.python.modeling.parameter_sharing import ParameterSharing
 
 
 def _RectifyName(blob_reference_or_name):

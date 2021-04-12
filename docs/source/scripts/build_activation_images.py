@@ -5,14 +5,15 @@ online tutorials.
 """
 
 import os.path
-import torch.nn.modules.activation
-import torch.autograd
+
 import matplotlib
+
+import torch.autograd
+import torch.nn.modules.activation
 
 matplotlib.use('Agg')
 
 import pylab
-
 
 # Create a directory for the images, if it doesn't exist
 ACTIVATION_IMAGE_PATH = os.path.join(

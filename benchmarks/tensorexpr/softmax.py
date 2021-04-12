@@ -1,5 +1,6 @@
-from . import benchmark
 import scipy.special
+
+from . import benchmark
 
 
 class SoftmaxBench(benchmark.Benchmark):

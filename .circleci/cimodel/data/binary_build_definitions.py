@@ -1,9 +1,10 @@
 from collections import OrderedDict
 
-import cimodel.data.simple.util.branch_filters as branch_filters
 import cimodel.data.binary_build_data as binary_build_data
+import cimodel.data.simple.util.branch_filters as branch_filters
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
+
 
 class Conf(object):
     def __init__(self, os, gpu_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant, libtorch_config_variant):

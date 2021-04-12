@@ -6,7 +6,8 @@ from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter, sys_importer
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
+from torch.testing._internal.common_utils import (IS_FBCODE, IS_SANDCASTLE,
+                                                  run_tests)
 
 try:
     from torchvision.models import resnet18

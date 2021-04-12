@@ -1,20 +1,21 @@
 # Module caffe2.python.examples.resnet50_trainer
 import argparse
 import logging
-import numpy as np
-import time
 import os
+import time
 
-from caffe2.python import core, workspace, experiment_util, data_parallel_model
-from caffe2.python import dyndep, optimizer
-from caffe2.python import timeout_guard, model_helper, brew
-from caffe2.proto import caffe2_pb2
+import numpy as np
 
 import caffe2.python.models.resnet as resnet
 import caffe2.python.models.shufflenet as shufflenet
-from caffe2.python.modeling.initializers import Initializer, PseudoFP16Initializer
 import caffe2.python.predictor.predictor_exporter as pred_exp
 import caffe2.python.predictor.predictor_py_utils as pred_utils
+from caffe2.proto import caffe2_pb2
+from caffe2.python import (brew, core, data_parallel_model, dyndep,
+                           experiment_util, model_helper, optimizer,
+                           timeout_guard, workspace)
+from caffe2.python.modeling.initializers import (Initializer,
+                                                 PseudoFP16Initializer)
 from caffe2.python.predictor_constants import predictor_constants
 
 '''

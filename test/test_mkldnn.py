@@ -1,6 +1,6 @@
 import copy
-import itertools
 import functools
+import itertools
 import unittest
 
 try:
@@ -12,12 +12,14 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 import torch
-import torch.nn.functional as F
-import torch.jit
 import torch.backends.mkldnn
+import torch.jit
+import torch.nn.functional as F
+from torch.testing._internal.common_utils import (IS_WINDOWS,
+                                                  TemporaryFileName, TestCase,
+                                                  gradcheck, gradgradcheck,
+                                                  run_tests)
 from torch.utils import mkldnn as mkldnn_utils
-from torch.testing._internal.common_utils import TestCase, \
-    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS
 
 # batched grad doesn't support mkldnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)

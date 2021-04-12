@@ -3,13 +3,13 @@
 
 
 
-import numpy as np
-
-import caffe2.python.models.shufflenet as shufflenet
 import hypothesis.strategies as st
+import numpy as np
 from hypothesis import given, settings
+
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.models.imagenet_trainer_test_utils as utils
+import caffe2.python.models.shufflenet as shufflenet
 
 
 class ShufflenetMemongerTest(hu.HypothesisTestCase):
@@ -49,8 +49,8 @@ class ShufflenetMemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(results[2][0], results[2][1])
 
 if __name__ == "__main__":
-    import unittest
     import random
+    import unittest
     random.seed(2006)
     # pyre-fixme[10]: Name `workspace` is used but not defined in the current scope
     workspace.GlobalInit([

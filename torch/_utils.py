@@ -1,10 +1,10 @@
-import torch
-from typing import Optional, List, DefaultDict, Any
-import warnings
-from collections import defaultdict
 import sys
 import traceback
+import warnings
+from collections import defaultdict
+from typing import Any, DefaultDict, List, Optional
 
+import torch
 
 
 def _type(self, dtype=None, non_blocking=False, **kwargs):

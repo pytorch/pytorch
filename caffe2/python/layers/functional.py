@@ -5,13 +5,13 @@
 
 
 
-from caffe2.python import core, schema, scope, workspace
-from caffe2.python.layers.layers import (
-    ModelLayer,
-)
-import caffe2.proto.caffe2_pb2 as caffe2_pb2
-import numpy as np
 import logging
+
+import numpy as np
+
+import caffe2.proto.caffe2_pb2 as caffe2_pb2
+from caffe2.python import core, schema, scope, workspace
+from caffe2.python.layers.layers import ModelLayer
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

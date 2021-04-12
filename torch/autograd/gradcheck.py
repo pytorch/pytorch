@@ -1,13 +1,15 @@
-import torch
-from torch.types import _TensorOrTensors
-import torch.testing
-from torch.overrides import is_tensor_like
 import collections
-from itertools import product
-import warnings
-from typing import Callable, Union, Optional, Iterable, List
-from torch._vmap_internals import vmap
 import functools
+import warnings
+from itertools import product
+from typing import Callable, Iterable, List, Optional, Union
+
+import torch
+import torch.testing
+from torch._vmap_internals import vmap
+from torch.overrides import is_tensor_like
+from torch.types import _TensorOrTensors
+
 
 def zero_gradients(x):
     if isinstance(x, torch.Tensor):

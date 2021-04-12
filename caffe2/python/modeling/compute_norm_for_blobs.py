@@ -3,11 +3,10 @@
 
 
 
-from caffe2.python import core, schema, muji
-from caffe2.python.modeling.net_modifier import NetModifier
-
-
 import numpy as np
+
+from caffe2.python import core, muji, schema
+from caffe2.python.modeling.net_modifier import NetModifier
 
 
 class ComputeNormForBlobs(NetModifier):

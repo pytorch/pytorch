@@ -5,11 +5,10 @@
 
 
 
-from caffe2.python import core, dataio
-from caffe2.python.task import TaskGroup
-
 import logging
 
+from caffe2.python import core, dataio
+from caffe2.python.task import TaskGroup
 
 logger = logging.getLogger(__name__)
 

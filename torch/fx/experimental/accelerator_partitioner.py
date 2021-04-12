@@ -1,14 +1,16 @@
+import operator
+from typing import Dict, List, NamedTuple, Set, Tuple
+
+import torch
+from torch.fx.experimental.graph_manipulation import get_size_of_all_nodes
+from torch.fx.experimental.partitioner_utils import (
+    Device, NodeLatency, Partition, PartitionerConfig, PartitionMode,
+    get_extra_size_of, get_latency_of_partitioned_graph,
+    get_partition_to_latency_mapping)
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node, map_arg
-from typing import Dict, List, Set, NamedTuple, Tuple
-import torch
 from torch.fx.passes.split_module import split_module
-import operator
-from torch.fx.experimental.graph_manipulation import get_size_of_all_nodes
-from torch.fx.experimental.partitioner_utils import Partition, \
-    Device, PartitionerConfig, get_partition_to_latency_mapping,\
-    get_latency_of_partitioned_graph, NodeLatency, get_extra_size_of, \
-    PartitionMode
+
 
 class DAGNode():
     """DAGNode class maintains useful information for a partition (submodule),

@@ -1,8 +1,10 @@
+from typing import Dict
+
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
-from typing import Dict
+
 
 class Independent(Distribution):
     r"""

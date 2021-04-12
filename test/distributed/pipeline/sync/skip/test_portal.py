@@ -5,8 +5,8 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 import pytest
-import torch
 
+import torch
 from torch.distributed.pipeline.sync.dependency import fork, join
 from torch.distributed.pipeline.sync.skip.portal import Portal
 from torch.distributed.pipeline.sync.stream import default_stream

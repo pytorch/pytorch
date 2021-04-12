@@ -1,8 +1,10 @@
-import torch
-from collections import defaultdict, abc
 import warnings
+from collections import abc, defaultdict
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+
+import torch
+
 from .common import amp_definitely_not_available
 
 

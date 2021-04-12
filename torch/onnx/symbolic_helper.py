@@ -1,18 +1,16 @@
 
-import torch
-import warnings
 import inspect
+import warnings
+from functools import wraps
 from sys import maxsize as maxsize
 from typing import Set
 
+import torch
 import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
-
-from functools import wraps
 from torch._C import OptionalType
-
 
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
@@ -281,7 +279,8 @@ def _hardtanh_helper(g, input, min_val, max_val):
         from torch.onnx.symbolic_opset9 import hardtanh
         return hardtanh(g, input, min_val, max_val)
     else:
-        from torch.onnx.symbolic_opset11 import hardtanh  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset11 import \
+            hardtanh  # type: ignore[no-redef]
         return hardtanh(g, input, min_val, max_val)
 
 def _is_fp(value):
@@ -584,9 +583,11 @@ def _unbind_helper(g, self, dim, _outputs):
     if _export_onnx_opset_version < 11:
         from torch.onnx.symbolic_opset9 import unbind
     elif _export_onnx_opset_version <= 12:
-        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset11 import \
+            unbind  # type: ignore[no-redef]
     else:
-        from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset13 import \
+            unbind  # type: ignore[no-redef]
     return unbind(g, self, dim, _outputs)
 
 

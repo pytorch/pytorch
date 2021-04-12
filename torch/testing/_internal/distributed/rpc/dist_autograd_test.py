@@ -1,11 +1,12 @@
+import random
 import sys
 import threading
 import time
 import unittest
-from enum import Enum
-import random
-import torch
 from datetime import timedelta
+from enum import Enum
+
+import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
@@ -13,18 +14,13 @@ import torch.testing._internal.dist_utils
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributed.rpc import RRef
-from torch.testing._internal.common_utils import IS_MACOS
-from torch.testing._internal.dist_utils import (
-    dist_init,
-    initialize_pg,
-    wait_until_node_failure,
-    worker_name,
-)
-from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
-    RpcAgentTestFixture,
-)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-
+from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.dist_utils import (dist_init, initialize_pg,
+                                                wait_until_node_failure,
+                                                worker_name)
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import \
+    RpcAgentTestFixture
 
 # Right now we test up to 3-layer nested rpc calls.
 # rpc_done[1] and ctx_ids[1] represent rpc is done in prev rank, and context id

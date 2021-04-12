@@ -5,13 +5,16 @@
 # `sparse @ vector`, `sparse @ sparse` and `sparse @ dense` with different backends (CPU/CUDA)
 # and with other frameworks such as scipy.
 
-import sys
 import argparse
+import os
+import sys
+
+from scipy.sparse import isspmatrix
+
 import torch
 import torch.utils.benchmark as benchmark_utils
+
 from .utils import load_dlmc_dataset
-from scipy.sparse import isspmatrix
-import os
 
 
 def scipy_matmul(mat1, mat2):

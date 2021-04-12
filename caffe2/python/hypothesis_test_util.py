@@ -38,19 +38,21 @@ The key functions are:
 
 
 
-from caffe2.proto import caffe2_pb2
-from caffe2.python import (
-    workspace, device_checker, gradient_checker, test_util, core)
 import contextlib
 import copy
 import functools
+import logging
+import os
+import struct
+
 import hypothesis
 import hypothesis.extra.numpy
 import hypothesis.strategies as st
-import logging
 import numpy as np
-import os
-import struct
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import (core, device_checker, gradient_checker, test_util,
+                           workspace)
 
 
 def is_sandcastle():

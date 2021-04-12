@@ -1,5 +1,6 @@
-from . import benchmark
 import numpy as np
+
+from . import benchmark
 
 
 class MatMulBench(benchmark.Benchmark):

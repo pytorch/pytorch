@@ -7,12 +7,12 @@
 
 import json
 
-from caffe2.proto import caffe2_pb2
 import click
 from onnx import ModelProto
 
-from caffe2.python.onnx.backend import Caffe2Backend as c2
 import caffe2.python.onnx.frontend as c2_onnx
+from caffe2.proto import caffe2_pb2
+from caffe2.python.onnx.backend import Caffe2Backend as c2
 
 
 @click.command(

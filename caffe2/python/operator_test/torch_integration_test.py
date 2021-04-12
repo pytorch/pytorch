@@ -3,13 +3,14 @@
 import struct
 import unittest
 
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-import torch
-from caffe2.python import core, workspace
 from hypothesis import given, settings
 from scipy.stats import norm
+
+import caffe2.python.hypothesis_test_util as hu
+import torch
+from caffe2.python import core, workspace
 
 
 def generate_rois(roi_counts, im_dims):

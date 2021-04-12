@@ -1,12 +1,12 @@
 
 import unittest
 
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep
 from hypothesis import given, settings
 
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, dyndep
 
 dyndep.InitOpsLibrary("@/caffe2/modules/detectron:detectron_ops")
 

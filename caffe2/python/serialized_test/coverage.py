@@ -3,11 +3,12 @@
 
 
 
-from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace
 import os
 import tempfile
 from zipfile import ZipFile
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
 
 '''
 Generates a document in markdown format summrizing the coverage of serialized

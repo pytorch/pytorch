@@ -9,23 +9,20 @@
 import os
 import unittest
 
-from caffe2.python import core
-from caffe2.proto import caffe2_pb2
-
-import onnx
-from onnx.helper import make_node, make_graph, make_tensor, make_tensor_value_info, make_model
-from caffe2.python.onnx.helper import c2_native_run_net, c2_native_run_op
-
-from onnx import mapping
-import caffe2.python.onnx.frontend as c2_onnx
-import caffe2.python.onnx.backend as c2
-
 import numpy as np
-from caffe2.python.models.download import ModelDownloader
-
-from caffe2.python.onnx.tests.test_utils import TestCase
+import onnx
+from onnx import mapping
+from onnx.helper import (make_graph, make_model, make_node, make_tensor,
+                         make_tensor_value_info)
 
 import caffe2.python._import_c_extension as C
+import caffe2.python.onnx.backend as c2
+import caffe2.python.onnx.frontend as c2_onnx
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core
+from caffe2.python.models.download import ModelDownloader
+from caffe2.python.onnx.helper import c2_native_run_net, c2_native_run_op
+from caffe2.python.onnx.tests.test_utils import TestCase
 
 
 class TestCaffe2Basic(TestCase):

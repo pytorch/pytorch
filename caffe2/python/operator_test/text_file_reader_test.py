@@ -2,12 +2,14 @@
 
 
 
-from caffe2.python import core, workspace
-from caffe2.python.text_file_reader import TextFileReader
-from caffe2.python.test_util import TestCase
-from caffe2.python.schema import Struct, Scalar, FetchRecord
 import tempfile
+
 import numpy as np
+
+from caffe2.python import core, workspace
+from caffe2.python.schema import FetchRecord, Scalar, Struct
+from caffe2.python.test_util import TestCase
+from caffe2.python.text_file_reader import TextFileReader
 
 
 class TestTextFileReader(TestCase):

@@ -4,14 +4,8 @@ import sys
 import time
 from typing import Any, Optional
 
-from .setting import (
-    LOG_DIR,
-    PROFILE_DIR,
-    CompilerType,
-    TestList,
-    TestPlatform,
-    TestType,
-)
+from .setting import (LOG_DIR, PROFILE_DIR, CompilerType, TestList,
+                      TestPlatform, TestType)
 
 
 def convert_time(seconds: float) -> str:
@@ -93,9 +87,8 @@ def detect_compiler_type(platform: TestPlatform) -> CompilerType:
 
         cov_type = detect_compiler_type()
     else:
-        from caffe2.fb.code_coverage.tool.package.fbcode.utils import (
-            detect_compiler_type,
-        )
+        from caffe2.fb.code_coverage.tool.package.fbcode.utils import \
+            detect_compiler_type
 
         cov_type = detect_compiler_type()
 

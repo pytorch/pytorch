@@ -1,13 +1,15 @@
-import warnings
-from collections import OrderedDict, abc as container_abcs
-from itertools import islice
 import operator
+import warnings
+from collections import OrderedDict
+from collections import abc as container_abcs
+from itertools import islice
+from typing import (TYPE_CHECKING, Any, Iterable, Iterator, Mapping, Optional,
+                    Tuple, TypeVar, Union, overload)
 
 import torch
-from .module import Module
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
+from .module import Module
 
 if TYPE_CHECKING:
     from torch.nn import Parameter

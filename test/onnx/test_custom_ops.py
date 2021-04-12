@@ -1,13 +1,13 @@
 import unittest
+
+import numpy as np
+import onnx
+from test_pytorch_onnx_caffe2 import do_export
+
+import caffe2.python.onnx.backend as c2
 import torch
 import torch.utils.cpp_extension
 
-import onnx
-import caffe2.python.onnx.backend as c2
-
-import numpy as np
-
-from test_pytorch_onnx_caffe2 import do_export
 
 class TestCustomOps(unittest.TestCase):
 

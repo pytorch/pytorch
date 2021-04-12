@@ -3,6 +3,7 @@ from collections import namedtuple
 from typing import Any, Optional, Tuple, Type
 
 import torch
+
 from ._core import _unravel_index
 
 __all__ = ["assert_tensors_equal", "assert_tensors_close"]

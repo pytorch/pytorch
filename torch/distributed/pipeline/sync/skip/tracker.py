@@ -5,8 +5,8 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 """Tracks skip tensors on a thread."""
-from contextlib import contextmanager
 import threading
+from contextlib import contextmanager
 from typing import Dict, Generator, List, Optional, Tuple
 
 from torch import Tensor

@@ -1,9 +1,11 @@
-import torch
-import torch.nn.quantized as nnq
-import torch.nn.functional as F
 from typing import Optional
+
+import torch
+import torch.nn.functional as F
+import torch.nn.quantized as nnq
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single
+
 
 class _ConvNd(nnq._ConvNd):
     """ A reference version of nn.quantized.Conv2d

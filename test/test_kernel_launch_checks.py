@@ -1,5 +1,6 @@
+from torch.testing import (check_code_for_cuda_kernel_launches,
+                           check_cuda_kernel_launches)
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing import check_cuda_kernel_launches, check_code_for_cuda_kernel_launches
 
 
 class AlwaysCheckCudaLaunchTest(TestCase):

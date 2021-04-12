@@ -137,20 +137,10 @@ Now all metrics in the group ``my_app`` will be printed to stdout as:
 
 from typing import Optional
 
-from .api import (  # noqa F401
-    ConsoleMetricHandler,
-    MetricData,
-    MetricHandler,
-    MetricsConfig,
-    NullMetricHandler,
-    configure,
-    get_elapsed_time_ms,
-    getStream,
-    prof,
-    profile,
-    publish_metric,
-    put_metric,
-)
+from .api import (ConsoleMetricHandler, MetricData, MetricHandler,  # noqa F401
+                  MetricsConfig, NullMetricHandler, configure,
+                  get_elapsed_time_ms, getStream, prof, profile,
+                  publish_metric, put_metric)
 
 
 def initialize_metrics(cfg: Optional[MetricsConfig] = None):

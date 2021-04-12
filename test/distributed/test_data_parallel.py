@@ -1,20 +1,23 @@
 import contextlib
+import functools
 import io
 import unittest
-from copy import deepcopy
 from collections import OrderedDict
+from copy import deepcopy
 from itertools import product
-import functools
 
 import torch
+import torch.nn.functional as F
+import torch.nn.parallel as dp
 from torch import nn
 from torch.cuda.amp import autocast
-import torch.nn.parallel as dp
-from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
-from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck
-from torch.testing._internal.common_utils import dtype2prec_DONTUSE
-import torch.nn.functional as F
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_utils import (ALL_TENSORTYPES, TestCase,
+                                                  _assertGradAndGradgradChecks,
+                                                  dtype2prec_DONTUSE,
+                                                  gradcheck,
+                                                  repeat_test_for_types,
+                                                  run_tests)
 
 torch.set_default_dtype(torch.double)
 

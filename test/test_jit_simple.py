@@ -1,4 +1,5 @@
 import sys
+
 sys.argv.append("--jit_executor=simple")
 from test_jit import *
 

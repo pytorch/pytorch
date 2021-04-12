@@ -3,23 +3,25 @@
 
 
 
-from caffe2.python.schema import Struct, ConstRecord
-from caffe2.python import core, workspace, model_helper
-from caffe2.python.session import LocalSession
-from caffe2.python.dataset import Dataset
-from caffe2.python.pipeline import pipe
-from caffe2.python.checkpoint import (
-    CheckpointManager, MultiNodeCheckpointManager, Job, JobRunner, epoch_limiter,
-    UploadTaskGroupBuilder, db_name)
-from caffe2.python.net_builder import ops
-from caffe2.python.task import Node, Task, TaskGroup, WorkspaceType, Cluster
-from caffe2.python.test_util import TestCase
-from caffe2.python.dataio import ReaderWithLimit
-
-import numpy as np
 import os
 import shutil
 import tempfile
+
+import numpy as np
+
+from caffe2.python import core, model_helper, workspace
+from caffe2.python.checkpoint import (CheckpointManager, Job, JobRunner,
+                                      MultiNodeCheckpointManager,
+                                      UploadTaskGroupBuilder, db_name,
+                                      epoch_limiter)
+from caffe2.python.dataio import ReaderWithLimit
+from caffe2.python.dataset import Dataset
+from caffe2.python.net_builder import ops
+from caffe2.python.pipeline import pipe
+from caffe2.python.schema import ConstRecord, Struct
+from caffe2.python.session import LocalSession
+from caffe2.python.task import Cluster, Node, Task, TaskGroup, WorkspaceType
+from caffe2.python.test_util import TestCase
 
 
 def build_pipeline(node_id):

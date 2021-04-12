@@ -3,15 +3,16 @@
 
 
 
-from caffe2.python import core
-from collections import defaultdict, Counter
-from hypothesis import given, settings
-import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
+import unittest
+from collections import Counter, defaultdict
+
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given, settings
 
-import unittest
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python import core
 
 DEFAULT_BEAM_WIDTH = 10
 DEFAULT_PRUNE_THRESHOLD = 0.001

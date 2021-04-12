@@ -1,6 +1,5 @@
 import torch
 
-
 t = torch.tensor([[3.0, 1.5], [2.0, 1.5]])
 
 t_sort = t.sort()

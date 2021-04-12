@@ -5,21 +5,21 @@ functions to be run in multiprocessing. E.g., the data loading worker loop is
 in `./_utils/worker.py`.
 """
 
-import os
-import threading
 import itertools
-import warnings
-import queue
-from typing import Any, Callable, TypeVar, Generic, Sequence, List, Optional
-
 import multiprocessing as python_multiprocessing
+import os
+import queue
+import threading
+import warnings
+from typing import Any, Callable, Generic, List, Optional, Sequence, TypeVar
+
 import torch
 import torch.multiprocessing as multiprocessing
-from torch._utils import ExceptionWrapper
 from torch._six import string_classes
+from torch._utils import ExceptionWrapper
 
-from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
-from . import _utils
+from . import (BatchSampler, Dataset, IterableDataset, RandomSampler, Sampler,
+               SequentialSampler, _utils)
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -1000,8 +1000,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str)) from e
             if isinstance(e, queue.Empty):
                 return (False, None)
-            import tempfile
             import errno
+            import tempfile
             try:
                 # Raise an exception if we are this close to the FDs limit.
                 # Apparently, trying to open only one file is not a sufficient

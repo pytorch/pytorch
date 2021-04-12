@@ -1,35 +1,29 @@
 import contextlib
+import io
 import logging
 import pickle
-import io
-import torch
-import warnings
 import time
-from torch._six import string_classes
+import warnings
 from datetime import timedelta
 from os import getenv
 from typing import Dict, Optional, Tuple, Union
 
+import torch
+from torch._C._distributed_c10d import (AllreduceCoalescedOptions,
+                                        AllreduceOptions, AllToAllOptions,
+                                        BarrierOptions, BroadcastOptions,
+                                        GatherOptions, PrefixStore,
+                                        ProcessGroup, ReduceOp, ReduceOptions,
+                                        ReduceScatterOptions, ScatterOptions,
+                                        Store)
+from torch._six import string_classes
+
+from .constants import default_pg_timeout
+from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
+
 # This module is wildcard imported from torch.distributed.
 # TODO: specify __all__
 
-from .constants import default_pg_timeout
-from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
-from torch._C._distributed_c10d import (
-    AllreduceOptions,
-    AllreduceCoalescedOptions,
-    AllToAllOptions,
-    BarrierOptions,
-    BroadcastOptions,
-    GatherOptions,
-    PrefixStore,
-    ProcessGroup,
-    ReduceOptions,
-    ReduceOp,
-    ReduceScatterOptions,
-    ScatterOptions,
-    Store,
-)
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True

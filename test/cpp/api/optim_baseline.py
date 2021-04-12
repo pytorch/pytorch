@@ -7,7 +7,6 @@ import sys
 import torch
 import torch.optim
 
-
 HEADER = """
 #include <torch/types.h>
 

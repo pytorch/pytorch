@@ -1,7 +1,7 @@
 import io
 import multiprocessing.queues
-from multiprocessing.reduction import ForkingPickler
 import pickle
+from multiprocessing.reduction import ForkingPickler
 
 
 class ConnectionWrapper(object):

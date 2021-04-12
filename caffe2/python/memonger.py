@@ -5,16 +5,18 @@
 
 
 
-import networkx as nx
 import collections
-import time
 import copy
-from caffe2.python import workspace, core
-from caffe2.proto import caffe2_pb2
 import enum
 import logging
+import time
+
+import networkx as nx
 from future.utils import viewitems, viewvalues
+
 import caffe2.python._import_c_extension as C
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
 
 log = logging.getLogger("memonger")
 log.setLevel(logging.INFO)

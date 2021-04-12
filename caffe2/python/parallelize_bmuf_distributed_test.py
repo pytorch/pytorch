@@ -2,16 +2,15 @@
 
 
 
-from multiprocessing import Process, Manager
-
-import numpy as np
-import unittest
-import tempfile
-import shutil
 import logging
+import shutil
+import tempfile
+import unittest
+from multiprocessing import Manager, Process
 
-from hypothesis import given, settings
 import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given, settings
 
 from caffe2.python import workspace
 
@@ -22,8 +21,8 @@ log.setLevel(logging.INFO)
 def bmuf_process(filestore_dir, process_id, shared_results,
                  cpu_device=False, nesterov=False):
     # We need to import caffe2 in every process to initialize CUDA independently.
-    from caffe2.python import core, cnn, data_parallel_model, dyndep
     from caffe2.proto import caffe2_pb2
+    from caffe2.python import cnn, core, data_parallel_model, dyndep
     dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 
     if not cpu_device:

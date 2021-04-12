@@ -1,84 +1,48 @@
 # -*- coding: utf-8 -*-
 # torch
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.jit
-import torch.jit.quantized
-
-# torch.quantization
-from torch.quantization import (
-    QConfig,
-    default_dynamic_qconfig,
-    float16_dynamic_qconfig,
-    default_observer,
-    per_channel_dynamic_qconfig,
-    default_per_channel_weight_observer,
-    default_qconfig,
-    get_default_qconfig,
-    quantize,
-    quantize_dynamic,
-    default_weight_observer,
-    default_histogram_observer,
-    fuse_modules,
-    quantize_jit,
-    quantize_dynamic_jit,
-    PlaceholderObserver,
-)
-
-# torch.quantization.quantize_jit
-from torch.quantization.quantize_jit import (
-    convert_jit,
-    convert_dynamic_jit,
-    fuse_conv_bn_jit,
-    prepare_jit,
-    prepare_dynamic_jit,
-    script_qconfig,
-)
-
-# Testing utils
-from torch.testing._internal.common_quantized import (
-    override_qengines,
-    qengine_is_fbgemm,
-    qengine_is_qnnpack,
-)
-
-from torch.testing._internal.common_quantization import (
-    QuantizationTestCase,
-    skipIfNoFBGEMM,
-    get_script_module,
-    SingleLayerLinearModel,
-    SkipQuantModel,
-    NestedModel,
-    ConvModel,
-    ConvTransposeModel,
-    default_per_channel_qconfig,
-    test_only_eval_fn,
-    ConvBnModel,
-)
-
-# Annotated models
-from torch.testing._internal.common_quantization import (
-    AnnotatedSingleLayerLinearModel,
-    AnnotatedSkipQuantModel,
-    AnnotatedNestedModel,
-    AnnotatedConvModel,
-    AnnotatedConvTransposeModel,
-    AnnotatedConvBnModel,
-)
-
-from torch.testing import FileCheck
-from torch.testing._internal.jit_utils import attrs_with_prefix
-from torch.testing._internal.jit_utils import get_forward
-from torch.testing._internal.jit_utils import get_forward_graph
-
-from torch.jit._recursive import wrap_cpp_module
-
-# Standard library
-from typing import List, Tuple
 import io
 import itertools
 import unittest
+# Standard library
+from typing import List, Tuple
+
+import torch
+import torch.jit
+import torch.jit.quantized
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.jit._recursive import wrap_cpp_module
+# torch.quantization
+from torch.quantization import (PlaceholderObserver, QConfig,
+                                default_dynamic_qconfig,
+                                default_histogram_observer, default_observer,
+                                default_per_channel_weight_observer,
+                                default_qconfig, default_weight_observer,
+                                float16_dynamic_qconfig, fuse_modules,
+                                get_default_qconfig,
+                                per_channel_dynamic_qconfig, quantize,
+                                quantize_dynamic, quantize_dynamic_jit,
+                                quantize_jit)
+# torch.quantization.quantize_jit
+from torch.quantization.quantize_jit import (convert_dynamic_jit, convert_jit,
+                                             fuse_conv_bn_jit,
+                                             prepare_dynamic_jit, prepare_jit,
+                                             script_qconfig)
+from torch.testing import FileCheck
+# Annotated models
+from torch.testing._internal.common_quantization import (
+    AnnotatedConvBnModel, AnnotatedConvModel, AnnotatedConvTransposeModel,
+    AnnotatedNestedModel, AnnotatedSingleLayerLinearModel,
+    AnnotatedSkipQuantModel, ConvBnModel, ConvModel, ConvTransposeModel,
+    NestedModel, QuantizationTestCase, SingleLayerLinearModel, SkipQuantModel,
+    default_per_channel_qconfig, get_script_module, skipIfNoFBGEMM,
+    test_only_eval_fn)
+# Testing utils
+from torch.testing._internal.common_quantized import (override_qengines,
+                                                      qengine_is_fbgemm,
+                                                      qengine_is_qnnpack)
+from torch.testing._internal.jit_utils import (attrs_with_prefix, get_forward,
+                                               get_forward_graph)
 
 
 class TestQuantizeJitPasses(QuantizationTestCase):

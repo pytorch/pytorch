@@ -1,8 +1,8 @@
 import numpy as np
+
 import torch
-
-from torch.utils.benchmark import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedTensor
-
+from torch.utils.benchmark import (FuzzedParameter, FuzzedTensor, Fuzzer,
+                                   ParameterAlias)
 
 _MIN_DIM_SIZE = 16
 _MAX_DIM_SIZE = 16 * 1024 ** 2

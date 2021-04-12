@@ -1,5 +1,6 @@
-import sys
 import json
+import sys
+
 import numpy
 
 sample_data_list = sys.argv[1:]

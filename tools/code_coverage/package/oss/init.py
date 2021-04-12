@@ -2,32 +2,14 @@ import argparse
 import os
 from typing import List, Optional, Tuple
 
-from ..util.setting import (
-    JSON_FOLDER_BASE_DIR,
-    LOG_DIR,
-    CompilerType,
-    Option,
-    Test,
-    TestList,
-    TestType,
-)
-from ..util.utils import (
-    clean_up,
-    create_folder,
-    print_log,
-    raise_no_test_found_exception,
-    remove_file,
-    remove_folder,
-)
+from ..util.setting import (JSON_FOLDER_BASE_DIR, LOG_DIR, CompilerType,
+                            Option, Test, TestList, TestType)
+from ..util.utils import (clean_up, create_folder, print_log,
+                          raise_no_test_found_exception, remove_file,
+                          remove_folder)
 from ..util.utils_init import add_arguments_utils, create_folders, get_options
-from .utils import (
-    clean_up_gcda,
-    detect_compiler_type,
-    get_llvm_tool_path,
-    get_oss_binary_folder,
-    get_pytorch_folder,
-)
-
+from .utils import (clean_up_gcda, detect_compiler_type, get_llvm_tool_path,
+                    get_oss_binary_folder, get_pytorch_folder)
 
 BLOCKED_PYTHON_TESTS = {
     "run_test.py",

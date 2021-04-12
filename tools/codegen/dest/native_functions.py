@@ -1,12 +1,13 @@
-from typing import List, Union, Set, Any
+from typing import Any, List, Set, Union
 
-from tools.codegen.context import *
-from tools.codegen.utils import *
-from tools.codegen.model import *
-from tools.codegen.api.types import *
 import tools.codegen.api.meta as meta
 import tools.codegen.api.native as native
 import tools.codegen.api.structured as structured
+from tools.codegen.api.types import *
+from tools.codegen.context import *
+from tools.codegen.model import *
+from tools.codegen.utils import *
+
 
 @with_native_function
 def gen_unstructured(f: NativeFunction) -> List[str]:

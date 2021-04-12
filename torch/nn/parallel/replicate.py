@@ -1,7 +1,8 @@
-from . import comm
+from collections import OrderedDict
+
 from torch._utils import _get_device_index
 
-from collections import OrderedDict
+from . import comm
 
 
 def _is_script_module(module):

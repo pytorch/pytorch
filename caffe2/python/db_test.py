@@ -3,11 +3,11 @@
 
 
 
-from caffe2.python import workspace
-
 import os
 import tempfile
 import unittest
+
+from caffe2.python import workspace
 
 
 class TestDB(unittest.TestCase):

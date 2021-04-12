@@ -9,10 +9,9 @@ import json
 
 import numpy as np
 
-from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, utils
 import caffe2.python._import_c_extension as C
-
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, utils, workspace
 
 
 def pairwise(iterable):

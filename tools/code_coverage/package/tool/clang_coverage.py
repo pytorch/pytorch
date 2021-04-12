@@ -3,24 +3,12 @@ import subprocess
 import time
 from typing import List
 
-from ..util.setting import (
-    JSON_FOLDER_BASE_DIR,
-    MERGED_FOLDER_BASE_DIR,
-    TestList,
-    TestPlatform,
-    TestType,
-)
-from ..util.utils import (
-    check_platform_type,
-    convert_to_relative_path,
-    create_folder,
-    get_raw_profiles_folder,
-    get_test_name_from_whole_path,
-    print_log,
-    print_time,
-    related_to_test_list,
-    replace_extension,
-)
+from ..util.setting import (JSON_FOLDER_BASE_DIR, MERGED_FOLDER_BASE_DIR,
+                            TestList, TestPlatform, TestType)
+from ..util.utils import (check_platform_type, convert_to_relative_path,
+                          create_folder, get_raw_profiles_folder,
+                          get_test_name_from_whole_path, print_log, print_time,
+                          related_to_test_list, replace_extension)
 from .utils import get_tool_path_by_platform, run_cpp_test
 
 
@@ -148,16 +136,16 @@ def export(test_list: TestList, platform_type: TestPlatform) -> None:
                 binary_file = ""
                 shared_library_list = []
                 if platform_type == TestPlatform.FBCODE:
-                    from caffe2.fb.code_coverage.tool.package.fbcode.utils import (
-                        get_fbcode_binary_folder,
-                    )
+                    from caffe2.fb.code_coverage.tool.package.fbcode.utils import \
+                        get_fbcode_binary_folder
 
                     binary_file = os.path.join(
                         get_fbcode_binary_folder(path),
                         get_test_name_from_whole_path(merged_file),
                     )
                 elif platform_type == TestPlatform.OSS:
-                    from ..oss.utils import get_oss_binary_file, get_oss_shared_library
+                    from ..oss.utils import (get_oss_binary_file,
+                                             get_oss_shared_library)
 
                     test_name = get_test_name_from_whole_path(merged_file)
                     # if it is python test, no need to provide binary, shared library is enough

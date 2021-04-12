@@ -1,10 +1,13 @@
 import threading
 import time
-import torch
 import unittest
-from torch.futures import Future
-from torch.testing._internal.common_utils import IS_WINDOWS, TestCase, TemporaryFileName, run_tests
 from typing import TypeVar
+
+import torch
+from torch.futures import Future
+from torch.testing._internal.common_utils import (IS_WINDOWS,
+                                                  TemporaryFileName, TestCase,
+                                                  run_tests)
 
 T = TypeVar("T")
 

@@ -18,11 +18,8 @@ from unittest.mock import Mock, patch
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
-from torch.distributed.launcher.api import (
-    LaunchConfig,
-    elastic_launch,
-    _get_entrypoint_name,
-)
+from torch.distributed.launcher.api import (LaunchConfig, _get_entrypoint_name,
+                                            elastic_launch)
 
 
 def path(script):

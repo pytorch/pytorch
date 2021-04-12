@@ -3,10 +3,10 @@
 
 
 import numpy as np
+
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer
 from caffe2.python.regularizer import BoundedGradientProjection, LogBarrier
-
 
 """
 Implementation of adaptive weighting: https://arxiv.org/pdf/1705.07115.pdf

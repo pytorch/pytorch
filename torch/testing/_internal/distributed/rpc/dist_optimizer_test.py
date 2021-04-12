@@ -7,9 +7,8 @@ import torch.distributed.rpc as rpc
 from torch import optim
 from torch.distributed.optim import DistributedOptimizer
 from torch.testing._internal.dist_utils import dist_init
-from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
-    RpcAgentTestFixture,
-)
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import \
+    RpcAgentTestFixture
 
 
 class MyModule:

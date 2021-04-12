@@ -21,13 +21,11 @@ from multiprocessing import synchronize
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Union
 
 import torch.multiprocessing as mp
-from torch.distributed.elastic.multiprocessing.errors import ProcessFailure, record
+from torch.distributed.elastic.multiprocessing.errors import (ProcessFailure,
+                                                              record)
 from torch.distributed.elastic.multiprocessing.redirects import (
-    redirect_stderr,
-    redirect_stdout,
-)
+    redirect_stderr, redirect_stdout)
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
-
 
 log = logging.getLogger(__name__)
 

@@ -8,7 +8,6 @@ import sys
 import time
 
 import torch
-
 import torch.utils.benchmark as benchmark_utils
 
 

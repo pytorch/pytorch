@@ -1,7 +1,8 @@
-from torch.testing._internal.common_utils import run_tests
+import unittest
 
 import torch
-import unittest
+from torch.testing._internal.common_utils import run_tests
+
 
 class TestPublicBindings(unittest.TestCase):
     def test_no_new_bindings(self):

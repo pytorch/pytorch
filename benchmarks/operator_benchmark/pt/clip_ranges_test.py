@@ -1,6 +1,6 @@
 import operator_benchmark as op_bench
-import torch
 
+import torch
 
 """Microbenchmarks for ClipRanges operator."""
 torch.ops.load_library("//caffe2/torch/fb/sparsenn:sparsenn_operators")

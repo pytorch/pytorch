@@ -1,17 +1,17 @@
-import torch
-from torch import tensor
-
+import random
 import unittest
 import warnings
-import random
 from functools import reduce
 
 import numpy as np
 
-from torch.testing._internal.common_utils import TestCase, run_tests, make_tensor
+import torch
+from torch import tensor
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
+    dtypes, dtypesIfCPU, dtypesIfCUDA, instantiate_device_type_tests, onlyCUDA,
     onlyOnCPUAndCUDA)
+from torch.testing._internal.common_utils import (TestCase, make_tensor,
+                                                  run_tests)
 
 
 class TestIndexing(TestCase):

@@ -3,9 +3,10 @@
 import collections
 
 import numpy as np
+from hypothesis import assume
+
 from caffe2.python import utils, workspace
 from caffe2.quantization.server import dnnlowp_pybind11
-from hypothesis import assume
 
 
 # This function asserts quantized results (output[1:]) are close enough to

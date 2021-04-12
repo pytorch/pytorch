@@ -1,7 +1,10 @@
 import sys
-import torch
 from contextlib import contextmanager
-from torch.backends import ContextProp, PropModule, __allow_nonbracketed_mutation
+
+import torch
+from torch.backends import (ContextProp, PropModule,
+                            __allow_nonbracketed_mutation)
+
 
 def is_available():
     r"""Returns whether PyTorch is built with MKL-DNN support."""

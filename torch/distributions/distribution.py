@@ -1,8 +1,9 @@
-import torch
 import warnings
+from typing import Any, Dict, Optional
+
+import torch
 from torch.distributions import constraints
 from torch.distributions.utils import lazy_property
-from typing import Dict, Optional, Any
 
 
 class Distribution(object):

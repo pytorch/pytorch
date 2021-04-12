@@ -1,26 +1,27 @@
+import collections
 import copy
 import glob
 import imp
 import os
 import re
 import shlex
-import setuptools
 import subprocess
 import sys
 import sysconfig
 import warnings
-import collections
+from typing import List, Optional, Union
+
+import setuptools
+from pkg_resources import packaging  # type: ignore
+from setuptools.command.build_ext import build_ext
 
 import torch
 import torch._appdirs
-from .file_baton import FileBaton
-from ._cpp_extension_versioner import ExtensionVersioner
-from .hipify import hipify_python
-from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
-from typing import List, Optional, Union
 
-from setuptools.command.build_ext import build_ext
-from pkg_resources import packaging  # type: ignore
+from ._cpp_extension_versioner import ExtensionVersioner
+from .file_baton import FileBaton
+from .hipify import hipify_python
+from .hipify.hipify_python import GeneratedFileCleaner, get_hip_file_path
 
 IS_WINDOWS = sys.platform == 'win32'
 LIB_EXT = '.pyd' if IS_WINDOWS else '.so'
@@ -1634,8 +1635,8 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
     env = os.environ.copy()
     # Try to activate the vc env for the users
     if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' not in env:
-        from distutils.util import get_platform
         from distutils._msvccompiler import _get_vc_env
+        from distutils.util import get_platform
 
         plat_name = get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]

@@ -1,13 +1,13 @@
 import itertools
-from typing import Optional, List, Sequence, Union
+from typing import List, Optional, Sequence, Union
 
-from tools.codegen.api.types import *
 from tools.codegen.api import cpp
+from tools.codegen.api.types import *
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
-from tools.codegen.utils import mapMaybe
-from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.gen import FileManager, parse_native_yaml
 from tools.codegen.model import *
+from tools.codegen.utils import mapMaybe
 
 # Note [Manual Backend kernels]
 # For these ops, we want to manually register to dispatch key Backend and

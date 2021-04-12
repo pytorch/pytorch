@@ -1,14 +1,17 @@
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 import torch
 from torch.fx import GraphModule  # type: ignore
+from torch.fx.node import Argument, Node, Target  # type: ignore
 from torch.fx.symbolic_trace import Tracer  # type: ignore
-from torch.fx.node import Target, Node, Argument  # type: ignore
+from torch.nn.intrinsic import _FusedModule
+
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
-from .fx.utils import graph_pretty_str  # noqa: F401
-from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .fx.graph_module import ObservedGraphModule, QuantizedGraphModule
-from torch.nn.intrinsic import _FusedModule
-from typing import Dict, Any, List, Callable, Tuple, Optional
+from .fx.utils import get_custom_module_class_keys  # noqa: F401
+from .fx.utils import graph_pretty_str  # noqa: F401
+
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
     if not isinstance(model, GraphModule):

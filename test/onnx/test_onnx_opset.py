@@ -1,15 +1,13 @@
+import io
+
+import onnx
 from test_pytorch_common import TestCase, run_tests
 
 import torch
 import torch.onnx
 from torch.nn import Module
-
-import onnx
-
-import io
-
-from torch.onnx.symbolic_helper import _export_onnx_opset_version
 from torch.onnx import ir_version, producer_name, producer_version
+from torch.onnx.symbolic_helper import _export_onnx_opset_version
 
 
 def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_version):

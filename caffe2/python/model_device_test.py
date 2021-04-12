@@ -1,14 +1,10 @@
-import numpy as np
 import unittest
 
+import numpy as np
+
 from caffe2.proto import caffe2_pb2
-from caffe2.python import (
-    workspace,
-    device_checker,
-    test_util,
-    model_helper,
-    brew,
-)
+from caffe2.python import (brew, device_checker, model_helper, test_util,
+                           workspace)
 
 
 class TestMiniAlexNet(test_util.TestCase):

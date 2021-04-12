@@ -1,10 +1,9 @@
-from torch import Tensor, _VF  # noqa: F401
-from torch.nn.utils.rnn import PackedSequence
-import torch
-
 import warnings
-
 from typing import List, Optional, Tuple
+
+import torch
+from torch import _VF, Tensor  # noqa: F401
+from torch.nn.utils.rnn import PackedSequence
 
 
 class QuantizedLinear(torch.jit.ScriptModule):

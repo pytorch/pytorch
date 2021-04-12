@@ -5,14 +5,11 @@
 
 
 
-from caffe2.python import schema
-from caffe2.python.layers.layers import (
-    ModelLayer,
-)
-from caffe2.python.layers.tags import (
-    Tags
-)
 import numpy as np
+
+from caffe2.python import schema
+from caffe2.python.layers.layers import ModelLayer
+from caffe2.python.layers.tags import Tags
 
 
 # ref: https://arxiv.org/pdf/1205.2618.pdf

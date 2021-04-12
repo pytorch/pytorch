@@ -1,9 +1,10 @@
-from torch.testing._internal.common_utils import TestCase, run_tests, slowTest, IS_WINDOWS
-
+import os
 import subprocess
 import tempfile
-import os
 import unittest
+
+from torch.testing._internal.common_utils import (IS_WINDOWS, TestCase,
+                                                  run_tests, slowTest)
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 

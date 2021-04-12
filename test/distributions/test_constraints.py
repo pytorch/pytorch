@@ -4,7 +4,6 @@ import torch
 from torch.distributions import biject_to, constraints, transform_to
 from torch.testing._internal.common_cuda import TEST_CUDA
 
-
 CONSTRAINTS = [
     (constraints.real,),
     (constraints.real_vector,),

@@ -62,17 +62,19 @@ for each GPU. Note that the 'coordinator' returned by the function is same
 each time.
 '''
 
-import queue as Queue
-from itertools import chain
 import logging
+import queue as Queue
 import threading
-import numpy as np
 import time
+from itertools import chain
 
-from caffe2.python import workspace, core, scope, utils
+import numpy as np
+
 from caffe2.proto import caffe2_pb2
-from caffe2.python.parallel_workers import Metrics, State, \
-    WorkerCoordinator, GlobalWorkerCoordinator, Worker, run_worker
+from caffe2.python import core, scope, utils, workspace
+from caffe2.python.parallel_workers import (GlobalWorkerCoordinator, Metrics,
+                                            State, Worker, WorkerCoordinator,
+                                            run_worker)
 
 log = logging.getLogger("data_workers")
 log.setLevel(logging.INFO)

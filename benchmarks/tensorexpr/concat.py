@@ -1,5 +1,7 @@
-from . import benchmark
 import numpy as np
+
+from . import benchmark
+
 
 class Concat2D2InputBench(benchmark.Benchmark):
     def __init__(self, mode, device, dtype, I1_D1, I1_D2, I2_D1, I2_D2, concat_dim):

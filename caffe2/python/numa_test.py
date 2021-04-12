@@ -2,10 +2,11 @@
 
 
 
-from caffe2.python import core, workspace
-from caffe2.proto import caffe2_pb2
-from caffe2.python.test_util import TestCase
 import unittest
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
+from caffe2.python.test_util import TestCase
 
 core.GlobalInit(["caffe2", "--caffe2_cpu_numa_enabled=1"])
 

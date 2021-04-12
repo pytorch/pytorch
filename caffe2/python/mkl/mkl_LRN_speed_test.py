@@ -5,8 +5,9 @@
 import unittest
 
 import numpy as np
+
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, test_util
+from caffe2.python import core, test_util, workspace
 
 
 @unittest.skipIf(not workspace.C.has_mkldnn, "Skipping as we do not have mkldnn.")

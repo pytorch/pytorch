@@ -1,22 +1,21 @@
 r"""Functional interface"""
-from typing import Callable, List, Optional, Tuple
 import math
 import warnings
+from typing import Callable, List, Optional, Tuple
 
 import torch
 from torch import _VF
-from torch._C import _infer_size, _add_docstr
+from torch._C import _add_docstr, _infer_size
 from torch._torch_docs import reproducibility_notes, tf32_notes
 
-from .._jit_internal import boolean_dispatch, _overload, BroadcastingList1, BroadcastingList2, BroadcastingList3
-from ..overrides import (
-    has_torch_function, has_torch_function_unary, has_torch_function_variadic,
-    handle_torch_function)
+from .._jit_internal import (BroadcastingList1, BroadcastingList2,
+                             BroadcastingList3, _overload, boolean_dispatch)
+from ..overrides import (handle_torch_function, has_torch_function,
+                         has_torch_function_unary, has_torch_function_variadic)
 from . import _reduction as _Reduction
 from . import grad  # noqa: F401
 from .modules import utils
-from .modules.utils import _single, _pair, _triple, _list_with_default
-
+from .modules.utils import _list_with_default, _pair, _single, _triple
 
 Tensor = torch.Tensor
 

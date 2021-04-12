@@ -1,7 +1,7 @@
-from .batchnorm import _NormBase
-from .. import functional as F
-
 from torch import Tensor
+
+from .. import functional as F
+from .batchnorm import _NormBase
 
 
 class _InstanceNorm(_NormBase):

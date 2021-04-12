@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-import sys
+import fnmatch
 import pickle
 import pprint
+import sys
 import zipfile
-import fnmatch
 from typing import IO, BinaryIO, Union
 
 

@@ -3,13 +3,14 @@
 
 
 
-from caffe2.python import core
+import itertools as it
+
+import hypothesis.strategies as st
+import numpy as np
 
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-import hypothesis.strategies as st
-import itertools as it
-import numpy as np
+from caffe2.python import core
 
 
 class TestMomentsOp(serial.SerializedTestCase):

@@ -3,9 +3,10 @@
 
 import collections
 import numbers
-from typing import (Any, Dict, Iterator, List, Set, Sequence, Tuple,
-                    TypeVar, Union, get_type_hints)
-from typing import _tp_cache, _type_check, _type_repr  # type: ignore
+from typing import (Any, Dict, Iterator, List, Sequence, Set,  # type: ignore
+                    Tuple, TypeVar, Union, _tp_cache, _type_check, _type_repr,
+                    get_type_hints)
+
 # TODO: Use TypeAlias when Python 3.6 is deprecated
 # Please check [Note: TypeMeta and TypeAlias]
 try:

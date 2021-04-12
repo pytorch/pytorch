@@ -3,21 +3,21 @@
 
 
 
-from caffe2.python import (
-    core, gradient_checker, rnn_cell, workspace, scope, utils
-)
-from caffe2.python.attention import AttentionType
-from caffe2.python.model_helper import ModelHelper, ExtractPredictorNet
-from caffe2.python.rnn.rnn_cell_test_util import sigmoid, tanh, _prepare_rnn
-from caffe2.proto import caffe2_pb2
-import caffe2.python.hypothesis_test_util as hu
-
+import unittest
 from functools import partial
-from hypothesis import assume, given
-from hypothesis import settings as ht_settings
+
 import hypothesis.strategies as st
 import numpy as np
-import unittest
+from hypothesis import assume, given
+from hypothesis import settings as ht_settings
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2
+from caffe2.python import (core, gradient_checker, rnn_cell, scope, utils,
+                           workspace)
+from caffe2.python.attention import AttentionType
+from caffe2.python.model_helper import ExtractPredictorNet, ModelHelper
+from caffe2.python.rnn.rnn_cell_test_util import _prepare_rnn, sigmoid, tanh
 
 
 def lstm_unit(*args, **kwargs):

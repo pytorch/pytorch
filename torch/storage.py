@@ -1,8 +1,9 @@
 import io
+from typing import Any, Type, TypeVar
 
 import torch
-from ._utils import _type, _cuda
-from typing import Any, TypeVar, Type
+
+from ._utils import _cuda, _type
 
 T = TypeVar('T', bound='_StorageBase')
 class _StorageBase(object):

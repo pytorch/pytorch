@@ -1,9 +1,11 @@
 from collections import namedtuple
-from .observer import *
-from .fake_quantize import *
+from typing import Optional, Union
+
 import torch.nn as nn
 
-from typing import Union, Optional
+from .fake_quantize import *
+from .observer import *
+
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     """

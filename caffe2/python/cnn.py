@@ -5,10 +5,11 @@
 
 
 
+import logging
+
+from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, workspace
 from caffe2.python.model_helper import ModelHelper
-from caffe2.proto import caffe2_pb2
-import logging
 
 
 class CNNModelHelper(ModelHelper):

@@ -6,12 +6,13 @@ import argparse
 import copy
 import logging
 import re
-import numpy as np  # noqa
 
-from caffe2.proto import caffe2_pb2, caffe2_legacy_pb2
+import numpy as np  # noqa
 from caffe.proto import caffe_pb2
-from caffe2.python import core, utils, workspace
 from google.protobuf import text_format
+
+from caffe2.proto import caffe2_legacy_pb2, caffe2_pb2
+from caffe2.python import core, utils, workspace
 
 logging.basicConfig()
 log = logging.getLogger("caffe_translator")

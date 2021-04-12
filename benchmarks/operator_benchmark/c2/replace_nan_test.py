@@ -1,8 +1,8 @@
 import benchmark_caffe2 as op_bench_c2
 import operator_benchmark as op_bench
 from benchmark_caffe2 import Caffe2BenchmarkBase  # noqa
-from caffe2.python import core
 
+from caffe2.python import core
 
 """Microbenchmarks for element-wise ReplaceNaN operator."""
 

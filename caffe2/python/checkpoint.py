@@ -5,18 +5,13 @@
 
 
 
-import os
 import logging
-from caffe2.python import core, context
+import os
+
+from caffe2.python import context, core
 from caffe2.python.net_builder import ops
-from caffe2.python.task import (
-    final_output,
-    Node,
-    Task,
-    TaskGroup,
-    TaskOutput,
-    WorkspaceType,
-)
+from caffe2.python.task import (Node, Task, TaskGroup, TaskOutput,
+                                WorkspaceType, final_output)
 
 logger = logging.getLogger(__name__)
 

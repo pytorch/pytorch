@@ -2,13 +2,14 @@
 
 
 
+import copy
 import functools
 
 import numpy as np
 from hypothesis import given, settings
-from caffe2.python import core
+
 import caffe2.python.hypothesis_test_util as hu
-import copy
+from caffe2.python import core
 
 
 class TestNormalizeOp(hu.HypothesisTestCase):

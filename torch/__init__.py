@@ -9,27 +9,30 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
-import os
-import sys
-import platform
-import textwrap
 import ctypes
+import os
+import platform
+import sys
+import textwrap
 import warnings
 
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
 from ._utils import _import_dotted_name
-from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
-    USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
+from ._utils_internal import (USE_GLOBAL_DEPS, USE_RTLD_GLOBAL_WITH_LIBTORCH,
+                              get_file_path,
+                              prepare_multiprocessing_environment)
+
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if sys.executable == 'torch_deploy':
     __version__ = "torch-deploy-1.8"
 else:
     from .version import __version__ as __version__
-from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING
+from typing import TYPE_CHECKING, Set, Type
+
+from ._six import string_classes as _string_classes
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -71,8 +74,9 @@ if sys.platform == 'win32':
     else:
         nvtoolsext_dll_path = ''
 
-    from .version import cuda as cuda_version
     import glob
+
+    from .version import cuda as cuda_version
     if cuda_version and all([not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths]):
         cuda_version_1 = cuda_version.replace('.', '_')
         cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
@@ -556,10 +560,11 @@ _storage_classes = {
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
 _tensor_classes: Set[Type] = set()
 
-# If you edit these imports, please update torch/__init__.py.in as well
-from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
-from .serialization import save, load
 from ._tensor_str import set_printoptions
+# If you edit these imports, please update torch/__init__.py.in as well
+from .random import (get_rng_state, initial_seed, manual_seed, seed,
+                     set_rng_state)
+from .serialization import load, save
 
 ################################################################################
 # Initialize extension
@@ -602,7 +607,6 @@ for name in dir(_C._VariableFunctions):
 # needs to be after the above ATen bindings so we can overwrite from Python side
 from .functional import *
 
-
 ################################################################################
 # Remove unnecessary members
 ################################################################################
@@ -629,7 +633,7 @@ del QUInt4x2StorageBase
 def _assert(condition, message):
     r"""A wrapper around Python's assert which is symbolically traceable.
     """
-    from .overrides import has_torch_function, handle_torch_function
+    from .overrides import handle_torch_function, has_torch_function
 
     if type(condition) is not torch.Tensor and has_torch_function((condition,)):
         return handle_torch_function(_assert, (condition,), condition, message)
@@ -643,47 +647,46 @@ def _assert(condition, message):
 # the public API. The "regular" import lines are there solely for the runtime
 # side effect of adding to the imported module's members for other users.
 
-from torch import cuda as cuda
-from torch import autograd as autograd
-from torch.autograd import (
-    no_grad as no_grad,
-    enable_grad as enable_grad,
-    set_grad_enabled as set_grad_enabled,
-)
-from torch import fft as fft
-from torch import futures as futures
-from torch import nn as nn
-import torch.nn.intrinsic
-import torch.nn.quantizable
-import torch.nn.quantized
-from torch import optim as optim
-import torch.optim._multi_tensor
-from torch import multiprocessing as multiprocessing
-from torch import sparse as sparse
-from torch import special as special
-import torch.utils.backcompat
-from torch import onnx as onnx
-from torch import jit as jit
-from torch import linalg as linalg
-from torch import hub as hub
-from torch import random as random
-from torch import distributions as distributions
-from torch import testing as testing
 import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
-from torch import quantization as quantization
+import torch.nn.intrinsic
+import torch.nn.quantizable
+import torch.nn.quantized
+import torch.optim._multi_tensor
+import torch.utils.backcompat
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
+from torch import autograd as autograd
+from torch import cuda as cuda
+from torch import distributions as distributions
+from torch import fft as fft
+from torch import futures as futures
+from torch import hub as hub
+from torch import jit as jit
+from torch import linalg as linalg
+from torch import multiprocessing as multiprocessing
+from torch import nn as nn
+from torch import onnx as onnx
+from torch import optim as optim
 from torch import profiler as profiler
+from torch import quantization as quantization
+from torch import random as random
+from torch import sparse as sparse
+from torch import special as special
+from torch import testing as testing
+from torch.autograd import enable_grad as enable_grad
+from torch.autograd import no_grad as no_grad
+from torch.autograd import set_grad_enabled as set_grad_enabled
 
 _C._init_names(list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs, _storage_docs
+from . import _storage_docs, _tensor_docs, _torch_docs
+
 del _torch_docs, _tensor_docs, _storage_docs
 
 
@@ -692,12 +695,11 @@ def compiled_with_cxx11_abi():
     return _C._GLIBCXX_USE_CXX11_ABI
 
 
-# Import the ops "namespace"
-from torch._ops import ops
-from torch._classes import classes
-
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom
+from torch._classes import classes
+# Import the ops "namespace"
+from torch._ops import ops
 
 # If you are seeing this, it means that this call site was not checked if
 # the memory format could be preserved, and it was switched to old default
@@ -706,13 +708,13 @@ legacy_contiguous_format = contiguous_format
 
 # Register fork handler to initialize OpenMP in child processes (see gh-28389)
 from torch.multiprocessing._atfork import register_after_fork
+
 register_after_fork(torch.get_num_threads)
 del register_after_fork
 
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg as lobpcg
-
 from ._vmap_internals import vmap as vmap
 
 # These were previously defined in native_functions.yaml and appeared on the

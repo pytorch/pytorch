@@ -1,53 +1,26 @@
-import torch._C
-
 from contextlib import contextmanager
 from typing import Iterator
 
-from torch.utils import set_module
-
+import torch._C
 # These are imported so users can access them from the `torch.jit` module
-from torch._jit_internal import (
-    Final,
-    Future,
-    _overload,
-    _overload_method,
-    ignore,
-    _isinstance,
-    is_scripting,
-    export,
-    unused,
-)
-from torch.jit._script import (
-    script,
-    Attribute,
-    ScriptModule,
-    script_method,
-    RecursiveScriptModule,
-    ScriptWarning,
-    interface,
-    CompilationUnit,
-    ScriptFunction,
-    _unwrap_optional,
-)
-from torch.jit._trace import (
-    trace,
-    trace_module,
-    TracedModule,
-    TracerWarning,
-    TracingCheckError,
-    is_tracing,
-    ONNXTracedModule,
-    TopLevelTracedModule,
-    _unique_state_dict,
-    _flatten,
-    _script_if_tracing,
-    _get_trace_graph,
-)
+from torch._jit_internal import (Final, Future, _isinstance, _overload,
+                                 _overload_method, export, ignore,
+                                 is_scripting, unused)
 from torch.jit._async import fork, wait
-from torch.jit._serialization import save, load
-from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
-
 from torch.jit._freeze import freeze, optimize_frozen_module
+from torch.jit._fuser import (fuser, last_executed_optimized_graph,
+                              optimized_execution)
+from torch.jit._script import (Attribute, CompilationUnit,
+                               RecursiveScriptModule, ScriptFunction,
+                               ScriptModule, ScriptWarning, _unwrap_optional,
+                               interface, script, script_method)
+from torch.jit._serialization import load, save
+from torch.jit._trace import (ONNXTracedModule, TopLevelTracedModule,
+                              TracedModule, TracerWarning, TracingCheckError,
+                              _flatten, _get_trace_graph, _script_if_tracing,
+                              _unique_state_dict, is_tracing, trace,
+                              trace_module)
+from torch.utils import set_module
 
 # For backwards compatibility
 _fork = fork

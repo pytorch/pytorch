@@ -1,10 +1,11 @@
-from typing import Dict, Set, Optional, Tuple, List
-import yaml
-
 from dataclasses import dataclass
+from typing import Dict, List, Optional, Set, Tuple
+
+import yaml
 
 from tools.codegen.model import NativeFunction
 from tools.codegen.selective_build.operator import *
+
 
 # A SelectiveBuilder holds information extracted from the selective build
 # YAML specification.

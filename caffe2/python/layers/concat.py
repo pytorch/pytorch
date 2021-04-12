@@ -5,15 +5,15 @@
 
 
 
-from caffe2.python import schema
-from caffe2.python.layers.layers import (
-    ModelLayer,
-)
-from future.utils import viewitems
-import numpy as np
+import logging
 from collections import defaultdict
 
-import logging
+import numpy as np
+from future.utils import viewitems
+
+from caffe2.python import schema
+from caffe2.python.layers.layers import ModelLayer
+
 logger = logging.getLogger(__name__)
 
 

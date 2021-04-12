@@ -1,10 +1,10 @@
 
-from typing import Optional
 import multiprocessing
 import multiprocessing.connection
 import signal
 import sys
 import warnings
+from typing import Optional
 
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 

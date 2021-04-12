@@ -4,18 +4,20 @@ These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
 """
 
-import torch
-import random
 import os
 import queue
+import random
 from dataclasses import dataclass
-from torch._utils import ExceptionWrapper
 from typing import Union
-from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS
+
+import torch
+from torch._utils import ExceptionWrapper
+
+from . import IS_WINDOWS, MP_STATUS_CHECK_INTERVAL, signal_handling
 
 if IS_WINDOWS:
     import ctypes
-    from ctypes.wintypes import DWORD, BOOL, HANDLE
+    from ctypes.wintypes import BOOL, DWORD, HANDLE
 
     # On Windows, the parent ID of the worker process remains unchanged when the manager process
     # is gone, and the only way to check it through OS is to let the worker have a process handle

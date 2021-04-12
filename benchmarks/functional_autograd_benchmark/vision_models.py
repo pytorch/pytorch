@@ -1,10 +1,11 @@
+from typing import cast
+
+import torchvision_models as models
+from utils import GetterReturnType, extract_weights, load_weights
+
 import torch
 from torch import Tensor
-import torchvision_models as models
 
-from utils import extract_weights, load_weights, GetterReturnType
-
-from typing import cast
 
 def get_resnet18(device: torch.device) -> GetterReturnType:
     N = 32

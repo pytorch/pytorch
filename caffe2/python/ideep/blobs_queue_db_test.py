@@ -4,10 +4,11 @@
 
 
 import unittest
+
 import numpy as np
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
-from caffe2.python import core, workspace, timeout_guard
+from caffe2.python import core, timeout_guard, workspace
 
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")

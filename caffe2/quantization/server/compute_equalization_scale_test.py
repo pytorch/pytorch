@@ -13,11 +13,12 @@
 # limitations under the License.
 ##############################################################################
 
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, workspace
 from hypothesis import given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, workspace
 
 
 class TestComputeEqualizationScaleOp(hu.HypothesisTestCase):

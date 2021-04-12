@@ -3,7 +3,7 @@
 
 
 
-from caffe2.python.core import DataType, BlobReference, ScopedBlobReference
+from caffe2.python.core import BlobReference, DataType, ScopedBlobReference
 from caffe2.python.modeling.parameter_info import ParameterInfo
 
 

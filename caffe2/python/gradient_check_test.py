@@ -6,23 +6,16 @@
 
 
 
-import numpy as np
-from caffe2.python import (
-    brew,
-    core,
-    device_checker,
-    gradient_checker,
-    model_helper,
-    test_util,
-    workspace,
-)
-from caffe2.python.gradient_checker import NetGradientChecker
-from caffe2.python.net_builder import ops, NetBuilder
-from caffe2.proto import caffe2_pb2
-
 import unittest
 from typing import Optional
 
+import numpy as np
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import (brew, core, device_checker, gradient_checker,
+                           model_helper, test_util, workspace)
+from caffe2.python.gradient_checker import NetGradientChecker
+from caffe2.python.net_builder import NetBuilder, ops
 
 if workspace.has_gpu_support and workspace.NumGpuDevices() > 0:
     _gpu_dev_option = caffe2_pb2.DeviceOption()

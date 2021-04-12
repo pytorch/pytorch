@@ -1,12 +1,11 @@
-import torch._C
-
 import contextlib
 import ctypes
 import sys
 import types
 
-import torch.jit
+import torch._C
 import torch._utils_internal
+import torch.jit
 
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')

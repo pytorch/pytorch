@@ -15,7 +15,7 @@ Usage:
 
 import os
 import re
-from subprocess import Popen, PIPE
+from subprocess import PIPE, Popen
 
 # Get python protobuf version.
 try:

@@ -10,7 +10,6 @@ import argparse
 import ctypes
 import os
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="test binary, triggers a segfault (SIGSEGV)"

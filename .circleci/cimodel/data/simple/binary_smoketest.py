@@ -18,8 +18,8 @@ TODO: Refactor circleci/cimodel/data/binary_build_data.py to generate this file
  - binary_linux_libtorch_3_6m_cu90_devtoolset7_static-without-deps_build
 """
 
-import cimodel.lib.miniutils as miniutils
 import cimodel.data.simple.util.branch_filters
+import cimodel.lib.miniutils as miniutils
 
 
 class SmoketestJob:

@@ -4,18 +4,15 @@
 
 
 import unittest
+
 import hypothesis.strategies as st
-from hypothesis import given
 import numpy as np
-from caffe2.proto import caffe2_pb2
-from caffe2.python import (
-    brew,
-    core,
-    model_helper,
-    workspace,
-)
-from caffe2.python.transformations import optimizeForMKLDNN
+from hypothesis import given
+
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2
+from caffe2.python import brew, core, model_helper, workspace
+from caffe2.python.transformations import optimizeForMKLDNN
 
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")

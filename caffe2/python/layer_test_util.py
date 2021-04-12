@@ -7,17 +7,11 @@
 
 from collections import namedtuple
 
-from caffe2.python import (
-    core,
-    layer_model_instantiator,
-    layer_model_helper,
-    schema,
-    test_util,
-    workspace,
-    utils,
-)
-from caffe2.proto import caffe2_pb2
 import numpy as np
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import (core, layer_model_helper, layer_model_instantiator,
+                           schema, test_util, utils, workspace)
 
 
 # pyre-fixme[13]: Pyre can't detect attribute initialization through the

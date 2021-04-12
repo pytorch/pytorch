@@ -1,16 +1,18 @@
-from typing import List, Optional, Union
 import itertools
-from typing_extensions import Literal
 from dataclasses import dataclass
+from typing import List, Optional, Union
 
-from tools.codegen.context import *
-from tools.codegen.utils import *
-from tools.codegen.model import *
-from tools.codegen.api.types import *
+from typing_extensions import Literal
+
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
+from tools.codegen.api.types import *
+from tools.codegen.context import *
+from tools.codegen.model import *
 from tools.codegen.selective_build.selector import SelectiveBuilder
+from tools.codegen.utils import *
+
 
 # Generates Register{dispatch}.cpp (e.g., RegisterCPU.cpp).
 #

@@ -3,9 +3,10 @@ import math
 import torch
 from torch._six import inf
 from torch.distributions import constraints
-from torch.distributions.transforms import AbsTransform
 from torch.distributions.cauchy import Cauchy
-from torch.distributions.transformed_distribution import TransformedDistribution
+from torch.distributions.transformed_distribution import \
+    TransformedDistribution
+from torch.distributions.transforms import AbsTransform
 
 
 class HalfCauchy(TransformedDistribution):

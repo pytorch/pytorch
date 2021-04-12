@@ -3,8 +3,10 @@
 
 
 
-from caffe2.python import workspace
 import unittest
+
+from caffe2.python import workspace
+
 
 class TestOperator(unittest.TestCase):
     def setUp(self):

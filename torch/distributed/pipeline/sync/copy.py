@@ -8,12 +8,13 @@
 and computation on the same GPU.
 """
 from collections import deque
-from typing import Deque, List, Optional, Tuple, Sequence
+from typing import Deque, List, Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor
 
-from .stream import AbstractStream, current_stream, get_device, record_stream, use_stream, wait_stream
+from .stream import (AbstractStream, current_stream, get_device, record_stream,
+                     use_stream, wait_stream)
 
 __all__: List[str] = []
 

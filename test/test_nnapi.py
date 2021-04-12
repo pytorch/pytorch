@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-import os
 import ctypes
-import torch
+import os
 from typing import Tuple
+
+import torch
 from torch.backends._nnapi.prepare import convert_model_to_nnapi
 from torch.testing._internal.common_utils import TestCase, run_tests
 

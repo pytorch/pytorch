@@ -1,12 +1,13 @@
-import numpy as np
-
-from caffe2.python import workspace, memonger, core, model_helper, brew
-from caffe2.proto import caffe2_pb2
-import caffe2.python.hypothesis_test_util as hu
-from future.utils import viewvalues
-import hypothesis.strategies as st
-from hypothesis import given, settings
 import unittest
+
+import hypothesis.strategies as st
+import numpy as np
+from future.utils import viewvalues
+from hypothesis import given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2
+from caffe2.python import brew, core, memonger, model_helper, workspace
 
 
 def has_blob(proto, needle):

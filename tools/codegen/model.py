@@ -1,11 +1,12 @@
-import re
-
-from dataclasses import dataclass
-from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
-from enum import Enum, auto
 import itertools
+import re
+from dataclasses import dataclass
+from enum import Enum, auto
+from typing import (Callable, Dict, Iterator, List, NoReturn, Optional,
+                    Sequence, Set, Tuple, Union)
 
 from tools.codegen.utils import *
+
 
 # A little trick from https://github.com/python/mypy/issues/6366
 # for getting mypy to do exhaustiveness checking

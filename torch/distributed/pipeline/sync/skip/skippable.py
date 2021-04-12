@@ -6,25 +6,9 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 """The user interface to define skip connections."""
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    ClassVar,
-    Dict,
-    FrozenSet,
-    Generator,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    Sequence,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-    cast,
-)
+from typing import (TYPE_CHECKING, Any, Callable, ClassVar, Dict, FrozenSet,
+                    Generator, Iterable, List, Optional, Sequence, Set, Tuple,
+                    Type, TypeVar, Union, cast)
 
 from torch import Tensor, nn
 

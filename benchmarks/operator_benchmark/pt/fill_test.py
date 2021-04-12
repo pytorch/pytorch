@@ -1,4 +1,5 @@
 import operator_benchmark as op_bench
+
 import torch
 
 """Microbenchmark for Fill_ operator."""

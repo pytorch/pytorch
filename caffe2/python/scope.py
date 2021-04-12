@@ -7,10 +7,10 @@
 
 import contextlib
 import threading
+
 from past.builtins import basestring
 
 from caffe2.proto import caffe2_pb2
-
 
 # The name scope and device scope when creating a new operator.
 _NAMESCOPE_SEPARATOR = '/'

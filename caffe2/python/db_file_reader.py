@@ -5,12 +5,13 @@
 
 
 
-from caffe2.python import core, scope, workspace, _import_c_extension as C
+import os
+
+from caffe2.python import _import_c_extension as C
+from caffe2.python import core, scope, workspace
 from caffe2.python.dataio import Reader
 from caffe2.python.dataset import Dataset
 from caffe2.python.schema import from_column_list
-
-import os
 
 
 class DBFileReader(Reader):

@@ -1,5 +1,7 @@
 import torch
-from ._functions import Scatter, Gather
+
+from ._functions import Gather, Scatter
+
 
 def is_namedtuple(obj):
     # Check if type was created from collections.namedtuple or a typing.NamedTuple.

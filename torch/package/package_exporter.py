@@ -4,24 +4,15 @@ import linecache
 import pickletools
 import types
 from pathlib import Path
-from typing import (
-    Any,
-    BinaryIO,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import (Any, BinaryIO, Callable, Dict, List, Optional, Sequence,
+                    Set, Tuple, Union)
 from urllib.parse import quote
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
 
-from ._file_structure_representation import Folder, _create_folder_from_file_list
+from ._file_structure_representation import (Folder,
+                                             _create_folder_from_file_list)
 from ._glob_group import GlobPattern, _GlobGroup
 from ._importlib import _normalize_path
 from ._mangling import is_mangled

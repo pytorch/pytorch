@@ -1,10 +1,12 @@
-import unittest
 import io
 import tempfile
+import unittest
+
 import torch
 import torch.utils.show_pickle
+from torch.testing._internal.common_utils import (IS_WINDOWS, TestCase,
+                                                  run_tests)
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 
 class TestShowPickle(TestCase):
 

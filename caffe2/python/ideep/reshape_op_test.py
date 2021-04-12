@@ -3,11 +3,13 @@
 
 
 
-from caffe2.python.test_util import TestCase
-from caffe2.proto import caffe2_pb2
 import unittest
+
 import numpy as np
+
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
+from caffe2.python.test_util import TestCase
 
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")

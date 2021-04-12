@@ -2,13 +2,15 @@
 
 
 
-from caffe2.python import core
-from hypothesis import given
-import caffe2.python.hypothesis_test_util as hu
+import unittest
+
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given
 
-import unittest
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core
+
 
 def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))

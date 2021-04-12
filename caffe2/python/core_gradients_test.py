@@ -3,16 +3,15 @@
 
 
 
-from hypothesis import given, settings
-import hypothesis.strategies as st
 import unittest
+
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given, settings
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, test_util, workspace
-from caffe2.python.core import CreateOperator, GradientRegistry, IR
-
-import numpy as np
-
+from caffe2.python.core import IR, CreateOperator, GradientRegistry
 
 # First, we will set up a few gradient registry entries so that we can manually
 # construct some test cases.

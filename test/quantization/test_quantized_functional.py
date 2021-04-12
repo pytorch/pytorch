@@ -1,23 +1,18 @@
 # Torch
-import torch
-import torch.nn.functional as F
-import torch.nn.quantized.functional as qF
-
 # Standard library
 import numpy as np
-
 # Testing utils
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from torch.testing._internal.common_quantization import (
-    QuantizationTestCase,
-    _make_conv_test_input,
-)
+
+import torch
+import torch.nn.functional as F
+import torch.nn.quantized.functional as qF
+from torch.testing._internal.common_quantization import (QuantizationTestCase,
+                                                         _make_conv_test_input)
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import (
-    IS_PPC,
-    TEST_WITH_UBSAN,
-)
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN
+
 
 class TestQuantizedFunctional(QuantizationTestCase):
     def test_relu_api(self):

@@ -1,10 +1,10 @@
-import torch
-from torch.nn.modules.container import ModuleList, ModuleDict, Module
-from torch.nn.parameter import Parameter
-from torch import Tensor
-from typing import Union, Optional, Iterable, Dict, Tuple
 from contextlib import contextmanager
+from typing import Dict, Iterable, Optional, Tuple, Union
 
+import torch
+from torch import Tensor
+from torch.nn.modules.container import Module, ModuleDict, ModuleList
+from torch.nn.parameter import Parameter
 
 _cache_enabled = 0
 _cache: Dict[Tuple[int, str], Optional[Tensor]] = {}

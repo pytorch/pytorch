@@ -1,22 +1,22 @@
 # Torch
-from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
-from torch.testing._internal.common_methods_invocations import non_differentiable, create_input, \
-    unpack_variables
-import torch.nn.functional as F
+import math  # noqa: F401
+from copy import deepcopy
+from typing import List, Union
+
 import torch
 import torch.cuda
 import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
-from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.testing._internal.common_utils import is_iterable_of_tensors
-
-from copy import deepcopy
-from typing import List, Union
-import math  # noqa: F401
-
+import torch.nn.functional as F
 # Testing utils
 from torch._six import inf
+from torch.jit.annotations import (BroadcastingList2,  # noqa: F401
+                                   BroadcastingList3)
+from torch.testing._internal.common_methods_invocations import (
+    create_input, non_differentiable, unpack_variables)
+from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.testing._internal.common_utils import is_iterable_of_tensors
 
 # TODO: include files like this should not set the default dtype
 torch.set_default_dtype(torch.double)

@@ -5,9 +5,11 @@
 
 
 
-from caffe2.python import core
-from caffe2.proto import caffe2_pb2
 from onnx.backend.base import BackendRep, namedtupledict
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core
+
 
 class Caffe2Rep(BackendRep):
     def __init__(self, init_net, predict_net, workspace, uninitialized):

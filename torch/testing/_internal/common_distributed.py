@@ -1,27 +1,25 @@
-from contextlib import contextmanager
-from enum import Enum
 import faulthandler
-from multiprocessing import Manager
-from io import StringIO
+import logging
 import os
 import sys
 import tempfile
 import threading
 import time
-import unittest
-import logging
 import traceback
 import types
-
+import unittest
+from contextlib import contextmanager
+from enum import Enum
+from functools import partial, reduce, wraps
+from io import StringIO
+from multiprocessing import Manager
 from typing import NamedTuple, Union
-from functools import wraps
 
 import torch
-import torch.distributed as c10d
 import torch.cuda.nccl
-
-from functools import partial, reduce
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA
+import torch.distributed as c10d
+from torch.testing._internal.common_utils import (FILE_SCHEMA, TEST_WITH_ROCM,
+                                                  TestCase)
 
 logger = logging.getLogger(__name__)
 

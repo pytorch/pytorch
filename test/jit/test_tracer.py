@@ -1,32 +1,34 @@
-import unittest
+import copy
 import io
 import os
 import sys
-import copy
+import unittest
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable, Function
+from torch.autograd import Function, Variable
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.common_utils import suppress_warnings, \
-    skipIfCompiledWithoutNumpy, enable_profiling_mode_for_profiling_tests, \
-    IS_SANDCASTLE, TemporaryFileName
-from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
-    _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, \
-    RUN_CUDA_MULTI_GPU, make_global
-from torch.testing._internal.common_cuda import with_tf32_off
-from torch import Tensor
-
+import warnings
 # Standard library
 from collections import namedtuple
 from itertools import chain
 from typing import Dict, List, Optional, Tuple
-import warnings
+
+from torch import Tensor
+from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_utils import (
+    IS_SANDCASTLE, TemporaryFileName,
+    enable_profiling_mode_for_profiling_tests, skipIfCompiledWithoutNumpy,
+    suppress_warnings)
+from torch.testing._internal.jit_utils import (
+    RUN_CUDA, RUN_CUDA_MULTI_GPU, JitTestCase,
+    _tmp_donotuse_dont_inline_everything, _trace, enable_cpu_fuser,
+    make_global)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

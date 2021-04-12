@@ -1,6 +1,7 @@
-from tools import trailing_newlines
-import unittest
 import tempfile
+import unittest
+
+from tools import trailing_newlines
 
 
 def correct_trailing_newlines(file_contents: str) -> bool:

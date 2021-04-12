@@ -2,8 +2,8 @@ import collections
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_WITH_ASAN)
+from torch.testing._internal.common_utils import (TEST_WITH_ASAN, TestCase,
+                                                  run_tests)
 
 try:
     import psutil

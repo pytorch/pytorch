@@ -3,18 +3,20 @@
 
 
 
-from caffe2.python.schema import (
-    Struct, FetchRecord, NewRecord, FeedRecord, InitEmptyRecord)
+import math
+
+import numpy as np
+
 from caffe2.python import core, workspace
-from caffe2.python.session import LocalSession
 from caffe2.python.dataset import Dataset
+from caffe2.python.net_builder import ops
 from caffe2.python.pipeline import pipe
 from caffe2.python.queue_util import Queue
+from caffe2.python.schema import (FeedRecord, FetchRecord, InitEmptyRecord,
+                                  NewRecord, Struct)
+from caffe2.python.session import LocalSession
 from caffe2.python.task import TaskGroup
 from caffe2.python.test_util import TestCase
-from caffe2.python.net_builder import ops
-import numpy as np
-import math
 
 
 class TestPipeline(TestCase):

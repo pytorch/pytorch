@@ -5,13 +5,14 @@ import pickle
 import signal
 import subprocess
 import time
-from typing import List, Optional, Union, TYPE_CHECKING
 import uuid
+from typing import TYPE_CHECKING, List, Optional, Union
 
 from core.api import AutoLabels
 from core.types import Label
 from core.utils import get_temp_dir
-from worker.main import WORKER_PATH, WorkerFailure, WorkerOutput, WorkerTimerArgs, WorkerUnpickler
+from worker.main import (WORKER_PATH, WorkerFailure, WorkerOutput,
+                         WorkerTimerArgs, WorkerUnpickler)
 
 if TYPE_CHECKING:
     PopenType = subprocess.Popen[bytes]

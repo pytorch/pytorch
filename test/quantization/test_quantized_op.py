@@ -1,31 +1,31 @@
-from builtins import round
-
 import copy
 import itertools
-import numpy as np
+import operator
 import sys
 import unittest
-import operator
+from builtins import round
+
+import numpy as np
+from hypothesis import HealthCheck, assume, given, note, settings
+from hypothesis import strategies as st
 
 import torch
-from torch import _VF
 import torch.jit
 import torch.nn.functional as F
-from torch.nn.modules.utils import _single, _pair
-
-from hypothesis import settings, HealthCheck
-from hypothesis import assume, given, note
-from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
+from torch import _VF
+from torch.nn.modules.utils import _pair, _single
+
 hu.assert_deadline_disabled()
 
-from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM
-from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
-    override_quantized_engine, supported_qengines, override_qengines, _snr
-from torch.testing._internal.common_quantized import qengine_is_qnnpack
 from torch.quantization import PerChannelMinMaxObserver
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_quantized import (
+    _calculate_dynamic_qparams, _dequantize, _quantize, _snr,
+    override_qengines, override_quantized_engine, qengine_is_qnnpack,
+    supported_qengines)
+from torch.testing._internal.common_utils import (IS_MACOS, IS_PPC,
+                                                  TEST_WITH_UBSAN, TestCase)
 
 np_dtype = {
     torch.quint8 : np.uint8,

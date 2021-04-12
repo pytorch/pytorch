@@ -8,37 +8,40 @@ import operator
 import os
 import pickle
 import sys
-import torch
 import traceback
-import warnings
 import unittest
+import warnings
+from copy import deepcopy
 from math import sqrt
 from pathlib import Path
-from torch.multiprocessing import Process
-from torch.testing import FileCheck
-from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
-import torch._C._fx  # type: ignore
-from torch.fx.node import Target, Argument
-from torch.fx.passes import shape_prop
-from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.fx.experimental.rewriter import RewritingTracer
-from torch.fx.operator_schemas import get_signature_for_torch_op
-from copy import deepcopy
-
-from torch.fx.proxy import TraceError
-
-from fx.quantization import Quantizer
-from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
-from fx.test_dce_pass import TestDCE  # noqa: F401
-from fx.test_fx_const_fold import TestConstFold  # noqa: F401
-
-from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
-from torch.testing._internal.jit_utils import JitTestCase
+from typing import (Any, Callable, Dict, List, NamedTuple, Optional, Tuple,
+                    Union)
 
 from fx.named_tup import MyNamedTup
+from fx.quantization import Quantizer
+from fx.test_dce_pass import TestDCE  # noqa: F401
+from fx.test_fx_const_fold import TestConstFold  # noqa: F401
+from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
+
+import torch
+import torch._C._fx  # type: ignore
+from torch.fx import (Graph, GraphModule, Interpreter, Node, Proxy, Tracer,
+                      Transformer, symbolic_trace, wrap)
+from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.node import Argument, Target
+from torch.fx.operator_schemas import get_signature_for_torch_op
+from torch.fx.passes import shape_prop
+from torch.fx.proxy import TraceError
+from torch.multiprocessing import Process
+from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests, onlyCPU, ops)
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_utils import (IS_MACOS, IS_SANDCASTLE,
+                                                  IS_WINDOWS, TEST_WITH_ROCM,
+                                                  run_tests)
+from torch.testing._internal.jit_utils import JitTestCase
 
 try:
     from torchvision.models import resnet18
@@ -2164,7 +2167,7 @@ class TestFX(JitTestCase):
                      "`annotations` is not defined in Python <3.7")
     def test_annotation_with_future(self):
         try:
-            import fx.test_future    # noqa: F401
+            import fx.test_future  # noqa: F401
         finally:
             del sys.modules["__future__"]
 
@@ -2196,8 +2199,9 @@ class TestFX(JitTestCase):
                     torch._C._fx.patch_function(arg, patched_in)
 
 
-        import torch
         from torchvision.models.resnet import resnet18
+
+        import torch
         rn = resnet18()
 
         try:

@@ -1,5 +1,6 @@
 import torch
 
+
 class WrapperModule(object):
     """ Wraps the instance of wrapped_type.
     For graph_mode traces the instance of wrapped_type.

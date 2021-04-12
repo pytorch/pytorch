@@ -14,19 +14,23 @@
 # 4. Compare Python/C++ functional's forward output. If they are the same, then we
 # have implementation parity between Python/C++ module.
 
+import os
+import pprint
+import re
 import tempfile
 from string import Template
-import re
-import pprint
-import os
+
+from cpp_api_parity.sample_functional import SAMPLE_FUNCTIONAL_CPP_SOURCE
+from cpp_api_parity.utils import (
+    TORCH_NN_COMMON_TEST_HARNESS, TorchNNFunctionalTestParams, add_test,
+    compile_cpp_code_inline, compute_arg_dict,
+    compute_cpp_args_construction_stmts_and_forward_arg_symbols,
+    compute_temp_file_path, decorate_test_fn, generate_error_msg,
+    is_torch_nn_functional_test, move_python_tensors_to_device,
+    serialize_arg_dict_as_script_module, set_python_tensors_requires_grad,
+    try_remove_folder)
 
 import torch
-from cpp_api_parity.utils import TorchNNFunctionalTestParams, TORCH_NN_COMMON_TEST_HARNESS, \
-    compile_cpp_code_inline, set_python_tensors_requires_grad, move_python_tensors_to_device, \
-    add_test, compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
-    compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg, is_torch_nn_functional_test, \
-    try_remove_folder
-from cpp_api_parity.sample_functional import SAMPLE_FUNCTIONAL_CPP_SOURCE
 
 # Expected substitutions:
 #

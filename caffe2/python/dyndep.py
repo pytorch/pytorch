@@ -8,6 +8,7 @@
 import ctypes
 import os
 from threading import Lock
+
 from caffe2.python import core, extension_loader
 
 

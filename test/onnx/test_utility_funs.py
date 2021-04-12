@@ -1,22 +1,21 @@
-from test_pytorch_common import TestCase, run_tests
-
-import torch
-import torch.onnx
-from torch.onnx import utils, OperatorExportTypes, TrainingMode
-from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
-import torch.utils.cpp_extension
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
-import caffe2.python.onnx.backend as backend
-from verify import verify
-
-import torchvision
-
-import onnx
-
-import io
 import copy
+import io
 import unittest
 
+import onnx
+import torchvision
+from test_pytorch_common import (TestCase, run_tests,
+                                 skipIfUnsupportedMinOpsetVersion,
+                                 skipIfUnsupportedOpsetVersion)
+from verify import verify
+
+import caffe2.python.onnx.backend as backend
+import torch
+import torch.onnx
+import torch.utils.cpp_extension
+from torch.onnx import OperatorExportTypes, TrainingMode, utils
+from torch.onnx.symbolic_helper import (_set_operator_export_type,
+                                        _set_opset_version)
 
 skip = unittest.skip
 

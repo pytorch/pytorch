@@ -1,5 +1,5 @@
-from typing import List, Set
 from enum import Enum
+from typing import List, Set
 
 # Defined in tools/autograd/init.cpp
 

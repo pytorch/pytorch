@@ -1,7 +1,8 @@
-import torch
 import sys
 from collections import OrderedDict
-from typing import Dict, Any
+from typing import Any, Dict
+
+import torch
 
 from .quantization_types import Pattern
 

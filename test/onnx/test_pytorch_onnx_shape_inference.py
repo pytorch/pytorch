@@ -1,15 +1,16 @@
-import unittest
-import torch
-
 import copy
+import unittest
 
 import test_pytorch_onnx_onnxruntime
 from test_pytorch_onnx_onnxruntime import TestONNXRuntime
-from torch.onnx import utils, OperatorExportTypes, TrainingMode
+
+import torch
+from torch.onnx import OperatorExportTypes, TrainingMode, utils
+from torch.onnx.symbolic_helper import (_is_none, _is_tensor, _is_tensor_list,
+                                        _set_onnx_shape_inference,
+                                        _set_operator_export_type,
+                                        _set_opset_version, _set_training_mode)
 from torch.onnx.utils import _validate_dynamic_axes
-from torch.onnx.symbolic_helper import (_set_opset_version, _set_operator_export_type,
-                                        _set_onnx_shape_inference, _set_training_mode,
-                                        _is_tensor_list, _is_tensor, _is_none)
 
 
 def verify_inferred_shape(graph):

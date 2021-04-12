@@ -4,11 +4,12 @@ import collections
 import contextlib
 import dataclasses
 import textwrap
-from typing import cast, Any, DefaultDict, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
+                    Tuple, cast)
 
 import numpy as np
-import torch
 
+import torch
 
 __all__ = ["TaskSpec", "Measurement"]
 

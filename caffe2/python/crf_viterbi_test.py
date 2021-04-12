@@ -2,14 +2,14 @@
 
 
 
-from caffe2.python import workspace, crf
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given, settings
 
+from caffe2.python import crf, workspace
 from caffe2.python.cnn import CNNModelHelper
 from caffe2.python.crf_predict import crf_update_predictions
 from caffe2.python.test_util import TestCase
-import hypothesis.strategies as st
-from hypothesis import given, settings
-import numpy as np
 
 
 class TestCrfDecode(TestCase):

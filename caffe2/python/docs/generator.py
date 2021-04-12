@@ -6,9 +6,11 @@
 
 import argparse
 import os
+
+from future.utils import viewitems, viewvalues
+
 from caffe2.python import core, workspace
 from caffe2.python.docs.formatter import Markdown
-from future.utils import viewitems, viewvalues
 
 OpSchema = workspace.C.OpSchema
 

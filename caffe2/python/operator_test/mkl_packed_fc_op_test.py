@@ -4,11 +4,13 @@
 
 
 import unittest
+
 import hypothesis.strategies as st
-from hypothesis import given
 import numpy as np
-from caffe2.python import core
+from hypothesis import given
+
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core
 
 
 @unittest.skipIf(not core.IsOperator("PackedFC"),

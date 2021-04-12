@@ -1,9 +1,9 @@
 ## @package context
 # Module caffe2.python.context
 
+import functools
 import inspect
 import threading
-import functools
 
 
 class _ContextInfo(object):

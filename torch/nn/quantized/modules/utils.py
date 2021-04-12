@@ -1,7 +1,9 @@
-import torch
-from itertools import repeat
 import collections
+from itertools import repeat
+
+import torch
 from torch.nn.modules.module import _addindent
+
 
 def _quantize_weight(float_wt, observer):
     wt_scale, wt_zp = observer.calculate_qparams()

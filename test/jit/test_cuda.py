@@ -1,12 +1,13 @@
+import gc
 import os
 import sys
-import gc
 import unittest
+from typing import NamedTuple
 
 import torch
-from typing import NamedTuple
+from torch.testing._internal.common_utils import (skipCUDANonDefaultStreamIf,
+                                                  skipIfRocm)
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import skipIfRocm, skipCUDANonDefaultStreamIf
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

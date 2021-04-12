@@ -1,10 +1,9 @@
-from tools.codegen.model import *
-
-from tools.codegen.api.types import *
-from tools.codegen.api import cpp
-
 import itertools
-from typing import Sequence, List, Union
+from typing import List, Sequence, Union
+
+from tools.codegen.api import cpp
+from tools.codegen.api.types import *
+from tools.codegen.model import *
 
 # This file describes the translation of JIT schema to the dispatcher
 # API, the *unboxed* calling convention by which invocations through

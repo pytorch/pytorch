@@ -8,8 +8,10 @@ import argparse
 import json
 import logging
 from collections import defaultdict
-from caffe2.python import utils
+
 from future.utils import viewitems
+
+from caffe2.python import utils
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

@@ -2,17 +2,18 @@
 
 
 
+import distutils.sysconfig
 import multiprocessing
 import os
 import re
-from subprocess import check_call, check_output
 import sys
-import distutils.sysconfig
 from distutils.version import LooseVersion
+from subprocess import check_call, check_output
 
 from . import which
-from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag)
-from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
+from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS,
+                  check_negative_env_flag)
+from .numpy_ import NUMPY_INCLUDE_DIR, USE_NUMPY
 
 
 def _mkdir_p(d):

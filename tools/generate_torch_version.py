@@ -1,9 +1,10 @@
 import argparse
 import os
 import subprocess
-from pathlib import Path
 from distutils.util import strtobool
+from pathlib import Path
 from typing import Optional, Union
+
 
 def get_sha(pytorch_root: Union[str, Path]) -> str:
     try:

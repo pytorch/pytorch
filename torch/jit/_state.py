@@ -5,9 +5,11 @@ This module stores various pieces of Python-global state relating to the JIT.
 This is not intended to be imported directly; please the exposed
 functionalities in `torch.jit`.
 """
-import torch
 import os
 import weakref
+
+import torch
+
 
 class EnabledProxy:
     """Stores whether the JIT is enabled or not.

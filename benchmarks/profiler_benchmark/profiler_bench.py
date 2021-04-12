@@ -1,8 +1,8 @@
 import argparse
 import sys
 import timeit
-import torch
 
+import torch
 from torch.utils.benchmark import Timer
 
 PARALLEL_TASKS_NUM = 4

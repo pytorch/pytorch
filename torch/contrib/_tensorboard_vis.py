@@ -5,13 +5,12 @@ from typing import DefaultDict
 
 import torch
 
-
 # Unfortunately it doesn't seem as if there was any way to get TensorBoard to do
 # anything without having TF installed, and so this file has a hard dependency on it
 # as well. It really is a debugging tool, so it doesn't matter.
 try:
-    from tensorflow.core.util import event_pb2
     from tensorflow.core.framework import graph_pb2
+    from tensorflow.core.util import event_pb2
     from tensorflow.python.summary.writer.writer import FileWriter
 except ImportError:
     raise ImportError("TensorBoard visualization of GraphExecutors requires having "

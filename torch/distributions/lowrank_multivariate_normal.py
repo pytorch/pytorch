@@ -3,7 +3,8 @@ import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.multivariate_normal import _batch_mahalanobis, _batch_mv
+from torch.distributions.multivariate_normal import (_batch_mahalanobis,
+                                                     _batch_mv)
 from torch.distributions.utils import _standard_normal, lazy_property
 
 

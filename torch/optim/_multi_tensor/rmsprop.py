@@ -1,6 +1,9 @@
-import torch
-from ..optimizer import Optimizer
 from collections import defaultdict
+
+import torch
+
+from ..optimizer import Optimizer
+
 
 class RMSprop(Optimizer):
     r"""Implements RMSprop algorithm.

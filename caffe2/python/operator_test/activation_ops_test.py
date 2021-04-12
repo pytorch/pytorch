@@ -3,19 +3,17 @@
 
 
 
-import numpy as np
+import unittest
 
-from hypothesis import given, assume, settings
 import hypothesis.strategies as st
+import numpy as np
+from hypothesis import assume, given, settings
+from scipy.stats import norm
 
-from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.mkl_test_util as mu
 import caffe2.python.serialized_test.serialized_test_util as serial
-
-from scipy.stats import norm
-
-import unittest
+from caffe2.python import core, workspace
 
 
 class TestActivations(serial.SerializedTestCase):

@@ -12,13 +12,15 @@ from typing import Any, Callable, Dict, List, Optional, Union, cast
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
-from torch.distributed.elastic.agent.server.api import WorkerSpec, WorkerState  # type: ignore[import]
-from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent  # type: ignore[import]
+from torch.distributed.elastic.agent.server.api import (  # type: ignore[import]
+    WorkerSpec, WorkerState)
+from torch.distributed.elastic.agent.server.local_elastic_agent import \
+    LocalElasticAgent  # type: ignore[import]
 from torch.distributed.elastic.multiprocessing import Std
-from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
+from torch.distributed.elastic.multiprocessing.errors import (ChildFailedError,
+                                                              record)
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.utils.logging import get_logger
-
 
 logger = get_logger()
 

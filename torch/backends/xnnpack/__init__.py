@@ -1,6 +1,8 @@
 import sys
-import torch
 import types
+
+import torch
+
 
 class _XNNPACKEnabled(object):
     def __get__(self, obj, objtype):

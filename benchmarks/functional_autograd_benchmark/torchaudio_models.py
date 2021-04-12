@@ -1,14 +1,13 @@
 # Taken from https://github.com/pytorch/audio/blob/master/torchaudio/models/wav2letter.py
 # So that we don't need torchaudio to be installed
 
-import torch
-from torch import Tensor
-from torch import nn
-import torch.nn.functional as F
-
 import math
 from collections import OrderedDict
-from typing import Tuple, Optional
+from typing import Optional, Tuple
+
+import torch
+import torch.nn.functional as F
+from torch import Tensor, nn
 
 __all__ = ["Wav2Letter"]
 

@@ -1,17 +1,14 @@
 import re
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+
 import torch
-from ..utils import is_per_tensor, is_per_channel
-from ..quantize import is_activation_post_process
-
 from torch.fx import GraphModule, map_arg
+from torch.fx.graph import Graph, Node
 
-from torch.fx.graph import (
-    Graph,
-    Node,
-)
-
-from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union
+from ..quantize import is_activation_post_process
+from ..utils import is_per_channel, is_per_tensor
 from .quantization_types import QuantizerCls
+
 
 # turn foo.bar -> ['foo', 'bar']
 def _parent_name(target):

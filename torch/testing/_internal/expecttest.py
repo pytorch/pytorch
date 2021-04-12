@@ -1,10 +1,9 @@
-import re
-import unittest
-import traceback
 import os
+import re
 import string
+import traceback
+import unittest
 from typing import Tuple
-
 
 # This file implements expect tests (also known as "golden" tests).
 # Expect tests are a method of writing tests where instead of

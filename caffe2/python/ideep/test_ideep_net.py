@@ -3,12 +3,14 @@
 
 
 
+import argparse
+import time
+
+import numpy as np
+
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.models.download import ModelDownloader
-import numpy as np
-import argparse
-import time
 
 
 def GetArgumentParser():

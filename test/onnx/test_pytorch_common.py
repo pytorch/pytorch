@@ -1,7 +1,8 @@
 import functools
 import os
-import unittest
 import sys
+import unittest
+
 import torch
 import torch.autograd.function as function
 

@@ -1,6 +1,6 @@
 import operator_benchmark as op_bench
-import torch
 
+import torch
 
 configs = op_bench.random_sample_configs(
     M=[1, 2, 3, 4, 5, 6],

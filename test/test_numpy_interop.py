@@ -1,12 +1,12 @@
-import torch
-import numpy as np
-
 from itertools import product
 
-from torch.testing._internal.common_utils import \
-    (TestCase, run_tests)
-from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes)
+import numpy as np
+
+import torch
+from torch.testing._internal.common_device_type import (
+    dtypes, instantiate_device_type_tests, onlyCPU)
+from torch.testing._internal.common_utils import TestCase, run_tests
+
 
 # For testing handling NumPy objects and sending tensors to / accepting
 #   arrays from NumPy.

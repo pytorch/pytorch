@@ -9,7 +9,6 @@
 import confu
 from confu import arm, x86
 
-
 parser = confu.standard_parser()
 
 

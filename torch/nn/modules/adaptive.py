@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
 
 from collections import namedtuple
-
-import torch
-
-from torch import Tensor
 from typing import List, Sequence
 
-from . import Sequential, ModuleList, Linear
-from .module import Module
-from ..functional import log_softmax
+import torch
+from torch import Tensor
 
+from ..functional import log_softmax
+from . import Linear, ModuleList, Sequential
+from .module import Module
 
 _ASMoutput = namedtuple('ASMoutput', ['output', 'loss'])
 

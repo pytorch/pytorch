@@ -18,10 +18,10 @@
 
 
 
+import numpy as np
+
 from caffe2.python import core, schema
 from caffe2.python.modeling.net_modifier import NetModifier
-
-import numpy as np
 
 
 class GetEntryFromBlobs(NetModifier):

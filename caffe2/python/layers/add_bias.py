@@ -5,9 +5,10 @@
 
 
 
+import math
+
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
-import math
 
 
 class AddBias(ModelLayer):

@@ -10,6 +10,7 @@ import unittest
 
 import numpy as np
 
+
 class TestCase(unittest.TestCase):
 
     def setUp(self):

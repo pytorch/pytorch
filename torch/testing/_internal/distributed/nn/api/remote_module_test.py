@@ -10,10 +10,8 @@ from torch._jit_internal import Future
 from torch.distributed.nn import RemoteModule
 from torch.distributed.nn.api.remote_module import _RemoteModule
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
-    RpcAgentTestFixture,
-)
-
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import \
+    RpcAgentTestFixture
 
 _PARAM_VAL = torch.nn.Parameter(torch.ones(1))
 

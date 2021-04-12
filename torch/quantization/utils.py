@@ -2,7 +2,9 @@
 Utils shared by different modes of quantization (eager/graph)
 """
 import torch
+
 from .quant_type import QuantType, quant_type_to_str
+
 
 def get_combined_dict(default_dict, additional_dict):
     d = default_dict.copy()

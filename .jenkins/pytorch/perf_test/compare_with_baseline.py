@@ -1,7 +1,7 @@
-import sys
+import argparse
 import json
 import math
-import argparse
+import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--test-name', dest='test_name', action='store',

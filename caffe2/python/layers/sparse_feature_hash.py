@@ -5,17 +5,11 @@
 
 
 
-from caffe2.python import schema, core
-from caffe2.python.layers.layers import (
-    ModelLayer,
-    IdList,
-    IdScoreList,
-)
-from caffe2.python.layers.tags import (
-    Tags
-)
-
 import numpy as np
+
+from caffe2.python import core, schema
+from caffe2.python.layers.layers import IdList, IdScoreList, ModelLayer
+from caffe2.python.layers.tags import Tags
 
 
 class SparseFeatureHash(ModelLayer):

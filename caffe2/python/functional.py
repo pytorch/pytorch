@@ -3,11 +3,13 @@
 
 
 
-from caffe2.python import core, workspace
-from caffe2.proto import caffe2_pb2
-from caffe2.python.onnx.workspace import Workspace
 from collections import namedtuple
+
 from six import string_types
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
+from caffe2.python.onnx.workspace import Workspace
 
 OpSchema = workspace.C.OpSchema
 

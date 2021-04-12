@@ -2,8 +2,9 @@
 import argparse
 import os
 from typing import Set
-from tools.codegen.selective_build.selector import *
+
 from tools.codegen.code_template import CodeTemplate
+from tools.codegen.selective_build.selector import *
 
 if_condition_template_str = """if (kernel_tag_sv.compare("$kernel_tag_name") == 0) {
   return $dtype_checks;

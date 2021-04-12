@@ -1,9 +1,9 @@
+from typing import List
+
 import operator_benchmark as op_bench
 
 import torch
 import torch.nn.quantized as nnq
-from typing import List
-
 
 """Microbenchmarks for quantized Cat operator"""
 

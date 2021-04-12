@@ -6,7 +6,6 @@ import unittest
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 
-
 try:
     from third_party.build_bundled import create_bundled
 except ImportError:

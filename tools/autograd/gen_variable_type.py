@@ -22,25 +22,26 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
-from .gen_trace_type import (
-    MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, declare_returned_variables,
-    tie_return_values, get_return_value, type_wrapper_name,
-)
-from .gen_inplace_or_view_type import (
-    get_view_info, is_tensor_list_type, unpack_args, get_base_name,
-    use_derived, modifies_arguments, WRAPPER_REGISTRATION, TMP_VAR, METHOD_DEFINITION,
-    ASSIGN_RETURN_VALUE, gen_formals,
-)
+from typing import Callable, List, Optional, Sequence, Union
 
-from tools.codegen.api.types import *
-from tools.codegen.api.autograd import *
 from tools.codegen.api import cpp
+from tools.codegen.api.autograd import *
+from tools.codegen.api.types import *
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.gen import FileManager
-from tools.codegen.utils import mapMaybe
 from tools.codegen.model import *
-from typing import Callable, List, Optional, Sequence, Union
+from tools.codegen.utils import mapMaybe
+
+from .gen_inplace_or_view_type import (ASSIGN_RETURN_VALUE, METHOD_DEFINITION,
+                                       TMP_VAR, WRAPPER_REGISTRATION,
+                                       gen_formals, get_base_name,
+                                       get_view_info, is_tensor_list_type,
+                                       modifies_arguments, unpack_args,
+                                       use_derived)
+from .gen_trace_type import (MANUAL_AUTOGRAD_AND_TRACER, MANUAL_BACKEND,
+                             declare_returned_variables, get_return_value,
+                             tie_return_values, type_wrapper_name)
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will

@@ -4,7 +4,7 @@ This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
 
-from typing import Optional, List
+from typing import List, Optional
 
 import torch
 from torch.jit._script import RecursiveScriptModule, ScriptModule

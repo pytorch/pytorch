@@ -1,7 +1,8 @@
-from tools.codegen.model import *
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, TypeVar, List, Set
 from enum import Enum
+from typing import List, Optional, Sequence, Set, TypeVar, Union
+
+from tools.codegen.model import *
 
 _T = TypeVar('_T')
 

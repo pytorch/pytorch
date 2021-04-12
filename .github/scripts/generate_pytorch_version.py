@@ -2,9 +2,8 @@
 
 import argparse
 import os
-import subprocess
 import re
-
+import subprocess
 from datetime import datetime
 from distutils.util import strtobool
 from pathlib import Path

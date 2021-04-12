@@ -1,12 +1,14 @@
 import dis
-import torch
 import inspect
 import operator
 import traceback
+from typing import Any, Dict, Iterable, Iterator, Optional, Tuple
 
-from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
-from .node import Target, Node, Argument, base_types, map_aggregate
+import torch
+
+from .graph import Graph, magic_methods, reflectable_magic_methods
+from .node import Argument, Node, Target, base_types, map_aggregate
+
 
 class TracerBase:
     graph: Graph

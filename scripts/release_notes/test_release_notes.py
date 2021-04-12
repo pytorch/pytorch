@@ -1,6 +1,8 @@
-import unittest
 import tempfile
+import unittest
+
 from commitlist import CommitList
+
 
 class TestCommitList(unittest.TestCase):
     def test_create_new(self):

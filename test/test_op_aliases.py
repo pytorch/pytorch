@@ -1,12 +1,13 @@
+from collections.abc import Sequence
+
 import torch
 from torch.testing import FileCheck
-
-from torch.testing._internal.common_utils import \
-    (run_tests)
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests, onlyCPU, skipCPUIfNoLapack,
+    skipCUDAIfNoMagma)
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, skipCPUIfNoLapack, skipCUDAIfNoMagma, onlyCPU)
-from collections.abc import Sequence
+
 
 # Information for generating an alias test
 # NOTE: ending the alias_name with an underscore will interpret the test

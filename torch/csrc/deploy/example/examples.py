@@ -1,5 +1,6 @@
 import torch
 
+
 class Simple(torch.nn.Module):
     def __init__(self, N, M):
         super().__init__()

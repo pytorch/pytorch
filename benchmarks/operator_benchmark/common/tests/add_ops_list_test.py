@@ -1,6 +1,6 @@
 import operator_benchmark as op_bench
-import torch
 
+import torch
 
 # Configs for pointwise unary ops
 unary_ops_configs = op_bench.config_list(

@@ -1,25 +1,31 @@
-import math
-import sys
-import errno
-import os
 import ctypes
+import errno
 import faulthandler
-import torch
 import gc
-import time
-import signal
-import unittest
 import itertools
-import warnings
+import math
+import os
+import signal
+import sys
 import tempfile
+import time
+import unittest
+import warnings
+
+import torch
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
+from torch._utils import ExceptionWrapper
+from torch.testing._internal.common_utils import (IS_PYTORCH_CI, IS_SANDCASTLE,
+                                                  IS_WINDOWS,
+                                                  NO_MULTIPROCESSING_SPAWN,
+                                                  TEST_NUMPY, TEST_WITH_TSAN,
+                                                  TestCase, load_tests,
+                                                  run_tests, skipIfRocm,
+                                                  slowTest)
+from torch.utils.data import (ChainDataset, ConcatDataset, DataLoader, Dataset,
+                              IterableDataset, TensorDataset, _utils)
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
-from torch._utils import ExceptionWrapper
-from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
-                                                  IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
-                                                  load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 try:
     import psutil
@@ -862,6 +868,7 @@ class TestDataLoader(TestCase):
 
     def test_typing(self):
         from typing import List
+
         # Make sure there is no TypeError
 
         class SomeDatasetClass(Dataset[List[torch.Tensor]]):
@@ -1368,6 +1375,7 @@ except RuntimeError as e:
     def test_random_sampler(self):
 
         from collections import Counter
+
         from torch.utils.data import RandomSampler
 
         def sample_stat(sampler, num_samples):
@@ -1403,6 +1411,7 @@ except RuntimeError as e:
 
     def test_random_sampler_len_with_replacement(self):
         from torch.utils.data import RandomSampler
+
         # add 5 extra samples
         num_samples = len(self.dataset) + 5
         sampler = RandomSampler(self.dataset,
@@ -1454,7 +1463,8 @@ except RuntimeError as e:
         self.assertEqual(scanned_data.size(), scanned_data.unique().size())
 
     def test_sampler_reproducibility(self):
-        from torch.utils.data import RandomSampler, WeightedRandomSampler, SubsetRandomSampler
+        from torch.utils.data import (RandomSampler, SubsetRandomSampler,
+                                      WeightedRandomSampler)
 
         weights = [0.1, 0.9, 0.4, 0.7, 3.0, 0.6]
         for fn in (

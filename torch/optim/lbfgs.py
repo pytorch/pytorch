@@ -1,5 +1,7 @@
-import torch
 from functools import reduce
+
+import torch
+
 from .optimizer import Optimizer
 
 

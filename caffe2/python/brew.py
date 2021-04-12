@@ -5,11 +5,11 @@
 
 
 
-import sys
 import copy
 import inspect
+import sys
+
 from past.builtins import basestring
-from caffe2.python.model_helper import ModelHelper
 
 # flake8: noqa
 from caffe2.python.helpers.algebra import *
@@ -27,6 +27,7 @@ from caffe2.python.helpers.pooling import *
 from caffe2.python.helpers.quantization import *
 from caffe2.python.helpers.tools import *
 from caffe2.python.helpers.train import *
+from caffe2.python.model_helper import ModelHelper
 
 
 class HelperWrapper(object):

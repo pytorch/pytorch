@@ -1,15 +1,17 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
 import enum
-import timeit
 import textwrap
-from typing import overload, Any, Callable, Dict, List, NoReturn, Optional, Tuple, Type, Union
+import timeit
+from typing import (Any, Callable, Dict, List, NoReturn, Optional, Tuple, Type,
+                    Union, overload)
 
 import numpy as np
+
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
-from torch.utils.benchmark.utils._stubs import TimerClass, TimeitModuleType
-from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valgrind_timer_interface
-
+from torch.utils.benchmark.utils._stubs import TimeitModuleType, TimerClass
+from torch.utils.benchmark.utils.valgrind_wrapper import \
+    timer_interface as valgrind_timer_interface
 
 __all__ = ["Timer", "timer", "Language"]
 

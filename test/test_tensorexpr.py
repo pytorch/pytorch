@@ -1,15 +1,17 @@
+import unittest
+
 import numpy as np
+
 import torch
 import torch.nn.functional as F
 from torch import nn
-import unittest
-
-from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
-
-from torch.testing._internal.te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
-    LLVMCodeGenExecuted, SimpleIREvalExecuted
-
+from torch.testing._internal.common_utils import (num_profiled_runs, run_tests,
+                                                  suppress_warnings)
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.te_utils import (CudaCodeGenCreated,
+                                              CudaCodeGenExecuted,
+                                              LLVMCodeGenExecuted,
+                                              SimpleIREvalExecuted)
 
 
 class BaseTestClass(JitTestCase):

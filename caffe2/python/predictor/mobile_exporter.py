@@ -5,9 +5,10 @@
 
 
 
-from caffe2.python import core, utils
-from caffe2.proto import caffe2_pb2
 import numpy as np
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, utils
 
 
 def add_tensor(net, name, blob):

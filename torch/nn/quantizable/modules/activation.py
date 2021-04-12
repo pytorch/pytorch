@@ -1,12 +1,11 @@
-import torch
-from torch import nn
-import torch.nn.functional as nnF
-import torch.nn.quantized as nnq
-
-from torch import Tensor
+import warnings
 from typing import Optional, Tuple
 
-import warnings
+import torch
+import torch.nn.functional as nnF
+import torch.nn.quantized as nnq
+from torch import Tensor, nn
+
 
 class MultiheadAttention(nn.MultiheadAttention):
     _FLOAT_MODULE = nn.MultiheadAttention

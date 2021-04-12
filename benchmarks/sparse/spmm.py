@@ -1,7 +1,10 @@
 import argparse
 import sys
+
+from utils import Event, gen_sparse_coo, gen_sparse_csr
+
 import torch
-from utils import gen_sparse_csr, gen_sparse_coo, Event
+
 
 def test_sparse_csr(m, n, k, nnz, test_count):
     start_timer = Event(enable_timing=True)

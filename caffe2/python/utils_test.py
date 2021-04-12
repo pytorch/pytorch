@@ -3,9 +3,9 @@
 
 
 
-from caffe2.python import core, utils, test_util
-
 import numpy as np
+
+from caffe2.python import core, test_util, utils
 
 
 class TestUtils(test_util.TestCase):

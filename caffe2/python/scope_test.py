@@ -3,11 +3,11 @@
 
 
 
-from caffe2.python import scope, core, workspace
-
-import unittest
 import threading
 import time
+import unittest
+
+from caffe2.python import core, scope, workspace
 
 SUCCESS_COUNT = 0
 

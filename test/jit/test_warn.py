@@ -1,10 +1,10 @@
+import io
 import os
 import sys
-import io
-
-import torch
 import warnings
 from contextlib import redirect_stderr
+
+import torch
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable

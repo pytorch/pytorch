@@ -5,20 +5,13 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 import pytest
-import torch
 
-from torch.distributed.pipeline.sync.stream import (
-    CPUStream,
-    current_stream,
-    default_stream,
-    get_device,
-    is_cuda,
-    new_stream,
-    record_stream,
-    use_device,
-    use_stream,
-    wait_stream,
-)
+import torch
+from torch.distributed.pipeline.sync.stream import (CPUStream, current_stream,
+                                                    default_stream, get_device,
+                                                    is_cuda, new_stream,
+                                                    record_stream, use_device,
+                                                    use_stream, wait_stream)
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 

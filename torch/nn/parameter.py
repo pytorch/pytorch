@@ -1,6 +1,7 @@
+from collections import OrderedDict
+
 import torch
 from torch._C import _disabled_torch_function_impl
-from collections import OrderedDict
 
 
 class Parameter(torch.Tensor):

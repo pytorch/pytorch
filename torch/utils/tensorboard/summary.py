@@ -1,21 +1,20 @@
 import json
 import logging
-import numpy as np
 import os
 from typing import Optional
 
+import numpy as np
+from google.protobuf import struct_pb2
 # pylint: disable=unused-import
 from six.moves import range
-
-from google.protobuf import struct_pb2
-from tensorboard.compat.proto.summary_pb2 import Summary
-from tensorboard.compat.proto.summary_pb2 import HistogramProto
-from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
+from tensorboard.compat.proto.summary_pb2 import (HistogramProto, Summary,
+                                                  SummaryMetadata)
 from tensorboard.compat.proto.tensor_pb2 import TensorProto
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
-from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
-from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.custom_scalar import layout_pb2
+from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
+from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
+
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
@@ -67,21 +66,20 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
       The `Summary` protobufs for Experiment, SessionStartInfo and
         SessionEndInfo
     """
-    import torch
     from six import string_types
-    from tensorboard.plugins.hparams.api_pb2 import (
-        Experiment, HParamInfo, MetricInfo, MetricName, Status, DataType
-    )
-    from tensorboard.plugins.hparams.metadata import (
-        PLUGIN_NAME,
-        PLUGIN_DATA_VERSION,
-        EXPERIMENT_TAG,
-        SESSION_START_INFO_TAG,
-        SESSION_END_INFO_TAG
-    )
-    from tensorboard.plugins.hparams.plugin_data_pb2 import (
-        HParamsPluginData, SessionEndInfo, SessionStartInfo
-    )
+    from tensorboard.plugins.hparams.api_pb2 import (DataType, Experiment,
+                                                     HParamInfo, MetricInfo,
+                                                     MetricName, Status)
+    from tensorboard.plugins.hparams.metadata import (EXPERIMENT_TAG,
+                                                      PLUGIN_DATA_VERSION,
+                                                      PLUGIN_NAME,
+                                                      SESSION_END_INFO_TAG,
+                                                      SESSION_START_INFO_TAG)
+    from tensorboard.plugins.hparams.plugin_data_pb2 import (HParamsPluginData,
+                                                             SessionEndInfo,
+                                                             SessionStartInfo)
+
+    import torch
 
     # TODO: expose other parameters in the future.
     # hp = HParamInfo(name='lr',display_name='learning rate',
@@ -648,8 +646,9 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, c
     Returns:
       Tensor summary with metadata.
     """
-    import torch
     from tensorboard.plugins.mesh import metadata
+
+    import torch
 
     tensor = torch.as_tensor(tensor)
 
@@ -708,8 +707,8 @@ def mesh(tag, vertices, colors, faces, config_dict, display_name=None, descripti
       Returns:
         Merged summary for mesh/point cloud representation.
       """
-    from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
     from tensorboard.plugins.mesh import metadata
+    from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
 
     json_config = _get_json_config(config_dict)
 

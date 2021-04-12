@@ -11,7 +11,8 @@ import unittest.mock as mock
 
 import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic.timer.api import TimerRequest
-from torch.distributed.elastic.timer.local_timer import MultiprocessingRequestQueue
+from torch.distributed.elastic.timer.local_timer import \
+    MultiprocessingRequestQueue
 from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 

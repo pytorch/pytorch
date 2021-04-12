@@ -1,6 +1,5 @@
 import torch
 
-
 t = torch.randn(2, 3)
 reveal_type(t)  # E: {Tensor}
 u = torch.randn(2, 3)

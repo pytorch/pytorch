@@ -5,17 +5,18 @@
 
 
 
-from caffe2.proto import caffe2_pb2
-from future.utils import viewitems
-from google.protobuf.message import DecodeError, Message
-from google.protobuf import text_format
-
-import sys
 import collections
 import copy
 import functools
+import sys
+
 import numpy as np
-from six import integer_types, binary_type, text_type, string_types
+from future.utils import viewitems
+from google.protobuf import text_format
+from google.protobuf.message import DecodeError, Message
+from six import binary_type, integer_types, string_types, text_type
+
+from caffe2.proto import caffe2_pb2
 
 OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
 ITERATION_MUTEX_NAME = "iteration_mutex"
@@ -246,7 +247,7 @@ def ConvertProtoToBinary(proto_class, filename, out_filename):
 def GetGPUMemoryUsageStats():
     """Get GPU memory usage stats from CUDAContext/HIPContext. This requires flag
        --caffe2_gpu_memory_tracking to be enabled"""
-    from caffe2.python import workspace, core
+    from caffe2.python import core, workspace
     workspace.RunOperatorOnce(
         core.CreateOperator(
             "GetGPUMemoryUsage",
@@ -265,7 +266,7 @@ def GetGPUMemoryUsageStats():
 
 
 def ResetBlobs(blobs):
-    from caffe2.python import workspace, core
+    from caffe2.python import core, workspace
     workspace.RunOperatorOnce(
         core.CreateOperator(
             "Free",

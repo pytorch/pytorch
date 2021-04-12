@@ -4,11 +4,11 @@ $ python -m examples.sparse.op_benchmark
 """
 
 import numpy as np
-import torch
 
+import torch
 from torch.utils.benchmark import Timer
-from torch.utils.benchmark.op_fuzzers.sparse_unary import UnaryOpSparseFuzzer
 from torch.utils.benchmark.op_fuzzers.sparse_binary import BinaryOpSparseFuzzer
+from torch.utils.benchmark.op_fuzzers.sparse_unary import UnaryOpSparseFuzzer
 
 _MEASURE_TIME = 1.0
 

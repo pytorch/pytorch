@@ -71,6 +71,7 @@ derivative would be as follows::
     loss.backward()
 """
 
+from . import transforms
 from .bernoulli import Bernoulli
 from .beta import Beta
 from .binomial import Binomial
@@ -102,7 +103,8 @@ from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
 from .negative_binomial import NegativeBinomial
 from .normal import Normal
-from .one_hot_categorical import OneHotCategorical, OneHotCategoricalStraightThrough
+from .one_hot_categorical import (OneHotCategorical,
+                                  OneHotCategoricalStraightThrough)
 from .pareto import Pareto
 from .poisson import Poisson
 from .relaxed_bernoulli import RelaxedBernoulli
@@ -113,7 +115,6 @@ from .transforms import *
 from .uniform import Uniform
 from .von_mises import VonMises
 from .weibull import Weibull
-from . import transforms
 
 __all__ = [
     'Bernoulli',

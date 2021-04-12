@@ -5,10 +5,11 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 import pytest
+
 import torch
 import torch.cuda
-
-from torch.distributed.pipeline.sync.microbatch import Batch, check, gather, scatter
+from torch.distributed.pipeline.sync.microbatch import (Batch, check, gather,
+                                                        scatter)
 
 
 def test_batch_atomic():

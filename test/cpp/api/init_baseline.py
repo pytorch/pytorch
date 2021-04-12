@@ -1,6 +1,7 @@
 """Script to generate baseline values from PyTorch initialization algorithms"""
 
 import sys
+
 import torch
 
 HEADER = """

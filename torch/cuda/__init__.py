@@ -10,15 +10,17 @@ It is lazily initialized, so you can always import it, and use
 
 import contextlib
 import os
-import torch
+import threading
 import traceback
 import warnings
-import threading
-from typing import List, Optional, Tuple, Union, Any
-from ._utils import _get_device_index, _dummy_type
-from .streams import Stream, Event, _Graph, _graph_pool_handle
-from .. import device as _device
+from typing import Any, List, Optional, Tuple, Union
+
+import torch
 import torch._C
+
+from .. import device as _device
+from ._utils import _dummy_type, _get_device_index
+from .streams import Event, Stream, _Graph, _graph_pool_handle
 
 try:
     from torch._C import _cudart  # type: ignore
@@ -491,9 +493,8 @@ def current_blas_handle():
     return torch._C._cuda_getCurrentBlasHandle()
 
 
+from ..storage import _StorageBase
 from .memory import *
-
-
 from .random import *
 
 ################################################################################
@@ -501,7 +502,6 @@ from .random import *
 ################################################################################
 
 
-from ..storage import _StorageBase
 
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
@@ -599,7 +599,4 @@ torch._storage_classes.add(BFloat16Storage)
 torch._storage_classes.add(ComplexDoubleStorage)
 torch._storage_classes.add(ComplexFloatStorage)
 
-from . import sparse
-from . import profiler
-from . import nvtx
-from . import amp
+from . import amp, nvtx, profiler, sparse

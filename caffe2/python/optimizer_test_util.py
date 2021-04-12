@@ -6,12 +6,13 @@
 
 
 import unittest
-import numpy as np
-from caffe2.python import brew, core, workspace, cnn, optimizer
-from caffe2.python.modeling.initializers import (
-    Initializer, PseudoFP16Initializer)
 
+import numpy as np
+
+from caffe2.python import brew, cnn, core, optimizer, workspace
 from caffe2.python.model_helper import ModelHelper
+from caffe2.python.modeling.initializers import (Initializer,
+                                                 PseudoFP16Initializer)
 
 
 class OptimizerTestBase(object):

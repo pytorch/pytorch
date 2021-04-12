@@ -7,18 +7,17 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 from torch.nn.intrinsic import _FusedModule
 
-from .quantization_mappings import (
-    get_default_dynamic_quant_module_mappings,
-    get_default_static_quant_module_mappings,
-    get_default_qat_module_mappings,
-    get_default_qconfig_propagation_list,
-    no_observer_set,
-    _has_special_act_post_process,
-    _get_special_act_post_process,
-)
-
+from .qconfig import (default_dynamic_qconfig, float16_dynamic_qconfig,
+                      float_qparams_weight_only_qconfig)
+from .quantization_mappings import (_get_special_act_post_process,
+                                    _has_special_act_post_process,
+                                    get_default_dynamic_quant_module_mappings,
+                                    get_default_qat_module_mappings,
+                                    get_default_qconfig_propagation_list,
+                                    get_default_static_quant_module_mappings,
+                                    no_observer_set)
 from .stubs import DeQuantStub, QuantWrapper
-from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_weight_only_qconfig
+
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or

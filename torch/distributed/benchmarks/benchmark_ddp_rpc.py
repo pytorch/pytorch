@@ -7,18 +7,18 @@ import subprocess
 import time
 
 import numpy as np
+
 import torch
-import torch.nn as nn
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 import torch.multiprocessing as mp
+import torch.nn as nn
 import torch.optim as optim
 from torch.distributed.optim import DistributedOptimizer
 from torch.distributed.rpc import RRef, TensorPipeRpcBackendOptions
 from torch.distributed.rpc.backend_registry import BackendType
 from torch.nn.parallel import DistributedDataParallel as DDP
-
 
 # Config
 NUM_TRAINERS = 8

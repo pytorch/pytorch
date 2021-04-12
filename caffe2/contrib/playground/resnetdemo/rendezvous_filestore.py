@@ -3,8 +3,8 @@
 
 
 
-from caffe2.python import core, workspace
-from caffe2.python import dyndep
+from caffe2.python import core, dyndep, workspace
+
 dyndep.InitOpsLibrary('@/caffe2/caffe2/distributed:file_store_handler_ops')
 
 

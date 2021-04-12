@@ -1,5 +1,5 @@
-from typing import Optional
 import warnings
+from typing import Optional
 
 # NB: Keep this file in sync with enums in aten/src/ATen/core/Reduction.h
 

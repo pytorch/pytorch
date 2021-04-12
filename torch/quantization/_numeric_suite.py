@@ -1,13 +1,12 @@
+from typing import Any, Callable, Dict, List, Optional, Set, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import prepare
-from typing import Dict, List, Optional, Any, Union, Callable, Set
 
-from .quantization_mappings import (
-    get_default_compare_output_module_list,
-)
+from .quantization_mappings import get_default_compare_output_module_list
 
 NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
     nnqd.Linear,

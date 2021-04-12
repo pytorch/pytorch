@@ -13,17 +13,16 @@ from typing import Any, Dict
 from unittest.mock import call, patch
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
-from torch.distributed.elastic.agent.server.api import (
-    RunResult,
-    SimpleElasticAgent,
-    WorkerGroup,
-    WorkerSpec,
-    WorkerState,
-    _get_fq_hostname,
-    _RoleInstanceInfo,
-)
+from torch.distributed.elastic.agent.server.api import (RunResult,
+                                                        SimpleElasticAgent,
+                                                        WorkerGroup,
+                                                        WorkerSpec,
+                                                        WorkerState,
+                                                        _get_fq_hostname,
+                                                        _RoleInstanceInfo)
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure
-from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
+from torch.distributed.elastic.rendezvous import (RendezvousHandler,
+                                                  RendezvousParameters)
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 
 

@@ -3,15 +3,17 @@
 
 
 
-import unittest
-import hypothesis.strategies as st
-from hypothesis import given, assume
-import numpy as np
-import time
 import os
-from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, muji, dyndep
+import time
+import unittest
+
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import assume, given
+
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, dyndep, muji, workspace
 
 np.random.seed(1)
 

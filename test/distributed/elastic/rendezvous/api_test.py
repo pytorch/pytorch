@@ -8,11 +8,9 @@ from typing import Any, Dict, SupportsInt, Tuple, cast
 from unittest import TestCase
 
 from torch.distributed import Store
-from torch.distributed.elastic.rendezvous import (
-    RendezvousHandler,
-    RendezvousHandlerRegistry,
-    RendezvousParameters
-)
+from torch.distributed.elastic.rendezvous import (RendezvousHandler,
+                                                  RendezvousHandlerRegistry,
+                                                  RendezvousParameters)
 
 
 class RendezvousParametersTest(TestCase):

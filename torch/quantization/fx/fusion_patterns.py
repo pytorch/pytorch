@@ -1,13 +1,13 @@
-import torch
-from torch.fx.graph import Node
-from .pattern_utils import (
-    register_fusion_pattern,
-)
-from .utils import _parent_name
-from .quantization_types import QuantizerCls
-from ..fuser_method_mappings import get_fuser_method
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict
+
+import torch
+from torch.fx.graph import Node
+
+from ..fuser_method_mappings import get_fuser_method
+from .pattern_utils import register_fusion_pattern
+from .quantization_types import QuantizerCls
+from .utils import _parent_name
 
 # ---------------------
 # Fusion Pattern Registrations

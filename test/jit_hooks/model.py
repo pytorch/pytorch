@@ -1,12 +1,14 @@
 import argparse
 import os
 import sys
+
 import torch
 
 # grab modules from test_jit_hooks.cpp
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from jit.test_hooks_modules import *
+
 
 # Create saved modules for JIT forward hooks and pre-hooks
 def main():

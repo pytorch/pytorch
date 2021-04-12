@@ -1,28 +1,27 @@
 #! /usr/bin/env python
 
-import onnx.backend
-
 import argparse
-import caffe2.python.workspace as c2_workspace
 import glob
 import json
-import numpy as np
-import onnx
-import caffe2.python.onnx.frontend
-import caffe2.python.onnx.backend
 import os
 import shutil
 import tarfile
 import tempfile
 
 import boto3
-
+import numpy as np
+import onnx
+import onnx.backend
+from onnx import numpy_helper
 from six.moves.urllib.request import urlretrieve
 
-from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
+import caffe2.python.onnx.backend
+import caffe2.python.onnx.frontend
+import caffe2.python.workspace as c2_workspace
 from caffe2.proto import caffe2_pb2
-from onnx import numpy_helper
-
+from caffe2.python.models.download import (deleteDirectory,
+                                           downloadFromURLToFile,
+                                           getURLFromName)
 
 """A script converting Caffe2 models to ONNX, and updating ONNX model zoos.
 

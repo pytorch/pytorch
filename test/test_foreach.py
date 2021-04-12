@@ -1,10 +1,14 @@
-import torch
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
-from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, skipCUDAIfRocm, ops)
+
+import torch
 from torch._six import inf, nan
-from torch.testing._internal.common_methods_invocations import foreach_unary_op_db
+from torch.testing._internal.common_device_type import (
+    dtypes, instantiate_device_type_tests, ops, skipCUDAIfRocm)
+from torch.testing._internal.common_methods_invocations import \
+    foreach_unary_op_db
+from torch.testing._internal.common_utils import (TEST_WITH_ROCM,
+                                                  TEST_WITH_SLOW, TestCase,
+                                                  run_tests)
 
 # Includes some values such that N * N won't be a multiple of 4,
 # which should ensure we test the vectorized and non-vectorized

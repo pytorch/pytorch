@@ -13,19 +13,21 @@ generated.  In the full build system, OUTPUT_DIR is
 torch/testing/_internal/generated
 """
 
-from collections import defaultdict
 import argparse
 import os
 import textwrap
+from collections import defaultdict
+from typing import Any, Dict, List
 
-from typing import Dict, List, Any
-
-from tools.codegen.gen import parse_native_yaml, FileManager
-from tools.codegen.context import with_native_function
-from tools.codegen.model import *
 import tools.codegen.api.python as python
-from .gen_python_functions import should_generate_py_binding, is_py_torch_function, \
-    is_py_nn_function, is_py_linalg_function, is_py_variable_method
+from tools.codegen.context import with_native_function
+from tools.codegen.gen import FileManager, parse_native_yaml
+from tools.codegen.model import *
+
+from .gen_python_functions import (is_py_linalg_function, is_py_nn_function,
+                                   is_py_torch_function, is_py_variable_method,
+                                   should_generate_py_binding)
+
 
 def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
     native_functions = parse_native_yaml(native_yaml_path)

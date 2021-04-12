@@ -2,8 +2,8 @@
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
-from ._torch_docs import parse_kwargs
-from ._torch_docs import reproducibility_notes
+
+from ._torch_docs import parse_kwargs, reproducibility_notes
 
 
 def add_docstr_all(method, docstr):

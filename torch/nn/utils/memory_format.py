@@ -1,5 +1,6 @@
 import torch
 
+
 def convert_conv2d_weight_memory_format(module, memory_format):
     r"""Convert ``memory_format`` of ``nn.Conv2d.weight`` to ``memory_format``
     The conversion recursively applies to nested ``nn.Module``, including ``module``.

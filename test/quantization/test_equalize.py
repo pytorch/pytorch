@@ -1,11 +1,10 @@
+import copy
+
 import torch
 import torch.nn as nn
-
+import torch.quantization._equalize as _equalize
 from torch.testing._internal.common_quantization import QuantizationTestCase
 
-import torch.quantization._equalize as _equalize
-
-import copy
 
 class TestEqualizeEager(QuantizationTestCase):
     def checkChannelsEqualized(self, tensor1, tensor2, output_axis, input_axis):

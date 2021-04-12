@@ -1,9 +1,10 @@
-import torch
-from collections import OrderedDict
-import weakref
-import warnings
 import functools
+import warnings
+import weakref
+from collections import OrderedDict
 from typing import Any
+
+import torch
 
 
 class RemovableHandle(object):

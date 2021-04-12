@@ -5,8 +5,8 @@
 
 import unittest
 
-from caffe2.python import workspace, core
 import caffe2.python.parallel_workers as parallel_workers
+from caffe2.python import core, workspace
 
 
 def create_queue():

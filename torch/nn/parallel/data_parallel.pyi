@@ -1,7 +1,8 @@
 from typing import Any, Optional
-from .common_types import _devices_t, _device_t
+
+from ... import Tensor, device
 from ..modules import Module
-from ... import device, Tensor
+from .common_types import _device_t, _devices_t
 
 class DataParallel(Module):
     module: Module = ...

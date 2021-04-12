@@ -3,13 +3,15 @@
 
 
 
-from caffe2.python import recurrent, workspace
-from caffe2.python.model_helper import ModelHelper
-from hypothesis import given, settings
-import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python import recurrent, workspace
+from caffe2.python.model_helper import ModelHelper
+
 
 class RecurrentNetworkTest(serial.SerializedTestCase):
     @given(T=st.integers(1, 4),

@@ -4,21 +4,28 @@ import torch
 # Sparse tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-import itertools
 import functools
+import itertools
 import operator
 import random
-from collections import defaultdict
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff
-from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
+from collections import defaultdict
 from numbers import Number
-from typing import Dict, Any
-from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyCUDA)
+from typing import Any, Dict
+
+from torch.testing._internal.common_cuda import (TEST_CUDA,
+                                                 _get_torch_cuda_version)
+from torch.testing._internal.common_device_type import (
+    dtypes, instantiate_device_type_tests, onlyCPU, onlyCUDA, ops)
 from torch.testing._internal.common_methods_invocations import \
-    (sparse_unary_ufuncs)
+    sparse_unary_ufuncs
+from torch.testing._internal.common_utils import (IS_WINDOWS, TEST_NUMPY,
+                                                  TEST_SCIPY, TestCase,
+                                                  coalescedonoff,
+                                                  do_test_dtypes,
+                                                  do_test_empty_full,
+                                                  gradcheck, load_tests,
+                                                  run_tests, skipIfRocm)
 
 if TEST_SCIPY:
     import scipy.sparse

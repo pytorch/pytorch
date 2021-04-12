@@ -18,18 +18,16 @@ from base64 import b64decode, b64encode
 from typing import Optional
 
 import etcd  # type: ignore[import]
+
 # pyre-ignore[21]: Could not find name `Store` in `torch.distributed`.
 from torch.distributed import Store
-from torch.distributed.elastic.rendezvous import (
-    RendezvousClosedError,
-    RendezvousError,
-    RendezvousHandler,
-    RendezvousParameters,
-    RendezvousTimeoutError,
-)
+from torch.distributed.elastic.rendezvous import (RendezvousClosedError,
+                                                  RendezvousError,
+                                                  RendezvousHandler,
+                                                  RendezvousParameters,
+                                                  RendezvousTimeoutError)
 
 from .utils import _parse_rendezvous_endpoint
-
 
 _log_fmt = logging.Formatter("%(levelname)s %(asctime)s %(message)s")
 _log_handler = logging.StreamHandler(sys.stderr)

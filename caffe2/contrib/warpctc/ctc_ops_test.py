@@ -3,9 +3,9 @@
 
 
 import numpy as np
-from caffe2.proto import caffe2_pb2
 
-from caffe2.python import core, workspace, dyndep, test_util
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, dyndep, test_util, workspace
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/warpctc:ctc_ops')
 workspace.GlobalInit(["python"])

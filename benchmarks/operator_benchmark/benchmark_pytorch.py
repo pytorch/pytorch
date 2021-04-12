@@ -1,8 +1,9 @@
-import time
 import json
-import torch
-import cpp_extension # noqa
+import time
 
+import cpp_extension  # noqa
+
+import torch
 
 """PyTorch performance microbenchmarks.
 

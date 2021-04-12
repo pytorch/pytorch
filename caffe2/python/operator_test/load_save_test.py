@@ -1,15 +1,16 @@
 import errno
-import hypothesis.strategies as st
-from hypothesis import given, assume, settings
 import io
 import math
-import numpy as np
 import os
 import shutil
 import struct
 import unittest
 from pathlib import Path
 from typing import Dict, Generator, List, NamedTuple, Optional, Tuple, Type
+
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import assume, given, settings
 
 from caffe2.proto import caffe2_pb2
 from caffe2.proto.caffe2_pb2 import BlobSerializationOptions

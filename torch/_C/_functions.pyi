@@ -1,5 +1,6 @@
-from torch import Tensor
 from typing import AnyStr, List
+
+from torch import Tensor
 
 class UndefinedGrad:
     def __init__(self) -> None: ...

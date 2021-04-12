@@ -25,11 +25,11 @@ import itertools
 import logging
 import os
 
-from six import add_metaclass
 import numpy as np
+from six import add_metaclass
 
-from caffe2.python import workspace, core
-from caffe2.python.hypothesis_test_util import runOpBenchmark, gpu_do
+from caffe2.python import core, workspace
+from caffe2.python.hypothesis_test_util import gpu_do, runOpBenchmark
 
 logging.basicConfig()
 logger = logging.getLogger(os.path.basename(__file__))

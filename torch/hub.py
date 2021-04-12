@@ -6,15 +6,16 @@ import re
 import shutil
 import sys
 import tempfile
-import torch
 import warnings
 import zipfile
-
-from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
+from urllib.request import Request, urlopen
+
+import torch
 
 try:
-    from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
+    from tqdm.auto import \
+        tqdm  # automatically select proper tqdm submodule if available
 except ImportError:
     try:
         from tqdm import tqdm

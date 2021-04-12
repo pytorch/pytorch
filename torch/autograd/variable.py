@@ -13,4 +13,5 @@ class Variable(with_metaclass(VariableMeta, torch._C._LegacyVariableBase)):  # t
 
 
 from torch._C import _ImperativeEngine as ImperativeEngine
+
 Variable._execution_engine = ImperativeEngine()  # type: ignore

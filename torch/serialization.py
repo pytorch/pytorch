@@ -1,22 +1,24 @@
+import copyreg
 import difflib
-import os
 import io
+import os
+import pathlib
+import pickle
 import shutil
 import struct
 import sys
-import torch
 import tarfile
 import tempfile
 import warnings
 from contextlib import closing, contextmanager
-from ._utils import _import_dotted_name
-from ._six import string_classes as _string_classes
+from typing import IO, Any, BinaryIO, Dict, Optional, Tuple, Type, Union, cast
+
+import torch
 from torch._utils_internal import get_source_lines_and_file
 from torch.types import Storage
-from typing import Any, BinaryIO, cast, Dict, Optional, Type, Tuple, Union, IO
-import copyreg
-import pickle
-import pathlib
+
+from ._six import string_classes as _string_classes
+from ._utils import _import_dotted_name
 
 DEFAULT_PROTOCOL = 2
 

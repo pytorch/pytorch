@@ -5,14 +5,14 @@
 
 
 
-from caffe2.proto import caffe2_pb2
-from caffe2.proto import metanet_pb2
-from caffe2.python import workspace, core, scope
-from caffe2.python.predictor_constants import predictor_constants
-import caffe2.python.predictor.serde as serde
-import caffe2.python.predictor.predictor_py_utils as utils
-from builtins import bytes
 import collections
+from builtins import bytes
+
+import caffe2.python.predictor.predictor_py_utils as utils
+import caffe2.python.predictor.serde as serde
+from caffe2.proto import caffe2_pb2, metanet_pb2
+from caffe2.python import core, scope, workspace
+from caffe2.python.predictor_constants import predictor_constants
 
 
 def get_predictor_exporter_helper(submodelNetName):

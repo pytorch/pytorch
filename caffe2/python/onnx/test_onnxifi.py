@@ -3,14 +3,16 @@
 
 
 
-import numpy as np
 import time
 import unittest
 
+import numpy as np
 import onnx
 import onnx.defs
 from onnx.backend.base import namedtupledict
-from onnx.helper import make_node, make_graph, make_tensor_value_info, make_model
+from onnx.helper import (make_graph, make_model, make_node,
+                         make_tensor_value_info)
+
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.models.download import ModelDownloader

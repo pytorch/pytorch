@@ -1,7 +1,8 @@
 import contextlib
+from typing import List
 
 import torch
-from typing import List
+
 
 @contextlib.contextmanager
 def optimized_execution(should_optimize):

@@ -2,13 +2,14 @@
 
 
 
+import numpy as np
+
 from caffe2.python import core, workspace
 from caffe2.python.dataset import Dataset
-from caffe2.python.schema import (
-    Struct, Map, Scalar, from_blob_list, NewRecord, FeedRecord)
 from caffe2.python.record_queue import RecordQueue
+from caffe2.python.schema import (FeedRecord, Map, NewRecord, Scalar, Struct,
+                                  from_blob_list)
 from caffe2.python.test_util import TestCase
-import numpy as np
 
 
 class TestRecordQueue(TestCase):

@@ -1,4 +1,4 @@
-from numbers import Real, Number
+from numbers import Number, Real
 
 import torch
 from torch.distributions import constraints

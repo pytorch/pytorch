@@ -5,9 +5,9 @@ import logging
 from collections import defaultdict
 
 import numpy as np
+
 from caffe2.python import core, utils
 from caffe2.python.fb import hardcode_scale_zp  # type: ignore[import]
-
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

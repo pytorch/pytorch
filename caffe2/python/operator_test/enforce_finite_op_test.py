@@ -3,11 +3,11 @@
 
 
 
-from hypothesis import given, settings
 import numpy as np
+from hypothesis import given, settings
 
-from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, workspace
 
 
 class TestEnforceFinite(hu.HypothesisTestCase):

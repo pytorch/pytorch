@@ -1,7 +1,8 @@
-import torch
-from collections import OrderedDict
-from typing import Union, Callable, Any, Dict
 import re
+from collections import OrderedDict
+from typing import Any, Callable, Dict, Union
+
+import torch
 
 from .utils import _parent_name
 

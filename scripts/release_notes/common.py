@@ -1,11 +1,12 @@
+import json
+import locale
+import os
+import re
+import subprocess
 from collections import namedtuple
 from os.path import expanduser
-import locale
-import subprocess
-import re
+
 import requests
-import os
-import json
 
 categories = [
     'Uncategorized',

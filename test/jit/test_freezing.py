@@ -1,20 +1,17 @@
+import io
+import unittest
+from itertools import product
+from typing import Any
+
 import torch
 import torch.nn as nn
-import unittest
-from torch.testing._internal.jit_utils import JitTestCase
-
-from torch.testing import FileCheck
-from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM
-from torch.testing._internal.common_utils import set_default_dtype
-from torch.utils import mkldnn as mkldnn_utils
-
-
 from torch.jit._recursive import wrap_cpp_module
-from typing import Any
-from itertools import product
-
-import io
+from torch.testing import FileCheck
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.jit_utils import JitTestCase
+from torch.utils import mkldnn as mkldnn_utils
 
 try:
     import torchvision

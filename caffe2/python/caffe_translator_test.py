@@ -3,14 +3,16 @@
 # that all the results look right. In default, it is disabled unless you
 # explicitly want to run it.
 
-from google.protobuf import text_format
-import numpy as np
 import os
 import sys
+
+import numpy as np
+from google.protobuf import text_format
 
 CAFFE_FOUND = False
 try:
     from caffe.proto import caffe_pb2
+
     from caffe2.python import caffe_translator
     CAFFE_FOUND = True
 except Exception as e:
@@ -21,8 +23,10 @@ except Exception as e:
             "Right now, this is not found, so we will skip the caffe "
             "translator test.")
 
-from caffe2.python import utils, workspace, test_util
 import unittest
+
+from caffe2.python import test_util, utils, workspace
+
 
 def setUpModule():
     # Do nothing if caffe and test data is not found

@@ -5,15 +5,15 @@
 
 
 
-from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace, core, utils, rnn_cell, model_helper
-from caffe2.python import recurrent
-
 import argparse
-import numpy as np
+import logging
 import time
 
-import logging
+import numpy as np
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import (core, model_helper, recurrent, rnn_cell, utils,
+                           workspace)
 
 logging.basicConfig()
 log = logging.getLogger("lstm_bench")

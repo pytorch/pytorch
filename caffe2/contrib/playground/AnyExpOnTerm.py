@@ -5,12 +5,12 @@
 
 import argparse
 import json
+import logging
 import os
 
 import caffe2.contrib.playground.AnyExp as AnyExp
 import caffe2.contrib.playground.checkpoint as checkpoint
 
-import logging
 logging.basicConfig()
 log = logging.getLogger("AnyExpOnTerm")
 log.setLevel(logging.DEBUG)

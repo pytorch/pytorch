@@ -1,10 +1,10 @@
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py`.
 import locale
+import os
 import re
 import subprocess
 import sys
-import os
 from collections import namedtuple
 
 try:

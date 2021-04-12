@@ -5,17 +5,16 @@
 
 
 import argparse
-import os
-import sys
-import signal
-import re
 import json
-
-from caffe2.proto import caffe2_pb2
-
+import os
+import re
+import signal
+import sys
+import urllib.request as urllib
 # Import urllib
 from urllib.error import HTTPError, URLError
-import urllib.request as urllib
+
+from caffe2.proto import caffe2_pb2
 
 # urllib requires more work to deal with a redirect, so not using vanity url
 DOWNLOAD_BASE_URL = "https://s3.amazonaws.com/download.caffe2.ai/models/"

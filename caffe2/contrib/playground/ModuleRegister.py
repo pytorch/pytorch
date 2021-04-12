@@ -5,6 +5,7 @@
 
 import inspect
 import logging
+
 logging.basicConfig()
 log = logging.getLogger("ModuleRegister")
 log.setLevel(logging.DEBUG)

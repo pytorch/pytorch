@@ -1,13 +1,14 @@
 import math
+from typing import TypeVar
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
-import torch.nn.functional as F
 from torch.nn import init
-from torch.nn.modules.utils import _single, _pair, _triple
+from torch.nn.modules.utils import _pair, _single, _triple
 from torch.nn.parameter import Parameter
-from typing import TypeVar
 
 _BN_CLASS_MAP = {
     1: nn.BatchNorm1d,

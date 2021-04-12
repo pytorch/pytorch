@@ -3,13 +3,13 @@
 
 
 
-import numpy as np
-import unittest
 import time
+import unittest
 
-from caffe2.python import workspace, model_helper
-from caffe2.python import timeout_guard
+import numpy as np
+
 import caffe2.python.data_workers as data_workers
+from caffe2.python import model_helper, timeout_guard, workspace
 
 
 def dummy_fetcher(fetcher_id, batch_size):

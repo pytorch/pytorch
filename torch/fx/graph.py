@@ -1,16 +1,18 @@
-from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
-
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
-from dataclasses import dataclass
-from contextlib import contextmanager
-import copy
-import torch
-import keyword
-import re
 import builtins
+import copy
+import keyword
 import math
+import re
 import warnings
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import (TYPE_CHECKING, Any, Callable, Dict, FrozenSet, List,
+                    NamedTuple, Optional, Set, Tuple)
 
+import torch
+
+from .node import (Argument, Node, Target, _get_qualified_name, _type_repr,
+                   map_arg)
 
 if TYPE_CHECKING:
     from .graph_module import GraphModule  # noqa

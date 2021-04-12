@@ -30,23 +30,23 @@
 #   message, but use what's there
 #
 
-from collections import defaultdict
 import itertools
 import re
+from collections import defaultdict
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+
 import yaml
 
-from .gen_trace_type import should_trace
-
-from tools.codegen.code_template import CodeTemplate
 from tools.codegen.api import cpp
-from tools.codegen.api.types import *
 from tools.codegen.api.python import *
-from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
+from tools.codegen.api.types import *
+from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
+from tools.codegen.gen import FileManager, cpp_string, parse_native_yaml
 from tools.codegen.model import *
 from tools.codegen.utils import *
 
-from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
+from .gen_trace_type import should_trace
 
 try:
     # use faster C loader if available

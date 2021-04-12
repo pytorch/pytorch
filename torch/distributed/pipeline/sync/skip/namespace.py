@@ -6,9 +6,9 @@
 # LICENSE file in the root directory of this source tree.
 """Provides isolated namespace of skip tensors."""
 import abc
+import uuid
 from functools import total_ordering
 from typing import Any
-import uuid
 
 __all__ = ["Namespace"]
 

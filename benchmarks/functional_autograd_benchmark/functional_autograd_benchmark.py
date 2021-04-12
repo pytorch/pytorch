@@ -1,16 +1,16 @@
-import torch
-from torch.autograd import functional
-
 import time
 from argparse import ArgumentParser
 from collections import defaultdict
-from typing import NamedTuple, Callable, List, Any
+from typing import Any, Callable, List, NamedTuple
 
+import audio_text_models
 import ppl_models
 import vision_models
-import audio_text_models
+from utils import (GetterType, InputsType, TimingResultType, VType,
+                   to_markdown_table)
 
-from utils import to_markdown_table, TimingResultType, InputsType, GetterType, VType
+import torch
+from torch.autograd import functional
 
 # Listing of the different tasks
 FAST_TASKS_NO_DOUBLE_BACK = [

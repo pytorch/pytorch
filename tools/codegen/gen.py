@@ -1,27 +1,29 @@
-import os
-from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence
-from typing_extensions import Literal
-import yaml
-from collections import OrderedDict, defaultdict
 import argparse
-import pathlib
 import functools
 import json
+import os
+import pathlib
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
+from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
+                    Union)
 
-from tools.codegen.code_template import CodeTemplate
-from tools.codegen.model import *
-from tools.codegen.api.types import *
-from tools.codegen.api import cpp
+import yaml
+from typing_extensions import Literal
+
 import tools.codegen.api.dispatcher as dispatcher
-import tools.codegen.api.native as native
 import tools.codegen.api.meta as meta
+import tools.codegen.api.native as native
 import tools.codegen.api.structured as structured
+import tools.codegen.dest as dest
+from tools.codegen.api import cpp
 from tools.codegen.api.translate import translate
+from tools.codegen.api.types import *
+from tools.codegen.code_template import CodeTemplate
+from tools.codegen.context import *
+from tools.codegen.model import *
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import *
-from tools.codegen.context import *
-import tools.codegen.dest as dest
 
 try:
     # use faster C loader if available

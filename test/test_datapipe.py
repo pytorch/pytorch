@@ -2,27 +2,27 @@ import itertools
 import os
 import pickle
 import random
+import tarfile
 import tempfile
 import warnings
-import tarfile
 import zipfile
+from typing import (Any, Dict, Iterator, List, Optional, Set, Tuple, Type,
+                    TypeVar, Union)
+from unittest import skipIf
+
 import numpy as np
 from PIL import Image
-from unittest import skipIf
 
 import torch
 import torch.nn as nn
-from torch.testing._internal.common_utils import (TestCase, run_tests)
-from torch.utils.data import \
-    (IterDataPipe, RandomSampler, DataLoader,
-     construct_time_validation, runtime_validation)
-
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, TypeVar, Set, Union
-
 import torch.utils.data.datapipes as dp
-from torch.utils.data.datapipes.utils.decoder import (
-    basichandlers as decoder_basichandlers,
-    imagehandler as decoder_imagehandler)
+from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.utils.data import (DataLoader, IterDataPipe, RandomSampler,
+                              construct_time_validation, runtime_validation)
+from torch.utils.data.datapipes.utils.decoder import \
+    basichandlers as decoder_basichandlers
+from torch.utils.data.datapipes.utils.decoder import \
+    imagehandler as decoder_imagehandler
 
 try:
     import torchvision.transforms
@@ -103,7 +103,8 @@ class TestIterableDataPipeBasic(TestCase):
 
     def test_loadfilesfromdisk_iterable_datapipe(self):
         # test import datapipe class directly
-        from torch.utils.data.datapipes.iter import ListDirFiles, LoadFilesFromDisk
+        from torch.utils.data.datapipes.iter import (ListDirFiles,
+                                                     LoadFilesFromDisk)
 
         temp_dir = self.temp_dir.name
         datapipe1 = ListDirFiles(temp_dir, '')

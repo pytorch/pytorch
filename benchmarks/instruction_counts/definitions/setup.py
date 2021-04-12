@@ -5,7 +5,6 @@ import enum
 from core.api import GroupedSetup
 from core.utils import parse_stmts
 
-
 _TRIVIAL_2D = GroupedSetup(
     r"x = torch.ones((4, 4))",
     r"auto x = torch::ones({4, 4});"

@@ -1,15 +1,18 @@
 
 
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
-from caffe2.python import core, layer_model_instantiator, regularizer, schema, workspace
+from hypothesis import given
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import (core, layer_model_instantiator, regularizer, schema,
+                           workspace)
 from caffe2.python.layer_test_util import LayersTestCase
 from caffe2.python.optimizer import SgdOptimizer
 from caffe2.python.regularizer import L1Norm, RegularizationBy
-from caffe2.python.regularizer_context import RegularizerContext, UseRegularizer
-from hypothesis import given
+from caffe2.python.regularizer_context import (RegularizerContext,
+                                               UseRegularizer)
 
 
 class TestRegularizerContext(LayersTestCase):

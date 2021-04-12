@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-from .module import Module
-from .. import functional as F
-
 from torch import Tensor
+
+from .. import functional as F
 from ..common_types import _size_any_t
+from .module import Module
 
 
 class Fold(Module):

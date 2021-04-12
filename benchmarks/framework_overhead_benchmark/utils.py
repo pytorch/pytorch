@@ -1,5 +1,6 @@
 import time
 from collections import namedtuple
+
 from torch.utils import ThroughputBenchmark
 
 NUM_LOOP_ITERS = 1000

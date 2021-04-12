@@ -5,8 +5,9 @@
 
 
 
-from caffe2.python import brew
 import logging
+
+from caffe2.python import brew
 
 '''
 Utility for creating ResNe(X)t

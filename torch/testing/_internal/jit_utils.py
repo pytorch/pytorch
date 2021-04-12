@@ -1,31 +1,5 @@
 # Torch
-from torch.autograd import Variable
-from torch.autograd.function import _nested_map
-from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
-
-from torch.onnx import OperatorExportTypes
-import torch
-import torch.cuda
-import torch.jit
-import torch.jit._logging
-import torch.jit.frontend
-import torch.jit.quantized
-import zipfile
 import functools
-
-# Testing utils
-from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_WINDOWS, \
-    freeze_rng_state, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
-from torch.testing._internal.common_jit import JitCommonTestCase
-from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
-
-# Standard library
-from contextlib import contextmanager
-from functools import reduce
-from io import StringIO
-from collections import defaultdict
-
 import importlib.util
 import inspect
 import io
@@ -35,8 +9,34 @@ import pickle
 import sys
 import tempfile
 import textwrap
+import zipfile
+from collections import defaultdict
+# Standard library
+from contextlib import contextmanager
+from functools import reduce
 from importlib.abc import Loader
+from io import StringIO
 from typing import Any, Dict, List
+
+import torch
+import torch.cuda
+import torch.jit
+import torch.jit._logging
+import torch.jit.frontend
+import torch.jit.quantized
+from torch.autograd import Variable
+from torch.autograd.function import _nested_map
+from torch.jit.annotations import (BroadcastingList2,  # noqa: F401
+                                   BroadcastingList3)
+from torch.onnx import OperatorExportTypes
+# Testing utils
+from torch.testing import FileCheck
+from torch.testing._internal.common_jit import JitCommonTestCase
+from torch.testing._internal.common_utils import \
+    enable_profiling_mode  # noqa: F401
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS, TEST_BAILOUTS, ProfilingMode,
+    enable_profiling_mode_for_profiling_tests, freeze_rng_state)
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1

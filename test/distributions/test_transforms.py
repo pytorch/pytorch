@@ -4,13 +4,19 @@ import pytest
 
 import torch
 from torch.autograd.functional import jacobian
-from torch.distributions import Dirichlet, Independent, Normal, TransformedDistribution, constraints
-from torch.distributions.transforms import (AbsTransform, AffineTransform, ComposeTransform,
-                                            CorrCholeskyTransform, ExpTransform, IndependentTransform,
-                                            LowerCholeskyTransform, PowerTransform, ReshapeTransform,
-                                            SigmoidTransform, TanhTransform, SoftmaxTransform,
-                                            StickBreakingTransform, identity_transform, Transform,
-                                            _InverseTransform)
+from torch.distributions import (Dirichlet, Independent, Normal,
+                                 TransformedDistribution, constraints)
+from torch.distributions.transforms import (AbsTransform, AffineTransform,
+                                            ComposeTransform,
+                                            CorrCholeskyTransform,
+                                            ExpTransform, IndependentTransform,
+                                            LowerCholeskyTransform,
+                                            PowerTransform, ReshapeTransform,
+                                            SigmoidTransform, SoftmaxTransform,
+                                            StickBreakingTransform,
+                                            TanhTransform, Transform,
+                                            _InverseTransform,
+                                            identity_transform)
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
 
 

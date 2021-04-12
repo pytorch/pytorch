@@ -11,11 +11,9 @@ import socket
 import unittest
 from contextlib import closing
 
-from torch.distributed.elastic.utils.distributed import (
-    create_c10d_store,
-    get_free_port,
-    get_socket_with_port,
-)
+from torch.distributed.elastic.utils.distributed import (create_c10d_store,
+                                                         get_free_port,
+                                                         get_socket_with_port)
 
 
 def _create_c10d_store_mp(is_server, server_addr, port, world_size):

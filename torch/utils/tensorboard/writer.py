@@ -3,26 +3,24 @@ consumed by TensorBoard for visualization."""
 
 import os
 import time
-import torch
 
 from tensorboard.compat import tf
-from tensorboard.compat.proto.event_pb2 import SessionLog
-from tensorboard.compat.proto.event_pb2 import Event
 from tensorboard.compat.proto import event_pb2
+from tensorboard.compat.proto.event_pb2 import Event, SessionLog
 from tensorboard.plugins.projector.projector_config_pb2 import ProjectorConfig
 from tensorboard.summary.writer.event_file_writer import EventFileWriter
 
+import torch
+
 from ._convert_np import make_np
-from ._embedding import (
-    make_mat, make_sprite, make_tsv, write_pbtxt, get_embedding_info,
-)
+from ._embedding import (get_embedding_info, make_mat, make_sprite, make_tsv,
+                         write_pbtxt)
 from ._onnx_graph import load_onnx_graph
 from ._pytorch_graph import graph
 from ._utils import figure_to_image
-from .summary import (
-    scalar, histogram, histogram_raw, image, audio, text,
-    pr_curve, pr_curve_raw, video, custom_scalars, image_boxes, mesh, hparams
-)
+from .summary import (audio, custom_scalars, histogram, histogram_raw, hparams,
+                      image, image_boxes, mesh, pr_curve, pr_curve_raw, scalar,
+                      text, video)
 
 
 class FileWriter(object):
@@ -729,9 +727,9 @@ class SummaryWriter(object):
             # Caffe2 models do not have the 'forward' method
             from caffe2.proto import caffe2_pb2
             from caffe2.python import core
-            from ._caffe2_graph import (
-                model_to_graph_def, nets_to_graph_def, protos_to_graph_def
-            )
+
+            from ._caffe2_graph import (model_to_graph_def, nets_to_graph_def,
+                                        protos_to_graph_def)
             if isinstance(model, list):
                 if isinstance(model[0], core.Net):
                     current_graph = nets_to_graph_def(model)

@@ -3,37 +3,22 @@ import collections
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 toq = torch.ops.quantized
+from typing import Any, Callable, Dict, List, Tuple
+
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.fx.symbolic_trace import Tracer
 from torch.quantization.ns.graph_matcher import (
-    get_matching_subgraph_pairs,
-    get_base_name_to_sets_of_related_ops,
-    get_type_a_related_to_b,
-)
+    get_base_name_to_sets_of_related_ops, get_matching_subgraph_pairs,
+    get_type_a_related_to_b)
 
-from .ns.utils import (
-    getattr_from_fqn,
-)
-
-from .ns.weight_utils import (
-    get_conv_mod_weight,
-    get_linear_mod_weight,
-    get_lstm_mod_weights,
-    get_linear_fun_weight,
-)
-
-from .ns.graph_passes import (
-    remove_observers_add_loggers,
-    create_a_shadows_b,
-)
-
-from .ns.ns_types import (
-    NSSingleResultValuesType,
-)
-
-from typing import Dict, Tuple, Callable, List, Any
+from .ns.graph_passes import create_a_shadows_b, remove_observers_add_loggers
+from .ns.ns_types import NSSingleResultValuesType
+from .ns.utils import getattr_from_fqn
+from .ns.weight_utils import (get_conv_mod_weight, get_linear_fun_weight,
+                              get_linear_mod_weight, get_lstm_mod_weights)
 
 RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 

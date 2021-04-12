@@ -7,8 +7,8 @@
 import threading
 
 import pytest
-import torch
 
+import torch
 from torch.distributed.pipeline.sync.microbatch import Batch
 from torch.distributed.pipeline.sync.stream import CPUStream
 from torch.distributed.pipeline.sync.worker import Task, spawn_workers

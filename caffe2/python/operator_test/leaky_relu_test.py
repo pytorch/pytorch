@@ -2,12 +2,12 @@
 
 
 
-import numpy as np
-from hypothesis import given, assume
 import hypothesis.strategies as st
+import numpy as np
+from hypothesis import assume, given
 
-from caffe2.python import core, model_helper, utils
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, model_helper, utils
 
 
 class TestLeakyRelu(hu.HypothesisTestCase):

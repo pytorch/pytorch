@@ -1,5 +1,6 @@
+from typing import Callable, Dict, Iterator, Optional, Tuple, TypeVar
+
 from torch.utils.data import IterDataPipe, functional_datapipe
-from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
 from .callable import MapIterDataPipe
 

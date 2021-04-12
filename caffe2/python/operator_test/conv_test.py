@@ -4,16 +4,17 @@ import collections
 import functools
 import unittest
 
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import assume, given, settings
+
 import caffe2.python._import_c_extension as C
 import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-import hypothesis.strategies as st
-import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, utils, workspace
 from caffe2.python.model_helper import ModelHelper
-from hypothesis import assume, given, settings
 
 
 def _cudnn_supports(dilation=False, nhwc=False, backward=False):

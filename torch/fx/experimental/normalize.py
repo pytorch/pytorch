@@ -1,14 +1,16 @@
-import torch
-import torch.fx
 import inspect
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple
-from torch.fx.node import Argument, Target
-from torch._jit_internal import boolean_dispatched
 
+import torch
+import torch.fx
+from torch._jit_internal import boolean_dispatched
 from torch.fx import Transformer
+from torch.fx.node import Argument, Target
 from torch.fx.operator_schemas import get_signature_for_torch_op
+
 from .schema_type_annotation import AnnotateTypesWithSchema
+
 
 class NormalizeArgs(Transformer):
     """

@@ -1,10 +1,9 @@
 import os
 import sys
-from textwrap import dedent
 import unittest
+from textwrap import dedent
 
 import torch
-
 from torch.testing._internal import jit_utils
 
 # Make the helper files in test/ importable

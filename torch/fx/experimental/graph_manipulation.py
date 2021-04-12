@@ -1,12 +1,13 @@
-from typing import Dict, List, NamedTuple, Any, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 import torch
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
-from torch.fx.node import Node, Target, Argument, map_arg, map_aggregate
-from torch.fx.node import _get_qualified_name
+from torch.fx.node import (Argument, Node, Target, _get_qualified_name,
+                           map_aggregate, map_arg)
 from torch.fx.passes.shape_prop import ShapeProp
+
 
 def replace_target_nodes_with(
     fx_module: GraphModule,

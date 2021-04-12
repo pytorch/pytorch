@@ -1,5 +1,6 @@
+from typing import Any, Dict, List, Set
+
 import torch
-from typing import Dict, List, Set, Any
 
 # This module is defined in torch/csrc/distributed/autograd/init.cpp
 

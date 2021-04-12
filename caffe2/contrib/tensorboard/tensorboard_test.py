@@ -3,15 +3,16 @@
 
 
 
-import click.testing
-import numpy as np
 import os
 import tempfile
 import unittest
 
-from caffe2.python import brew, core, model_helper
+import click.testing
+import numpy as np
+
 import caffe2.contrib.tensorboard.tensorboard as tb
 import caffe2.contrib.tensorboard.tensorboard_exporter as tb_exporter
+from caffe2.python import brew, core, model_helper
 
 try:
     # tensorboard>=1.14.0

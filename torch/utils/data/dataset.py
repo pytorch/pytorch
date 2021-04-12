@@ -1,14 +1,16 @@
 import bisect
-import warnings
 import functools
+import warnings
+from typing import (Callable, Dict, Generic, Iterable, Iterator, List,
+                    Optional, Sequence, Tuple, TypeVar)
 
-from torch._utils import _accumulate
-from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
+from torch import randperm
+from torch._utils import _accumulate
 from torch.utils.data._typing import _DataPipeMeta
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
-from ... import Tensor, Generator
+
+from ... import Generator, Tensor
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')

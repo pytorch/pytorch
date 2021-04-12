@@ -4,19 +4,21 @@
 
 
 import argparse
-from caffe2.proto import caffe2_pb2
-from caffe2.python import gradient_checker
-import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.serialized_test import coverage
-import hypothesis as hy
 import inspect
-import numpy as np
 import os
 import shutil
 import sys
 import tempfile
 import threading
 from zipfile import ZipFile
+
+import hypothesis as hy
+import numpy as np
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2
+from caffe2.python import gradient_checker
+from caffe2.python.serialized_test import coverage
 
 operator_test_type = 'operator_test'
 TOP_DIR = os.path.dirname(os.path.realpath(__file__))

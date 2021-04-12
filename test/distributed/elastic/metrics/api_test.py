@@ -9,13 +9,9 @@ import abc
 import unittest
 import unittest.mock as mock
 
-from torch.distributed.elastic.metrics.api import (
-    MetricData,
-    MetricHandler,
-    MetricStream,
-    _get_metric_name,
-    prof,
-)
+from torch.distributed.elastic.metrics.api import (MetricData, MetricHandler,
+                                                   MetricStream,
+                                                   _get_metric_name, prof)
 
 
 def foo_1():

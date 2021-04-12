@@ -3,14 +3,15 @@
 
 
 
-from caffe2.python import core, workspace
-from hypothesis import given, settings
-import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
+import unittest
+
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given, settings
 
-import unittest
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python import core, workspace
 
 
 class TestSoftmaxOps(serial.SerializedTestCase):
@@ -678,7 +679,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
             np.testing.assert_allclose(loss_gpu, loss_cpu, rtol=1e-1)
 
 if __name__ == "__main__":
-    import unittest
     import random
+    import unittest
     random.seed(2603)
     unittest.main()

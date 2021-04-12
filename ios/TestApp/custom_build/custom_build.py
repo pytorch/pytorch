@@ -1,6 +1,7 @@
-import torch
 import torchvision
 import yaml
+
+import torch
 
 model = torchvision.models.mobilenet_v2(pretrained=True)
 model.eval()

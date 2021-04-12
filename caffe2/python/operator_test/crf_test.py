@@ -2,13 +2,14 @@
 
 
 
-from caffe2.python import workspace, crf, brew
-from caffe2.python.model_helper import ModelHelper
-import numpy as np
-from scipy.special import logsumexp
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
+import numpy as np
 from hypothesis import given, settings
+from scipy.special import logsumexp
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import brew, crf, workspace
+from caffe2.python.model_helper import ModelHelper
 
 
 class TestCRFOp(hu.HypothesisTestCase):

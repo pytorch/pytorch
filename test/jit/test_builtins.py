@@ -1,6 +1,6 @@
+import inspect
 import os
 import sys
-import inspect
 import unittest
 from typing import Dict, List
 
@@ -9,7 +9,7 @@ import torch
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
+from torch.testing._internal.jit_utils import RUN_CUDA, JitTestCase
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
