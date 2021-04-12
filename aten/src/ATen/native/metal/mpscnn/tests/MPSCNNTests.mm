@@ -67,7 +67,7 @@ bool TEST(const std::vector<int64_t>& sizes, std::string name, Func block) {
   std::stringstream ss;
   std::copy(sizes.begin(), sizes.end(), std::ostream_iterator<int>(ss, " "));
   __block std::string str1 = ss.str();
-  at::AutoNonVariableTypeMode guard(true);
+  c10::InferenceMode guard;
   bool b = block();
   void (^print)(NSString*) = ^(NSString* result) {
     NSLog(@"[%s],[%s],[%@]", name.c_str(), str1.c_str(), result);

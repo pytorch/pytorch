@@ -185,6 +185,14 @@ ScalarType TensorIteratorBase::compute_common_dtype() {
   return common_dtype_;
 }
 
+TensorOptions original_options(const OperandInfo& op) {
+  if (op.original_tensor.defined()) {
+    return op.original_tensor.options();
+  } else {
+    return op.options();
+  }
+}
+
 // Implements the the behavior of the following flags:
 //   - check_all_same_dtype_
 //   - check_all_same_device_
@@ -427,19 +435,19 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
         // can just return contiguous output
         // it is faster because it avoids allocating 0 size tensor and
         // resizing and restriding it
-        set_output(i, tensor_shape, {}, op.options(), names_);
+        set_output(i, tensor_shape, {}, original_options(op), names_);
       } else {
         auto tensor_stride = invert_perm(op.stride_bytes);
         for (int dim = 0; dim < ndim(); dim++) {
           tensor_stride[dim] /= element_size;
         }
-        set_output(i, tensor_shape, tensor_stride, op.options(), names_);
+        set_output(i, tensor_shape, tensor_stride, original_options(op), names_);
       }
       op.current_dtype = op.target_dtype;
     } else if (op.tensor.defined()) {
       // Even if we don't resize, we still need to tell set_output about
       // the output, so that we properly set guard and propagate names
-      set_output(i, op.tensor.sizes(), {}, op.tensor.options(), names_);
+      set_output(i, op.tensor.sizes(), {}, original_options(op), names_);
     }
   }
 }
@@ -1082,7 +1090,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output(i, shape_, {}, op.options().memory_format(MemoryFormat::Contiguous), names_);
+          set_output(i, shape_, {}, original_options(op).memory_format(MemoryFormat::Contiguous), names_);
         }
         break;
       }
@@ -1093,7 +1101,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output(i, shape_, {}, op.options().memory_format(MemoryFormat::ChannelsLast), names_);
+          set_output(i, shape_, {}, original_options(op).memory_format(MemoryFormat::ChannelsLast), names_);
         }
         break;
       }
@@ -1110,7 +1118,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output(i, shape_, operands_[i_defined].tensor.strides(), op.options(), names_);
+          set_output(i, shape_, operands_[i_defined].tensor.strides(), original_options(op), names_);
         }
         break;
       }

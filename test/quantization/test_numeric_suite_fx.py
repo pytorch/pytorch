@@ -30,14 +30,33 @@ from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
     GraphMatchingException,
 )
-from torch.quantization.ns.numeric_suite_core_apis_fx import (
+from torch.quantization._numeric_suite_fx import (
     extract_weights,
+    _extract_weights_impl,
     add_loggers,
     OutputLogger,
     add_shadow_loggers,
     extract_logger_info,
     extract_shadow_logger_info,
 )
+
+
+# Note: these models are not for use outside of this file. While it's good
+# to reuse code, we also need to be able to iterate on tests
+# quickly when debugging. If a test model has a large number of callsites
+# across various different files, speed of debugging on individual test cases
+# decreases.
+class LinearReluFunctional(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w1 = nn.Parameter(torch.Tensor(4, 4))
+        self.b1 = nn.Parameter(torch.zeros(4))
+        torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+    def forward(self, x):
+        x = F.linear(x, self.w1, self.b1)
+        x = F.relu(x)
+        return x
 
 
 class TestFXGraphMatcher(QuantizationTestCase):
@@ -86,19 +105,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
     @override_qengines
     def test_simple_fusion(self):
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = nn.Parameter(torch.Tensor(4, 1))
-                self.b = nn.Parameter(torch.zeros(4))
-                torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
-
-            def forward(self, x):
-                x = F.linear(x, self.w, self.b)
-                x = F.relu(x)
-                return x
-
-        m = M().eval()
+        m = LinearReluFunctional().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
@@ -308,12 +315,15 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
-        results = extract_weights('fp32_prepared', mp, 'int8', mq)
-        self.assertTrue(
-            len(results) == results_len,
-            f"expected len {results_len}, got len {len(results)}")
-        self.assert_ns_compare_dict_valid(results)
-        return results
+
+        # test both the public API as well as the internal GraphModule API
+        for extract_weights_fun in (extract_weights, _extract_weights_impl):
+            results = extract_weights_fun('fp32_prepared', mp, 'int8', mq)
+            self.assertTrue(
+                len(results) == results_len,
+                f"expected len {results_len}, got len {len(results)}")
+            self.assert_ns_compare_dict_valid(results)
+            return results
 
     def _test_match_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
@@ -397,8 +407,42 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_extract_weights_mod(self):
-        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
-        self._test_extract_weights(m, results_len=2)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # conv1d
+                self.conv1d_0 = nn.Conv1d(1, 1, 1)
+                # conv1d - relu
+                self.conv1d_1 = nn.Conv1d(1, 1, 1)
+                self.relu_0 = nn.ReLU()
+                # conv2d
+                self.conv2d_0 = nn.Conv2d(1, 1, 1)
+                # conv2d - relu
+                self.conv2d_1 = nn.Conv2d(1, 1, 1)
+                self.relu_1 = nn.ReLU()
+                # conv3d
+                self.conv3d_0 = nn.Conv3d(1, 1, 1)
+                # conv3d - relu
+                self.conv3d_1 = nn.Conv3d(1, 1, 1)
+                self.relu_2 = nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv1d_0(x)
+                x = self.conv1d_1(x)
+                x = self.relu_0(x)
+                x = x.reshape(1, 1, 1, 1)
+                x = self.conv2d_0(x)
+                x = self.conv2d_1(x)
+                x = self.relu_1(x)
+                x = x.reshape(1, 1, 1, 1, 1)
+                x = self.conv3d_0(x)
+                x = self.conv3d_1(x)
+                x = self.relu_2(x)
+                return x
+
+        m = M().eval()
+        self._test_extract_weights(m, results_len=6)
 
     @skipIfNoFBGEMM
     def test_extract_weights_fun(self):
@@ -540,32 +584,42 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             should_log_inputs=True)
 
     @skipIfNoFBGEMM
-    def test_linear_fp16(self):
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w1 = nn.Parameter(torch.Tensor(4, 4))
-                self.b1 = nn.Parameter(torch.zeros(4))
-                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
-
-            def forward(self, x):
-                x = F.linear(x, self.w1, self.b1)
-                x = F.relu(x)
-                return x
+    def test_linear_fp16_weights(self):
         qconfig_dict = {'': torch.quantization.float16_static_qconfig}
-
-        m = M().eval()
+        m = LinearReluFunctional().eval()
         self._test_extract_weights(m, results_len=1, qconfig_dict=qconfig_dict)
 
-        m = M().eval()
-        expected_occurrence = {
-            ns.call_module(OutputLogger): 1,
-        }
-        self._test_match_activations(
-            m, (torch.randn(4, 4),),
-            prepared_expected_node_occurrence=expected_occurrence,
-            results_len=1,
-            qconfig_dict=qconfig_dict)
+    @skipIfNoFBGEMM
+    def test_linear_fp16_activations(self):
+        for should_log_inputs in (True, False):
+            qconfig_dict = {'': torch.quantization.float16_static_qconfig}
+            m = LinearReluFunctional().eval()
+            num_loggers = 2 if should_log_inputs else 1
+            expected_occurrence = {
+                ns.call_module(OutputLogger): num_loggers,
+            }
+            res = self._test_match_activations(
+                m, (torch.randn(4, 4),),
+                prepared_expected_node_occurrence=expected_occurrence,
+                results_len=1,
+                qconfig_dict=qconfig_dict,
+                should_log_inputs=should_log_inputs)
+
+    @skipIfNoFBGEMM
+    def test_linear_fp16_shadow_activations(self):
+        for should_log_inputs in (True, False):
+            qconfig_dict = {'': torch.quantization.float16_static_qconfig}
+            m = LinearReluFunctional().eval()
+            num_loggers = 4 if should_log_inputs else 2
+            expected_occurrence = {
+                ns.call_module(OutputLogger): num_loggers,
+            }
+            res2 = self._test_match_shadow_activations(
+                m, (torch.randn(4, 4),),
+                prepared_expected_node_occurrence=expected_occurrence,
+                results_len=1,
+                qconfig_dict=qconfig_dict,
+                should_log_inputs=should_log_inputs)
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):

@@ -129,7 +129,7 @@ class TORCH_API TensorMaker {
 
   DataPtr makeDataPtrFromContext() noexcept;
 
-  SmallVector<std::int64_t, 5> makeTempSizes() const noexcept;
+  IntArrayRef makeTempSizes() const noexcept;
 
   Tensor makeEmptyTensor() const;
 

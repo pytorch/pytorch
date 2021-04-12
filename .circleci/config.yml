@@ -350,7 +350,7 @@ pytorch_windows_params: &pytorch_windows_params
     VC_YEAR: <<parameters.vc_year>>
     VC_PRODUCT: <<parameters.vc_product>>
     USE_CUDA: <<parameters.use_cuda>>
-    TORCH_CUDA_ARCH_LIST: "5.2 7.5"
+    TORCH_CUDA_ARCH_LIST: "7.5"
     JOB_BASE_NAME: <<parameters.test_name>>
     JOB_EXECUTOR: <<parameters.executor>>
 binary_linux_build_params: &binary_linux_build_params
@@ -1857,19 +1857,6 @@ jobs:
     - store_test_results:
         path: bazel-testlogs
 
-  pytorch_windows_test_multigpu:
-    machine:
-      image: ubuntu-1604:202007-01
-    steps:
-      - checkout
-      - run:
-          name: Test
-          no_output_timeout: "90m"
-          command: |
-            set -e
-            python3 -m pip install requests
-            python3 ./.circleci/scripts/trigger_azure_pipeline.py
-
   pytorch_doc_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-doc-test
@@ -3061,8 +3048,28 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_macos_arm64_build:
+          name: binary_macos_arm64_wheel_3_9_cpu_nightly_build
+          build_environment: "wheel 3.9 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_macos_arm64_build:
           name: binary_macos_arm64_conda_3_8_cpu_nightly_build
           build_environment: "conda 3.8 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_macos_arm64_build:
+          name: binary_macos_arm64_conda_3_9_cpu_nightly_build
+          build_environment: "conda 3.9 cpu"
           filters:
             branches:
               only:
@@ -6325,10 +6332,38 @@ workflows:
           package_type: wheel
           upload_subfolder: cpu
       - binary_upload:
+          name: binary_macos_arm64_wheel_3_9_cpu_nightly_upload
+          context: org-member
+          requires:
+            - binary_macos_arm64_wheel_3_9_cpu_nightly_build
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: wheel
+          upload_subfolder: cpu
+      - binary_upload:
           name: binary_macos_arm64_conda_3_8_cpu_nightly_upload
           context: org-member
           requires:
             - binary_macos_arm64_conda_3_8_cpu_nightly_build
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cpu
+      - binary_upload:
+          name: binary_macos_arm64_conda_3_9_cpu_nightly_upload
+          context: org-member
+          requires:
+            - binary_macos_arm64_conda_3_9_cpu_nightly_build
           filters:
             branches:
               only:
@@ -7803,10 +7838,6 @@ workflows:
           vc_product: BuildTools
           vc_version: "14.28.29333"
           vc_year: "2019"
-      - pytorch_windows_test_multigpu:
-          name: pytorch_windows_vs2019_py36_cuda10.1_test_azure_multi_gpu
-          requires:
-            - pytorch_windows_vs2019_py36_cuda10.1_build
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11.1"
