@@ -857,9 +857,11 @@ def main() -> None:
     dispatch_keys = [
         DispatchKey.CPU,
         DispatchKey.SparseCPU,
+        DispatchKey.SparseCsrCPU,
         DispatchKey.MkldnnCPU,
         DispatchKey.CUDA,
         DispatchKey.SparseCUDA,
+        DispatchKey.SparseCsrCUDA,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
         DispatchKey.CompositeImplicitAutograd,
