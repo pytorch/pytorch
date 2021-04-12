@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
+#include <c10/util/llvmMathExtras.h>
 
 namespace at {
 namespace native {
@@ -21,6 +22,18 @@ inline Tensor optional_contiguous(const Tensor& source) {
 template <typename scalar_t>
 inline scalar_t* optional_data(const Tensor& source) {
   return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
+}
+
+
+static int64_t ceil_log2(int64_t x) {
+  if (x <= 2) {
+    return 1;
+  }
+
+  auto ux = static_cast<uint64_t>(x);
+  // Last set bit is floor(log2(x)), floor + 1 is ceil
+  // except when x is an exact powers of 2, so subtract 1 first
+  return static_cast<int64_t>(llvm::findLastSet(ux - 1)) + 1;
 }
 
 template <typename scalar_t>
@@ -82,41 +95,69 @@ static void nll_loss_out_frame(
   const scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
   const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
 
+  const int64_t ndim = input.dim();
+  TORCH_CHECK(ndim <= 2);
+  const int64_t batch_size = ndim == 1 ? 1 : input.size(0);
+  TORCH_CHECK(target.size(0) == batch_size);
+
+  constexpr int64_t cascade_sum_num_levels = 8;
+  const int64_t level_power =
+      std::max(int64_t(4), ceil_log2(batch_size) / cascade_sum_num_levels);
+  const int64_t level_step = (1 << level_power);
+  const int64_t level_mask = level_step - 1;
+
   scalar_t output_val = 0;
   scalar_t total_weight_val = 0;
+  int64_t num_ignored = 0;
 
-  if (input.dim() == 1) {
-    const auto cur_target = target_data[0];
-    if (cur_target != ignore_index) {
-      TORCH_CHECK_INDEX(
-          cur_target >= 0 && cur_target < n_classes,
-          "Target ",
-          cur_target,
-          " is out of bounds.");
-      total_weight_val =
-          weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
-      output_val = -input_data[cur_target] * total_weight_val;
+  scalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
+  scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
+  for (int64_t b = 0; b < batch_size; b++) {
+    const int64_t cur_target = target_data[b];
+    if (cur_target == ignore_index) {
+      ++num_ignored;
+      continue;
     }
-  } else if (input.dim() == 2) {
-    const auto batch_size = input.size(0);
-    TORCH_CHECK(target.size(0) == batch_size);
-    const auto n_target = input.size(1);
 
-    for (int64_t i = 0; i < batch_size; i++) {
-      const auto cur_target = target_data[i];
-      if (cur_target != ignore_index) {
-        TORCH_CHECK_INDEX(
-            cur_target >= 0 && cur_target < n_classes,
-            "Target ",
-            cur_target,
-            " is out of bounds.");
+    TORCH_CHECK_INDEX(
+        cur_target >= 0 && cur_target < n_classes,
+        "Target ",
+        cur_target,
+        " is out of bounds.");
 
-        scalar_t cur_weight =
-            weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
-        total_weight_val += cur_weight;
-        output_val -= input_data[i * n_target + cur_target] * cur_weight;
+    const auto data = input_data[b * n_classes + cur_target];
+    if (weight_data) {
+      const scalar_t weight_val = weight_data[cur_target];
+      loss_partial_sums[0] -= data * weight_val;
+      weight_partial_sums[0] += weight_val;
+    } else {
+      loss_partial_sums[0] -= data;
+    }
+
+    for (int64_t j = 0; j + 1 < cascade_sum_num_levels; ++j) {
+      const auto mask = (level_mask << (j * level_power));
+      if (C10_LIKELY((b & mask) != 0)) {
+        break;
       }
+
+      weight_partial_sums[j + 1] += weight_partial_sums[j];
+      loss_partial_sums[j + 1] += loss_partial_sums[j];
+
+      weight_partial_sums[j] = 0;
+      loss_partial_sums[j] = 0;
     }
+  }
+
+  if (weight_data) {
+    for (int64_t level = 0; level < cascade_sum_num_levels; ++level) {
+      total_weight_val += weight_partial_sums[level];
+    }
+  } else {
+    total_weight_val = static_cast<scalar_t>(batch_size - num_ignored);
+  }
+
+  for (int64_t level = 0; level < cascade_sum_num_levels; ++level) {
+    output_val += loss_partial_sums[level];
   }
 
   if (reduction == Reduction::Mean &&

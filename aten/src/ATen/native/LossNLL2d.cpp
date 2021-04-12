@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
+#include <c10/util/llvmMathExtras.h>
 
 namespace at {
 namespace native {
@@ -78,6 +79,19 @@ inline void check_gradout_shape_nll_loss2d(
       target.sizes());
 }
 
+
+static int64_t ceil_log2(int64_t x) {
+  if (x <= 2) {
+    return 1;
+  }
+
+  auto ux = static_cast<uint64_t>(x);
+  // Last set bit is floor(log2(x)), floor + 1 is ceil
+  // except when x is an exact powers of 2, so subtract 1 first
+  return static_cast<int64_t>(llvm::findLastSet(ux - 1)) + 1;
+}
+
+
 template <typename scalar_t>
 static void nll_loss2d_forward_out_frame(
     Tensor& output,
@@ -147,14 +161,22 @@ static void nll_loss2d_forward_out_frame(
   const int64_t batch_size = input.size(0);
   const int64_t map_size = input.size(2) * input.size(3);
   const int64_t sample_size = map_size * n_classes;
+  const int64_t numiter = batch_size * map_size;
 
-  scalar_t total_weight_val = 0;
-  scalar_t output_val = 0;
+  constexpr int64_t cascade_sum_num_levels = 8;
+  scalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
+  scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
+  const int64_t level_power =
+      std::max(int64_t(4), ceil_log2(numiter) / cascade_sum_num_levels);
+  const int64_t level_step = (1 << level_power);
+  const int64_t level_mask = level_step - 1;
+
+  int64_t num_ignored = 0;
   for (int64_t b = 0; b < batch_size; b++) {
     for (int64_t elem = 0; elem < map_size; elem++) {
       const int64_t cur_target = target_data[b * map_size + elem];
-
       if (cur_target == ignore_index) {
+        ++num_ignored;
         continue;
       }
 
@@ -164,12 +186,43 @@ static void nll_loss2d_forward_out_frame(
           cur_target,
           " is out of bounds.");
 
-      const scalar_t weight_val =
-          weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
-      total_weight_val += weight_val;
-      output_val -= input_data[b * sample_size + cur_target * map_size + elem] *
-          weight_val;
+      const auto data = input_data[b * sample_size + cur_target * map_size + elem];
+      if (weight_data) {
+        const scalar_t weight_val = weight_data[cur_target];
+        loss_partial_sums[0] -= data * weight_val;
+        weight_partial_sums[0] += weight_val;
+      } else {
+        loss_partial_sums[0] -= data;
+      }
+
+      const int64_t linear_idx = b * map_size + elem;
+      for (int64_t j = 0; j + 1 < cascade_sum_num_levels; ++j) {
+        const auto mask = (level_mask << (j * level_power));
+        if (C10_LIKELY((linear_idx & mask) != 0)) {
+          break;
+        }
+
+        weight_partial_sums[j + 1] += weight_partial_sums[j];
+        loss_partial_sums[j + 1] += loss_partial_sums[j];
+
+        weight_partial_sums[j] = 0;
+        loss_partial_sums[j] = 0;
+      }
     }
+  }
+
+  scalar_t total_weight_val = 0;
+  if (weight_data) {
+    for (int64_t level = 0; level < cascade_sum_num_levels; ++level) {
+      total_weight_val += weight_partial_sums[level];
+    }
+  } else {
+    total_weight_val = static_cast<scalar_t>(numiter - num_ignored);
+  }
+
+  scalar_t output_val = 0;
+  for (int64_t level = 0; level < cascade_sum_num_levels; ++level) {
+    output_val += loss_partial_sums[level];
   }
 
   if (reduction == Reduction::Mean &&

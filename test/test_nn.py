@@ -10052,6 +10052,17 @@ class TestNN(NNTestCase):
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(input.grad, inputf.grad, atol=1e-1, rtol=0)
 
+    def test_cross_entropy_loss_precision(self):
+        # Regression test for #55657
+        loss_cpu = nn.CrossEntropyLoss().cpu()
+        inputf = torch.randn(128, 2, 768, 768, device="cpu", dtype=torch.float)
+        inputd = inputf.double()
+        target = torch.randint(2, (128, 768, 768), dtype=torch.long)
+
+        outf = loss_cpu(inputf, target)
+        outd = loss_cpu(inputd, target)
+        self.assertEqual(outf, outd, exact_dtype=False)
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
         module = torch.nn.Sequential(
