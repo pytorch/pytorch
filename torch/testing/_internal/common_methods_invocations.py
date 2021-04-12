@@ -586,22 +586,85 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
+def sample_inputs_add(op_info, device, dtype, requires_grad, **kwargs):
+    for_inplace_variant = kwargs.get('for_inplace_variant', False)
+    tests_list = [
+        ((S, S, S), (S, S, S)),
+        ((S, S, S), (S, S)),
+        ((), ()),
+        ((S, S, S), ()),
+    ]
+    tests_require_resizing = [
+        ((S, S), (S, S, S)),
+        ((), (S, S, S)),
+        ((S, 1, S), (M, S)),
+    ]
+    test_cases = [*tests_list] if for_inplace_variant else [*tests_list, *tests_require_resizing]
+    inputs = list(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
+                                          requires_grad=requires_grad),
+                              args=(make_tensor(second_shape, device=device, dtype=dtype,
+                                    requires_grad=requires_grad),))
+                  for first_shape, second_shape in test_cases)
+    if dtype in [torch.bfloat16, torch.float16, torch.float32, torch.float64]:
+        args_list = [
+            ((S, S, S), [3.14]),
+        ]
+        args_list = args_list if for_inplace_variant else [*args_list, ((), [3.14])]  # type : ignore
+        more_inputs = list(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
+                                                   requires_grad=requires_grad),
+                                       args=(torch.tensor(additive, device=device, dtype=dtype,
+                                                          requires_grad=requires_grad),))
+                           for first_shape, additive in args_list)
+        inputs = [*inputs, *more_inputs]
+    elif dtype in [torch.complex64, torch.complex128]:
+        inputs.append(SampleInput(make_tensor((S, S, S), device, dtype,
+                                              requires_grad=requires_grad),
+                                  args=(torch.tensor([3.14j], device=device, dtype=dtype,
+                                                     requires_grad=requires_grad),)))
+    return tuple(inputs)
+
+def sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad, **kwargs):
+    for_inplace_variant = kwargs.get('for_inplace_variant', False)
+    tests_list = [
+        ((S, M), (S, S), (S, M)),
+    ]
+    tests_require_resizing = [
+        ((1,), (S, S), (S, M)),
+        ((), (S, S), (S, M))
+    ]
+    test_cases = [*tests_list] if for_inplace_variant else [*tests_list, *tests_require_resizing]  # type: ignore
+    inputs = tuple(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
+                               args=(make_tensor(shape_b, device, dtype,
+                                                 requires_grad=requires_grad),
+                                     make_tensor(shape_c, device, dtype,
+                                                 requires_grad=requires_grad)))
+                   for shape_a, shape_b, shape_c in test_cases)
+    return inputs
+
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
-    input = SampleInput(
-        make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(
-            make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=False)))
+    for_inplace_variant = kwargs.get('for_inplace_variant', False)
+    tests_list = [
+        ((S, M), (S, S), (S, M), dict(beta=0.2, alpha=0.6)),
+    ]
+    tests_require_resizing = [
+        ((1,), (S, S), (S, M), dict(beta=0.2, alpha=0.6)),
+        ((), (S, S), (S, M), dict(beta=0.2, alpha=0.6))
+    ]
+    test_cases = [*tests_list] if for_inplace_variant else [*tests_list, *tests_require_resizing]  # type: ignore
+    inputs = list(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
+                              args=(make_tensor(shape_b, device, dtype,
+                                                requires_grad=requires_grad),
+                                    make_tensor(shape_c, device, dtype,
+                                                requires_grad=requires_grad)),
+                              kwargs=kwargs)
+                  for shape_a, shape_b, shape_c, kwargs in test_cases)
     if dtype.is_complex:
-        another_input = SampleInput(
-            make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(
-                make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-                make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=False)),
-            kwargs=dict(beta=1 + 2j, alpha=2 + 3j))
-        return (input, another_input)
-    else:
-        return (input, )
+        another_input = SampleInput(make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+                                    args=(make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+                                          make_tensor((S, S), device, dtype, requires_grad=False)),
+                                    kwargs=dict(beta=1 + 2j, alpha=2 + 3j))
+        inputs.append(another_input)
+    return tuple(inputs)
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     for_inplace_variant = kwargs.get('for_inplace_variant', False)
@@ -1090,6 +1153,17 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
     inputs.append(SampleInput(make_tensor((), device, dtype,
                                           low=None, high=None,
                                           requires_grad=requires_grad),))
+    return inputs
+
+def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
+    args_list = (
+        ((S, M), (M, S)),
+    )
+    inputs = tuple(SampleInput(make_tensor(first_shape, device, dtype,
+                                           requires_grad=requires_grad),
+                               args=(make_tensor(second_shape, device, dtype,
+                                     requires_grad=requires_grad),))
+                   for first_shape, second_shape in args_list)
     return inputs
 
 def sample_inputs_outer(op_info, device, dtype, requires_grad, **kwargs):
@@ -2518,22 +2592,38 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients', 'test_method_grad',
                                 device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                    )),
-    OpInfo('addmm',
-           dtypes=floating_types(),
-           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           # BFloat16 support on CUDA requires CUDA 11 and SM53
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                           *[torch.bfloat16] if CUDA11OrLater else []),
-           dtypesIfROCM=floating_types_and(torch.half),
+    OpInfo('add',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_add,
+           supports_inplace_autograd=False),
+    OpInfo('addmm',
+           variant_test_name='without_non_fusible_nodes',
+           dtypes=floating_types_and(torch.float16),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           assert_autodiffed=True,
+           supports_inplace_autograd=False,
+           skips=(
+               # Skips unsupported bfloat16 check because cuDNN 8 & below
+               # are buggy. This test works on cuDNN 8.1 & CUDA 11.2
+               SkipInfo('TestOpInfo', 'test_unsupported_backward', dtypes=[torch.bfloat16], device_type='cuda'),
+           ),
+           sample_inputs_func=sample_inputs_addmm),
+    OpInfo('addmm',
+           variant_test_name='non_fusible_nodes',
+           dtypes=floating_types_and(torch.float16),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           assert_autodiffed=True,
+           supports_inplace_autograd=False,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            skips=(
-               # Skips unsupported bfloat16 check because above support check
-               #   doesn't work on all platforms
-               SkipInfo('TestOpInfo', 'test_unsupported_dtypes', dtypes=(torch.bfloat16,)),
-               # TODO: remove redundant method_tests() entries
-               SkipInfo('TestOpInfo', 'test_duplicate_method_tests')),
-           sample_inputs_func=sample_inputs_addmm),
+               # Skips unsupported bfloat16 check because cuDNN 8 & below
+               # are buggy. This test works on cuDNN 8.1 & CUDA 11.2.
+               SkipInfo('TestOpInfo', 'test_unsupported_backward', dtypes=[torch.bfloat16], device_type='cuda'),
+           ),
+           sample_inputs_func=sample_inputs_addmm_non_fusible_nodes),
     OpInfo('addmv',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
@@ -3277,7 +3367,6 @@ op_db: List[OpInfo] = [
                                 dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
                    )),
     OpInfo('lu',
-           op=torch.lu,
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
            check_batched_gradgrad=False,
@@ -3296,87 +3385,70 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,
            supports_out=False),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_scatter,
            supports_out=False),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_select),
     OpInfo('max',
-           op=torch.max,
            variant_test_name='binary',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,
            assert_autodiffed=True,),
     OpInfo('max',
-           op=torch.max,
            variant_test_name='reduction_with_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            skips=(
                # max does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),)),
     OpInfo('max',
-           op=torch.max,
            variant_test_name='reduction_no_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('min',
-           op=torch.min,
            variant_test_name='binary',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,
            assert_autodiffed=True,),
     OpInfo('min',
-           op=torch.min,
            variant_test_name='reduction_with_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            skips=(
                # min does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('min',
-           op=torch.min,
            variant_test_name='reduction_no_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('maximum',
-           op=torch.maximum,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,),
     OpInfo('minimum',
-           op=torch.minimum,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('mm',
+           dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_mm,
+           skips=(
+               # mm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+               # This test fails with cuDNN 8 & CUDA 11.1 on Nvidia Tesla T4 GPUs used for CI.
+               SkipInfo('TestOpInfo', 'test_supported_backward', device_type='cuda', dtypes=[torch.bfloat16]),
+           )),
     OpInfo('mode',
-           op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_mode,),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
@@ -4260,16 +4332,6 @@ def ident(x):
 def method_tests():
     set_rng_seed(SEED)
     return [
-        ('add', (S, S, S), ((S, S, S),), '', (True,)),
-        ('add', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
-        ('add', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
-        ('add', (S, 1, S), ((M, S),), 'broadcast_all', (True,)),
-        ('add', (), ((),), 'scalar', (True,)),
-        ('add', (S, S, S), ((),), 'scalar_broadcast_rhs', (True,)),
-        ('add', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
-        ('add', (S, S, S), (3.14,), 'constant', (True,)),
-        ('add', (), (3.14,), 'scalar_constant', (True,)),
-        ('add', (S, S, S), (3.14j,), 'complex_scalar_constant', (True,)),
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
         ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
         ('sub', (S, S, S), ((S, S, S),), '', (True,)),
@@ -4514,12 +4576,6 @@ def method_tests():
         ('logcumsumexp', (S, S, S), (1,), 'dim1', (), [0]),
         ('logcumsumexp', (), (0,), 'dim0_scalar', (), [0]),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
-        ('addmm', (S, M), ((S, S), (S, M)), '', (True, ['aten::add', 'aten::mm'])),
-        ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs', (True, ['aten::add', 'aten::mm'])),
-        ('addmm', (S, M), ((S, S), (S, M)), 'coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs_coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs', (True, ['aten::add', 'aten::mm'])),
-        ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs_coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('addbmm', (S, M), ((S, S, S), (S, S, M)),),
         ('addbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs'),
         ('addbmm', (S, M), ((S, S, S), (S, S, M)), 'coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
@@ -4538,7 +4594,6 @@ def method_tests():
          {'beta': 0.2, 'alpha': 0.6}),
         ('dot', (L,), ((L,),), '', (True,)),
         ('vdot', (L,), ((L,),),),
-        ('mm', (S, M), ((M, S),), '', (True,)),
         ('bmm', (M, S, M), ((M, M, S),), '', (True,)),
         ('mv', (S, M), ((M,),), '', (True,)),
         ('inner', (S,), ((S,),), "1d_1d", (False,)),
