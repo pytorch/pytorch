@@ -21,12 +21,13 @@ See also these wiki pages:
 import re
 import sys
 from configparser import ConfigParser
-from itertools import chain
-from pathlib import Path, PurePath, PurePosixPath
+from pathlib import Path, PurePath
 from typing import List, Set
-from wcmatch.glob import globmatch  # type: ignore[import]
 
 import mypy.api
+# not part of the public API, but this is the easiest way to ensure that
+# we agree with what mypy actually does
+import mypy.config_parser
 
 
 def config_files() -> Set[str]:
@@ -36,13 +37,16 @@ def config_files() -> Set[str]:
     return {str(p) for p in Path().glob('mypy*.ini')}
 
 
-def glob(*, pattern: str, filename: PurePosixPath) -> bool:
+def is_match(*, pattern: str, filename: str) -> bool:
     """
     Return True iff the filename matches the (mypy ini) glob pattern.
     """
+    # technically this function takes in a comma-separated list of
+    # patterns, but splitting first works fine too
+    expanded = mypy.config_parser.split_and_match_files(pattern)
     return any(
-        globmatch(str(prefix), pattern)
-        for prefix in chain([filename], filename.parents)
+        filename == path or filename.startswith(f'{path}/')
+        for path in expanded
     )
 
 
@@ -52,10 +56,10 @@ def in_files(*, ini: str, py: str) -> bool:
     """
     config = ConfigParser()
     repo_root = Path.cwd()
-    filename = PurePosixPath(PurePath(py).relative_to(repo_root).as_posix())
+    filename = PurePath(py).relative_to(repo_root).as_posix()
     config.read(repo_root / ini)
     return any(
-        glob(pattern=pattern, filename=filename)
+        is_match(pattern=pattern, filename=filename)
         for pattern in re.split(r',\s*', config['mypy']['files'].strip())
     )
 
