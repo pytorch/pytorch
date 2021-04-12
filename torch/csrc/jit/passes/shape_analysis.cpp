@@ -2210,7 +2210,7 @@ void EraseShapeInformation(
   }
 }
 
-void EraseShapeInformation(Block* b, TypeCache& cache) {
+void EraseShapeInformation(Block* b, TypeCache& unshaped_type_cache) {
   EraseShapeInformation(b->inputs(), unshaped_type_cache);
   EraseShapeInformation(b->outputs(), unshaped_type_cache);
   for (Node* n : b->nodes()) {
