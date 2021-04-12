@@ -20,9 +20,8 @@ namespace meta {
 
   TORCH_CHECK((mat.size(1) == vec.size(0) && mat.size(0) == self_.size(0)),
     "size mismatch, got ", self_.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
-
-  std::array<int64_t, 1> out_size{mat.sizes()[0]};
-  set_output(out_size, mat.options());
+  auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
+  set_output(0, {mat.sizes()[0]}, {}, mat.options(), names);
   auto result = maybe_get_output();
   //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
   TORCH_CHECK(result.dim() == 1 && result.sizes()[0] == mat.sizes()[0], "output of addmv operation should be 1D with ",

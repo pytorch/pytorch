@@ -369,18 +369,17 @@ static std::vector<Dimname> compute_matmul_outnames(
   return result;
 }
 
-void propagate_names_for_addmv(
-    Tensor& result,
+std::vector<Dimname> propagate_names_for_addmv(
     const Tensor& mat,
     const Tensor& vec,
     const Tensor& bias) {
-  if (!result.has_names() && !mat.has_names() &&
+  if (!mat.has_names() &&
       !vec.has_names() && !bias.has_names()) {
-    return;
+    return std::vector<Dimname>{};
   }
   auto mv_outnames = compute_matmul_outnames(mat.names(), vec.names());
-  auto add_outnames = unify_from_right(mv_outnames, bias.names());
-  propagate_names(result, add_outnames);
+  return unify_from_right(mv_outnames, bias.names());
+//  propagate_names(result, add_outnames);
 }
 
 void propagate_names_for_addmm(
