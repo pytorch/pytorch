@@ -1209,7 +1209,7 @@ class TestLinalg(TestCase):
                 for ord in ord_settings:
                     for dtype, out_dtype in dtype_pairs:
                         input = torch.rand(*input_size)
-                        result = torch.Tensor().to(out_dtype)
+                        result = torch.tensor([]).to(out_dtype)
                         with self.assertRaisesRegex(RuntimeError, r'provided dtype must match dtype of result'):
                             torch.linalg.norm(input, ord=ord, keepdim=keepdim, dtype=dtype, out=result)
 
@@ -1610,7 +1610,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(res.shape, expected.shape, msg=msg)
                 self.assertEqual(res, expected, msg=msg)
 
-                res_out = torch.Tensor().to(device)
+                res_out = torch.tensor([]).to(device)
                 torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out.cpu(), expected, msg=msg)
@@ -1625,7 +1625,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(res.shape, expected.shape, msg=msg)
                 self.assertEqual(res, expected, msg=msg)
 
-                res_out = torch.Tensor().to(device)
+                res_out = torch.tensor([]).to(device)
                 torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out.cpu(), expected, msg=msg)
