@@ -1860,7 +1860,7 @@ class TestFX(JitTestCase):
                 traced(5)
 
         self.assertIn("Call using an FX-traced Module, line 4 of the "
-                      "traced Module’s generated forward function:",
+                      "traced Module's generated forward function:",
                       captured[0])
 
     def test_custom_traceback_not_raised_when_exception_source_is_submodule(self):
@@ -1882,7 +1882,7 @@ class TestFX(JitTestCase):
             captured = traceback.format_exc()
 
         self.assertNotIn("Call using an FX-traced Module, line 4 of the"
-                         " traced Module’s generated forward function:",
+                         " traced Module's generated forward function:",
                          captured)
 
     def test_ast_rewriter_rewrites_assert(self):
