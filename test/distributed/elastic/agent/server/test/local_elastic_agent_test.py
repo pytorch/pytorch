@@ -71,6 +71,13 @@ def _sad_function():
     raise RuntimeError("sad because i throw")
 
 
+def dummy_compute() -> torch.Tensor:
+    """
+    returns a predefined size random Tensor
+    """
+    return torch.rand(100, 100)
+
+
 def _fatal_signal_function(expected_error_index: int, sig: int):
     rank = int(os.environ["RANK"])
     if rank == expected_error_index:
@@ -305,6 +312,16 @@ class LocalElasticAgentTest(unittest.TestCase):
             role, run_result = agent_results.get()
             results.setdefault(role, []).append(run_result)
         return results
+
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
+    )
+    def test_dummy_compute(self):
+        res = self.run_agent(Conf(entrypoint=dummy_compute, local_world_size=2))
+        self.assertFalse(res.is_failed())
+        for return_value in res.return_values.values():
+            self.assertIsInstance(return_value, torch.Tensor)
+            self.assertEqual((100, 100), return_value.shape)
 
     @unittest.skipIf(
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
