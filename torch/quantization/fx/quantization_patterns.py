@@ -1062,6 +1062,7 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
 class GELUModuleQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
+        print("were in boiz")
         self.gelu_node = node
         if node.op == "call_module":
             self.gelu = quantizer.modules[self.gelu_node.target]  # next node?
@@ -1073,11 +1074,11 @@ class GELUModuleQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not is_reference:
             warnings.warn("Only reference implementation support at this time")
-        args = load_arg(quantized=[0, 1])(self.gelu_node.args)
+        args = load_arg(quantized=[0])(self.gelu_node.args)
         args = load_arg(quantized=False)(self.gelu_node.args)
         kwargs = load_arg(quantized=False)(self.gelu_node.kwargs)
         op_out = quantizer.quantized_graph.create_node(
-            "call_function", self.gelu, args, kwargs)
+            "call_function", torch.nn.functional.gelu, args, kwargs)
         act_post_process_name = self.gelu_node.name
         act_post_process_node = self.gelu_node
         ur_idx = quantizer.activation_post_process_indexes[act_post_process_name]

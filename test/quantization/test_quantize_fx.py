@@ -3034,6 +3034,36 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quantized_module, torch.ops.quantized.instance_norm,
                 skip_op_arg_for_functional=True)
 
+    def test_gelu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gelu = torch.nn.GELU()
+
+            def forward(self, x):
+                x = self.gelu(x)
+                # x = torch.nn.functional.gelu(x)
+                return x
+
+        data = torch.randn((2, 2, 2, 2), dtype=torch.float16)
+        # qconfig_dict = {"": torch.quantization.get_default_qconfig("fbgemm")}
+        qconfig_dict = {
+            "": float16_static_qconfig
+        }
+        m = M()
+        m.eval()
+        print("m:\n \n")
+        print(m)
+        print("\n \n m_prep: \n \n")
+        m_prep = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        print(m_prep)
+        m_prep(data)
+        print("\n \n m_quant: \n \n")
+        m_quant = torch.quantization.quantize_fx.convert_fx(m_prep)
+        print(m_quant)
+        self.assertEqual(m(data), m(data + 1))
+
+
     def test_silu(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3962,3 +3992,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
         model = models.__dict__[name](pretrained=True).eval().float()
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
+
+
+if __name__ == "__main__":
+    test = TestQuantizeFxOps()
+    test.test_gelu()
