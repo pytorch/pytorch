@@ -248,7 +248,7 @@ Operation createUnaryOp(
 
     // tensor's physical size could be bigger than a logical one
     // `a_it.get_desc().get_size()` returns the real physical size (in bytes)
-    // we use it to compute `nelem` for `aten` ops 
+    // we use it to compute `nelem` for `aten` ops
     auto nelem = a_it.get_desc().get_size() / elementSize(a.scalar_type());
     auto out_aten = at::from_blob(out_raw_data, {nelem}, topt);
     aten_op(out_aten, t);
