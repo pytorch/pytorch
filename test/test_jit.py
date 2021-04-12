@@ -10487,19 +10487,39 @@ dedent """
                 super(A, self).__init__()
 
             @torch.jit.ignore
-            def ignored(self, a: int, b: int) -> torch.Tensor:
-                l = len([2 + b for i in range(a) if i > 2])
+            def ignored(self, a: int) -> None:
+                l: int = len([2 for i in range(a) if i > 2])
                 return
 
-            def forward(self):
+            def forward(self) -> int:
                 a: int = 4
                 b: int = 5
-                self.ignored(a, b)
+                self.ignored(a)
                 return a + b
 
-        model = torch.jit.script(A())
-        # successfully compiles
-        self.assertEqual(model(), 9)
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+
+            @torch.jit.ignore
+            def ignored(self, a: int):
+                l: int = len([2 for i in range(a) if i > 2])
+                return
+
+            def forward(self) -> int:
+                a: int = 4
+                b: int = 5
+                self.ignored(a)
+                return a + b
+
+        modelA = torch.jit.script(A())
+        self.assertEqual(modelA(), 9)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "expected value of type Tensor", "self.ignored"):
+            modelB = torch.jit.script(B())
+            modelB()
+
+
 
     def test_addmm_grad(self):
         """ This test checks several things:
