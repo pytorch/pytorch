@@ -41,7 +41,8 @@ namespace native {
 
 Tensor mkldnn_linear(
     const Tensor& self,
-    const Tensor& weight_t, const c10::optional<Tensor>& bias_opt) {
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
@@ -89,7 +90,7 @@ Tensor mkldnn_linear(
   }
 
   if (self.dim() != 2) {
-    aten_result.reshape(output_size);
+    aten_result = aten_result.reshape(output_size);
   }
   return aten_result;
 }
