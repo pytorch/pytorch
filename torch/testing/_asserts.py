@@ -1,8 +1,11 @@
 import collections.abc
+import contextlib
 import functools
+import numbers
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type, TypeVar, Union
+
 
 import torch
 from torch import Tensor
@@ -30,6 +33,17 @@ except (KeyError, AttributeError):
         pass
 
 
+# 'numpy' is not a hard requirement of 'torch'. If it is available, we can import the underlying data directly with
+# 'torch.from_numpy()'. Otherwise we treat 'numpy.ndarray's the same as any other unknown object.
+try:
+    import numpy as np
+
+    _NUMPY_AVAILABLE = True
+except ImportError:
+    np = None
+    _NUMPY_AVAILABLE = False
+
+
 # This is copy-pasted from torch.testing._internal.common_utils.TestCase.dtype_precisions. With this we avoid a
 # dependency on torch.testing._internal at import. See
 # https://github.com/pytorch/pytorch/pull/54769#issuecomment-813174256 for details.
@@ -48,22 +62,6 @@ _DTYPE_PRECISIONS = {
 def _get_default_rtol_and_atol(a: torch.Tensor, b: torch.Tensor) -> Tuple[float, float]:
     dtype = a.dtype if a.dtype == b.dtype else torch.promote_types(a.dtype, b.dtype)
     return _DTYPE_PRECISIONS.get(dtype, (0.0, 0.0))
-
-
-def _check_are_tensors(a: Any, b: Any) -> Optional[AssertionError]:
-    """Checks if both inputs are tensors.
-
-    Args:
-        a (Any): First input.
-        b (Any): Second input.
-
-    Returns:
-        (Optional[AssertionError]): If check did not pass.
-    """
-    if not (isinstance(a, Tensor) and isinstance(b, Tensor)):
-        return AssertionError(f"Both inputs have to be tensors, but got {type(a)} and {type(b)} instead.")
-
-    return None
 
 
 def _check_supported_tensors(a: Tensor, b: Tensor) -> Optional[UsageError]:  # type: ignore[valid-type]
@@ -289,10 +287,6 @@ def _check_tensors_equal(
     Returns:
         Optional[Exception]: If checks did not pass.
     """
-    exc: Optional[Exception] = _check_are_tensors(a, b)
-    if exc:
-        return exc
-
     exc = _check_supported_tensors(a, b)
     if exc:
         return exc
@@ -337,11 +331,7 @@ def _check_tensors_close(
     Returns:
         Optional[Exception]: If checks did not pass.
     """
-    exc: Optional[Exception] = _check_are_tensors(a, b)
-    if exc:
-        return exc
-
-    exc = _check_supported_tensors(a, b)
+    exc: Optional[Exception] = _check_supported_tensors(a, b)
     if exc:
         return exc
 
@@ -349,7 +339,7 @@ def _check_tensors_close(
         # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
         # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
         return UsageError(
-            f"Both 'rtol' and 'atol' must be omitted or specified, " f"but got rtol={rtol} and atol={atol} instead."
+            f"Both 'rtol' and 'atol' must be omitted or specified, but got rtol={rtol} and atol={atol} instead."
         )
     elif rtol is None:
         rtol, atol = _get_default_rtol_and_atol(a, b)
@@ -369,44 +359,33 @@ def _check_tensors_close(
     return None
 
 
+Data = Union[Tensor, np.ndarray, numbers.Number]
+
+
 def _check_by_type(
-    a: Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]],
-    b: Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]],
-    check_tensors: Callable[[Tensor, Tensor], Optional[Exception]],
+    a: Union[Data, Sequence[Data], Mapping[Any, Data]],
+    b: Union[Data, Sequence[Data], Mapping[Any, Data]],
+    check_data: Callable[[Data, Data], Optional[Exception]],
 ) -> Optional[Exception]:
     """Delegates tensor checking based on the inputs types.
 
-    Currently supports pairs of
-
-    - :class:`Tensor`'s,
-    - :class:`~collections.abc.Sequence`'s of :class:`Tensor`'s, and
-    - :class:`~collections.abc.Mapping`'s of :class:`Tensor`'s.
+    :class:`~collections.abc.Sequence`'s and :class:`~collections.abc.Mapping`'s are checked elementwise.
 
     Args:
-        a (Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]]): First input.
-        b (Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]]): Second input.
-        check_tensors (Callable[[Tensor, Tensor], Optional[Exception]]): Callable used to check if two tensors match.
-            In case they mismatch should return an :class:`Exception` with an expressive error message.
+        a (Union[Data, Sequence[Data], Mapping[Any, Data]]): First input.
+        b (Union[Data, Sequence[Data], Mapping[Any, Data]]): Second input.
+        check_data (Callable[[Data, Data], Optional[Exception]]): Callable used to check if a data pair matches.
+            In case it mismatches should return an :class:`Exception` with an expressive error message.
 
     Returns:
-        (Optional[Exception]): :class:`UsageError` if the inputs types are unsupported. Additionally, any exception
-        returned by :attr:`check_tensors`.
+        (Optional[Exception]): Return value of :attr:`check_tensors`.
     """
-    # _check_are_tensors() returns nothing in case both inputs are tensors and an exception otherwise. Thus, the logic
-    # is inverted here.
-    are_tensors = not _check_are_tensors(a, b)
-    if are_tensors:
-        return check_tensors(cast(Tensor, a), cast(Tensor, b))
-
     if isinstance(a, collections.abc.Sequence) and isinstance(b, collections.abc.Sequence):
-        return _check_sequence(a, b, check_tensors)
+        return _check_sequence(a, b, check_data)
     elif isinstance(a, collections.abc.Mapping) and isinstance(b, collections.abc.Mapping):
-        return _check_mapping(a, b, check_tensors)
-
-    return UsageError(
-        f"Both inputs have to be tensors, or sequences or mappings of tensors, "
-        f"but got {type(a)} and {type(b)} instead."
-    )
+        return _check_mapping(a, b, check_data)
+    else:
+        return check_data(a, b)
 
 
 E = TypeVar("E", bound=Exception)
@@ -429,20 +408,19 @@ _SEQUENCE_MSG_FMTSTR = "The failure occurred at index {} of the sequences."
 
 
 def _check_sequence(
-    a: Sequence[Tensor], b: Sequence[Tensor], check_tensors: Callable[[Tensor, Tensor], Optional[Exception]]
+    a: Sequence[Data], b: Sequence[Data], check_data: Callable[[Data, Data], Optional[Exception]]
 ) -> Optional[Exception]:
-    """Checks if the values of two sequences of tensors match.
+    """Checks if the data in two sequences matches.
 
     Args:
-        a (Sequence[Tensor]): First sequence of tensors.
-        b (Sequence[Tensor]): Second sequence of tensors.
-        check_tensors (Callable[[Tensor, Tensor], Optional[Exception]]): Callable used to check if the items of
-            :attr:`a` and :attr:`b` match. In case they mismatch should return an :class:`Exception` with an expressive
-            error message.
+        a (Sequence[Tensor]): First sequence.
+        b (Sequence[Tensor]): Second sequence.
+        check_data (Callable[[Data, Data], Optional[Exception]]): Callable used to check if a data pair matches.
+            In case it mismatches should return an :class:`Exception` with an expressive error message.
 
     Returns:
         Optional[Exception]: :class:`AssertionError` if the sequences do not have the same length. Additionally, any
-            exception returned by :attr:`check_tensors`. In this case, the error message is amended to include the
+            exception returned by :attr:`check_data`. In this case, the error message is amended to include the
             first offending index.
     """
     len_a = len(a)
@@ -450,7 +428,7 @@ def _check_sequence(
     if len_a != len_b:
         return AssertionError(f"The length of the sequences mismatch: {len_a} != {len_b}")
     for idx, (a_t, b_t) in enumerate(zip(a, b)):
-        exc = check_tensors(a_t, b_t)
+        exc = check_data(a_t, b_t)
         if exc:
             return _amend_error_message(exc, f"{{}}\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
 
@@ -461,20 +439,19 @@ _MAPPING_MSG_FMTSTR = "The failure occurred for key '{}' of the mappings."
 
 
 def _check_mapping(
-    a: Mapping[Any, Tensor], b: Mapping[Any, Tensor], check_tensors: Callable[[Tensor, Tensor], Optional[Exception]]
+    a: Mapping[Any, Data], b: Mapping[Any, Data], check_data: Callable[[Data, Data], Optional[Exception]]
 ) -> Optional[Exception]:
-    """Checks if the values of two mappings of tensors match.
+    """Checks if the data of two mappings matches.
 
     Args:
-        a (Mapping[Any, Tensor]): First mapping of tensors.
-        b (Mapping[Any, Tensor]): Second mapping of tensors.
-        check_tensors (Callable[[Tensor, Tensor], Optional[Exception]]): Callable used to check if the values of
-            :attr:`a` and :attr:`b` match. In case they mismatch should return an :class:`Exception` with an expressive
-            error message.
+        a (Mapping[Any, Tensor]): First mapping.
+        b (Mapping[Any, Tensor]): Second mapping.
+        check_data (Callable[[Data, Data], Optional[Exception]]): Callable used to check if a data pair matches.
+            In case it mismatches should return an :class:`Exception` with an expressive error message.
 
     Returns:
         Optional[Exception]: :class:`AssertionError` if the sequences do not have the same set of keys. Additionally,
-            any exception returned by :attr:`check_tensors`. In this case, the error message is amended to include the
+            any exception returned by :attr:`check_data`. In this case, the error message is amended to include the
             first offending key.
     """
     a_keys = set(a.keys())
@@ -491,16 +468,60 @@ def _check_mapping(
         a_t = a[key]
         b_t = b[key]
 
-        exc = check_tensors(a_t, b_t)
+        exc = check_data(a_t, b_t)
         if exc:
             return _amend_error_message(exc, f"{{}}\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
 
     return None
 
 
+def _maybe_to_tensor(input: Data) -> Optional[Tensor]:
+    """Maybe casts the input to a tensor.
+
+    :class:`~torch.Tensor`'s are returned without modification. If :mod:`numpy` is available, :class:`numpy.ndarray`'s
+    are casted with :func:`torch.from_numpy`. Everything else is casted with :func:`torch.tensor`.
+
+    Args:
+        input (Data): Input to be casted.
+
+    Returns:
+        Optional[Tensor]: :class:`~torch.Tensor` if it :attr:`input` is castable and ``None`` otherwise.
+    """
+    if isinstance(input, torch.Tensor):
+        return input
+    elif _NUMPY_AVAILABLE and isinstance(input, np.ndarray):
+        return torch.from_numpy(input)
+
+    with contextlib.suppress(Exception):
+        return torch.tensor(input)
+
+    return None
+
+
+def _cast_inputs(check_tensors):
+    """Decorator that casts the two first positional inputs to :class:`~torch.Tensor`'s.
+
+    Casting is performed by :func:`_maybe_to_tensor`. If the casting of any input failed, returns a :class:`UsageError`
+    instead of executing the decorated function.
+    """
+
+    def wrapper(a: Data, b: Data, **kwargs):
+        a_t = _maybe_to_tensor(a)
+        b_t = _maybe_to_tensor(b)
+        if a_t is None or b_t is None:
+            return UsageError(
+                f"Both inputs have to be tensors or something that can be cast to one, "
+                f"but got {type(a)} and {type(b)} instead."
+            )
+
+        return check_tensors(a_t, b_t, **kwargs)
+
+    return wrapper
+
+
 def assert_equal(
-    a: Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]],
-    b: Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]],
+    a: Union[Data, Sequence[Data], Mapping[Any, Data]],
+    b: Union[Data, Sequence[Data], Mapping[Any, Data]],
     *,
     check_device: bool = True,
     check_dtype: bool = True,
@@ -510,11 +531,12 @@ def assert_equal(
 
     Optionally, checks that some attributes of tensors are equal.
 
-    Also supports :class:`~collections.abc.Sequence`'s and :class:`~collections.abc.Mapping`'s of :class:`Tensor`'s.
+    Also supports inputs that can be cast to :class:`torch.Tensor`'s as well as :class:`~collections.abc.Sequence`'s
+    and :class:`~collections.abc.Mapping`'s of any valid input type.
 
     Args:
-        a (Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]]): First input.
-        b (Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]]): Second input.
+        a (Union[Data, Sequence[Data], Mapping[Any, Data]]): First input.
+        b (Union[Data, Sequence[Data], Mapping[Any, Data]]): Second input.
         check_device (bool): If ``True`` (default), asserts that tensors live in the same :attr:`~torch.Tensor.device`
             memory. If this check is disabled **and** they do not live in the same memory :attr:`~torch.Tensor.device`,
             they are moved CPU memory before their values are compared.
@@ -543,19 +565,20 @@ def assert_equal(
         :func:`assert_close` instead.
     """
     check_tensors = functools.partial(
-        _check_tensors_equal,
+        _cast_inputs(_check_tensors_equal),
         check_device=check_device,
         check_dtype=check_dtype,
         check_stride=check_stride,
     )
+
     exc = _check_by_type(a, b, check_tensors)
     if exc:
         raise exc
 
 
 def assert_close(
-    a: Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]],
-    b: Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]],
+    a: Union[Data, Sequence[Data], Mapping[Any, Data]],
+    b: Union[Data, Sequence[Data], Mapping[Any, Data]],
     *,
     rtol: Optional[float] = None,
     atol: Optional[float] = None,
@@ -576,11 +599,12 @@ def assert_close(
 
     Optionally, checks that some attributes of tensors are equal.
 
-    Also supports :class:`~collections.abc.Sequence`'s and :class:`~collections.abc.Mapping`'s of :class:`Tensor`'s.
+    Also supports inputs that can be cast to :class:`torch.Tensor`'s as well as :class:`~collections.abc.Sequence`'s
+    and :class:`~collections.abc.Mapping`'s of any valid input type.
 
     Args:
-        a (Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]]): First input.
-        b (Union[Tensor, Sequence[Tensor], Mapping[Any, Tensor]]): Second input.
+        a (Union[Data, Sequence[Data], Mapping[Any, Data]]): First input.
+        b (Union[Data, Sequence[Data], Mapping[Any, Data]]): Second input.
         rtol (Optional[float]): Relative tolerance. If specified :attr:`atol` must also be specified. If omitted,
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
         atol (Optional[float]): Absolute tolerance. If specified :attr:`rtol` must also be specified. If omitted,
@@ -635,7 +659,7 @@ def assert_close(
         To assert that the values in tensors are bitwise equal, use :func:`assert_equal` instead.
     """
     check_tensors = functools.partial(
-        _check_tensors_close,
+        _cast_inputs(_check_tensors_close),
         rtol=rtol,
         atol=atol,
         check_device=check_device,
