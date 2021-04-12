@@ -61,6 +61,37 @@ at::Tensor conv3d(
   return at::conv3d(input, weight, bias, stride, padding, dilation, groups);
 }
 
+std::vector<Tensor> to(const std::vector<Tensor> tensors, Device device) {
+    std::vector<Tensor> output_tensors;
+    for (const auto& t : tensors) {
+        output_tensors.push_back(t.to(device));
+    }
+    return output_tensors;
+}
+
+std::vector<c10::optional<at::Tensor>> to_cpu(const std::vector<c10::optional<at::Tensor>>& tensors) {
+    std::vector<c10::optional<at::Tensor>> opt_cpu_tensors(tensors.size());
+    std::vector<bool> copy_indices(tensors.size());
+    std::vector<at::Tensor> valid_tensors;
+    for (auto i = 0; i < tensors.size(); ++i) {
+        if (tensors[i].has_value()) {
+            valid_tensors.push_back(*tensors[i]);
+            copy_indices[i] = true;
+        } else {
+            opt_cpu_tensors[i] = tensors[i];
+        }
+    }
+    auto cpu_tensors = at::to_cpu(valid_tensors); // redispatch!
+
+    int idx = 0;
+    for (auto i = 0; i < tensors.size(); ++i) {
+        if (copy_indices[i]) {
+            opt_cpu_tensors[i] = c10::optional<at::Tensor>(cpu_tensors[idx++]);
+        }
+    }
+    return opt_cpu_tensors;
+}
+
 namespace detail {
 
 void noopDelete(void*)
