@@ -278,6 +278,12 @@ def is_tensor(obj):
 
     Args:
         obj (Object): Object to test
+    Example::
+
+        >>> x=torch.tensor([1,2,3])
+        >>> torch.is_tensor(x)
+        True
+
     """
     return isinstance(obj, torch.Tensor)
 
