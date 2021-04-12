@@ -221,7 +221,7 @@ class GenExternalAtenFallback:
 
             tensorlist_intermediates_str = ''
             if len(tensorlist_args) > 0:
-                tensorlist_intermediates_str = '\n'.join([f'  auto {updated_name} = at::to_cpu({arg.name});'
+                tensorlist_intermediates_str = '\n'.join([f'  auto {updated_name} = at::_to_cpu({arg.name});'
                                                           for arg, updated_name in tensorlist_args.items()])
 
             opt_tensor_intermediates_str = ''
@@ -234,7 +234,7 @@ class GenExternalAtenFallback:
             if tensorlist_intermediates_str != '':
                 intermediates += tensorlist_intermediates_str + '\n'
             intermediates += f"  std::vector<at::Tensor> xlatens_tensors = {{{', '.join([a.name for a in tensor_args.keys()])}}};"
-            intermediates += "\n  auto xlatens = at::to_cpu(xlatens_tensors);"
+            intermediates += "\n  auto xlatens = at::_to_cpu(xlatens_tensors);"
             if opt_tensor_intermediates_str != '':
                 intermediates += opt_tensor_intermediates_str
 

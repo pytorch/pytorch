@@ -68,7 +68,7 @@ std::vector<c10::optional<at::Tensor>> to_cpu(const std::vector<c10::optional<at
             opt_cpu_tensors[i] = tensors[i];
         }
     }
-    auto cpu_tensors = at::to_cpu(valid_tensors); // redispatch!
+    auto cpu_tensors = at::_to_cpu(valid_tensors); // redispatch!
 
     int idx = 0;
     for (auto i = 0; i < tensors.size(); ++i) {
