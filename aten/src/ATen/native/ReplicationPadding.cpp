@@ -48,6 +48,37 @@ TORCH_META_FUNC(replication_pad1d) (
   }
 }
 
+TORCH_META_FUNC(replication_pad1d_backward) (
+  const Tensor& gradOutput,
+  const Tensor& input,
+  IntArrayRef paddingSize
+) {
+  int64_t dimw = 1;
+  int64_t dimslices = 0;
+  int64_t nbatch = 1;
+  TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
+  int64_t pad_l = paddingSize[0];
+  int64_t pad_r = paddingSize[1];
+
+  if (input.ndimension() == 3)
+  {
+    nbatch = input.size(0);
+    dimw++;
+    dimslices++;
+  }
+
+  /* sizes */
+  int64_t nslices = input.size(dimslices);
+  int64_t iwidth = input.size(dimw);
+  int64_t owidth  = iwidth + pad_l + pad_r;
+
+  TORCH_CHECK(owidth == gradOutput.size(dimw),
+      "gradOutput width unexpected. Expected: ", owidth,
+      " Got: ", gradOutput.size(dimw));
+
+  set_output(input.sizes(), input.options());
+}
+
 } // namespace meta
 
 
@@ -247,82 +278,6 @@ static void replication_pad1d_backward_out_batch(
         nslices, iwidth, owidth, pad_l, pad_r);
     }
   });
-}
-
-Tensor& replication_pad1d_backward_out_cpu_template(
-    Tensor& gradInput,
-    const Tensor& gradOutput_,
-    const Tensor& input,
-    IntArrayRef paddingSize)
-{
-  int dimw = 1;
-  int dimslices = 0;
-  long nbatch = 1;
-  TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
-  int pad_l = paddingSize[0];
-  int pad_r = paddingSize[1];
-
-  if (input.ndimension() == 3)
-  {
-    nbatch = input.size(0);
-    dimw++;
-    dimslices++;
-  }
-
-  /* sizes */
-  long nslices = input.size(dimslices);
-  long iwidth = input.size(dimw);
-  long owidth  = iwidth + pad_l + pad_r;
-
-  TORCH_CHECK(owidth == gradOutput_.size(dimw),
-      "gradOutput width unexpected. Expected: ", owidth,
-      " Got: ", gradOutput_.size(dimw));
-
-  /* get contiguous gradOutput */
-  auto gradOutput = gradOutput_.contiguous();
-  gradInput.resize_as_(input);
-  if (gradInput.numel() == 0) {
-    return gradInput;
-  }
-  gradInput.zero_();
-
-  /* backprop */
-  if (input.ndimension() == 2)
-  {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      input.scalar_type(), "replication_pad1d_backward_cpu", [&] {
-      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-
-      replication_pad1d_backward_out_frame<scalar_t> (
-        gradInput_data,
-        gradOutput_data,
-        nslices,
-        iwidth,
-        owidth,
-        pad_l, pad_r);
-      }
-    );
-  }
-  else
-  {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      input.scalar_type(), "replication_pad1d_backward_cpu", [&] {
-      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-
-      replication_pad1d_backward_out_batch<scalar_t> (
-        gradInput_data,
-        gradOutput_data,
-        nslices,
-        iwidth,
-        owidth,
-        pad_l, pad_r,
-        nbatch);
-      }
-    );
-  }
-  return gradInput;
 }
 
 template <typename scalar_t>
@@ -938,26 +893,76 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cpu) (
   }
 }
 
-Tensor& replication_pad1d_backward_out_cpu(const Tensor& gradOutput,
-    const Tensor& input,
-    IntArrayRef paddingSize,
-    Tensor& gradInput)
-{
-  gradInput.resize_as_(input);
-  replication_pad1d_backward_out_cpu_template(
-      gradInput, gradOutput, input, paddingSize);
-  return gradInput;
-}
+TORCH_IMPL_FUNC(replication_pad1d_backward_out_cpu) (
+  const Tensor& gradOutput_, const Tensor& input, IntArrayRef paddingSize, const Tensor& gradInput
+) {
+  int64_t dimw = 1;
+  int64_t dimslices = 0;
+  int64_t nbatch = 1;
+  int64_t pad_l = paddingSize[0];
+  int64_t pad_r = paddingSize[1];
 
-Tensor replication_pad1d_backward_cpu(
-    const Tensor& gradOutput,
-    const Tensor& input,
-    IntArrayRef paddingSize)
-{
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  replication_pad1d_backward_out_cpu_template(
-      gradInput, gradOutput, input, paddingSize);
-  return gradInput;
+  if (input.ndimension() == 3)
+  {
+    nbatch = input.size(0);
+    dimw++;
+    dimslices++;
+  }
+
+  /* get contiguous gradOutput */
+  auto gradOutput = gradOutput_.contiguous();
+
+  /* sizes */
+  int64_t nslices = input.size(dimslices);
+  int64_t iwidth  = input.size(dimw);
+  int64_t owidth  = gradOutput.size(dimw);
+
+  TORCH_CHECK(owidth == gradOutput.size(dimw),
+      "gradOutput width unexpected. Expected: ", owidth,
+      " Got: ", gradOutput_.size(dimw));
+
+  if (gradInput.numel() == 0) {
+    return;
+  }
+
+  gradInput.zero_();
+
+  /* backprop */
+  if (input.ndimension() == 2)
+  {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      input.scalar_type(), "replication_pad1d_backward_cpu", [&] {
+      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+
+      replication_pad1d_backward_out_frame<scalar_t> (
+        gradInput_data,
+        gradOutput_data,
+        nslices,
+        iwidth,
+        owidth,
+        pad_l, pad_r);
+      }
+    );
+  }
+  else
+  {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      input.scalar_type(), "replication_pad1d_backward_cpu", [&] {
+      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+
+      replication_pad1d_backward_out_batch<scalar_t> (
+        gradInput_data,
+        gradOutput_data,
+        nslices,
+        iwidth,
+        owidth,
+        pad_l, pad_r,
+        nbatch);
+      }
+    );
+  }
 }
 
 Tensor& replication_pad2d_out_cpu(const Tensor& input,
