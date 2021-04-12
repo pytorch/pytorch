@@ -2172,29 +2172,62 @@ void PropagateInputShapes(const std::shared_ptr<Graph>& graph) {
 
 namespace {
 
-void EraseShapeInformation(at::ArrayRef<Value*> vals) {
+using TypeCache = std::unordered_map<TypePtr, TypePtr>;
+
+TypePtr getOrCreateUnshapedType(TypePtr type, TypeCache& cache);
+
+TypePtr unshapedTypeImpl(TypePtr type, TypeCache& cache) {
+  if (type->isSubtypeOf(TensorType::get())) {
+    return TensorType::get();
+  }
+  std::vector<TypePtr> unshaped_contained_types;
+  for (const auto& type: type->containedTypes()) {
+    unshaped_contained_types.push_back(getOrCreateUnshapedType(type));
+  }
+  return type->withContained(unshaped_contained_types);
+}
+
+TypePtr getOrCreateUnshapedType(TypePtr type, TypeCache& cache) {
+  auto maybe_cached_type = cache.find(type);
+  if (maybe_cached_type != cache.end()) {
+    return maybe_cached_type->second;
+  }
+  auto unshaped_type = unshapedTypeImpl(type);
+  cache[type] = unshaped_type;
+  return unshaped_type;
+}
+
+void EraseShapeInformation(const std::shared_ptr<Graph>& graph, TypeCache& cache);
+
+void EraseShapeInformation(at::ArrayRef<Value*> vals, TypeCache& cache) {
   for (Value* v : vals) {
-    v->setType(unshapedType(v->type()));
+    v->setType(getOrCreateUnshapedType(v->type(), cache));
   }
 }
 
-void EraseShapeInformation(Block* b) {
-  EraseShapeInformation(b->inputs());
-  EraseShapeInformation(b->outputs());
+void EraseShapeInformation(Block* b, TypeCache& cache) {
+  EraseShapeInformation(b->inputs(), cache);
+  EraseShapeInformation(b->outputs(), cache);
   for (Node* n : b->nodes()) {
-    EraseShapeInformation(n->outputs());
+    EraseShapeInformation(n->outputs(), cache);
     for (Block* sb : n->blocks()) {
-      EraseShapeInformation(sb);
+      EraseShapeInformation(sb, cache);
     }
     if (n->hasAttribute(attr::Subgraph)) {
-      EraseShapeInformation(n->g(attr::Subgraph));
+      EraseShapeInformation(n->g(attr::Subgraph), cache);
     }
   }
 }
+
+void EraseShapeInformation(const std::shared_ptr<Graph>& graph, TypeCache& cache) {
+  EraseShapeInformation(graph->block(), cache);
+}
+
 } // anonymous namespace
 
 void EraseShapeInformation(const std::shared_ptr<Graph>& graph) {
-  EraseShapeInformation(graph->block());
+  TypeCache cache;
+  EraseShapeInformation(graph->block(), cache);
 }
 } // namespace jit
 } // namespace torch
