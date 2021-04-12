@@ -543,7 +543,7 @@ thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> p
     return thread_event_lists();
   }
 
-  state_ptr->mark("__stop_profile");
+  state_ptr->mark("__stop_profile", false);
   // Note that this will erase the underlying events.
   return state_ptr->consolidate();
 }
