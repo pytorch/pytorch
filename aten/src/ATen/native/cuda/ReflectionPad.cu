@@ -398,8 +398,8 @@ void reflection_pad2d_backward_out_template(
 } // namespace
 
 
-Tensor& reflection_pad1d_out_cuda(
-    Tensor& output, const Tensor& input, IntArrayRef padding) {
+Tensor& reflection_pad1d_out_cuda(const Tensor& input, IntArrayRef padding,
+    Tensor& output) {
   reflection_pad1d_out_template(output, input, padding);
   return output;
 }
@@ -410,10 +410,10 @@ Tensor reflection_pad1d_cuda(const Tensor& input, IntArrayRef padding) {
   return output;
 }
 
-Tensor& reflection_pad1d_backward_out_cuda(
-    Tensor& grad_input, const Tensor& grad_output,
+Tensor& reflection_pad1d_backward_out_cuda(const Tensor& grad_output,
     const Tensor& input,
-    IntArrayRef padding) {
+    IntArrayRef padding,
+    Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("reflection_pad1d_backward_out_cuda");
@@ -437,8 +437,8 @@ Tensor reflection_pad1d_backward_cuda(
   return grad_input;
 }
 
-Tensor& reflection_pad2d_out_cuda(
-    Tensor& output, const Tensor& input, IntArrayRef padding) {
+Tensor& reflection_pad2d_out_cuda(const Tensor& input, IntArrayRef padding,
+    Tensor& output) {
   reflection_pad2d_out_template(output, input, padding);
   return output;
 }
@@ -449,10 +449,10 @@ Tensor reflection_pad2d_cuda(const Tensor& input, IntArrayRef padding) {
   return output;
 }
 
-Tensor& reflection_pad2d_backward_out_cuda(
-    Tensor& grad_input, const Tensor& grad_output,
+Tensor& reflection_pad2d_backward_out_cuda(const Tensor& grad_output,
     const Tensor& input,
-    IntArrayRef padding) {
+    IntArrayRef padding,
+    Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("reflection_pad2d_backward_out_cuda");

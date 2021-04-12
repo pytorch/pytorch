@@ -57,7 +57,11 @@ class Tensor(torch._C._TensorBase):
         if id(self) in memo:
             return memo[id(self)]
         with torch.no_grad():
-            if self.is_sparse or self.device.type == 'xla' or self.device.type == 'mlc':
+            # TODO: skipping storage copy is wrong for meta, as meta
+            # does accurate alias tracking; however, the code below
+            # doesn't work because of
+            # https://github.com/pytorch/pytorch/issues/47442
+            if self.is_sparse or self.device.type in ['xla', 'mlc', 'meta']:
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
@@ -414,10 +418,10 @@ class Tensor(torch._C._TensorBase):
 
         if not torch._jit_internal.is_scripting():
             if self.requires_grad:
-                if not (self.size(-2) == self.size(-1) and self.dtype.is_floating_point):
+                if not (self.size(-2) == self.size(-1) and (self.dtype.is_floating_point) or self.is_complex):
                     raise ValueError(
                         'lu.backward works only with batches of squared full-rank matrices'
-                        ' of floating types.'
+                        ' of floating or complex types.'
                     )
 
                 from torch._autograd_functions import _LU
@@ -585,8 +589,8 @@ class Tensor(torch._C._TensorBase):
         # (e.g., if you zip(*hiddens), the eager map will force all the
         # indexes of hiddens[0] before hiddens[1], while the generator
         # map will interleave them.)
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__iter__, (self,), self)
+        # NB: We have intentionally skipped __torch_function__ dispatch here.
+        # See gh-54457
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
         if torch._C._get_tracing_state():
@@ -974,7 +978,6 @@ class Tensor(torch._C._TensorBase):
             return _convert(ret, cls)
 
     __module__ = 'torch'
-
 
 def _convert(ret, cls):
     if cls is Tensor:

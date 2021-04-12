@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/ArrayRef.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -30,7 +31,7 @@ class TORCH_API Unpickler {
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
-      const std::vector<at::Tensor>* tensor_table)
+      c10::ArrayRef<at::Tensor> tensor_table)
       : reader_(std::move(reader)),
         tensor_table_(tensor_table),
         type_resolver_(std::move(type_resolver)),
@@ -47,7 +48,7 @@ class TORCH_API Unpickler {
       c10::optional<at::Device> device,
       bool use_storage_device = false)
       : reader_(std::move(reader)),
-        tensor_table_(nullptr),
+        tensor_table_(),
         type_resolver_(std::move(type_resolver)),
         obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),
@@ -127,7 +128,7 @@ class TORCH_API Unpickler {
   std::vector<std::function<void(void)>> globals_;
   std::vector<IValue> memo_table_;
   std::vector<size_t> marks_;
-  const std::vector<at::Tensor>* tensor_table_;
+  c10::ArrayRef<at::Tensor> tensor_table_;
 
   // When deserializing types on lists and dicts, cache the type here
   // so we don't have to parse the same type multiple times. Strings

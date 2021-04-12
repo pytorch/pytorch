@@ -37,6 +37,8 @@ builtin_cast_method_to_scalar_type() {
       {"char", at::kChar},
       {"double", at::kDouble},
       {"float", at::kFloat},
+      {"cfloat", at::kComplexFloat},
+      {"cdouble", at::kComplexDouble},
       {"int", at::kInt},
       {"long", at::kLong},
       {"short", at::kShort},
@@ -236,6 +238,9 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     Node* unpack =
         graph->insertNode(graph->createListUnpack(value_, *size_hint));
     return fmap(unpack->outputs(), make_simple_value);
+  } else if (value_->type()->kind() == TypeKind::AnyTupleType) {
+    throw ErrorReport(loc)
+        << "Provided tuple is not fully defined/refined including its element types, please provide a value of type like Tuple[int, int]";
   }
   throw ErrorReport(loc) << value_->type()->repr_str()
                          << " cannot be used as a tuple";

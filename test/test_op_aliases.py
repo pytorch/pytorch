@@ -33,7 +33,7 @@ class AliasInfo(object):
         self.decorators = decorators
 
 alias_infos = (
-    AliasInfo('linalg.det', torch.linalg.det, 'det', torch.det,
+    AliasInfo('linalg_det', torch.linalg.det, 'det', torch.det,
               lambda d: torch.randn(10, 10, device=d),
               decorators=(skipCPUIfNoLapack, skipCUDAIfNoMagma)),
     # NOTE: only runs on CPU because it leaks CUDA memory

@@ -121,21 +121,10 @@ endif()
 set(CPU_AARCH64 OFF)
 set(CPU_INTEL OFF)
 
-if(WIN32)
-  # On Windows, CMAKE_HOST_SYSTEM_PROCESSOR is calculated through `PROCESSOR_ARCHITECTURE`,
-  # which only has the value of `x86` or `AMD64`. We cannot infer whether it's a Intel CPU
-  # or not. However, the environment variable `PROCESSOR_IDENTIFIER` could be used.
-  if($ENV{PROCESSOR_IDENTIFIER} MATCHES "Intel")
-    set(CPU_INTEL ON)
-  else()
-    set(CPU_INTEL OFF)
-  endif()
-else()
- if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|i[3-6]+86)")
-    set(CPU_INTEL ON)
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
-    set(CPU_AARCH64 ON)
-  endif()
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(AMD64|x86_64)")
+  set(CPU_INTEL ON)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
+  set(CPU_AARCH64 ON)
 endif()
 
 
@@ -379,7 +368,7 @@ cmake_dependent_option(
 
 if(NOT USE_SYSTEM_ONNX)
   set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
-elseif()
+else()
   set(ONNX_NAMESPACE "onnx" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 endif()
 set(SELECTED_OP_LIST "" CACHE STRING
@@ -645,6 +634,10 @@ if(USE_VULKAN)
   if(USE_VULKAN_SHADERC_RUNTIME)
     string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
   endif()
+endif()
+
+if(BUILD_LITE_INTERPRETER)
+  string(APPEND CMAKE_CXX_FLAGS " -DBUILD_LITE_INTERPRETER")
 endif()
 
 if(USE_PYTORCH_METAL)

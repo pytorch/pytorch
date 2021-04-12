@@ -152,13 +152,21 @@ Tensor autograd functions
    :noindex:
 
    .. autoattribute:: grad
+      :noindex:
    .. autoattribute:: requires_grad
+      :noindex:
    .. autoattribute:: is_leaf
+      :noindex:
    .. automethod:: backward
+      :noindex:
    .. automethod:: detach
+      :noindex:
    .. automethod:: detach_
+      :noindex:
    .. automethod:: register_hook
+      :noindex:
    .. automethod:: retain_grad
+      :noindex:
 
 :hidden:`Function`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

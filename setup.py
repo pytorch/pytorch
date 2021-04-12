@@ -883,7 +883,7 @@ if __name__ == '__main__':
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 8) + 1
+    version_range_max = max(sys.version_info[1], 9) + 1
     setup(
         name=package_name,
         version=version,
@@ -997,6 +997,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/python/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/jit/tensorexpr/*.h',
+                'include/torch/csrc/jit/tensorexpr/operators/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/torch/csrc/tensor/*.h',

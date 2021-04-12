@@ -5,13 +5,15 @@
 #include <cstring>
 #include <sstream>
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 Tokenizer::Tokenizer(const std::vector<char>& delims, char escape)
     : escape_(escape) {
   reset();
   std::memset(delimTable_, 0, sizeof(delimTable_));
-  for (int i = 0; i < delims.size(); ++i) {
+  for (const auto i : c10::irange(delims.size())) {
     delimTable_[(unsigned char)delims.at(i)] = i + 1;
   }
 }
