@@ -2030,7 +2030,7 @@ struct to_ir {
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
       if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT ||
-          assignee.kind() == TK_TUPLE_LITERAL) {
+          assignee.kind() == TK_TUPLE_LITERAL || assignee.kind() == '.') {
         num_normal_assign++;
       } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
@@ -2482,6 +2482,10 @@ struct to_ir {
               sub_starred_unpack);
           i++;
         } break;
+        case '.': {
+          emitSelectAssign(assignee, outputs.at(i), rhs_loc);
+          i++;
+        } break;
         default:
           throw ErrorReport(assignee)
               << "unexpected expression on the left-hand side";
@@ -2594,6 +2598,16 @@ struct to_ir {
     const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1, type_hint)
                               ->asValue(stmt.rhs().range(), method);
     lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
+  }
+
+  void emitSelectAssign(
+      const Expr& lhs,
+      SugaredValuePtr rhs,
+      const SourceRange& loc) {
+    const auto lhs_select = Select(lhs);
+    auto lhs_sv = emitSugaredExpr(lhs_select.value(), 1);
+    const auto rhs_value = rhs->asValue(loc, method);
+    lhs_sv->setAttr(loc, method, lhs_select.selector().name(), rhs_value);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -3484,6 +3498,21 @@ struct to_ir {
       // checked is second)
       std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
     }
+
+    // if this is adding two tuples, we deal with it here.
+    // the reason is we can't specify the length of tuples
+    // when registering custom aten::add.
+    if (named_values[0].type()->kind() == TupleType::Kind &&
+        named_values[1].type()->kind() == TupleType::Kind &&
+        kind == aten::add) {
+      auto first_tuple = createTupleUnpack(named_values[0].value(*graph)).vec();
+      auto second_tuple =
+          createTupleUnpack(named_values[1].value(*graph)).vec();
+      first_tuple.insert(
+          first_tuple.end(), second_tuple.begin(), second_tuple.end());
+      return graph->insertNode(graph->createTuple(first_tuple))->output();
+    }
+
     return asSimple(
         makeMagic(
             overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
