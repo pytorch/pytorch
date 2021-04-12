@@ -19,7 +19,7 @@ from etcd import (  # type: ignore
 )
 
 from .api import RendezvousConnectionError, RendezvousParameters, RendezvousStateError
-from .default_rendezvous import RendezvousBackend, Token
+from .dynamic_rendezvous import RendezvousBackend, Token
 from .utils import _parse_rendezvous_endpoint
 
 
@@ -28,7 +28,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
 
     Args:
         client:
-            The `etcd.Client` instance to use to communicate with etcd.
+            The ``etcd.Client`` instance to use to communicate with etcd.
         run_id:
             The run id of the rendezvous.
         key_prefix:
@@ -72,7 +72,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
 
     @property
     def client(self) -> EtcdClient:
-        """Gets the `etcd.Client` instance used to communicate with etcd."""
+        """Gets the ``etcd.Client`` instance used to communicate with etcd."""
         return self._client
 
     @property
@@ -186,22 +186,27 @@ def _create_etcd_client(params: RendezvousParameters) -> EtcdClient:
 
 
 def create_backend(params: RendezvousParameters) -> EtcdRendezvousBackend:
-    """Creates a new `EtcdRendezvousBackend` from the specified parameters.
+    """Creates a new :py:class:`EtcdRendezvousBackend` from the specified
+    parameters.
 
-    Configuration:
-        read_timeout (int, optional):
-            The read timeout, in seconds, for etcd operations. Defaults to 60
-            seconds.
-        protocol (str, optional):
-            The protocol to use to communicate with etcd. Valid values are
-            "http" and "https". Defaults to "http".
-        ssl_cert (str, optional):
-            The path to the SSL client certificate to use along with HTTPS.
-        ssl_cert_key (str, optional):
-            The path to the private key of the SSL client certificate to use
-            along with HTTPS.
-        ca_cert (str, optional):
-            The path to the root SSL authority certificate.
+    +--------------+-----------------------------------------------------------+
+    | Parameter    | Description                                               |
+    +==============+===========================================================+
+    | read_timeout | The read timeout, in seconds, for etcd operations.        |
+    |              | Defaults to 60 seconds.                                   |
+    +--------------+-----------------------------------------------------------+
+    | protocol     | The protocol to use to communicate with etcd. Valid       |
+    |              | values are "http" and "https". Defaults to "http".        |
+    +--------------+-----------------------------------------------------------+
+    | ssl_cert     | The path to the SSL client certificate to use along with  |
+    |              | HTTPS. Defaults to ``None``.                              |
+    +--------------+-----------------------------------------------------------+
+    | ssl_cert_key | The path to the private key of the SSL client certificate |
+    |              | to use along with HTTPS. Defaults to ``None``.            |
+    +--------------+-----------------------------------------------------------+
+    | ca_cert      | The path to the rool SSL authority certificate. Defaults  |
+    |              | to ``None``.                                              |
+    +--------------+-----------------------------------------------------------+
     """
     client = _create_etcd_client(params)
 

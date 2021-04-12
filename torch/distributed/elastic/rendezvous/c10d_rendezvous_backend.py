@@ -14,7 +14,7 @@ from typing import Any, Optional, Tuple, cast
 from torch.distributed import Store, TCPStore
 
 from .api import RendezvousConnectionError, RendezvousParameters, RendezvousStateError
-from .default_rendezvous import RendezvousBackend, Token
+from .dynamic_rendezvous import RendezvousBackend, Token
 from .utils import _matches_machine_hostname, _parse_rendezvous_endpoint
 
 log = logging.getLogger(__name__)
@@ -25,7 +25,8 @@ class C10dRendezvousBackend(RendezvousBackend):
 
     Args:
         store:
-            The `Store` instance to use to communicate with the C10d store.
+            The :py:class:`torch.distributed.Store` instance to use to
+            communicate with the C10d store.
         run_id:
             The run id of the rendezvous.
     """
@@ -59,7 +60,8 @@ class C10dRendezvousBackend(RendezvousBackend):
 
     @property
     def store(self) -> Store:
-        """Gets the `Store` instance used to communicate with the C10d store."""
+        """Gets the :py:class:`torch.distributed.Store` instance used to
+        communicate with the C10d store."""
         return self._store
 
     @property
@@ -163,26 +165,32 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
 
 
 def create_backend(params: RendezvousParameters) -> C10dRendezvousBackend:
-    """Creates a new `C10dRendezvousBackend` from the specified parameters.
+    """Creates a new :py:class:`C10dRendezvousBackend` from the specified
+    parameters.
 
-    Configuration:
-        store_type (str, optional):
-            The type of the C10d store. As of today the only supported type is
-            "tcp" which corresponds to `TCPStore`. Defaults to "tcp".
-        read_timeout (int, optional):
-            The read timeout, in seconds, for store operations. Defaults to 60
-            seconds.
-        is_host (bool, optional):
-            A boolean value indicating whether this backend instance will host
-            the C10d store. If not specified it will be inferred heuristically
-            by matching the hostname or the IP address of this machine against
-            the specified rendezvous endpoint. Defaults to `None`.
-
-            Note that this configuration option only applies to `TCPStore`. In
-            normal circumstances you can safely skip it; the only time when it
-            is needed is if its value cannot be correctly determined (e.g. the
-            rendezvous endpoint has a CNAME as the hostname and does not match
-            the FQDN of the machine).
+    +--------------+-----------------------------------------------------------+
+    | Parameter    | Description                                               |
+    +==============+===========================================================+
+    | store_type   | The type of the C10d store. As of today the only          |
+    |              | supported type is "tcp" which corresponds to              |
+    |              | :py:class:`torch.distributed.TCPStore`. Defaults to "tcp".|
+    +--------------+-----------------------------------------------------------+
+    | read_timeout | The read timeout, in seconds, for store operations.       |
+    |              | Defaults to 60 seconds.                                   |
+    +--------------+-----------------------------------------------------------+
+    | is_host      | A boolean value indicating whether this backend instance  |
+    |              | will host the C10d store. If not specified it will be     |
+    |              | inferred heuristically by matching the hostname or the IP |
+    |              | address of this machine against the specified rendezvous  |
+    |              | endpoint. Defaults to ``None``.                           |
+    |              |                                                           |
+    |              | Note that this configuration option only applies to       |
+    |              | :py:class:`torch.distributed.TCPStore`. In normal         |
+    |              | circumstances you can safely skip it; the only time when  |
+    |              | it is needed is if its value cannot be correctly          |
+    |              | determined (e.g. the rendezvous endpoint has a CNAME as   |
+    |              | the hostname or does not match the FQDN of the machine).  |
+    +--------------+-----------------------------------------------------------+
     """
     # As of today we only support TCPStore. Other store types do not have the
     # required functionality (e.g. compare_set) yet.

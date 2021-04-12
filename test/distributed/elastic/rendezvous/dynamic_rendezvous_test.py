@@ -10,8 +10,8 @@ from unittest import TestCase
 
 from torch.distributed import Store
 from torch.distributed.elastic.rendezvous import RendezvousParameters
-from torch.distributed.elastic.rendezvous.default_rendezvous import (
-    DefaultRendezvousHandler,
+from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
+    DynamicRendezvousHandler,
     RendezvousBackend,
     RendezvousTimeout,
     create_handler,
@@ -64,22 +64,22 @@ class DummyRendezvousBackend(RendezvousBackend):
         return None
 
 
-class DefaultRendezvousHandlerTest(TestCase):
+class DynamicRendezvousHandlerTest(TestCase):
     def setUp(self) -> None:
         self._run_id = "dummy_run_id"
         self._store = DummyStore()
         self._backend = DummyRendezvousBackend()
-        self._min_participants = 3
-        self._max_participants = 6
+        self._min_nodes = 3
+        self._max_nodes = 6
         self._timeout: Optional[RendezvousTimeout] = RendezvousTimeout()
 
-    def _create_handler(self) -> DefaultRendezvousHandler:
-        return DefaultRendezvousHandler(
+    def _create_handler(self) -> DynamicRendezvousHandler:
+        return DynamicRendezvousHandler(
             run_id=self._run_id,
             store=self._store,
             backend=self._backend,
-            min_participants=self._min_participants,
-            max_participants=self._max_participants,
+            min_nodes=self._min_nodes,
+            max_nodes=self._max_nodes,
             timeout=self._timeout,
         )
 
@@ -92,8 +92,8 @@ class DefaultRendezvousHandlerTest(TestCase):
         self.assertEqual(handler.get_backend(), self._backend.name)
         self.assertEqual(handler.get_run_id(), self._run_id)
         self.assertEqual(handler.run_id, self._run_id)
-        self.assertEqual(handler.min_participants, self._min_participants)
-        self.assertEqual(handler.max_participants, self._max_participants)
+        self.assertEqual(handler.min_nodes, self._min_nodes)
+        self.assertEqual(handler.max_nodes, self._max_nodes)
 
         if self._timeout is None:
             self.assertIsNotNone(handler.timeout)
@@ -105,32 +105,32 @@ class DefaultRendezvousHandlerTest(TestCase):
 
         self.test_init_initializes_handler()
 
-    def test_init_initializes_handler_if_min_and_max_participants_are_equal(self) -> None:
-        self._min_participants = 3
-        self._max_participants = 3
+    def test_init_initializes_handler_if_min_and_max_nodes_are_equal(self) -> None:
+        self._min_nodes = 3
+        self._max_nodes = 3
 
         self.test_init_initializes_handler()
 
-    def test_init_raises_error_if_min_participants_is_not_positive(self) -> None:
+    def test_init_raises_error_if_min_nodes_is_not_positive(self) -> None:
         for num in [0, -10]:
-            with self.subTest(min_participants=num):
-                self._min_participants = num
+            with self.subTest(min_nodes=num):
+                self._min_nodes = num
 
                 with self.assertRaisesRegex(
                     ValueError,
-                    rf"^The minimum number of participants \({num}\) must be greater than zero.$",
+                    rf"^The minimum number of nodes \({num}\) must be greater than zero.$",
                 ):
                     self._create_handler()
 
-    def test_init_raises_error_if_max_participants_is_less_than_min(self) -> None:
-        self._min_participants = 3
-        self._max_participants = 2
+    def test_init_raises_error_if_max_nodes_is_less_than_min(self) -> None:
+        self._min_nodes = 3
+        self._max_nodes = 2
 
         with self.assertRaisesRegex(
             ValueError,
-            rf"^The maximum number of participants \({self._max_participants}\) must be "
-            "greater than or equal to the minimum number of participants "
-            rf"\({self._min_participants}\).$",
+            rf"^The maximum number of nodes \({self._max_nodes}\) must be greater than or equal to "
+            "the minimum number of nodes "
+            rf"\({self._min_nodes}\).$",
         ):
             self._create_handler()
 
@@ -153,7 +153,9 @@ class CreateHandlerTest(TestCase):
             close_timeout="70",
         )
 
-        self._expected_close_timeout = timedelta(seconds=70)
+        self._expected_timeout = RendezvousTimeout(
+            timedelta(seconds=50), timedelta(seconds=60), timedelta(seconds=70)
+        )
 
     def test_create_handler_returns_handler(self) -> None:
         handler = create_handler(self._store, self._backend, self._params)
@@ -163,15 +165,17 @@ class CreateHandlerTest(TestCase):
 
         self.assertEqual(handler.get_backend(), self._backend.name)
         self.assertEqual(handler.get_run_id(), self._params.run_id)
-        self.assertEqual(handler.min_participants, self._params.min_nodes)
-        self.assertEqual(handler.max_participants, self._params.max_nodes)
-        self.assertEqual(handler.timeout.join, timedelta(seconds=50))
-        self.assertEqual(handler.timeout.last_call, timedelta(seconds=60))
-        self.assertEqual(handler.timeout.close, self._expected_close_timeout)
+        self.assertEqual(handler.min_nodes, self._params.min_nodes)
+        self.assertEqual(handler.max_nodes, self._params.max_nodes)
+        self.assertEqual(handler.timeout.join, self._expected_timeout.join)
+        self.assertEqual(handler.timeout.last_call, self._expected_timeout.last_call)
+        self.assertEqual(handler.timeout.close, self._expected_timeout.close)
 
     def test_create_handler_returns_handler_if_timeout_is_not_specified(self) -> None:
+        del self._params.config["join_timeout"]
+        del self._params.config["last_call_timeout"]
         del self._params.config["close_timeout"]
 
-        self._expected_close_timeout = timedelta(seconds=30)
+        self._expected_timeout = RendezvousTimeout()
 
         self.test_create_handler_returns_handler()
