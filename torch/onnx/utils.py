@@ -331,7 +331,8 @@ def _decide_input_format(model, args):
                 else:
                     param = sig.parameters[optional_arg]
                     if param.default is param.empty:
-                        args.append(None)
+                        if param.kind != param.VAR_KEYWORD:
+                            args.append(None)
                     else:
                         args.append(param.default)
             args = tuple(args)

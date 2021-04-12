@@ -851,6 +851,66 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(AllOptionalModel(), {'y': y, 'z': None}, input_names=['input_y'])
         self.run_test(AllOptionalModel(), {'y': None, 'z': z}, input_names=['input_z'])
 
+    @disableScriptTest()
+    def test_optional_inputs_with_empty_kwargs(self):
+        class KwargsModel(torch.nn.Module):
+            def forward(self, x, y=None, *kwargs):
+                if y is not None:
+                    x += y
+                return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(KwargsModel(), (x, y))
+        self.run_test(KwargsModel(), (x, None))
+        # With optional arguments dictionary
+        self.run_test(KwargsModel(), (x, {'y': y}))
+        self.run_test(KwargsModel(), (x, {'y': None}))
+
+    @disableScriptTest()
+    def test_optional_inputs_with_args(self):
+        class ArgsModel(torch.nn.Module):
+            def forward(self, x, *args, y=None):
+                z = torch.zeros(2, 3)
+                z = z + x
+                print(args)
+                for num in args:
+                    print(num)
+                    if num is not None:
+                        z += num
+                if y is not None:
+                    z += y
+                return z
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        args1 = torch.randn(2, 3)
+        args2 = torch.randn(2, 3)
+        model = ArgsModel()
+
+        # Without optional arguments dictionary
+        # With empty *args
+        self.run_test(ArgsModel(), (x, y))
+        self.run_test(ArgsModel(), (x, None))
+        # With multiple value in *args
+        self.run_test(ArgsModel(), (x, args1, args2, y))
+        self.run_test(ArgsModel(), (x, args1, args2, None))
+
+
+        # With empty *args
+        pytorch_out = [model(x, y).detach().numpy()]
+        ort_sess = convert_to_onnx(model, input=(x, {'y': y}), opset_version=self.opset_version)
+        ort_outs = run_ort(ort_sess, input=(x, y))
+        [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
+
+        # With multiple value in *args
+        pytorch_out = [model(x, args1, args2, y).detach().numpy()]
+        ort_sess = convert_to_onnx(model, input=(x, args1, args2, {'y': y}), opset_version=self.opset_version)
+        #ort_outs = run_ort(ort_sess, input=(x, arg1, arg2, y))
+        #[np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
+
+
     def test_input_as_output(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
