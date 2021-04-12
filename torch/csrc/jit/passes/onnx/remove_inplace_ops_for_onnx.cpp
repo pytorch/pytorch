@@ -614,6 +614,7 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
         paramConst = findArgumentAsInputParam(graph_, fullName, attr);
         attr_name_value_map.insert({fullName, paramConst});
       } else if (auto attrVal = tryInsertConstant(*graph_, attr)) {
+        // TODO: Extend support for attribute of type List[Tensor] etc.
         for (size_t i = 0; i < type->getAttributes().size(); i++) {
           if (type->getAttributeName(i) == name) {
             paramConst = *attrVal;
@@ -621,6 +622,8 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
           }
         }
       } else {
+        // If attribute is a custom class object, instead of primitive types,
+        // Tensor, or List/Tuple/Dict of Tensors.
         GRAPH_DEBUG(
             attr.type()->cast<ClassType>() ? "" : "attribute: ",
             name,
@@ -628,7 +631,8 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
       }
     }
 
-    // Create dummy initial value.
+    // Create dummy initial value, if initial value does not exist for this
+    // attribute.
     if (attr_name_value_map.find(fullName) == attr_name_value_map.end()) {
       auto* noneNode = graph_->create(prim::Constant);
       noneNode->output()->setType(NoneType::get());
