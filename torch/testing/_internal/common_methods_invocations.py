@@ -1672,37 +1672,31 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
     return out
 
 # Based on erstwhile method_tests tests & some tensor_op_tests for pow
-def sample_inputs_pow(op_info, device, dtype, requires_grad):
+def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
+    for_inplace_variant = kwargs.get('for_inplace_variant', False)
     samples = []
 
     if dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
-        arg_tuples = (
-            ((2, 2), (2, 2)),
-            ((2, 2), (1,)),
-            ((1,), (2, 2)),
-            ((2, 1, 2), (1, 2, 1)),
-        )
-        samples = list(SampleInput(make_tensor(base_size, dtype=dtype, device=device,
-                                               high=5, low=0,
-                                               requires_grad=requires_grad) + 1e-3,
-                                   args=(make_tensor(exp_size, dtype=dtype, device=device,
-                                                     high=1, low=0,
-                                                     requires_grad=requires_grad) + 0.1,))
-                       for base_size, exp_size in arg_tuples)
-        inputs_tuple = (
+        test_cases = (
+            ((2, 2), 0, 5, 1e-3, requires_grad, (2, 2), 0, 1, 0.1, requires_grad),
+            ((2, 2), 0, 5, 1e-3, requires_grad (1,), 0, 1, 0.1, requires_grad),
             ((), 1e-3, 1e-3 + 1, 0, True, (), 0.1, 1.1, 0, False),
             ((2, 2), 0, 5, 1e-3, requires_grad, (), 0.1, 1.1, 1, False),
+        )
+        tests_require_resizing = (
+            ((1,), 0, 5, 1e-3, requires_grad (2, 2), 0, 1, 0.1, requires_grad),
+            ((2, 1, 2), 0, 5, 1e-3, requires_grad, (1, 2, 1), 0, 1, 0.1, requires_grad),
             ((), 1e-3, 1e-3 + 1, 0, True, (1, S, 1), 0, 1, 0.1, requires_grad),
         )
-        more_samples = list(SampleInput(make_tensor(shape_b, low=low_b, high=high_b,
+        cases = test_cases if for_inplace_variant else (test_cases + tests_require_resizing)
+        samples = list(SampleInput(make_tensor(shape_b, low=low_b, high=high_b,
                                                     requires_grad=b_grad, device=device,
                                                     dtype=dtype) + additive_b,
                                         args=(make_tensor(shape_e, low=low_e, high=high_e,
                                                           requires_grad=e_grad, device=device,
                                                           dtype=dtype) + additive_e,))
                             for shape_b, low_b, high_b, additive_b, b_grad, shape_e, low_e,
-                            high_e, additive_e, e_grad in inputs_tuple)
-        samples = [*samples, *more_samples]
+                            high_e, additive_e, e_grad in cases)
         tensor_scalar_inputs = (
             ((2, 2), 0, 5, 1e-3, requires_grad, (3.14,)),
             ((), 1e-3, 1e-3 + 1, 0, True, (3.14,))
@@ -1751,8 +1745,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad):
                                                requires_grad=requires_grad),
                                    args=(make_tensor((2, 2), device, dtype,
                                                      requires_grad=requires_grad),)))
-
-    return samples
+    return tuple(samples)
 
 def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=False)
