@@ -92,7 +92,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test:
-    runs-on: linux.2xlarge
+    runs-on: !{{ test_runner_type }}
     needs:
       - calculate-docker-image
       - build
@@ -111,6 +111,10 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
+      - name: Install nvidia driver, nvidia-docker runtime
+        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') }}
+        run: |
+          .github/scripts/install_nvidia_utils.sh
       - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts
         with:

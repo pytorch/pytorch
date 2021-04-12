@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from pathlib import Path
+from enum import Enum
 
 import jinja2
 
@@ -8,11 +9,17 @@ DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
 GITHUB_DIR = Path(__file__).parent.parent
 
+CPU_TEST_RUNNER = "linux.2xlarge"
+GPU_TEST_RUNNER = "linux.8xlarge.nvidida.gpu"
+
 
 class PyTorchLinuxWorkflow:
     def __init__(self, build_environment: str, docker_image_base: str):
         self.build_environment = build_environment
         self.docker_image_base = docker_image_base
+        self.test_runner_type = (
+           GPU_TEST_RUNNER if "cuda" in build_environment else CPU_TEST_RUNNER
+        )
 
     def generate_workflow_file(
         self, workflow_template: jinja2.Template, jinja_env: jinja2.Environment
@@ -25,6 +32,7 @@ class PyTorchLinuxWorkflow:
                 workflow_template.render(
                     build_environment=self.build_environment,
                     docker_image_base=self.docker_image_base,
+                    test_runner_type=self.test_runner_type
                 )
             )
             output_file.write('\n')
@@ -60,18 +68,10 @@ WORKFLOWS = [
     #     build_environment="pytorch-linux-xenial-py3-clang7-onnx",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-onnx",
     # ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7",
-    # ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
-    # ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
-    # ),
+    PyTorchLinuxWorkflow(
+        build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
+    ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
