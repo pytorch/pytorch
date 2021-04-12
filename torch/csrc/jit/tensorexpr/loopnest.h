@@ -25,14 +25,16 @@ class Dtype;
 class TORCH_API LoopNest {
  public:
   // A constructor for building a LoopNest from a list of Tensors
-  LoopNest(const std::vector<Tensor*>& output_tensors);
   LoopNest(
       const std::vector<Tensor*>& output_tensors,
       const std::vector<Tensor*>& tensors_to_compute);
 
+  // A convenience constructor for the case when all tensors are output tensors
+  LoopNest(const std::vector<Tensor*>& output_tensors);
+
   // A constructor for building a LoopNest from an Stmt and a list of output
   // buffers.
-  LoopNest(Stmt* stmt, const std::unordered_set<const Buf*>& output_bufs);
+  LoopNest(Stmt* stmt, std::unordered_set<const Buf*> output_bufs);
 
   // A constructor for building a LoopNest from another loopnest. It clones the
   // other loopnest's stmt.
