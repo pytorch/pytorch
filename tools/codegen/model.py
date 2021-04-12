@@ -74,6 +74,8 @@ class DispatchKey(Enum):
     MkldnnCPU = auto()
     SparseCPU = auto()
     SparseCUDA = auto()
+    SparseCsrCPU = auto()
+    SparseCsrCUDA = auto()
     SparseHIP = auto()
     SparseXPU = auto()
     NestedTensor = auto()

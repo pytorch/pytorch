@@ -402,6 +402,7 @@ _(aten, is_same_size) \
 _(aten, is_set_to) \
 _(aten, is_signed) \
 _(aten, is_sparse) \
+_(aten, is_sparse_csr) \
 _(aten, isclose) \
 _(aten, isreal) \
 _(aten, istft) \

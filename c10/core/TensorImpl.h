@@ -590,6 +590,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         key_set_.has(DispatchKey::SparseXPU);
   }
 
+  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR format.
+  bool is_sparse_csr() const {
+    return key_set_.has(DispatchKey::SparseCsrCPU) ||
+           key_set_.has(DispatchKey::SparseCsrCUDA);
+  }
+
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::QuantizedCPU) ||
