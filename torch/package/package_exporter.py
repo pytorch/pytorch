@@ -95,7 +95,7 @@ class PackageExporter:
             f: The location to export to. Can be a  string/Path object containing a filename,
                 or a Binary I/O object.
             importer: If a single Importer is passed, use that to search for modules.
-                If a sequence of importers are passsed, an Orderedporter will be constructed out of them.
+                If a sequence of importers are passsed, an OrderedImporter will be constructed out of them.
             verbose: Print information about dependency resolution to stdout.
                 Useful for tracking down why certain files get included.
         """
@@ -129,7 +129,6 @@ class PackageExporter:
         self.matched_patterns: Set[int] = set()
         self.debug_deps: List[Tuple[str, str]] = []
         self._unique_id = 0
-        self._next_ts_id = 0
         self._next_storage_id = 0
 
     def save_source_file(
@@ -216,12 +215,6 @@ class PackageExporter:
         ret = str(self._unique_id)
         self._unique_id += 1
         return ret
-
-    def get_ts_id(self) -> str:
-        """Get an id for a TorchScript object. This id is guaranteed to only be handed out once for this package."""
-        ret = self._next_ts_id
-        self._next_ts_id += 1
-        return str(ret)
 
     def get_storage_id(self) -> int:
         """Get an id for a storage object. This id is guaranteed to only be handed out once for this package."""
