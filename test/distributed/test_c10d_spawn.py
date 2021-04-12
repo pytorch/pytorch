@@ -241,11 +241,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
         if inp[0].is_cuda:
-            num_gpus = torch.cuda.device_count()
-            batch_size = inp[0].size(0)
-            # batch_size must be evenly divisible by num_gpus_used, take the largest one
-            num_gpus_used = [i for i in range(1, num_gpus + 1) if batch_size % i == 0][-1]
-            device_ids = list(range(num_gpus_used))
+            device_ids = [torch.cuda.current_device()]
         else:
             device_ids = None
 

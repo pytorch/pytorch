@@ -222,7 +222,7 @@ TEST_F(NNUtilsTest, ClipGradNormErrorIfNonfinite) {
       for (auto p : parameters) {
         grads_before.push_back(p.grad().clone());
       }
-      EXPECT_THROW(utils::clip_grad_norm_(parameters, 1., norm_type), std::exception) << msg;
+      EXPECT_THROW(utils::clip_grad_norm_(parameters, 1., norm_type, true), std::exception) << msg;
       // Grads should not change if error is thrown
       for (int64_t p_idx = 0; p_idx < parameters.size(); p_idx++) {
         ASSERT_TRUE(torch::allclose(parameters[p_idx].grad(), grads_before[p_idx], 1.0, 0.0, /*equal_nan*/ true)) << msg;
