@@ -2202,7 +2202,9 @@ void EraseShapeInformation(
     const std::shared_ptr<Graph>& graph,
     TypeCache& unshaped_type_cache);
 
-void EraseShapeInformation(at::ArrayRef<Value*> vals, TypeCache& cache) {
+void EraseShapeInformation(
+    at::ArrayRef<Value*> vals,
+    TypeCache& unshaped_type_cache) {
   for (Value* v : vals) {
     v->setType(getOrCreateUnshapedType(v->type(), unshaped_type_cache));
   }
