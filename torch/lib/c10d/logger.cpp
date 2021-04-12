@@ -35,6 +35,10 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
         fmt::format("\n Gradient comm. hook: {}", ddp_logging_data->comm_hook);
   }
 
+  if (ddp_logging_data->join_uneven_inputs) {
+    loggerInfo += "\n Uneven input detection with join() enabled.";
+  }
+
   return output << loggerInfo;
 }
 
@@ -88,6 +92,10 @@ std::vector<int> Logger::get_bucket_sizes() {
 
 void Logger::set_comm_hook(const std::string& hook) {
   ddp_logging_data_->comm_hook = hook;
+}
+
+void Logger::set_uneven_input_join() {
+  ddp_logging_data_->join_uneven_inputs = true;
 }
 
 void Logger::set_construction_data_and_log(
