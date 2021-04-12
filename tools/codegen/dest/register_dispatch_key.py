@@ -3,10 +3,17 @@ import itertools
 from typing_extensions import Literal
 from dataclasses import dataclass
 
-from tools.codegen.context import *
-from tools.codegen.utils import *
-from tools.codegen.model import *
-from tools.codegen.api.types import *
+from tools.codegen.context import method_with_native_function
+from tools.codegen.utils import Target, mapMaybe
+from tools.codegen.model import (DispatchKey, NativeFunction,
+                                 NativeFunctionsGroup, SchemaKind,
+                                 TensorOptionsArguments, assert_never,
+                                 is_cuda_dispatch_key, is_generic_dispatch_key,
+                                 is_structured_dispatch_key)
+from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
+                                     CppSignature, CppSignatureGroup,
+                                     DispatcherSignature, Expr, MutRefCType,
+                                     NativeSignature)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate

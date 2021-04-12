@@ -3,8 +3,9 @@ from pprint import pformat
 
 import argparse
 
-from tools.codegen.model import *
-from tools.codegen.api.python import *
+from tools.codegen.model import Variant
+from tools.codegen.api.python import (PythonSignatureGroup,
+                                      PythonSignatureNativeFunctionPair)
 from tools.codegen.gen import FileManager
 from typing import Sequence, List, Dict
 
