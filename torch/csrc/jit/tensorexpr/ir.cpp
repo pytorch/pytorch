@@ -33,9 +33,12 @@ void castIndicesToInts(std::vector<const Expr*>& indices) {
 Load::Load(
     Dtype dtype,
     const Buf* buf,
-    const std::vector<const Expr*>& indices,
+    std::vector<const Expr*> indices,
     const Expr* mask)
-    : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
+    : ExprNodeBase(dtype),
+      buf_(buf),
+      indices_(std::move(indices)),
+      mask_(mask) {
   castIndicesToInts(indices_);
 }
 
