@@ -666,19 +666,18 @@ static TensorIterator build_addr_iter(Tensor& result,
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
 
-  Tensor self_;
-  if (&result != &self) {
-    std::tie(self_) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr");
-  } else {
-    self_ = self;
-  }
+  const auto vec1_size0 = vec1.sizes()[0];
+  const auto vec2_size0 = vec2.sizes()[0];
+  auto self_ = &result == &self
+    ? c10::MaybeOwned<Tensor>::borrowed(self)
+    : expand_size(self, {vec1_size0, vec2_size0}, "addr");
   TORCH_CHECK(
-    self_.dim() == 2,
-    "2D tensor expected, got ", self_.dim(), "D tensor for input"
+    self_->dim() == 2,
+    "2D tensor expected, got ", self_->dim(), "D tensor for input"
   );
   TORCH_CHECK(
-    self_.size(0) == vec1.size(0) && self_.size(1) == vec2.size(0),
-    "size mismatch, input: ", self_.sizes(),
+    self_->sizes()[0] == vec1_size0 && self_->sizes()[1] == vec2_size0,
+    "size mismatch, input: ", self_->sizes(),
     ", v1: ", vec1.sizes(),
     ", v2: ", vec2.sizes()
   );
@@ -686,8 +685,8 @@ static TensorIterator build_addr_iter(Tensor& result,
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(true)
     .add_output(result)
-    .add_input(self_)
-    .add_input(vec1.reshape({vec1.size(0), 1}))
+    .add_input(*self_)
+    .add_input(vec1.reshape({vec1_size0, 1}))
     .add_input(vec2)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
@@ -997,10 +996,10 @@ static void addbmm_impl_(
 }
 
 Tensor& addbmm_out(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
-  Tensor b_self = std::get<0>(expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out"));
+  auto b_self = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
   {
     at::NoNamesGuard guard;
-    addbmm_impl_(result, b_self, batch1, batch2, beta, alpha);
+    addbmm_impl_(result, *b_self, batch1, batch2, beta, alpha);
   }
   at::namedinference::propagate_names_for_addmm(result, batch1, batch2, self);
   return result;
@@ -1018,10 +1017,10 @@ Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, co
 Tensor& addmm_cpu_out(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
-  Tensor b_self = std::get<0>(expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out"));
+  auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
     at::NoNamesGuard guard;
-    addmm_impl_cpu_(result, b_self, mat1, mat2, beta, alpha);
+    addmm_impl_cpu_(result, *b_self, mat1, mat2, beta, alpha);
   }
   at::namedinference::propagate_names_for_addmm(result, mat1, mat2, self);
   return result;
@@ -1199,10 +1198,9 @@ Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch
 }
 
 Tensor& baddbmm_out_cpu(const Tensor& self_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
-  Tensor self;
-  std::tie(self) = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
-  result.resize_(self.sizes());
-  result.copy_(self);
+  auto self = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+  result.resize_(self->sizes());
+  result.copy_(*self);
   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha);
 }
 
