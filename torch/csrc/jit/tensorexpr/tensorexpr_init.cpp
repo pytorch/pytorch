@@ -134,7 +134,7 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "load",
           [](Tensor& self, const std::vector<ExprHandle>& v) {
-            return self.call(v);
+            return self.load(v);
           })
       .def("buf", [](Tensor& self) { return BufHandle(self.buf()); })
       .def("stmt", &Tensor::stmt, py::return_value_policy::reference);
