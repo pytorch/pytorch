@@ -1,6 +1,7 @@
 #include <ATen/native/sparse/SparseTensorMath.h>
 
 #include <c10/util/irange.h>
+#include <c10/util/MaybeOwned.h>
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
@@ -230,6 +231,10 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, const Scalar& value) {
 // --------------------------------------------------------------------
 
 static SparseTensor& coalesce_(SparseTensor& tensor) {
+  if (tensor.is_coalesced()) {
+    return tensor;
+  }
+
   SparseTensor coalesced = tensor.coalesce();
   tensor._values().resize_as_(coalesced._values());
   tensor._indices().resize_as_(coalesced._indices());
@@ -912,9 +917,8 @@ Tensor& addmm_out_sparse_dense_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return s_addmm_out_sparse_dense_cpu(result, b_self, mat1, mat2, beta, alpha);
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_out_sparse_dense_cpu(result, *b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor s_addmm_sparse_dense_cpu(
@@ -936,9 +940,8 @@ Tensor addmm_sparse_dense_cpu(
     const Scalar& beta,
     const Scalar& alpha
 ) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return s_addmm_sparse_dense_cpu(b_self, mat1, mat2, beta, alpha);
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_sparse_dense_cpu(*b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor& s_addmm_sparse_dense_cpu_(
