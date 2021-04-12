@@ -55,7 +55,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         x = torch.randn(8, 2, dtype=torch.float).requires_grad_()
         y = torch.randn(8, 2, dtype=torch.float)
 
-        def t(x : torch.Tensor, y : torch.Tensor):
+        def t(x : torch.Tensor, y : torch.Tensor, flag : bool):
             o = x + 1.0
             o1 = torch.relu(o)
             o = y + 1.5
@@ -63,17 +63,17 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             o3 = o1 + o2
 
             if flag:
-              o = o1 + 1.0
-              oo1 = torch.relu(o)
-              o = o2 + 2.5
-              oo2 = torch.relu(o)
-              oo3 = oo1 + oo2
+                o = o1 + 1.0
+                oo1 = torch.relu(o)
+                o = o2 + 2.5
+                oo2 = torch.relu(o)
+                oo3 = oo1 + oo2
             else:
-              o = o1 * 1.0
-              oo1 = torch.relu(o)
-              o = o2 * 2.0
-              oo2 = torch.relu(o)
-              oo3 = oo1 + oo2
+                o = o1 * 1.0
+                oo1 = torch.relu(o)
+                o = o2 * 2.0
+                oo2 = torch.relu(o)
+                oo3 = oo1 + oo2
 
             return o1, o2, o3, oo1, oo2, oo3
 

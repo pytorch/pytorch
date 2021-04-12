@@ -159,8 +159,7 @@ static void setRequiresGradOnDiffGraph(Node* dnode) {
   auto go = dnode->g(attr::Subgraph)->outputs();
   auto set_requires_grad = [](const TensorTypePtr& t, Value* val) -> bool {
     if (t && t->requiresGrad().has_value()) {
-      GRAPH_DEBUG(
-          "setting type ", *t);
+      GRAPH_DEBUG("setting type ", *t);
       val->setType(t);
       return true;
     }
@@ -175,20 +174,25 @@ static void setRequiresGradOnDiffGraph(Node* dnode) {
       for (auto dno_use : dno->uses()) {
         GRAPH_DEBUG("found user of ", i, " as ", *dno_use.user);
         if (n->kind() == prim::profile) {
-          if (set_requires_grad(n->ty(attr::profiled_type)->expect<TensorType>(), go[i])) {
+          if (set_requires_grad(
+                  n->ty(attr::profiled_type)->expect<TensorType>(), go[i])) {
             break;
           }
         } else if (dno_use.user->kind() == prim::profile) {
-          if (set_requires_grad(dno_use.user->ty(attr::profiled_type)->expect<TensorType>(), go[i])) {
+          if (set_requires_grad(
+                  dno_use.user->ty(attr::profiled_type)->expect<TensorType>(),
+                  go[i])) {
             break;
           }
         } else if (dno_use.user->kind() == prim::DifferentiableGraph) {
           Value* o =
               dno_use.user->g(attr::Subgraph)->inputs().at(dno_use.offset);
-          // Is it safe to not check other uses, because we are inside a DifferentiableGraph?
+          // Is it safe to not check other uses, because we are inside a
+          // DifferentiableGraph?
           auto nn = o->uses().at(0).user;
           if (nn->kind() == prim::profile) {
-            if (set_requires_grad(nn->ty(attr::profiled_type)->expect<TensorType>(), go[i])) {
+            if (set_requires_grad(
+                    nn->ty(attr::profiled_type)->expect<TensorType>(), go[i])) {
               break;
             }
           }
