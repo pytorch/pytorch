@@ -609,7 +609,8 @@ def sample_inputs_add(op_info, device, dtype, requires_grad, **kwargs):
         args_list = [
             ((S, S, S), [3.14]),
         ]
-        more_tests = args_list if for_inplace_variant else [*args_list, ((), [3.14])]
+        test_inplace = [((), [3.14])]
+        more_tests = args_list if for_inplace_variant else [*args_list, *test_inplace]  # type: ignore
         more_inputs = list(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
                                                    requires_grad=requires_grad),
                                        args=(torch.tensor(additive, device=device, dtype=dtype,
