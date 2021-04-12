@@ -318,4 +318,4 @@ jobs:
       - name: Install isort
         run: pip install isort==5.8.0
       - name: Run isort
-        run: isort . --check
+        run: isort . --check --diff
