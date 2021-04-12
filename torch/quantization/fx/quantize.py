@@ -77,8 +77,8 @@ from .utils import (
 )
 
 from .qconfig_utils import (
-    get_flattened_qconfig_dict,
     convert_dict_to_ordered_dict,
+    get_flattened_qconfig_dict,
     get_object_type_qconfig,
     get_qconfig,
     QConfigAny,
