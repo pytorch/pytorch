@@ -1034,9 +1034,9 @@ def gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_tol
     check_inputs(tupled_inputs, check_sparse_nnz)
     func_out = func(*tupled_inputs)
 
-    # if fast_mode and has_complex_inputs_or_outputs(tupled_inputs, func_out):
-    #     raise NotImplementedError("Fast mode for gradcheck and gradgradcheck is currently only implemented"
-    #                               " for R to R functions.")
+    if fast_mode and has_complex_inputs_or_outputs(tupled_inputs, func_out):
+        raise NotImplementedError("Fast mode for gradcheck and gradgradcheck is currently only implemented"
+                                  " for R to R functions.")
 
     outputs = _differentiable_outputs(func_out)
     check_outputs(outputs)
