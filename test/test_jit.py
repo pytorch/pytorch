@@ -38,8 +38,9 @@ from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
 from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
-from jit.test_freezing import (TestFreezing,  # noqa: F401
-                               TestFrozenOptimizations, TestMKLDNNReinplacing)
+from jit.test_freezing import TestFreezing  # noqa: F401
+from jit.test_freezing import TestFrozenOptimizations  # noqa: F401
+from jit.test_freezing import TestMKLDNNReinplacing  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 from jit.test_hooks import TestHooks  # noqa: F401

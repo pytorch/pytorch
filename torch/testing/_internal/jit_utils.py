@@ -26,8 +26,8 @@ import torch.jit.frontend
 import torch.jit.quantized
 from torch.autograd import Variable
 from torch.autograd.function import _nested_map
-from torch.jit.annotations import (BroadcastingList2,  # noqa: F401
-                                   BroadcastingList3)
+from torch.jit.annotations import BroadcastingList2  # noqa: F401
+from torch.jit.annotations import BroadcastingList3  # noqa: F401
 from torch.onnx import OperatorExportTypes
 # Testing utils
 from torch.testing import FileCheck

@@ -11,8 +11,8 @@ import torch.jit.frontend
 import torch.nn.functional as F
 # Testing utils
 from torch._six import inf
-from torch.jit.annotations import (BroadcastingList2,  # noqa: F401
-                                   BroadcastingList3)
+from torch.jit.annotations import BroadcastingList2  # noqa: F401
+from torch.jit.annotations import BroadcastingList3  # noqa: F401
 from torch.testing._internal.common_methods_invocations import (
     create_input, non_differentiable, unpack_variables)
 from torch.testing._internal.common_nn import module_tests, new_module_tests

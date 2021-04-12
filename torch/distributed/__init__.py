@@ -36,10 +36,8 @@ if is_available():
                                             _test_python_store,
                                             _verify_model_across_ranks)
     if sys.platform != 'win32':
-        from torch._C._distributed_c10d import (
-            HashStore,
-            _round_robin_process_groups,
-        )
+        from torch._C._distributed_c10d import (HashStore,
+                                                _round_robin_process_groups)
 
     # Variables prefixed with underscore are not auto imported
     # See the comment in `distributed_c10d.py` above `_backend` on why we expose
