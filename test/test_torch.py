@@ -205,7 +205,8 @@ class AbstractTestCases:
             # test_namespace(torch)
 
         def test_msnpu_error(self):
-            with self.assertRaisesRegex(RuntimeError, "support for msnpu"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        "Could not run 'aten::empty.memory_format' with arguments from the 'MSNPU' backend"):
                 torch.zeros(1, device=torch.device('msnpu'))
 
         def test_has_storage(self):
