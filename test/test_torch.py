@@ -3596,6 +3596,23 @@ class TestTorchDeviceType(TestCase):
                 _test_in_place_broadcastable(small2, small_expanded, large_expanded)
                 _test_in_place_broadcastable(small2, small, large)
 
+    # Ensures that index_put throws nondeterministic alerts in the correct cases
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.double)
+    def test_index_put_nondeterministic_alert(self, device, dtype):
+        @expectedAlertNondeterministic('index_put_ with accumulate=False')
+        def test_func(slf, device, op_call):
+            S = 10
+            a = torch.randn(S, dtype=dtype, device=device)
+            indices = (torch.tensor([0, 0], device=device), )
+            values = torch.tensor([0, 1], dtype=dtype, device=device)
+            op_call(a, indices, values, accumulate=False)
+
+        test_func(self, device, lambda *args, **kwargs: torch.index_put(*args, **kwargs))
+        test_func(self, device, lambda *args, **kwargs: args[0].index_put(*args[1:], **kwargs))
+        test_func(self, device, lambda *args, **kwargs: torch.index_put_(*args, **kwargs))
+        test_func(self, device, lambda *args, **kwargs: args[0].index_put_(*args[1:], **kwargs))
+
     # Ensures that kthvalue throws nondeterministic alerts in the correct cases
     @dtypes(torch.double)
     def test_kthvalue_nondeterministic_alert(self, device, dtype):
