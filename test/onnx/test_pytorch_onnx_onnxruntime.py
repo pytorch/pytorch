@@ -4789,6 +4789,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 4, requires_grad=True)
         self.run_test(UnfoldModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)  # MatMul long inputs is added in ONNX opset 9.
     def test_mv(self):
         class MatmulModel(torch.nn.Module):
             def forward(self, input, other):
