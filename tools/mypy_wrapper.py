@@ -41,12 +41,11 @@ def is_match(*, pattern: str, filename: str) -> bool:
     """
     Return True iff the filename matches the (mypy ini) glob pattern.
     """
-    return any(
-        filename == path or filename.startswith(f'{path}/')
-        # technically this function takes in a comma-separated list of
-        # patterns, but splitting first works fine too
-        for path in mypy.config_parser.split_and_match_files(pattern)
-    )
+    for path in mypy.config_parser.split_and_match_files(pattern):
+        path = PurePath(path).as_posix()
+        if filename == path or filename.startswith(f'{path}/'):
+            return True
+    return False
 
 
 def in_files(*, ini: str, py: str) -> bool:
