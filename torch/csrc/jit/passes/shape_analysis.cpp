@@ -2181,9 +2181,9 @@ TypePtr unshapedTypeImpl(TypePtr type, TypeCache& unshaped_type_cache) {
     return TensorType::get();
   }
   std::vector<TypePtr> unshaped_contained_types;
-  for (const auto& type : type->containedTypes()) {
+  for (const auto& contained_type : type->containedTypes()) {
     unshaped_contained_types.push_back(
-        getOrCreateUnshapedType(type, unshaped_type_cache));
+        getOrCreateUnshapedType(contained_type, unshaped_type_cache));
   }
   return type->withContained(unshaped_contained_types);
 }
