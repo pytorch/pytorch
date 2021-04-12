@@ -50,6 +50,97 @@ TORCH_META_FUNC(replication_pad1d) (
 
 } // namespace meta
 
+
+static inline void shapeCheck3d(
+    const Tensor& input,
+    int pleft, int pright,
+    int ptop, int pbottom,
+    int pfront, int pback) {
+  int dimw = 3;
+  int dimh = 2;
+  int dimd = 1;
+  int dimslices = 0;
+
+  // allow batch size of 0-dim.
+  bool valid_dims = input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
+  TORCH_CHECK(
+      (input.dim() == 4 && input.size(0) != 0 && valid_dims) ||
+      (input.dim() == 5 && valid_dims && input.size(4) != 0),
+      "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+      input.sizes());
+
+  if (input.dim() == 5)
+  {
+    dimw++;
+    dimh++;
+    dimd++;
+    dimslices++;
+  }
+
+  /* sizes */
+  // int64_t nslices = input.size(dimslices);
+  int64_t idepth = input.size(dimd);
+  int64_t iheight = input.size(dimh);
+  int64_t iwidth = input.size(dimw);
+  int64_t odepth = idepth + pfront + pback;
+  int64_t oheight = iheight + ptop + pbottom;
+  int64_t owidth  = iwidth + pleft + pright;
+
+  TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
+      "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
+      ") is too small."
+      " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
+
+}
+
+namespace meta {
+
+TORCH_META_FUNC(replication_pad3d) (
+  const Tensor& input, IntArrayRef paddingSize
+) {
+  TORCH_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
+  int64_t pleft = paddingSize[0];
+  int64_t pright = paddingSize[1];
+  int64_t ptop = paddingSize[2];
+  int64_t pbottom = paddingSize[3];
+  int64_t pfront = paddingSize[4];
+  int64_t pback = paddingSize[5];
+  int64_t dimw = 3;
+  int64_t dimh = 2;
+  int64_t dimd = 1;
+  int64_t dimslices = 0;
+  int64_t nbatch = 1;
+
+  shapeCheck3d(input, pleft, pright, ptop, pbottom, pfront, pback);
+
+  if (input.dim() == 5)
+  {
+    nbatch = input.size(0);
+    dimw++;
+    dimh++;
+    dimd++;
+    dimslices++;
+  }
+
+  /* sizes */
+  int64_t nslices = input.size(dimslices);
+  int64_t idepth = input.size(dimd);
+  int64_t iheight = input.size(dimh);
+  int64_t iwidth = input.size(dimw);
+  int64_t odepth = idepth + pfront + pback;
+  int64_t oheight = iheight + ptop + pbottom;
+  int64_t owidth  = iwidth + pleft + pright;
+
+  /* resize output */
+  if (input.dim() == 4) {
+    set_output({nslices, odepth, oheight, owidth}, input.options());
+  } else {
+    set_output({nbatch, nslices, odepth, oheight, owidth}, input.options());
+  }
+}
+
+} // namespace meta
+
 namespace native {
 
 namespace {
@@ -533,48 +624,6 @@ Tensor& replication_pad2d_backward_out_cpu_template(
   return gradInput;
 }
 
-static inline void shapeCheck3d(
-    const Tensor& input,
-    int pleft, int pright,
-    int ptop, int pbottom,
-    int pfront, int pback) {
-  int dimw = 3;
-  int dimh = 2;
-  int dimd = 1;
-  int dimslices = 0;
-
-  // allow batch size of 0-dim.
-  bool valid_dims = input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
-  TORCH_CHECK(
-      (input.dim() == 4 && input.size(0) != 0 && valid_dims) ||
-      (input.dim() == 5 && valid_dims && input.size(4) != 0),
-      "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
-      input.sizes());
-
-  if (input.dim() == 5)
-  {
-    dimw++;
-    dimh++;
-    dimd++;
-    dimslices++;
-  }
-
-  /* sizes */
-  // int64_t nslices = input.size(dimslices);
-  int64_t idepth = input.size(dimd);
-  int64_t iheight = input.size(dimh);
-  int64_t iwidth = input.size(dimw);
-  int64_t odepth = idepth + pfront + pback;
-  int64_t oheight = iheight + ptop + pbottom;
-  int64_t owidth  = iwidth + pleft + pright;
-
-  TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
-      "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
-      ") is too small."
-      " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
-
-}
-
 template <typename scalar_t>
 static void replication_pad3d_out_frame(
     scalar_t *input_p, scalar_t *output_p,
@@ -658,78 +707,6 @@ static void replication_pad3d_out_batch(
           pleft, pright, ptop, pbottom, pfront, pback);
     }
   });
-}
-
-void replication_pad3d_out_cpu_template(
-    Tensor& output,
-    const Tensor& input_,
-    IntArrayRef paddingSize)
-{
-  TORCH_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
-  int pleft = paddingSize[0];
-  int pright = paddingSize[1];
-  int ptop = paddingSize[2];
-  int pbottom = paddingSize[3];
-  int pfront = paddingSize[4];
-  int pback = paddingSize[5];
-  int dimw = 3;
-  int dimh = 2;
-  int dimd = 1;
-  int dimslices = 0;
-  int64_t nbatch = 1;
-
-  shapeCheck3d(input_, pleft, pright,
-      ptop, pbottom, pfront, pback);
-
-  if (input_.dim() == 5)
-  {
-    nbatch = input_.size(0);
-    dimw++;
-    dimh++;
-    dimd++;
-    dimslices++;
-  }
-
-  /* sizes */
-  int64_t nslices = input_.size(dimslices);
-  int64_t idepth = input_.size(dimd);
-  int64_t iheight = input_.size(dimh);
-  int64_t iwidth = input_.size(dimw);
-  int64_t odepth = idepth + pfront + pback;
-  int64_t oheight = iheight + ptop + pbottom;
-  int64_t owidth  = iwidth + pleft + pright;
-
-  /* get contiguous input */
-  auto input = input_.contiguous();
-
-  /* resize output */
-  if (input.dim() == 4)
-  {
-    output.resize_({nslices, odepth, oheight, owidth});
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      replication_pad3d_out_frame<scalar_t>(
-        input_data, output_data, nslices, iwidth, iheight, idepth,
-        owidth, oheight, odepth, pleft, pright, ptop, pbottom, pfront,
-        pback);
-      }
-    );
-  }
-  else
-  {
-    output.resize_({nbatch, nslices, odepth, oheight, owidth});
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      replication_pad3d_out_batch<scalar_t>(
-        input_data, output_data, nslices, iwidth, iheight, idepth,
-        owidth, oheight, odepth, pleft, pright, ptop, pbottom, pfront,
-        pback,
-        nbatch);
-      }
-    );
-  }
 }
 
 template <typename scalar_t>
@@ -1023,23 +1000,66 @@ Tensor replication_pad2d_backward_cpu(
   return gradInput;
 }
 
-Tensor& replication_pad3d_out_cpu(const Tensor& input,
-    IntArrayRef paddingSize,
-    Tensor& output)
-{
-  replication_pad3d_out_cpu_template(
-      output, input, paddingSize);
-  return output;
-}
+TORCH_IMPL_FUNC(replication_pad3d_out_cpu) (
+  const Tensor& input_, IntArrayRef paddingSize, const Tensor& output
+) {
+  int64_t pleft = paddingSize[0];
+  int64_t pright = paddingSize[1];
+  int64_t ptop = paddingSize[2];
+  int64_t pbottom = paddingSize[3];
+  int64_t pfront = paddingSize[4];
+  int64_t pback = paddingSize[5];
+  int64_t dimw = 3;
+  int64_t dimh = 2;
+  int64_t dimd = 1;
+  int64_t dimslices = 0;
+  int64_t nbatch = 1;
 
-Tensor replication_pad3d_cpu(
-    const Tensor& input,
-    IntArrayRef paddingSize)
-{
-  auto output = at::empty({0}, input.options());
-  replication_pad3d_out_cpu_template(
-      output, input, paddingSize);
-  return output;
+  /* get contiguous input */
+  auto input = input_.contiguous();
+
+  if (input.dim() == 5) {
+    nbatch = input.size(0);
+    dimw++;
+    dimh++;
+    dimd++;
+    dimslices++;
+  }
+
+  /* sizes */
+  int64_t nslices = input.size(dimslices);
+  int64_t idepth  = input.size(dimd);
+  int64_t iheight = input.size(dimh);
+  int64_t iwidth  = input.size(dimw);
+  int64_t odepth  = output.size(dimd);
+  int64_t oheight = output.size(dimh);
+  int64_t owidth  = output.size(dimw);
+
+  /* resize output */
+  if (input.dim() == 4) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
+      auto input_data = input.data_ptr<scalar_t>();
+      auto output_data = output.data_ptr<scalar_t>();
+      replication_pad3d_out_frame<scalar_t>(
+        input_data, output_data, nslices, iwidth, iheight, idepth,
+        owidth, oheight, odepth, pleft, pright, ptop, pbottom, pfront,
+        pback);
+      }
+    );
+  }
+  else
+  {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
+      auto input_data = input.data_ptr<scalar_t>();
+      auto output_data = output.data_ptr<scalar_t>();
+      replication_pad3d_out_batch<scalar_t>(
+        input_data, output_data, nslices, iwidth, iheight, idepth,
+        owidth, oheight, odepth, pleft, pright, ptop, pbottom, pfront,
+        pback,
+        nbatch);
+      }
+    );
+  }
 }
 
 Tensor& replication_pad3d_backward_out_cpu(const Tensor& gradOutput,

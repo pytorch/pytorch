@@ -7787,15 +7787,14 @@
 
 - func: replication_pad3d.out(Tensor self, int[6] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: replication_pad3d_out_cpu
     CUDA: replication_pad3d_out_cuda
 
 - func: replication_pad3d(Tensor self, int[6] padding) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: replication_pad3d_cpu
-    CUDA: replication_pad3d_cuda
+  structured_delegate: replication_pad3d.out
 
 - func: replication_pad3d_backward.grad_input(Tensor grad_output, Tensor self, int[6] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
