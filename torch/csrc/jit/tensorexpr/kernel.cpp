@@ -2273,10 +2273,9 @@ Tensor* TensorExprKernel::computeCatWoConditionals(const torch::jit::Value* v) {
       }
     }
     auto inp_buf = tensors_.at(inp)->buf();
-    auto load_expr = new Load(inp_buf, load_indices, new IntImm(1));
+    auto load_expr = new Load(inp_buf, load_indices);
     auto load_promoted = promoteToDtype(ExprHandle(load_expr), highType);
-    Stmt* st = new Store(
-        output_buf, store_indices, load_promoted.node(), new IntImm(1));
+    Stmt* st = new Store(output_buf, store_indices, load_promoted.node());
     for (size_t i = dims.size(); i > 0; --i) {
       st = new For(for_vars[i - 1], new IntImm(0), dims[i - 1].node(), st);
     }

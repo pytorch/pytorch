@@ -283,9 +283,6 @@ class TORCH_API Store : public StmtNode<Store> {
   const Expr* value() const {
     return value_;
   }
-  const Expr* mask() const {
-    return mask_;
-  }
   const Buf* buf() const {
     return buf_;
   }
@@ -293,25 +290,14 @@ class TORCH_API Store : public StmtNode<Store> {
   static Store* make(
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
-      const ExprHandle& value,
-      const ExprHandle& mask);
-
-  static Store* make(
-      const BufHandle& buf,
-      const std::vector<ExprHandle>& indices,
       const ExprHandle& value);
 
-  Store(
-      const Buf* buf,
-      std::vector<const Expr*> indices,
-      const Expr* value,
-      const Expr* mask);
+  Store(const Buf* buf, std::vector<const Expr*> indices, const Expr* value);
 
  private:
   const Buf* buf_;
   std::vector<const Expr*> indices_;
   const Expr* value_;
-  const Expr* mask_;
 };
 
 // Allocate a buffer of given shapes and dtypes and bind it with the given
