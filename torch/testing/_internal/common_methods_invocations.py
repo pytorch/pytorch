@@ -1794,7 +1794,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
                                                      requires_grad=e_grad, device=device,
                                                      dtype=dtype) + additive_e,))
                        for shape_b, low_b, high_b, additive_b, b_grad, shape_e, low_e,
-                            high_e, additive_e, e_grad in cases)
+                           high_e, additive_e, e_grad in cases)
         tensor_scalar_inputs = (
             ((2, 2), 0, 5, 1e-3, requires_grad, (3.14,)),
             ((), 1e-3, 1e-3 + 1, 0, True, (3.14,))
