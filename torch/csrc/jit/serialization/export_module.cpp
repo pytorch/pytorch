@@ -372,220 +372,279 @@ void SetExportModuleMobileInfoConverter(
   GetMobileInfoConverter() = std::move(converter);
 }
 
-class ScriptModuleSerializer {
- public:
-  explicit ScriptModuleSerializer(const std::string& filename)
-      : writer_(filename) {}
+////// START SHARED GOOD ///////
 
-  explicit ScriptModuleSerializer(
-      const std::function<size_t(const void*, size_t)>& writer_func)
-      : writer_(writer_func) {}
-
-  void serialize(
-      const Module& module,
-      const ExtraFilesMap& extra_files,
-      bool bytecode_format,
-      bool save_mobile_debug_info) {
-    C10_LOG_API_USAGE_ONCE("torch.script.save");
-    writeExtraFiles(module, extra_files);
-    // Serialize the model object
-    writeArchive("data", module._ivalue());
-    // Then we serialize all code info.
-    writeCode(module.type());
-    // The tensor constants from the code are written to a separate archive
-    // so loading the code does not depend on loading the data
-    std::vector<IValue> ivalue_constants(
-        constant_table_.begin(), constant_table_.end());
-    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
-    if (bytecode_format) {
-      writeByteCode(module, save_mobile_debug_info);
-      writeMobileMetadata(module, extra_files);
-    }
-
-    // Acquires and sets minimum (dynamic) version
-    for (auto& item : file_streams_) {
-      writer_.setMinVersion(item.value().minVersion());
-    }
+void ScriptModuleSerializer::convertNamedType(
+    const c10::NamedTypePtr& class_type) {
+  if (converted_types_.count(class_type)) {
+    return;
   }
+  converted_types_.insert(class_type);
+  auto qualname = type_name_uniquer_.getUniqueName(class_type);
+  std::string qualifier = qualname.prefix();
+  PythonPrint* pp = file_streams_.find(qualifier);
 
- private:
-  void writeArchive(const std::string& archive_name, const IValue& value) {
-    std::vector<char> data;
-    // Vector to capture the run-time class types during pickling the IValues
-    std::vector<c10::ClassTypePtr> memoizedClassTypes;
-    Pickler data_pickle(
-        [&](const char* buf, size_t size) {
-          data.insert(data.end(), buf, buf + size);
-        },
-        nullptr,
-        [&](const c10::ClassTypePtr& t) {
-          return type_name_uniquer_.getUniqueName(t);
-        },
-        &memoizedClassTypes);
-    data_pickle.protocol();
-    data_pickle.pushIValue(value);
-    data_pickle.stop();
-    size_t i = 0;
-    std::string prefix = archive_name + "/";
-    for (const auto& td : data_pickle.tensorData()) {
-      WriteableTensorData writable_td = getWriteableTensorData(td);
-      std::string fname = prefix + c10::to_string(i++);
-      writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+  auto type_printer =
+      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
+    auto namedType = t->cast<c10::NamedType>();
+    if (namedType && namedType->name()) {
+      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
     }
-    std::string fname = archive_name + ".pkl";
-    writer_.writeRecord(fname, data.data(), data.size());
-
-    // serialize all the captured run-time class types
-    for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
-      convertNamedType(wroteType);
-    }
+    return c10::nullopt;
+  };
+  if (!pp) {
+    pp = &file_streams_.insert(
+        std::move(qualifier),
+        PythonPrint(constant_table_, class_deps_, type_printer, true));
   }
+  pp->printNamedType(class_type);
+}
 
-  void writeExtraFiles(const Module& module, const ExtraFilesMap& extra_files) {
-    // Write out extra files.
-    for (const auto& kv : extra_files) {
+void ScriptModuleSerializer::convertTypes(const at::NamedTypePtr& root_type) {
+  class_deps_.add(root_type);
+  for (size_t i = 0; i < class_deps_.size(); ++i) {
+    // note: convertNameType may extend class_deps_, so re-checking .size() is
+    // necessary
+    convertNamedType(class_deps_[i]);
+  }
+}
+
+void ScriptModuleSerializer::writeFiles(const std::string& code_dir) {
+  // Mapping of filename => src. We need this because multiple classes may go
+  // in the same file (e.g. foo.bar.Baz and foo.bar.Qux)
+  for (auto& item : file_streams_) {
+    const std::string filename = qualifierToArchivePath(item.key(), code_dir);
+
+    std::string src = item.value().str();
+    // Only compress these records if they're not tiny.
+    // The cpu cost of generating zip datastructs and compressing isn't
+    // well-spent for very small records.
+    static constexpr size_t kMinToCompress = 200;
+
+    writer_.writeRecord(
+        filename, src.c_str(), src.size(), src.size() > kMinToCompress);
+
+    // Write out the debug information
+    std::string debugFilename = filename + ".debug_pkl";
+    SourceRangePickler source_range_pickler;
+    auto range_data = source_range_pickler.pickle(item.value().ranges());
+    writer_.writeRecord(
+        debugFilename,
+        range_data.data(),
+        range_data.size(),
+        range_data.size() > kMinToCompress);
+  }
+}
+
+void ScriptModuleSerializer::writeExtraFiles(
+    const Module& module,
+    const ExtraFilesMap& extra_files) {
+  // Write out extra files.
+  for (const auto& kv : extra_files) {
+    const std::string key = "extra/" + kv.first;
+    writer_.writeRecord(key, kv.second.data(), kv.second.size());
+  }
+  auto hook = GetExtraFilesHook();
+  if (hook) {
+    ExtraFilesMap hook_files = hook(module);
+    for (const auto& kv : hook_files) {
+      // Checks if the hooked file is already written in extra files,
+      //   if so, skips it and warns
+      if (extra_files.find(kv.first) != extra_files.end()) {
+        TORCH_WARN_ONCE(
+            "An extra files hook attempted to write ",
+            kv.first,
+            " but ",
+            "this is already written in extra files and so will be skipped. ",
+            "This warning will only appear once per process.");
+        continue;
+      }
       const std::string key = "extra/" + kv.first;
       writer_.writeRecord(key, kv.second.data(), kv.second.size());
     }
-    auto hook = GetExtraFilesHook();
-    if (hook) {
-      ExtraFilesMap hook_files = hook(module);
-      for (const auto& kv : hook_files) {
-        // Checks if the hooked file is already written in extra files,
-        //   if so, skips it and warns
-        if (extra_files.find(kv.first) != extra_files.end()) {
-          TORCH_WARN_ONCE(
-              "An extra files hook attempted to write ",
-              kv.first,
-              " but ",
-              "this is already written in extra files and so will be skipped. ",
-              "This warning will only appear once per process.");
-          continue;
-        }
-        const std::string key = "extra/" + kv.first;
-        writer_.writeRecord(key, kv.second.data(), kv.second.size());
-      }
-    }
   }
+}
 
-  void writeMobileMetadata(
-      const Module& module,
-      const ExtraFilesMap& extra_files) {
-    auto hook = GetExtraFilesHook();
-    auto converter = GetMobileInfoConverter();
-    if (!converter) {
-      return;
-    }
-    ExtraFilesMap files_to_write = extra_files;
-    // merge hook files and extra files
-    if (hook) {
-      ExtraFilesMap hook_files = hook(module);
-      files_to_write.insert(hook_files.begin(), hook_files.end());
-    }
-    auto content_to_write = converter(module, files_to_write);
-    if (!content_to_write.empty()) {
-      writeArchive("metadata", content_to_write);
-    }
+void ScriptModuleSerializer::writeMobileMetadata(
+    const Module& module,
+    const ExtraFilesMap& extra_files) {
+  auto hook = GetExtraFilesHook();
+  auto converter = GetMobileInfoConverter();
+  if (!converter) {
+    return;
   }
-
-  void writeCode(const at::NamedTypePtr& root_type) {
-    class_deps_.add(root_type);
-    for (size_t i = 0; i < class_deps_.size(); ++i) {
-      // note: convertNameType may extend class_deps_, so re-checking
-      // .size() is necessary
-      convertNamedType(class_deps_[i]);
-    }
-
-    // Mapping of filename => src. We need this because multiple classes may go
-    // in the same file (e.g. foo.bar.Baz and foo.bar.Qux)
-    for (auto& item : file_streams_) {
-      const std::string filename = qualifierToArchivePath(item.key(), "code/");
-
-      std::string src = item.value().str();
-
-      // Only compress these records if they're not tiny.
-      // The cpu cost of generating zip datastructs and compressing isn't
-      // well-spent for very small records.
-      static constexpr size_t kMinToCompress = 200;
-
-      writer_.writeRecord(
-          filename,
-          src.c_str(),
-          src.size(),
-          src.size() > kMinToCompress /*compress*/);
-
-      // Write out the debug information
-      std::string debugFilename = filename + ".debug_pkl";
-      SourceRangePickler source_range_pickler;
-      auto range_data = source_range_pickler.pickle(item.value().ranges());
-      writer_.writeRecord(
-          debugFilename,
-          range_data.data(),
-          range_data.size(),
-          range_data.size() > kMinToCompress /*compress*/);
-    }
+  ExtraFilesMap files_to_write = extra_files;
+  // merge hook files and extra files
+  if (hook) {
+    ExtraFilesMap hook_files = hook(module);
+    files_to_write.insert(hook_files.begin(), hook_files.end());
   }
+  auto content_to_write = converter(module, files_to_write);
+  if (!content_to_write.empty()) {
+    writeArchive(content_to_write, "metadata", "", "metadata/", 0);
+  }
+}
 
-  void writeByteCode(const Module& module, bool save_mobile_debug_info) {
-    std::vector<c10::IValue> elements;
-    elements.emplace_back(
+void ScriptModuleSerializer::writeByteCode(
+    const Module& module,
+    bool save_mobile_debug_info) {
+  std::vector<c10::IValue> elements;
+  elements.emplace_back(
+      static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+  c10::optional<std::vector<c10::IValue>> debug_info_elements;
+  if (save_mobile_debug_info) {
+    debug_info_elements = std::vector<c10::IValue>();
+    debug_info_elements->emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
-    c10::optional<std::vector<c10::IValue>> debug_info_elements;
-    if (save_mobile_debug_info) {
-      debug_info_elements = std::vector<c10::IValue>();
-      debug_info_elements->emplace_back(
-          static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
-    }
-
-    moduleMethodsTuple(
-        module, elements, debug_info_elements, save_mobile_debug_info);
-    auto telements = Tup(std::move(elements));
-    writeArchive("bytecode", telements);
-    if (save_mobile_debug_info) {
-      auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
-      writeArchive("mobile_debug", debug_info_telements);
-    }
   }
 
-  void convertNamedType(const c10::NamedTypePtr& class_type) {
-    if (converted_types_.count(class_type)) {
-      return;
-    }
-    converted_types_.insert(class_type);
-    auto qualname = type_name_uniquer_.getUniqueName(class_type);
-    std::string qualifier = qualname.prefix();
-    PythonPrint* pp = file_streams_.find(qualifier);
+  moduleMethodsTuple(
+      module, elements, debug_info_elements, save_mobile_debug_info);
+  auto telements = Tup(std::move(elements));
+  uint64_t next_tensor_id =
+      writeArchive(telements, "bytecode", "", "bytecode/", 0);
+  if (save_mobile_debug_info) {
+    auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
+    writeArchive(
+        debug_info_telements,
+        "mobile_debug",
+        "",
+        "mobile_debug/",
+        next_tensor_id);
+  }
+}
 
-    auto type_printer =
-        [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-      auto namedType = t->cast<c10::NamedType>();
-      if (namedType && namedType->name()) {
-        return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+//// SHARED NOT GOOD:
+uint64_t ScriptModuleSerializer::get_starting_tensor_id() {
+  const std::vector<std::string>& all_records = writer_.getAllWrittenRecords();
+  uint64_t max_storage_num_seen;
+  for (auto& item : all_records) {
+    if (item.size() >= std::string(".data/0.storage").size()) {
+      if (item.compare(0, 6, ".data/") == 0 &&
+          item.compare(item.size() - 8, 8, ".storage") == 0) {
+        uint64_t storage_int;
+        std::istringstream iss(item.substr(6, item.size() - 14));
+        iss >> storage_int;
+        max_storage_num_seen = storage_int > max_storage_num_seen
+            ? storage_int
+            : max_storage_num_seen;
       }
-      return c10::nullopt;
-    };
-    if (!pp) {
-      pp = &file_streams_.insert(
-          std::move(qualifier),
-          PythonPrint(
-              constant_table_,
-              class_deps_,
-              type_printer,
-              /*enforce_importable=*/true));
     }
-    pp->printNamedType(class_type);
+  }
+  return max_storage_num_seen;
+}
+
+std::tuple<uint64_t, uint64_t> ScriptModuleSerializer::serialize_unified_format(
+    Module& module,
+    uint64_t starting_tensor_id) {
+  // determine starting tensor ID
+  // uint64_t starting_tensor_id = get_starting_tensor_id();
+  // determine ts_id
+  uint64_t ts_id = next_ts_id++;
+  const std::string archive_dir =
+      ".data/ts_code/" + std::to_string(ts_id) + "/";
+
+  // Serialize the model object
+  uint64_t next_tensor_id = writeArchive(
+      module._ivalue(), "data", archive_dir, ".data/", starting_tensor_id);
+  // Then we serialize all code info.
+  convertTypes(module.type());
+  // The tensor constants from the code are written to a separate archive
+  // so loading the code does not depend on loading the data
+  std::vector<IValue> ivalue_constants(
+      constant_table_.begin(), constant_table_.end());
+  next_tensor_id = writeArchive(
+      c10::ivalue::Tuple::create(ivalue_constants),
+      "constants",
+      archive_dir,
+      ".data/",
+      next_tensor_id);
+
+  // writeFiles() call needs to be made in addition to calling this function
+  // to have the code actually saved
+  return std::make_tuple(ts_id, next_tensor_id);
+}
+
+int ScriptModuleSerializer::serialize(
+    const Module& module,
+    const ExtraFilesMap& extra_files,
+    bool bytecode_format,
+    bool save_mobile_debug_info) {
+  C10_LOG_API_USAGE_ONCE("torch.script.save");
+  writeExtraFiles(module, extra_files);
+  // Serialize the model object
+  uint64_t next_tensor_id =
+      writeArchive(module._ivalue(), "data", "", "data/", 0);
+  // Then we serialize all code info.
+  convertTypes(module.type());
+  writeFiles("code/");
+  // The tensor constants from the code are written to a separate archive
+  // so loading the code does not depend on loading the data
+  std::vector<IValue> ivalue_constants(
+      constant_table_.begin(), constant_table_.end());
+  writeArchive(
+      c10::ivalue::Tuple::create(ivalue_constants),
+      "constants",
+      "",
+      "constants/",
+      next_tensor_id);
+  if (bytecode_format) {
+    writeByteCode(module, save_mobile_debug_info);
+    writeMobileMetadata(module, extra_files);
   }
 
-  caffe2::serialize::PyTorchStreamWriter writer_;
-  std::vector<at::IValue> constant_table_;
-  std::unordered_set<c10::NamedTypePtr> converted_types_;
-  PrintDepsTable class_deps_;
-  TypeNameUniquer type_name_uniquer_;
+  // Acquires and sets minimum (dynamic) version
+  for (auto& item : file_streams_) {
+    writer_.setMinVersion(item.value().minVersion());
+  }
+  return 0;
+}
 
-  // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
-  // created
-  OrderedDict<std::string, PythonPrint> file_streams_;
-};
+uint64_t ScriptModuleSerializer::writeArchive(
+    const IValue& value,
+    const std::string& archive_name,
+    const std::string& archive_dir,
+    const std::string& tensor_dir,
+    uint64_t next_tensor_id) {
+  std::vector<char> data;
+  // Vector to capture the run-time class types during pickling the IValues
+  std::vector<c10::ClassTypePtr> memoizedClassTypes;
+  std::vector<std::string> tensor_names;
+  Pickler data_pickle(
+      [&](const char* buf, size_t size) {
+        data.insert(data.end(), buf, buf + size);
+      },
+      nullptr,
+      [&](const c10::ClassTypePtr& t) {
+        return type_name_uniquer_.getUniqueName(t);
+      },
+      &memoizedClassTypes,
+      [&]() {
+        // returns a string to use in picker.cpp as storage obj key
+        tensor_names.push_back(std::to_string(next_tensor_id++) + ".storage");
+        return tensor_names.back();
+      });
+  data_pickle.protocol();
+  data_pickle.pushIValue(value);
+  data_pickle.stop();
+
+  // write out tensor data
+  size_t i = 0;
+  assert(tensor_names.size() == data_pickle.tensorData().size());
+  for (const auto& td : data_pickle.tensorData()) {
+    WriteableTensorData writable_td = getWriteableTensorData(td);
+    std::string fname = tensor_dir + tensor_names[i++];
+    writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+  }
+  std::string fname = archive_dir + archive_name + ".pkl";
+  writer_.writeRecord(fname, data.data(), data.size());
+
+  // serialize all the captured run-time class types
+  for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
+    convertNamedType(wroteType);
+  }
+  return next_tensor_id;
+}
 
 void ExportModule(
     const Module& module,
@@ -593,11 +652,12 @@ void ExportModule(
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
-  ScriptModuleSerializer serializer(
+  caffe2::serialize::PyTorchStreamWriter writer(
       [&](const void* buf, size_t nbytes) -> size_t {
         out.write(static_cast<const char*>(buf), nbytes);
         return !out ? 0 : nbytes;
       });
+  ScriptModuleSerializer serializer(writer);
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
 }
@@ -608,7 +668,8 @@ void ExportModule(
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
-  ScriptModuleSerializer serializer(filename);
+  caffe2::serialize::PyTorchStreamWriter writer(filename);
+  ScriptModuleSerializer serializer(writer);
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
 }
@@ -619,7 +680,8 @@ void ExportModule(
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
-  ScriptModuleSerializer serializer(writer_func);
+  caffe2::serialize::PyTorchStreamWriter writer(writer_func);
+  ScriptModuleSerializer serializer(writer);
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
 }
