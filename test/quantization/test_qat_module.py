@@ -43,8 +43,8 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         self.momentum = momentum
         self.freeze_bn = freeze_bn if self.training else True
         self.num_features = out_channels
-        self.gamma = nn.Parameter(torch.Tensor(out_channels))
-        self.beta = nn.Parameter(torch.Tensor(out_channels))
+        self.gamma = nn.Parameter(torch.empty(out_channels))
+        self.beta = nn.Parameter(torch.empty(out_channels))
         self.affine = True
         self.track_running_stats = True
         self.register_buffer('running_mean', torch.zeros(out_channels))
@@ -53,7 +53,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
         if bias:
-            self.bias = nn.Parameter(torch.Tensor(out_channels))
+            self.bias = nn.Parameter(torch.empty(out_channels))
         else:
             self.register_parameter('bias', None)
         self.reset_bn_parameters()
