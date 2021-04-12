@@ -4208,16 +4208,12 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_item(self):
         class M(torch.nn.Module):
-            def comp(self, a: int, b: int):
-                return a > b
-
-            def forward(self, x, y, i: int) -> bool:
-                return int(x[y[i]].item()) > i
+            def forward(self, x, y):
+                return int(x[y[i]].item())
 
         x = torch.arange(6, dtype=torch.float)
         y = torch.tensor([0, 1, 2, 3, 4], dtype=torch.long)
-        i = 3
-        self.run_test(torch.jit.script(M()), (x, y, i))
+        self.run_test(torch.jit.script(M()), (x, y))
 
     @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
     @skipIfUnsupportedMinOpsetVersion(9)
