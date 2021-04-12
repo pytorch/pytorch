@@ -13,6 +13,8 @@ inline void alpha_check(const ScalarType dtype, const Scalar& alpha) {
   TORCH_CHECK(isFloatingType(dtype) || isComplexType(dtype)
               || alpha.isIntegral(true),
               "For integral input tensors, argument alpha must not be a floating point number.");
+  TORCH_CHECK(isComplexType(dtype) || !alpha.isComplex(),
+              "For non-complex input tensors, argument alpha must not be a complex number.")
 }
 
 // Basic checking for all sub functions.
@@ -50,8 +52,8 @@ DECLARE_DISPATCH(structured_binary_fn, mul_stub);
 DECLARE_DISPATCH(structured_binary_fn, div_true_stub);
 DECLARE_DISPATCH(structured_binary_fn, div_floor_stub);
 DECLARE_DISPATCH(structured_binary_fn, div_trunc_stub);
+DECLARE_DISPATCH(structured_binary_fn, atan2_stub);
 DECLARE_DISPATCH(binary_fn, remainder_stub);
-DECLARE_DISPATCH(binary_fn, atan2_stub);
 DECLARE_DISPATCH(binary_fn, bitwise_and_stub);
 DECLARE_DISPATCH(binary_fn, bitwise_or_stub);
 DECLARE_DISPATCH(binary_fn, bitwise_xor_stub);

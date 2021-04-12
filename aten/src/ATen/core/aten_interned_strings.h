@@ -137,7 +137,6 @@ _(aten, _tanh) \
 _(aten, _tanh_forward) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
 _(aten, _th_std) \
@@ -403,6 +402,7 @@ _(aten, is_same_size) \
 _(aten, is_set_to) \
 _(aten, is_signed) \
 _(aten, is_sparse) \
+_(aten, is_sparse_csr) \
 _(aten, isclose) \
 _(aten, isreal) \
 _(aten, istft) \
@@ -436,7 +436,6 @@ _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
 _(aten, logdet) \
-_(aten, logit) \
 _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, xlogy) \
@@ -621,7 +620,6 @@ _(aten, segment_reduce) \
 _(aten, select) \
 _(aten, selu) \
 _(aten, set) \
-_(aten, sigmoid) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
