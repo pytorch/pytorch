@@ -42,26 +42,18 @@ method_map& customClassMethods() {
   return customClassMethods;
 }
 
-method_overloads_list& customClassMethodsAsVector() {
-  auto& method_map = customClassMethods();
-  static method_overloads_list method_vector;
-  for (auto& methods : method_map) {
-    for (auto& method_it : methods.second) {
-      method_vector.push_back(std::move(method_it));
-    }
-  }
-  return method_vector;
-}
-
 void registerCustomClassMethod(std::unique_ptr<jit::Function> fn) {
   auto& custom_class_methods = customClassMethods();
-  auto& custom_class_methods_vector = customClassMethodsAsVector();
-  // hopefully, we won't register thousands of overloaded methods.
-  for (auto& method : custom_class_methods_vector) {
-    if (fn == method) {
-      return;
+
+  // check if the method is already registered
+  for (auto& methods : custom_class_methods) {
+    for (auto& method_it : methods.second) {
+      if (method_it == fn) {
+        return;
+      }
     }
   }
+
   auto it =
       custom_class_methods.insert(std::pair<std::string, method_overloads_list>(
           fn->name(), method_overloads_list()));
