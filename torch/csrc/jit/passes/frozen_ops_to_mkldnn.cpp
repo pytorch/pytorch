@@ -243,7 +243,8 @@ Operation createUnaryOp(
       out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
     }
 
-    auto out_aten = at::from_blob(out_raw_data, {a.numel()}, topt);
+    auto nelem = a_it.get_desc().get_size() / elementSize(a.scalar_type());
+    auto out_aten = at::from_blob(out_raw_data, {nelem}, topt);
     aten_op(out_aten, t);
     push(stack, out);
   };
