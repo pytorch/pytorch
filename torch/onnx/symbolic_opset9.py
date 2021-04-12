@@ -2041,7 +2041,10 @@ def pixel_shuffle(g, self, upscale_factor):
     after_view = view(g, self, g.op("Constant", value_t=torch.tensor([-1, output_channel, upscale_factor,
                                                                       upscale_factor, dims[2], dims[3]])))
     after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
-    return view(g, after_transpose,
+    first_reshape = view(g, after_transpose,
+                         g.op("Constant", value_t=torch.tensor([-1, output_channel, dims[2] * upscale_factor,
+                                                                dims[3], upscale_factor])))
+    return view(g, first_reshape,
                 g.op("Constant", value_t=torch.tensor([-1, output_channel, dims[2] * upscale_factor,
                                                        dims[3] * upscale_factor])))
 
