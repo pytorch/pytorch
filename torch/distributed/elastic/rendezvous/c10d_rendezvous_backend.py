@@ -135,13 +135,13 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
 
     # In specific cases we attempt to instantiate the store twice. For details
     # see the explanation in the except clause below.
-    for _ in range(2):
+    for is_server in [is_host, False]:
         try:
             store = TCPStore(  # type: ignore[call-arg]
-                host, port, is_master=is_host, timeout=timedelta(seconds=read_timeout)
+                host, port, is_master=is_server, timeout=timedelta(seconds=read_timeout)
             )
 
-            if is_host:
+            if is_server:
                 log.info(
                     f"Process {os.getpid()} hosts the TCP store for the C10d rendezvous backend."
                 )
@@ -154,12 +154,10 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
             # more than one process that is part of the same rendezvous on this
             # machine and only one of them will eventually host the store.
 
-            if not is_host or cfg_is_host is not None:
+            if not is_server or cfg_is_host is not None:
                 raise RendezvousConnectionError(
                     "The connection to the C10d store has failed. See inner exception for details."
                 ) from exc
-
-            is_host = False
 
     return store
 
