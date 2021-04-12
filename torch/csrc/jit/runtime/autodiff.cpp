@@ -14,12 +14,70 @@
 #include <torch/csrc/jit/runtime/symbolic_script.h>
 #include <algorithm>
 #include <memory>
+#include <mutex>
+#include "ATen/core/interned_strings.h"
+#include "jit/ir/ir.h"
+
 
 namespace torch {
 namespace jit {
 
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
+
+struct InlineExprsInBwdPasses {
+  std::vector<std::function<void(std::shared_ptr<Graph>, Block* )>> passes_;
+  std::mutex mutex_;
+} inline_passes_;
+
+void registerInlineExprsInBwdPass(std::function<void(std::shared_ptr<Graph>, Block*)> pass) {
+  std::lock_guard<std::mutex> lock(inline_passes_.mutex_);
+  std::cerr << "registerInlineExprsInBwdPass\n";
+  inline_passes_.passes_.push_back(std::move(pass));
+}
+
+RegisterInlineExprsInBwdPass::RegisterInlineExprsInBwdPass(std::function<void(std::shared_ptr<Graph>, Block*)> pass) {
+  registerInlineExprsInBwdPass(std::move(pass));
+}
+
+
+static void inlineProfileNodes_(Block* block) {
+
+  auto replaceAfter = block->param_node();
+  for (auto n: block->nodes()) {
+    for (auto inp: n->inputs()) {
+      if (inp->node()->kind() == prim::profile) {
+        inp->replaceAllUsesAfterNodeWith(replaceAfter, inp->node()->input(0));
+      }
+    }
+
+    for (auto ib: n->blocks()) {
+      inlineProfileNodes_(ib);
+    }
+  }
+}
+
+static void inlineProfileNodes(Block* block) {
+  GRAPH_DEBUG("@@@Reverse inlineProfileNodes block before", *block->owningNode());
+  inlineProfileNodes_(block);
+  GRAPH_DEBUG("@@@Reverse inlineProfileNodes block after", *block->owningNode());
+}
+
+static void runInlineExprsInBwdPasses(std::shared_ptr<Graph> fwd, Block* reverse_block) {
+
+  reverse_block->owningNode()->owningGraph()->appendNode(reverse_block->owningNode());
+  // TODO this can be registered as a bwd pass
+  inlineProfileNodes(reverse_block);
+  
+  std::lock_guard<std::mutex> lock(inline_passes_.mutex_);
+  for (auto p: inline_passes_.passes_) {
+    std::cerr << "runInlineExprsInBwdPasses\n";
+    p(fwd, reverse_block);
+  }
+
+  reverse_block->owningNode()->removeFromList();  
+}
+
 
 void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
   if (dim < 0) {
@@ -665,6 +723,111 @@ static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
   eliminateDeadCode(rev_info);
 }
 
+
+
+static value_list removeRecomputedExpressions(const value_list& captures, Block* b) {
+
+  b->owningNode()->owningGraph()->appendNode(b->owningNode());
+
+  GRAPH_DEBUG("@@@Reverse block before", *b->owningNode());
+  std::unordered_map<Value*, Value*> inlined_exprs;
+  std::unordered_set<Value*> captures_set(captures.begin(), captures.end());
+  std::unordered_set<Value*> inlined_set;
+  auto lookup = [&](Value* v) {
+    if (v->node()->kind() == prim::profile) {
+      v = v->node()->input(0);
+    }
+    auto it = inlined_exprs.find(v);
+    if (it != inlined_exprs.end()) {
+      return it->second;
+    }
+    return v;
+  };
+
+
+
+  //TODO check that all inputs are captured
+  auto inputs_captured = [&](Node* n) {
+    return std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
+      if (v->node()->kind() == prim::profile) {
+        v = v->node()->input(0);
+      }
+      return captures_set.count(v) != 0 || inlined_exprs.count(v) != 0 || v->node()->kind() == prim::Constant;
+    });
+  };
+
+
+  WithInsertPoint wip{b->nodes().begin()->next()};
+
+  std::function<Node*(Node*)> recursiveClone = [&](Node* n) -> Node* {
+
+    auto graph = b->owningGraph();
+    for (auto inp: n->inputs()) {
+      if (captures_set.count(inp) == 0 && inlined_exprs.count(inp) == 0) {
+        recursiveClone(inp->node());
+      }
+    }
+
+    auto copy = graph->createClone(n, lookup);
+    GRAPH_DEBUG("@@@Creating a clone ", *copy, " of ", *n);
+    for (size_t i = 0; i < copy->outputs().size(); i++) {
+      copy->output(i)->copyMetadata(n->output(i));
+      graph->insertNode(copy);
+      inlined_exprs[n->output(i)] = copy->output(i);
+      n->output(i)->replaceAllUsesAfterNodeWith(copy, copy->output(i));
+    }
+
+    return copy;
+  };
+
+  auto cloneAndMap = [&](Node* n) {
+
+      auto graph = b->owningGraph();
+      auto copy = graph->createClone(n, lookup);
+      GRAPH_DEBUG("@@@Creating a clone ", *copy, " of ", *n);
+      for (size_t i = 0; i < copy->outputs().size(); i++) {
+        copy->output(i)->copyMetadata(n->output(i));
+        graph->insertNode(copy);
+        inlined_exprs[n->output(i)] = copy->output(i);
+        n->output(i)->replaceAllUsesAfterNodeWith(copy, copy->output(i));
+
+    }
+  };
+
+  
+  
+  value_list new_captures;
+  for (auto v: captures) {
+    // heuristics to decide if a value needs to be recomputed
+    if (v->node()->kind() == aten::threshold && inputs_captured(v->node())) {
+      GRAPH_DEBUG("@@@Found value %", v->debugName(), " of node ", *v->node());
+      //TORCH_INTERNAL_ASSERT(inputs_captured(v->node()));
+      TORCH_INTERNAL_ASSERT(v->node()->outputs().size() == 1);
+
+      for (auto inp: v->node()->inputs()) {
+        if (inp->node()->kind() == prim::Constant) {
+          cloneAndMap(inp->node());
+        }
+      }
+      cloneAndMap(v->node());
+      // auto copy = graph->createClone(threshold, lookup);
+      // GRAPH_DEBUG("@@@Creating a clone ", *copy);
+      // inlined_exprs[v] = copy->output();
+      // graph->insertNode(copy);
+      // inlined_set.insert(copy->output());
+      // v->replaceAllUsesAfterNodeWith(copy, copy->output());
+      // skip adding to new_captures
+    } else {
+      new_captures.push_back(v);
+    }
+  }
+
+  b->owningNode()->removeFromList();
+  GRAPH_DEBUG("@@@Reverse block before", *b->owningNode());
+  return new_captures;
+}
+
+
 // Takes a grad_desc.f returned from `addReverseInline` and splits off the
 // reverse_block into its own graph, storing it in df.
 // All intermediates needed in the second stage are added to
@@ -677,6 +840,10 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   auto& graph = *grad_desc.f;
   auto reverse_block = rev_info.reverse_block;
 
+  // 1. Allow fusers to inline back expressions that are cheap to recompute
+  // and expensive to materialize
+  runInlineExprsInBwdPasses(grad_desc.f, reverse_block);
+  
   // --------------------------------------------------------------------------
   // 1. Find values of f that need to be captured.
   // --------------------------------------------------------------------------
@@ -686,7 +853,6 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   // they are not already an input or an output of f
   // Invariant: topo sorted
   value_list reverse_captures = getReverseCaptures(grad_desc);
-
   // --------------------------------------------------------------------------
   // 2. Prepare input/outputs lists for f and df
   // --------------------------------------------------------------------------

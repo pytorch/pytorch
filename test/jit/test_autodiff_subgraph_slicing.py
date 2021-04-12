@@ -2,6 +2,7 @@ import os
 import sys
 import unittest
 from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, enable_profiling_mode_for_profiling_tests
+from torch.testing._internal.common_jit import check_against_reference
 import torch
 
 # Make the helper files in test/ importable
@@ -47,6 +48,8 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
+
+    #def test_run
 
     def test_simple_merge(self):
         # o --> o
@@ -177,6 +180,24 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         # the same group; they should each be a separate DiffGraph
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 3)
 
+    def test_autodiff_recomp(self):
+        torch._C._debug_set_autodiff_subgraph_inlining(1)
+        with enable_profiling_mode_for_profiling_tests():
+
+            def method1(a, b):
+                return torch.nn.functional.threshold(a, 0., 3.) * b
+
+
+            x = torch.rand(10, requires_grad=True)
+            y = torch.rand(10, requires_grad=True)
+
+
+            scripted = torch.jit.script(method1)
+            scripted(x, y)
+            scripted(x, y)
+            scripted(x, y)
+
+            check_against_reference(self, scripted, method1, lambda x: x, (x, y), check_types=False)
 
     def test_merge_respects_aliasing(self):
         def fn(x, k, cond):

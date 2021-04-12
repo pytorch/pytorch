@@ -94,5 +94,9 @@ TORCH_API bool isDifferentiable(const Node* n);
 TORCH_API bool isDifferentiable(Graph& g);
 TORCH_API bool isZero(Value* v);
 
+struct TORCH_API RegisterInlineExprsInBwdPass {
+  RegisterInlineExprsInBwdPass(std::function<void(std::shared_ptr<Graph>, Block* b)> pass);
+};
+
 } // namespace jit
 } // namespace torch

@@ -677,6 +677,8 @@ struct TORCH_API Node {
   // Result: %3 = g(%1)
   void destroy();
 
+  void removeFromList();
+
   // Dynamically cast this node to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid..
   //
@@ -919,7 +921,6 @@ struct TORCH_API Node {
     return next() != nullptr;
   }
 
-  void removeFromList();
   void lint() const;
 
   void assignTopoPosition();

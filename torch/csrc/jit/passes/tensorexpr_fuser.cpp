@@ -17,6 +17,9 @@
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
+#include <cstddef>
+#include "jit/ir/ir.h"
+#include <torch/csrc/jit/runtime/autodiff.h>
 
 // NOLINTNEXTLINE
 C10_DEFINE_bool(
@@ -54,6 +57,104 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
   db->createValue(broadcast_n->output());
   return broadcast_n->output();
 }
+
+static bool isFwdValue(Value* v, torch::jit::Block* b) {
+  auto it = v->node();
+
+  while (it != nullptr) {
+    if (it->owningBlock() == b) {
+      return false;
+    }
+    it = it->owningBlock()->owningNode();
+  }
+  return true;
+}
+
+static void collectValue(std::vector<Use>& fwd_values, std::map<Value*, std::pair<size_t, size_t>>& value_counts, Node* n, size_t i) {
+
+  auto& val = value_counts[n->input(i)];
+  if (val.first == 0) {
+    GRAPH_DEBUG("Collecting %", n->input(i)->debugName(), " for the first time at use ", getHeader(n));
+    fwd_values.push_back({n, i});
+    val.second = fwd_values.size() - 1;
+  }
+  else {
+    // keep the earliest use of the val in a bwd graph
+    if (n->isBefore(fwd_values[val.second].user)) {
+      fwd_values[val.second] = {n, i};
+      GRAPH_DEBUG("Updating %", n->input(i)->debugName(), " use to ", getHeader(n));
+    }
+  }
+  val.first++;
+  GRAPH_DEBUG("Count for %", n->input(i)->debugName(), " is set to ", val.first);
+}
+
+static void collectFwdUses(std::vector<Use>& fwd_values, std::map<Value*, std::pair<size_t, size_t>>& value_counts, torch::jit::Block* cur, torch::jit::Block* bwd) {
+  for (auto n: cur->nodes()) {
+    for (size_t i = 0; i < n->inputs().size(); i++) {
+      auto inp = n->input(i);
+      if (isFwdValue(inp, bwd)) {
+        collectValue(fwd_values, value_counts, n, i);
+      }
+    }
+
+    for (auto ib: n->blocks()) {
+      collectFwdUses(fwd_values, value_counts, ib, bwd);
+    }
+  }
+}
+
+void InlineExprsInBwd(std::shared_ptr<Graph> fwd, torch::jit::Block* bwd) {
+
+  GRAPH_DUMP("@@@Reverse block before", fwd);
+
+  const size_t MAX_INLINES = 10; // a fake heuristic when to inline vs recompute
+
+  // if we process fwd values in the reverse
+  // we should be able to avoid keeping a map of old new values
+  // as the subsequent values we process can refer to the earlier ones
+
+  auto identity = [&](Value* v) { return v; };
+std::vector<Use> fwd_values;
+  std::map<Value*, std::pair<size_t, size_t>> value_counts;
+  collectFwdUses(fwd_values, value_counts, bwd, bwd);
+  auto insertionPoint = *bwd->nodes().begin();
+  
+  // since we are running this loop there must be
+  // at least one GradOf block
+  while (insertionPoint->kind() != prim::GradOf) {
+    insertionPoint = insertionPoint->next();
+  }
+  auto graph = bwd->owningGraph();
+  while (!fwd_values.empty()) {
+    auto use = fwd_values.back();
+    auto v = use.user->input(use.offset);
+    fwd_values.pop_back();
+    GRAPH_DEBUG("@@@ Looking at %", v->debugName(), " in node ", getHeader(v->node()));
+    if (value_counts.at(v).first < MAX_INLINES &&  v->node()->kind() == aten::threshold) {
+      
+      // TODO: extend to support node with mulitple outputs
+      TORCH_INTERNAL_ASSERT(v->node()->outputs().size() == 1);
+      
+      // collect the inputs of an expression to inline/ update counters
+      for (size_t i = 0; i < v->node()->inputs().size(); i++) {
+        collectValue(fwd_values, value_counts, v->node(), i);
+      }
+      // N.B. this should be the earliest use of `v`
+      WithInsertPoint wip{insertionPoint};
+      auto copy = graph->createClone(v->node(), identity);
+      GRAPH_DEBUG("@@@Replacing %", v->debugName(), " with %", copy->output()->debugName(), " at use ", getHeader(insertionPoint));
+      v->node()->owningGraph()->insertNode(copy);
+      insertionPoint = copy;
+      copy->output()->copyMetadata(v);
+      v->replaceAllUsesAfterNodeWith(copy, copy->output());
+    }
+  }
+
+  GRAPH_DUMP("@@@Reverse block after", fwd);
+}
+
+RegisterInlineExprsInBwdPass riebp(InlineExprsInBwd);
 
 namespace tensorexpr {
 

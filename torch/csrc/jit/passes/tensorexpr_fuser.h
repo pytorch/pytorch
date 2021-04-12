@@ -25,6 +25,8 @@ TORCH_API bool tensorExprFuserEnabled();
 TORCH_API bool setTexprReductionsEnabled(bool value);
 TORCH_API bool texprReductionsEnabled();
 
+
+TORCH_API void InlineExprsInBwd(std::shared_ptr<Graph> fwd, Block* bwd);
 TORCH_API void RemoveProfileNodesAndSpecializeTypes(
     std::shared_ptr<Graph>& graph);
 TORCH_API void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph);
