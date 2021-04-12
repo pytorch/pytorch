@@ -107,12 +107,8 @@ class non_deterministic(object):
 ######################################################
 # typing
 ######################################################
-# Construct-time checking
-# Validate each DataPipe with hint as a subtype of the hint.
-def construct_time_validation(f):
-    if f.__name__ not in ('__init__', '__new__'):
-        raise TypeError("Can not decorate function {} with 'construct_time_validation'"
-                        .format(f.__name__))
+# Validate each argument of DataPipe with hint as a subtype of the hint.
+def argument_validation(f):
     signature = inspect.signature(f)
     hints = get_type_hints(f)
 

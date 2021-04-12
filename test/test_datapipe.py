@@ -15,7 +15,7 @@ import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import \
     (IterDataPipe, RandomSampler, DataLoader,
-     construct_time_validation, runtime_validation)
+     argument_validation, runtime_validation)
 
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, TypeVar, Set, Union
 
@@ -742,7 +742,7 @@ class TestTyping(TestCase):
 
     def test_construct_time(self):
         class DP0(IterDataPipe[Tuple]):
-            @construct_time_validation
+            @argument_validation
             def __init__(self, dp: IterDataPipe):
                 self.dp = dp
 
@@ -751,7 +751,7 @@ class TestTyping(TestCase):
                     yield d, str(d)
 
         class DP1(IterDataPipe[int]):
-            @construct_time_validation
+            @argument_validation
             def __init__(self, dp: IterDataPipe[Tuple[int, str]]):
                 self.dp = dp
 
@@ -767,12 +767,6 @@ class TestTyping(TestCase):
         dp = DP0(IDP(range(10)))
         with self.assertRaisesRegex(TypeError, r"Expected type of argument 'dp' as a subtype"):
             dp = DP1(dp)
-
-        with self.assertRaisesRegex(TypeError, r"Can not decorate"):
-            class InvalidDP1(IterDataPipe[int]):
-                @construct_time_validation
-                def __iter__(self):
-                    yield 0
 
     def test_runtime(self):
         class DP(IterDataPipe[Tuple[int, T_co]]):
