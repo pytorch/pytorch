@@ -10,7 +10,7 @@ DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 GITHUB_DIR = Path(__file__).parent.parent
 
 CPU_TEST_RUNNER = "linux.2xlarge"
-GPU_TEST_RUNNER = "linux.8xlarge.nvidida.gpu"
+GPU_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
 
 
 class PyTorchLinuxWorkflow:

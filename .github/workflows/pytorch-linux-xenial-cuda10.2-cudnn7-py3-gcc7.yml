@@ -92,7 +92,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test:
-    runs-on: linux.8xlarge.nvidida.gpu
+    runs-on: linux.8xlarge.nvidia.gpu
     needs:
       - calculate-docker-image
       - build
