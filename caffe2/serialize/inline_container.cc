@@ -229,7 +229,7 @@ const std::vector<std::string>& PyTorchStreamWriter::getAllWrittenRecords() {
 size_t PyTorchStreamReader::getRecordID(const std::string& name) {
   std::string ss = archive_name_plus_slash_ + name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
-  bool isRecordFound = ar_->m_last_error == MZ_ZIP_FILE_NOT_FOUND;
+  bool isRecordFound = ar_->m_last_error != MZ_ZIP_FILE_NOT_FOUND;
   if (!isRecordFound) {
     // If this name isn't found in the container, clean up after ourselves and throw a ValueError.
     ar_->m_last_error = MZ_ZIP_NO_ERROR;
