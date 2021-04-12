@@ -111,7 +111,6 @@ class TORCH_API PyTorchStreamReader final {
 
  private:
   void init();
-  bool hasRecordImpl(const std::string& name);
   size_t read(uint64_t pos, char* buf, size_t n);
   void valid(const char* what, const char* info = "");
   size_t getRecordID(const std::string& name);

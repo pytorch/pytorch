@@ -69,8 +69,6 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
 }
 
 TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
-  int64_t kFieldAlignment = 64L;
-
   std::ostringstream oss;
   // write records through writers
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
@@ -106,6 +104,9 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   // read records through readers
   PyTorchStreamReader reader(&iss);
   EXPECT_THROW(reader.getRecord("key3"), c10::ValueError);
+
+  // Reader should still work after throwing
+  EXPECT_TRUE(reader.hasRecord("key1"));
 }
 
 } // namespace
