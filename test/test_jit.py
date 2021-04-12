@@ -10481,6 +10481,26 @@ dedent """
 
         self.checkScript(t, (torch.zeros(3, 2, 3),))
 
+    def test_torch_ignore_conversion_to_none(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            @torch.jit.ignore
+            def ignored(self, a: int, b: int) -> torch.Tensor:
+                l = len([2 + b for i in range(a) if i > 2])
+                return
+
+            def forward(self):
+                a: int = 4
+                b: int = 5
+                self.ignored(a, b)
+                return a + b
+
+        model = torch.jit.script(A())
+        # successfully compiles
+        self.assertEqual(model(), 9)
+
     def test_addmm_grad(self):
         """ This test checks several things:
             1. An expand node was inserted before the addmm operating on the
