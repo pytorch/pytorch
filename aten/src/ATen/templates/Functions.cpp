@@ -1,6 +1,9 @@
 // ${generated_comment}
 
+#include <array>
+
 #include <ATen/Functions.h>
+#include <ATen/Utils.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/adaption.h>
@@ -61,47 +64,17 @@ at::Tensor conv3d(
   return at::conv3d(input, weight, bias, stride, padding, dilation, groups);
 }
 
-std::vector<Tensor> to(const std::vector<Tensor> tensors, Device device) {
-    std::vector<Tensor> output_tensors;
-    for (const auto& t : tensors) {
-        output_tensors.push_back(t.to(device));
-    }
-    return output_tensors;
-}
-
-std::vector<c10::optional<at::Tensor>> to_cpu(const std::vector<c10::optional<at::Tensor>>& tensors) {
-    std::vector<c10::optional<at::Tensor>> opt_cpu_tensors(tensors.size());
-    std::vector<bool> copy_indices(tensors.size());
-    std::vector<at::Tensor> valid_tensors;
-    for (auto i = 0; i < tensors.size(); ++i) {
-        if (tensors[i].has_value()) {
-            valid_tensors.push_back(*tensors[i]);
-            copy_indices[i] = true;
-        } else {
-            opt_cpu_tensors[i] = tensors[i];
-        }
-    }
-    auto cpu_tensors = at::to_cpu(valid_tensors); // redispatch!
-
-    int idx = 0;
-    for (auto i = 0; i < tensors.size(); ++i) {
-        if (copy_indices[i]) {
-            opt_cpu_tensors[i] = c10::optional<at::Tensor>(cpu_tensors[idx++]);
-        }
-    }
-    return opt_cpu_tensors;
-}
-
 namespace detail {
 
-void noopDelete(void*)
-{}
+void noopDelete(void*) {}
 
-}  // namespace detail
+} // namespace detail
 
 Tensor TensorMaker::make_tensor() {
   AutoNonVariableTypeMode guard{}; // TODO: Remove.
   tracer::impl::NoTracerDispatchMode tracer_guard{};
+
+  check_size_nonnegative(sizes_);
 
   TORCH_CHECK_VALUE(
       !deleter_ || !ctx_,
@@ -130,16 +103,17 @@ Tensor TensorMaker::make_tensor() {
 
   Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr)};
 
-  at::Tensor tensor = makeEmptyTensor();
+  Tensor tensor = detail::make_tensor<TensorImpl>(
+      std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
 
-  c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+  if (sizes_.size() != 1 || sizes_[0] != 0) {
+    TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
-  tensor_impl->set_storage_keep_dtype(std::move(storage));
-
-  if (strides_) {
-    tensor_impl->set_sizes_and_strides(sizes_, *strides_);
-  } else {
-    tensor_impl->set_sizes_contiguous(sizes_);
+    if (strides_) {
+      tensor_impl->set_sizes_and_strides(sizes_, *strides_);
+    } else {
+      tensor_impl->set_sizes_contiguous(sizes_);
+    }
   }
 
   return tensor;
@@ -153,8 +127,8 @@ std::size_t TensorMaker::computeStorageSize() const noexcept {
   }
 
   std::size_t size = 1;
-  for (std::size_t s : sizes_) {
-    size *= s;
+  for (std::int64_t s : sizes_) {
+    size *= static_cast<std::size_t>(s);
   }
   return size * itemsize;
 }
@@ -168,7 +142,7 @@ inline DataPtr TensorMaker::makeDataPtrFromContext() noexcept {
 }
 
 IntArrayRef TensorMaker::makeTempSizes() const noexcept {
-  static int64_t zeros[5] = {0, 0, 0, 0, 0};
+  static std::int64_t zeros[5] = {0, 0, 0, 0, 0};
   if (opts_.has_memory_format()) {
     MemoryFormat format = *opts_.memory_format_opt();
     if (format == MemoryFormat::ChannelsLast) {
@@ -179,10 +153,6 @@ IntArrayRef TensorMaker::makeTempSizes() const noexcept {
     }
   }
   return IntArrayRef(zeros, 1);
-}
-
-inline Tensor TensorMaker::makeEmptyTensor() const {
-  return empty(makeTempSizes(), opts_);
 }
 
 ${function_definitions}

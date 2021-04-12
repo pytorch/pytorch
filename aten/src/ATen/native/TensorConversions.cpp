@@ -106,6 +106,9 @@ Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy,
   return to_impl(self, options.memory_format(optional_memory_format), non_blocking, copy);
 }
 
+// This op is important primarily for lazy / graph-based backends.
+// While this vanilla implementation loops through each tensor and independently converts it to cpu,
+// a lazy backend like XLA might need to tell sync updates across tensors.
 std::vector<Tensor> to_cpu(TensorList tensors) {
     std::vector<Tensor> cpu_tensors;
     for (const auto& t : tensors) {
