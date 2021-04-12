@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/InferenceMode.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -694,7 +694,7 @@ c10::IValue StaticRuntime::operator()(
   // autograd. Enabling this is a significant win on dispatcher
   // overhead because it saves a round of dispatch for at least some
   // functions, such as resize_ and resize_as_.
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  c10::InferenceMode mode;
 
   if (planner_) {
     planner_->allocate();
@@ -839,9 +839,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
 
-  // See comment on above use of AutoNonVariableTypeMode for
+  // See comment on above use of InferenceMode for
   // explanation.
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  c10::InferenceMode mode;
 
   IndividualMetrics results;
   results.time_per_node.resize(nodes_.size(), 0);
