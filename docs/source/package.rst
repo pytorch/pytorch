@@ -5,6 +5,9 @@ torch.package
 
 API Reference
 -------------
+.. autoclass:: torch.package.DeniedModuleError
+
+.. autoclass:: torch.package.EmptyMatchError
 
 .. autoclass:: torch.package.PackageExporter
 
