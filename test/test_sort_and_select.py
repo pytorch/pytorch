@@ -3,13 +3,13 @@ import numpy as np
 
 import random
 from torch._six import nan
-from itertools import product
+from itertools import permutations
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, make_tensor)
+    (TestCase, run_tests, make_tensor, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU)
+     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU, largeTensorTest)
 
 # TODO: remove this
 SIZE = 100
@@ -17,29 +17,33 @@ SIZE = 100
 class TestSortAndSelect(TestCase):
 
     def assertIsOrdered(self, order, x, mxx, ixx, task):
-        SIZE = 4
+        SIZE = x.size(1)
         if order == 'descending':
             def check_order(a, b):
                 # `a != a` because we put NaNs
                 # at the end of ascending sorted lists,
                 # and the beginning of descending ones.
-                return a != a or a >= b
+                return ((a != a) | (a >= b)).all().item()
         elif order == 'ascending':
             def check_order(a, b):
                 # see above
-                return b != b or a <= b
+                return ((b != b) | (a <= b)).all().item()
         else:
             error('unknown order "{}", must be "ascending" or "descending"'.format(order))
 
         are_ordered = True
-        for j, k in product(range(SIZE), range(1, SIZE)):
-            self.assertTrue(check_order(mxx[j][k - 1], mxx[j][k]),
+        for k in range(1, SIZE):
+            self.assertTrue(check_order(mxx[:, k - 1], mxx[:, k]),
                             'torch.sort ({}) values unordered for {}'.format(order, task))
 
         seen = set()
         indicesCorrect = True
+        size0 = x.size(0)
         size = x.size(x.dim() - 1)
-        for k in range(size):
+        x = x.tolist()
+        mxx = mxx.tolist()
+        ixx = ixx.tolist()
+        for k in range(size0):
             seen.clear()
             for j in range(size):
                 self.assertEqual(x[k][ixx[k][j]], mxx[k][j],
@@ -48,70 +52,71 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(len(seen), size)
 
     def test_sort(self, device):
-        SIZE = 4
-        x = torch.rand(SIZE, SIZE, device=device)
-        res1val, res1ind = torch.sort(x)
+        # on CUDA 2048 vs >2048 have different code path for the dim being sorted
+        for SIZE in (4, 2049):
+            x = torch.rand(4, SIZE, device=device)
+            res1val, res1ind = torch.sort(x)
 
-        # Test use of result tensor
-        res2val = torch.tensor((), device=device)
-        res2ind = torch.tensor((), device=device, dtype=torch.long)
-        torch.sort(x, out=(res2val, res2ind))
-        self.assertEqual(res1val, res2val, atol=0, rtol=0)
-        self.assertEqual(res1ind, res2ind, atol=0, rtol=0)
-        self.assertEqual(torch.argsort(x), res1ind)
-        self.assertEqual(x.argsort(), res1ind)
+            # Test use of result tensor
+            res2val = torch.tensor((), device=device)
+            res2ind = torch.tensor((), device=device, dtype=torch.long)
+            torch.sort(x, out=(res2val, res2ind))
+            self.assertEqual(res1val, res2val, atol=0, rtol=0)
+            self.assertEqual(res1ind, res2ind, atol=0, rtol=0)
+            self.assertEqual(torch.argsort(x), res1ind)
+            self.assertEqual(x.argsort(), res1ind)
 
-        # Test sorting of random numbers
-        self.assertIsOrdered('ascending', x, res2val, res2ind, 'random')
+            # Test sorting of random numbers
+            self.assertIsOrdered('ascending', x, res2val, res2ind, 'random')
 
-        # Test simple sort
-        self.assertEqual(
-            torch.sort(torch.tensor((50, 40, 30, 20, 10), device=device))[0],
-            torch.tensor((10, 20, 30, 40, 50), device=device),
-            atol=0, rtol=0
-        )
+            # Test simple sort
+            self.assertEqual(
+                torch.sort(torch.tensor((50, 40, 30, 20, 10), device=device))[0],
+                torch.tensor((10, 20, 30, 40, 50), device=device),
+                atol=0, rtol=0
+            )
 
-        # Test that we still have proper sorting with duplicate keys
-        x = torch.floor(torch.rand(SIZE, SIZE, device=device) * 10)
-        torch.sort(x, out=(res2val, res2ind))
-        self.assertIsOrdered('ascending', x, res2val, res2ind, 'random with duplicate keys')
+            # Test that we still have proper sorting with duplicate keys
+            x = torch.floor(torch.rand(4, SIZE, device=device) * 10)
+            torch.sort(x, out=(res2val, res2ind))
+            self.assertIsOrdered('ascending', x, res2val, res2ind, 'random with duplicate keys')
 
-        # DESCENDING SORT
-        x = torch.rand(SIZE, SIZE, device=device)
-        res1val, res1ind = torch.sort(x, x.dim() - 1, True)
+            # DESCENDING SORT
+            x = torch.rand(4, SIZE, device=device)
+            res1val, res1ind = torch.sort(x, x.dim() - 1, True)
 
-        # Test use of result tensor
-        res2val = torch.tensor((), device=device)
-        res2ind = torch.tensor((), device=device, dtype=torch.long)
-        torch.sort(x, x.dim() - 1, True, out=(res2val, res2ind))
-        self.assertEqual(res1val, res2val, atol=0, rtol=0)
-        self.assertEqual(res1ind, res2ind, atol=0, rtol=0)
-        self.assertEqual(torch.argsort(x, x.dim() - 1, True), res1ind)
-        self.assertEqual(x.argsort(x.dim() - 1, True), res1ind)
+            # Test use of result tensor
+            res2val = torch.tensor((), device=device)
+            res2ind = torch.tensor((), device=device, dtype=torch.long)
+            torch.sort(x, x.dim() - 1, True, out=(res2val, res2ind))
+            self.assertEqual(res1val, res2val, atol=0, rtol=0)
+            self.assertEqual(res1ind, res2ind, atol=0, rtol=0)
+            self.assertEqual(torch.argsort(x, x.dim() - 1, True), res1ind)
+            self.assertEqual(x.argsort(x.dim() - 1, True), res1ind)
 
-        # Test sorting of random numbers
-        self.assertIsOrdered('descending', x, res2val, res2ind, 'random')
+            # Test sorting of random numbers
+            self.assertIsOrdered('descending', x, res2val, res2ind, 'random')
 
-        # Test simple sort task
-        self.assertEqual(
-            torch.sort(torch.tensor((10, 20, 30, 40, 50), device=device), 0, True)[0],
-            torch.tensor((50, 40, 30, 20, 10), device=device),
-            atol=0, rtol=0
-        )
+            # Test simple sort task
+            self.assertEqual(
+                torch.sort(torch.tensor((10, 20, 30, 40, 50), device=device), 0, True)[0],
+                torch.tensor((50, 40, 30, 20, 10), device=device),
+                atol=0, rtol=0
+            )
 
-        # Test that we still have proper sorting with duplicate keys
-        self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
+            # Test that we still have proper sorting with duplicate keys
+            self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
 
-        # Test sorting with NaNs
-        x = torch.rand(SIZE, SIZE, device=device)
-        x[1][2] = float('NaN')
-        x[3][0] = float('NaN')
-        torch.sort(x, out=(res2val, res2ind))
-        self.assertIsOrdered('ascending', x, res2val, res2ind,
-                             'random with NaNs')
-        torch.sort(x, out=(res2val, res2ind), descending=True)
-        self.assertIsOrdered('descending', x, res2val, res2ind,
-                             'random with NaNs')
+            # Test sorting with NaNs
+            x = torch.rand(4, SIZE, device=device)
+            x[1][2] = float('NaN')
+            x[3][0] = float('NaN')
+            torch.sort(x, out=(res2val, res2ind))
+            self.assertIsOrdered('ascending', x, res2val, res2ind,
+                                 'random with NaNs')
+            torch.sort(x, out=(res2val, res2ind), descending=True)
+            self.assertIsOrdered('descending', x, res2val, res2ind,
+                                 'random with NaNs')
 
     @onlyCUDA
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
@@ -120,10 +125,17 @@ class TestSortAndSelect(TestCase):
         with self.assertRaisesRegex(RuntimeError, "stable=True is not implemented on CUDA yet."):
             x.sort(stable=True)
 
-    @onlyCPU
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_stable_sort(self, device, dtype):
-        for ncopies in (100, 1000, 10000):
+        if self.device_type == 'cpu':
+            sizes = (100, 1000, 10000)
+        elif self.device_type == 'cuda':
+            # On CUDA, stable sort is supported only when the size of
+            # the sorted dim is greater than 2048
+            sizes = (1025, 10000)
+        else:
+            return
+        for ncopies in sizes:
             x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=device)
             _, idx = x.sort(stable=True)
             self.assertEqual(
@@ -135,7 +147,60 @@ class TestSortAndSelect(TestCase):
                 torch.arange(start=1, end=2 * ncopies, step=2, device=device)
             )
 
+    @onlyCUDA
+    @dtypes(torch.uint8)
+    @largeTensorTest('200GB')  # Unfortunately 80GB A100 is not large enough
+    def test_sort_large(self, device, dtype):
+        t0 = torch.randperm(8192, device=device).to(dtype)
+        t = t0.view(1, 8192).expand(2 ** 18 + 1, -1).contiguous()
+        v, i = t.sort()
+        del t
+        iv, im = i.var_mean(dim=0)
+        del i
+        vv, vm = v.var_mean(dim=0)
+        del v
+        self.assertEqual(vv, torch.zeros_like(vv))
+        self.assertEqual(iv, torch.zeros_like(iv))
+        self.assertEqual(vm, torch.arange(255, dtype=dtype, device=device))
+        self.assertEqual(im, t0.sort().indices)
+
+    def _test_sort_discontiguous(self, device, dtype):
+        # on CUDA 2048 vs >2048 have different code path for the dim being sorted
+        sizes = (5, 7, 2049)
+        for shape in permutations(sizes):
+            for perm in permutations((0, 1, 2)):
+                for dim in range(3):
+                    t = torch.randn(shape, device=device, dtype=dtype).permute(perm)
+                    r1 = t.sort(dim=dim)
+                    r2 = t.contiguous().sort(dim=dim)
+                    self.assertEqual(r1, r2)
+                    n = t.size(dim)
+
+                    # assert ordered
+                    self.assertTrue((r1.values.narrow(dim, 1, n - 1) >= r1.values.narrow(dim, 0, n - 1)).all())
+
+                    # assert that different segments does not mix, which can easily happen
+                    # if the stride is not handled correctly
+                    self.assertTrue((t.unsqueeze(-1).transpose(dim, -1) == r1.values.unsqueeze(-1)).any(dim=dim).any(dim=-1).all())
+
+                    # assert stride is preserved
+                    if self.device_type == 'cuda' and n > 2048:
+                        # FIXME: this behavior should be true for all cases, not
+                        # just the one specified in if condition
+                        self.assertEqual(r1.values.stride(), t.stride())
+                        self.assertEqual(r1.indices.stride(), t.stride())
+
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_sort_discontiguous(self, device, dtype):
+        self._test_sort_discontiguous(device, dtype)
+
+    @slowTest  # this test is slow on CPU, but not on CUDA
     @onlyCPU
+    @dtypes(torch.float32)
+    def test_sort_discontiguous_slow(self, device, dtype):
+        self._test_sort_discontiguous(device, dtype)
+
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_stable_sort_against_numpy(self, device, dtype):
         if dtype in torch.testing.floating_types_and(torch.float16):
@@ -155,6 +220,16 @@ class TestSortAndSelect(TestCase):
 
         def generate_samples():
             from itertools import chain, combinations
+
+            for sizes in [(1025,), (10000,)]:
+                size = sizes[0]
+                # binary strings
+                yield (torch.tensor([0, 1] * size, dtype=dtype, device=device), 0)
+
+            if self.device_type == 'cuda':
+                return
+
+            yield (torch.tensor([0, 1] * 100, dtype=dtype, device=device), 0)
 
             def repeated_index_fill(t, dim, idxs, vals):
                 res = t
@@ -180,14 +255,9 @@ class TestSortAndSelect(TestCase):
                         idxs_subset, vals_subset = zip(*subset)
                         yield (repeated_index_fill(x, dim, idxs_subset, vals_subset), dim)
 
-            for sizes in [(100,), (1000,), (10000,)]:
-                size = sizes[0]
-                # binary strings
-                yield (torch.tensor([0, 1] * size, dtype=dtype, device=device), 0)
-
         for sample, dim in generate_samples():
             _, idx_torch = sample.sort(dim=dim, stable=True)
-            sample_numpy = sample.numpy()
+            sample_numpy = sample.cpu().numpy()
             idx_numpy = np.argsort(sample_numpy, axis=dim, kind='stable')
             self.assertEqual(idx_torch, idx_numpy)
 
