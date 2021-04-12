@@ -685,7 +685,7 @@ def sample_inputs_xlog1py(self, device, dtype, requires_grad):
 
     def generator():
         # same shape
-        yield SampleInput(make_arg((S, S)),args=(make_arg((S, S), low=-1),))
+        yield SampleInput(make_arg((S, S)), args=(make_arg((S, S), low=-1),))
         # rhs broadcast
         yield SampleInput(make_arg((S, S)), args=(make_arg((S,), low=-1),))
         # all zero `x`
