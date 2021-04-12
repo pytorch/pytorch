@@ -639,6 +639,65 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
 }
 
 // Replace prim::GetAttr and prim::SetAttr with ATen inplace operators.
+// Example graph:
+// clang-format off
+//  Before graph(%x.1 : Float(12, strides=[1], requires_grad=0, device=cpu)):
+//    %1 : __torch__.___torch_mangle_1.M = prim::CreateObject()
+//    ...
+//    %10 : Tensor = aten::arange(%6, %7, %7, %7, %7)
+//     = prim::SetAttr[name="_bias"](%1, %10)
+//     = prim::Loop(%5, %8)
+//      block0(%i.1 : int):
+//        %12 : bool = aten::eq(%i.1, %4)
+//         = prim::If(%12)
+//          block0():
+//             = prim::Loop(%3, %8)
+//              block0(%j : int):
+//                %14 : Tensor = prim::GetAttr[name="_bias"](%1)
+//                %15 : Tensor = aten::add_(%14, %2, %9)
+//                 = prim::SetAttr[name="_bias"](%1, %15)
+//                -> (%8)
+//            -> ()
+//          block1():
+//            %16 : Tensor = aten::arange(%6, %7, %7, %7, %7)
+//             = prim::SetAttr[name="_bias"](%1, %16)
+//            -> ()
+//        -> (%8)
+//    %17 : Tensor = prim::GetAttr[name="_bias"](%1)
+//    %18 : Tensor = aten::add(%17, %x.1, %9)
+//    return (%18)
+//
+//  After graph(%x.1 : Float(12, strides=[1], requires_grad=0, device=cpu)):
+//    %19 : Float(2, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value= 1  1 [ CPUFloatType{2} ]]()
+//    %1 : __torch__.___torch_mangle_1.M = prim::CreateObject()
+//    ...
+//    %10 : Tensor = aten::arange(%6, %7, %7, %7, %7)
+//    %26 : bool = prim::Constant[value=0]()
+//    %27 : Tensor?[] = prim::ListConstruct()
+//    %28 : Tensor = aten::index_put_(%19, %27, %10, %26)
+//     = prim::Loop(%5, %8)
+//      block0(%i.1 : int):
+//        %12 : bool = aten::eq(%i.1, %4)
+//         = prim::If(%12)
+//          block0():
+//             = prim::Loop(%3, %8)
+//              block0(%j : int):
+//                %15 : Tensor = aten::add_(%19, %2, %9)
+//                %23 : bool = prim::Constant[value=0]()
+//                %24 : Tensor?[] = prim::ListConstruct()
+//                %25 : Tensor = aten::index_put_(%19, %24, %15, %23)
+//                -> (%8)
+//            -> ()
+//          block1():
+//            %16 : Tensor = aten::arange(%6, %7, %7, %7, %7)
+//            %20 : bool = prim::Constant[value=0]()
+//            %21 : Tensor?[] = prim::ListConstruct()
+//            %22 : Tensor = aten::index_put_(%19, %21, %16, %20)
+//            -> ()
+//        -> (%8)
+//    %18 : Tensor = aten::add(%19, %x.1, %9)
+//    return (%18)
+// clang-format on
 void InplaceConverter::replaceAttrWithInplaceOps(
     Block* block,
     const std::unordered_map<std::string, Value*>& attr_name_value_map,
