@@ -326,8 +326,9 @@ void multinomial_with_replacement_kernel_impl(
     int numSM = props->multiProcessorCount;
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
-    int requiredShared = (numCategories < maxThreads ? numCategories + 1 : maxThreads)
-                         * sizeof(accscalar_t);
+    int requiredShared =
+        (numCategories < maxThreads ? min(2, numCategories) : maxThreads) *
+        sizeof(accscalar_t);
 
     if (n_sample == 1 && maxShared >= requiredShared) {
       // Optimized allocation-free implementation
