@@ -1523,10 +1523,16 @@ The ``enumerate`` statement:
 * Arguments must be iterables.
 * Iterable types in TorchScript include ``Tensors``, ``lists``, ``tuples``, ``dictionaries``, ``strings``, ``torch.nn.ModuleList`` and ``torch.nn.ModuleDict``.
 
+
+.. _python-values-torch-script:
+
+Python Values
+~~~~~~~~~~~~~
+
 .. _python-builtin-functions-values-resolution:
 
-Python Functions/Values Resolution Rules
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Resolution Rules
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 When given a Python value, TorchScript attempts to resolve it in following five different ways:
 
 * Compilable Python Implementation:
@@ -1551,7 +1557,7 @@ When given a Python value, TorchScript attempts to resolve it in following five 
 .. _python-builtin-functions-support:
 
 Python Builtin Functions Support
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 .. list-table:: TorchScript Support for Python Builtin Functions
    :widths: 25 25 50
    :header-rows: 1
@@ -1743,7 +1749,7 @@ Python Builtin Functions Support
 .. _python-builtin-values-support:
 
 Python Builtin Values Support
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 .. list-table:: TorchScript Support for Python Builtin Values
    :widths: 25 25 50
    :header-rows: 1
@@ -1766,3 +1772,100 @@ Python Builtin Values Support
    * - ``Ellipsis``
      - Full
      -
+
+
+.. _torch_apis_in_torchscript:
+
+``torch.*`` APIs Support in TorchScript
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. _torch_apis_in_torchscript_rpc:
+
+Remote Procedure Calls
+^^^^^^^^^^^^^^^^^^^^^^
+
+TorchScript supports a subset of RPC APIs that supports running a function on
+on a specified remote worker instead of locally.
+
+Specifically, following APIs are fully supported:
+
+- ``torch.distributed.rpc.rpc_sync()``
+    - ``rpc_sync()`` makes a blocking RPC call to run a function on remote worker. RPC messages are sent and received in parallel to execution of Python code.
+    - More deatils about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_sync`.
+
+- ``torch.distributed.rpc.rpc_async()``
+    - ``rpc_async()`` makes a non-blocking RPC call to run a function on remote worker. RPC messages are sent and received in parallel to execution of Python code.
+    - More deatils about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_async`.
+- ``torch.distributed.rpc.remote()``
+    - Executing a remote call on worker and getting a Remote Reference ``RRef`` as return value.
+    - More deatils about its usage and examples can be found in :meth:`~torch.distributed.rpc.rpc_async`.
+
+.. _torch_apis_in_torchscript_async:
+
+Asynchronous Execution
+^^^^^^^^^^^^^^^^^^^^^^
+
+TorchScript allows creating asynchronous computation tasks to make better use
+of computation resources. This is done via supporting a list of APIs that are
+only usable within TorchScript:
+
+- ``torch.jit.fork()``
+    - Creates an asynchronous task executing func and a reference to the value of the result of this execution. fork will return immediately.
+    - Synonymous to ``torch.jit._fork``, which is only kept for backward compatibility reasons.
+    - More deatils about its usage and examples can be found in :meth:`~torch.jit.fork`.
+- ``torch.jit.wait()``
+    - Forces completion of a ``torch.jit.Future[T]`` asynchronous task, returning the result of the task.
+    - Synonymous to ``torch.jit._wait``, which is only kept for backward compatibility reasons.
+    - More deatils about its usage and examples can be found in :meth:`~torch.jit.wait`.
+
+
+.. _torch_apis_in_torchscript_annotation:
+
+Type Annotations
+^^^^^^^^^^^^^^^^
+
+TorchScript is statically-typed, it provides and supports a set of utilities to help annotate variables and attributes.:
+
+- ``torch.jit.annotate()``
+    - Provides a type hint to TorchScript where Python 3 style type hints do not work well.
+    - One common example is to annotate type for expressions like ``[]``. ``[]`` is treated as ``List[torch.Tensor]`` by default, when a different type is needed, one can use following code to hint TorchScript: ``torch.jit.annotate(List[int], [])``.
+    - More details can be found in :meth:`~torch.jit.annotate`
+- ``torch.jit.Attribute``
+    - Common use cases include providing type hint for ``torch.nn.Module`` attributes. Because their ``__init__`` methods are not parsed by TorchScript, ``torch.jit.Attribute`` should be used instead of ``torch.jit.annotate`` in module's ``__init__`` methods.
+    - More details can be found in :meth:`~torch.jit.Attribute`
+- ``torch.jit.Final``
+    - An alias for Python's ``typing.Final``. ``torch.jit.Final`` is only kept for backward compatibility reasons.
+
+
+.. _torch_apis_in_torchscript_meta_programming:
+
+Meta Programming
+^^^^^^^^^^^^^^^^
+
+TorchScript provides a set of utilities to facilitate meta programming.
+
+- ``torch.jit.is_scripting()``
+    - Returns a boolean value indicating whether current program is compiled by ``torch.jit.script`` or not.
+    - When used in an ``assert`` or ``if`` statement, the scope or branch where ``torch.jit.is_scripting()`` evaluates to ``False`` is not compiled.
+    - Its value can be evaluated statically at compile time, thus commonly used in ``if`` statement to stop TorchScript from compiling one of the branches.
+    - More details and examples can be found in :meth:`~torch.jit.is_scripting`
+- ``@torch.jit.ignore``
+    - This decorator indicates to the compiler that a function or method should be ignored and left as a Python function.
+    - This allows you to leave code in your model that is not yet TorchScript compatible.
+    - If a function decorated by ``@torch.jit.ignore`` is called from TorchScript, ignored functions will dispatch the call to the Python interpreter.
+    - Models with ignored functions cannot be exported.
+    - More details and examples can be found in :meth:`~torch.jit.ignore`
+- ``@torch.jit.unused``
+    - This decorator indicates to the compiler that a function or method should be ignored and replaced with the raising of an exception.
+    - This allows you to leave code in your model that is not yet TorchScript compatible and still export your model.
+    - If a function decorated by ``@torch.jit.unused`` is called from TorchScript, a runtime error will be raised.
+    - More details and examples can be found in :meth:`~torch.jit.unused`
+
+.. _torch_apis_in_torchscript_type_refinement:
+
+Type Refinement
+^^^^^^^^^^^^^^^
+
+- ``torch.jit.isinstance()``
+    - Returns a boolean indicating whether a variable is of specified type.
+    - More deatils about its usage and examples can be found in :meth:`~torch.jit.isinstance`.

@@ -148,52 +148,41 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             args_exprs_str = ', '.join(a.name for a in args)
 
-            return_kw = "    return "
+            init_cuda = ""
+            device_guard = "// DeviceGuard omitted"  # default
 
-            cuda_guard = ""
-            if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
-                self_arg = [f.func.arguments.self_arg.argument] if f.func.arguments.self_arg is not None else []
-
-                # There is precedence for which argument we use to do
-                # device guard.  This describes the precedence order.
-                candidate_args = itertools.chain(
-                    self_arg,
-                    f.func.arguments.out,
-                    f.func.arguments.flat_positional
-                )
-
-                # Only tensor like arguments are eligible
-                device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
-
+            if (is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key)) and f.device_guard:
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
+                if has_tensor_options:
+                    # kernel is creating a tensor
+                    device_guard = "const DeviceGuard device_guard(device_or_default(device));"
 
-                cuda_guard_from_tensor_options = """\
-    const DeviceGuard device_guard(device_or_default(device));
-"""
-
-                # TODO: There is probably a simpler version of this that
-                # works just as well.
-                if f.device_guard and is_generic_dispatch_key(self.dispatch_key) and has_tensor_options:
-                    cuda_guard = cuda_guard_from_tensor_options
-                elif f.device_guard and is_cuda_dispatch_key(self.dispatch_key) and has_tensor_options:
-                    cuda_guard = f"""\
-    globalContext().lazyInitCUDA();
-    {cuda_guard_from_tensor_options}
-"""
-                elif f.device_guard and device_of is not None:
-                    cuda_guard = f"""\
-    const OptionalDeviceGuard device_guard(device_of({device_of}));
-"""
+                    if is_cuda_dispatch_key(self.dispatch_key):
+                        # initialize CUDA on construction of CUDA tensors
+                        init_cuda = "globalContext().lazyInitCUDA();\n"
                 else:
-                    cuda_guard = """\
-    // DeviceGuard omitted
-"""
+                    # kernel is operating on existing tensors
+
+                    # There is precedence for which argument we use to do
+                    # device guard.  This describes the precedence order.
+                    self_arg = [f.func.arguments.self_arg.argument] if f.func.arguments.self_arg is not None else []
+                    candidate_args = itertools.chain(
+                        self_arg,
+                        f.func.arguments.out,
+                        f.func.arguments.flat_positional
+                    )
+
+                    # Only tensor like arguments are eligible
+                    device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
+                    if device_of is not None:
+                        device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
 
             return f"""\
 namespace {{
 
 {returns_type} {name}({args_str}) {{
-{cuda_guard}{return_kw}{impl_name}({args_exprs_str});
+  {init_cuda}{device_guard}
+  return {impl_name}({args_exprs_str});
 }}
 
 }} // anonymous namespace
@@ -293,8 +282,15 @@ if (strides.empty()) {{
                 # We can add one in if for the perf if we need to. But it'll be easier when external backends
                 # have access to meta functions, and we can write one for resize_.
                 resize_impl = "resize_output"
+            # TODO: Provide a way of bypassing the tests here, if the meta
+            # function consulted maybe_get_output()
             return f"""
 {maybe_set_guard}
+const auto& out = outputs_[output_idx].get();
+TORCH_CHECK(options.dtype() == out.dtype(),
+    "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
+TORCH_CHECK(options.device() == out.device(),
+    "Expected out tensor to have device ", options.device(), ", but got ", out.device(), " instead");
 bool resized = at::native::{resize_impl}(outputs_[output_idx], sizes);
 // Only restride if a resize occurred; otherwise we ignore the (advisory)
 // strides from the meta function and directly use the output tensor's

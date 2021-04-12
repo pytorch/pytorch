@@ -10,14 +10,12 @@ class WindowsJob:
         vscode_spec,
         cuda_version,
         force_on_cpu=False,
-        multi_gpu=False,
         master_only_pred=lambda job: job.vscode_spec.year != 2019,
     ):
         self.test_index = test_index
         self.vscode_spec = vscode_spec
         self.cuda_version = cuda_version
         self.force_on_cpu = force_on_cpu
-        self.multi_gpu = multi_gpu
         self.master_only_pred = master_only_pred
 
     def gen_tree(self):
@@ -27,10 +25,7 @@ class WindowsJob:
             base_phase if self.test_index is None else base_phase + str(self.test_index)
         )
 
-        key_parts = ["pytorch", "windows", base_phase]
-        if self.multi_gpu:
-            key_parts.append('multigpu')
-        key_name = "_".join(key_parts)
+        key_name = "_".join(["pytorch", "windows", base_phase])
 
         cpu_forcing_name_parts = ["on", "cpu"] if self.force_on_cpu else []
 
@@ -66,18 +61,15 @@ class WindowsJob:
 
         is_running_on_cuda = bool(self.cuda_version) and not self.force_on_cpu
 
-        if self.multi_gpu:
-            props_dict = {"requires": prerequisite_jobs}
-        else:
-            props_dict = {
-                "build_environment": build_environment_string,
-                "python_version": miniutils.quote("3.6"),
-                "vc_version": miniutils.quote(self.vscode_spec.dotted_version()),
-                "vc_year": miniutils.quote(str(self.vscode_spec.year)),
-                "vc_product": self.vscode_spec.get_product(),
-                "use_cuda": miniutils.quote(str(int(is_running_on_cuda))),
-                "requires": prerequisite_jobs,
-            }
+        props_dict = {
+            "build_environment": build_environment_string,
+            "python_version": miniutils.quote("3.6"),
+            "vc_version": miniutils.quote(self.vscode_spec.dotted_version()),
+            "vc_year": miniutils.quote(str(self.vscode_spec.year)),
+            "vc_product": self.vscode_spec.get_product(),
+            "use_cuda": miniutils.quote(str(int(is_running_on_cuda))),
+            "requires": prerequisite_jobs,
+        }
 
         if self.master_only_pred(self):
             props_dict[
@@ -86,19 +78,18 @@ class WindowsJob:
 
         name_parts = base_name_parts + cpu_forcing_name_parts + [numbered_phase]
 
-        if not self.multi_gpu:
-            if base_phase == "test":
-                test_name = "-".join(["pytorch", "windows", numbered_phase])
-                props_dict["test_name"] = test_name
+        if base_phase == "test":
+            test_name = "-".join(["pytorch", "windows", numbered_phase])
+            props_dict["test_name"] = test_name
 
-                if is_running_on_cuda:
-                    props_dict["executor"] = "windows-with-nvidia-gpu"
+            if is_running_on_cuda:
+                props_dict["executor"] = "windows-with-nvidia-gpu"
 
-            props_dict["cuda_version"] = (
-                miniutils.quote(str(self.cuda_version))
-                if self.cuda_version
-                else "cpu"
-            )
+        props_dict["cuda_version"] = (
+            miniutils.quote(str(self.cuda_version))
+            if self.cuda_version
+            else "cpu"
+        )
 
         props_dict["name"] = "_".join(name_parts)
 
@@ -141,7 +132,6 @@ WORKFLOW_DATA = [
     WindowsJob(None, _VC2019, CudaVersion(10, 1)),
     WindowsJob(1, _VC2019, CudaVersion(10, 1)),
     WindowsJob(2, _VC2019, CudaVersion(10, 1)),
-    WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(10, 1), multi_gpu=True),
     # VS2019 CUDA-11.1
     WindowsJob(None, _VC2019, CudaVersion(11, 1)),
     WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),

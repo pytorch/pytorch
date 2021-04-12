@@ -11,7 +11,10 @@ target_link_libraries(torchbind_test torch)
 add_library(jitbackend_test SHARED ${JIT_TEST_ROOT}/test_backend_lib.cpp)
 target_link_libraries(jitbackend_test torch)
 
-add_library(backend_with_compiler SHARED ${JIT_TEST_ROOT}/test_backend_compiler_lib.cpp)
+add_library(backend_with_compiler SHARED
+        ${JIT_TEST_ROOT}/test_backend_compiler_lib.cpp
+        ${JIT_TEST_ROOT}/test_backend_compiler_preprocess.cpp
+        )
 target_link_libraries(backend_with_compiler torch)
 
 if(INSTALL_TEST)
