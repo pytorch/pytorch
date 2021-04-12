@@ -1,7 +1,9 @@
 import collections.abc
 import functools
 import sys
+from collections import namedtuple
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type, TypeVar, Union, cast
+
 import torch
 from torch import Tensor
 
@@ -156,22 +158,44 @@ def _equalize_attributes(a: Tensor, b: Tensor) -> Tuple[Tensor, Tensor]:
     return a, b
 
 
-def _trace_mismatches(a: Tensor, b: Tensor, mismatches: Tensor) -> str:
-    """Traces mismatches.
+_Trace = namedtuple(
+    "Trace",
+    (
+        "total_elements",
+        "total_mismatches",
+        "mismatch_ratio",
+        "max_abs_diff",
+        "max_abs_diff_idx",
+        "max_rel_diff",
+        "max_rel_diff_idx",
+    ),
+)
+
+
+def _trace_mismatches(a: torch.Tensor, b: torch.Tensor, mismatches: torch.Tensor) -> _Trace:
+    """Traces mismatches and returns the found information.
+
+    The returned named tuple has the following fields:
+    - total_elements (int): Total number of values.
+    - total_mismatches (int): Total number of mismatches.
+    - mismatch_ratio (float): Quotient of total mismatches and total elements.
+    - max_abs_diff (Union[int, float]): Greatest absolute difference of :attr:`a` and :attr:`b`.
+    - max_abs_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
+    - max_rel_diff (Union[int, float]): Greatest relative difference of :attr:`a` and :attr:`b`.
+    - max_rel_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
+
+    For ``max_abs_diff`` and ``max_rel_diff`` the returned type depends on the :attr:`~torch.Tensor.dtype` of
+    :attr:`a` and :attr:`b`.
 
     Args:
         a (Tensor): First tensor.
         b (Tensor): Second tensor.
         mismatches (Tensor): Boolean mask of the same shape as :attr:`a` and :attr:`b` that indicates the
             location of mismatches.
-
-    Returns:
-        (str): Multiline list comprising the absolute and relative number of mismatches, and the maximum absolute and
-            relative difference with the corresponding index.
     """
     total_elements = mismatches.numel()
-    abs_mismatches = torch.sum(mismatches).item()
-    rel_mismatches = abs_mismatches / total_elements
+    total_mismatches = torch.sum(mismatches).item()
+    mismatch_ratio = total_mismatches / total_elements
 
     dtype = torch.float64 if a.dtype.is_floating_point else torch.int64
     a_flat = a.flatten().to(dtype)
@@ -183,10 +207,14 @@ def _trace_mismatches(a: Tensor, b: Tensor, mismatches: Tensor) -> str:
     rel_diff = abs_diff / torch.abs(b_flat)
     max_rel_diff, max_rel_diff_flat_idx = torch.max(rel_diff, 0)
 
-    return (
-        f"Mismatched elements: {abs_mismatches} / {total_elements} ({rel_mismatches:.1%})\n"
-        f"Max. abs. diff.: {max_abs_diff.item()} at {_unravel_index(max_abs_diff_flat_idx.item(), mismatches.shape)}\n"
-        f"Max. rel. diff.: {max_rel_diff.item()} at {_unravel_index(max_rel_diff_flat_idx.item(), mismatches.shape)}"
+    return _Trace(
+        total_elements=total_elements,
+        total_mismatches=total_mismatches,
+        mismatch_ratio=mismatch_ratio,
+        max_abs_diff=max_abs_diff.item(),
+        max_abs_diff_idx=_unravel_index(max_abs_diff_flat_idx.item(), mismatches.shape),
+        max_rel_diff=max_rel_diff.item(),
+        max_rel_diff_idx=_unravel_index(max_rel_diff_flat_idx.item(), mismatches.shape),
     )
 
 
@@ -204,7 +232,13 @@ def _check_values_equal(a: Tensor, b: Tensor) -> Optional[AssertionError]:
     if not torch.any(mismatches):
         return None
 
-    return AssertionError(f"Tensors are not equal:\n\n{_trace_mismatches(a, b, mismatches)}")
+    trace = _trace_mismatches(a, b, mismatches)
+    return AssertionError(
+        f"Tensors are not equal!\n\n"
+        f"Mismatched elements: {trace.total_mismatches} / {trace.total_elements} ({trace.mismatch_ratio:.1%})\n"
+        f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx}\n"
+        f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx}"
+    )
 
 
 def _check_values_close(
@@ -229,8 +263,12 @@ def _check_values_close(
     if not torch.any(mismatches):
         return None
 
+    trace = _trace_mismatches(a, b, mismatches)
     return AssertionError(
-        f"Tensors are not close according to rtol={rtol} and ator={atol}:\n\n{_trace_mismatches(a, b, mismatches)}"
+        f"Tensors are not close!\n\n"
+        f"Mismatched elements: {trace.total_mismatches} / {trace.total_elements} ({trace.mismatch_ratio:.1%})\n"
+        f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx} (up to {atol} allowed)\n"
+        f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx} (up to {rtol} allowed)"
     )
 
 
