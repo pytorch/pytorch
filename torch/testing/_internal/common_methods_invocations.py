@@ -1777,23 +1777,23 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
     if dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
         test_cases = (
             ((2, 2), 0, 5, 1e-3, requires_grad, (2, 2), 0, 1, 0.1, requires_grad),
-            ((2, 2), 0, 5, 1e-3, requires_grad (1,), 0, 1, 0.1, requires_grad),
+            ((2, 2), 0, 5, 1e-3, requires_grad, (1,), 0, 1, 0.1, requires_grad),
             ((), 1e-3, 1e-3 + 1, 0, True, (), 0.1, 1.1, 0, False),
             ((2, 2), 0, 5, 1e-3, requires_grad, (), 0.1, 1.1, 1, False),
         )
         tests_require_resizing = (
-            ((1,), 0, 5, 1e-3, requires_grad (2, 2), 0, 1, 0.1, requires_grad),
+            ((1,), 0, 5, 1e-3, requires_grad, (2, 2), 0, 1, 0.1, requires_grad),
             ((2, 1, 2), 0, 5, 1e-3, requires_grad, (1, 2, 1), 0, 1, 0.1, requires_grad),
             ((), 1e-3, 1e-3 + 1, 0, True, (1, S, 1), 0, 1, 0.1, requires_grad),
         )
         cases = test_cases if for_inplace_variant else (test_cases + tests_require_resizing)
         samples = list(SampleInput(make_tensor(shape_b, low=low_b, high=high_b,
-                                                    requires_grad=b_grad, device=device,
-                                                    dtype=dtype) + additive_b,
-                                        args=(make_tensor(shape_e, low=low_e, high=high_e,
-                                                          requires_grad=e_grad, device=device,
-                                                          dtype=dtype) + additive_e,))
-                            for shape_b, low_b, high_b, additive_b, b_grad, shape_e, low_e,
+                                               requires_grad=b_grad, device=device,
+                                               dtype=dtype) + additive_b,
+                                   args=(make_tensor(shape_e, low=low_e, high=high_e,
+                                                     requires_grad=e_grad, device=device,
+                                                     dtype=dtype) + additive_e,))
+                       for shape_b, low_b, high_b, additive_b, b_grad, shape_e, low_e,
                             high_e, additive_e, e_grad in cases)
         tensor_scalar_inputs = (
             ((2, 2), 0, 5, 1e-3, requires_grad, (3.14,)),
