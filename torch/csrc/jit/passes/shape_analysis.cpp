@@ -2181,8 +2181,9 @@ TypePtr unshapedTypeImpl(TypePtr type, TypeCache& unshaped_type_cache) {
     return TensorType::get();
   }
   std::vector<TypePtr> unshaped_contained_types;
-  for (const auto& type: type->containedTypes()) {
-    unshaped_contained_types.push_back(getOrCreateUnshapedType(type, unshaped_type_cache));
+  for (const auto& type : type->containedTypes()) {
+    unshaped_contained_types.push_back(
+        getOrCreateUnshapedType(type, unshaped_type_cache));
   }
   return type->withContained(unshaped_contained_types);
 }
@@ -2197,7 +2198,9 @@ TypePtr getOrCreateUnshapedType(TypePtr type, TypeCache& unshaped_type_cache) {
   return unshaped_type;
 }
 
-void EraseShapeInformation(const std::shared_ptr<Graph>& graph, TypeCache& unshaped_type_cache);
+void EraseShapeInformation(
+    const std::shared_ptr<Graph>& graph,
+    TypeCache& unshaped_type_cache);
 
 void EraseShapeInformation(at::ArrayRef<Value*> vals, TypeCache& cache) {
   for (Value* v : vals) {
@@ -2219,7 +2222,9 @@ void EraseShapeInformation(Block* b, TypeCache& cache) {
   }
 }
 
-void EraseShapeInformation(const std::shared_ptr<Graph>& graph, TypeCache& unshaped_type_cache) {
+void EraseShapeInformation(
+    const std::shared_ptr<Graph>& graph,
+    TypeCache& unshaped_type_cache) {
   EraseShapeInformation(graph->block(), unshaped_type_cache);
 }
 
