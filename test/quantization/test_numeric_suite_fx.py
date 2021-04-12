@@ -49,7 +49,7 @@ from torch.quantization._numeric_suite_fx import (
 class LinearReluFunctional(nn.Module):
     def __init__(self):
         super().__init__()
-        self.w1 = nn.Parameter(torch.Tensor(4, 4))
+        self.w1 = nn.Parameter(torch.empty(4, 4))
         self.b1 = nn.Parameter(torch.zeros(4))
         torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
 
@@ -82,7 +82,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w = nn.Parameter(torch.Tensor(1, 4))
+                self.w = nn.Parameter(torch.empty(1, 4))
                 self.b = nn.Parameter(torch.zeros(1))
                 torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
@@ -461,7 +461,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w = nn.Parameter(torch.Tensor(4, 4))
+                self.w = nn.Parameter(torch.empty(4, 4))
                 self.b = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
@@ -537,9 +537,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w1 = nn.Parameter(torch.Tensor(4, 4))
+                self.w1 = nn.Parameter(torch.empty(4, 4))
                 self.b1 = nn.Parameter(torch.zeros(4))
-                self.w2 = nn.Parameter(torch.Tensor(4, 4))
+                self.w2 = nn.Parameter(torch.empty(4, 4))
                 self.b2 = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
                 torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
@@ -573,9 +573,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w1 = nn.Parameter(torch.Tensor(4, 4))
+                self.w1 = nn.Parameter(torch.empty(4, 4))
                 self.b1 = nn.Parameter(torch.zeros(4))
-                self.w2 = nn.Parameter(torch.Tensor(4, 4))
+                self.w2 = nn.Parameter(torch.empty(4, 4))
                 self.b2 = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
                 torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
