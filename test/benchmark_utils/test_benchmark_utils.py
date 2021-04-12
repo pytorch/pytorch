@@ -168,6 +168,17 @@ class TestBenchmarkUtils(TestCase):
 
     @slowTest
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    def test_timer_tiny_fast_snippet(self):
+        timer = benchmark_utils.Timer(
+            'auto x = 1;',
+            timer=timeit.default_timer,
+            language=benchmark_utils.Language.CPP,
+        )
+        median = timer.blocked_autorange().median
+        self.assertIsInstance(median, float)
+
+    @slowTest
+    @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
     def test_cpp_timer(self):
         timer = benchmark_utils.Timer(
             """
@@ -979,7 +990,7 @@ class TestBenchmarkUtils(TestCase):
         for i, (tensors, _, _) in enumerate(fuzzer.take(2)):
             x = tensors["x"]
             self.assertEqual(
-                x, torch.Tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
+                x, torch.tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
 
 
 if __name__ == '__main__':

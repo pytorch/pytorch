@@ -1,8 +1,9 @@
 
-import time
-from functools import partial, wraps
 import re
 import sys
+import time
+from functools import partial, wraps
+from typing import Tuple
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -37,7 +38,7 @@ def single_threaded_process_group_agent(f):
     return wrapper
 
 
-def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
+def dist_init(old_test_method=None, setup_rpc: bool = True, clean_shutdown: bool = True,
               faulty_messages=None, messages_to_delay=None):
     """
     We use this decorator for setting up and tearing down state since
@@ -97,10 +98,10 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
     return new_test_method
 
 
-def noop():
+def noop() -> None:
     pass
 
-def wait_until_node_failure(rank, expected_error_regex=".*"):
+def wait_until_node_failure(rank: int, expected_error_regex: str = ".*") -> str:
     '''
     Loops until an RPC to the given rank fails. This is used to
     indicate that the node has failed in unit tests.
@@ -118,7 +119,7 @@ def wait_until_node_failure(rank, expected_error_regex=".*"):
                 return str(e)
 
 
-def wait_until_pending_futures_and_users_flushed(timeout=20):
+def wait_until_pending_futures_and_users_flushed(timeout: int = 20) -> None:
     '''
     The RRef protocol holds forkIds of rrefs in a map until those forks are
     confirmed by the owner. The message confirming the fork may arrive after
@@ -145,7 +146,7 @@ def wait_until_pending_futures_and_users_flushed(timeout=20):
             )
 
 
-def get_num_owners_and_forks():
+def get_num_owners_and_forks() -> Tuple[str, str]:
     """
     Retrieves number of OwnerRRefs and forks on this node from
     _rref_context_get_debug_info.
@@ -156,7 +157,7 @@ def get_num_owners_and_forks():
     return num_owners, num_forks
 
 
-def wait_until_owners_and_forks_on_rank(num_owners, num_forks, rank, timeout=20):
+def wait_until_owners_and_forks_on_rank(num_owners: int, num_forks: int, rank: int, timeout: int = 20) -> None:
     """
     Waits until timeout for num_forks and num_owners to exist on the rank. Used
     to ensure proper deletion of RRefs in tests.
@@ -179,7 +180,7 @@ def wait_until_owners_and_forks_on_rank(num_owners, num_forks, rank, timeout=20)
             )
 
 
-def initialize_pg(init_method, rank, world_size):
+def initialize_pg(init_method, rank: int, world_size: int) -> None:
     # This is for tests using `dist.barrier`.
     # For `RpcAgent` other than `ProcessGroupAgent`,
     # no `_default_pg` is initialized.
@@ -191,7 +192,7 @@ def initialize_pg(init_method, rank, world_size):
             world_size=world_size,
         )
 
-def worker_name(rank):
+def worker_name(rank: int) -> str:
     return "worker{}".format(rank)
 
 def get_function_event(function_events, partial_event_name):

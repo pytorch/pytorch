@@ -62,8 +62,6 @@ std::vector<const Expr*> AccessInfo::getIndices() const {
   if (expr_) {
     if (auto* load = dynamic_cast<const Load*>(expr_)) {
       indices = load->indices();
-    } else if (auto* call = dynamic_cast<const FunctionCall*>(expr_)) {
-      indices = call->params();
     }
   } else {
     if (auto* store = dynamic_cast<const Store*>(stmt_)) {
@@ -574,47 +572,6 @@ void MemDependencyChecker::visit(const Load* v) {
   auto& writeHistory = currentScope_->openWrites_[var];
   updateWriteHistory(writeHistory, load, load->id());
   currentScope_->accesses_.push_back(load);
-}
-
-void MemDependencyChecker::visit(const FunctionCall* v) {
-  // This is essentially the same as Load.
-  auto paramScope =
-      std::make_shared<Scope>(currentScope_->block, currentScope_);
-  currentScope_ = paramScope;
-
-  for (const Expr* param : v->params()) {
-    param->accept(this);
-  }
-
-  const Var* var = v->tensor()->buf()->base_handle();
-  auto call = std::make_shared<AccessInfo>(
-      nextAccess_++,
-      AccessType::Call,
-      v,
-      lastStmt_,
-      var,
-      getIndicesBounds(v->params()));
-
-  // If there were loads in the parameters, this call depends on them, also
-  // merge.
-  if (!paramScope->accesses_.empty()) {
-    for (auto& access : paramScope->accesses_) {
-      call->addDependency(access);
-      access->addDependent(call);
-    }
-    mergeScope(paramScope, paramScope->parent, false);
-  }
-
-  currentScope_ = paramScope->parent;
-
-  stmtToAccess_.emplace(lastStmt_, call);
-  exprToAccess_.emplace(v, call);
-
-  // Intentionally using operator[], we want it to be created if it does not
-  // exist.
-  auto& writeHistory = currentScope_->openWrites_[var];
-  updateWriteHistory(writeHistory, call, call->id());
-  currentScope_->accesses_.push_back(call);
 }
 
 // This check determines if two accesses within a loop are "safe" from loop-self
