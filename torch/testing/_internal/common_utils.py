@@ -23,6 +23,8 @@ import warnings
 import random
 import contextlib
 import shutil
+import datetime
+import pathlib
 import socket
 import subprocess
 import time
@@ -42,10 +44,10 @@ from typing import cast, Any, Dict, Iterable, Iterator, Optional
 
 import numpy as np
 
+from torch.testing import floating_types_and, integral_types, complex_types
 from torch.testing._internal import expecttest
-from torch.testing import \
-    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type,
-     floating_types_and, integral_types, complex_types)
+from .._core import \
+    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
 
 import torch
 import torch.cuda
@@ -816,6 +818,55 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
+
+FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
+
+def fetch_and_cache(name: str, url: str):
+    """
+    Some tests run in a different process so globals like `slow_test_dict` won't
+    always be filled even though the test file was already downloaded on this
+    machine, so cache it on disk
+    """
+    path = os.path.join(tempfile.gettempdir(), name)
+
+    def is_cached_file_valid():
+        # Check if the file is new enough (say 1 hour for now). A real check
+        # could make a HEAD request and check/store the file's ETag
+        fname = pathlib.Path(path)
+        now = datetime.datetime.now()
+        mtime = datetime.datetime.fromtimestamp(fname.stat().st_mtime)
+        diff = now - mtime
+        return diff.total_seconds() < FILE_CACHE_LIFESPAN_SECONDS
+
+    if os.path.exists(path) and is_cached_file_valid():
+        # Another test process already downloaded the file, so don't re-do it
+        with open(path, "r") as f:
+            return json.load(f)
+    try:
+        contents = urlopen(url, timeout=1).read().decode('utf-8')
+        with open(path, "w") as f:
+            f.write(contents)
+        return json.loads(contents)
+    except Exception as e:
+        print(f'Could not download {url} because of error {e}.')
+        return {}
+
+
+slow_tests_dict: Optional[Dict[str, float]] = None
+def check_slow_test_from_stats(test):
+    global slow_tests_dict
+    if slow_tests_dict is None:
+        url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
+        slow_tests_dict = fetch_and_cache(".pytorch-slow-tests", url)
+    test_suite = str(test.__class__).split('\'')[1]
+    test_name = f'{test._testMethodName} ({test_suite})'
+
+    if test_name in slow_tests_dict:
+        getattr(test, test._testMethodName).__dict__['slow_test'] = True
+        if not TEST_WITH_SLOW:
+            raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+
+
 disabled_test_from_issues: Optional[Dict[str, Any]] = None
 def check_disabled(test_name):
     global disabled_test_from_issues
@@ -823,9 +874,9 @@ def check_disabled(test_name):
         _disabled_test_from_issues: Dict = {}
 
         def read_and_process():
-            url = 'https://raw.githubusercontent.com/zdevito/pytorch_disabled_tests/master/result.json'
+            url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/disabled-tests.json'
             contents = urlopen(url, timeout=1).read().decode('utf-8')
-            the_response = json.loads(contents)
+            the_response = fetch_and_cache(".pytorch-disabled-tests", url)
             for item in the_response['items']:
                 title = item['title']
                 key = 'DISABLED '
@@ -990,7 +1041,7 @@ class TestCase(expecttest.TestCase):
 
     def setUp(self):
 
-
+        check_slow_test_from_stats(self)
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
@@ -998,20 +1049,20 @@ class TestCase(expecttest.TestCase):
 
         set_rng_seed(SEED)
 
-    def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
+    def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
         # empty numel, but nnz > 0 makes the indices containing values.
         assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
 
         v_size = [nnz] + list(size[sparse_dim:])
-        v = torch.randn(*v_size, device=device)
+        v = make_tensor(v_size, device=device, dtype=dtype, low=-1, high=1)
         i = torch.rand(sparse_dim, nnz, device=device)
         i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
         i = i.to(torch.long)
         if is_uncoalesced:
             v = torch.cat([v, torch.randn_like(v)], 0)
             i = torch.cat([i, i], 1)
-        x = torch.sparse_coo_tensor(i, v, torch.Size(size))
+        x = torch.sparse_coo_tensor(i, v, torch.Size(size), dtype=dtype, device=device)
 
         if not is_uncoalesced:
             x = x.coalesce()
@@ -1612,9 +1663,8 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 
 # Methods for matrix and tensor generation
 
-# Used in test_autograd.py and test_torch.py
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
-                requires_grad: bool = False, discontiguous: bool = False) -> torch.Tensor:
+                requires_grad: bool = False, noncontiguous: bool = False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
         By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
@@ -1623,9 +1673,9 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         For unsigned types the values are in the range[0, 9] and for complex types the real and imaginary
         parts are each in the range [-9, 9].
 
-        If discontiguous=True, a discontiguous tensor with the given size will be returned unless the size
-        specifies a tensor with a 1 or 0 elements in which case the discontiguous parameter is ignored because
-        it is not possible to create a discontiguous Tensor with a single element.
+        If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
+        specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
+        it is not possible to create a noncontiguous Tensor with a single element.
     """
 
     assert low is None or low < 9, "low value too high!"
@@ -1660,7 +1710,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
         result = torch.complex(real, imag)
 
-    if discontiguous and result.numel() > 1:
+    if noncontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
 
@@ -1703,6 +1753,7 @@ def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001)
         .sort(-1, descending=True).values.to(dtype)
     return (u * s.unsqueeze(-2)) @ v.transpose(-2, -1).conj()
 
+# TODO: remove this (prefer make_symmetric_matrices below)
 def random_symmetric_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
@@ -1710,6 +1761,13 @@ def random_symmetric_matrix(l, *batches, **kwargs):
     A = (A + A.transpose(-2, -1)).div_(2)
     return A
 
+# Creates a symmetric matrix or batch of symmetric matrices
+# Shape must be a square matrix or batch of square matrices
+def make_symmetric_matrices(*shape, device, dtype):
+    assert shape[-1] == shape[-2]
+    t = make_tensor(shape, device=device, dtype=dtype)
+    t = t + t.transpose(-2, -1).div_(2)
+    return t
 
 def random_hermitian_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
@@ -1737,6 +1795,7 @@ def random_hermitian_psd_matrix(matrix_size, *batch_dims, dtype=torch.double, de
     return torch.matmul(A, A.conj().transpose(-2, -1))
 
 
+# TODO: remove this (prefer make_symmetric_pd_matrices below)
 def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
@@ -1745,6 +1804,15 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
     return torch.matmul(A, A.transpose(-2, -1)) \
         + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
 
+
+# Creates a symmetric positive-definite matrix or batch of
+#   such matrices
+def make_symmetric_pd_matrices(*shape, device, dtype):
+    assert shape[-1] == shape[-2]
+    t = make_tensor(shape, device=device, dtype=dtype)
+    t = torch.matmul(t, t.transpose(-2, -1))
+    i = torch.eye(shape[-1], device=device, dtype=dtype) * 1e-5
+    return t + i
 
 def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     """
@@ -1759,24 +1827,7 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
         + torch.eye(matrix_size, dtype=dtype, device=device)
 
 
-def make_nonzero_det(A, sign=None, min_singular_value=0.1):
-    u, s, v = A.svd()
-    s.clamp_(min=min_singular_value)
-    A = torch.matmul(u, torch.matmul(torch.diag_embed(s), v.transpose(-2, -1)))
-    det = A.det()
-    if sign is not None:
-        if A.dim() == 2:
-            det = det.item()
-            if (det < 0) ^ (sign < 0):
-                A[0, :].neg_()
-        else:
-            cond = ((det < 0) ^ (sign < 0)).nonzero()
-            if cond.size(0) > 0:
-                for i in range(cond.size(0)):
-                    A[list(cond[i])][0, :].neg_()
-    return A
-
-
+# TODO: remove this (prefer make_fullrank_matrices_with_distinct_singular_values below)
 def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
                                                    **kwargs):
     dtype = kwargs.get('dtype', torch.double)
@@ -1790,6 +1841,20 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
     real_dtype = A.real.dtype if A.dtype.is_complex else A.dtype
     s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
     return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).to(A.dtype).matmul(v.transpose(-2, -1)))
+
+
+# Creates a full rank matrix with distinct signular values or
+#   a batch of such matrices
+# Shape must be a square matrix or batch of square matrices
+def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype):
+    assert shape[-1] == shape[-2]
+    t = make_tensor(shape, device=device, dtype=dtype)
+    u, _, v = t.svd()
+    # TODO: improve the handling of complex tensors here
+    real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
+    s = torch.arange(1., shape[-1] + 1, dtype=real_dtype, device=device).mul_(1.0 / (shape[-1] + 1)).diag()
+    u.matmul(s.expand(*shape).to(t.dtype).matmul(v.transpose(-2, -1)))
+    return t
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
@@ -2115,3 +2180,12 @@ def _wrap_warn_once(regex):
                 fn(self, *args, **kwargs)
         return inner
     return decorator
+
+# This is a wrapper that wraps a test to run this test twice, one with
+# coalesced=True, another with coalesced=False for coalesced/uncoalesced sparse tensors.
+def coalescedonoff(f):
+    @wraps(f)
+    def wrapped(self, *args, **kwargs):
+        f(self, *args, **kwargs, coalesced=True)
+        f(self, *args, **kwargs, coalesced=False)
+    return wrapped
