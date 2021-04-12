@@ -57,7 +57,8 @@ class RendezvousHandler(ABC):
         rendezvous was marked closed.
 
         Returns:
-            A tuple of C10d `Store`, `rank`, and `world size`.
+            A tuple of :py:class:`torch.distributed.Store`, ``rank``, and
+            ``world size``.
 
         Raises:
             RendezvousClosedError:
@@ -77,10 +78,11 @@ class RendezvousHandler(ABC):
         A closed rendezvous means all future attempts to re-rendezvous within
         same job will fail.
 
-        `is_closed()` and `set_closed()` have semantics of eventual propagation
-        and should not be used for synchronization. The intention is that if at
-        least one node decides the job is finished, it will close the rendezvous
-        and other nodes will soon observe this and stop running as well.
+        ``is_closed()`` and :py:meth:`set_closed` have semantics of eventual
+        propagation and should not be used for synchronization. The intention is
+        that if at least one node decides the job is finished, it will close the
+        rendezvous, and other nodes will soon observe this and stop running as
+        well.
         """
 
     @abstractmethod
@@ -94,7 +96,7 @@ class RendezvousHandler(ABC):
 
         Callers should periodically call this method to check whether new
         nodes are waiting to join the job and if so admit them by calling
-        `next_rendezvous()` (re-rendezvous).
+        :py:meth:`next_rendezvous()` (re-rendezvous).
         """
 
     @abstractmethod
@@ -109,7 +111,8 @@ class RendezvousHandler(ABC):
     def shutdown(self) -> bool:
         """Closes all resources that were open for the rendezvous.
 
-        Example:
+        Example::
+
             rdzv_handler = ...
             try:
                 store, rank, world_size = rdzv_handler.next_rendezvous()
@@ -119,7 +122,7 @@ class RendezvousHandler(ABC):
 
 
 class RendezvousParameters:
-    """Holds the parameters to construct a `RendezvousHandler`.
+    """Holds the parameters to construct a :py:class:`RendezvousHandler`.
 
     Args:
         backend:
@@ -166,11 +169,11 @@ class RendezvousParameters:
         self.config = kwargs
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Returns the value for `key` if `key` exists, else `default`."""
+        """Returns the value for ``key`` if ``key`` exists, else ``default``."""
         return self.config.get(key, default)
 
     def get_as_bool(self, key: str, default: Optional[bool] = None) -> Optional[bool]:
-        """Returns the value for `key` as a `bool`."""
+        """Returns the value for ``key`` as a ``bool``."""
         value = self.get(key, default)
         if value is None or isinstance(value, bool):
             return value
@@ -189,7 +192,7 @@ class RendezvousParameters:
         )
 
     def get_as_int(self, key: str, default: Optional[int] = None) -> Optional[int]:
-        """Returns the value for `key` as an `int`."""
+        """Returns the value for ``key`` as an ``int``."""
         value = self.get(key, default)
         if value is None:
             return value
@@ -206,7 +209,7 @@ RendezvousHandlerCreator = Callable[[RendezvousParameters], RendezvousHandler]
 
 
 class RendezvousHandlerRegistry:
-    """Represents a registry of `RendezvousHandler` backends."""
+    """Represents a registry of :py:class:`RendezvousHandler` backends."""
 
     _registry: Dict[str, RendezvousHandlerCreator]
 
@@ -220,7 +223,8 @@ class RendezvousHandlerRegistry:
             backend:
                 The name of the backend.
             creater:
-                The callback to invoke to construct the `RendezvousHandler`.
+                The callback to invoke to construct the
+                :py:class:`RendezvousHandler`.
         """
         if not backend:
             raise ValueError("The rendezvous backend name must be a non-empty string.")
@@ -240,7 +244,7 @@ class RendezvousHandlerRegistry:
         self._registry[backend] = creator
 
     def create_handler(self, params: RendezvousParameters) -> RendezvousHandler:
-        """Creates a new `RendezvousHandler`."""
+        """Creates a new :py:class:`RendezvousHandler`."""
         try:
             creator = self._registry[params.backend]
         except KeyError:
