@@ -32,7 +32,7 @@ from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
-                                                  load_tests, random_symmetric_matrix,
+                                                  load_tests,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
                                                   TemporaryFileName, TEST_WITH_ROCM,
                                                   gradcheck, gradgradcheck)
@@ -1497,7 +1497,7 @@ class TestAutograd(TestCase):
             self.assertEqual(indexed_tensor, indexed_var_t)
 
             indexed_var.sum().backward()
-            expected_grad = torch.Tensor(x.size()).fill_(0)
+            expected_grad = torch.empty(x.size()).fill_(0)
             expected_grad[idx] = 1
             self.assertEqual(y.grad, expected_grad)
 
@@ -1595,10 +1595,10 @@ class TestAutograd(TestCase):
         y = Variable(x, requires_grad=True)
         idx = [[[1, 2], [0, 0]], [[0, 1], [1, 1]]]
         y[idx].sum().backward()
-        expected_grad = torch.Tensor([[0, 2, 0, 0],
-                                      [1, 0, 0, 0],
-                                      [0, 1, 0, 0],
-                                      [0, 0, 0, 0]])
+        expected_grad = torch.tensor([[0., 2., 0., 0.],
+                                      [1., 0., 0., 0.],
+                                      [0., 1., 0., 0.],
+                                      [0., 0., 0., 0.]])
         self.assertEqual(y.grad, expected_grad)
 
         x = torch.arange(1., 65).view(4, 4, 4)
@@ -1606,7 +1606,7 @@ class TestAutograd(TestCase):
 
         idx = [[1, 1, 1], slice(None), slice(None)]
         y[idx].sum().backward()
-        expected_grad = torch.Tensor(4, 4, 4).zero_()
+        expected_grad = torch.empty(4, 4, 4).zero_()
         expected_grad[1].fill_(3)
         self.assertEqual(y.grad, expected_grad)
 
@@ -1849,7 +1849,7 @@ class TestAutograd(TestCase):
         r.backward(torch.ones(5, 5), retain_graph=True)
         self.assertEqual(x.grad, torch.ones(5, 5) / 2)
         w.backward(torch.ones(5, 5), retain_graph=True)
-        self.assertEqual(x.grad, torch.Tensor(5, 5).fill_((1 + math.e) / 2))
+        self.assertEqual(x.grad, torch.empty(5, 5).fill_((1 + math.e) / 2))
         self.assertRaises(RuntimeError, lambda: q.backward(torch.ones(5, 5)))
 
         leaf = torch.ones(5, 5, requires_grad=True)
@@ -2838,26 +2838,6 @@ class TestAutograd(TestCase):
         torch.autograd.backward(r1, grad)
         torch.autograd.backward(r2, grad)
         self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
-
-    @skipIfNoLapack
-    def test_symeig(self):
-        def func(root, upper):
-            x = 0.5 * (root + root.transpose(-2, -1))
-            return torch.symeig(x, eigenvectors=True, upper=upper)
-
-        def run_test(upper, dims):
-            root = torch.rand(*dims, requires_grad=True)
-
-            gradcheck(func, [root, upper])
-            gradgradcheck(func, [root, upper])
-
-            root = random_symmetric_matrix(dims[-1], *dims[:-2]).requires_grad_()
-            w, v = root.symeig(eigenvectors=True)
-            (w.sum() + v.sum()).backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2))  # Check the gradient is symmetric
-
-        for upper, dims in product([True, False], [(3, 3), (5, 3, 3), (4, 3, 2, 2)]):
-            run_test(upper, dims)
 
     @slowTest
     @skipIfNoLapack
@@ -4311,7 +4291,7 @@ for shape in [(1,), ()]:
 
         feat_combined = []
         for r in range(num_inp):
-            data_r = torch.Tensor(1, nz_inp)
+            data_r = torch.empty(1, nz_inp)
             data_r.uniform_()
             data_r.requires_grad = True
             feat_r = checkpoint(module, data_r)
@@ -7071,8 +7051,8 @@ class TestAutogradDeviceType(TestCase):
             i = i.to(torch.long)
 
             inp = torch.randn(v_size, requires_grad=True)
-            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True)[0]
-            other = other.to(device)
+            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True, device=device,
+                                         dtype=torch.double)[0]
 
             def fn(v):
                 x = torch.sparse_coo_tensor(i, v, size, device=device)

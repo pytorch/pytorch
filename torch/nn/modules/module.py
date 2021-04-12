@@ -808,7 +808,7 @@ class Module:
                     "if a complex module does not work as expected.")
 
         def convert(t):
-            if convert_to_format is not None and t.dim() == 4:
+            if convert_to_format is not None and t.dim() in (4, 5):
                 return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None,
                             non_blocking, memory_format=convert_to_format)
             return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
@@ -1191,10 +1191,10 @@ class Module:
     def state_dict(self, destination: T_destination, prefix: str = ..., keep_vars: bool = ...) -> T_destination:
         ...
 
-    # TODO: annotate with OrderedDict not Dict, but there is a problem:
-    # https://docs.python.org/3/library/typing.html#typing.OrderedDict
+    # TODO: Remove string escape once Python-3.6 no longer supported
+    # See https://github.com/python/mypy/issues/6904#issuecomment-496207426
     @overload
-    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Tensor]:
+    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> 'OrderedDict[str, Tensor]':
         ...
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
