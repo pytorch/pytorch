@@ -261,19 +261,20 @@ class TORCH_API LoopNest {
   //
   // Example:
   // Original IR:
-  // S1: for i        # normal axis
+  // S1: for i      # normal axis
   // S2:   X[i] = 0
   // S3:   for j    # reduction axis
   // S4:     for k  # reduction axis
   // S5:       X[i] = ReduceOp(X[i] + Y[i,j,k], reduce_axis={j,k})
   //
   // After RFACTOR(S5, S3)
-  // S1: for i        # normal axis
+  // S1: for i               # normal axis
   // S2:   X[i] = 0
-  // S3:   for j    # reduction axis for X, normal axis for X_rfac
-  // S4:     for k  # reduction axis
-  // S5:       X_rfac[i,j] = ReduceOp(X_rfac[i,j] + Y[i,j,k], reduce_axis={k})
-  // S6:     X[i] = ReduceOp(X[i] + X_rfac[j,k], reduce_axis={j})
+  // S3:   for j             # reduction axis for X, normal axis for X_rfac
+  //         X_rfac[i,j] = 0
+  // S4:     for k           # reduction axis
+  //           X_rfac[i,j] = ReduceOp(X_rfac[i,j] + Y[i,j,k], reduce_axis={k})
+  //         X[i] = ReduceOp(X[i] + X_rfac[i,j], reduce_axis={j})
   bool rfactor(Stmt* s, For* outer_reduction_for);
   bool rfactor(Stmt* s, For* outer_reduction_for, Buf** rfac_buf_ptr);
 
