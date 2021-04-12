@@ -469,7 +469,7 @@ class TestFX(JitTestCase):
                             # Pull out constants. These constants will later be
                             # fed to the interpreter C++ object via add_constant()
                             arg_name = f'constant_{constant_idx}'
-                            constants[arg_name] = torch.Tensor(
+                            constants[arg_name] = torch.tensor(
                                 [arg] if isinstance(arg, numbers.Number) else arg)
                             arg_names.append(arg_name)
                             constant_idx += 1
@@ -1860,7 +1860,7 @@ class TestFX(JitTestCase):
                 traced(5)
 
         self.assertIn("Call using an FX-traced Module, line 4 of the "
-                      "traced Module’s generated forward function:",
+                      "traced Module's generated forward function:",
                       captured[0])
 
     def test_custom_traceback_not_raised_when_exception_source_is_submodule(self):
@@ -1882,7 +1882,7 @@ class TestFX(JitTestCase):
             captured = traceback.format_exc()
 
         self.assertNotIn("Call using an FX-traced Module, line 4 of the"
-                         " traced Module’s generated forward function:",
+                         " traced Module's generated forward function:",
                          captured)
 
     def test_ast_rewriter_rewrites_assert(self):

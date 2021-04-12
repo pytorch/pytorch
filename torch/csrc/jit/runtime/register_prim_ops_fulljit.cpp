@@ -282,6 +282,14 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::is_sparse_csr(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_sparse_csr());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_mkldnn(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
@@ -691,7 +699,7 @@ RegisterOperators logging_operators(
              tracer::recordSourceLocation(node);
              graph->insertNode(node);
            }
-           auto output = autograd::profiler::getTime();
+           auto output = autograd::profiler::getTime(/*allow_monotonic=*/true);
            push(stack, output);
            if (jit::tracer::isTracing()) {
              jit::tracer::addOutput(node, output);

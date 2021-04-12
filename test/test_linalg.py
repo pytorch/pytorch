@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import torch
 import numpy as np
 
@@ -17,7 +18,7 @@ from functools import reduce
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, make_tensor, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
-     wrapDeterministicFlagAPITest, iter_indices, gradcheck, gradgradcheck)
+     wrapDeterministicFlagAPITest, iter_indices, gradcheck, gradgradcheck, skipIfRocm)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -68,7 +69,7 @@ class TestLinalg(TestCase):
         check([1, 2], [3, 4, 2])            # 2D x 3D
         check([2, 1, 3, 2], [1, 3, 2, 2])   # 4D x 4D
 
-        # Test discontiguous input
+        # Test noncontiguous input
         a = torch.randn(3, 2, device=device, dtype=dtype).transpose_(0, 1)
         b = torch.randn(4, 3, device=device, dtype=dtype)[::2, :]
         self.assertFalse(a.is_contiguous() or b.is_contiguous())
@@ -1208,7 +1209,7 @@ class TestLinalg(TestCase):
                 for ord in ord_settings:
                     for dtype, out_dtype in dtype_pairs:
                         input = torch.rand(*input_size)
-                        result = torch.Tensor().to(out_dtype)
+                        result = torch.tensor([]).to(out_dtype)
                         with self.assertRaisesRegex(RuntimeError, r'provided dtype must match dtype of result'):
                             torch.linalg.norm(input, ord=ord, keepdim=keepdim, dtype=dtype, out=result)
 
@@ -1474,6 +1475,7 @@ class TestLinalg(TestCase):
                 actual = torch.linalg.cond(input, p)
                 self.assertEqual(actual, expected)
 
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/55552
     @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -1608,7 +1610,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(res.shape, expected.shape, msg=msg)
                 self.assertEqual(res, expected, msg=msg)
 
-                res_out = torch.Tensor().to(device)
+                res_out = torch.tensor([]).to(device)
                 torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out.cpu(), expected, msg=msg)
@@ -1623,7 +1625,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(res.shape, expected.shape, msg=msg)
                 self.assertEqual(res, expected, msg=msg)
 
-                res_out = torch.Tensor().to(device)
+                res_out = torch.tensor([]).to(device)
                 torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out.cpu(), expected, msg=msg)
@@ -1799,6 +1801,7 @@ class TestLinalg(TestCase):
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
 
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/55552
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(*floating_and_complex_types())
@@ -3034,6 +3037,7 @@ class TestLinalg(TestCase):
             test_inverse_many_batches_helper(torch_inverse, 3, 512)
             test_inverse_many_batches_helper(torch_inverse, 64, 64)
 
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/55552
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
@@ -3167,6 +3171,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "rcond tensor of complex type is not supported"):
             torch.linalg.pinv(a, rcond=rcond)
 
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/55552
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -3297,6 +3302,7 @@ class TestLinalg(TestCase):
         expected = np.linalg.solve(A.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected)
 
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/55552
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -3975,8 +3981,8 @@ class TestLinalg(TestCase):
     @onlyOnCPUAndCUDA
     @dtypes(torch.double, torch.cdouble)
     def test_multi_dot(self, device, dtype):
-        def check(*shapes, discontiguous=False):
-            tensors = [make_tensor(shape, device, dtype, discontiguous=discontiguous) for shape in shapes]
+        def check(*shapes, noncontiguous=False):
+            tensors = [make_tensor(shape, device, dtype, noncontiguous=noncontiguous) for shape in shapes]
             np_arrays = [tensor.cpu().numpy() for tensor in tensors]
             res = torch.linalg.multi_dot(tensors).cpu()
             ref = torch.from_numpy(np.array(np.linalg.multi_dot(np_arrays)))
@@ -4007,9 +4013,9 @@ class TestLinalg(TestCase):
         check([10, 100], [100, 5], [5, 50])
         check([10, 20], [20, 30], [30, 5])
 
-        # test discontiguous input
-        check([3, 2], [2, 2], [2, 3], [3, 4], discontiguous=True)
-        check([15, 5], [5, 10], [10, 20], [20, 25], discontiguous=True)
+        # test noncontiguous input
+        check([3, 2], [2, 2], [2, 3], [3, 4], noncontiguous=True)
+        check([15, 5], [5, 10], [10, 20], [20, 25], noncontiguous=True)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float)
@@ -4285,7 +4291,7 @@ class TestLinalg(TestCase):
         check('bik,k...j->i...j', C, torch.rand(5, 3, device=device, dtype=dtype))
         check('i...j, ij... -> ...ij', C, torch.rand(2, 5, 2, 3, device=device, dtype=dtype))
 
-        # torch.bilinear with discontiguous tensors
+        # torch.bilinear with noncontiguous tensors
         l = torch.randn(10, 5, device=device, dtype=dtype).transpose(0, 1)
         r = torch.randn(20, 5, device=device, dtype=dtype).transpose(0, 1)
         w = torch.randn(15, 10, 20, device=device, dtype=dtype)
@@ -6168,8 +6174,8 @@ else:
     @skipCUDAIfNoMagmaAndNoCusolver
     @dtypes(torch.double, torch.cdouble)
     def test_matrix_power_non_negative(self, device, dtype):
-        def check(*size, discontiguous=False):
-            t = make_tensor(size, device, dtype, discontiguous=discontiguous)
+        def check(*size, noncontiguous=False):
+            t = make_tensor(size, device, dtype, noncontiguous=noncontiguous)
             for n in range(8):
                 res = torch.linalg.matrix_power(t, n)
                 ref = np.linalg.matrix_power(t.cpu().numpy(), n)
@@ -6178,10 +6184,10 @@ else:
         check(0, 0)
         check(1, 1)
         check(5, 5)
-        check(5, 5, discontiguous=True)
+        check(5, 5, noncontiguous=True)
         check(0, 3, 3)
         check(2, 3, 3)
-        check(2, 3, 4, 4, discontiguous=True)
+        check(2, 3, 4, 4, noncontiguous=True)
 
     @skipCUDAIfRocm
     @skipCPUIfNoLapack
