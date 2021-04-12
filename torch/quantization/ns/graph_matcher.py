@@ -17,6 +17,7 @@ from torch.fx.graph import Graph, Node
 
 from .utils import getattr_from_fqn
 from .ns_types import NSSubgraph
+from torch.quantization.fx.pattern_utils import get_default_quant_patterns
 
 from typing import Dict, Tuple, List, Optional, Set, Callable, Any, Union
 
@@ -183,28 +184,36 @@ def get_reversed_fusions() -> Set[Tuple[NSFusionType, int]]:
     of 0 represents the first op in regular (non-reverse) order, 1 represents the
     second op, etc.
     """
-    # TODO(future PR): remove the custom syntax for defining fusion patterns
-    # and reuse either quantization's syntax or something else.
-    return set([
-        # linear functionals
-        ((F.relu, F.linear), 0),
-        # conv functionals
-        ((F.relu, F.conv1d), 0),
-        ((F.relu, F.conv2d), 0),
-        ((F.relu, F.conv3d), 0),
-        # conv modules
-        ((nn.ReLU, nn.Conv1d), 0),
-        ((nn.ReLU, nn.Conv2d), 0),
-        ((nn.ReLU, nn.Conv3d), 0),
-        # linear modules
-        ((nn.ReLU, nn.Linear), 0),
+    results: Set[Tuple[NSFusionType, int]] = set([])
+
+    # Possible syntaxes:
+    # * single op: torch.nn.Conv2d
+    # * multiple ops: (torch.nn.ReLU, torch.nn.Conv2d)
+    # For fusions, we only care about patterns composed of multiple ops.
+    # TODO(future PR): allow customizations from default patterns.
+    all_quant_patterns = get_default_quant_patterns()
+    default_base_op_idx = 0
+    for quant_pattern, _quant_handler in all_quant_patterns.items():
+        # this only takes patterns of multiple ops
+        if isinstance(quant_pattern, tuple):
+            results.add((quant_pattern, default_base_op_idx))  # type: ignore
+
+    # After this point, results countains values such as
+    # [..., ((torch.nn.Relu, torch.nn.Conv2d), 0), ...]
+
+    # Patterns for matching fp16 emulation are not specified in the quantization
+    # fusion mappings.  For now, define them here.
+    fp16_em_base_op_idx = 1
+    patterns_to_add = [
         # linear-relu fp16 emulation:
         # fp16_to_fp32 -> linear -> relu -> fp32_to_fp16
-        ((("to", torch.float16), F.relu, F.linear, "dequantize"), 1),
-    ])
+        ((("to", torch.float16), F.relu, F.linear, "dequantize"), fp16_em_base_op_idx,),
+    ]
+    for p in patterns_to_add:
+        results.add(p)
 
-# TODO(future PR): we should see if we can reuse quantization's fusion
-# patterns here.
+    return results
+
 def end_node_matches_reversed_fusion(
     end_node: Node,
     reversed_fusion: NSFusionType,
