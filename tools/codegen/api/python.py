@@ -883,8 +883,8 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
         type_str = cpp_arg.type
         is_out_arg = cpp_arg.name in out_args
         if ps.method and cpp_arg.name == 'self':
-            # For method's 'self', we can use 'Tensor &' and simply ignore mutability!
-            type_str = 'Tensor &'
+            # For method's 'self', we can use 'const Tensor &' and simply ignore mutability!
+            type_str = 'const Tensor &'
         else:
             # For other cases we need prevent dangling refs to temps (unless it's
             # unpacked scattered output)
