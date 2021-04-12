@@ -169,9 +169,8 @@ Tensor& addmm_out_sparse_dense_cuda(
     const Scalar& alpha,
     Tensor& result
 ) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return s_addmm_out_sparse_dense_cuda(result, b_self, mat1, mat2, beta, alpha);
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_out_sparse_dense_cuda(result, *b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor s_addmm_sparse_dense_cuda(
@@ -193,9 +192,8 @@ Tensor addmm_sparse_dense_cuda(
     const Scalar& beta,
     const Scalar& alpha
 ) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return s_addmm_sparse_dense_cuda(b_self, mat1, mat2, beta, alpha);
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_sparse_dense_cuda(*b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor& s_addmm_sparse_dense_cuda_(
@@ -852,7 +850,7 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
 
   // First need to coalesce to get all of the first dimension indices
   // in order since we'll be sending each matrix into the MM operation
-  SparseTensor self_coalesced = coalesce_sparse_cuda(self);
+  SparseTensor self_coalesced = self.coalesce();
 
   int64_t nnz =        self_coalesced._nnz();
   Tensor indices = self_coalesced._indices();
