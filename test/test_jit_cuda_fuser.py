@@ -2053,6 +2053,8 @@ class TestCudaFuser(JitTestCase):
         # have been optimized away
         self.assertGraphContainsExactly(t_jit.graph_for(x), FUSION_GUARD, 1)
 
+    @unittest.skipIf(os.environ['PYTORCH_NO_CUDA_MEMORY_CACHING'] == "1",
+                     "skipping graph_rng when caching allocator is disabled")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(CUDA_MAJOR < 11, "requires CUDA11 or above")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
