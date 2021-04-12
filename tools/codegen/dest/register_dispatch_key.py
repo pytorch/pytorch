@@ -458,7 +458,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     # TODO: Stop hardcoding that the output type is a Tensor.  Note
                     # that for the codegen here this is fine because outputs_ is
                     # hardcoded to be tensor already
-                    type=NamedCType(out_arg.ctype.name, MutRefCType(BaseCType(tensorT)))
+                    type=NamedCType(out_arg.nctype.name, MutRefCType(BaseCType(tensorT)))
                 ))
 
             # With the expanded context, do the impl call (if not a meta
