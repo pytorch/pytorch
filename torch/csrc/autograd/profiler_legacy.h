@@ -72,7 +72,7 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
-inline int64_t getTime() {
+inline int64_t getTime(bool allow_monotonic = false) {
 #if defined(C10_IOS) && defined(C10_MOBILE)
 // clock_gettime is only available on iOS 10.0 or newer. Unlike OS X, iOS can't rely on
 // CLOCK_REALTIME, as it is defined no matter if clock_gettime is implemented or not
@@ -86,7 +86,11 @@ inline int64_t getTime() {
 #else
   // clock_gettime is *much* faster than std::chrono implementation on Linux
   struct timespec t{};
-  clock_gettime(CLOCK_MONOTONIC, &t);
+  auto mode = CLOCK_REALTIME;
+  if (allow_monotonic) {
+    mode = CLOCK_MONOTONIC;
+  }
+  clock_gettime(mode, &t);
   return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
 #endif
 }
