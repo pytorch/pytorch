@@ -30,7 +30,7 @@ class RendezvousBackend(ABC):
 
         Returns:
             A tuple of the encoded rendezvous state and its fencing token or
-            `None` if no state is found in the backend.
+            ``None`` if no state is found in the backend.
 
         Raises:
             RendezvousConnectionError:
@@ -47,23 +47,23 @@ class RendezvousBackend(ABC):
 
         The new rendezvous state is set conditionally:
 
-          - If the specified `token` matches the fencing token stored in the
+          - If the specified ``token`` matches the fencing token stored in the
             backend, the state will be updated. The new state will be returned
             to the caller along with its fencing token.
-          - If the specified `token` does not match the fencing token stored in
-            the backend, the state won't be updated; instead the existing state
-            along with its fencing token will be returned to the caller.
-          - If the specified `token` is `None`, the new state will be set only
-            if there is no existing state in the backend. Either the new state
-            or the existing state along with its fencing token will be returned
-            to the caller.
+          - If the specified ``token`` does not match the fencing token stored
+            in the backend, the state won't be updated; instead the existing
+            state along with its fencing token will be returned to the caller.
+          - If the specified ``token`` is ``None``, the new state will be set
+            only if there is no existing state in the backend. Either the new
+            state or the existing state along with its fencing token will be
+            returned to the caller.
 
         Args:
             state:
                 The encoded rendezvous state.
             token:
                 An optional fencing token that was retrieved by a previous call
-                to `get_state()` or `set_state()`.
+                to :py:meth:`get_state` or ``set_state()``.
 
         Returns:
             A tuple of the serialized rendezvous state and its fencing token.
@@ -84,10 +84,11 @@ class RendezvousTimeout:
             The total time within which the rendezvous is expected to complete.
         last_call:
             An additional wait amount before completing the rendezvous once the
-            minimum number of participants has been reached.
+            minimum number of nodes has been reached.
         close:
             The time within which the rendezvous is expected to close after a
-            call to `set_closed()` or `shutdown()`.
+            call to :py:meth:`RendezvousHandler.set_closed` or
+            :py:meth:`RendezvousHandler.shutdown`.
     """
 
     _ZERO = timedelta(0)
@@ -134,8 +135,8 @@ class RendezvousTimeout:
             setattr(self, "_" + name, timeout)
 
 
-class DefaultRendezvousHandler(RendezvousHandler):
-    """Represents the default rendezvous handler.
+class DynamicRendezvousHandler(RendezvousHandler):
+    """Represents the dynamic rendezvous handler.
 
     Args:
         run_id:
@@ -144,10 +145,10 @@ class DefaultRendezvousHandler(RendezvousHandler):
             The C10d store to return as part of the rendezvous.
         backend:
             The backend to use to hold the rendezvous state.
-        min_participants:
-            The minimum number of participants to admit to the rendezvous.
-        max_participants:
-            The maximum number of participants to admit to the rendezvous.
+        min_nodes:
+            The minimum number of nodes to admit to the rendezvous.
+        max_nodes:
+            The maximum number of nodes to admit to the rendezvous.
         timeout:
             The timeout configuration of the rendezvous.
     """
@@ -155,8 +156,8 @@ class DefaultRendezvousHandler(RendezvousHandler):
     _run_id: str
     _store: Store
     _backend: RendezvousBackend
-    _min_participants: int
-    _max_participants: int
+    _min_nodes: int
+    _max_nodes: int
     _timeout: RendezvousTimeout
 
     def __init__(
@@ -164,23 +165,22 @@ class DefaultRendezvousHandler(RendezvousHandler):
         run_id: str,
         store: Store,
         backend: RendezvousBackend,
-        min_participants: int,
-        max_participants: int,
+        min_nodes: int,
+        max_nodes: int,
         timeout: Optional[RendezvousTimeout] = None,
     ) -> None:
         if not run_id:
             raise ValueError("The run id must be a non-empty string.")
 
-        if min_participants < 1:
+        if min_nodes < 1:
             raise ValueError(
-                f"The minimum number of participants ({min_participants}) must be greater than "
-                "zero."
+                f"The minimum number of nodes ({min_nodes}) must be greater than zero."
             )
 
-        if max_participants < min_participants:
+        if max_nodes < min_nodes:
             raise ValueError(
-                f"The maximum number of participants ({max_participants}) must be greater than or "
-                f"equal to the minimum number of participants ({min_participants})."
+                f"The maximum number of nodes ({max_nodes}) must be greater than or equal to the "
+                f"minimum number of nodes ({min_nodes})."
             )
 
         self._run_id = run_id
@@ -188,8 +188,8 @@ class DefaultRendezvousHandler(RendezvousHandler):
         self._store = store
         self._backend = backend
 
-        self._min_participants = min_participants
-        self._max_participants = max_participants
+        self._min_nodes = min_nodes
+        self._max_nodes = max_nodes
 
         self._timeout = timeout or RendezvousTimeout()
 
@@ -209,14 +209,14 @@ class DefaultRendezvousHandler(RendezvousHandler):
         return self._backend
 
     @property
-    def min_participants(self) -> int:
-        """Gets the minimum number of participants to admit to the rendezvous."""
-        return self._min_participants
+    def min_nodes(self) -> int:
+        """Gets the minimum number of nodes to admit to the rendezvous."""
+        return self._min_nodes
 
     @property
-    def max_participants(self) -> int:
-        """Gets the maximum number of participants to admit to the rendezvous."""
-        return self._max_participants
+    def max_nodes(self) -> int:
+        """Gets the maximum number of nodes to admit to the rendezvous."""
+        return self._max_nodes
 
     @property
     def timeout(self) -> RendezvousTimeout:
@@ -261,21 +261,27 @@ def _get_timeout(params: RendezvousParameters, key: str) -> Optional[timedelta]:
 
 def create_handler(
     store: Store, backend: RendezvousBackend, params: RendezvousParameters
-) -> DefaultRendezvousHandler:
-    """Create a new `DefaultRendezvousHandler` from the specified parameters.
+) -> DynamicRendezvousHandler:
+    """Create a new :py:class:`DynamicRendezvousHandler` from the specified
+    parameters.
 
-    Configuration:
-        join_timeout (int, optional):
-            The total time, in seconds, within which the rendezvous is expected
-            to complete. Defaults to 600 seconds.
-        last_call_timeout (int, optional):
-            An additional wait amount, in seconds, before completing the
-            rendezvous once the minimum number of participants has been reached.
-            Defaults to 30 seconds.
-        close_timeout (int, optional):
-            The time, in seconds, within which the rendezvous is expected to
-            close after a call to `set_closed()` or `shutdown()`. Defaults to
-            30 seconds.
+    +-------------------+------------------------------------------------------+
+    | Parameter         | Description                                          |
+    +===================+======================================================+
+    | join_timeout      | The total time, in seconds, within which the         |
+    |                   | rendezvous is expected to complete. Defaults to 600  |
+    |                   | seconds.                                             |
+    +-------------------+------------------------------------------------------+
+    | last_call_timeout | An additional wait amount, in seconds, before        |
+    |                   | completing the rendezvous once the minimum number of |
+    |                   | nodes has been reached. Defaults to 30 seconds.      |
+    +-------------------+------------------------------------------------------+
+    | close_timeout     | The time, in seconds, within which the rendezvous is |
+    |                   | expected to close after a call to                    |
+    |                   | :py:meth:`RendezvousHandler.set_closed` or           |
+    |                   | :py:meth:`RendezvousHandler.shutdown`. Defaults to   |
+    |                   | 30 seconds.                                          |
+    +-------------------+------------------------------------------------------+
     """
     timeout = RendezvousTimeout(
         _get_timeout(params, "join"),
@@ -283,7 +289,7 @@ def create_handler(
         _get_timeout(params, "close"),
     )
 
-    return DefaultRendezvousHandler(
+    return DynamicRendezvousHandler(
         params.run_id,
         store,
         backend,
