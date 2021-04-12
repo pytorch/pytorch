@@ -287,6 +287,8 @@ class DeviceCachingAllocator {
   // Most of the time it's zero, in which case malloc can avoid calling
   // cudaStreamGetCaptureInfo in the hot path.
   int captures_underway = 0;
+  // See free() for this thing's purpose
+  std::vector<Block*> insert_events_deferred_until_no_capture;
   // outstanding cuda events
   std::deque<std::pair<cudaEvent_t, Block*>> cuda_events;
 
@@ -323,8 +325,18 @@ class DeviceCachingAllocator {
   {
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
-    // process outstanding cudaEvents
-    process_events();
+    if (C10_LIKELY(captures_underway == 0)) {
+      // Processes end-of-life events for outstanding allocations used on multiple streams
+      // (checks if their GPU-side uses are complete and repurposes their memory if so)
+      //
+      // Q. Why skip process_events if a capture might be underway?
+      // A. process_events involves a cudaEventQuery, illegal during CUDA graph capture
+      //    (rightfully illegal, because you'd be "querying" the completion of ghost CUDA
+      //    work that doesn't really run). Dumb simple solution: defer reclaiming these
+      //    allocations until after capture. Cross-stream memory use is uncommon, so the
+      //    deferral's effect on memory use during capture should be small.
+      process_events();
+    }
 
     size = round_size(size);
     auto& pool = get_pool(size, stream);
@@ -458,7 +470,14 @@ class DeviceCachingAllocator {
     update_stat_array(stats.allocated_bytes, -block->size, {stat_types});
 
     if (!block->stream_uses.empty()) {
-      insert_events(block);
+      if (C10_UNLIKELY(captures_underway)) {
+        // It's forbidden to cudaEventQuery an event recorded during CUDA graph capture.
+        // We conservatively defer recording end-of-life events until the next call to
+        // process_events() (which won't happen until no captures are underway)
+        insert_events_deferred_until_no_capture.push_back(block);
+      } else {
+        insert_events(block);
+      }
     } else {
       free_block(block);
     }
@@ -984,6 +1003,14 @@ class DeviceCachingAllocator {
 
   void process_events()
   {
+    if (C10_UNLIKELY(insert_events_deferred_until_no_capture.size() > 0)) {
+      for (const auto block : insert_events_deferred_until_no_capture) {
+        TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
+        insert_events(block);
+      }
+      insert_events_deferred_until_no_capture.clear();
+    }
+
     // Process outstanding cudaEvents. Events that are completed are removed
     // from the queue, and the 'event_count' for the corresponding allocation
     // is decremented. Stops at the first event which has not been completed.
