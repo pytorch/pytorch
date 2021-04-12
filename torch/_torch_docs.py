@@ -8502,25 +8502,30 @@ add_docstr(torch.svd,
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition of either a matrix or batch of
-matrices :attr:`input`. The singular value decomposition is represented as a
-namedtuple `(U, S, V)`, such that :attr:`input` `= U diag(S) Vᴴ`.
+matrices :attr:`input`.
+
+The singular value decomposition is represented as a
+namedtuple `(U, S, V)`, such that `input = U diag(S) Vᴴ`.
 where `Vᴴ` is the transpose of `V` for real inputs,
 and the conjugate transpose of `V` for complex inputs.
-If :attr:`input` is a batch of matrices, then `U`, `S`, and `V` are also
+If :attr:`input` is a batch of matrices, then `U`, `S`, `V` are also
 batched with the same batch dimensions as :attr:`input`.
 
+The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
+the singular values of each matrix in the batch are returned in descending order.
+
 If :attr:`some` is `True` (default), the method returns the reduced singular
-value decomposition. In this case, if the last two dimensions of :attr:`input` are
-`m` and `n`, then the returned `U` and `V` matrices will contain only
-`min(n, m)` orthonormal columns.
+value decomposition. In this case, if :attr:`input` is of size `(*, m, n)`,
+the returned `U`, `V` will be of size `(*, m, min(m, n))` and `(*, n, min(m, n))`
+respectively.
 
 If :attr:`compute_uv` is `False`, the returned `U` and `V` will be
 zero-filled matrices of shape `(m, m)` and `(n, n)`
 respectively, and the same device as :attr:`input`. The argument :attr:`some`
 has no effect when :attr:`compute_uv` is `False`.
 
-Supports :attr:`input` of float, double, cfloat and cdouble data types.
-The dtypes of `U` and `V` are the same as :attr:`input`'s. `S` will
+Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
+The dtype of `U` and `V` is the same as that of :attr:`input`. `S` will
 always be real-valued, even if :attr:`input` is complex.
 
 .. warning:: :func:`torch.svd` is deprecated. Please use
@@ -8539,38 +8544,34 @@ always be real-valued, even if :attr:`input` is complex.
                tensors for `U` and `Vh`, whereas :func:`torch.linalg.svd` returns
                empty tensors.
 
-.. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
-          then the singular values of each matrix in the batch are returned in descending order.
-
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is `True`.
 
 .. note:: When :attr:`some` is `False`, the gradients on `U[..., :, min(m, n):]`
           and `V[..., :, min(m, n):]` will be ignored in the backward pass, as those vectors
           can be arbitrary bases of the corresponding subspaces.
 
-.. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `?gesdd`
-          (a divide-and-conquer algorithm) instead of `?gesvd` for speed. Analogously,
+.. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `gesdd`
+          (a divide-and-conquer algorithm) instead of `gesvd` for speed. Analogously,
           on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched` on CUDA 10.1.243
           and later, and MAGMA's routine `gesdd` on earlier versions of CUDA.
 
 .. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
           be represented as a column-major matrix (i.e. Fortran-contiguous).
 
-.. warning:: The gradients with respect to `U` and `V` will only be finite when the input does not
-             have zero nor repeated singular values.
-
-.. warning:: If the distance between any two singular values is close to zero, the gradients with respect to
-             `U` and `V` will be numerically unstable, as they depends on
-             :math:`\frac{1}{\min_{i \neq j} \sigma_i^2 - \sigma_j^2}`. The same happens when the matrix
-             has small singular values, as these gradients also depend on `S⁻¹`.
-
-.. warning:: For complex-valued :attr:`input` the singular value decomposition is not unique,
-             as `U` and `V` may be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.
+.. warning:: The singular values of a matrix are not unique. Any pair of left and right singular values may 
+             be multiplied by `-1` in the real case or by a factor of norm `1` :math:`e^{i \phi}` in the complex case.
              The same happens when :attr:`input` has repeated singular values, where one may multiply
              the columns of the spanning subspace in `U` and `V` by a rotation matrix
              and `the resulting vectors will span the same subspace`_.
              Different platforms, like NumPy, or inputs on different device types,
-             may produce different `U` and `V` tensors.
+             may produce different `U` and `Vh` tensors.
+
+.. warning:: The gradients with respect to `U` and `Vh` will only be finite when :attr:`input`
+             does not have zero or repeated singular values.
+             If the distance between any two singular values is close to zero, the gradients with respect to
+             `U` and `V` will be numerically unstable, as they depends on
+             :math:`\frac{1}{\min_{i \neq j} \sigma_i^2 - \sigma_j^2}`. The same happens when :attr:`input`
+             has small singular values, as these gradients also depend on `S⁻¹`.
 
 Args:
     input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more

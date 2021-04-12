@@ -248,42 +248,41 @@ Example::
 eig = _add_docstr(_linalg.linalg_eig, r"""
 linalg.eig(input, *, out=None) -> (Tensor, Tensor)
 
-Computes the eigenvalues and eigenvectors of a square
-matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
+Computes the eigenvalues and eigenvectors of a square matrix or batch of matrices :attr:`input`,
+so that `input = V diag(L) V⁻¹`, where `V⁻¹` is the inverse of `V`.
 
-For a single matrix :attr:`input`, the tensor of eigenvalues `w` and the tensor of eigenvectors
-`V` decompose the :attr:`input` such that `input = V diag(w) V⁻¹`, where `V⁻¹` is the inverse of `V`.
+The decomposition is represented as a namedtuple `(eigenvalues, eigenvectors)`, which corrsponds
+to `(L, V)` above. If :attr:`input` is a batch of matrices, then `L`, `V` are also batched with
+the same batch dimensions as :attr:`input`.
 
-The eigenvalues are not necessarily sorted.
-For real-valued input the resulting eigenvalues and eigenvectors will always be of complex type.
+Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
+The eigenvalues and eigenvectors will always be complex-valued, even if :attr:`input` is real.
 
-Supports input of float, double, cfloat and cdouble dtypes.
+.. note:: When :attr:`input` is on a CUDA device, this function synchronizes that device with the CPU.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
-
-.. note:: The eigenvalues and eigenvectors are computed using LAPACK's and MAGMA's `geev` routine.
-
-.. note:: The eigenvectors of matrices are not unique, so any eigenvector multiplied by a constant remains
-          a valid eigenvector. This function may compute different eigenvector representations on
-          different device types. Usually the difference is only in the sign of the eigenvector.
+.. note:: It is computed using LAPACK's and MAGMA's `geev` routine.
 
 .. note:: See :func:`torch.linalg.eigvals` for a related function that computes only eigenvalues.
           However, that function is not differentiable.
 
+.. note:: The eigenvectors of a matrix are not unique. Any eigenvector may be multiplied by
+          `-1` in the real case or by :math:`e^{i \phi}` for any :math:`\phi \in \mathbb{R}`
+          in the complex case. As such, the eigenvectors are normalized to have norm `1` and
+          largest real component. As such, the eigenvectors are not continuous functions of the
+          inputs.
+
+.. warning:: This function assumes that :attr:`input` is diagonalizable (e.g. when all the
+             eigenvalues are different). If it is not, it will return the correct eigenvalues,
+             but the eigenvectors will be incorrect.
+
 .. warning:: Differentiation support for this function is not implemented yet.
 
 Args:
-    input (Tensor): the `n \times n` matrix or the batch of such matrices of size
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    input (Tensor): input tensor of size `(*, n, n)` where `*` is zero or more
+                    batch dimensions consisting of `(n, n)` matrices.
 
 Keyword args:
-    out (tuple, optional): tuple of two tensors to write the output to. Default is `None`.
-
-Returns:
-    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
-
-        - **eigenvalues** (*Tensor*): Shape `(*, n)`.
-        - **eigenvectors** (*Tensor*): Shape `(*, n, n)`.
+    out (tuple, optional): tuple of two tensors to write the output to. Default: `None`.
 
 Examples::
 
@@ -309,26 +308,24 @@ Examples::
 eigvals = _add_docstr(_linalg.linalg_eigvals, r"""
 linalg.eigvals(input, *, out=None) -> Tensor
 
-Computes the eigenvalues of a square
-matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
+Computes the eigenvalues of a square matrix or a batch of matrices :attr:`input`.
 
-The eigenvalues are not necessarily sorted.
-For real-valued input the resulting eigenvalues will always be of complex type.
+Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
+The eigenvalues will always be complex-valued, even if :attr:`input` is real.
 
-Supports input of float, double, cfloat and cdouble dtypes.
+.. note:: When :attr:`input` is on a CUDA device, this function synchronizes that device with the CPU.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+.. note:: It is computed using LAPACK's and MAGMA's `geev` routine.
 
-.. note:: The eigenvalues are computed using LAPACK's and MAGMA's `geev` routine.
-
-.. note:: See :func:`torch.linalg.eig` for a related function that computes both eigenvalues and eigenvectors.
+.. note:: This function doesn't support backpropagation. Please use :func:`torch.linalg.eig`
+          instead, which also computes the eigenvectors.
 
 Args:
-    input (Tensor): the `n \times n` matrix or the batch of such matrices of size
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    input (Tensor): input tensor of size `(*, n, n)` where `*` is zero or more
+                    batch dimensions consisting of `(n, n)` matrices.
 
 Keyword args:
-    out (Tensor, optional): tensor to write the output to. Default is `None`.
+    out (tuple, optional): tensor to write the output to. Default: `None`.
 
 Examples::
 
@@ -344,49 +341,56 @@ Examples::
 eigh = _add_docstr(_linalg.linalg_eigh, r"""
 linalg.eigh(input, UPLO='L', *, out=None) -> (Tensor, Tensor)
 
-Computes the eigenvalues and eigenvectors of a complex Hermitian (or real symmetric)
-matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
+Computes the eigenvalues and eigenvectors of a complex Hermitian (or real symmetric) matrix
+or batch of matrices :attr:`input`, so that `input = V diag(L) Vᴴ`.
+Here, `Vᴴ` is the conjugate transpose (resp. transpose) of `V`.
+`V` is unitary (resp. orthogonal).
 
-For a single matrix :attr:`input`, the tensor of eigenvalues `w` and the tensor of eigenvectors
-`V` decompose the :attr:`input` such that `input = V diag(w) Vᴴ`, where `Vᴴ` is the transpose of `V`
-for real-valued :attr:`input`, or the conjugate transpose of `V` for complex-valued :attr:`input`.
+The decomposition is represented as a namedtuple `(eigenvalues, eigenvectors)`, which
+corrsepond to `(L, V)` above. If :attr:`input` is a batch of matrices, then `L`, `V` are also
+batched with the same batch dimensions as :attr:`input`.
 
-Since the matrix or matrices in :attr:`input` are assumed to be Hermitian, the imaginary part of their diagonals
-is always treated as zero. When :attr:`UPLO` is "L", its default value, only the lower triangular part of each
-matrix is used in the computation. When :attr:`UPLO` is "U" only the upper triangular part of each matrix is used.
+The eigenvalues are returned in ascending order.
 
-Supports input of float, double, cfloat and cdouble dtypes.
+:attr:`input` is assumed to be Hermitian (resp. symmetric), but this is not checked internally.
+When :attr:`UPLO` is `'L'` (default), only the lower triangular part of each matrix is used in the computation.
+When :attr:`UPLO` is `'U'`, only the upper triangular part of each matrix is used.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
+The eigenvalues will always be real-valued, even if :attr:`input` is complex.
+The eigenvectors will have the same dtype as :attr:`input`.
 
-.. note:: The eigenvalues/eigenvectors are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs,
+.. note:: When :attr:`input` is on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The is computed using LAPACK's `syevd` and `heevd` routines for CPU inputs,
           and MAGMA's `syevd` and `heevd` routines for CUDA inputs.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
-.. note:: The eigenvectors of matrices are not unique, so any eigenvector multiplied by a constant remains
-          a valid eigenvector. This function may compute different eigenvector representations on
-          different device types. Usually the difference is only in the sign of the eigenvector.
-
 .. note:: See :func:`torch.linalg.eigvalsh` for a related function that computes only eigenvalues.
           However, that function is not differentiable.
 
+.. warning:: The eigenvectors of a matrix are not unique. Any eigenvector may be multiplied by `-1`
+             in the real case or by :math:`e^{i \phi}` for any :math:`\phi \in \mathbb{R}` in the
+             complex case.
+             As such, the eigenvectors are not continuous functions of the inputs, and different
+             platforms, like NumPy, or inputs on different devices, may produce different
+             eigenvectors.
+
+.. warning:: If `V` is used in the loss function, the gradient will only be finite when
+             :attr:`input` does not have repeated eigenvalues.
+             If the distance between any two eigenvalues is close to zero, the gradient with
+             respect to `V` will be numerically unstable, as it depends on
+             :math:`\frac{1}{\min_{i \neq j} \lambda_i - \lambda_j}`.
+
 Args:
-    input (Tensor): the Hermitian `n \times n` matrix or the batch of such matrices of size
-                    `(*, n, n)` where `*` is one or more batch dimensions.
-    UPLO ('L', 'U', optional): controls whether to use the upper-triangular or the lower-triangular part
-                               of :attr:`input` in the computations. Default is ``'L'``.
+    input (Tensor): symmetric or Hermitian input tensor of size `(*, n, n)` where `*` is zero
+                    or more batch dimensions consisting of `(n, n)` symmetric or Hermitian matrices.
+    UPLO ('L', 'U', optional): controls whether to use the upper or lower triangular part
+                               of :attr:`input` in the computations. Default: `'L'`.
 
 Keyword args:
-    out (tuple, optional): tuple of two tensors to write the output to. Default is ``None``.
-
-Returns:
-    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
-
-        - **eigenvalues** (*Tensor*): Shape `(*, m)`.
-            The eigenvalues in ascending order.
-        - **eigenvectors** (*Tensor*): Shape `(*, m, m)`.
-            The orthonormal eigenvectors of the :attr:`input`.
+    out (tuple, optional): tuple of two tensors to write the output to. Default: ``None``.
 
 Examples::
 
@@ -414,35 +418,36 @@ Examples::
 eigvalsh = _add_docstr(_linalg.linalg_eigvalsh, r"""
 linalg.eigvalsh(input, UPLO='L', *, out=None) -> Tensor
 
-Computes the eigenvalues of a complex Hermitian (or real symmetric) matrix :attr:`input`,
-or of each such matrix in a batched :attr:`input`. The eigenvalues are returned in ascending order.
+Computes the eigenvalues and eigenvectors of a complex Hermitian (or real symmetric)
+matrix or batch of matrices :attr:`input.
 
-Since the matrix or matrices in :attr:`input` are assumed to be Hermitian, the imaginary part of their diagonals
-is always treated as zero. When :attr:`UPLO` is "L", its default value, only the lower triangular part of
-each matrix is used in the computation. When :attr:`UPLO` is "U" only the upper triangular part of each matrix is used.
+The eigenvalues are returned in ascending order.
 
-Supports input of float, double, cfloat and cdouble dtypes.
+:attr:`input` is assumed to be Hermitian (resp. symmetric), but this is not checked internally.
+When :attr:`UPLO` is `'L'` (default), only the lower triangular part of each matrix is used in the computation.
+When :attr:`UPLO` is `'U'`, only the upper triangular part of each matrix is used.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
+The eigenvalues will always be real-valued, even if :attr:`input` is complex.
+
+.. note:: When :attr:`input` is on a CUDA device, this function synchronizes that device with the CPU.
 
 .. note:: The eigenvalues are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs,
           and MAGMA's `syevd` and `heevd` routines for CUDA inputs.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
-.. note:: This function doesn't support backpropagation, please use :func:`torch.linalg.eigh` instead,
-          which also computes the eigenvectors.
-
-.. note:: See :func:`torch.linalg.eigh` for a related function that computes both eigenvalues and eigenvectors.
+.. note:: This function doesn't support backpropagation. Please use :func:`torch.linalg.eigh`
+          instead, which also computes the eigenvectors.
 
 Args:
-    input (Tensor): the Hermitian `n \times n` matrix or the batch
-                    of such matrices of size `(*, n, n)` where `*` is one or more batch dimensions.
-    UPLO ('L', 'U', optional): controls whether to use the upper-triangular or the lower-triangular part
-                               of :attr:`input` in the computations. Default is ``'L'``.
+    input (Tensor): symmetric or Hermitian input tensor of size `(*, n, n)` where `*` is zero
+                    or more batch dimensions consisting of `(n, n)` symmetric or Hermitian matrices.
+    UPLO ('L', 'U', optional): controls whether to use the upper or lower triangular part
+                               of :attr:`input` in the computations. Default: `'L'`.
 
 Keyword args:
-    out (Tensor, optional): tensor to write the output to. Default is ``None``.
+    out (Tensor, optional): tensor to write the output to. Default: `None`.
 
 Examples::
 
@@ -1002,23 +1007,28 @@ Using the :attr:`dim` argument to compute matrix norms::
 svd = _add_docstr(_linalg.linalg_svd, r"""
 linalg.svd(input, full_matrices=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-Computes the singular value decomposition of either a matrix or batch of
-matrices :attr:`input`. The singular value decomposition is represented as a
-namedtuple `(U, S, Vh)`, such that :attr:`input` `= U diag(S) Vh`.
-If :attr:`input` is a batch of matrices, then `U`, `S`, and `Vh` are
-also batched with the same batch dimensions as :attr:`input`.
+Computes the singular value decomposition of a matrix or batch of matrices :attr:`input`.
+
+The singular value decomposition is represented as a namedtuple `(U, S, Vh)`, such that
+`input = U diag(S) Vh`. If :attr:`input` is a batch of matrices, then `U`, `S`, `Vh` are
+also batched with the same batch dimensions as :attr:`input`. The matrices (or batch of matrices)
+`U`, `Vh` are orthogonal in the real case, and unitary in the complex case.
+
+The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
+the singular values of each matrix in the batch are returned in descending order.
 
 If :attr:`full_matrices` is `False`, the method returns the reduced singular
-value decomposition. In this case, if the last two dimensions of :attr:`input` are
-`m` and `n`, then the returned `U` and `Vh` matrices will contain only
-`min(n, m)` orthonormal columns.
+value decomposition. In this case, if :attr:`input` is of size `(*, m, n)`,
+the returned `U`, `Vh` will be of size `(*, m, min(m, n))` and `(*, min(m, n), n)`
+respectively.
 
 If :attr:`compute_uv` is `False`, the returned `U` and `Vh` will be empty
 tensors with no elements and the same device as :attr:`input`. The
-:attr:`full_matrices` argument has no effect when :attr:`compute_uv` is False.
+:attr:`full_matrices` argument has no effect when :attr:`compute_uv` is `False`.
 
-The dtypes of `U` and `Vh` are the same as :attr:`input`'s. `S` will
-always be real-valued, even if :attr:`input` is complex.
+Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
+`S` will always be real-valued, even if :attr:`input` is complex.
+`U` and `Vh` will have the same dtype as :attr:`input`.
 
 .. note:: Unlike NumPy's `linalg.svd`, :func:`torch.linalg.svd` always returns a namedtuple
           of three tensors, even when :attr:`compute_uv` is `False`. This behavior may
@@ -1026,39 +1036,36 @@ always be real-valued, even if :attr:`input` is complex.
           Please use :func:`torch.linalg.svdvals`, which computes only the singular values,
           instead of ``compute_uv=False``.
 
-.. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
-          then the singular values of each matrix in the batch are returned in descending order.
-
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is `True`.
 
 .. note:: When :attr:`full_matrices` is `True`, the gradients on `U[..., :, min(m, n):]`
           and `Vh[..., min(m, n):, :]` will be ignored in the backwards pass, as those vectors
           can be arbitrary bases of the corresponding subspaces.
 
-.. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `?gesdd`
-          (a divide-and-conquer algorithm) instead of `?gesvd` for speed. Analogously,
+.. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `gesdd`
+          (a divide-and-conquer algorithm) instead of `gesvd` for speed. Analogously,
           on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched` on CUDA 10.1.243
           and later, and MAGMA's routine `gesdd` on earlier versions of CUDA.
 
 .. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
           be represented as a column-major matrix (i.e. Fortran-contiguous).
 
-.. warning:: The gradients with respect to `U` and `Vh` will only be finite when the input does not
-             have zero nor repeated singular values.
-
-.. warning:: If the distance between any two singular values is close to zero, the gradients with respect to
-             `U` and `Vh` will be numerically unstable, as they depends on
-             :math:`\frac{1}{\min_{i \neq j} \sigma_i^2 - \sigma_j^2}`. The same happens when the matrix
-             has small singular values, as these gradients also depend on `S⁻¹`.
-
-.. warning:: For complex-valued :attr:`input` the singular value decomposition is not unique,
-             as `U` and `V` may be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.
+.. warning:: The singular vectors of a matrix are not unique. Any pair of left and right singular
+             vectors may be multiplied by `-1` in the real case or by :math:`e^{i \phi}` for any
+             :math:`\phi \in \mathbb{R}` in the complex case.
              The same happens when :attr:`input` has repeated singular values, where one may multiply
              the columns of the spanning subspace in `U` and `V` by a rotation matrix
              and `the resulting vectors will span the same subspace`_.
-             Different platforms, like NumPy, or inputs on different device types,
-             may produce different `U` and `Vh` tensors.
+             As such, `U` and `Vh` are not continuous functions of the inputs, and different
+             platforms, like NumPy, or inputs on different devices, may produce different
+             `U` and `Vh` tensors.
 
+.. warning:: If `U` or `Vh` are used in the loss function, the gradient will only be finite when
+             :attr:`input` does not have zero as a singular valuer or repeated singular values.
+             If the distance between any two singular values is close to zero, the gradient will
+             be numerically unstable, as it depends on
+             :math:`\frac{1}{\min_{i \neq j} \sigma_i^2 - \sigma_j^2}`. The same happens when
+             :attr:`input` has small singular values, as the gradient also depend on `S⁻¹`.
 
 Args:
     input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
