@@ -304,3 +304,18 @@ jobs:
         run: |
           set -eux
           for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+
+  isort:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@v2
+      - name: Install isort
+        run: pip install isort==5.8.0
+      - name: Run isort
+        run: isort . --check
