@@ -2995,7 +2995,7 @@ void quantize_tensor_per_tensor_affine_sub_byte_cpu(
       const auto elem_per_byte = CHAR_BIT / bit_width;
       for (int i = 0; i < numel; ++i) {
         float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
-        int qvalue = lrintf(std::nearbyint(rdata[i] * inv_scale) + zero_point);
+        int64_t qvalue = lrintf(std::nearbyint(rdata[i] * inv_scale) + zero_point);
         qvalue = std::max(quant_min, std::min(qvalue, quant_max));
 
         // We pack sub_byte values and align them to a byte.

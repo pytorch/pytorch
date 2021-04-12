@@ -108,7 +108,8 @@ int64_t _get_zero_point_from_tensor(
     bool is_forward) {
   float zero_point_fp = zero_point[0].item<float>();
   zero_point_fp = is_forward ? std::nearbyint(zero_point_fp) : zero_point_fp + 0.5f;
-  float zero_point_clamped = std::min(std::max(zero_point_fp, quant_min), quant_max);
+  float zero_point_clamped = std::min(std::max(zero_point_fp, static_cast<float>(quant_min)),
+                                       static_cast<float>(quant_max));
   return static_cast<int64_t>(zero_point_clamped);
 }
 
