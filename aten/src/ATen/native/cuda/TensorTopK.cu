@@ -2,6 +2,7 @@
 //#include <ATen/Context.h>
 //#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
+#include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 //#include <ATen/Dispatch.h>
@@ -305,22 +306,11 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     int maxSliceSize = 2048;
 #endif
 
-    //auto sortedTopK_tensor = THTensor_wrap(sortedTopK);
-    //auto sortedIndices_tensor = THTensor_wrap(sortedIndices);
-    Tensor sortedTopK;
-    Tensor sortedIndices;
-    at::native::sort_out_cuda(THTensor_wrap(topK), dim, dir, sortedTopK, sortedIndices);
-    sortedIndices.resize_as_(indices);
-    values = sortedTopK;
-    indices = indices.gather(dim, sortedIndices);
-    // sort already has maxSliceSize threshold logic
-    //sortedTopK = at::sort(topK, indices, dim, dir);
-    /*
     if (sliceSize <= maxSliceSize) {
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
       //THCTensor_(sortKeyValueInplace)(state, topK, indices, dim, dir);
-      at::sortKeyValueInplace(topK, indices, dim, dir);
+      legacy::cuda::_th_sort_key_value_inplace(values, indices, dim, largest);
     } else {
       // Depend upon the backup sort that returns indices, which we
       // can use in conjunction with gather to produce the original
@@ -330,20 +320,19 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
       // greater performance, they should torch.gather() the results
       // themselves using the reported indices, providing previously
       // allocated tensors to receive the results.
-      THCTensor* sortedTopK = THCTensor_(new)(state);
-      THCudaLongTensor* sortedIndices = THCudaLongTensor_new(state);
-      THCTensor_(sort)(state, sortedTopK, sortedIndices, topK, dim, dir);
 
-      THCudaLongTensor* sortedTopKIndices = THCudaLongTensor_new(state);
+      Tensor sortedTopK;
+      Tensor sortedIndices;
+      std::tie(sortedTopK, sortedIndices) = at::sort(values, dim, largest);
+      at::native::sort_out_cuda(values, dim, largest, sortedTopK, sortedIndices);
+      sortedIndices.resize_as_(indices);
+      values = sortedTopK;
+      indices = indices.gather(dim, sortedIndices);
 
-      THCudaLongTensor_resizeAs(state, sortedTopKIndices, indices);
-      THCudaLongTensor_gather(state, sortedTopKIndices, indices, dim, sortedIndices);
-
-      THCTensor_(freeCopyTo)(state, sortedTopK, topK);
-      THCudaLongTensor_freeCopyTo(state, sortedTopKIndices, indices);
-      THCudaLongTensor_free(state, sortedIndices);
+      //THCTensor_(freeCopyTo)(state, sortedTopK, topK);
+      //THCudaLongTensor_freeCopyTo(state, sortedTopKIndices, indices);
+      //THCudaLongTensor_free(state, sortedIndices);
     }
-    */
   }
   // is this necessary?
   //THCudaLongTensor_free(state, input);

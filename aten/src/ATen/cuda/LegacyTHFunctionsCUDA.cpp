@@ -171,6 +171,62 @@ std::tuple<Tensor,Tensor> _th_sort_stable(const Tensor & self, c10::optional<boo
 std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending) {
   return _th_sort_stable(self, /*stable=*/false, dim, descending);
 }
+void _th_sort_key_value_inplace(Tensor & keys, Tensor & values, int64_t dim, bool descending) {
+    auto dispatch_scalar_type = infer_scalar_type(keys);
+    switch (dispatch_scalar_type) {
+        case ScalarType::Byte: {
+            auto keys_ = checked_dense_tensor_unwrap(keys, "keys", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, dispatch_scalar_type);
+            auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, ScalarType::Long);
+            THCudaByteTensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
+            break;
+        }
+        case ScalarType::Char: {
+            auto keys_ = checked_dense_tensor_unwrap(keys, "keys", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, dispatch_scalar_type);
+            auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, ScalarType::Long);
+            THCudaCharTensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
+            break;
+        }
+        case ScalarType::Double: {
+            auto keys_ = checked_dense_tensor_unwrap(keys, "keys", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, dispatch_scalar_type);
+            auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, ScalarType::Long);
+            THCudaDoubleTensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
+            break;
+        }
+        case ScalarType::Float: {
+            auto keys_ = checked_dense_tensor_unwrap(keys, "keys", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, dispatch_scalar_type);
+            auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, ScalarType::Long);
+            THCudaTensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
+            break;
+        }
+        case ScalarType::Int: {
+            auto keys_ = checked_dense_tensor_unwrap(keys, "keys", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, dispatch_scalar_type);
+            auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, ScalarType::Long);
+            THCudaIntTensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
+            break;
+        }
+        case ScalarType::Long: {
+            auto keys_ = checked_dense_tensor_unwrap(keys, "keys", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, dispatch_scalar_type);
+            auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, ScalarType::Long);
+            THCudaLongTensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
+            break;
+        }
+        case ScalarType::Short: {
+            auto keys_ = checked_dense_tensor_unwrap(keys, "keys", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, dispatch_scalar_type);
+            auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, ScalarType::Long);
+            THCudaShortTensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
+            break;
+        }
+        case ScalarType::Half: {
+            auto keys_ = checked_dense_tensor_unwrap(keys, "keys", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, dispatch_scalar_type);
+            auto values_ = checked_dense_tensor_unwrap(values, "values", 0, "_th_sort_key_value_inplace", false, DeviceType::CUDA, ScalarType::Long);
+            THCudaHalfTensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
+            break;
+        }
+        default:
+            AT_ERROR("_th_sort_key_value_inplace not supported on CUDAType for ", dispatch_scalar_type);
+    }
+
+}
 Tensor & _th_renorm_out(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm, Tensor & result) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
