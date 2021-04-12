@@ -209,12 +209,11 @@ class AbstractTestCases:
                 torch.zeros(1, device=torch.device('msnpu'))
 
         def test_has_storage(self):
-            self.assertIsNotNone(torch.Tensor().storage())
-            self.assertIsNotNone(torch.Tensor(0).storage())
-            self.assertIsNotNone(torch.Tensor([]).storage())
-            self.assertIsNotNone(torch.Tensor().clone().storage())
-            self.assertIsNotNone(torch.Tensor([0, 0, 0]).nonzero().storage())
-            self.assertIsNotNone(torch.Tensor().new().storage())
+            self.assertIsNotNone(torch.tensor([]).storage())
+            self.assertIsNotNone(torch.empty(0).storage())
+            self.assertIsNotNone(torch.tensor([]).clone().storage())
+            self.assertIsNotNone(torch.tensor([0, 0, 0]).nonzero().storage())
+            self.assertIsNotNone(torch.tensor([]).new().storage())
 
         def test_where_invalid_device(self):
             if torch.cuda.is_available():
@@ -529,10 +528,10 @@ class AbstractTestCases:
         @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
         def test_multinomial_invalid_probs(self):
             test_method = AbstractTestCases._TestTorchMixin._test_multinomial_invalid_probs
-            self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
-            self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
-            self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
-            self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
+            self._spawn_method(test_method, torch.tensor([1., -1., 1.]))
+            self._spawn_method(test_method, torch.tensor([1., inf, 1.]))
+            self._spawn_method(test_method, torch.tensor([1., -inf, 1.]))
+            self._spawn_method(test_method, torch.tensor([1., 1., nan]))
 
         def test_copy_broadcast(self):
             torch.zeros(5, 6).copy_(torch.zeros(6))
@@ -585,10 +584,10 @@ class AbstractTestCases:
             self.assertEqual(imfc, imfx, atol=0, rtol=0, msg='torch.conv2')
             self.assertLessEqual(math.abs(x.dot(x) - torch.xcorr2(x, x)[0][0]), 1e-10, 'torch.conv2')
 
-            xx = torch.Tensor(2, x.size(1), x.size(2))
+            xx = torch.empty(2, x.size(1), x.size(2))
             xx[1].copy_(x)
             xx[2].copy_(x)
-            kk = torch.Tensor(2, k.size(1), k.size(2))
+            kk = torch.empty(2, k.size(1), k.size(2))
             kk[1].copy_(k)
             kk[2].copy_(k)
 
@@ -629,10 +628,10 @@ class AbstractTestCases:
             self.assertEqual(imfc, imfx, atol=0, rtol=0, msg='torch.conv3')
             self.assertLessEqual(math.abs(x.dot(x) - torch.xcorr3(x, x)[0][0][0]), 4e-10, 'torch.conv3')
 
-            xx = torch.Tensor(2, x.size(1), x.size(2), x.size(3))
+            xx = torch.empty(2, x.size(1), x.size(2), x.size(3))
             xx[1].copy_(x)
             xx[2].copy_(x)
-            kk = torch.Tensor(2, k.size(1), k.size(2), k.size(3))
+            kk = torch.empty(2, k.size(1), k.size(2), k.size(3))
             kk[1].copy_(k)
             kk[2].copy_(k)
 
@@ -732,7 +731,7 @@ class AbstractTestCases:
 
             torch.random.manual_seed(100)
             buf = io.BytesIO()
-            tensor = torch.Tensor([1, 2, 3])
+            tensor = torch.tensor([1, 2, 3])
             ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(tensor)
             after = torch.rand(10)
 
@@ -858,7 +857,7 @@ class AbstractTestCases:
                 run_test(x, *case)
 
         def _consecutive(self, size, start=1):
-            sequence = torch.ones(int(torch.Tensor(size).prod(0))).cumsum(0)
+            sequence = torch.ones(torch.tensor(size).prod(0)).cumsum(0)
             sequence.add_(start - 1)
             return sequence.resize_(*size)
 
@@ -1200,18 +1199,18 @@ class AbstractTestCases:
             self.assertEqual(repr(a.max(1)), textwrap.dedent(expected).strip())
 
         def test_is_same_size(self):
-            t1 = torch.Tensor(3, 4, 9, 10)
-            t2 = torch.Tensor(3, 4)
-            t3 = torch.Tensor(1, 9, 3, 3)
-            t4 = torch.Tensor(3, 4, 9, 10)
+            t1 = torch.empty(3, 4, 9, 10)
+            t2 = torch.empty(3, 4)
+            t3 = torch.empty(1, 9, 3, 3)
+            t4 = torch.empty(3, 4, 9, 10)
 
             self.assertFalse(t1.is_same_size(t2))
             self.assertFalse(t1.is_same_size(t3))
             self.assertTrue(t1.is_same_size(t4))
 
         def test_tensor_set(self):
-            t1 = torch.Tensor()
-            t2 = torch.Tensor(3, 4, 9, 10).uniform_()
+            t1 = torch.tensor([])
+            t2 = torch.empty(3, 4, 9, 10).uniform_()
             t1.set_(t2)
             self.assertEqual(t1.storage()._cdata, t2.storage()._cdata)
             size = torch.Size([9, 3, 4, 10])
@@ -1228,7 +1227,7 @@ class AbstractTestCases:
             self.assertEqual(t1.stride(), stride)
 
             # test argument names
-            t1 = torch.Tensor()
+            t1 = torch.tensor([])
             # 1. case when source is tensor
             t1.set_(source=t2)
             self.assertEqual(t1.storage()._cdata, t2.storage()._cdata)
@@ -1273,11 +1272,11 @@ class AbstractTestCases:
 
         def test_equal(self):
             # Contiguous, 1D
-            t1 = torch.Tensor((3, 4, 9, 10))
+            t1 = torch.tensor((3., 4., 9., 10.))
             t2 = t1.contiguous()
-            t3 = torch.Tensor((1, 9, 3, 10))
-            t4 = torch.Tensor((3, 4, 9))
-            t5 = torch.Tensor()
+            t3 = torch.tensor((1., 9., 3., 10.))
+            t4 = torch.tensor((3., 4., 9.))
+            t5 = torch.tensor([])
             self.assertTrue(t1.equal(t2))
             self.assertFalse(t1.equal(t3))
             self.assertFalse(t1.equal(t4))
@@ -1288,11 +1287,11 @@ class AbstractTestCases:
             self.assertFalse(torch.equal(t1, t5))
 
             # Non contiguous, 2D
-            s = torch.Tensor(((1, 2, 3, 4), (5, 6, 7, 8)))
+            s = torch.tensor(((1, 2, 3, 4), (5, 6, 7, 8)))
             s1 = s[:, 1:3]
             s2 = s1.clone()
-            s3 = torch.Tensor(((2, 3), (6, 7)))
-            s4 = torch.Tensor(((0, 0), (0, 0)))
+            s3 = torch.tensor(((2, 3), (6, 7)))
+            s4 = torch.tensor(((0, 0), (0, 0)))
 
             self.assertFalse(s1.is_contiguous())
             self.assertTrue(s1.equal(s2))
@@ -1353,7 +1352,7 @@ class AbstractTestCases:
         def test_permute(self):
             orig = [1, 2, 3, 4, 5, 6, 7]
             perm = torch.randperm(7).tolist()
-            x = torch.Tensor(*orig).fill_(0)
+            x = torch.empty(*orig).fill_(0)
             new = [i - 1 for i in x.permute(*perm).size()]
             self.assertEqual(perm, new)
             self.assertEqual(x.size(), orig)
@@ -1469,7 +1468,7 @@ class AbstractTestCases:
             self.assertEqual(g1_randn, g2_randn)
 
             default_state = torch.default_generator.get_state()
-            q = torch.Tensor(100)
+            q = torch.empty(100)
             g1_normal = q.normal_()
             g2 = torch.Generator()
             g2.set_state(default_state)
@@ -1884,7 +1883,7 @@ class AbstractTestCases:
                     assert_with_filename(fname)
 
         def test_print(self):
-            default_type = torch.Tensor().type()
+            default_type = torch.tensor([]).type()
             for t in torch._tensor_classes:
                 if t == torch.HalfTensor:
                     continue  # HalfTensor does not support fill
@@ -2152,7 +2151,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             for i, sub in enumerate(x):
                 self.assertEqual(sub, x[i])
 
-            x = torch.Tensor()
+            x = torch.tensor([])
             self.assertEqual(list(x), [])
 
         def test_assertEqual(self) -> None:
@@ -2173,7 +2172,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                                    lambda: self.assertEqual(x, xv, "", 1.0))  # type: ignore
 
         def test_new(self) -> None:
-            x = torch.autograd.Variable(torch.Tensor())
+            x = torch.autograd.Variable(torch.tensor([]))
             y = torch.autograd.Variable(torch.randn(4, 4))
             z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]))
             self.assertEqual(x.new().shape, [0])
@@ -3422,7 +3421,7 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(t1.is_set_to(t3))
         self.assertTrue(t3.is_set_to(t1), "is_set_to should be symmetric")
         self.assertFalse(t1.is_set_to(t4))
-        self.assertFalse(torch.Tensor().is_set_to(torch.Tensor()),
+        self.assertFalse(torch.tensor([]).is_set_to(torch.tensor([])),
                          "Tensors with no storages should not appear to be set "
                          "to each other")
 
@@ -4058,7 +4057,7 @@ class TestTorchDeviceType(TestCase):
     def test_cumsum(self, device):
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumsum(x, 1)
-        res2 = torch.Tensor().to(device)
+        res2 = torch.tensor([]).to(device)
         torch.cumsum(x, 1, out=res2)
         self.assertEqual(res1, res2)
         x.cumsum_(1)
@@ -4108,7 +4107,7 @@ class TestTorchDeviceType(TestCase):
     def test_cumprod(self, device):
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumprod(x, 1)
-        res2 = torch.Tensor().to(device)
+        res2 = torch.tensor([]).to(device)
         torch.cumprod(x, 1, out=res2)
         self.assertEqual(res1, res2)
         x.cumprod_(1)
@@ -6544,10 +6543,10 @@ class TestTorchDeviceType(TestCase):
                 torch.multinomial(probs.to(device), 2)
                 torch.cuda.synchronize()
 
-        test(torch.Tensor([1, -1, 1]))
-        test(torch.Tensor([1, inf, 1]))
-        test(torch.Tensor([1, -inf, 1]))
-        test(torch.Tensor([1, 1, nan]))
+        test(torch.tensor([1., -1., 1.]))
+        test(torch.tensor([1., inf, 1.]))
+        test(torch.tensor([1., -inf, 1.]))
+        test(torch.tensor([1., 1., nan]))
 
     def test_multinomial_invalid_distribution(self, device):
         def test(probs, replacement):
