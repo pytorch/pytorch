@@ -642,7 +642,7 @@ def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
         alpha, beta = input_args[3], input_args[4]
         broadcasts_input = input_args[5]
         sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha),
-                                         broadcasts_input=True))
+                                         broadcasts_input=broadcasts_input))
     return tuple(sample_inputs)
 
 def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
