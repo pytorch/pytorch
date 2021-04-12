@@ -74,9 +74,9 @@ def xla_tensor_creation_api(ret_name: str, ret: Return, device_param_name: str, 
         # Only raw Tensor (non-reference) returns need to go through the XLA tensor creation API.
         # Tensor references can be returned directly, since they've already been converted to XLA tensors.
         # See Note [Tensor Copy Returns]
-        bridge_api = 'CreateXlaTensor'
+        pass
     elif isinstance(ret.type, ListType) and ret.type.elem == BaseType(BaseTy.Tensor):
-        bridge_api = 'CreateXlaTensors'
+        pass
     else:
         # for non tensor-types, there's no need to wrap the output in an xla bridge api.
         return ret_name
@@ -85,7 +85,10 @@ def xla_tensor_creation_api(ret_name: str, ret: Return, device_param_name: str, 
     if tuple_idx is not None:
         out_name = f"std::get<{tuple_idx}>(x_result)"
 
-    return f"bridge::{bridge_api}({out_name}, bridge::GetXlaDevice({device_param_name}))"
+    if isinstance(ret.type, ListType) and ret.type.elem == BaseType(BaseTy.Tensor):
+        return f"at::to({out_name}, {device_param_name}.device())"
+    else:
+        return f"{out_name}.to({device_param_name}.device())"
 
 
 
@@ -126,12 +129,12 @@ class GenExternalAtenFallback:
             return_names = cpp.return_names(f.native_function, override_name="x_result")
             if len(return_names) > 1:
                 updates = '\n  '.join(
-                    f'bridge::XlaUpdateTensors({{{ret_name}}}, {{std::get<{i}>({name}_tmp)}}, {{0}});'
+                    f'at::_copy_from(std::get<{i}>({name}_tmp), {ret_name});'
                     for i, ret_name in enumerate(return_names))
                 returns = f'{dispatcher_sig.returns_type().cpp_type()}({", ".join(return_names)})'
             else:
                 ret_name = return_names[0]
-                updates = f'bridge::XlaUpdateTensors({{{ret_name}}}, {{{name}_tmp}}, {{0}});'
+                updates = f'at::_copy_from({name}_tmp, {ret_name});'
                 returns = ret_name
 
             # TODO: instead of hardcoding out wrappers that call into functional kernels,
@@ -221,20 +224,20 @@ class GenExternalAtenFallback:
 
             tensorlist_intermediates_str = ''
             if len(tensorlist_args) > 0:
-                tensorlist_intermediates_str = '\n'.join([f'  auto {updated_name} = bridge::XlaCreateTensorList({arg.name});'
+                tensorlist_intermediates_str = '\n'.join([f'  auto {updated_name} = at::to_cpu({arg.name});'
                                                           for arg, updated_name in tensorlist_args.items()])
 
             opt_tensor_intermediates_str = ''
             if len(opt_tensor_args) > 0:
                 arg_str = ", ".join([a.name for a in opt_tensor_args.keys()])
                 opt_tensor_intermediates_str = f'\n  std::vector<c10::optional<at::Tensor>> xlatens_opt_tensors = {{{arg_str}}};'
-                opt_tensor_intermediates_str += '\n  auto xlatens_opt = bridge::XlaCreateOptTensorList(xlatens_opt_tensors);'
+                opt_tensor_intermediates_str += '\n  auto xlatens_opt = at::to_cpu(xlatens_opt_tensors);'
 
             intermediates = ''
             if tensorlist_intermediates_str != '':
                 intermediates += tensorlist_intermediates_str + '\n'
             intermediates += f"  std::vector<at::Tensor> xlatens_tensors = {{{', '.join([a.name for a in tensor_args.keys()])}}};"
-            intermediates += "\n  auto xlatens = bridge::XlaCreateTensorList(xlatens_tensors);"
+            intermediates += "\n  auto xlatens = at::to_cpu(xlatens_tensors);"
             if opt_tensor_intermediates_str != '':
                 intermediates += opt_tensor_intermediates_str
 
@@ -263,7 +266,7 @@ class GenExternalAtenFallback:
             if len(annotated_tensor_indices) > 0:
                 indices_str = ", ".join([str(i) for i in annotated_tensor_indices])
                 collect_mutated_tensors = f'\n  std::vector<size_t> xlatens_update_indices = {{{indices_str}}};'
-                update_tensors = '\n  bridge::XlaUpdateTensors(xlatens_tensors, xlatens, xlatens_update_indices);'
+                update_tensors = '\n  for (int i : xlatens_update_indices) at::_copy_from(xlatens[i], xlatens_tensors[i]);'
 
             returns = ''
             if f.native_function.func.returns:
