@@ -63,10 +63,6 @@ TORCH_API at::Tensor conv3d(
     const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
     std::initializer_list<int64_t> padding, IntArrayRef dilation = 1, int64_t groups = 1);
 
-// C++ only helper functions that are used in codegen
-TORCH_API std::vector<Tensor> to(const std::vector<Tensor>& tensors, c10::Device device);
-TORCH_API std::vector<c10::optional<at::Tensor>> to_cpu(const std::vector<c10::optional<at::Tensor>>& tensors);
-
 namespace detail {
 
 TORCH_API void noopDelete(void*);
@@ -104,7 +100,7 @@ class TORCH_API TensorMaker {
 
   TensorMaker& context(void* value, ContextDeleter deleter = nullptr) noexcept {
     ctx_ = std::unique_ptr<void, ContextDeleter>{
-        value, deleter ? deleter : detail::noopDelete};
+        value, deleter != nullptr ? deleter : detail::noopDelete};
 
     return *this;
   }
@@ -134,8 +130,6 @@ class TORCH_API TensorMaker {
   DataPtr makeDataPtrFromContext() noexcept;
 
   IntArrayRef makeTempSizes() const noexcept;
-
-  Tensor makeEmptyTensor() const;
 
   void* data_;
   IntArrayRef sizes_;

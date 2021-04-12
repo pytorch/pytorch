@@ -85,10 +85,7 @@ def xla_tensor_creation_api(ret_name: str, ret: Return, device_param_name: str, 
     if tuple_idx is not None:
         out_name = f"std::get<{tuple_idx}>(x_result)"
 
-    if isinstance(ret.type, ListType) and ret.type.elem == BaseType(BaseTy.Tensor):
-        return f"at::to({out_name}, {device_param_name}.device())"
-    else:
-        return f"{out_name}.to({device_param_name}.device())"
+    return f"to_device_opt({out_name}, get_device_arg({device_param_name}))"
 
 
 
@@ -231,7 +228,7 @@ class GenExternalAtenFallback:
             if len(opt_tensor_args) > 0:
                 arg_str = ", ".join([a.name for a in opt_tensor_args.keys()])
                 opt_tensor_intermediates_str = f'\n  std::vector<c10::optional<at::Tensor>> xlatens_opt_tensors = {{{arg_str}}};'
-                opt_tensor_intermediates_str += '\n  auto xlatens_opt = at::to_cpu(xlatens_opt_tensors);'
+                opt_tensor_intermediates_str += '\n  auto xlatens_opt = to_cpu(xlatens_opt_tensors);'
 
             intermediates = ''
             if tensorlist_intermediates_str != '':

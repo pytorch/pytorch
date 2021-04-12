@@ -14,6 +14,71 @@
 
 namespace torch_xla {
 
+// convenience helpers for extracting out an optional c10::Device
+
+c10::optional<c10::Device> get_device_arg(at::Tensor tensor) {
+    return tensor.device();
+}
+
+c10::optional<c10::Device> get_device_arg(c10::optional<at::Tensor> tensor) {
+    return tensor ? c10::optional<c10::Device>((*tensor).device()) : c10::nullopt;
+}
+
+c10::optional<c10::Device> get_device_arg(std::vector<at::Tensor> tensors) {
+    return tensors.size() > 0 ? c10::optional<c10::Device>(tensors[0].device()) : c10::nullopt;
+}
+
+c10::optional<c10::Device> get_device_arg(at::TensorList tensors) {
+    return tensors.size() > 0 ? c10::optional<c10::Device>(tensors[0].device()) : c10::nullopt;
+}
+
+c10::optional<c10::Device> get_device_arg(c10::optional<c10::Device> device) {
+    return device;
+}
+
+c10::optional<c10::Device> get_device_arg(c10::Device device) {
+    return c10::optional<c10::Device>(device);
+}
+
+// convenience helpers for converting tensors to an optional device
+
+at::Tensor to_device_opt(const at::Tensor tensor, c10::optional<c10::Device> device) {
+    return device ? tensor.to(*device) : tensor;
+}
+
+std::vector<at::Tensor> to_device_opt(const std::vector<at::Tensor>& tensors, c10::optional<c10::Device> device) {
+    std::vector<at::Tensor> output_tensors;
+    for (const auto& t : tensors) {
+        output_tensors.push_back(to_device_opt(t, device));
+    }
+    return output_tensors;
+}
+
+// convenience helper for converting tensors to cpu
+
+std::vector<c10::optional<at::Tensor>> to_cpu(const std::vector<c10::optional<at::Tensor>>& tensors) {
+    std::vector<c10::optional<at::Tensor>> opt_cpu_tensors(tensors.size());
+    std::vector<bool> copy_indices(tensors.size());
+    std::vector<at::Tensor> valid_tensors;
+    for (auto i = 0; i < tensors.size(); ++i) {
+        if (tensors[i].has_value()) {
+            valid_tensors.push_back(*tensors[i]);
+            copy_indices[i] = true;
+        } else {
+            opt_cpu_tensors[i] = tensors[i];
+        }
+    }
+    auto cpu_tensors = at::to_cpu(valid_tensors); // redispatch!
+
+    int idx = 0;
+    for (auto i = 0; i < tensors.size(); ++i) {
+        if (copy_indices[i]) {
+            opt_cpu_tensors[i] = c10::optional<at::Tensor>(cpu_tensors[idx++]);
+        }
+    }
+    return opt_cpu_tensors;
+}
+
 ${dispatch_aten_fallback_definitions}
 
 
