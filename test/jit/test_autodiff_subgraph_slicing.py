@@ -49,8 +49,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 
-    #def test_run
-
     def test_simple_merge(self):
         # o --> o
         def fn(x, y, z):
@@ -190,7 +188,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
             x = torch.rand(10, requires_grad=True)
             y = torch.rand(10, requires_grad=True)
-
 
             scripted = torch.jit.script(method1)
             scripted(x, y)
