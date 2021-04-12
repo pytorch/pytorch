@@ -710,14 +710,6 @@ class TORCH_API Tensor {
     impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
   }
 
-  /// This function returns if the forward gradient for this tensor exists at any level
-  /// it is safe to use as a guard against _fw_grad in code where autograd may not be
-  /// be built
-  bool _has_fw_grad() const {
-    return impl_->_has_fw_grad();
-  }
-
-
 
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.

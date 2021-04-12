@@ -51,13 +51,6 @@ const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self) c
   return autograd_meta_->fw_grad(level, self);
 }
 
-bool TensorImpl::_has_fw_grad() const {
-  // One reason for autograd_meta_ to be undefined is autograd isnt enabled.
-  // However in functions like _fw_grad the fallback code path also requires
-  // autograd to be enabled. This function can serve as a guard then.
-  return autograd_meta_ != nullptr;
-}
-
 void TensorImpl::_set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) {
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);

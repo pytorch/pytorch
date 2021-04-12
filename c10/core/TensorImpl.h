@@ -792,13 +792,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   const at::Tensor& _fw_grad(uint64_t level, const at::Tensor& self) const;
 
   /**
-  * Guard function in case _fw_grad might be called in a context where autograd is not build
-  *
-  * This is an internal API that should never be used by end users.
-  */
-  bool _has_fw_grad() const;
-
-  /**
    * Sets the forward gradient for this Tensor.
    * The given Tensor might not be used directly and its content will be copied.
    *
