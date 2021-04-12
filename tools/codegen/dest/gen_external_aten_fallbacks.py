@@ -8,11 +8,7 @@ from tools.codegen.utils import *
 from tools.codegen.model import *
 from tools.codegen.api.types import *
 
-# TODO: Are these XLA specifc?
-# I have a feeling that the answer is no: we don't want to generate cpu fallbacks for these ops
-# for ANY backend, not just XLA.
-# If that's the case, I think it's fine to leave this list in codegen.
-# If the list of denied op is different per backend though, consider moving this into yaml.
+# TODO: if any of these are XLA specific, we should move them into yaml.
 _FN_DENYLIST_REGEX = [
     # ATEN functions
     r'[^(]*cudnn',
