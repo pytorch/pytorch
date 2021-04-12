@@ -821,7 +821,7 @@ slow_tests_dict: Optional[Dict[str, float]] = None
 def check_slow_test_from_stats(test):
     global slow_tests_dict
     if slow_tests_dict is None:
-        url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/.pytorch-slow-tests'
+        url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json'
         try:
             contents = urlopen(url, timeout=1).read().decode('utf-8')
             slow_tests_dict = json.loads(contents)
@@ -844,7 +844,7 @@ def check_disabled(test_name):
         _disabled_test_from_issues: Dict = {}
 
         def read_and_process():
-            url = 'https://raw.githubusercontent.com/zdevito/pytorch_disabled_tests/master/result.json'
+            url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/disabled-tests.json'
             contents = urlopen(url, timeout=1).read().decode('utf-8')
             the_response = json.loads(contents)
             for item in the_response['items']:
@@ -1019,20 +1019,20 @@ class TestCase(expecttest.TestCase):
 
         set_rng_seed(SEED)
 
-    def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
+    def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
         # empty numel, but nnz > 0 makes the indices containing values.
         assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
 
         v_size = [nnz] + list(size[sparse_dim:])
-        v = torch.randn(*v_size, device=device)
+        v = make_tensor(v_size, device=device, dtype=dtype, low=-1, high=1)
         i = torch.rand(sparse_dim, nnz, device=device)
         i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
         i = i.to(torch.long)
         if is_uncoalesced:
             v = torch.cat([v, torch.randn_like(v)], 0)
             i = torch.cat([i, i], 1)
-        x = torch.sparse_coo_tensor(i, v, torch.Size(size))
+        x = torch.sparse_coo_tensor(i, v, torch.Size(size), dtype=dtype, device=device)
 
         if not is_uncoalesced:
             x = x.coalesce()
@@ -2136,3 +2136,12 @@ def _wrap_warn_once(regex):
                 fn(self, *args, **kwargs)
         return inner
     return decorator
+
+# This is a wrapper that wraps a test to run this test twice, one with
+# coalesced=True, another with coalesced=False for coalesced/uncoalesced sparse tensors.
+def coalescedonoff(f):
+    @wraps(f)
+    def wrapped(self, *args, **kwargs):
+        f(self, *args, **kwargs, coalesced=True)
+        f(self, *args, **kwargs, coalesced=False)
+    return wrapped
