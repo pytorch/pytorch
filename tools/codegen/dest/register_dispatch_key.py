@@ -148,18 +148,14 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             args_exprs_str = ', '.join(a.name for a in args)
 
-            init_cuda = ""
             device_guard = "// DeviceGuard omitted"  # default
 
-            if (is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key)) and f.device_guard:
+            if f.device_guard and is_cuda_dispatch_key(self.dispatch_key):
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                 if has_tensor_options:
                     # kernel is creating a tensor
-                    device_guard = "const DeviceGuard device_guard(device_or_default(device));"
-
-                    if is_cuda_dispatch_key(self.dispatch_key):
-                        # initialize CUDA on construction of CUDA tensors
-                        init_cuda = "globalContext().lazyInitCUDA();\n"
+                    device_guard = """globalContext().lazyInitCUDA();
+  const DeviceGuard device_guard(device_or_default(device));"""
                 else:
                     # kernel is operating on existing tensors
 
@@ -181,7 +177,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 namespace {{
 
 {returns_type} {name}({args_str}) {{
-  {init_cuda}{device_guard}
+  {device_guard}
   return {impl_name}({args_exprs_str});
 }}
 
