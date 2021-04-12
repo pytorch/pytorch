@@ -235,6 +235,8 @@ Operation createUnaryOp(
     auto out_raw_data = raw_data;
     auto out = a;
     if (!inplace) {
+      // `a_it.get_desc()` will allocate a tensor
+      // of the right physical size.
       auto it_empty = ideep::tensor(a_it.get_desc());
       out = at::native::new_with_itensor_mkldnn(
           std::move(it_empty),
@@ -244,6 +246,9 @@ Operation createUnaryOp(
       out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
     }
 
+    // tensor's physical size could be bigger than a logical one
+    // `a_it.get_desc().get_size()` returns the real physical size (in bytes)
+    // we use it to compute `nelem` for `aten` ops 
     auto nelem = a_it.get_desc().get_size() / elementSize(a.scalar_type());
     auto out_aten = at::from_blob(out_raw_data, {nelem}, topt);
     aten_op(out_aten, t);
