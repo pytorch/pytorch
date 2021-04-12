@@ -344,11 +344,6 @@ class DeviceTypeTestBase(TestCase):
             result.stop()
 
 
-# All available device types, this list must match
-# the derived *TestBase classes below
-ALL_AVAILABLE_DEVICE_TYPES = ['meta', 'cpu', 'cuda']
-
-
 class CPUTestBase(DeviceTypeTestBase):
     device_type = 'cpu'
 
@@ -432,20 +427,19 @@ def get_device_type_test_bases():
 device_type_test_bases = get_device_type_test_bases()
 
 
-def filter_desired_device_types(device_types: List[str],
-                                except_for: List[str] = None, only_for: List[str] = None):
-    filtered_device_types: List[str] = list()
-    for device_type in device_types:
-        # Skips bases listed in except_for
-        if except_for and only_for:
-            assert device_type not in except_for or device_type not in only_for,\
-                "same device cannot appear in except_for and only_for"
-        if except_for and device_type in except_for:
-            continue
-        if only_for and device_type not in only_for:
-            continue
-        filtered_device_types.append(device_type)
-    return filtered_device_types
+def filter_desired_device_types(device_type_test_bases, except_for=None, only_for=None):
+    # device type cannot appear in both except_for and only_for
+    intersect = set(except_for if except_for else []) & set(only_for if only_for else [])
+    assert not intersect, f"device ({intersect}) appeared in both except_for and only_for"
+
+    if except_for is not None:
+        device_type_test_bases = filter(
+            lambda x: x.device_type not in except_for, device_type_test_bases)
+    if only_for is not None:
+        device_type_test_bases = filter(
+            lambda x: x.device_type in only_for, device_type_test_bases)
+
+    return list(device_type_test_bases)
 
 
 # Note [How to extend DeviceTypeTestBase to add new test device]
@@ -498,8 +492,8 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     generic_tests = [x for x in generic_members if x.startswith('test')]\
 
     # Filter out the device types based on user inputs
-    desired_device_types = filter_desired_device_types(ALL_AVAILABLE_DEVICE_TYPES,
-                                                       except_for, only_for)
+    desired_device_type_test_bases = filter_desired_device_types(device_type_test_bases,
+                                                                 except_for, only_for)
 
     def split_if_not_empty(x: str):
         return x.split(",") if len(x) != 0 else []
@@ -511,15 +505,12 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     env_only_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_ONLY_FOR", ''))
     env_except_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_EXCEPT_FOR", ''))
 
-    desired_device_types = filter_desired_device_types(desired_device_types,
-                                                       env_except_for, env_only_for)
+    desired_device_type_test_bases = filter_desired_device_types(desired_device_type_test_bases,
+                                                                 env_except_for, env_only_for)
 
 
     # Creates device-specific test cases
-    for base in device_type_test_bases:
-        # Skips bases if not listed in desired_device_types
-        if base.device_type not in desired_device_types:
-            continue
+    for base in desired_device_type_test_bases:
         # Special-case for ROCm testing -- only test for 'cuda' i.e. ROCm device by default
         # The except_for and only_for cases were already checked above. At this point we only need to check 'cuda'.
         if TEST_WITH_ROCM and base.device_type != 'cuda':
