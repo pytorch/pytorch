@@ -416,12 +416,11 @@ if _enabled:
             PackageExporter and return method to load the ScriptModule in PackageImporter's
             Pickler's persistent_load operation
             """
-            ts_id = exporter.get_ts_id()
-            starting_tensor_id = exporter.get_storage_id()
-            exporter._next_storage_id = exporter.ts_serializer.serialize(
-                self._actual_script_module, ts_id, starting_tensor_id
+            ts_id, next_storage_id = exporter.ts_serializer.serialize(
+                self._actual_script_module, exporter.get_storage_id()
             )
-            return (reduce_package_script_module, (ts_id, ))
+            exporter._next_storage_id = next_storage_id
+            return (reduce_package_script_module, (str(ts_id),))
 
     class RecursiveScriptModule(ScriptModule):
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
@@ -583,12 +582,11 @@ if _enabled:
             PackageExporter and return method to load the ScriptModule in PackageImporter's
             Pickler's persistent_load operation
             """
-            ts_id = exporter.get_ts_id()
-            starting_ts_id = exporter.get_storage_id()
-            exporter._next_storage_id = exporter.ts_serializer.serialize(
-                self._c, ts_id, starting_ts_id
+            ts_id, next_storage_id = exporter.ts_serializer.serialize(
+                self._c, exporter.get_storage_id()
             )
-            return (reduce_package_script_module, (ts_id, ))
+            exporter._next_storage_id = next_storage_id
+            return (reduce_package_script_module, (str(ts_id),))
 
         def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""
