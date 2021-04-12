@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 from pathlib import Path
-from enum import Enum
 
 import jinja2
 
@@ -10,16 +9,16 @@ DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 GITHUB_DIR = Path(__file__).parent.parent
 
 CPU_TEST_RUNNER = "linux.2xlarge"
-GPU_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
+CUDA_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
 
 
 class PyTorchLinuxWorkflow:
     def __init__(self, build_environment: str, docker_image_base: str):
         self.build_environment = build_environment
         self.docker_image_base = docker_image_base
-        self.test_runner_type = (
-           GPU_TEST_RUNNER if "cuda" in build_environment else CPU_TEST_RUNNER
-        )
+        self.test_runner_type = CPU_TEST_RUNNER
+        if "cuda" in build_environment:
+            self.test_runner_type = CUDA_TEST_RUNNER
 
     def generate_workflow_file(
         self, workflow_template: jinja2.Template, jinja_env: jinja2.Environment

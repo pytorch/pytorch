@@ -114,7 +114,7 @@ jobs:
       - name: Install nvidia driver, nvidia-docker runtime
         if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') }}
         run: |
-          .github/scripts/install_nvidia_utils.sh
+          bash .github/scripts/install_nvidia_utils_linux.sh
       - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts
         with:
