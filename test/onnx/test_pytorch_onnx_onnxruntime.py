@@ -7949,6 +7949,17 @@ class TestONNXRuntime(unittest.TestCase):
         output = module(x, win_length)
         self.run_test(module, (x, win_length))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()
+    def test_fill(self):
+        class FillModule(torch.nn.Module):
+            def forward(self, x, filled_value: int):
+                return x.fill_(filled_value)
+
+        x = torch.randn((4, 5, 6))
+        filled_value = 7
+        self.run_test(FillModule(), (x, filled_value))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
               **extra_kwargs):
