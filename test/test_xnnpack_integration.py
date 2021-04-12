@@ -186,6 +186,17 @@ class TestXNNPACKOps(TestCase):
         output_hardswishprepacked = torch.ops.prepacked.hardswish(input_data)
         torch.testing.assert_allclose(ref_result, output_hardswishprepacked, rtol=1e-2, atol=1e-3)
 
+    @given(batch_size=st.integers(0, 3),
+           data_shape=hu.array_shapes(1, 3, 2, 64))
+    def test_hardswish_(self, batch_size, data_shape):
+        data_shape = [batch_size] + list(data_shape)
+        input_data = torch.rand(data_shape)
+        ref_result = F.hardswish(input_data)
+
+        output_hardswishprepacked = torch.ops.prepacked.hardswish_(input_data)
+        torch.testing.assert_allclose(ref_result, input_data, rtol=1e-2, atol=1e-3)
+
+
 
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
                      " XNNPACK must be enabled for these tests."

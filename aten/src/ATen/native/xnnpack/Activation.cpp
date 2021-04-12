@@ -7,27 +7,17 @@ namespace at {
 namespace native {
 namespace xnnpack {
 
-Tensor hardswish(const Tensor& input) {
+Tensor& hardswish_impl(Tensor& input, Tensor& output) {
   using namespace internal;
 
-  const Tensor padded_input =
-      mobile::allocate_padded_contiguous_if_needed(
-          input, input.suggest_memory_format());
-
-  Tensor output = mobile::empty_with_tail_padding(
-      padded_input.sizes(),
-      padded_input.options().dtype(),
-      input.suggest_memory_format(),
-      padded_input.names());
-
   xnn_operator_t hardswish_op{};
-  const auto channels = Layout::ActivationND::channel(padded_input.sizes());
+  const auto channels = Layout::ActivationND::channel(input.sizes());
   const xnn_status create_status = xnn_create_hardswish_nc_f32(
-      channels, // channels
-      channels, // input stride
-      channels, // output stride
-      0, // flags
-      &hardswish_op);
+    channels, // channels
+    channels, // input stride
+    channels, // output stride
+    0, // flags
+    &hardswish_op);
 
   TORCH_CHECK(
     xnn_status_success == create_status,
@@ -37,8 +27,8 @@ Tensor hardswish(const Tensor& input) {
 
   const xnn_status setup_status = xnn_setup_hardswish_nc_f32(
     hardswish_op,
-    Layout::ActivationND::batch(padded_input.sizes()),  // Batch
-    padded_input.data_ptr<float>(),
+    Layout::ActivationND::batch(input.sizes()),  // Batch
+    input.data_ptr<float>(),
     output.data_ptr<float>(),
     caffe2::pthreadpool_());  // threadpool
 
@@ -54,7 +44,28 @@ Tensor hardswish(const Tensor& input) {
     xnn_status_success == run_status,
     "xnn_run_operator failed!");
 
+  return output;
+}
+
+Tensor hardswish(const Tensor& input) {
+  Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
+    input, input.suggest_memory_format());
+
+  Tensor output = mobile::empty_with_tail_padding(
+    padded_input.sizes(),
+    padded_input.options().dtype(),
+    input.suggest_memory_format(),
+    padded_input.names());
+
+  hardswish_impl(padded_input, output);
   return output.contiguous(input.suggest_memory_format());
+}
+
+Tensor& hardswish_(Tensor& input) {
+  using namespace internal;
+
+  hardswish_impl(input, input);
+  return input;
 }
 
 }

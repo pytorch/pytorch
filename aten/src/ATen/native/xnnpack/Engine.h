@@ -84,6 +84,7 @@ Tensor channel_shuffle(
 //
 
 Tensor hardswish(const Tensor& input);
+Tensor& hardswish_(Tensor& input);
 
 } // namespace xnnpack
 } // namespace native

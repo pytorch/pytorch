@@ -81,6 +81,7 @@ TORCH_LIBRARY(prepacked, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::conv2d_transpose_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.TransposeConv2dOpContext W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA("prepacked::hardswish(Tensor X) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA("prepacked::hardswish_(Tensor X) -> Tensor Y"));
 }
 
 TORCH_LIBRARY_IMPL(prepacked, CPU, m) {
@@ -91,6 +92,7 @@ TORCH_LIBRARY_IMPL(prepacked, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("prepacked::conv2d_clamp_run"), TORCH_FN(internal::convolution2d::conv2d_clamp_run));
   m.impl(TORCH_SELECTIVE_NAME("prepacked::conv2d_transpose_clamp_run"), TORCH_FN(internal::convolution2d::conv2d_transpose_clamp_run));
   m.impl(TORCH_SELECTIVE_NAME("prepacked::hardswish"), TORCH_FN(hardswish));
+  m.impl(TORCH_SELECTIVE_NAME("prepacked::hardswish_"), TORCH_FN(hardswish_));
 }
 
 } // namespace xnnpack

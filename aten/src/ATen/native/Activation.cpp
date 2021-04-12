@@ -155,6 +155,10 @@ Tensor& hardswish_out(const Tensor& self, Tensor& result) {
 }
 
 Tensor& hardswish_(Tensor& self) {
+  #if defined(C10_MOBILE) && defined(USE_XNNPACK)
+  xnnpack::hardswish_(self);
+  return self;
+  #endif
   auto iter = TensorIterator::unary_op(self, self);
   hardswish_stub(iter.device_type(), iter);
   return self;
