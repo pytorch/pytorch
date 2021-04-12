@@ -661,9 +661,6 @@ class TestBinaryUfuncs(TestCase):
 
     # Tests pow() for integral, floating-type tensors, with integral, floating-type
     # exponents (tensor or scalar), respectively. Discontiguous tensors are also tested.
-    # This test is to be skipped for ROCm until the issue pretaining to int8 dtype would
-    # be resolved. Reference: https://github.com/RadeonOpenCompute/ROCm/issues/1432
-    @skipIfRocm
     def test_int_and_float_pow(self, device):
 
         def _test_int_and_float_pow(dt, low, high, dev):
