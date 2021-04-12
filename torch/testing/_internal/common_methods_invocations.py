@@ -2608,7 +2608,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Skips unsupported bfloat16 check because cuDNN 8 & below
                # are buggy. This test works on cuDNN 8.1 & CUDA 11.2
-               SkipInfo('TestOpInfo', 'test_unsupported_backward', dtypes=[torch.bfloat16], device_type='cuda'),
+               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=[torch.bfloat16], device_type='cuda'),
            ),
            sample_inputs_func=sample_inputs_addmm),
     OpInfo('addmm',
@@ -2622,7 +2622,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Skips unsupported bfloat16 check because cuDNN 8 & below
                # are buggy. This test works on cuDNN 8.1 & CUDA 11.2.
-               SkipInfo('TestOpInfo', 'test_unsupported_backward', dtypes=[torch.bfloat16], device_type='cuda'),
+               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=[torch.bfloat16], device_type='cuda'),
            ),
            sample_inputs_func=sample_inputs_addmm_non_fusible_nodes),
     OpInfo('addmv',
