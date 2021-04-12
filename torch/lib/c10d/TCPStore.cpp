@@ -145,7 +145,7 @@ void ListenThread::run() {
   std::vector<struct pollfd> fds;
   tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
 
-  while (1) {
+  while (true) {
     // Check control and exit early if triggered
     int res;
     SYSCHECK_ERR_RETURN_NEG1(
@@ -179,7 +179,7 @@ void ListenThread::run() {
   tcputil::addPollfd(fds, controlPipeFd_[0], POLLHUP);
   tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
 
-  while (1) {
+  while (true) {
     SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
 
     // Check control and exit early if triggered
@@ -216,23 +216,6 @@ TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket)
   daemonThread_ = std::thread(&TCPStoreDaemon::run, this);
 }
 
-void TCPStoreDaemon::cleanUpSockets(std::unordered_map<std::string, std::vector<int>>& socketMapping, int fd) {
-  for (auto it = socketMapping.begin(); it != socketMapping.end();) {
-    for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
-      if (*vecIt == fd) {
-        vecIt = it->second.erase(vecIt);
-      } else {
-        ++vecIt;
-      }
-    }
-    if (it->second.size() == 0) {
-      it = socketMapping.erase(it);
-    } else {
-      ++it;
-    }
-  }
-}
-
 void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {
   // Skipping the fds[0] and fds[1],
   // fds[0] is master's listening socket
@@ -256,8 +239,20 @@ void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {
       tcputil::closeSocket(fds[fdIdx].fd);
 
       // Remove all the tracking state of the close FD
-      cleanUpSockets(waitingSockets_, fds[fdIdx].fd);
-      cleanUpSockets(watchedSockets_, fds[fdIdx].fd);
+      for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
+        for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
+          if (*vecIt == fds[fdIdx].fd) {
+            vecIt = it->second.erase(vecIt);
+          } else {
+            ++vecIt;
+          }
+        }
+        if (it->second.size() == 0) {
+          it = waitingSockets_.erase(it);
+        } else {
+          ++it;
+        }
+      }
       for (auto it = keysAwaited_.begin(); it != keysAwaited_.end();) {
         if (it->first == fds[fdIdx].fd) {
           it = keysAwaited_.erase(it);
@@ -608,10 +603,6 @@ TCPStore::TCPStore(
         tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
     watchListener_ = std::make_unique<ListenThread>(listenSocket_);
   } catch (const std::exception&) {
-    if (isServer_) {
-      tcpStoreDaemon_ = nullptr;
-      tcputil::closeSocket(masterListenSocket_);
-    }
     watchListener_ = nullptr;
     if (listenSocket_ != -1) {
       tcputil::closeSocket(listenSocket_);
@@ -619,20 +610,24 @@ TCPStore::TCPStore(
     if (storeSocket_ != -1) {
       tcputil::closeSocket(storeSocket_);
     }
+    if (isServer_) {
+      tcpStoreDaemon_ = nullptr;
+      tcputil::closeSocket(masterListenSocket_);
+    }
     throw;
   }
 }
 
 TCPStore::~TCPStore() {
+  watchListener_ = nullptr;
+  tcputil::closeSocket(listenSocket_);
+  tcputil::closeSocket(storeSocket_);
   if (isServer_) {
     // Store daemon should end because of closed connection.
     // daemon destructor should join the thread
     tcpStoreDaemon_ = nullptr;
     tcputil::closeSocket(masterListenSocket_);
   }
-  watchListener_ = nullptr;
-  tcputil::closeSocket(listenSocket_);
-  tcputil::closeSocket(storeSocket_);
 }
 
 void TCPStore::waitForWorkers() {

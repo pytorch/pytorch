@@ -12,8 +12,10 @@
 std::condition_variable cv;
 std::mutex cv_m;
 constexpr int64_t kShortStoreTimeoutMillis = 100;
+constexpr int64_t kStoreCallbackTimeout = 1000;
+constexpr int defaultTimeout = 20;
 
-c10::intrusive_ptr<c10d::TCPStore> _createServer(int numWorkers = 1, int timeout = 15) {
+c10::intrusive_ptr<c10d::TCPStore> _createServer(int numWorkers = 1, int timeout = defaultTimeout) {
   return c10::make_intrusive<c10d::TCPStore>(
       "127.0.0.1",
       0,
@@ -28,7 +30,7 @@ void testHelper(const std::string& prefix = "") {
   const auto numThreads = 16;
   const auto numWorkers = numThreads + 1;
 
-  auto serverTCPStore = _createServer(numWorkers, 30);
+  auto serverTCPStore = _createServer(numWorkers);
 
   auto serverStore =
       c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
@@ -90,13 +92,11 @@ void testHelper(const std::string& prefix = "") {
       std::to_string(numThreads * numIterations + 1);
 
   for (auto i = 0; i < numThreads; i++) {
-    threads.push_back(std::thread([&sem1,
+    threads.emplace_back(std::thread([&sem1,
                                    &sem2,
                                    &clientStores,
                                    i,
-                                   &expectedCounterRes,
-                                   &numIterations,
-                                   &numThreads] {
+                                   &expectedCounterRes] {
       for (auto j = 0; j < numIterations; j++) {
         clientStores[i]->add("counter", 1);
       }
@@ -154,13 +154,15 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   int numCallbacksExecuted = 0;
   std::function<void(c10::optional<std::string>, c10::optional<std::string>)> callback =
       [&numCallbacksExecuted](
-          c10::optional<std::string> old_value, c10::optional<std::string> new_value) {
+          c10::optional<std::string> oldValue, c10::optional<std::string> newValue) {
+        std::ignore = oldValue;
+        std::ignore = newValue;
         numCallbacksExecuted++;
       };
 
   const auto numThreads = 16;
   const auto numWorkers = numThreads + 1;
-  auto serverTCPStore = _createServer(numWorkers, 15);
+  auto serverTCPStore = _createServer(numWorkers);
   auto serverStore =
       c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
 
@@ -185,7 +187,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   std::vector<std::thread> threads;
   std::atomic<int> keyChangeOperationCount{0};
   for (auto i = 0; i < numThreads; i++) {
-    threads.push_back(std::thread([&clientStores,
+    threads.emplace_back(std::thread([&clientStores,
                                    &internalKey,
                                    &keyChangeOperationCount,
                                    i,
@@ -238,25 +240,24 @@ void _setCallback(
   const c10::optional<std::string>& expectedNewValue) {
     // Test the correctness of new_value and old_value
     std::function<void(c10::optional<std::string>, c10::optional<std::string>)> callback =
-    [&](c10::optional<std::string> oldValue, c10::optional<std::string> newValue) {
+    [expectedOldValue, expectedNewValue, &eptr](c10::optional<std::string> oldValue, c10::optional<std::string> newValue) {
       try {
         EXPECT_EQ(expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
         EXPECT_EQ(expectedNewValue.value_or("NONE"), newValue.value_or("NONE"));
-        cv.notify_one();
       } catch(...) {
         eptr = std::current_exception();
-        cv.notify_one();
       }
+      cv.notify_one();
     };
     store.watchKey(key, callback);
 }
 
-void _waitFinish(int durationInMilliseconds) {
+void _waitFinish() {
   std::unique_lock<std::mutex> lk(cv_m);
-  cv.wait_for(lk, std::chrono::duration<int, std::milli>(durationInMilliseconds));
+  cv.wait_for(lk, std::chrono::duration<int, std::milli>(kStoreCallbackTimeout));
 }
 
-TEST(TCPStoreTest, testWatchKeyUpdate) {
+TEST(TCPStoreTest, testKeyUpdate) {
   auto store = _createServer();
 
   std::exception_ptr eptr = nullptr;
@@ -266,7 +267,7 @@ TEST(TCPStoreTest, testWatchKeyUpdate) {
   store->get(key);
   _setCallback(*store, key, eptr, "", "2");
   c10d::test::set(*store, key, "2");
-  _waitFinish(300);
+  _waitFinish();
   if (eptr) std::rethrow_exception(eptr);
 
   key = "testRegularKeyValue";
@@ -275,22 +276,22 @@ TEST(TCPStoreTest, testWatchKeyUpdate) {
   store->get(key);
   _setCallback(*store, key, eptr, "1", "2");
   c10d::test::set(*store, key, "2");
-  _waitFinish(300);
+  _waitFinish();
   if (eptr) std::rethrow_exception(eptr);
 }
 
-TEST(TCPStoreTest, testWatchKeyCreate) {
+TEST(TCPStoreTest, testKeyCreate) {
   auto store = _createServer();
 
   std::exception_ptr eptr = nullptr;
   std::string key = "testWatchKeyCreate";
   _setCallback(*store, key, eptr, c10::nullopt, "2");
   c10d::test::set(*store, key, "2");
-  _waitFinish(300);
+  _waitFinish();
   if (eptr) std::rethrow_exception(eptr);
 }
 
-TEST(TCPStoreTest, testWatchKeyDelete) {
+TEST(TCPStoreTest, testKeyDelete) {
   auto store = _createServer();
 
   std::exception_ptr eptr = nullptr;
@@ -298,7 +299,7 @@ TEST(TCPStoreTest, testWatchKeyDelete) {
   c10d::test::set(*store, key, "1");
   _setCallback(*store, key, eptr, "1", c10::nullopt);
   store->deleteKey(key);
-  _waitFinish(300);
+  _waitFinish();
   if (eptr) std::rethrow_exception(eptr);
 }
 

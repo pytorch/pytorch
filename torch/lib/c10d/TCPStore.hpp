@@ -66,16 +66,14 @@ class TCPStoreDaemon : public BackgroundThread {
       std::vector<uint8_t>& oldData,
       std::vector<uint8_t>& newData);
 
+private:
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
-  // From key -> the list of sockets waiting on it
+  // From key -> the list of sockets waiting on the key
   std::unordered_map<std::string, std::vector<int>> waitingSockets_;
   // From socket -> number of keys awaited
   std::unordered_map<int, size_t> keysAwaited_;
-  // From key -> the list of sockets waiting on it
+  // From key -> the list of sockets watching the key
   std::unordered_map<std::string, std::vector<int>> watchedSockets_;
-
-private:
-  void cleanUpSockets(std::unordered_map<std::string, std::vector<int>>& socketMap, int fd);
 };
 
 // Listener thread runs on all processes
