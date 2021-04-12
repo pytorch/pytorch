@@ -7,7 +7,6 @@ API Reference
 -------------
 
 .. autoclass:: torch.package.PackageExporter
-  :members:
 
   .. automethod:: __init__
   .. automethod:: close
@@ -27,7 +26,6 @@ API Reference
   .. automethod:: save_text
 
 .. autoclass:: torch.package.PackageImporter
-  :members:
 
   .. automethod:: __init__
   .. automethod:: file_structure
