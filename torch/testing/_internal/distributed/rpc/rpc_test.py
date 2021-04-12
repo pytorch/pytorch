@@ -2049,6 +2049,38 @@ class RpcTest(RpcAgentTestFixture):
     def test_stress_heavy_rpc_torchscript(self):
         self._stress_test_rpc(heavy_rpc_torchscript, repeat=20, args=(torch.ones(100, 100),))
 
+    @staticmethod
+    def _test_integer(x):
+        return 0
+
+    @dist_init
+    def test_stress_rpc_int(self):
+        print("======== Warm Up ===========")
+        self._stress_test_rpc(RpcTest._test_integer, args=(1, ))
+        time.sleep(1)
+        print("======== Testing ===========")
+        self._stress_test_rpc(RpcTest._test_integer, args=(1, ))
+
+    @staticmethod
+    def _test_tensor(x):
+        return 0
+
+    @dist_init
+    def test_stress_rpc_small_tensor(self):
+        print("======== Warm Up ===========")
+        self._stress_test_rpc(RpcTest._test_tensor, args=(torch.zeros(1),))
+        time.sleep(1)
+        print("======== Testing ===========")
+        self._stress_test_rpc(RpcTest._test_tensor, args=(torch.zeros(1),))
+
+    @dist_init
+    def test_stress_rpc_large_tensor(self):
+        print("======== Warm Up ===========")
+        self._stress_test_rpc(RpcTest._test_tensor, args=(torch.zeros(1000, 1000),))
+        time.sleep(1)
+        print("======== Testing ===========")
+        self._stress_test_rpc(RpcTest._test_tensor, args=(torch.zeros(1000, 1000),))
+
     @dist_init
     def test_builtin_remote_ret(self):
         n = self.rank + 1
