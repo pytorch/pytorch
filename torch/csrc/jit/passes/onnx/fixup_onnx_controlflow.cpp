@@ -237,7 +237,7 @@ std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   //       since onnx loop requires scan outputs to be the last outputs.
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
 
-  // TODO: fix node output metadata based on block output metadata.
+  // Copy type of block output to node output.
   for (size_t i = 0; i < node->outputs().size(); ++i) {
     node->output(i)->setType(node->blocks().at(0)->outputs().at(i + 1)->type());
   }
@@ -380,7 +380,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   auto* graph = if_node->owningGraph();
   FixupONNXSubblockOutputs(node);
   ONNXFixupUninitializedOutput(if_node);
-  // TODO: fix node output metadata based on block output metadata.
+  // Copy type of block output to node output.
   for (size_t i = 0; i < node->outputs().size(); ++i) {
     node->output(i)->setType(node->blocks().at(0)->outputs().at(i)->type());
   }

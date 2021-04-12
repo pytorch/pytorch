@@ -72,8 +72,10 @@ struct InplaceConverter {
     std::unordered_map<Value*, Value*> alias_to_value_;
 
     // Sort the alias based on their order in graph.
-    // A tie can happen when two aliases belong to different blocks, while having the same ancestor node.
-    // The unique id is used as tie breaker.
+    // A tie can happen when two distinct aliases belong to different blocks,
+    // while having the same ancestor node. The unique id is used as tie
+    // breaker, otherwise the two aliases will be considered equal to each
+    // other. aliasComp must satisfy strict weak ordering.
     struct aliasComp {
       bool operator()(const Value* a, const Value* b) const {
         auto* n_a = a->node();

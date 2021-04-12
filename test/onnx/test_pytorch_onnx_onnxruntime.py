@@ -4271,6 +4271,22 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+        class ListModel(torch.nn.Module):
+            def forward(self, x):
+                res = []
+                res_replicate = []
+                for i in range(x.size(0)):
+                    if len(res) > 2:
+                        for j in range(x.size(1)):
+                            res.append(x[i][j])
+                        res_replicate.append(res[-1])
+                        res.append(res_replicate[-1])
+                return res, res_replicate
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(4, 4, 3, 4)
+        self.run_test(model, (x, ))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_pop(self):
         class ListModel(torch.nn.Module):
