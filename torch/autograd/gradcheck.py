@@ -146,13 +146,31 @@ def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
 
 
 def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
-    # Simple wrapper around _get_numerical_jacobian
-    warnings.warn("get_analytical_jacobian is deprecated!")
+    """Deprecated api to compute numerical jacobian for a given fn and inputs.
+    Args:
+        fn: the function to compute the jacobian for (must take inputs as a tuple)
+        input: input to `fn`
+        target: the Tensors wrt whom Jacobians are calculated (default=`input`)
+        eps: the magnitude of the perturbation during finite differencing (default=`1e-3`)
+        grad_out: grad output value used to calculate gradients.
+
+    Returns:
+        A list of jacobians wrt each input (or target) and the first output
+
+    Note that `target` may not even be part of `input` to `fn`, so please be
+    **very careful** in this to not clone `target`.
+    """
+    warnings.warn("get_numerical_jacobian was part of PyTorch's private API and not "
+                  "meant to be exposed. We are deprecating it and it will be removed "
+                  "in a future version of PyTorch. If you have a specific use for "
+                  "this or feature request for this to be a stable API, please file "
+                  "us an issue at https://github.com/pytorch/pytorch/issues/new")
 
     def fn_pack_inps(*inps):
         return fn(inps)
     jacobians = _get_numerical_jacobian(fn_pack_inps, inputs, None, target, eps, grad_out)
-    return jacobians[0][0]
+
+    return tuple(jacobian_for_each_output[0] for jacobian_for_each_output in jacobians)
 
 
 def compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
@@ -355,7 +373,12 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_sc
 
 def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
     # Replicates the behavior of the old get_analytical_jacobian before the refactor
-    warnings.warn("get_analytical_jacobian is deprecated!")
+    warnings.warn("get_analytical_jacobian was part of PyTorch's private API and not "
+                  "meant to be exposed. We are deprecating it and it will be removed "
+                  "in a future version of PyTorch. If you have a specific use for "
+                  "this or feature request for this to be a stable API, please file "
+                  "us an issue at https://github.com/pytorch/pytorch/issues/new")
+
     diff_input_list = list(iter_tensors(inputs, True))
 
     def backward_fn(grad_output):
