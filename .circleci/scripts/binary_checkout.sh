@@ -55,7 +55,7 @@ else
   echo "Can't tell what to checkout"
   exit 1
 fi
-retry git submodule update --init --recursive
+retry git submodule update --init --recursive --jobs 0
 echo "Using Pytorch from "
 git --no-pager log --max-count 1
 popd
@@ -64,5 +64,6 @@ popd
 retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
+git checkout driazati/test
 git --no-pager log --max-count 1
 popd
