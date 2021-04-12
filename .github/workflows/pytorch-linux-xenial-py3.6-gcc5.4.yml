@@ -48,7 +48,9 @@ jobs:
           submodules: recursive
       - name: Log in to ECR
         run: |
-          $(aws ecr get-login --no-include-email --region us-east-1)
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -56,7 +58,7 @@ jobs:
         run: |
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
           MEMORY_LIMIT_MAX_JOBS=8 # our "linux.2xlarge" runner has 16 vCPUs, if we use all of them we'll OOM
-          MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
+          export MAX_JOBS=$(( SCCACHE_MAX_JOBS > MEMORY_LIMIT_MAX_JOBS ? MEMORY_LIMIT_MAX_JOBS : SCCACHE_MAX_JOBS ))
           docker run \
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS \
@@ -67,9 +69,9 @@ jobs:
             --cap-add=SYS_PTRACE \
             --tty \
             --user jenkins \
-            -v ${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            ${DOCKER_IMAGE} \
+            "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Chown workspace
         run: |
@@ -107,7 +109,9 @@ jobs:
         uses: actions/checkout@v2
       - name: Log in to ECR
         run: |
-          $(aws ecr get-login --no-include-email --region us-east-1)
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -129,9 +133,9 @@ jobs:
             --cap-add=SYS_PTRACE \
             --tty \
             --user jenkins \
-            -v ${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            ${DOCKER_IMAGE} \
+            "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && .jenkins/pytorch/test.sh'
       - name: Clean up docker images
         if: always()

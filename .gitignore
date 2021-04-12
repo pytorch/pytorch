@@ -288,3 +288,6 @@ TAGS
 
 # bazel symlinks
 bazel-*
+
+# generated shellcheck directories
+.shellcheck_generated*/
