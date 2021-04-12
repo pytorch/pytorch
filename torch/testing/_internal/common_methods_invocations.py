@@ -81,9 +81,9 @@ class SkipInfo(DecorateInfo):
 class SampleInput(object):
     """Represents sample inputs to a function."""
 
-    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad']
+    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad', 'broadcasts_input']
 
-    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None):
+    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None, broadcasts_input=False):
         # input is the first input to the op and must be either a Tensor or TensorList (Sequence[Tensor]).
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         # op with TensorList inputs do not support method or inplace variants.
@@ -93,13 +93,24 @@ class SampleInput(object):
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
 
+        # Specifies if `self.input` is broadcasted or not,
+        # given that the operator supports broadcasting.
+        # This field is used to verify the behavior for inplace variant.
+        #
+        # If a SampleInput is marked with `broadcasts_input=True`,
+        # it is verified that we get a `RuntimerError` with this sample,
+        # and inplace variant. Also inplace grad{grad} tests are skipped,
+        # for such inputs (as they will error out otherwise).
+        self.broadcasts_input = broadcasts_input
+
     def __repr__(self):
         arguments = [
             'input=Tensor' if isinstance(self.input, torch.Tensor) else f'input=TensorList[{len(self.input)}]',
             f'args={self.args}' if len(self.args) > 0 else None,
             f'kwargs={self.kwargs}' if len(self.kwargs) > 0 else None,
             (f'output_process_fn_grad={self.output_process_fn_grad}'
-             if self.output_process_fn_grad is not None else None)]
+             if self.output_process_fn_grad is not None else None),
+            f'broadcasts_input={self.broadcasts_input}']
 
         return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
 
@@ -606,19 +617,17 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
         return (input, )
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
-    for_inplace_variant = kwargs.get('for_inplace_variant', False)
-
-    test_cases = (((S,), (S, M), (M,), 1, 1),
-                  ((S,), (S, M), (M,), 0.2, 0.6),
+    test_cases = (((S,), (S, M), (M,), 1, 1, False),
+                  ((S,), (S, M), (M,), 0.2, 0.6, False),
                   )
 
-    test_cases_with_broadcast = (((1,), (S, M), (M,), 1, 1),
-                                 ((1,), (S, M), (M,), 0.2, 0.6),
-                                 ((), (S, M), (M,), 1, 1),
-                                 ((), (S, M), (M,), 0.2, 0.6),
+    test_cases_with_broadcast = (((1,), (S, M), (M,), 1, 1, True),
+                                 ((1,), (S, M), (M,), 0.2, 0.6, True),
+                                 ((), (S, M), (M,), 1, 1, True),
+                                 ((), (S, M), (M,), 0.2, 0.6, True),
                                  )
 
-    cases = test_cases if for_inplace_variant else (test_cases + test_cases_with_broadcast)
+    cases = test_cases + test_cases_with_broadcast
     sample_inputs = []
     for input_args in cases:
         args = (make_tensor(input_args[0], device, dtype,
@@ -631,7 +640,9 @@ def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
                             low=None, high=None,
                             requires_grad=requires_grad))
         alpha, beta = input_args[3], input_args[4]
-        sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha)))
+        broadcasts_input = input_args[5]
+        sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha),
+                                         broadcasts_input=True))
     return tuple(sample_inputs)
 
 def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
@@ -1905,37 +1916,34 @@ def sample_inputs_copysign(op_info, device, dtype, requires_grad, **kwargs):
     def _make_tensor(*shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
-    for_inplace_variant = kwargs.get('for_inplace_variant', False)
-
     cases = [
         # no broadcast
-        ((S, S, S), (S, S, S)),
+        ((S, S, S), (S, S, S), False),
         # broadcast rhs
-        ((S, S, S), (S, S)),
+        ((S, S, S), (S, S), False),
 
         # scalar
-        ((S, S), 3.14),
+        ((S, S), 3.14, False),
         # scalar positive zero
-        ((S, S), 0.0),
+        ((S, S), 0.0, False),
         # scalar negative zero
-        ((S, S), -0.0),
+        ((S, S), -0.0, False),
     ]
 
-    if not for_inplace_variant:
-        # broadcast lhs
-        cases.append(((S, S), (S, S, S)))
-        # broadcast all
-        cases.append(((S, 1, S), (M, S)))
+    # broadcast lhs
+    cases.append(((S, S), (S, S, S), True))
+    # broadcast all
+    cases.append(((S, 1, S), (M, S), True))
 
     def generator():
-        for input_shape, arg_val in cases:
+        for input_shape, arg_val, broadcasts_input in cases:
             if isinstance(arg_val, tuple):
                 arg = _make_tensor(*arg_val)
             else:
                 # arg_val is scalar
                 arg = arg_val
 
-            yield SampleInput(_make_tensor(*input_shape), args=(arg, ))
+            yield SampleInput(_make_tensor(*input_shape), args=(arg, ), broadcasts_input=broadcasts_input)
 
     return list(generator())
 
@@ -2027,15 +2035,13 @@ def sample_inputs_floor_divide(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    for_inplace_variant = kwargs.get('for_inplace_variant', False)
-
     def samples_generator():
         yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, make_arg((S, S))))
         yield SampleInput(make_arg((S, S)), args=(torch.randn((S,), device=device) > 0, make_arg((S, S))))
         yield SampleInput(make_arg((S, S)), args=(bernoulli_scalar().to(device), make_arg((S, S))))
-
-        if not for_inplace_variant:
-            yield SampleInput(make_arg((S,)), args=(torch.randn(S, S, device=device) > 0, make_arg((S, S))))
+        yield SampleInput(make_arg((S,)),
+                          args=(torch.randn(S, S, device=device) > 0, make_arg((S, S))),
+                          broadcasts_input=True)
 
     samples = tuple(samples_generator())
     return samples
@@ -2043,8 +2049,6 @@ def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs
 
 def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    for_inplace_variant = kwargs.get('for_inplace_variant', False)
 
     def sample_generator():
         yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, 10))
@@ -2054,11 +2058,12 @@ def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(()), args=(torch.randn((), device=device) > 0, make_arg(())))
         yield SampleInput(make_arg((S, S)), args=(torch.randn((), device=device) > 0, 10))
 
-        if not for_inplace_variant:
-            yield SampleInput(make_arg((S,)),
-                              args=(torch.randn(S, S, device=device) > 0, make_arg(())))
-            yield SampleInput(make_arg((S,)),
-                              args=(torch.randn(S, S, device=device) > 0, 10))
+        yield SampleInput(make_arg((S,)),
+                          args=(torch.randn(S, S, device=device) > 0, make_arg(())),
+                          broadcasts_input=True)
+        yield SampleInput(make_arg((S,)),
+                          args=(torch.randn(S, S, device=device) > 0, 10),
+                          broadcasts_input=True)
 
     samples = tuple(sample_generator())
     return samples
@@ -2604,6 +2609,9 @@ op_db: List[OpInfo] = [
                # issue may fix: https://github.com/pytorch/pytorch/issues/55589
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                SkipInfo('TestCommon', 'test_out', dtypes=(torch.float32,)),
+               # Runtime Error not raised for inplace variant where,
+               # self is broadcasted.
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
            ),
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addr',
