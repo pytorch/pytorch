@@ -1042,10 +1042,11 @@ def gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_tol
                      check_grad_dtypes, check_batched_grad, fast_mode):
     tupled_inputs = _as_tuple(inputs)
     check_inputs(tupled_inputs, check_sparse_nnz)
-    func_out = func(*tupled_inputs)
 
+    func_out = func(*tupled_inputs)
     outputs = _differentiable_outputs(func_out)
     check_outputs(outputs)
+
     complex_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
     any_complex = any(o.is_complex() for o in _as_tuple(func_out))
     gradcheck_fn = fast_gradcheck if fast_mode else slow_gradcheck
