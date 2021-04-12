@@ -112,6 +112,9 @@ enum class DispatchKey : uint8_t {
   // [Masquerading as CUDA]
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
 
+  SparseCsrCPU,
+  SparseCsrCUDA,
+
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
