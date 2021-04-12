@@ -2377,7 +2377,7 @@ class RfactorStoreRewriter : public IRMutator {
 };
 
 bool LoopNest::rfactor(Stmt* st, For* target_for) {
-  Buf* tmp_buf;
+  Buf* tmp_buf = nullptr;
   return rfactor(st, target_for, &tmp_buf);
 }
 
