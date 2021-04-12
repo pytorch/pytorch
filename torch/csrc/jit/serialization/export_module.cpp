@@ -515,9 +515,6 @@ void ScriptModuleSerializer::writeByteCode(
 std::tuple<uint64_t, uint64_t> ScriptModuleSerializer::serialize_unified_format(
     Module& module,
     uint64_t starting_tensor_id) {
-  // determine starting tensor ID
-  // uint64_t starting_tensor_id = get_starting_tensor_id();
-  // determine ts_id
   uint64_t ts_id = next_ts_id++;
   const std::string archive_dir =
       ".data/ts_code/" + std::to_string(ts_id) + "/";
