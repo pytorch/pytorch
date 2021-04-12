@@ -61,7 +61,15 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             o = y + 1.5
             o2 = torch.relu(o)
             o3 = o1 + o2
-            return o1, o2, o3
+
+            _ = o1.add_(1.0)
+            _ = o2.add_(1.0)
+            o = o1 * 1.0
+            oo1 = torch.relu(o)
+            o = o2 * 2.0
+            oo2 = torch.relu(o)
+            oo3 = oo1 + oo2
+            return o1, o2, o3, oo1, oo2, oo3
 
         with enable_profiling_mode_for_profiling_tests():
 
