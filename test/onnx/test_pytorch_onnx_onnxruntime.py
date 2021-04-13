@@ -76,7 +76,11 @@ def run_ort(ort_sess, input):
     input, _ = torch.jit._flatten(input_copy)
     inputs = [to_numpy(inp) for inp in input]
 
-    ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
+    if len(ort_sess.get_inputs()) == len(inputs):
+        ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
+    else:
+        ort_inputs = dict((ort_input.name, inputs[i]) for i, ort_input in enumerate(ort_sess.get_inputs()))
+
     ort_outs = ort_sess.run(None, ort_inputs)
     return inline_flatten_list(ort_outs, [])
 
@@ -7991,6 +7995,17 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (x, y), test_with_inputs=[(new_x, new_y)],
                       input_names=['input_x', 'input_y'],
                       dynamic_axes={'input_x': [0, 1, 2, 3], 'input_y': [0, 1, 2, 3]})
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_to_device(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x.to(y.device)
+
+        x = torch.randn(6)
+        y = torch.randn(6)
+
+        self.run_test(M(), (x, y))
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,

@@ -1923,7 +1923,13 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 
 def to(g, self, *args):
-    # ONNX doesn't have a concept of a device, so we ignore device casts
+    # ONNX doesn't have a concept of a device,
+    # so if this is to a device, return self directly
+    if len(args) > 0:
+        # aten::to(Tensor, Device, Layout, bool, bool)
+        if args[0].node().kind() == 'prim::device':
+            return self
+
     if len(args) == 4:
         if args[0].type().isSubtypeOf(ListType.ofInts()):
             # aten::to(Tensor, Device, bool, bool, memory_format)
