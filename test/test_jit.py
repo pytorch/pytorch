@@ -1843,8 +1843,6 @@ graph(%Ra, %Rb):
 
         FileCheck().check_not("prim::If").run(fn.graph)
 
-<<<<<<< HEAD
-=======
     def test_short_circuit_optimization(self):
         @torch.jit.script
         def const_expressions(x):
@@ -1982,7 +1980,6 @@ graph(%Ra, %Rb):
         self.run_pass("constant_propagation", foo.graph)
         FileCheck().check_count("aten::len", 4).run(foo.graph)
 
->>>>>>> 6b734965c2 (Add list len refinement)
     def test_unchecked_cast(self):
         def test(cond):
             # type: (bool)
