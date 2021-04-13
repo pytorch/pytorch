@@ -10,9 +10,6 @@
 
 namespace {
 
-template <typename T>
-using MaybeOwned = c10::MaybeOwned<T>;
-
 using at::Tensor;
 
 struct MyString : public c10::intrusive_ptr_target, public std::string {
@@ -22,14 +19,12 @@ struct MyString : public c10::intrusive_ptr_target, public std::string {
 template <typename T>
 class MaybeOwnedTest : public ::testing::Test {
  public:
-  using MaybeOwned = c10::MaybeOwned<T>;
-
   T borrowFrom;
   T ownCopy;
   T ownCopy2;
-  MaybeOwned borrowed;
-  MaybeOwned owned;
-  MaybeOwned owned2;
+  c10::MaybeOwned<T> borrowed;
+  c10::MaybeOwned<T> owned;
+  c10::MaybeOwned<T> owned2;
 
  protected:
   void SetUp() override; // defined below helpers
@@ -40,9 +35,9 @@ class MaybeOwnedTest : public ::testing::Test {
     ownCopy = T();
     ownCopy2 = T();
 
-    borrowed = MaybeOwned();
-    owned = MaybeOwned();
-    owned2 = MaybeOwned();
+    borrowed = c10::MaybeOwned<T>();
+    owned = c10::MaybeOwned<T>();
+    owned2 = c10::MaybeOwned<T>();
   }
 
 };
@@ -60,10 +55,10 @@ template <typename T>
 bool equal(const T&, const T&);
 
 template <typename T>
-void assertBorrow(const MaybeOwned<T>&, const T&);
+void assertBorrow(const c10::MaybeOwned<T>&, const T&);
 
 template <typename T>
-void assertOwn(const MaybeOwned<T>&, const T&, size_t useCount = 2);
+void assertOwn(const c10::MaybeOwned<T>&, const T&, size_t useCount = 2);
 
 ////////////////// Helper implementations for intrusive_ptr. //////////////////
 template<>
@@ -86,7 +81,7 @@ bool equal(const c10::intrusive_ptr<MyString>& lhs, const c10::intrusive_ptr<MyS
 
 template <>
 void assertBorrow(
-    const MaybeOwned<c10::intrusive_ptr<MyString>>& mo,
+    const c10::MaybeOwned<c10::intrusive_ptr<MyString>>& mo,
     const c10::intrusive_ptr<MyString>& borrowedFrom) {
   EXPECT_EQ(*mo, borrowedFrom);
   EXPECT_EQ(mo->get(), borrowedFrom.get());
@@ -95,7 +90,7 @@ void assertBorrow(
 
 template <>
 void assertOwn(
-    const MaybeOwned<c10::intrusive_ptr<MyString>>& mo,
+    const c10::MaybeOwned<c10::intrusive_ptr<MyString>>& mo,
     const c10::intrusive_ptr<MyString>& original,
     size_t useCount) {
   EXPECT_EQ(*mo, original);
@@ -126,7 +121,7 @@ bool equal(const Tensor& lhs, const Tensor& rhs) {
 
 template <>
 void assertBorrow(
-    const MaybeOwned<Tensor>& mo,
+    const c10::MaybeOwned<Tensor>& mo,
     const Tensor& borrowedFrom) {
   EXPECT_TRUE(mo->is_same(borrowedFrom));
   EXPECT_EQ(borrowedFrom.use_count(), 1);
@@ -134,7 +129,7 @@ void assertBorrow(
 
 template <>
 void assertOwn(
-    const MaybeOwned<Tensor>& mo,
+    const c10::MaybeOwned<Tensor>& mo,
     const Tensor& original,
     size_t useCount) {
   EXPECT_TRUE(mo->is_same(original));
@@ -146,9 +141,9 @@ void MaybeOwnedTest<T>::SetUp() {
   borrowFrom = getSampleValue<T>();
   ownCopy = getSampleValue<T>();
   ownCopy2 = getSampleValue<T>();
-  borrowed = MaybeOwned::borrowed(borrowFrom);
-  owned = MaybeOwned::owned(c10::in_place, ownCopy);
-  owned2 = MaybeOwned::owned(T(ownCopy2));
+  borrowed = c10::MaybeOwned<T>::borrowed(borrowFrom);
+  owned = c10::MaybeOwned<T>::owned(c10::in_place, ownCopy);
+  owned2 = c10::MaybeOwned<T>::owned(T(ownCopy2));
 }
 
 using MaybeOwnedTypes = ::testing::Types<
@@ -165,12 +160,12 @@ TYPED_TEST(MaybeOwnedTest, SimpleDereferencingString) {
 }
 
 TYPED_TEST(MaybeOwnedTest, DefaultCtor) {
-  MaybeOwned<TypeParam> borrowed, owned;
+  c10::MaybeOwned<TypeParam> borrowed, owned;
   // Don't leave the fixture versions around messing up reference counts.
-  this->borrowed = MaybeOwned<TypeParam>();
-  this->owned = MaybeOwned<TypeParam>();
-  borrowed = MaybeOwned<TypeParam>::borrowed(this->borrowFrom);
-  owned = MaybeOwned<TypeParam>::owned(c10::in_place, this->ownCopy);
+  this->borrowed = c10::MaybeOwned<TypeParam>();
+  this->owned = c10::MaybeOwned<TypeParam>();
+  borrowed = c10::MaybeOwned<TypeParam>::borrowed(this->borrowFrom);
+  owned = c10::MaybeOwned<TypeParam>::owned(c10::in_place, this->ownCopy);
 
   assertBorrow(borrowed, this->borrowFrom);
   assertOwn(owned, this->ownCopy);
@@ -193,7 +188,7 @@ TYPED_TEST(MaybeOwnedTest, CopyConstructor) {
 
 TYPED_TEST(MaybeOwnedTest, MoveDereferencing) {
   // Need a different value.
-  this->owned = MaybeOwned<TypeParam>::owned(c10::in_place, getSampleValue2<TypeParam>());
+  this->owned = c10::MaybeOwned<TypeParam>::owned(c10::in_place, getSampleValue2<TypeParam>());
 
   EXPECT_TRUE(equal(*std::move(this->borrowed), getSampleValue<TypeParam>()));
   EXPECT_TRUE(equal(*std::move(this->owned), getSampleValue2<TypeParam>()));
@@ -216,9 +211,9 @@ TYPED_TEST(MaybeOwnedTest, MoveConstructor) {
 }
 
 TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoOwned) {
-  auto copiedBorrowed = MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto copiedOwned = MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto copiedOwned2 = MaybeOwned<TypeParam>::owned(c10::in_place);
+  auto copiedBorrowed = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
+  auto copiedOwned = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
+  auto copiedOwned2 = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
 
   copiedBorrowed = this->borrowed;
   copiedOwned = this->owned;
@@ -235,9 +230,9 @@ TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoOwned) {
 TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoBorrowed) {
   auto otherBorrowFrom = getSampleValue2<TypeParam>();
   auto otherOwnCopy = getSampleValue2<TypeParam>();
-  auto copiedBorrowed = MaybeOwned<TypeParam>::borrowed(otherBorrowFrom);
-  auto copiedOwned = MaybeOwned<TypeParam>::borrowed(otherOwnCopy);
-  auto copiedOwned2 = MaybeOwned<TypeParam>::borrowed(otherOwnCopy);
+  auto copiedBorrowed = c10::MaybeOwned<TypeParam>::borrowed(otherBorrowFrom);
+  auto copiedOwned = c10::MaybeOwned<TypeParam>::borrowed(otherOwnCopy);
+  auto copiedOwned2 = c10::MaybeOwned<TypeParam>::borrowed(otherOwnCopy);
 
   copiedBorrowed = this->borrowed;
   copiedOwned = this->owned;
@@ -255,9 +250,9 @@ TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoBorrowed) {
 
 TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoOwned) {
 
-  auto movedBorrowed = MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto movedOwned = MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto movedOwned2 = MaybeOwned<TypeParam>::owned(c10::in_place);
+  auto movedBorrowed = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
+  auto movedOwned = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
+  auto movedOwned2 = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
 
   movedBorrowed = std::move(this->borrowed);
   movedOwned = std::move(this->owned);
@@ -271,9 +266,9 @@ TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoOwned) {
 
 TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoBorrowed) {
   auto y = getSampleValue2<TypeParam>();
-  auto movedBorrowed = MaybeOwned<TypeParam>::borrowed(y);
-  auto movedOwned = MaybeOwned<TypeParam>::borrowed(y);
-  auto movedOwned2 = MaybeOwned<TypeParam>::borrowed(y);
+  auto movedBorrowed = c10::MaybeOwned<TypeParam>::borrowed(y);
+  auto movedOwned = c10::MaybeOwned<TypeParam>::borrowed(y);
+  auto movedOwned2 = c10::MaybeOwned<TypeParam>::borrowed(y);
 
   movedBorrowed = std::move(this->borrowed);
   movedOwned = std::move(this->owned);
