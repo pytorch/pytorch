@@ -42,18 +42,6 @@ __device__ inline void bitonicSwap(K& kA, V& vA, bool& validA,
   }
 };
 
-template <typename Comparator, typename K>
-__device__ inline void bitonicSwapKeys(K& kA, bool& validA,
-                                       K& kB, bool& validB,
-                                       bool dir,
-                                       const Comparator& comp) {
-  bool swap = (comp(kA, kB) && validA) || !validB;
-  if (swap == dir) {
-    swapVars(kA, kB);
-    swapVars(validA, validB);
-  }
-}
-
 template <typename Comparator, typename K, typename V,
           typename IndexType, int Power2SortSize>
 __device__ inline void bitonicSort(K keys[Power2SortSize],
@@ -92,49 +80,6 @@ __device__ inline void bitonicSort(K keys[Power2SortSize],
     bitonicSwap<Comparator, K, V>(
       keys[pos], values[pos], valid[pos],
       keys[pos + stride], values[pos + stride], valid[pos + stride],
-      false, comp);
-  }
-
-  __syncthreads();
-
-}
-
-template <typename Comparator, typename K,
-          typename IndexType, int Power2SortSize>
-__device__ inline void bitonicSortKeys(K keys[Power2SortSize],
-                                   bool valid[Power2SortSize],
-                                   const Comparator& comp) {
-#ifndef __HIP_PLATFORM_HCC__
-#pragma unroll
-#endif
-  for (unsigned int size = 2; size < Power2SortSize; size *= 2) {
-    bool flag = ((threadIdx.x & (size / 2)) != 0);
-
-#ifndef __HIP_PLATFORM_HCC__
-#pragma unroll
-#endif
-    for (unsigned int stride = size / 2; stride > 0; stride /= 2) {
-
-      __syncthreads();
-
-      unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
-      bitonicSwapKeys<Comparator, K>(
-        keys[pos], valid[pos],
-        keys[pos + stride], valid[pos + stride],
-        flag, comp);
-    }
-  }
-
-#ifndef __HIP_PLATFORM_HCC__
-#pragma unroll
-#endif
-  for (unsigned int stride = Power2SortSize / 2; stride > 0; stride /= 2) {
-    __syncthreads();
-
-    unsigned int pos = 2 * threadIdx.x - (threadIdx.x & (stride - 1));
-    bitonicSwapKeys<Comparator, K>(
-      keys[pos], valid[pos],
-      keys[pos + stride], valid[pos + stride],
       false, comp);
   }
 

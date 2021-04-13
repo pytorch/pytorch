@@ -52,6 +52,16 @@ TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, c10
   }
 }
 
+TORCH_META_FUNC2(copysign, Tensor) (
+  const Tensor& self, const Tensor& other
+) {
+  build_binary_float_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
+  build_binary_float_op(maybe_get_output(), self, other);
+}
+
 } // namespace meta
 
 
@@ -142,6 +152,10 @@ TORCH_IMPL_FUNC(div_out_mode) (
   }
 }
 
+TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
+  atan2_stub(device_type(), *this);
+}
+
 Tensor& add_relu_impl(
     Tensor& result, const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto iter = TensorIterator::binary_op(result, self, other);
@@ -188,29 +202,25 @@ Tensor& add_relu_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   return add_relu_impl(self, self, other, alpha);
 }
 
-Tensor& copysign_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  copysign_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor copysign(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  copysign_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& copysign_(Tensor& self, const Tensor& other) {
-  return native::copysign_out(self, other, self);
+TORCH_IMPL_FUNC(copysign_out) (
+  const Tensor& self, const Tensor& other, const Tensor& result
+) {
+  copysign_stub(device_type(), *this);
 }
 
 Tensor copysign(const Tensor& self, const Scalar& other) {
-  return native::copysign(self, wrapped_scalar_tensor(other));
+  // redispatch!
+  return at::copysign(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& copysign_(Tensor& self, const Scalar& other) {
-  return native::copysign_(self, wrapped_scalar_tensor(other));
+  // redispatch!
+  return self.copysign_(wrapped_scalar_tensor(other));
+}
+
+Tensor& copysign_out(const Tensor& self, const Scalar& other, Tensor& result) {
+  // redispatch!
+  return at::copysign_out(result, self, wrapped_scalar_tensor(other));
 }
 
 // WARNING: There doesn't appear to be any testing for this function
@@ -459,23 +469,6 @@ Tensor tanh_backward(const Tensor& grad_output, const Tensor& output) {
 
 Tensor rsub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return at::sub(other, self, alpha); // redispatch!
-}
-
-Tensor& atan2_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  atan2_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor atan2(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  atan2_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& atan2_(Tensor& self, const Tensor& other) {
-  return native::atan2_out(self, other, self);
 }
 
 // These are still needed because we don't have C++ conversions from number

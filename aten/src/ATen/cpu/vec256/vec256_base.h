@@ -26,7 +26,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
-#include <c10/util/Half-math.h>
+#include <c10/util/copysign.h>
 #include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/TypeCast.h>
@@ -77,6 +77,7 @@ private:
   __at_align32__ T values[32 / sizeof(T)];
 public:
   using value_type = T;
+  using size_type = int;
   // Note [constexpr static function to avoid odr-usage compiler bug]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Why, you might ask, is size defined to be a static constexpr function,
@@ -109,7 +110,7 @@ public:
   // versions GCC/Clang have buggy determinations on whether or not an
   // identifier is odr-used or not, and in any case it's hard to tell if
   // a variable is odr-used or not.  So best to just cut the problem at the root.
-  static constexpr int size() {
+  static constexpr size_type size() {
     return 32 / sizeof(T);
   }
   Vec256() : values{0} {}
@@ -318,10 +319,13 @@ public:
     }
     return ret;
   }
+  template <
+    typename U = T,
+    typename std::enable_if_t<is_floating_point<U>::value, int> = 0>
   Vec256<T> copysign(const Vec256<T> &sign) const {
     Vec256<T> ret;
-    for (int i = 0; i < size(); i++) {
-      ret[i] = std::copysign(values[i], sign[i]);
+    for (size_type i = 0; i < size(); i++) {
+      ret[i] = c10::copysign(values[i], sign[i]);
     }
     return ret;
   }
