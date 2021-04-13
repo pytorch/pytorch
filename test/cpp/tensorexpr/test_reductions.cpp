@@ -479,7 +479,7 @@ TEST(Reductions, ReduceAsProducer) {
       "scale",
       {{2, "l2"}, {3, "n1"}},
       [&](const VarHandle& l, const VarHandle& n) {
-        return c->call(l, n) * a.load(l, n);
+        return c->load(l, n) * a.load(l, n);
       });
   LoopNest loop({d}, {c, d});
   loop.prepareForCodegen();
@@ -1134,7 +1134,7 @@ TEST(Reductions, ReduceInlineReduction) {
 
   Tensor* x = Reduce("x", {{M, "m1"}}, Sum(), b_buf, {{N, "n1"}, {K, "k1"}});
   Tensor* y = Compute("y", {{M, "m2"}}, [&](const VarHandle& m) {
-    return a_buf.load(m) + x->call(m);
+    return a_buf.load(m) + x->load(m);
   });
 
   PaddedBuffer<float> a_v(M);
@@ -1287,7 +1287,7 @@ TEST(Reductions, ReductionCacheAccessesOuter) {
   Tensor* d = Reduce("sum", {{L, "l1"}}, Sum(), c, {{N, "n1"}, {M, "m1"}});
 
   Tensor* e = Compute("scale", {{L, "l"}}, [&](const VarHandle& l) {
-    return b.load(0, 0, l) * d->call(l);
+    return b.load(0, 0, l) * d->load(l);
   });
 
   LoopNest l({e}, {c, d, e});
@@ -1336,7 +1336,7 @@ TEST(Reductions, ReductionCacheAccessesInner) {
   Tensor* d = Reduce("sum", {{L, "l1"}}, Sum(), c, {{N, "n1"}, {M, "m1"}});
 
   Tensor* e = Compute("scale", {{L, "l"}}, [&](const VarHandle& l) {
-    return b.load(0, 0, l) * d->call(l);
+    return b.load(0, 0, l) * d->load(l);
   });
 
   LoopNest l({e}, {c, d, e});
@@ -1381,7 +1381,7 @@ TEST(Reductions, ReductionCacheBodyAccess) {
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
-    return b.load(0, 0, l) * d->call(l);
+    return b.load(0, 0, l) * d->load(l);
   });
 
   LoopNest l({e}, {c, d, e});
@@ -1422,7 +1422,7 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
-    return b.load(0, 0, l) * d->call(l);
+    return b.load(0, 0, l) * d->load(l);
   });
 
   LoopNest l({e}, {c, d, e});
@@ -1463,7 +1463,7 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
-    return b.load(0, 0, l) * d->call(l);
+    return b.load(0, 0, l) * d->load(l);
   });
 
   LoopNest l({e}, {c, d, e});
@@ -1511,7 +1511,7 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
-    return b.load(0, 0, l) * d->call(l);
+    return b.load(0, 0, l) * d->load(l);
   });
 
   LoopNest l({e}, {c, d, e});

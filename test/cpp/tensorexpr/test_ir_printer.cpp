@@ -65,21 +65,21 @@ TEST(IRPrinter, FunctionName) {
       "chunk",
       {{M, "m"}, {N / 2, "n"}},
       [&](const ExprHandle& m, const ExprHandle& n) {
-        return producer->call(m, n);
+        return producer->load(m, n);
       });
 
   Tensor* chunk_1 = Compute(
       "chunk",
       {{M, "m"}, {N / 2, "n"}},
       [&](const ExprHandle& m, const ExprHandle& n) {
-        return producer->call(m, n + ExprHandle(N / 2));
+        return producer->load(m, n + ExprHandle(N / 2));
       });
 
   Tensor* consumer = Compute(
       "consumer",
       {{M, "i"}, {N / 2, "j"}},
       [&](const ExprHandle& i, const ExprHandle& j) {
-        return i * chunk_1->call(i, j);
+        return i * chunk_1->load(i, j);
       });
 
   LoopNest l({chunk_0, chunk_1, consumer});

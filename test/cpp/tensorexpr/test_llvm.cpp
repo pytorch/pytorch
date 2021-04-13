@@ -1641,13 +1641,13 @@ TEST(LLVM, CompositeParallel) {
         "t3",
         {{M, "M"}, {N, "N"}},
         [=](const VarHandle& m, const VarHandle& n) {
-          return t1->call(m) * t2->call(n);
+          return t1->load(m) * t2->load(n);
         });
     Tensor* t4 = Compute(
         "t4",
         {{M, "M"}, {N, "N"}},
         [=](const VarHandle& m, const VarHandle& n) {
-          return t3->call(m, n) + m + n;
+          return t3->load(m, n) + m + n;
         });
     LoopNest loop_nest({t4}, {t1, t2, t3, t4});
     std::vector<For*> loop_list;
