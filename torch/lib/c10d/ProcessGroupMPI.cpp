@@ -244,7 +244,7 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
       constexpr int kMaxNumRetries = 3;
       bool groupComm_updated = false;
       MPI_Barrier(MPI_COMM_WORLD);
-      printf("DBG: global rank = %d; after MPI_Comm_create\n", rank);
+      // printf("DBG: global rank = %d; after MPI_Comm_create\n", rank);
       for (int i = 0; i < kMaxNumRetries; ++i) {
         if (MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm)) {
           groupComm_updated = true;
@@ -253,7 +253,7 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
       }
       MPI_CHECK(groupComm_updated);
 
-      printf("DBG: global rank = %d; after MPI_Comm_create\n", rank);
+      // printf("DBG: global rank = %d; after MPI_Comm_create\n", rank);
       MPI_CHECK(MPI_Group_free(&worldGroup));
       MPI_CHECK(MPI_Group_free(&ranksGroup));
     }
