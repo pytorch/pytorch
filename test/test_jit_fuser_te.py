@@ -1314,7 +1314,8 @@ class TestTEFuser(JitTestCase):
         dtypes = [
             torch.bool,
             torch.int,
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
         ]
