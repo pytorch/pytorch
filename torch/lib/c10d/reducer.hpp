@@ -420,6 +420,9 @@ class Reducer {
   int divFactor_;
 
  private:
+  void reset_bucket_counting();
+  void search_unused_parameters(
+    const std::vector<torch::autograd::Variable>& outputs);
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
   // Current thread local state
