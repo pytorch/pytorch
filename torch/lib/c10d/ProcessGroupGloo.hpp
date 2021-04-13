@@ -251,8 +251,13 @@ class ProcessGroupGloo : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
+  // Similar to barrier(), but blocks rank 0 until all other ranks have
+  // acknowledged that they are alive (through send/recv from rank 0). Rank 0
+  // is able to report all failed ranks if waitAllRanks = true, otherwise
+  // reports the first rank it detected as failed.
   void monitoredBarrier(
-      const BarrierOptions& opts = BarrierOptions()) override;
+      const BarrierOptions& opts = BarrierOptions(),
+      bool waitAllRanks = false) override;
 
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;

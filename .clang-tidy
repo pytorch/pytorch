@@ -6,8 +6,10 @@ bugprone-*,
 -bugprone-forward-declaration-namespace,
 -bugprone-macro-parentheses,
 -bugprone-lambda-function-name,
+-bugprone-reserved-identifier,
 cppcoreguidelines-*,
 -cppcoreguidelines-interfaces-global-init,
+-cppcoreguidelines-macro-usage,
 -cppcoreguidelines-owning-memory,
 -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
 -cppcoreguidelines-pro-bounds-constant-array-index,
@@ -30,6 +32,7 @@ modernize-*,
 -modernize-use-trailing-return-type,
 performance-*,
 -performance-noexcept-move-constructor,
+-performance-unnecessary-value-param,
 '
 HeaderFilterRegex: 'torch/csrc/.*'
 AnalyzeTemporaryDtors: false

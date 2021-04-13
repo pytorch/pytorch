@@ -1483,10 +1483,10 @@ class TestCuda(TestCase):
     @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
-        self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
+        self._spawn_method(test_method, torch.tensor([1., -1., 1.]))
+        self._spawn_method(test_method, torch.tensor([1., inf, 1.]))
+        self._spawn_method(test_method, torch.tensor([1., -inf, 1.]))
+        self._spawn_method(test_method, torch.tensor([1., 1., nan]))
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -2680,6 +2680,12 @@ torch.cuda.synchronize()
             self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_linalg_fp16(self):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
+            for op, args in self.autocast_lists.linalg_fp16:
+                self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._linalg)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_fp16(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.methods_fp16:
@@ -3032,7 +3038,10 @@ torch.cuda.synchronize()
                            # TODO: reenable multinomial tests if/when the implementation is capturable.
                            # ("multinomial", (input.clone(), size, True), {}),
                            # ("multinomial", (input.clone(), size // 2, False), {}),
-                           ("normal", (input.clone() + 1, input.clone()), {}),
+                           # TODO: reenable normal test, where std is a device
+                           # tensor, when graph test failures are fixed
+                           # ("normal", (input.clone() + 1, input.clone()), {}),
+                           ("normal", (input.clone() + 1, 1.0), {}),
                            ("poisson", (input.clone(),), {}),
                            ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
                            ("randint", (0, 3, (size,)), {"device": "cuda", "dtype": torch.float}),

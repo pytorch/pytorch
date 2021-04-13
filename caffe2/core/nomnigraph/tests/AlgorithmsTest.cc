@@ -123,4 +123,3 @@ TEST(Subgraph, InduceEdgesCycle) {
     EXPECT_TRUE(sg.hasEdge(edge));
   }
 }
-

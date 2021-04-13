@@ -235,13 +235,20 @@ const Expr* IRMutator::mutate(const IfThenElse* v) {
 }
 
 const Expr* IRMutator::mutate(const Intrinsics* v) {
-  const BaseCallNode* base = v;
-  return this->mutate(base);
-}
-
-const Expr* IRMutator::mutate(const FunctionCall* v) {
-  const BaseCallNode* base = v;
-  return this->mutate(base);
+  std::vector<const Expr*> params(v->nparams());
+  bool any_change = false;
+  for (int i = 0; i < v->nparams(); i++) {
+    const Expr* value = v->param(i);
+    const Expr* value_new = value->accept_mutator(this);
+    if (value != value_new) {
+      any_change = true;
+    }
+    params[i] = value_new;
+  }
+  if (!any_change) {
+    return v;
+  }
+  return new Intrinsics(v->op_type(), params);
 }
 
 const Expr* IRMutator::mutate(const Term* v) {
@@ -304,23 +311,6 @@ const Expr* IRMutator::mutate(const ReduceOp* v) {
   }
 
   return new ReduceOp(body_new, new_reduce_args, v->reducer());
-}
-
-const Expr* IRMutator::mutate(const BaseCallNode* v) {
-  std::vector<const Expr*> params(v->nparams());
-  bool any_change = false;
-  for (int i = 0; i < v->nparams(); i++) {
-    const Expr* value = v->param(i);
-    const Expr* value_new = value->accept_mutator(this);
-    if (value != value_new) {
-      any_change = true;
-    }
-    params[i] = value_new;
-  }
-  if (!any_change) {
-    return v;
-  }
-  return v->DefaultMutator(params);
 }
 
 Stmt* IRMutator::mutate(const For* v) {
@@ -498,12 +488,6 @@ Stmt* IRMutator::mutate(const Cond* v) {
   }
 
   return new Cond(cond_new, true_new, false_new);
-}
-
-const Expr* IRMutator::DefaultMutator(
-    const BaseCallNode* v,
-    std::vector<const Expr*>& params) {
-  return v->DefaultMutator(params);
 }
 
 class StmtClone : public IRMutator {

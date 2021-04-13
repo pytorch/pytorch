@@ -9,7 +9,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
+#include <ATen/core/op_registration/adaption.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -63,15 +63,6 @@ NamedTensorMeta* Tensor::get_named_tensor_meta() {
 
 const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
-}
-
-bool Tensor::has_names() const {
-  // If a user is using unnamed tensors, then we can short-circuit right here.
-  // Otherwise, impl::has_names attempts to retrieve names.
-  if (!impl_->has_named_tensor_meta()) {
-    return false;
-  }
-  return impl::has_names(unsafeGetTensorImpl());
 }
 
 #define DEFINE_CAST(T, name)                                        \
