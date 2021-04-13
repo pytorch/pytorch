@@ -137,7 +137,6 @@ _(aten, _tanh) \
 _(aten, _tanh_forward) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
 _(aten, _th_std) \
@@ -227,7 +226,6 @@ _(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
-_(aten, chain_matmul) \
 _(aten, cholesky) \
 _(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
@@ -320,7 +318,6 @@ _(aten, equal) \
 _(aten, exp) \
 _(aten, expand) \
 _(aten, expand_as) \
-_(aten, expm1) \
 _(aten, exponential) \
 _(aten, eye) \
 _(aten, feature_alpha_dropout) \
@@ -405,6 +402,7 @@ _(aten, is_same_size) \
 _(aten, is_set_to) \
 _(aten, is_signed) \
 _(aten, is_sparse) \
+_(aten, is_sparse_csr) \
 _(aten, isclose) \
 _(aten, isreal) \
 _(aten, istft) \
@@ -438,7 +436,6 @@ _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
 _(aten, logdet) \
-_(aten, logit) \
 _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, xlogy) \
@@ -623,7 +620,6 @@ _(aten, segment_reduce) \
 _(aten, select) \
 _(aten, selu) \
 _(aten, set) \
-_(aten, sigmoid) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
