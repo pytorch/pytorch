@@ -10,7 +10,7 @@ inline Tensor view_tensor(
     int64_t offset, IntArrayRef sizes, IntArrayRef strides) {
   Storage storage = tensor.storage();
   auto new_tensor = detail::make_tensor<TensorImpl>(
-      std::move(storage), tensor.key_set(), scalarTypeToTypeMeta(dtype));
+      c10::TensorImpl::VIEW, std::move(storage), tensor.key_set(), scalarTypeToTypeMeta(dtype));
   auto * impl = new_tensor.unsafeGetTensorImpl();
   impl->set_storage_offset(offset);
   impl->set_sizes_and_strides(sizes, strides);
