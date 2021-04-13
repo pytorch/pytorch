@@ -1,6 +1,7 @@
 import re
 import torch
 from ..utils import is_per_tensor, is_per_channel
+from ..quantize import is_activation_post_process
 
 from torch.fx import GraphModule, map_arg
 
@@ -119,7 +120,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Opti
         qparams = {"_dtype_": dtype}
     return node_type, quantize_op, qparams
 
-def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
+def quantize_node(quantizer: QuantizerCls, in_node: Node, obs_module: torch.nn.Module, obs_node: Node, is_input: bool) -> Node:
     ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
     with the qparams calculated from activation_post_process (obs_module).
     The observer node (obs_node) is used to find the FQN of the user of act_post_process.
@@ -131,15 +132,30 @@ def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
     # Find the first use of the observer node, we use this to get the scope of the module.
     if is_input:
         # if the quantize function is at the input of op, then we find the first user of the observer_node
-        # to get the path
-        first_use = list(obs_node.users)[0]
+        # to get the path. If a linear call_function is in the user list, we return the first instance
+        # of linear node to get the FQN.
+        users = list(obs_node.users)
+        first_linear_use_or_first_use = users[0] if users else None
+        linear_node = None
+        for n in users:
+            if n.op == "call_function" and n.target == torch.nn.functional.linear:
+                linear_node = n
+                break
+        if linear_node:
+            first_linear_use_or_first_use = linear_node
         prefix = "_input"
     else:
         # if the quantize function is at the output of the op, we use the observer input node to get the path
-        first_use = in_node
+        first_linear_use_or_first_use = in_node
         prefix = "_output"
 
-    module_path, _ = quantizer.node_name_to_scope[first_use.name]
+    if first_linear_use_or_first_use and first_linear_use_or_first_use.name in quantizer.node_name_to_scope:
+        module_path, _ = quantizer.node_name_to_scope[first_linear_use_or_first_use.name]
+    else:
+        # TODO: it's not used, so actually we can skip quantization
+        # but this requires changing return type of quantize_node
+        # we can fix it later if needed
+        module_path = ""
     root_module = quantizer.modules['']
     graph = quantizer.quantized_graph
     node_type, quantize_op, qparams = get_quantize_node_info(obs_module)
@@ -151,10 +167,8 @@ def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
             qparam_node = create_getattr_from_value(root_module, graph, module_path + prefix + key, value)
             inputs.append(qparam_node)
         else:
-            get_new_attr_name = get_new_attr_name_with_prefix(module_path + prefix + key)
-            qparam_full_path = get_new_attr_name(root_module)
-            setattr(root_module, qparam_full_path, value)
-            inputs.append(graph.create_node('get_attr', qparam_full_path))
+            # for qparams that are not scale/zero_point (like axis, dtype) we store them as literals in the graph.
+            inputs.append(value)
     return graph.create_node(node_type, quantize_op, tuple(inputs), {})
 
 def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key) -> List[Any]:
@@ -330,3 +344,67 @@ def create_qparam_nodes(quantizer: QuantizerCls, node_name: str, scale: Any, zer
     scale_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_scale_"), scale)
     zero_point_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_zero_point_"), zero_point)
     return (scale_node, zero_point_node)
+
+
+def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module], cache: Dict[Node, bool]) -> bool:
+    """
+    If we know for sure that all of this node's args have no
+    tensors (are primitives), return True.  If we either
+    find a tensor or are not sure, return False. Note: this
+    function is not exact.
+    """
+    if cache and node in cache:
+        return cache[node]
+
+    result = False  # will be overwritten
+    if not isinstance(node, Node):
+        result = True
+    elif node.op == 'placeholder':
+        result = False
+    elif node.op == 'call_module':
+        assert isinstance(node.target, str)
+        if is_activation_post_process(modules[node.target]):
+            result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore
+    elif node.op == 'call_module':
+        result = False
+    elif node.op == 'get_attr':
+        result = False
+    elif node.target is getattr and node.args[1] in ['ndim', 'shape']:
+        # x1 = x0.ndim
+        result = True
+    elif node.op == 'call_method' and node.target == 'size':
+        # x1 = x0.size(0)
+        result = True
+    else:
+        found_one_tensor = False
+        for arg in node.args:
+            if isinstance(arg, list):
+                for list_el in arg:
+                    if isinstance(list_el, Node):
+                        this_list_el_args_have_no_tensors = \
+                            all_node_args_have_no_tensors(list_el, modules, cache)
+                        found_one_tensor = found_one_tensor or \
+                            (not this_list_el_args_have_no_tensors)
+            elif isinstance(arg, int):
+                pass
+            else:
+                if isinstance(arg, Node):
+                    this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg, modules, cache)
+                    found_one_tensor = found_one_tensor or \
+                        (not this_arg_args_have_no_tensors)
+                else:
+                    found_one_tensor = True
+            result = not found_one_tensor
+    if cache:
+        cache[node] = result
+    return result
+
+
+def node_return_type_is_int(node: Node) -> bool:
+    """
+    Returns true if this node results in an integer, even if some of the args
+    are Tensors.
+    """
+    if node.op == 'call_method' and node.target == 'size':
+        return True
+    return False

@@ -201,9 +201,9 @@ Now the exported ONNX graph becomes: ::
           %loop_range : Long()):
       %2 : Long() = onnx::Constant[value={1}](), scope: LoopModel2/loop
       %3 : Tensor = onnx::Cast[to=9](%2)
-      %4 : Long(2, 3) = onnx::Loop(%loop_range, %3, %input_data), scope: LoopModel2/loop # custom_loop.py:240:5
+      %4 : Long(2, 3) = onnx::Loop(%loop_range, %3, %input_data), scope: LoopModel2/loop
         block0(%i.1 : Long(), %cond : bool, %x.6 : Long(2, 3)):
-          %8 : Long(2, 3) = onnx::Add(%x.6, %i.1), scope: LoopModel2/loop # custom_loop.py:241:13
+          %8 : Long(2, 3) = onnx::Add(%x.6, %i.1), scope: LoopModel2/loop
           %9 : Tensor = onnx::Cast[to=9](%2)
           -> (%9, %8)
       return (%4)
@@ -249,8 +249,43 @@ E.g.: ::
     out = model(*inputs)
     torch.onnx.export(model, inputs, 'loop_and_list.onnx', opset_version=11, example_outputs=out)
 
+
+Type Annotations
+--------------------------------
+TorchScript only supports a subset of Python types. You can find more details about type annotation
+`here <https://pytorch.org/docs/stable/jit_language_reference.html#id8>`_.
+
+Due to optimization purposes, TorchScript only supports variables with single static types for script functions.
+By default, each variable is assumed to be Tensor. If an argument to a ScriptModule function is not Tensor,
+its type should be specified using MyPy-style annotations.
+
+::
+
+    import torch
+
+    class Module(torch.nn.Module):
+        def forward(self, x, tup):
+            # type: (int, Tuple[Tensor, Tensor]) -> Tensor
+            t0, t1 = tup
+            return t0 + t1 + x
+
+If the type annotation is not specified, TorchScript compiler fails with the runtime error below.
+
+::
+
+  RuntimeError:
+  Tensor (inferred) cannot be used as a tuple:
+    File <filename>
+          def forward(self, x, tup):
+              t0, t1 = tup
+                       ~~~ <--- HERE
+              return t0 + t1 + x
+
+
 Write PyTorch model in Torch way
 --------------------------------
+Avoid using numpy
+~~~~~~~~~~~~~~~~~
 
 PyTorch models can be written using numpy manipulations, but this is not proper when we convert to the ONNX model.
 For the trace-based exporter, tracing treats the numpy values as the constant node,
@@ -274,11 +309,18 @@ In addition, Dropout layer need defined in init function so that inferencing can
         def forward(self, x):
             x = self.dropout(x)
 
+Avoid using .data field
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The .data field is an old field that is kept for backward compatibility and should be avoided when writing models.
+It's usage is dangerous and can make computations wrong, furthermore it can produce an incorrect trace graph and
+therefore an incorrect ONNX graph. A safer alternative is to use .detach() instead.
+
 Using dictionaries to handle Named Arguments as model inputs
 ------------------------------------------------------------
 
 There are two ways to handle models which consist of named parameters or keyword arguments as inputs:
- 
+
 * The first method is to pass all the inputs in the same order as required by the model and pass None
   values for the keyword arguments that do not require a value to be passed
 
@@ -288,23 +330,23 @@ There are two ways to handle models which consist of named parameters or keyword
 
 For example, in the model: ::
 
-    class Model(torch.nn.Module): 
-      def forward(self, x, y=None, z=None): 
-        if y is not None: 
-          return x + y 
-        if z is not None: 
-          return x + z 
-        return x 
-    m = Model() 
+    class Model(torch.nn.Module):
+      def forward(self, x, y=None, z=None):
+        if y is not None:
+          return x + y
+        if z is not None:
+          return x + z
+        return x
+    m = Model()
     x = torch.randn(2, 3)
-    z = torch.randn(2, 3) 
+    z = torch.randn(2, 3)
 
 There are two ways of exporting the model:
 
-* Not using a dictionary for the keyword arguments and passing all the inputs in the same order 
+* Not using a dictionary for the keyword arguments and passing all the inputs in the same order
   as required by the model ::
 
-      torch.onnx.export(model, (x, None, z), ‘test.onnx’) 
+      torch.onnx.export(model, (x, None, z), ‘test.onnx’)
 
 * Using a dictionary to represent the keyword arguments. This dictionary is always passed in
   addition to the non-keyword arguments and is always the last argument in the args tuple. ::
@@ -318,25 +360,25 @@ empty or no dictionary. For example, ::
     or
     torch.onnx.export(model, (x, ), ‘test.onnx’)
 
-An exception to this rule are cases in which the last input is also of a dictionary type. 
-In these cases it is mandatory to have an empty dictionary as the last argument in the 
+An exception to this rule are cases in which the last input is also of a dictionary type.
+In these cases it is mandatory to have an empty dictionary as the last argument in the
 args tuple. For example, ::
 
-    class Model(torch.nn.Module): 
-      def forward(self, k, x): 
-        ...  
-        return x 
-    m = Model() 
-    k = torch.randn(2, 3)   
+    class Model(torch.nn.Module):
+      def forward(self, k, x):
+        ...
+        return x
+    m = Model()
+    k = torch.randn(2, 3)  
     x = {torch.tensor(1.): torch.randn(2, 3)}
 
-Without the presence of the empty dictionary, the export call assumes that the 
-‘x’ input is intended to represent the optional dictionary consisting of named arguments. 
-In order to prevent this from being an issue a constraint is placed to provide an empty 
-dictionary as the last input in the tuple args in such cases. 
-The new call would look like this. :: 
+Without the presence of the empty dictionary, the export call assumes that the
+‘x’ input is intended to represent the optional dictionary consisting of named arguments.
+In order to prevent this from being an issue a constraint is placed to provide an empty
+dictionary as the last input in the tuple args in such cases.
+The new call would look like this. ::
 
-    torch.onnx.export(model, (k, x, {}), ‘test.onnx’) 
+    torch.onnx.export(model, (k, x, {}), ‘test.onnx’)
 
 
 Indexing
@@ -388,12 +430,12 @@ Below is the list of supported patterns for RHS indexing. ::
   data[torch.tensor([[1, 2], [2, 3]]), torch.tensor([2, 3])]
   data[torch.tensor([2, 3]), :, torch.tensor([1, 2])]
 
-  # Ellipsis
+  # Ellipsis followed by tensor indexing
   # Not supported in scripting
   # i.e. torch.jit.script(model) will fail if model contains this pattern.
   # Export is supported under tracing
   # i.e. torch.onnx.export(model)
-  data[...]
+  data[..., torch.tensor([2, 1])]
 
   # The combination of above
   data[2, ..., torch.tensor([2, 1, 3]), 2:4, torch.tensor([[1], [2]])]
@@ -450,12 +492,12 @@ Below is the list of supported patterns for LHS indexing. ::
   data[torch.tensor([[1, 2], [2, 3]])] = new_data
   data[torch.tensor([2, 3]), torch.tensor([1, 2])] = new_data
 
-  # Ellipsis
+  # Ellipsis followed by tensor indexing
   # Not supported to export in script modules
   # i.e. torch.onnx.export(torch.jit.script(model)) will fail if model contains this pattern.
   # Export is supported under tracing
   # i.e. torch.onnx.export(model)
-  data[...] = new_data
+  data[..., torch.tensor([2, 1])] = new_data
 
   # The combination of above
   data[2, ..., torch.tensor([2, 1, 3]), 2:4] += update
@@ -575,6 +617,7 @@ The following operators are supported:
 * glu
 * group_norm
 * gt
+* hardsigmoid
 * hardswish
 * hardtanh
 * im2col
@@ -1009,6 +1052,11 @@ Q: I have exported my lstm model, but its input size seems to be fixed?
 Q: How to export models with loops in it?
 
   Please checkout `Tracing vs Scripting`_.
+
+Q: How to export models with primitive type inputs?
+
+  Support for primitive type inputs will be added starting from PyTorch 1.9 release.
+  However, exporter does not support conversion of models with String inputs.
 
 Q: Does ONNX support implicit scalar datatype casting?
 

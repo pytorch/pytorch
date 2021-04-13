@@ -339,7 +339,8 @@ class ErrorTrackingProcess(mp.Process):
         set_faulthander_if_available()
         if self.disable_stderr:
             # Disable polluting stderr with errors that are supposed to happen.
-            sys.stderr = open(os.devnull, "w")
+            with open(os.devnull, 'w') as devnull:
+                os.dup2(devnull.fileno(), sys.stderr.fileno())
         try:
             super(ErrorTrackingProcess, self).run()
             self._cconn.send(None)
@@ -525,13 +526,26 @@ def disable_stderr(worker_id):
     sys.stderr.flush()  # flush library buffers that dup2 knows nothing about
     # Can't use a with-block because otherwise the fd will be closed when this
     # function ends.
-    devnull = open(os.devnull, 'w')
-    os.dup2(devnull.fileno(), sys.stderr.fileno())
+    with open(os.devnull, 'w') as devnull:
+        os.dup2(devnull.fileno(), sys.stderr.fileno())
 
 
 def _test_segfault():
     dataset = SegfaultDataset(10)
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2, worker_init_fn=disable_stderr)
+    _ = next(iter(dataloader))
+
+
+def _test_no_segfault():
+    dataset = [1, 2, 3]
+    num_threads = torch.get_num_threads()
+    if num_threads < 4:
+        torch.set_num_threads(4)
+    else:
+        torch.set_num_threads(num_threads)
+    mp_ctx = torch.multiprocessing.get_context(method='fork')
+    dataloader = DataLoader(dataset, num_workers=1, worker_init_fn=disable_stderr,
+                            multiprocessing_context=mp_ctx)
     _ = next(iter(dataloader))
 
 
@@ -947,7 +961,6 @@ except RuntimeError as e:
             next(loader1_it)
             next(loader2_it)
 
-    @unittest.skip("temporarily disable until flaky failures are fixed")
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
@@ -961,6 +974,25 @@ except RuntimeError as e:
             else:
                 self.assertIsInstance(p.exception, RuntimeError)
                 self.assertRegex(str(p.exception), r'DataLoader worker \(pid \d+\) is killed by signal: ')
+        finally:
+            p.terminate()
+
+    # Tests if the child process forked by the DataLoader segfaults due to having more than 3 threads
+    # in the parent process after at least one set_num_threads invocation in the parent process.
+    # After forking, set_num_threads(1) in the child process entails handling some inherited data-structures
+    # of the Caffe2 thread-pool of the parent process, culminating in a segfault.
+    # Reference: https://github.com/pytorch/pytorch/issues/54752
+    @unittest.skipIf(IS_WINDOWS, "Needs fork")
+    def test_no_segfault(self):
+        p = ErrorTrackingProcess(target=_test_no_segfault)
+        p.start()
+        p.join(JOIN_TIMEOUT)
+        try:
+            self.assertFalse(p.is_alive())
+            if p.exception:
+                self.assertIsInstance(p.exception, RuntimeError)
+                self.assertRegex(str(p.exception), r'DataLoader worker \(pid \d+\) is killed by signal: ')
+                self.fail("Segfault occurred in worker process after fork")
         finally:
             p.terminate()
 
@@ -1879,7 +1911,7 @@ class DictDataset(Dataset):
 
     def __getitem__(self, ndx):
         return {
-            'a_tensor': torch.Tensor(4, 2).fill_(ndx),
+            'a_tensor': torch.empty(4, 2).fill_(ndx),
             'another_dict': {
                 'a_number': ndx,
             },
@@ -2169,7 +2201,7 @@ class TestIndividualWorkerQueue(TestCase):
                 self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
 
 
-class SetAffinityDataset(torch.utils.data.IterableDataset):
+class SetAffinityDataset(IterableDataset):
 
     def __iter__(self):
         torch.randperm(1)
@@ -2193,6 +2225,26 @@ class TestSetAffinity(TestCase):
         for sample in dataloader:
             self.assertEqual(sample, [2])
 
+class ConvDataset(Dataset):
+    def __init__(self):
+        self.x = torch.ones(1, 1, 24000)
+        # Call convolution on parent process
+        self[0]
+
+    def __len__(self):
+        return 1
+
+    def __getitem__(self, index):
+        return torch.nn.functional.conv1d(self.x, torch.ones(1, 1, 2))
+
+
+@unittest.skipIf(IS_WINDOWS, "Needs fork")
+class TestConvAfterFork(TestCase):
+    # Tests crash reported in https://github.com/pytorch/pytorch/issues/53565
+    def test_conv_after_fork(self):
+        loader = DataLoader(ConvDataset(), num_workers=1)
+        for x in loader:
+            self.assertEqual(x.shape, (1, 1, 1, 23999))
 
 
 if __name__ == '__main__':

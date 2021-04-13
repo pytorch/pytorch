@@ -542,11 +542,13 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       py::cast(kDefaultNumSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
-      .def(py::init([](std::string workerName,
+      .def(py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                       std::string workerName,
                        const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
         return std::make_unique<ProcessGroupAgent>(
+            store,
             std::move(workerName),
             pg,
             numSendRecvThreads,
@@ -755,26 +757,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
          std::vector<torch::Tensor>& tensors,
          const float rpcTimeoutSeconds,
          const bool isAsyncExecution) {
-        return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcPythonUdf(
-                dst,
-                pickledPythonUDF,
-                tensors,
-                rpcTimeoutSeconds,
-                isAsyncExecution),
-            /* unwrap_func */ [](const py::object& value) {
-              py::gil_scoped_release release;
-              auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-              // This will unwrap RemoteException and raise the contained
-              // server-side Python exception on client side. A caveat here is
-              // that the exception must be raise in the client thread calling
-              // the pybind "wait" API, so that it can be correctly shown to
-              // user. A wrong way is to raise it in RPC server thread, where
-              // the exception would be swallowed in the ThreadPool task, and
-              // also no pybind handling code can help shown the Python
-              // exception.
-              pythonRpcHandler.handleException(value);
-            });
+        return std::make_shared<jit::PythonFutureWrapper>(pyRpcPythonUdf(
+            dst,
+            pickledPythonUDF,
+            tensors,
+            rpcTimeoutSeconds,
+            isAsyncExecution));
       },
       py::call_guard<py::gil_scoped_release>());
 

@@ -34,7 +34,8 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame  = (blockIdx.z + offsetZ) % output.size(1); // output frame/time
-  int slice   = (blockIdx.z + offsetZ) / output.size(1); // output slice/feature
+  int64_t slice   = (blockIdx.z + offsetZ) / output.size(1); // output slice/feature
+  // For int64_t data type, see https://github.com/pytorch/pytorch/issues/52822
 
   if (oRow < output.size(2) && oColumn < output.size(3))
   {
@@ -400,15 +401,14 @@ void max_pool3d_with_indices_backward_out_cuda_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cuda(
-  Tensor& output,
-  Tensor& indices,
-  const Tensor& input,
+std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cuda(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
-  bool ceil_mode)
+  bool ceil_mode,
+  Tensor& output,
+  Tensor& indices)
 {
   max_pool3d_with_indices_out_cuda_template(
     output,
@@ -451,16 +451,15 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cuda(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& max_pool3d_with_indices_backward_out_cuda(
-  Tensor& gradInput,
-  const Tensor& gradOutput,
+Tensor& max_pool3d_with_indices_backward_out_cuda(const Tensor& gradOutput,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
   bool ceil_mode,
-  const Tensor& indices)
+  const Tensor& indices,
+  Tensor& gradInput)
 {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

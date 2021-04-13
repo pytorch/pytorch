@@ -1,7 +1,11 @@
 import torch
+import numpy as np
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
+import unittest
+
+LLVM_ENABLED = torch._C._llvm_enabled()
 
 class kernel_arena_scope(object):
     def __enter__(self):
@@ -58,6 +62,62 @@ class TestTensorExprPyBind(JitTestCase):
             tC = torch.empty(1, 1)
             codegen.call([tA, tB, tC])
             torch.testing.assert_allclose(torch.matmul(tA, tB), tC)
+
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_kernel_with_tensor_inputs(self):
+        def f(a, b, c):
+            return a + b + c
+        device, size = 'cpu', (4, 4)
+        x = torch.rand(size, device=device)
+        y = torch.rand(size, device=device)
+        z = torch.rand(size, device=device)
+
+        graph_str = """
+graph(%a.1 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu),
+      %b.1 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu),
+      %c.1 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu)):
+  %6 : int = prim::Constant[value=1]()
+  %7 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu) = aten::add(%a.1, %b.1, %6)
+  %3 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu) = aten::add(%7, %c.1, %6)
+  return (%3)
+        """
+        graph = torch._C.parse_ir(graph_str)
+
+        with kernel_arena_scope():
+            kernel = torch._C._te.TensorExprKernel(graph)
+            res1 = kernel.run((x, y, z))
+            res2 = kernel.fallback((x, y, z))
+            correct = f(x, y, z)
+            np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+            np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
+
+
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_kernel_with_scalar_inputs(self):
+        def f(a, b, c):
+            return a + b + c
+        x = torch.tensor(0.1, dtype=torch.float, device='cpu')
+        y = torch.tensor(0.6, dtype=torch.float, device='cpu')
+        z = torch.tensor(0.7, dtype=torch.float, device='cpu')
+
+        graph_str = """
+graph(%a.1 : Float(requires_grad=0, device=cpu),
+      %b.1 : Float(requires_grad=0, device=cpu),
+      %c.1 : Float(requires_grad=0, device=cpu)):
+  %3 : int = prim::Constant[value=1]()
+  %6 : Float(requires_grad=0, device=cpu) = aten::add(%a.1, %b.1, %3)
+  %9 : Float(requires_grad=0, device=cpu) = aten::add(%6, %c.1, %3)
+  return (%9)
+        """
+        graph = torch._C.parse_ir(graph_str)
+
+        with kernel_arena_scope():
+            kernel = torch._C._te.TensorExprKernel(graph)
+            res1 = kernel.run((x, y, z))
+            res2 = kernel.fallback((x, y, z))
+            correct = f(x, y, z)
+            np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+            np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
 
 if __name__ == '__main__':
     run_tests()

@@ -19,6 +19,8 @@
 // *************************************************************************
 
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
+constexpr auto kProcessGroupDefaultTimeout =
+    std::chrono::milliseconds(10 * 1000);
 
 namespace c10d {
 
@@ -164,6 +166,21 @@ class ProcessGroup : public torch::CustomClassHolder {
     std::function<void()> recordFunctionEndCallback_;
   };
 
+  // ProcessGroup Options is a base struct that defines the basic options
+  // when constructing a ProcessGroup. Each ProcessGroup subclass should
+  // extend this struct and define its options if it wants to provide more
+  // config options (beyond basic ones defined here) to end user.
+  struct Options : torch::CustomClassHolder {
+    explicit Options(std::chrono::milliseconds timeout, std::string backend)
+        : timeout(timeout), backend(backend) {}
+    virtual ~Options() = default;
+
+    std::chrono::milliseconds timeout;
+
+    // backend name
+    const std::string backend;
+  };
+
   explicit ProcessGroup(int rank, int size);
   virtual ~ProcessGroup();
 
@@ -248,6 +265,16 @@ class ProcessGroup : public torch::CustomClassHolder {
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) {
     throw std::runtime_error("ProcessGroup does not support alltoall");
+  }
+
+  virtual void monitoredBarrier(
+      const BarrierOptions& /* unused */, bool /* unused */ = false ) {
+    auto backendName = getBackendName();
+    throw std::runtime_error(
+        c10::str("ProcessGroup ",
+        backendName,
+        " does not support monitoredBarrier, only GLOO supports monitored barrier.")
+    );
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> send(

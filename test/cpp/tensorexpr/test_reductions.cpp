@@ -481,7 +481,7 @@ TEST(Reductions, ReduceAsProducer) {
       [&](const VarHandle& l, const VarHandle& n) {
         return c->call(l, n) * a.load(l, n);
       });
-  LoopNest loop({d});
+  LoopNest loop({d}, {c, d});
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -525,7 +525,7 @@ TEST(Reductions, ReduceAsConsumer) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
   Tensor* d = Reduce("sum", {{2, "l1"}}, Sum(), c, {{3, "n1"}, {m, "m1"}});
-  LoopNest loop({d});
+  LoopNest loop({d}, {c, d});
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -573,11 +573,8 @@ TEST(Reductions, SplitReduceAxis) {
 
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
-  For* x_outer;
-  For* x_inner;
-  For* x_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[1], 2, &x_outer, &x_inner, &x_tail);
+  l.splitWithTail(loops[1], 2);
 
   l.prepareForCodegen();
 
@@ -1041,8 +1038,7 @@ TEST(Reductions, ReduceSplitTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner, *tail;
-    loop.splitWithTail(loops[i], 8, &outer, &inner, &tail);
+    loop.splitWithTail(loops[i], 8);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1074,8 +1070,7 @@ TEST(Reductions, ReduceSplitNoTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner, *tail;
-    loop.splitWithTail(loops[i], 5, &outer, &inner, &tail);
+    loop.splitWithTail(loops[i], 5);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1109,8 +1104,7 @@ TEST(Reductions, ReduceOverSplitTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner, *tail;
-    loop.splitWithTail(loops[i], 16, &outer, &inner, &tail);
+    loop.splitWithTail(loops[i], 16);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1143,8 +1137,7 @@ TEST(Reductions, ReduceSplitMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner;
-    loop.splitWithMask(loops[i], 8, &outer, &inner);
+    loop.splitWithMask(loops[i], 8);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1176,8 +1169,7 @@ TEST(Reductions, ReduceSplitNoMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner;
-    loop.splitWithMask(loops[i], 5, &outer, &inner);
+    loop.splitWithMask(loops[i], 5);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1210,8 +1202,7 @@ TEST(Reductions, ReduceOverSplitMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    For *outer, *inner;
-    loop.splitWithMask(loops[i], 16, &outer, &inner);
+    loop.splitWithMask(loops[i], 16);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1247,8 +1238,7 @@ TEST(Reductions, ReduceSplitRfactor) {
   Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  For *o, *i, *t;
-  loop.splitWithTail(loops[2], SPLIT_FACTOR, &o, &i, &t);
+  loop.splitWithTail(loops[2], SPLIT_FACTOR);
 
   auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
   loop.rfactor(reduces[0], reduces[0]->reduce_args().back());
@@ -1284,8 +1274,7 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   Tensor* c = Reduce("sum", {}, Sum(), b, {{N, "n"}, {K, "k"}});
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  For *o, *i, *t;
-  loop.splitWithTail(loops[1], SPLIT_FACTOR, &o, &i, &t);
+  loop.splitWithTail(loops[1], SPLIT_FACTOR);
 
   auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
   loop.rfactor(reduces[0], reduces[0]->reduce_args().back());
@@ -1345,7 +1334,7 @@ TEST(Reductions, ReduceInlineReduction) {
     }
   }
 
-  LoopNest l1({y});
+  LoopNest l1({y}, {x, y});
   // Cannot inline a reduction computation
   ASSERT_FALSE(l1.computeInline(x->buf()));
 }
@@ -1379,7 +1368,7 @@ TEST(Reductions, ReduceInlineConsumer) {
     }
   }
 
-  LoopNest l1({y});
+  LoopNest l1({y}, {x, y});
   LoopNest l2(l1);
   l2.computeInline(x->buf());
 
@@ -1437,7 +1426,7 @@ TEST(Reductions, ReduceInlineReducerInternal) {
     }
   }
 
-  LoopNest l1({y});
+  LoopNest l1({y}, {x, y});
   LoopNest l2(l1);
   l2.computeInline(x->buf());
 
@@ -1484,7 +1473,7 @@ TEST(Reductions, ReductionCacheAccessesOuter) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
   Stmt* d_loop = l.getLoopStmtsFor(d)[1];
   l.cacheAccesses(d->buf(), "d_local", d_loop);
@@ -1533,7 +1522,7 @@ TEST(Reductions, ReductionCacheAccessesInner) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
   Stmt* d_loop = l.getLoopStmtsFor(d)[2];
   l.cacheAccesses(d->buf(), "d_local", d_loop);
@@ -1578,7 +1567,7 @@ TEST(Reductions, ReductionCacheBodyAccess) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
   Stmt* d_loop = l.getLoopStmtsFor(d)[1];
   l.cacheAccesses(c->buf(), "scale_local", d_loop);
@@ -1619,11 +1608,9 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
-  For* outer;
-  For* inner;
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &outer, &inner);
+  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4);
 
   Stmt* e_loop = l.getLoopStmtsFor(e)[1];
   l.cacheAccesses(d->buf(), "sum_local", e_loop);
@@ -1662,7 +1649,7 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
   For* outer;
   For* inner;
@@ -1710,7 +1697,7 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
     return b.load(0, 0, l) * d->call(l);
   });
 
-  LoopNest l({e});
+  LoopNest l({e}, {c, d, e});
 
   For* outer;
   For* inner;
@@ -1978,5 +1965,34 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   ASSERT_EQ(out_before[0], out_after[0]);
 }
 
+TEST(Reductions, InitFunction) {
+  KernelScope ks;
+  constexpr int M = 32;
+  constexpr int N = 16;
+  Placeholder A("A", kFloat, {M, N});
+  Placeholder B("B", kFloat, {N});
+  Tensor* C = Reduce(
+      "C",
+      {{N, "n"}},
+      Sum(),
+      [&](const std::vector<VarHandle>& v) { return B.load(v[0]); },
+      [&](const std::vector<VarHandle>& v) { return A.load(v[1], v[0]); },
+      {{M, "m"}});
+  LoopNest nest({C});
+  nest.prepareForCodegen();
+  Stmt* s = IRSimplifier::simplify(nest.root_stmt());
+  std::ostringstream oss;
+  oss << *s << "\n";
+  const std::string& expected_ir =
+      R"IR(
+#CHECK:  for (int n = 0; n < 16; n++) {
+#CHECK:    C[n] = B[n];
+#CHECK:    for (int m = 0; m < 32; m++) {
+#CHECK:      C[n] = (C[n]) + (A[n + 16 * m]);
+#CHECK:    }
+#CHECK:  }
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
 } // namespace jit
 } // namespace torch

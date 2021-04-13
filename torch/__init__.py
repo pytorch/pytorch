@@ -278,6 +278,12 @@ def is_tensor(obj):
 
     Args:
         obj (Object): Object to test
+    Example::
+
+        >>> x=torch.tensor([1,2,3])
+        >>> torch.is_tensor(x)
+        True
+
     """
     return isinstance(obj, torch.Tensor)
 
@@ -371,6 +377,8 @@ def use_deterministic_algorithms(d):
           ``indices`` is a list of tensors
         * :func:`torch.index_put` with ``accumulate=True`` when called on a CPU
           tensor
+        * :func:`torch.put` with ``accumulate=True`` when called on a CPU
+          tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when `d=True`:
@@ -401,6 +409,8 @@ def use_deterministic_algorithms(d):
         * :func:`torch.scatter_add_` when called on a CUDA tensor
         * :func:`torch.index_add_` when called on a CUDA tensor
         * :func:`torch.index_copy`
+        * :func:`torch.put` when ``accumulate=False``
+        * :func:`torch.put` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.index_select` when called on a CUDA tensor that requires grad
         * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
         * :func:`torch.histc` when called on a CUDA tensor
@@ -476,7 +486,7 @@ def is_warn_always_enabled():
 # Define Storage and Tensor classes
 ################################################################################
 
-from .tensor import Tensor
+from ._tensor import Tensor
 from .storage import _StorageBase
 
 
@@ -683,8 +693,8 @@ def compiled_with_cxx11_abi():
 
 
 # Import the ops "namespace"
-from torch._ops import ops as ops
-from torch._classes import classes as classes
+from torch._ops import ops
+from torch._classes import classes
 
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom

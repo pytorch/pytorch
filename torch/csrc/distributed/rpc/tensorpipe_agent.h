@@ -38,14 +38,7 @@ class Context;
 } // namespace transport
 
 namespace channel {
-template <typename TBuffer>
 class Context;
-using CpuContext = Context<CpuBuffer>;
-
-#ifdef USE_CUDA_NOT_ROCM
-using CudaContext = Context<CudaBuffer>;
-#endif
-
 } // namespace channel
 
 using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
@@ -71,7 +64,7 @@ struct TransportRegistration {
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct CpuChannelRegistration {
-  std::shared_ptr<tensorpipe::channel::CpuContext> channel;
+  std::shared_ptr<tensorpipe::channel::Context> channel;
   int64_t priority;
 };
 
@@ -80,7 +73,7 @@ C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 
 struct CudaChannelRegistration {
 #ifdef USE_CUDA_NOT_ROCM
-  std::shared_ptr<tensorpipe::channel::CudaContext> channel;
+  std::shared_ptr<tensorpipe::channel::Context> channel;
   int64_t priority;
 #endif
 };
@@ -231,7 +224,7 @@ class TensorPipeAgent : public RpcAgent {
   void removeFromTimeoutMap(uint64_t messageId);
 
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
-  void collectNames();
+  void prepareNames();
 
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
 

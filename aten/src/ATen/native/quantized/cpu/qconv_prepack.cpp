@@ -10,6 +10,8 @@
 #include <ATen/quantized/Quantizer.h>
 #include <torch/library.h>
 
+#include <c10/util/irange.h>
+
 #ifdef USE_FBGEMM
 template <int kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
@@ -114,7 +116,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   const int output_channels_per_group = output_channels / groups;
   const int inner_size =
       kernel_d * kernel_h * kernel_w * input_channels_per_group;
-  for (int g = 0; g < groups; ++g) {
+  for (const auto g : c10::irange(groups)) {
     for (int i = 0; i < output_channels_per_group; ++i) {
       const int c = g * output_channels_per_group + i;
       int32_t sum = 0;
@@ -188,8 +190,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
         int64_t groups,
         bool transpose) {
   TORCH_CHECK(
-      kSpatialDim == 2,  // 1D is packed as 2d, hence we don't need other checks
-      "QNNPACK packing only supports 2D convolution.");
+      kSpatialDim == 2 || kSpatialDim == 3,  // 1D is packed as 2d, hence we don't need other checks
+      "QNNPACK packing only supports 2D / 3D convolution.");
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "quantized::conv_prepack (qnnpack): Weights are expected to have ",
@@ -233,6 +235,21 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
       !bias_fp32.defined() ||
           (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
       "quantized::conv2d_prepack (qnnpack): expected bias to be 1-dimensional "
+      "with ",
+      out_ch,
+      " elements",
+      ", but got bias of size ",
+      bias_fp32.sizes(),
+      " instead. "
+      "(weight dimensions: ",
+      weight.sizes(), " , transpose: ",
+      (transpose ? "True)." : "False).")
+  );
+
+  TORCH_CHECK(
+      !bias_fp32.defined() ||
+          (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
+      "quantized::conv3d_prepack (qnnpack): expected bias to be 1-dimensional "
       "with ",
       out_ch,
       " elements",
@@ -363,6 +380,8 @@ class QConvPackWeightInt8 final {
   }
 };
 
+
+
 class QConv1dPackWeightInt8 final {
  public:
   static c10::intrusive_ptr<ConvPackedParamsBase<2>> run_conv(
@@ -415,6 +434,8 @@ class QConv1dPackWeightInt8 final {
     }
 #endif
 
+
+
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       return PackedConvWeightsQnnp<2>::prepack(
@@ -445,6 +466,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
   // Conv
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv2d_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_conv));
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv3d_prepack"), TORCH_FN(QConvPackWeightInt8<3>::run_conv));
   // ConvTranspose
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose1d_prepack"), TORCH_FN(QConv1dPackWeightInt8::run_deconv));
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_deconv));

@@ -6,21 +6,12 @@ from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
+from torch.utils.data._typing import _DataPipeMeta
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
 from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
-
-class functional_datapipe(object):
-    def __init__(self, name):
-        self.name = name
-
-    def __call__(self, cls):
-        if not issubclass(cls, IterableDataset):
-            raise Exception('Can only decorate IterDataPipe')
-        IterableDataset.register_datapipe_as_function(self.name, cls)
-        return cls
 
 
 class Dataset(Generic[T_co]):
@@ -50,7 +41,7 @@ class Dataset(Generic[T_co]):
     # in pytorch/torch/utils/data/sampler.py
 
 
-class IterableDataset(Dataset[T_co]):
+class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
     r"""An iterable Dataset.
 
     All datasets that represent an iterable of data samples should subclass it.
@@ -153,6 +144,7 @@ class IterableDataset(Dataset[T_co]):
         [3, 4, 5, 6]
     """
     functions: Dict[str, Callable] = {}
+    reduce_ex_hook : Optional[Callable] = None
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
@@ -183,6 +175,20 @@ class IterableDataset(Dataset[T_co]):
             return cls(source_dp, *args, **kwargs)
         function = functools.partial(class_function, cls_to_register)
         IterableDataset.functions[function_name] = function
+
+    def __reduce_ex__(self, *args, **kwargs):
+        if IterableDataset.reduce_ex_hook is not None:
+            try:
+                return IterableDataset.reduce_ex_hook(self)
+            except NotImplementedError:
+                pass
+        return super().__reduce_ex__(*args, **kwargs)
+
+    @classmethod
+    def set_reduce_ex_hook(cls, hook_fn):
+        if IterableDataset.reduce_ex_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing reduce_ex_hook")
+        IterableDataset.reduce_ex_hook = hook_fn
 
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
