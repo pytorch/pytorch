@@ -15,7 +15,9 @@ constexpr int64_t kShortStoreTimeoutMillis = 100;
 constexpr int64_t kStoreCallbackTimeout = 1000;
 constexpr int defaultTimeout = 20;
 
-c10::intrusive_ptr<c10d::TCPStore> _createServer(int numWorkers = 1, int timeout = defaultTimeout) {
+c10::intrusive_ptr<c10d::TCPStore> _createServer(
+    int numWorkers = 1,
+    int timeout = defaultTimeout) {
   return c10::make_intrusive<c10d::TCPStore>(
       "127.0.0.1",
       0,
@@ -93,12 +95,12 @@ void testHelper(const std::string& prefix = "") {
 
   for (auto i = 0; i < numThreads; i++) {
     threads.emplace_back(std::thread([&sem1,
-                                   &sem2,
-                                   &clientStores,
-                                   i,
-                                   &expectedCounterRes,
-                                   &numIterations,
-                                   &numThreads] {
+                                      &sem2,
+                                      &clientStores,
+                                      i,
+                                      &expectedCounterRes,
+                                      &numIterations,
+                                      &numThreads] {
       for (auto j = 0; j < numIterations; j++) {
         clientStores[i]->add("counter", 1);
       }
@@ -154,9 +156,10 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   // Callback function increments counter of the total number of callbacks that
   // were run
   int numCallbacksExecuted = 0;
-  std::function<void(c10::optional<std::string>, c10::optional<std::string>)> callback =
-      [&numCallbacksExecuted](
-          c10::optional<std::string> oldValue, c10::optional<std::string> newValue) {
+  std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
+      callback = [&numCallbacksExecuted](
+                     c10::optional<std::string> oldValue,
+                     c10::optional<std::string> newValue) {
         std::ignore = oldValue;
         std::ignore = newValue;
         numCallbacksExecuted++;
@@ -189,22 +192,20 @@ void testWatchKeyCallback(const std::string& prefix = "") {
   std::vector<std::thread> threads;
   std::atomic<int> keyChangeOperationCount{0};
   for (auto i = 0; i < numThreads; i++) {
-    threads.emplace_back(std::thread([&clientStores,
-                                   &internalKey,
-                                   &keyChangeOperationCount,
-                                   i] {
-      // Let each thread set and get key on its client store
-      std::string key = internalKey + std::to_string(i);
-      std::string keyCounter = internalKey + "counter" + std::to_string(i);
-      std::string val = "thread_val_" + std::to_string(i);
-      // The set, compareSet, add methods count as key change operations
-      c10d::test::set(*clientStores[i], key, val);
-      c10d::test::compareSet(*clientStores[i], key, val, "newValue");
-      clientStores[i]->add(keyCounter, i);
-      keyChangeOperationCount += 3;
-      c10d::test::check(*clientStores[i], key, "newValue");
-      c10d::test::check(*clientStores[i], keyCounter, std::to_string(i));
-    }));
+    threads.emplace_back(
+        std::thread([&clientStores, &internalKey, &keyChangeOperationCount, i] {
+          // Let each thread set and get key on its client store
+          std::string key = internalKey + std::to_string(i);
+          std::string keyCounter = internalKey + "counter" + std::to_string(i);
+          std::string val = "thread_val_" + std::to_string(i);
+          // The set, compareSet, add methods count as key change operations
+          c10d::test::set(*clientStores[i], key, val);
+          c10d::test::compareSet(*clientStores[i], key, val, "newValue");
+          clientStores[i]->add(keyCounter, i);
+          keyChangeOperationCount += 3;
+          c10d::test::check(*clientStores[i], key, "newValue");
+          c10d::test::check(*clientStores[i], keyCounter, std::to_string(i));
+        }));
   }
 
   // Ensures that internal_key has been "set" and "get"
@@ -234,28 +235,33 @@ TEST(TCPStoreTest, testWatchKeyCallbackWithPrefix) {
 
 // Helper function to create a key on the store, watch it, and run the callback
 void _setCallback(
-  c10d::Store& store,
-  std::string key,
-  std::exception_ptr& eptr,
-  const c10::optional<std::string>& expectedOldValue,
-  const c10::optional<std::string>& expectedNewValue) {
-    // Test the correctness of new_value and old_value
-    std::function<void(c10::optional<std::string>, c10::optional<std::string>)> callback =
-    [expectedOldValue, expectedNewValue, &eptr](c10::optional<std::string> oldValue, c10::optional<std::string> newValue) {
-      try {
-        EXPECT_EQ(expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
-        EXPECT_EQ(expectedNewValue.value_or("NONE"), newValue.value_or("NONE"));
-      } catch(...) {
-        eptr = std::current_exception();
-      }
-      cv.notify_one();
-    };
-    store.watchKey(key, callback);
+    c10d::Store& store,
+    std::string key,
+    std::exception_ptr& eptr,
+    const c10::optional<std::string>& expectedOldValue,
+    const c10::optional<std::string>& expectedNewValue) {
+  // Test the correctness of new_value and old_value
+  std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
+      callback = [expectedOldValue, expectedNewValue, &eptr](
+                     c10::optional<std::string> oldValue,
+                     c10::optional<std::string> newValue) {
+        try {
+          EXPECT_EQ(
+              expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
+          EXPECT_EQ(
+              expectedNewValue.value_or("NONE"), newValue.value_or("NONE"));
+        } catch (...) {
+          eptr = std::current_exception();
+        }
+        cv.notify_one();
+      };
+  store.watchKey(key, callback);
 }
 
 void _waitFinish() {
   std::unique_lock<std::mutex> lk(cv_m);
-  cv.wait_for(lk, std::chrono::duration<int, std::milli>(kStoreCallbackTimeout));
+  cv.wait_for(
+      lk, std::chrono::duration<int, std::milli>(kStoreCallbackTimeout));
 }
 
 TEST(TCPStoreTest, testKeyUpdate) {
@@ -269,7 +275,8 @@ TEST(TCPStoreTest, testKeyUpdate) {
   _setCallback(*store, key, eptr, "", "2");
   c10d::test::set(*store, key, "2");
   _waitFinish();
-  if (eptr) std::rethrow_exception(eptr);
+  if (eptr)
+    std::rethrow_exception(eptr);
 
   key = "testRegularKeyValue";
   c10d::test::set(*store, key, "1");
@@ -278,7 +285,8 @@ TEST(TCPStoreTest, testKeyUpdate) {
   _setCallback(*store, key, eptr, "1", "2");
   c10d::test::set(*store, key, "2");
   _waitFinish();
-  if (eptr) std::rethrow_exception(eptr);
+  if (eptr)
+    std::rethrow_exception(eptr);
 }
 
 TEST(TCPStoreTest, testKeyCreate) {
@@ -289,7 +297,8 @@ TEST(TCPStoreTest, testKeyCreate) {
   _setCallback(*store, key, eptr, c10::nullopt, "2");
   c10d::test::set(*store, key, "2");
   _waitFinish();
-  if (eptr) std::rethrow_exception(eptr);
+  if (eptr)
+    std::rethrow_exception(eptr);
 }
 
 TEST(TCPStoreTest, testKeyDelete) {
@@ -301,7 +310,8 @@ TEST(TCPStoreTest, testKeyDelete) {
   _setCallback(*store, key, eptr, "1", c10::nullopt);
   store->deleteKey(key);
   _waitFinish();
-  if (eptr) std::rethrow_exception(eptr);
+  if (eptr)
+    std::rethrow_exception(eptr);
 }
 
 TEST(TCPStoreTest, testCleanShutdown) {

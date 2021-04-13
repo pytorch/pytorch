@@ -110,7 +110,8 @@ ListenThread::ListenThread(int listenSocket) : BackgroundThread(listenSocket) {
 
 void ListenThread::addCallback(
     std::string key,
-    std::function<void(c10::optional<std::string>, c10::optional<std::string>)> cb) {
+    std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
+        cb) {
   keyToCallbacksLock.lock();
   keyToCallbacks_[key] = cb;
   keyToCallbacksLock.unlock();
@@ -124,15 +125,13 @@ void ListenThread::callbackHandler(int socket) {
   c10::optional<std::string> currentValue;
   if (watchResponse == WatchResponseType::KEY_CREATED) {
     currentValue = c10::nullopt;
-  }
-  else {
+  } else {
     currentValue = std::string(currentValueVec.begin(), currentValueVec.end());
   }
   c10::optional<std::string> newValue;
   if (watchResponse == WatchResponseType::KEY_DELETED) {
-    newValue =  c10::nullopt;
-  }
-  else {
+    newValue = c10::nullopt;
+  } else {
     newValue = std::string(newValueVec.begin(), newValueVec.end());
   }
   keyToCallbacksLock.lock();
@@ -327,8 +326,7 @@ void TCPStoreDaemon::sendKeyUpdatesToClients(
     std::vector<uint8_t>& oldData,
     std::vector<uint8_t>& newData) {
   for (int socket : watchedSockets_[key]) {
-    tcputil::sendValue<WatchResponseType>(
-        socket, type);
+    tcputil::sendValue<WatchResponseType>(socket, type);
     tcputil::sendString(socket, key, true);
     tcputil::sendVector<uint8_t>(socket, oldData);
     tcputil::sendVector<uint8_t>(socket, newData);
@@ -349,8 +347,10 @@ void TCPStoreDaemon::setHandler(int socket) {
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
   // Send key update to all watching clients
-  newKey ? sendKeyUpdatesToClients(key, WatchResponseType::KEY_CREATED, oldData, newData)
-         : sendKeyUpdatesToClients(key, WatchResponseType::KEY_UPDATED, oldData, newData);
+  newKey ? sendKeyUpdatesToClients(
+               key, WatchResponseType::KEY_CREATED, oldData, newData)
+         : sendKeyUpdatesToClients(
+               key, WatchResponseType::KEY_UPDATED, oldData, newData);
 }
 
 void TCPStoreDaemon::compareSetHandler(int socket) {
@@ -368,7 +368,8 @@ void TCPStoreDaemon::compareSetHandler(int socket) {
       pos->second = std::move(newValue);
 
       // Send key update to all watching clients
-      sendKeyUpdatesToClients(key, WatchResponseType::KEY_UPDATED, currentValue, pos->second);
+      sendKeyUpdatesToClients(
+          key, WatchResponseType::KEY_UPDATED, currentValue, pos->second);
     }
     tcputil::sendVector<uint8_t>(socket, pos->second);
   }
@@ -397,8 +398,10 @@ void TCPStoreDaemon::addHandler(int socket) {
   // On "add", wake up all clients that have been waiting
   wakeupWaitingClients(key);
   // Send key update to all watching clients
-  newKey ? sendKeyUpdatesToClients(key, WatchResponseType::KEY_CREATED, oldData, newData)
-         : sendKeyUpdatesToClients(key, WatchResponseType::KEY_UPDATED, oldData, newData);
+  newKey ? sendKeyUpdatesToClients(
+               key, WatchResponseType::KEY_CREATED, oldData, newData)
+         : sendKeyUpdatesToClients(
+               key, WatchResponseType::KEY_UPDATED, oldData, newData);
 }
 
 void TCPStoreDaemon::getHandler(int socket) const {
@@ -418,7 +421,8 @@ void TCPStoreDaemon::deleteHandler(int socket) {
     std::vector<uint8_t> oldData = it->second;
     // Send key update to all watching clients
     std::vector<uint8_t> newData;
-    sendKeyUpdatesToClients(key, WatchResponseType::KEY_DELETED, oldData, newData);
+    sendKeyUpdatesToClients(
+        key, WatchResponseType::KEY_DELETED, oldData, newData);
   }
   auto numDeleted = tcpStore_.erase(key);
   tcputil::sendValue<int64_t>(socket, numDeleted);
@@ -701,7 +705,8 @@ bool TCPStore::deleteKey(const std::string& key) {
 
 void TCPStore::watchKey(
     const std::string& key,
-    std::function<void(c10::optional<std::string>, c10::optional<std::string>)> callback) {
+    std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
+        callback) {
   std::string regKey = regularPrefix_ + key;
 
   watchListener_->addCallback(regKey, callback);
