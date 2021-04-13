@@ -343,6 +343,17 @@ def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, input, inputs,
     return jacobians
 
 
+def get_fast_numerical_jacobians(fn, inputs, inp_indices, outputs, all_ur, all_ui, all_v, eps):
+    reduced_jacobians: List[List[torch.Tensor]] = []
+    for i, (inp, inp_idx, ur, ui) in enumerate(zip(iter_tensors(inputs, True), inp_indices, all_ur, all_ui)):
+        jacobian_cols = get_fast_numerical_jacobian_wrt_specific_input(fn, inp_idx, inp, inputs, outputs, ur, ui, eps)
+        jacobian_scalars: List[torch.Tensor] = []
+        for v, Ju in zip(all_v, jacobian_cols):
+            jacobian_scalars.append(dot(v, Ju.to(v.device)))
+        reduced_jacobians.append(jacobian_scalars)
+    return reduced_jacobians
+
+
 def check_jacobians_equal(j1, j2, atol):
     # Check whether the max diff betwen two jacobians are within some tolerance `atol`
     for j1_x, j2_x in zip(j1, j2):
@@ -421,6 +432,25 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad_
                              'although analytical gradient matches numerical gradient.'
                              f'The tolerance for nondeterminism was {nondet_tol}.' + FAILED_NONDET_MSG)
     return jacobians
+
+
+def get_fast_analytical_jacobians(inputs, outputs, nondet_tol, check_grad_dtypes, all_v, all_ur, all_ui):
+    reduced_jacobians: List[List[torch.Tensor]] = []
+    for output, v in zip(outputs, all_v):
+        jacobian_cols = check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad_dtypes,
+                                                             fast_mode=True, v=v)
+        jacobian_scalars: List[torch.Tensor] = []
+        for vJ, ur, ui in zip(jacobian_cols, all_ur, all_ui):
+            vJ = vJ.T.squeeze(0)
+            if vJ.is_complex():  # C -> R
+                tv = torch.view_as_real(vJ)
+                tr = tv.select(-1, 0)
+                ti = tv.select(-1, 1)
+                jacobian_scalars.append(tr.dot(ur) + 1j * ti.dot(ui))
+            else:  # R -> R
+                jacobian_scalars.append(dot(vJ, ur.to(vJ.device)))
+        reduced_jacobians.append(jacobian_scalars)
+    return reduced_jacobians
 
 
 def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
@@ -829,23 +859,35 @@ def all_close(a, b, rtol, atol):
     return True
 
 
-def vec_from_tensor(x, generator, always_float64=False):
+def rand_vec_from_tensors(tensors, generator, always_float64=False):
     # Create a random vector with the same number of elements as x and the same dtype/device
     # If x is complex, we create a complex tensor with only real component
-    if x.layout == torch.sparse_coo:
-        # For sparse, create a random sparse vec with random values in the same
-        # indices. Make sure size is set so that it isn't inferred to be smaller.
-        x_values = x._values()
-        values = torch.rand(x_values.numel(), generator=generator) \
-            .to(dtype=x.dtype, device=x.device) \
-            .reshape(x_values.shape)
-        values /= values.norm()
-        vec = torch.sparse_coo_tensor(x._indices(), values, x.size())
-    else:
-        dtype = x.dtype if not always_float64 else torch.float64
-        vec = torch.rand(x.numel(), generator=generator).to(dtype=dtype, device=x.device)
-        vec /= vec.norm()
-    return vec
+    out = []
+    for x in tensors:
+        if x.layout == torch.sparse_coo:
+            # For sparse, create a random sparse vec with random values in the same
+            # indices. Make sure size is set so that it isn't inferred to be smaller.
+            x_values = x._values()
+            values = torch.rand(x_values.numel(), generator=generator) \
+                .to(dtype=x.dtype, device=x.device) \
+                .reshape(x_values.shape)
+            values /= values.norm()
+            vec = torch.sparse_coo_tensor(x._indices(), values, x.size())
+        else:
+            dtype = x.dtype if not always_float64 else torch.float64
+            vec = torch.rand(x.numel(), generator=generator).to(dtype=dtype, device=x.device)
+            vec /= vec.norm()
+        out.append(vec)
+    return out
+
+
+def to_flat_dense(tensors):
+    return [t.to_dense().reshape(-1) if t.layout == torch.sparse_coo else t for t in tensors]
+
+
+def get_inp_tensors(tupled_inputs):
+    inp_idx_tup = [(i, t) for i, t in enumerate(tupled_inputs) if is_tensor_like(t) and t.requires_grad]
+    return [tup[0] for tup in inp_idx_tup], [tup[1] for tup in inp_idx_tup]
 
 
 def adjusted_atol(atol, u, v):
@@ -898,56 +940,42 @@ def slow_mode_jacobian_message(func, tupled_inputs, outputs, input_idx, output_i
     return msg
 
 
-def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
-                   atol, check_grad_dtypes, nondet_tol, complex_indices=None):
-    # Perform the fast version of gradcheck
-    # See https://github.com/pytorch/pytorch/issues/53876 for details
-    inp_tensors = [t for t in tupled_inputs if is_tensor_like(t) and t.requires_grad]
-    inp_tensor_indices = [i for i, t in enumerate(tupled_inputs) if is_tensor_like(t) and t.requires_grad]
-
-    g_cpu = torch.Generator()
-    all_ur = [vec_from_tensor(inp, g_cpu, True) for inp in inp_tensors]
-    all_ur_dense = [u.to_dense().reshape(-1) if u.layout == torch.sparse_coo else u for u in all_ur]
-    all_ui = [vec_from_tensor(inp, g_cpu, True) for inp in inp_tensors]
-    all_ui_dense = [u.to_dense().reshape(-1) if u.layout == torch.sparse_coo else u for u in all_ui]
-    all_v = [vec_from_tensor(out, g_cpu) for out in outputs]
-
-    if not outputs:
-        check_no_differentiable_outputs_fast(func, func_out, tupled_inputs, inp_tensors,
-                                             inp_tensor_indices, all_ur, all_ui, eps, nondet_tol)
-
-    # Initialize list of lists to store jacobians for each input, output pair
-    all_analytical: List[List[torch.Tensor]] = [[] for _ in outputs]
-    all_numerical: List[List[torch.Tensor]] = [[] for _ in inp_tensors]
-
-    # Numerically approximate v^T (J u)
-    for i, (inp, input_idx, ur, ui) in enumerate(zip(inp_tensors, inp_tensor_indices, all_ur, all_ui)):
-        numerical = get_fast_numerical_jacobian_wrt_specific_input(func, input_idx, inp, tupled_inputs,
-                                                                   outputs, ur, ui, eps)
-        for j, (a, v) in enumerate(zip(numerical, all_v)):
-            all_numerical[i].append(dot(a, v.to(device=a.device)))
-
-    # Analytically calculate (v^T J) u
-    for i, (out, v) in enumerate(zip(outputs, all_v)):
-        analytical = check_analytical_jacobian_attributes(tupled_inputs, out, nondet_tol, check_grad_dtypes,
-                                                          fast_mode=True, v=v)
-        for a, ur, ui in zip(analytical, all_ur_dense, all_ui_dense):
-            if a.is_complex():
-                av = torch.view_as_real(a.T.squeeze(0))
-                ar = av.select(-1, 0)
-                ai = av.select(-1, 1)
-                all_analytical[i].append(ar.dot(ur) + 1j * ai.dot(ui))
-            else:
-                all_analytical[i].append(dot(a.T.squeeze(0), ur))
-
+def check_analytical_numerical_equal(all_analytical, all_numerical, complex_indices, tupled_inputs, inp_tensors, outputs,
+                                     func, all_v, all_ur, all_ui, rtol, atol):
     # Make sure analytical and numerical is the same
     for i, (all_numerical_for_input_i, inp) in enumerate(zip(all_numerical, inp_tensors)):
         for j, n in enumerate(all_numerical_for_input_i):
             a = all_analytical[j][i]
             # TODO: Update adjusted atol
-            if not all_close(a, n, rtol, adjusted_atol(atol, all_ur[i], all_v[j])):
+            if not all_close(a, n.to(a.device), rtol, adjusted_atol(atol, all_ur[i], all_v[j])):
                 jacobians_str = slow_mode_jacobian_message(func, tupled_inputs, outputs, i, j, rtol, atol)
                 raise GradcheckError(get_notallclose_msg(a, n, i, j, complex_indices, inp.is_complex()) + jacobians_str)
+
+
+def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
+                   atol, check_grad_dtypes, nondet_tol, complex_indices=None):
+    # Perform the fast version of gradcheck
+    # See https://github.com/pytorch/pytorch/issues/53876 for details
+    inp_tensors_idx, inp_tensors = get_inp_tensors(tupled_inputs)
+
+    g_cpu = torch.Generator()
+    all_ur = rand_vec_from_tensors(inp_tensors, g_cpu, True)
+    all_ui = rand_vec_from_tensors(inp_tensors, g_cpu, True)
+    all_ur_dense = to_flat_dense(all_ur)
+    all_ui_dense = to_flat_dense(all_ui)
+    all_v = rand_vec_from_tensors(outputs, g_cpu)
+
+    if not outputs:
+        check_no_differentiable_outputs_fast(func, func_out, tupled_inputs, inp_tensors,
+                                             inp_tensors_idx, all_ur, all_ui, eps, nondet_tol)
+
+    reduced_numerical_jacobians = get_fast_numerical_jacobians(func, tupled_inputs, inp_tensors_idx, outputs,
+                                                               all_ur, all_ui, all_v, eps)
+    reduced_analytical_jacobians = get_fast_analytical_jacobians(tupled_inputs, outputs, nondet_tol, check_grad_dtypes,
+                                                                 all_v, all_ur_dense, all_ui_dense)
+
+    check_analytical_numerical_equal(reduced_analytical_jacobians, reduced_numerical_jacobians, complex_indices,
+                                     tupled_inputs, inp_tensors, outputs, func, all_v, all_ur, all_ui, rtol, atol)
     return True
 
 
