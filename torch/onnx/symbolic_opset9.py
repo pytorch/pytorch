@@ -3028,6 +3028,7 @@ def linear(g, input, weight, bias):
 
     return output
 
+
 @parse_args('v', 'b', 'i', 'v', 'v', 'v', 'v')
 def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device=None, pin_memory=None, requires_grad=False):
     if dtype is None:
@@ -3046,3 +3047,7 @@ def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device
     output = g.op("Cast", square(g, sin(g, output)), to_i=sym_help.scalar_type_to_onnx[dtype])
 
     return output
+
+
+def mv(g, self, vec):
+    return matmul(g, self, vec)
