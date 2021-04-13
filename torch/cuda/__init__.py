@@ -491,10 +491,10 @@ def current_blas_handle():
     return torch._C._cuda_getCurrentBlasHandle()
 
 
-from .memory import *
+from .memory import *  # noqa: F403
 
 
-from .random import *
+from .random import *  # noqa: F403
 
 ################################################################################
 # Define Storage and Tensor classes

@@ -28,6 +28,7 @@ from ..quantize import (
 
 from ..utils import (
     get_combined_dict,
+    get_qconfig_dtypes,
     get_swapped_custom_module_class,
     weight_is_quantized,
     activation_is_statically_quantized,
@@ -52,7 +53,16 @@ from .graph_module import (
     QuantizedGraphModule,
 )
 
-from .quantization_patterns import *
+from .quantization_patterns import (
+    binary_op_supported_dtypes,
+    BinaryOpQuantizeHandler,
+    CopyNodeQuantizeHandler,
+    CustomModuleQuantizeHandler,
+    DefaultQuantizeHandler,
+    FixedQParamsOpQuantizeHandler,
+    QuantizeHandler,
+    StandaloneModuleQuantizeHandler,
+)
 
 from .utils import (
     _parent_name,
@@ -66,11 +76,19 @@ from .utils import (
     node_return_type_is_int,
 )
 
-from .qconfig_utils import *
+from .qconfig_utils import (
+    convert_dict_to_ordered_dict,
+    get_flattened_qconfig_dict,
+    get_object_type_qconfig,
+    get_qconfig,
+    QConfigAny,
+)
+
+import operator
 
 from collections import defaultdict
 
-from typing import Optional, Dict, Any, List, Tuple, Set, Callable
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 # Define helper types
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,

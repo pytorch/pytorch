@@ -1,13 +1,14 @@
 import itertools
 from typing import Optional, List, Sequence, Union
 
-from tools.codegen.api.types import *
+from tools.codegen.api.types import CppSignatureGroup, DispatcherSignature
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.utils import mapMaybe
 from tools.codegen.gen import parse_native_yaml, FileManager
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
+                                 TensorOptionsArguments)
 
 # Note [Manual Backend kernels]
 # For these ops, we want to manually register to dispatch key Backend and

@@ -1,4 +1,5 @@
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, FunctionSchema, NativeFunction,
+                                 SelfArgument, TensorOptionsArguments)
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence, TypeVar, List, Set
 from enum import Enum
