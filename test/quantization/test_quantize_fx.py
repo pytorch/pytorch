@@ -138,6 +138,10 @@ class BinaryOpRelu(torch.nn.Module):
         x = self.relu(x)
         return x
 
+@torch.fx.wrap
+def _user_func_with_complex_return_type(x):
+    return list(torch.split(x, 1, 1))
+
 class TestFuseFx(QuantizationTestCase):
     def test_fuse_conv_bn_relu(self):
         class M(torch.nn.Module):
@@ -2083,6 +2087,34 @@ class TestQuantizeFx(QuantizationTestCase):
                 "mods1_0_scale_0", "mods1_0_zero_point_0",
                 "mods1_1_scale_0", "mods1_1_zero_point_0"]:
             self.assertTrue(hasattr(m, attr_name))
+
+    def test_no_obs_between_unmatched_node_and_copy_node(self):
+        """
+        Verifies that an observer is not inserted between an unmatched
+        node and a node matched to CopyNodeQuantizeHandler.  This is done
+        because observers require activations to be Tensors, and there is
+        no guarantee that an output of an unmatched node is a Tensor.
+        """
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = _user_func_with_complex_return_type(x)
+                x1 = x[0] + 1
+                return x1, x[1]
+
+        m = M().eval()
+
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        # if an observer is inserted after _user_func_with_complex_return_type,
+        # the following call will fail
+        mp(torch.randn(4, 4, 4, 4))
+        mc = convert_fx(mp)
+        mc(torch.randn(4, 4, 4, 4))
 
     def test_fold_quant_dequant(self):
         """ Test that the sequence of quant-dequant nodes in the
