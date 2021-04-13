@@ -137,9 +137,10 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         # determine how many of the first two args are Tensors (versus scalars)
         # this distinguishes things like "x + y" from "x + 2" or "2 + x"
         self.num_tensor_args = 0
+        cache_for_no_tensor_check: Dict[Node, bool] = dict()
         for arg_idx in range(len(self.binary_op_node.args)):
             arg = self.binary_op_node.args[arg_idx]
-            if isinstance(arg, Node) and (not all_node_args_have_no_tensors(arg)):
+            if isinstance(arg, Node) and (not all_node_args_have_no_tensors(arg, quantizer.modules, cache_for_no_tensor_check)):
                 self.num_tensor_args += 1
         self.all_node_args_are_tensors = \
             (self.num_tensor_args == len(self.binary_op_node.args))
@@ -190,7 +191,10 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
             if self.num_tensor_args == 1:
                 # add/mul scalar
                 first_arg = self.binary_op_node.args[0]
-                if isinstance(first_arg, Node) and (not all_node_args_have_no_tensors(first_arg)):
+                cache_for_no_tensor_check: Dict[Node, bool] = dict()
+                if isinstance(first_arg, Node) and (
+                        not all_node_args_have_no_tensors(
+                            first_arg, quantizer.modules, cache_for_no_tensor_check)):
                     quantized_index = 0
                 else:
                     quantized_index = 1
@@ -958,8 +962,8 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.squeeze)
 @register_quant_pattern(torch.stack)
 @register_quant_pattern(torch.unsqueeze)
-@register_quant_pattern(operator.getitem)
 @register_quant_pattern(operator.floordiv)
+@register_quant_pattern(operator.getitem)
 @register_quant_pattern('chunk')
 @register_quant_pattern('clamp')
 @register_quant_pattern('contiguous')
