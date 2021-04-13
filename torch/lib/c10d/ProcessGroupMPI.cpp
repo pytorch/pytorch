@@ -4,7 +4,6 @@
 #include <map>
 
 #include <c10/core/DeviceGuard.h>
-#include <c10/util/StringUtil.h>
 
 #if defined(OPEN_MPI) && OPEN_MPI
 #include <mpi-ext.h> // Needed for CUDA-aware check
@@ -235,18 +234,17 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
     // If no ranks are specified, assume we're creating the root group
     if (!ranks.empty()) {
       MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
-      MPI_CHECK(MPI_Comm_size(MPI_COMM_WORLD, &size));
-      printf("DBG: global rank = %d; ranks in ProcessGroupMPI::createProcessGroupMPI = %s\n", rank, c10::Join(", ", ranks).c_str());
       MPI_Group worldGroup;
       MPI_Group ranksGroup;
       MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
       MPI_CHECK(
           MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
-      printf("DBG: global rank = %d; before MPI_Comm_create\n", rank);
 
       // MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));
       constexpr int kMaxNumRetries = 3;
       bool groupComm_updated = false;
+      MPI_Barrier(MPI_COMM_WORLD);
+      printf("DBG: global rank = %d; after MPI_Comm_create\n", rank);
       for (int i = 0; i < kMaxNumRetries; ++i) {
         if (MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm)) {
           groupComm_updated = true;
