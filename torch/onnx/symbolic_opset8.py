@@ -5,6 +5,7 @@ import torch.onnx.symbolic_opset9 as sym_opset9
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _block_list_in_opset, _try_get_scalar_type
 from torch.onnx.symbolic_opset9 import _cast_Float  # type: ignore
+from torch.onnx.symbolic_opset7 import div  # noqa: F401
 
 import warnings
 
@@ -41,7 +42,9 @@ import warnings
 block_listed_operators = [
     "nonzero", "where", "scatter", "scatter_add", "erf", "sign", "isnan", "gather",
     "arange", "masked_fill",
-    "index_fill", "index_copy"
+    "index_fill", "index_copy", "repeat_interleave",
+    "isnan",
+    "any", "all"
 ]
 
 for block_listed_op in block_listed_operators:

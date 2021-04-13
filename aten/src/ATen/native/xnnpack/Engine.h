@@ -49,23 +49,23 @@ Tensor linear(
 
 bool use_max_pool2d(
     const Tensor& input,
-    IntArrayRef kernel,
-    IntArrayRef padding,
+    const IntArrayRef kernel,
+    const IntArrayRef padding,
     IntArrayRef stride,
-    IntArrayRef dilation,
-    bool ceil_mode,
-    float output_min = -std::numeric_limits<float>::infinity(),
-    float output_max = +std::numeric_limits<float>::infinity());
+    const IntArrayRef dilation,
+    const bool ceil_mode,
+    const float output_min = -std::numeric_limits<float>::infinity(),
+    const float output_max = +std::numeric_limits<float>::infinity());
 
 Tensor max_pool2d(
     const Tensor& input,
-    IntArrayRef kernel,
-    IntArrayRef padding,
+    const IntArrayRef kernel,
+    const IntArrayRef padding,
     IntArrayRef stride,
-    IntArrayRef dilation,
-    bool ceil_mode,
-    float output_min = -std::numeric_limits<float>::infinity(),
-    float output_max = +std::numeric_limits<float>::infinity());
+    const IntArrayRef dilation,
+    const bool ceil_mode,
+    const float output_min = -std::numeric_limits<float>::infinity(),
+    const float output_max = +std::numeric_limits<float>::infinity());
 
 //
 // Channel Shuffle

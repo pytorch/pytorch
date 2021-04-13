@@ -144,8 +144,8 @@ void csrmm2(
   TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
     &descC,               /* output */
     m, n, ldc,            /* rows, cols, leading dimension */
-    c,                    /* values */ 
-    cusparse_value_type,  /* data type of values */ 
+    c,                    /* values */
+    cusparse_value_type,  /* data type of values */
     CUSPARSE_ORDER_COL    /* memory layout, ONLY column-major is supported now */
   ));
 

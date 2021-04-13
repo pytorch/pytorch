@@ -117,7 +117,7 @@ void preprocessCaffe2Ops(Block* block) {
           it->s_(Symbol::attr(arg.name()), constant_node->s(attr::value));
         } else if (type->kind() == TypeKind::ListType) {
           const auto& list_node = origin_input->node();
-          const auto& elem_type = type->cast<ListType>()->getElementType();
+          const auto& elem_type = type->castRaw<ListType>()->getElementType();
           AT_ASSERT(
               list_node->kind() == prim::ListConstruct ||
               list_node->kind() == prim::Constant);
@@ -164,6 +164,8 @@ void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
 std::shared_ptr<Graph> ToONNX(
     std::shared_ptr<Graph>& graph,
     ::torch::onnx::OperatorExportTypes operator_export_type) {
+  auto constant_value_map = ConstantValueMap::getInstance();
+  ConstantValueMap::ClearMaps();
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
   BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
@@ -177,17 +179,6 @@ void BlockToONNX(
     std::unordered_map<Value*, Value*> env) {
   torch::autograd::SymbolicContext ctx{};
   ctx.block = new_block;
-  py::object onnx = py::module::import("torch.onnx");
-  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic_helper");
-  py::object onnx_registry = py::module::import("torch.onnx.symbolic_registry");
-
-  // Returns a node that n maps to in the new graph
-  auto envFn = [&env](Value* n) -> Value* {
-    auto it = env.find(n);
-    TORCH_CHECK(it != env.end(), "Dangling node reference");
-    TORCH_CHECK(it->second, "Unused node was subsequently used");
-    return it->second;
-  };
 
   GRAPH_DEBUG(
       "BlockToONNX: graph of old block: ",
@@ -198,6 +189,40 @@ void BlockToONNX(
     auto n = ctx.block->addInput()->copyMetadata(input);
     env[input] = n;
   }
+
+  // Finally, visit all nodes in the graph
+  for (auto node : old_block->nodes()) {
+    NodeToONNX(node, ctx.block, operator_export_type, env);
+  }
+  for (auto output : old_block->outputs()) {
+    ctx.block->registerOutput(env.at(output));
+  }
+
+  // Run dce to clean-up unused functional and inplace ops.
+  EliminateDeadCode(
+      ctx.block,
+      true,
+      DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
+}
+
+void NodeToONNX(
+    Node* old_node,
+    Block* new_block,
+    ::torch::onnx::OperatorExportTypes operator_export_type,
+    std::unordered_map<Value*, Value*>& env) {
+  py::object onnx = py::module::import("torch.onnx");
+  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic_helper");
+  py::object onnx_registry = py::module::import("torch.onnx.symbolic_registry");
+
+  // Setup all the lambda helper functions.
+
+  // Returns a node that n maps to in the new graph
+  auto envFn = [&env](Value* n) -> Value* {
+    auto it = env.find(n);
+    TORCH_CHECK(it != env.end(), "Dangling node reference");
+    TORCH_CHECK(it->second, "Unused node was subsequently used");
+    return it->second;
+  };
 
   // Put the new outputs in our environment map, and copy the type from the
   // input graph if they were not set by the symbolic. This is called only
@@ -250,11 +275,11 @@ void BlockToONNX(
 
   // Clone the node and add it to the new graph
   auto cloneNode = [&](Node* node) {
-    auto n_ = ctx.block->appendNode(
-        ctx.block->owningGraph()->createClone(node, envFn));
+    auto n_ = new_block->appendNode(
+        new_block->owningGraph()->createClone(node, envFn));
     for (size_t i = 0; i < node->outputs().size(); i++) {
       // n_->outputs()[i]->setType(node->outputs()[i]->type());
-      env[node->outputs()[i]] = n_->outputs()[i];
+      env[node->output(i)] = n_->output(i);
     }
   };
 
@@ -295,15 +320,20 @@ void BlockToONNX(
       py_inputs[input_nr++] = py::cast(envFn(input));
     }
 
-    WithInsertPoint insert_point_guard(ctx.block);
-    WithCurrentScope scope_guard(*ctx.block->owningGraph(), n->scope());
+    WithInsertPoint insert_point_guard(new_block);
+    WithCurrentScope scope_guard(*new_block->owningGraph(), n->scope());
     py::object raw_output = onnx.attr("_run_symbolic_function")(
-        ctx.block->owningGraph(), n, py_inputs, env, operator_export_type);
+        new_block->owningGraph(),
+        new_block,
+        n,
+        py_inputs,
+        env,
+        operator_export_type);
 
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
     processSymbolicOutput(n->kind().toUnqualString(), n, raw_output);
-    GRAPH_DUMP("after process output:", ctx.block->owningGraph());
+    GRAPH_DUMP("after process output:", new_block->owningGraph());
   };
 
   auto callPySymbolicMethod = [&](ConcretePythonOp* op) {
@@ -322,7 +352,7 @@ void BlockToONNX(
     // by regular args, with Variables replaced by corresponding nodes.
     Py_ssize_t input_nr = 0;
     py::tuple py_symbolic_args(1 + op->cconv.size());
-    py_symbolic_args[input_nr++] = py::cast(ctx.block->owningGraph());
+    py_symbolic_args[input_nr++] = py::cast(new_block->owningGraph());
     auto inputs = op->inputs();
     auto node_it = inputs.begin();
     auto scalar_it = op->scalar_args.begin();
@@ -343,8 +373,8 @@ void BlockToONNX(
       py_symbolic_args[input_nr++] = obj;
     }
 
-    WithInsertPoint insert_point_guard(ctx.block);
-    WithCurrentScope scope_guard(*ctx.block->owningGraph(), op->scope());
+    WithInsertPoint insert_point_guard(new_block);
+    WithCurrentScope scope_guard(*new_block->owningGraph(), op->scope());
     // Call the symbolic function
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
@@ -357,24 +387,15 @@ void BlockToONNX(
     processSymbolicOutput(op->name(), op, raw_output);
   };
 
-  // Finally, visit all nodes in the graph
-  for (auto node : old_block->nodes()) {
-    if (node->kind().is_caffe2()) {
-      // Pass on Caffe2 operator, since we already preprocess it
-      cloneNode(node);
-    } else if (node->kind() == prim::PythonOp) {
-      callPySymbolicMethod(static_cast<ConcretePythonOp*>(node));
-    } else {
-      callPySymbolicFunction(node);
-    }
+  auto k = old_node->kind();
+  if (k.is_caffe2()) {
+    // Pass on Caffe2 operator, since we already preprocess it
+    cloneNode(old_node);
+  } else if (k == prim::PythonOp) {
+    callPySymbolicMethod(static_cast<ConcretePythonOp*>(old_node));
+  } else {
+    callPySymbolicFunction(old_node);
   }
-  for (auto output : old_block->outputs()) {
-    ctx.block->registerOutput(env.at(output));
-  }
-  EliminateDeadCode(
-      ctx.block,
-      true,
-      DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 } // namespace jit

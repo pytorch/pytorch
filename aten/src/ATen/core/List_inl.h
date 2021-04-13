@@ -13,6 +13,10 @@ List<T>::List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements)
 : impl_(std::move(elements)) {}
 
 template<class T>
+List<T>::List(const c10::intrusive_ptr<c10::detail::ListImpl>& elements)
+: impl_(elements) {}
+
+template<class T>
 List<T>::List()
 : List(make_intrusive<c10::detail::ListImpl>(
   typename c10::detail::ListImpl::list_type(),
@@ -65,8 +69,12 @@ List<T> toTypedList(impl::GenericList list) {
 }
 
 template<class T>
-impl::GenericList toList(List<T> list) {
+impl::GenericList toList(List<T>&& list) {
   return GenericList(std::move(list.impl_));
+}
+template<class T>
+impl::GenericList toList(const List<T>& list) {
+  return GenericList(list.impl_);
 }
 }
 
@@ -160,7 +168,20 @@ template<class T, class Iterator>
 inline bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs) {
   return rhs == lhs;
 }
+
+template<class T>
+inline typename ListElementConstReferenceTraits<T>::const_reference
+list_element_to_const_ref(const IValue& element) {
+  return element.template to<T>();
 }
+
+template<>
+inline typename ListElementConstReferenceTraits<c10::optional<std::string>>::const_reference
+list_element_to_const_ref<c10::optional<std::string>>(const IValue& element) {
+  return element.toOptionalStringRef();
+}
+
+} // namespace impl
 
 template<class T>
 void List<T>::set(size_type pos, const value_type& value) const {
@@ -178,7 +199,12 @@ typename List<T>::value_type List<T>::get(size_type pos) const {
 }
 
 template<class T>
-typename List<T>::internal_reference_type List<T>::operator[](size_type pos) const {
+typename List<T>::internal_const_reference_type List<T>::operator[](size_type pos) const {
+  return c10::impl::list_element_to_const_ref<T>(impl_->list.at(pos));
+}
+
+template<class T>
+typename List<T>::internal_reference_type List<T>::operator[](size_type pos) {
   static_cast<void>(impl_->list.at(pos)); // Throw the exception if it is out of range.
   return {impl_->list.begin() + pos};
 }

@@ -29,29 +29,20 @@ enum IRNodeType {
   kRshift,
   kXor,
   kCompareSelect,
-  kLet,
   kCast,
   kBitCast,
-  kBroadcast,
-  kRamp,
-  kPolynomial,
-  kTerm,
-  kRoundOff,
-  kMaxTerm,
-  kMinTerm,
-  kNone,
-  kExtra
+  kOther,
 };
 
 // The common base between all expression node.
-class Expr : public KernelScopedObject {
+class TORCH_API Expr : public KernelScopedObject {
  public:
-  explicit Expr(Dtype dtype, IRNodeType expr_type = kNone)
+  explicit Expr(Dtype dtype, IRNodeType expr_type = kOther)
       : dtype_(dtype), expr_type_(expr_type) {}
   Dtype dtype() const {
     return dtype_;
   }
-  TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
+  virtual void accept(IRVisitor* visitor) const = 0;
   virtual const Expr* accept_mutator(IRMutator* mutator) const = 0;
 
   IRNodeType expr_type() const {
@@ -85,8 +76,9 @@ class ExprNode : public Base {
 // Also serves the primary way to build and operate on other expressions.
 class TORCH_API ExprHandle {
  public:
-  ExprHandle() {}
+  ExprHandle() = default;
   explicit ExprHandle(const Expr* node)
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       : base_expr_node_(const_cast<Expr*>(node)) {}
 
   Expr* node() {
@@ -112,6 +104,7 @@ class TORCH_API ExprHandle {
 
   template <class Op>
   const Op* AsNode() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     return const_cast<ExprHandle*>(this)->AsNode<Op>();
   }
 
@@ -144,7 +137,7 @@ class TORCH_API ExprHandle {
 // The underlying representation node to a Var.
 // Currently, each Var object represents a unique variable, even though the
 // names might be the same. We should consider add a unique_name as well.
-class Var : public ExprNode<Var> {
+class TORCH_API Var : public ExprNode<Var> {
  public:
   static ExprHandle make(const std::string& name_hint, Dtype dtype) {
     return ExprHandle(new Var(name_hint, dtype));
@@ -158,8 +151,8 @@ class Var : public ExprNode<Var> {
     return name_hint_;
   }
 
-  Var(const std::string& name_hint, Dtype dtype)
-      : ExprNodeBase(dtype, kPrimitive), name_hint_(name_hint) {}
+  Var(std::string name_hint, Dtype dtype)
+      : ExprNodeBase(dtype, kPrimitive), name_hint_(std::move(name_hint)) {}
 
  private:
   std::string name_hint_;
@@ -183,11 +176,18 @@ class TORCH_API Buf : public ExprNode<Buf> {
 
   Buf(const std::string& name_hint,
       const std::vector<const Expr*>& dims,
-      Dtype dtype)
-      : Buf(new Var(name_hint, kHandle), dims, dtype) {}
+      Dtype dtype,
+      const Expr* initializer = nullptr)
+      : Buf(new Var(name_hint, kHandle), dims, dtype, initializer) {}
 
-  Buf(const Var* var, const std::vector<const Expr*>& dims, Dtype dtype)
-      : ExprNodeBase(dtype, kPrimitive), base_handle_(var), dims_(dims) {
+  Buf(const Var* var,
+      std::vector<const Expr*> dims,
+      Dtype dtype,
+      const Expr* initializer = nullptr)
+      : ExprNodeBase(dtype, kPrimitive),
+        base_handle_(var),
+        dims_(std::move(dims)),
+        initializer_(initializer) {
     TORCH_CHECK(var);
   }
 
@@ -207,9 +207,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
     dims_ = dims;
   };
 
+  const Expr* initializer() const {
+    return initializer_;
+  };
+
  private:
   const Var* base_handle_;
   std::vector<const Expr*> dims_;
+  const Expr* initializer_;
 };
 
 class TORCH_API BufHandle : public ExprHandle {
@@ -219,10 +224,18 @@ class TORCH_API BufHandle : public ExprHandle {
       const std::vector<ExprHandle>& dims,
       Dtype dtype)
       : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
+
   explicit BufHandle(const Buf* node) : ExprHandle(node) {}
   const Buf* node() const {
     return static_cast<const Buf*>(ExprHandle::node());
   }
+
+  template <typename... Ts>
+  inline ExprHandle load(const Ts&... ts) const;
+
+  template <typename T>
+  inline ExprHandle load(const std::vector<T>& args) const;
+
   bool operator==(const BufHandle& other) const {
     return this->node() == other.node();
   }
@@ -233,15 +246,26 @@ class TORCH_API BufHandle : public ExprHandle {
   const std::string& name_hint() const {
     return this->node()->name_hint();
   }
+
   bool empty() const {
     return (this->node() == nullptr);
+  }
+
+  size_t ndim() const {
+    return node()->ndim();
+  }
+
+  std::vector<ExprHandle> dims() const;
+
+  ExprHandle dim(size_t index) const {
+    return ExprHandle(node()->dim(index));
   }
 };
 
 // An expression to construct the underlying variable node.
 // Note: do not store any info here, since it is often possible to slice this
 // object. For example: VarHandle x('x'); ExprHandle x2 = x;
-class VarHandle : public ExprHandle {
+class TORCH_API VarHandle : public ExprHandle {
  public:
   VarHandle() : ExprHandle(nullptr) {}
   explicit VarHandle(Dtype dtype) : ExprHandle(Var::make(dtype)) {}
@@ -268,6 +292,7 @@ class VarHandle : public ExprHandle {
 
 template <class Op, class Base>
 const Expr* ExprNode<Op, Base>::accept_mutator(IRMutator* mutator) const {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   ExprNode* this_mutable = const_cast<ExprNode*>(this);
   return mutator->mutate(static_cast<Op*>(this_mutable));
 }
@@ -290,7 +315,10 @@ TORCH_API ExprHandle exp(const ExprHandle& v);
 TORCH_API ExprHandle expm1(const ExprHandle& v);
 TORCH_API ExprHandle abs(const ExprHandle& v);
 TORCH_API ExprHandle log(const ExprHandle& v);
+TORCH_API ExprHandle fast_tanh(const ExprHandle& v);
+TORCH_API ExprHandle fast_sigmoid(const ExprHandle& v);
 TORCH_API ExprHandle fast_log(const ExprHandle& v);
+TORCH_API ExprHandle log_vml(const ExprHandle& v);
 TORCH_API ExprHandle log2(const ExprHandle& v);
 TORCH_API ExprHandle log10(const ExprHandle& v);
 TORCH_API ExprHandle log1p(const ExprHandle& v);
@@ -309,6 +337,7 @@ TORCH_API ExprHandle pow(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle fmod(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle isnan(const ExprHandle& v1);
+TORCH_API ExprHandle Relu(const ExprHandle& v1);
 
 TORCH_API ExprHandle
 ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
