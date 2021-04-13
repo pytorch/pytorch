@@ -681,6 +681,23 @@ class TORCH_API For : public StmtNode<For> {
     return new For(var_, start_, stop_, body, loop_options_);
   }
 
+  Block* removeBody() {
+    auto res = body_;
+    set_parent(res, nullptr);
+    body_ = nullptr;
+    return res;
+  }
+
+  Block* setBody(Stmt* body) {
+    Block* b = dynamic_cast<Block*>(body);
+    if (!b) {
+      b = new Block({body});
+    }
+    body_ = b;
+    set_parent(body_, this);
+    return body_;
+  }
+
  private:
   const Var* var_;
   const Expr* start_;

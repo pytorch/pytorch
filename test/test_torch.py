@@ -205,7 +205,8 @@ class AbstractTestCases:
             # test_namespace(torch)
 
         def test_msnpu_error(self):
-            with self.assertRaisesRegex(RuntimeError, "support for msnpu"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        "Could not run 'aten::empty.memory_format' with arguments from the 'MSNPU' backend"):
                 torch.zeros(1, device=torch.device('msnpu'))
 
         def test_has_storage(self):
@@ -4490,7 +4491,7 @@ class TestTorchDeviceType(TestCase):
 
         def make_arg(batch_sizes, n, dim, contig):
             size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(size_arg, device, dtype, low=None, high=None, discontiguous=not contig)
+            return make_tensor(size_arg, device, dtype, low=None, high=None, noncontiguous=not contig)
 
         def ref_index_copy(tgt, dim, idx, src):
             for i in range(idx.size(0)):
@@ -4598,7 +4599,7 @@ class TestTorchDeviceType(TestCase):
 
         def make_arg(batch_sizes, n, dim, contig):
             size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(size_arg, device, dtype, low=None, high=None, discontiguous=not contig)
+            return make_tensor(size_arg, device, dtype, low=None, high=None, noncontiguous=not contig)
 
         def ref_index_select(src, dim, idx):
             # bfloat16 is just used on GPU, so it's not supported on numpy
@@ -4613,7 +4614,7 @@ class TestTorchDeviceType(TestCase):
             for other_sizes in ((), (4, 5)):
                 for dim in range(len(other_sizes)):
                     src = make_arg(other_sizes, num_src, dim, src_contig)
-                    idx = make_tensor((num_out,), device, dtype=torch.int64, low=0, high=num_src, discontiguous=not idx_contig)
+                    idx = make_tensor((num_out,), device, dtype=torch.int64, low=0, high=num_src, noncontiguous=not idx_contig)
                     out = torch.index_select(src, dim, idx)
                     out2 = ref_index_select(src, dim, idx)
                     self.assertEqual(out, out2)
@@ -4622,7 +4623,7 @@ class TestTorchDeviceType(TestCase):
             other_sizes = (3, 2)
             dim = 1
             src = make_arg(other_sizes, num_src, dim, True)
-            idx = make_tensor((num_out,), device, dtype=idx_type, low=0, high=num_src, discontiguous=False)
+            idx = make_tensor((num_out,), device, dtype=idx_type, low=0, high=num_src, noncontiguous=False)
             out = torch.index_select(src, dim, idx)
             out2 = ref_index_select(src, dim, idx)
             self.assertEqual(out, out2)
@@ -4652,8 +4653,8 @@ class TestTorchDeviceType(TestCase):
 
         for src_contig, idx_contig, idx_reshape in product([True, False], repeat=3):
             for src_size in ((5,), (4, 5)):
-                src = make_arg(src_size, discontiguous=not src_contig)
-                idx = make_idx(idx_size, high=src.numel(), discontiguous=not idx_contig)
+                src = make_arg(src_size, noncontiguous=not src_contig)
+                idx = make_idx(idx_size, high=src.numel(), noncontiguous=not idx_contig)
                 if idx_reshape:
                     idx = idx.reshape(2, 2)
                 out = torch.take(src, idx)
@@ -4685,8 +4686,8 @@ class TestTorchDeviceType(TestCase):
 
         for dst_contig, src_contig, idx_contig, idx_reshape, accumulate in product([True, False], repeat=5):
             for dst_size in ((5,), (4, 5)):
-                dst = make_arg(dst_size, discontiguous=not dst_contig)
-                src = make_arg(src_size, discontiguous=not src_contig)
+                dst = make_arg(dst_size, noncontiguous=not dst_contig)
+                src = make_arg(src_size, noncontiguous=not src_contig)
 
                 # If accumulate=True, `put_` should be deterministic regardless of the inputs on CPU
                 # On CUDA it may not be, but the test has enough tolerance to account for this
