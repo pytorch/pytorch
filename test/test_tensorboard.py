@@ -99,7 +99,7 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
         self.assertIsInstance(make_np(0.1), np.ndarray)
 
     def test_pytorch_autograd_np(self):
-        x = torch.autograd.Variable(torch.Tensor(1))
+        x = torch.autograd.Variable(torch.empty(1))
         self.assertIsInstance(make_np(x), np.ndarray)
 
     def test_pytorch_write(self):
@@ -289,8 +289,8 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
 class TestTensorBoardEmbedding(BaseTestCase):
     def test_embedding(self):
         w = self.createSummaryWriter()
-        all_features = torch.Tensor([[1, 2, 3], [5, 4, 1], [3, 7, 7]])
-        all_labels = torch.Tensor([33, 44, 55])
+        all_features = torch.tensor([[1., 2., 3.], [5., 4., 1.], [3., 7., 7.]])
+        all_labels = torch.tensor([33., 44., 55.])
         all_images = torch.zeros(3, 3, 5, 5)
 
         w.add_embedding(all_features,
@@ -309,8 +309,8 @@ class TestTensorBoardEmbedding(BaseTestCase):
 
     def test_embedding_64(self):
         w = self.createSummaryWriter()
-        all_features = torch.Tensor([[1, 2, 3], [5, 4, 1], [3, 7, 7]])
-        all_labels = torch.Tensor([33, 44, 55])
+        all_features = torch.tensor([[1., 2., 3.], [5., 4., 1.], [3., 7., 7.]])
+        all_labels = torch.tensor([33., 44., 55.])
         all_images = torch.zeros((3, 3, 5, 5), dtype=torch.float64)
 
         w.add_embedding(all_features,
