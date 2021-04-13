@@ -73,3 +73,23 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertEqual(output_shape[1], sym2)
         # TODO: output_shape[0] == sym1, output_shape[2] == sym3
         # both require additional cleanup / optimization passes
+
+
+    def test_sharing_of_list_len(self):
+        # testing generic sharing of logic, a la _convolution and conv2s
+        @torch.jit.script
+        def adaptive_avg_pool2d(self, out: List[int]):
+            assert len(out) == 2
+            out2 : List[int] = []
+            for elem in out:
+                out2.append(elem)
+            return out2
+
+        @torch.jit.script
+        def foo(x, out: List[int]):
+            return torch.nn.functional.adaptive_avg_pool2d(x, out)
+
+        self.run_pass("inline", foo.graph)
+        torch._C._jit_register_operator_shape_function(foo.graph.findNode("aten::adaptive_avg_pool2d"), adaptive_avg_pool2d.graph)
+        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
+        FileCheck().check("Tensor(*, *)").check_same("adaptive_avg_pool2d").run(foo.graph)

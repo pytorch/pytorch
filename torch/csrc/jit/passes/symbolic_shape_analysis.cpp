@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 #include "ATen/core/interned_strings.h"
+#include "jit/passes/peephole_list_idioms.h"
 
 namespace torch {
 namespace jit {
@@ -95,7 +96,8 @@ struct SymbolicShapeAnalyzer {
       RemoveListMutation(graph_);
       UnrollConstantLoops(graph_);
       ConstantPropagation(graph_);
-      PeepholeOptimize(graph_);
+      // TODO: separate out non-Tensor peepholes in separate pass and invoke
+      PeepholeOptimizeListIdioms(graph_, /*refine_list_len*/ true);
       ConstantPropagation(graph_);
       EliminateCommonSubexpression(graph_);
     }

@@ -1838,6 +1838,95 @@ graph(%Ra, %Rb):
         self.run_pass('peephole', graph)
         FileCheck().check("prim::unchecked_cast").run(graph)
 
+    def test_peephole_list_len(self):
+        def run_peephole_and_check_const_value(graph, const_string):
+            torch._C._jit_pass_peephole_list_idioms(graph, refine_list_len=True)
+            self.run_pass("constant_propagation", graph)
+            FileCheck().check(const_string).check_next("return").run(graph)
+
+        def gen_li(inp_len: int):
+            return [0 for i in range(inp_len)]
+
+        @torch.jit.script
+        def foo(x: List[int], y: List[int]):
+            if len(x) != 4 or len(y) != 5:
+                raise Exception("")
+
+            return len(x) + len(y)
+
+        run_peephole_and_check_const_value(foo.graph, "value=9")
+        self.assertEqual(foo(gen_li(4), gen_li(5)), 9)
+        with self.assertRaises(Exception):
+            foo(2, 4)
+
+        @torch.jit.script
+        def foo(x: List[int], y: List[int]):
+            if len(x) == 4 and len(y) == 5:
+                pass
+            else:
+                raise Exception("hi")
+
+            return len(x) + len(y)
+
+        run_peephole_and_check_const_value(foo.graph, "value=9")
+        self.assertEqual(foo(gen_li(4), gen_li(5)), 9)
+        with self.assertRaises(Exception):
+            foo(2, 4)
+
+        @torch.jit.script
+        def foo(x: List[int], y: List[int], z: List[int]):
+            if len(x) != 4:
+                raise Exception("..")
+            else:
+                if len(y) != 8:
+                    raise Exception("...")
+                else:
+                    if len(z) == 3:
+                        pass
+                    else:
+                        raise Exception("...")
+
+            return len(x) + len(y) * len(z)
+
+        run_peephole_and_check_const_value(foo.graph, "value=28")
+        self.assertEqual(foo(gen_li(4), gen_li(8), gen_li(3)), 28)
+        with self.assertRaises(Exception):
+            foo(1, 2, 3)
+
+        # refinement should persist in second len(x) call
+
+        @torch.jit.script
+        def foo(x: List[int], cond: bool):
+            if len(x) == 4:
+                if cond:
+                    return len(x)
+                return 4
+
+            return 4
+
+        run_peephole_and_check_const_value(foo.graph, "value=4")
+
+        # Test unsuccessful optimizations
+
+        @torch.jit.script
+        def foo(x: List[int]):
+            assert len(x) == 4
+            x.append(3)
+            return len(x)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        self.run_pass("constant_propagation", foo.graph)
+        FileCheck().check_count("aten::len", 2).run(foo.graph)
+
+        @torch.jit.script
+        def foo(x: List[int], y: List[int]):
+            assert len(x) == 4 or len(y) == 5
+            return len(x) + len(y)
+
+        torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
+        self.run_pass("constant_propagation", foo.graph)
+        FileCheck().check_count("aten::len", 4).run(foo.graph)
+
     def test_unchecked_cast(self):
         def test(cond):
             # type: (bool)

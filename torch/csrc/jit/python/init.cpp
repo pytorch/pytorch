@@ -48,6 +48,7 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
 #include <torch/csrc/jit/passes/quantization/finalize.h>
 #include <torch/csrc/jit/passes/quantization/fusion_passes.h>
@@ -372,6 +373,13 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("graph"),
           py::arg("addmm_fusion_enabled") = false)
+      .def(
+          "_jit_pass_peephole_list_idioms",
+          [](const std::shared_ptr<Graph>& g, bool refine_list_len) {
+            return PeepholeOptimizeListIdioms(g, refine_list_len);
+          },
+          py::arg("graph"),
+          py::arg("refine_list_len") = false)
       .def(
           "_jit_pass_fuse_addmm",
           [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
