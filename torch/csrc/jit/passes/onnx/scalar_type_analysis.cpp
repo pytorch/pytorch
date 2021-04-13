@@ -302,11 +302,17 @@ static void RecoverScalarTypeForOutput(
 
 static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
   TORCH_INTERNAL_ASSERT(n->outputs().size() == 1);
-  TORCH_INTERNAL_ASSERT(n->output()->type()->cast<TensorType>() != nullptr);
+  if (n->output()->type()->cast<TensorType>() == nullptr){
+    // skip LowPrecisionCast if op output type is null.
+    return;
+  }
   auto output_scalar_type =
       n->output()->type()->cast<TensorType>()->scalarType().value();
   for (size_t i = 0; i < n->inputs().size(); ++i) {
-    TORCH_INTERNAL_ASSERT(n->input(i)->type()->cast<TensorType>() != nullptr);
+    if (n->input(i)->type()->cast<TensorType>() == nullptr){
+      // skip LowPrecisionCast if any op input type node is null.
+      return;
+    }
     auto input_tensor_type =
         n->input(i)->type()->cast<TensorType>()->scalarType().value();
     TORCH_INTERNAL_ASSERT(output_scalar_type == input_tensor_type);
