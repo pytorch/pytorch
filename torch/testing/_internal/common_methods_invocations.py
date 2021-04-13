@@ -634,6 +634,25 @@ def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
         sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha)))
     return tuple(sample_inputs)
 
+def sample_inputs_addcmul(op_info, device, dtype, requires_grad, **kwargs):
+    test_cases = [((S, S), (S, S), (S, S)),
+                  ((S, S), (S, 1), (1, S)),
+                  ((1,), (S, S, 1), (1, S)),
+                  ((), (), ()),
+                  ((S, S), (), ()),
+                  ((), (S, S, 1), (1, S)),
+                  ]
+
+    sample_inputs = []
+    for input_args in test_cases:
+        args = tuple(make_tensor(arg, device, dtype, requires_grad=requires_grad) if isinstance(arg, tuple) else arg
+                     for arg in input_args)
+        sample_inputs.append(SampleInput(args[0], args=args[1:]))
+
+        sample_inputs.append(SampleInput(args[0], args=args[1:], kwargs=dict(value=3.14)))
+
+    return tuple(sample_inputs)
+
 def sample_inputs_addr(op_info, device, dtype, requires_grad, **kwargs):
     input1 = SampleInput(
         make_tensor((S, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -2634,6 +2653,15 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),),
            sample_inputs_func=sample_inputs_addr),
+    OpInfo('addcmul',
+           dtypes=all_types_and_complex(),
+           dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           assert_autodiffed=True,
+           supports_inplace_autograd=False,
+           skips=(
+               # TODO: update sample inputs with for_inplace_variant kwarg to support this test
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),),
+           sample_inputs_func=sample_inputs_addcmul),
     OpInfo('amax',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_amax_amin,),
@@ -4662,18 +4690,6 @@ def method_tests():
         ('mvlgamma', torch.empty(S,).uniform_(1, 2), [2], "p=2"),
         ('mvlgamma', torch.empty(S, S).uniform_(1.5, 3), [3], "p=3"),
         ('mvlgamma', torch.empty(S, S).uniform_(2.5, 5), [5], "p=5"),
-        ('addcmul', (S, S), ((S, S), (S, S)), '', (True,)),
-        ('addcmul', (S, S), ((S, 1), (1, S)), 'broadcast_rhs', (True,)),
-        ('addcmul', (1,), ((S, S, 1), (1, S)), 'broadcast_all', (True,)),
-        ('addcmul', (S, S), ((S, S), (S, S)), 'scale', (True,), (), (), ident, {'value': 0.5}),
-        ('addcmul', (S, S), ((S, 1), (1, S)), 'scale_broadcast_rhs', (True,), (), (), ident, {'value': 0.5}),
-        ('addcmul', (1,), ((S, S, 1), (1, S)), 'scale_broadcast_all', (True,), (), (), ident, {'value': 0.5}),
-        ('addcmul', (), ((), ()), 'scalar', (True,)),
-        ('addcmul', (S, S), ((), ()), 'scalar_broadcast_rhs', (True,)),
-        ('addcmul', (), ((S, S, 1), (1, S)), 'scalar_broadcast_lhs', (True,)),
-        ('addcmul', (), ((), ()), 'scalar_scale', (True,), (), (), ident, {'value': 0.5}),
-        ('addcmul', (S, S), ((), ()), 'scalar_scale_broadcast_rhs', (True,), (), (), ident, {'value': 0.5}),
-        ('addcmul', (), ((S, S, 1), (1, S)), 'scalar_scale_broadcast_lhs', (True,), (), (), ident, {'value': 0.5}),
         ('addcdiv', (S, S), ((S, S), (S, S))),
         ('addcdiv', (S, S), ((S, 1), (1, S)), 'broadcast_rhs'),
         ('addcdiv', (1,), ((S, S, 1), (1, S)), 'broadcast_all'),

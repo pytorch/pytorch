@@ -5250,8 +5250,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'mul',
                 '__rmul__', 'dot', 'vdot', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'fill_', 'sub',
-                'mean', 'inverse', 'addcmul',
-                'addcdiv', 'linalg.tensorinv', 'matrix_exp',
+                'mean', 'inverse', 'addcdiv', 'linalg.tensorinv', 'matrix_exp',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split',
                 'baddbmm', 'addbmm', 'addmv'] + complex_list_filter + separate_complex_tests
 
