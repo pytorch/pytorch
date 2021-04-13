@@ -7,6 +7,7 @@
 #include <ATen/TracerMode.h>
 #include <ATen/RedispatchFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 using namespace at;
@@ -18,7 +19,7 @@ std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::
   std::vector<DeprecatedTypeProperties*> res;
   res.reserve(backends.size());
   for (auto p : backends) {
-    for (int64_t s = 0; s < static_cast<int64_t>(ScalarType::NumOptions); s++) {
+    for(const auto s : c10::irange(static_cast<int64_t>(ScalarType::NumOptions))) {
       auto& type = getDeprecatedTypeProperties(static_cast<Backend>(p), static_cast<ScalarType>(s));
       res.emplace_back(&type);
     }
@@ -84,7 +85,6 @@ namespace {
 Tensor _fw_primal(const Tensor & self, int64_t level) {
   auto& self_ = unpack(self, "self", 0);
   std::shared_ptr<Identity> grad_fn;
-  assert_no_inference_tensor(self);
   if (compute_requires_grad( self )) {
     grad_fn = std::make_shared<Identity>();
     grad_fn->set_next_edges(collect_next_edges( self ));
@@ -122,7 +122,6 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   auto& src_ = unpack(src, "src", 1);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  assert_no_inference_tensor(self, src);
   requires_grad &= isDifferentiableType(self.scalar_type());
   check_inplace(self, requires_grad);
   if (requires_grad) {
@@ -135,7 +134,6 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
-  increment_version(self);
   rebase_history(self , std::move(grad_fn));
 
   if (isDifferentiableType(self.scalar_type()) &&
@@ -164,7 +162,6 @@ Tensor& resize_(
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
-  assert_no_inference_tensor(self);
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
@@ -186,7 +183,6 @@ Tensor& resize_as_(
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
-  assert_no_inference_tensor(self);
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
@@ -205,7 +201,6 @@ Tensor& resize_as_(
 
 Tensor detach(const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
-  assert_no_inference_tensor(self);
   std::function<at::Tensor(const at::Tensor&)> func=nullptr;
   auto result = as_view(/* base */ self, /* output */ self, /* is_bw_differentiable */ false,
                         /* is_fw_differentiable */ true, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT,
@@ -223,7 +218,6 @@ Tensor detach(const Tensor & self) {
 
 Tensor & detach_(Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
-  assert_no_inference_tensor(self);
   if (self.is_view()) {
     // NB: is_view() ==> get_autograd_meta()
     auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
@@ -288,4 +282,22 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
 }
 
 }  // namespace
-}}} // namespace torch::autograd::VariableType
+}} // namespace autograd::VariableType
+
+namespace InplaceOrView {
+  Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
+    {
+      at::AutoDispatchBelowInplaceOrView guard;
+      at::redispatch::copy_(ks & c10::after_InplaceOrView_keyset, self, src, non_blocking);
+    }
+    torch::autograd::increment_version(self);
+    return self;
+  }
+
+  namespace {
+    TORCH_LIBRARY_IMPL(aten, InplaceOrView, m) {
+      m.impl("copy_", torch::dispatch(DispatchKey::InplaceOrView, TORCH_FN(InplaceOrView::copy_)));
+    }
+  } // namespace
+} // namespace InplaceOrView
+} // namespace torch
