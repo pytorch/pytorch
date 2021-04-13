@@ -13,9 +13,6 @@ from typing import Optional, Sequence, Union, List, Set
 #     for the C++ API; it makes calling kwarg factory functions
 #     pleasant)
 #
-#   - for 'use_c10_dispatcher: full' functions, optional tensors are
-#     represented explicitly using c10::optional
-#
 #   - defaulting lives here (in fact, the dispatcher is completely
 #     oblivious of defaults!)
 #
