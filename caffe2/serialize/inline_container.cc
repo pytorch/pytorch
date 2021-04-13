@@ -140,15 +140,14 @@ void PyTorchStreamReader::init() {
 }
 
 void PyTorchStreamReader::valid(const char* what, const char* info) {
-  auto err = mz_zip_get_last_error(ar_.get());
-  if (err != MZ_ZIP_NO_ERROR) {
-    CAFFE_THROW(
-        "PytorchStreamReader failed ",
-        what,
-        info,
-        ": ",
-        mz_zip_get_error_string(err));
-  }
+  const auto err = mz_zip_get_last_error(ar_.get());
+  TORCH_CHECK(
+      err == MZ_ZIP_NO_ERROR,
+      "PytorchStreamReader failed ",
+      what,
+      info,
+      ": ",
+      mz_zip_get_error_string(err));
 }
 
 constexpr int MZ_ZIP_LOCAL_DIR_HEADER_SIZE = 30;
@@ -192,12 +191,17 @@ bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
   std::string ss = archive_name_plus_slash_ + name;
   mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
-  bool result = ar_->m_last_error != MZ_ZIP_FILE_NOT_FOUND;
-  if (!result) {
-    ar_->m_last_error = MZ_ZIP_NO_ERROR;
+  const mz_zip_error err = mz_zip_get_last_error(ar_.get());
+
+  if (err == MZ_ZIP_NO_ERROR) {
+    return true;
+  } else if (err == MZ_ZIP_FILE_NOT_FOUND) {
+    return false;
+  } else {
+    // A different error happened, raise it.
+    valid("attempting to locate file ", name.c_str());
   }
-  valid("attempting to locate file ", name.c_str());
-  return result;
+  TORCH_INTERNAL_ASSERT(false, "should not reach here");
 }
 
 std::vector<std::string> PyTorchStreamReader::getAllRecords() {
@@ -229,9 +233,6 @@ const std::vector<std::string>& PyTorchStreamWriter::getAllWrittenRecords() {
 size_t PyTorchStreamReader::getRecordID(const std::string& name) {
   std::string ss = archive_name_plus_slash_ + name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
-  if (ar_->m_last_error == MZ_ZIP_FILE_NOT_FOUND) {
-    CAFFE_THROW("file not found: ", ss);
-  }
   valid("locating file ", name.c_str());
   return result;
 }
