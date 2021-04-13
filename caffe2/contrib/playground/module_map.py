@@ -1,4 +1,4 @@
-"""isort:skip_file"""
+# isort: skip_file
 
 # Input
 import caffe2.contrib.playground.resnetdemo.\

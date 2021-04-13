@@ -279,7 +279,7 @@ def _hardtanh_helper(g, input, min_val, max_val):
         from torch.onnx.symbolic_opset9 import hardtanh
         return hardtanh(g, input, min_val, max_val)
     else:
-        from torch.onnx.symbolic_opset11 import hardtanh  # type: ignore[no-redef] # isort:skip
+        from torch.onnx.symbolic_opset11 import hardtanh  # type: ignore[no-redef] # isort: skip
         return hardtanh(g, input, min_val, max_val)
 
 def _is_fp(value):
@@ -582,9 +582,9 @@ def _unbind_helper(g, self, dim, _outputs):
     if _export_onnx_opset_version < 11:
         from torch.onnx.symbolic_opset9 import unbind
     elif _export_onnx_opset_version <= 12:
-        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef] # isort:skip
+        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef] # isort: skip
     else:
-        from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef] # isort:skip
+        from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef] # isort: skip
     return unbind(g, self, dim, _outputs)
 
 
