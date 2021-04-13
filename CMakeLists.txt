@@ -266,6 +266,9 @@ option(USE_ZSTD "Use ZSTD" OFF)
 cmake_dependent_option(
   USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." "${CPU_INTEL}"
   "CPU_INTEL OR CPU_AARCH64" OFF)
+cmake_dependent_option(
+  USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
+  "USE_MKLDNN AND CPU_AARCH64" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
