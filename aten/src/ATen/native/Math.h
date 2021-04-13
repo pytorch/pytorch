@@ -1370,12 +1370,12 @@ calc_i1e(T _x) {
   if (x <= 8.0) {
     auto A = chebyshev_coefficients_i1e_A<T>();
     T y = (x / 2.0) - 2.0;
-    const T out = static_cast<T>(chbevl(y, A, 29) * x);
+    const auto out = static_cast<T>(chbevl(y, A, 29) * x);
     return (_x < 0.0) ? -out : out;
   }
 
   auto B = chebyshev_coefficients_i1e_B<T>();
-  const T out = static_cast<T>(
+  const auto out = static_cast<T>(
       chbevl(static_cast<T>(32.0 / x - 2.0), B, 25) / std::sqrt(x));
   return (_x < 0.0) ? -out : out;
 }
