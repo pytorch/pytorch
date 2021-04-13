@@ -18,7 +18,6 @@ FUNS_IO_TYPE_FP32 = set([
     # TODO(future PR): move this to a new category, since
     # i/o can be fp32 or int8
     torch.cat,
-    F.relu,
 ])
 
 # TODO(future PR): make configurable
@@ -33,6 +32,10 @@ FUNS_IO_TYPE_INT8 = set([
     toq.conv3d,
     toq.conv3d_relu,
     toq.cat,
+])
+
+FUNS_IO_TYPE_FP32_OR_INT8 = set([
+    F.relu,
 ])
 
 # TODO(future PR): make configurable
@@ -58,4 +61,10 @@ MODS_IO_TYPE_INT8 = set([
     nnq.Conv2d,
     nniq.ConvReLU2d,
     nnq.Conv3d,
+])
+
+# TODO(future PR): make configurable
+# TODO(future PR): fill out coverage
+MODS_IO_TYPE_FP32_OR_INT8 = set([
+    nn.ReLU,
 ])

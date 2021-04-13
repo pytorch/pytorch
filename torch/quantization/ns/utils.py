@@ -9,8 +9,10 @@ from torch.quantization.fx.quantize import is_activation_post_process
 from .mappings import (
     FUNS_IO_TYPE_FP32,
     FUNS_IO_TYPE_INT8,
+    FUNS_IO_TYPE_FP32_OR_INT8,
     MODS_IO_TYPE_FP32,
     MODS_IO_TYPE_INT8,
+    MODS_IO_TYPE_FP32_OR_INT8,
 )
 
 from typing import Any, Tuple, Callable
@@ -32,6 +34,7 @@ class NodeInputOrOutputType(enum.Enum):
     INT8 = enum.auto()  # torch.qint8 or torch.quint8
     FP16 = enum.auto()  # torch.float16
     UNKNOWN = enum.auto()  # we cannot determine input/output dtype
+    FP32_OR_INT8 = enum.auto()  # either torch.float or torch.quint8 or torch.qint8
     # TODO(future PRs): dynamic quant, fake quant, etc
 
 
@@ -45,6 +48,8 @@ def get_node_first_input_and_output_type(
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
         elif node.target in FUNS_IO_TYPE_INT8:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
+        elif node.target in FUNS_IO_TYPE_FP32_OR_INT8:
+            return (NodeInputOrOutputType.FP32_OR_INT8, NodeInputOrOutputType.FP32_OR_INT8)
         else:
             return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
@@ -61,17 +66,21 @@ def get_node_first_input_and_output_type(
                 get_node_first_input_and_output_type(
                     first_arg, gm, logger_cls)
             return (prev_node_output_type, prev_node_output_type)
-        # For now, hacky check to see which mod is in which namespace
         is_known_fp32_input_module = any(
             isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32
         )
         is_known_int8_input_module = any(
             isinstance(mod, target_type) for target_type in MODS_IO_TYPE_INT8
         )
+        is_known_fp32_or_int8_input_module = any(
+            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8
+        )
         if is_known_fp32_input_module:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
         elif is_known_int8_input_module:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
+        elif is_known_fp32_or_int8_input_module:
+            return (NodeInputOrOutputType.FP32_OR_INT8, NodeInputOrOutputType.FP32_OR_INT8)
         else:
             return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 

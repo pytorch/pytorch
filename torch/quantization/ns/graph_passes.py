@@ -167,7 +167,15 @@ def _insert_dtype_cast_after_node(
          node_input_type_c == NodeInputOrOutputType.FP16)
     ):
         dtype_cast_op = torch.dequantize
-    elif node_input_type_a == NodeInputOrOutputType.FP32 and node_input_type_c == NodeInputOrOutputType.FP32:
+    elif (
+        node_input_type_a == NodeInputOrOutputType.FP32 and
+        node_input_type_c == NodeInputOrOutputType.FP32
+    ):
+        dtype_cast_mod_cls = torch.nn.Identity
+    elif (
+        node_input_type_a == NodeInputOrOutputType.FP32_OR_INT8 and
+        node_input_type_c == NodeInputOrOutputType.FP32_OR_INT8
+    ):
         dtype_cast_mod_cls = torch.nn.Identity
     else:
         raise AssertionError(
