@@ -138,58 +138,6 @@ class TestComplex(JitTestCase):
         self.assertEqual(loaded(2, 3), 2 + cmath.infj)
         self.assertEqual(loaded(3, 4), 4 + cmath.nanj)
 
-    def test_torch_complex(self):
-        def fn(real, img):
-            return torch.complex(real, img)
-
-        def fn_out(real, img, out):
-            return torch.complex(real, img, out=out)
-        self.checkScript(fn, (torch.rand(3, 4), torch.rand(3, 4), ))
-        self.checkScript(fn, (torch.ones(5, 1, 4), torch.ones(5, 1, 4), ))
-        self.checkScript(fn, (torch.zeros(1, 6), torch.ones(6, 1), ))
-        self.checkScript(fn, (torch.zeros(1, 6), torch.zeros(6, 1), ))
-        self.checkScript(fn, (torch.empty(3, 4), torch.empty(3, 4), ))
-
-        real = torch.tensor([1, 2], dtype=torch.float32)
-        img = torch.tensor([3, 4], dtype=torch.float32)
-        out = torch.empty([3, 4], dtype=torch.complex64)
-        self.checkScript(fn_out, (real, img, out, ))
-
-        real = torch.tensor([5, 2], dtype=torch.float64)
-        img = torch.tensor([3, 4], dtype=torch.float64)
-        out = torch.empty([5, 2], dtype=torch.complex128)
-        self.checkScript(fn_out, (real, img, out, ))
-
-        real = torch.ones([1, 2])
-        img = torch.ones([1, 2])
-        out = torch.empty([1, 2], dtype=torch.complex128)
-        self.checkScript(fn_out, (real, img, out, ))
-
-        real = torch.ones([3, 8, 7])
-        img = torch.ones([3, 8, 7])
-        out = torch.empty([3, 8, 7], dtype=torch.complex128)
-        self.checkScript(fn_out, (real, img, out, ))
-
-        real = torch.empty([3, 2, 6])
-        img = torch.empty([3, 2, 6])
-        out = torch.empty([3, 2, 6], dtype=torch.complex128)
-        self.checkScript(fn_out, (real, img, out, ))
-
-        real = torch.zeros([1, 3])
-        img = torch.empty([3, 1])
-        out = torch.empty([3, 3], dtype=torch.complex128)
-        self.checkScript(fn_out, (real, img, out, ))
-
-        real = torch.ones([2, 5])
-        img = torch.empty([2, 1])
-        out = torch.empty([2, 5], dtype=torch.complex128)
-        self.checkScript(fn_out, (real, img, out, ))
-
-        real = torch.ones([2, 5])
-        img = torch.zeros([2, 1])
-        out = torch.empty([2, 5], dtype=torch.complex128)
-        self.checkScript(fn_out, (real, img, out, ))
-
     def test_complex_constructor(self):
         # Test all scalar types
         def fn_int(real: int, img: int):
