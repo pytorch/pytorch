@@ -15,9 +15,7 @@ class NativePeer implements INativePeer {
 
   @DoNotStrip
   private static native HybridData initHybrid(
-      String moduleAbsolutePath,
-      Map<String, String> extraFiles,
-      int deviceJniCode);
+      String moduleAbsolutePath, Map<String, String> extraFiles, int deviceJniCode);
 
   @DoNotStrip
   private static native HybridData initHybridAndroidAsset(
