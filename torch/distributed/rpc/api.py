@@ -5,7 +5,7 @@ import hashlib
 import inspect
 import logging
 import threading
-from typing import Generic, TypeVar, Set, Any
+from typing import Dict, Generic, TypeVar, Set, Any
 
 import torch
 from torch.futures import Future
@@ -101,7 +101,7 @@ class AllGatherStates(object):
 # `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
 _ALL_WORKER_NAMES: Set[Any] = set()
 _all_gather_dict_lock = threading.RLock()
-_all_gather_sequence_id = 0
+_all_gather_sequence_id: Dict[str, int] = {}
 _all_gather_sequence_id_to_states: collections.defaultdict = collections.defaultdict(AllGatherStates)
 
 
@@ -190,21 +190,15 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
 
     self_name = _get_current_rpc_agent().get_worker_info().name
 
-
+    with _all_gather_dict_lock:
+        concat_names = "".join(sorted(worker_names))
+        sequence_num = _all_gather_sequence_id.get(concat_names, 0)
+        _all_gather_sequence_id[concat_names] = sequence_num + 1
+        sequence_id = hashlib.sha256((concat_names + str(sequence_num)).encode("utf-8")).hexdigest()
+        
     is_leader = leader_name == self_name
     if timeout == UNSET_RPC_TIMEOUT:
         timeout = get_rpc_timeout()
-
-    if worker_names != _ALL_WORKER_NAMES:
-        # create hash of all worker names in group
-        concat_names = "".join(sorted(worker_names)).encode('utf-8')
-        sequence_id = hashlib.sha256(concat_names).hexdigest()
-    else:
-        # perform all_gather using all workers by incrementing global id
-        with _all_gather_dict_lock:
-            global _all_gather_sequence_id
-            sequence_id = str(_all_gather_sequence_id)
-            _all_gather_sequence_id += 1
 
     # Phase 1: Followers send it's object to the leader
     if is_leader:

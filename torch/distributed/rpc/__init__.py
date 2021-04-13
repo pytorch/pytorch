@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 _init_counter = 0
 _init_counter_lock = threading.Lock()
-_rpc_barrier_workers_lock = threading.Lock()
 
 def is_available():
     return hasattr(torch._C, "_rpc_init")
@@ -63,7 +62,7 @@ if is_available():
         _DEFAULT_RPC_TIMEOUT_SEC,
     )  # noqa: F401
     from torch._C._distributed_c10d import Store
-    from .api import *  # noqa: F401
+    from .api import *  # noqa: F401,F403
     from .options import TensorPipeRpcBackendOptions  # noqa: F401
     from .backend_registry import BackendType
     from .server_process_global_profiler import (
@@ -212,10 +211,8 @@ if is_available():
             set will be all workers. Default is ``None``.
 
         """
-        # When specifying a set of workers, only allow one barrier at a time
         if worker_names:
-            with _rpc_barrier_workers_lock:
-                api._all_gather(None, set(worker_names))
+            api._all_gather(None, set(worker_names))
         else:
             api._all_gather(None)
 
