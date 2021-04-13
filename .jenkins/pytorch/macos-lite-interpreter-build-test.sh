@@ -27,22 +27,7 @@ if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
     VERBOSE=1 DEBUG=1 python "${BUILD_LIBTORCH_PY}"
     popd || exit
 
-    # Unfortunately it seems like the test can't load from miniconda3
-    # without these paths being set
-    export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
-    export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-
-    echo "Finding test_lite_interpreter_runtime path"
-    find . -regex '.*test_lite_interpreter_runtime'
-
-    echo "Show current path"
-    pwd
-
-    # Copy the unittest binary test_lite_interpreter_runtime to the path
-    # where the dynamic library libtorch.dylib locates, otherwise it binary
-    # can't find the library
-    cp "${HOME}/project/torch/bin/test_lite_interpreter_runtime" "${WORKSPACE_DIR}//miniconda3/lib/python3.7/site-packages/torch/lib"
-    "${WORKSPACE_DIR}//miniconda3/lib/python3.7/site-packages/torch/lib/test_lite_interpreter_runtime"
+    "${CPP_BUILD}/caffe2/build/bin/test_lite_interpreter_runtime"
 
     # Change the permission manually from 755 to 644 to keep git clean
     chmod 644 "${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh"

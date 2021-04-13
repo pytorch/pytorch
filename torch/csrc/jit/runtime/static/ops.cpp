@@ -9,6 +9,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -77,7 +78,7 @@ at::Tensor& flatten_copy_out(
 
   std::vector<int64_t> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
-  for (int64_t i = 0; i < start_dim; i++) {
+  for (const auto i : c10::irange(start_dim)) {
     shape.push_back(self.sizes()[i]);
   }
   shape.push_back(slice_numel);
@@ -105,6 +106,11 @@ namespace torch {
 namespace jit {
 
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
+
+bool opIsRegistered(const c10::Symbol& op_name) {
+  const std::string name(op_name.toQualString());
+  return SROperatorRegistry()->Has(name);
+}
 
 bool canRunOutOfPlace(Node* n) {
   auto op_name = std::string(n->kind().toQualString());

@@ -43,15 +43,6 @@
 #include <THC/generic/THCTensorScatterGather.h>
 #include <THC/THCGenerateBoolType.h>
 
-#include <THC/generic/THCTensorIndex.h>
-#include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCTensorIndex.h>
-#include <THC/THCGenerateBoolType.h>
-
-#include <THC/generic/THCTensorIndex.h>
-#include <THC/THCGenerateBFloat16Type.h>
-
 #include <THC/generic/THCTensorSort.h>
 #include <THC/THCGenerateAllTypes.h>
 
