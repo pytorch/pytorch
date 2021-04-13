@@ -2,6 +2,7 @@
 
 #ifdef USE_TENSORPIPE
 
+#include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace tensorpipe {
@@ -38,6 +39,29 @@ struct TensorpipeReadBuffers {
   std::vector<c10::DataPtr> tensors;
 };
 
+static auto streamCreator =
+    [](c10::DeviceType device_type,
+       c10::DeviceIndex index) -> c10::optional<c10::Stream> {
+  if (device_type == c10::DeviceType::CUDA) {
+    return at::cuda::getStreamFromPool(
+        /* isHighPriority */ false, /* device */ index);
+  } else {
+    // return c10::nullopt;
+    throw std::runtime_error("Only CUDA streams are supported");
+  }
+};
+
+static auto currentStreamProvider =
+    [](c10::DeviceType device_type,
+       c10::DeviceIndex index) -> c10::optional<c10::Stream> {
+  if (device_type == c10::DeviceType::CUDA) {
+    return at::cuda::getCurrentCUDAStream(index);
+  } else {
+    // return c10::nullopt;
+    throw std::runtime_error("Only CUDA streams are supported");
+  }
+};
+
 // Convert an RPC message into a TensorPipe message, plus a holder to all the
 // data that must be kept alive while the write is performed asynchronously.
 TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
@@ -45,7 +69,7 @@ tensorpipeSerialize(
     Message&& rpcMessage,
     std::vector<c10::DeviceIndex> devices = {},
     const std::shared_ptr<LazyStreamContext>& =
-        std::make_shared<LazyStreamContext>());
+        createLazyStreamContext(streamCreator, currentStreamProvider));
 
 // Allocate the buffers that will hold the incoming data. They will be managed
 // by the returned holder, which must be kept alive until the asynchronous read
@@ -54,7 +78,7 @@ tensorpipeSerialize(
 TORCH_API TensorpipeReadBuffers tensorpipeAllocate(
     tensorpipe::Message& tpMessage,
     const std::shared_ptr<LazyStreamContext>& ctx =
-        std::make_shared<LazyStreamContext>());
+        createLazyStreamContext(streamCreator, currentStreamProvider));
 
 // Convert a TensorPipe message back into an RPC message. This requires the data
 // to be available and can thus only be performed once the asynchronous read has

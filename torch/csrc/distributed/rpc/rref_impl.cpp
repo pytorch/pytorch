@@ -2,7 +2,6 @@
 #include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
@@ -261,25 +260,30 @@ void OwnerRRef::setError(std::exception_ptr eptr) {
 
 void OwnerRRef::recordAllStreams(
     const std::shared_ptr<LazyStreamContext>& ctx) {
-#ifdef USE_CUDA_NOT_ROCM
   if (ctx) {
     for (auto stream : ctx->getReservedStreams()) {
-      at::cuda::CUDAEvent cudaEvent;
-      cudaEvent.record(stream);
-      cudaEvents_.push_back(std::move(cudaEvent));
+      // std::cout << "stream = " << stream << std::endl;
+      c10::Event event{stream.device_type()};
+      event.record(stream);
+      events_.push_back(std::move(event));
     }
   }
-#endif
 }
 
 void OwnerRRef::blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx) {
-#ifdef USE_CUDA_NOT_ROCM
   if (ctx) {
-    for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
-      cudaEvent.block(ctx->getStream(cudaEvent.device_index()));
+    for (auto& event : events_) {
+      // std::cout << "event.device_type() = " << event.device_type()
+      //           << ", event.device_index() = " << (int)(event.device_index())
+      //           << std::endl;
+      auto maybe_stream =
+          ctx->getStream(event.device_type(), event.device_index());
+      auto stream = *maybe_stream;
+      // std::cout << "stream exists = " << (bool)maybe_stream
+      //           << ", stream = " << stream << std::endl;
+      event.block(stream);
     }
   }
-#endif
 }
 
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {

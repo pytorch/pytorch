@@ -354,8 +354,18 @@ struct MultiStreamGuard {
   explicit MultiStreamGuard(
       const std::shared_ptr<LazyStreamContext>& /* unused */) {}
 #else
+  static inline std::vector<at::cuda::CUDAStream> toCUDAStreams(
+      const std::vector<c10::Stream>& streams) {
+    std::vector<at::cuda::CUDAStream> cudaStreams;
+    cudaStreams.reserve(streams.size());
+    std::transform(
+        streams.begin(), streams.end(), cudaStreams.begin(), [](c10::Stream s) {
+          return at::cuda::CUDAStream(s);
+        });
+    return cudaStreams;
+  }
   explicit MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& ctx)
-      : guard(ctx->getReservedStreams()) {}
+      : guard(toCUDAStreams(ctx->getReservedStreams())) {}
 
  private:
   at::cuda::CUDAMultiStreamGuard guard;
@@ -606,7 +616,7 @@ void TensorPipeAgent::pipeRead(
       return;
     }
 
-    auto ctx = createLazyStreamContext();
+    auto ctx = createLazyStreamContext(streamCreator, currentStreamProvider);
     TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage, ctx);
 
     pipe->read(
@@ -934,7 +944,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is sending request #"
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
-  auto ctx = createLazyStreamContext();
+  auto ctx = createLazyStreamContext(streamCreator, currentStreamProvider);
   ctx->waitForCurrentStreams(requestMessage.tensors());
   pipeWrite(
       clientPipe.pipe_,

@@ -6,6 +6,7 @@
 #ifdef USE_CUDA_NOT_ROCM
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #endif
 
 #include <tensorpipe/tensorpipe.h>
@@ -124,7 +125,12 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         tpMessage.tensors.push_back(std::move(tensor));
 #ifdef USE_CUDA_NOT_ROCM
       } else if (tensorDataVec[i].device().is_cuda()) {
-        auto stream = ctx->getStream(tensorDataVec[i].device().index());
+        auto maybe_stream = ctx->getStream(
+            c10::DeviceType::CUDA, tensorDataVec[i].device().index());
+        if (!maybe_stream) {
+          throw std::runtime_error("Only CUDA streams are supported");
+        }
+        auto stream = at::cuda::CUDAStream(*maybe_stream);
         tensorpipe::CudaBuffer buffer;
         buffer.ptr = tensorPtr;
         buffer.stream = stream.stream();
@@ -199,7 +205,12 @@ TensorpipeReadBuffers tensorpipeAllocate(
 #ifdef USE_CUDA_NOT_ROCM
     } else if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCuda) {
       auto deviceIndex = std::stoi(tensor.metadata);
-      auto stream = ctx->getStream(deviceIndex);
+      auto maybe_stream = ctx->getStream(c10::DeviceType::CUDA, deviceIndex);
+      if (!maybe_stream) {
+        throw std::runtime_error("Only CUDA streams are supported");
+      }
+      auto stream = at::cuda::CUDAStream(*maybe_stream);
+
       // CUDACachingAllocator will call recordStream accordingly on the current
       // stream.
       at::cuda::CUDAStreamGuard guard(stream);
