@@ -601,11 +601,23 @@ void minimum_kernel(TensorIterator& iter) {
 
 void fmax_kernel(TensorIterator& iter) {
   if (isFloatingType(iter.common_dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmax_cpu", [&]() {
-      cpu_kernel(iter,
+    if (iter.common_dtype() == at::ScalarType::Half) {
+        cpu_kernel(iter,
+          [](at::Half a, at::Half b) -> at::Half {
+            return std::fmax(a, b);
+          });
+    } else if (iter.common_dtype() == at::ScalarType::BFloat16) {
+        cpu_kernel(iter,
+          [](at::BFloat16 a, at::BFloat16 b) -> at::BFloat16 {
+            return std::fmax(a, b);
+          });
+    }
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "fmax_cpu", [&]() {
+      cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
           return std::fmax(a, b);
-        });
+        },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::fmax(a, b); });
     });
   } else {
     maximum_kernel(iter);
@@ -614,11 +626,23 @@ void fmax_kernel(TensorIterator& iter) {
 
 void fmin_kernel(TensorIterator& iter) {
   if (isFloatingType(iter.common_dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmin_cpu", [&]() {
-      cpu_kernel(iter,
+    if (iter.common_dtype() == at::ScalarType::Half) {
+        cpu_kernel(iter,
+          [](at::Half a, at::Half b) -> at::Half {
+            return std::fmin(a, b);
+          });
+    } else if (iter.common_dtype() == at::ScalarType::BFloat16) {
+        cpu_kernel(iter,
+          [](at::BFloat16 a, at::BFloat16 b) -> at::BFloat16 {
+            return std::fmin(a, b);
+          });
+    }
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "fmin_cpu", [&]() {
+      cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
           return std::fmin(a, b);
-        });
+        },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::fmin(a, b); });
     });
   } else {
     minimum_kernel(iter);
