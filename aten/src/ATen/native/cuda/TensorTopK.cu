@@ -154,8 +154,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
 std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
               int64_t k, int64_t dim, bool largest, bool sorted,
-	      Tensor& values,
-	      Tensor& indices) {
+              Tensor& values,
+              Tensor& indices) {
   TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
   checkAllSameGPU("topk_out_cuda", {topK_arg, indices_arg, input_arg});
   dim = at::maybe_wrap_dim(dim, self);
@@ -220,25 +220,25 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   }
 
 #define RUN_T(INDEX_T)                                                  \
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "topk_out_cuda", [&] {								      \
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "topk_out_cuda", [&] { \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> inputInfo =           \
       at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(input);          \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> topKInfo =            \
       at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(values);         \
     at::cuda::detail::TensorInfo<int64_t, INDEX_T> indicesInfo =          \
       at::cuda::detail::getTensorInfo<int64_t, INDEX_T>(indices);         \
-    /* tensorInfoLegacyIfScalar*/                                           \
-    if (!input.dim()) {                                                    \
-      inputInfo.dims = 1;\
-      inputInfo.sizes[0] = 1;\
-      inputInfo.strides[0] = 1;\
-      topKInfo.dims = 1;\
-      topKInfo.sizes[0] = 1;\
-      topKInfo.strides[0] = 1;\
-      indicesInfo.dims = 1;\
-      indicesInfo.sizes[0] = 1;\
-      indicesInfo.strides[0] = 1;\
-    } 	                                                                  \
+    /* tensorInfoLegacyIfScalar*/                                         \
+    if (!input.dim()) {                                                   \
+      inputInfo.dims = 1;                                                 \
+      inputInfo.sizes[0] = 1;                                             \
+      inputInfo.strides[0] = 1;                                           \
+      topKInfo.dims = 1;                                                  \
+      topKInfo.sizes[0] = 1;                                              \
+      topKInfo.strides[0] = 1;                                            \
+      indicesInfo.dims = 1;                                               \
+      indicesInfo.sizes[0] = 1;                                           \
+      indicesInfo.strides[0] = 1;                                         \
+    }                                                                     \
     /* We use these structures solely to find the offset to */            \
     /* each slice we are operating on */                                  \
     inputInfo.sizes[dim] = 1;                                             \
