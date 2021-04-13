@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_st
     TEST_WITH_ROCM, gradcheck, gradgradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import expectedAlertNondeterministic
-from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
+from torch.autograd.gradcheck import _get_numerical_jacobian, iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
@@ -5008,15 +5008,20 @@ class NNTestCase(TestCase):
         return res
 
     def _numerical_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True, jacobian_parameters=True):
-        def fw(input):
+        def fw(*input):
             return self._forward(module, input).detach()
 
         res: Tuple[torch.Tensor, ...] = tuple()
         if jacobian_input:
-            res += get_numerical_jacobian(fw, input, eps=1e-6),
+            res += _get_numerical_jacobian(fw, input, eps=1e-6),
         if jacobian_parameters:
             param, _ = self._get_parameters(module)
-            res += torch.cat([get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param], 0),
+            to_cat = []
+            for p in param:
+                jacobian = _get_numerical_jacobian(fw, input, target=p, eps=1e-6)
+                # get_numerical_jacobian returns a list of tuples but we require a tensor
+                to_cat.append(jacobian[0][0])
+            res += (torch.cat(to_cat, 0),)
         return res
 
     def check_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True):

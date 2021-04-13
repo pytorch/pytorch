@@ -4021,6 +4021,9 @@ class TestAutograd(TestCase):
             gradcheck(lambda x: torch.tensor([x]), x)
         self.assertFalse(gradcheck(lambda x: torch.tensor([x]), x, raise_exception=False))
 
+        # succeed when no outputs at all
+        self.assertTrue(gradcheck(lambda x: (), (x,)))
+
     def test_gradcheck_check_batched_grad(self):
         x = torch.rand(10, requires_grad=True).to_sparse()
         # runtime error while compute batched grad (print big error)
@@ -4126,6 +4129,110 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1'):
             gradcheck(fn3, (x_c,))
         self.assertFalse(gradcheck(fn3, (x_c,), raise_exception=False))
+
+    def test_gradcheck_dense_and_sparse_inputs(self):
+        def fn(x, y):
+            return x * y.coalesce().to_dense()
+        a = torch.rand(2, 2, requires_grad=True)
+        b = torch.rand(2, 2).to_sparse().requires_grad_(True)
+        self.assertTrue(gradcheck(fn, (a, b), check_sparse_nnz=True, check_batched_grad=False))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_gradcheck_multiple_mkldnn_inputs(self):
+        def fn(x, y):
+            return x + y.to_dense()
+        a = torch.rand(10, requires_grad=True)
+        b = torch.rand(10, dtype=torch.float32).to_mkldnn().requires_grad_(True)
+        self.assertTrue(gradcheck(fn, (a, b), atol=1e-1, check_batched_grad=False))
+
+        def fn2(x, y):
+            return x.to_dense() + y.to_dense()
+        c = torch.rand(10, dtype=torch.float32).to_mkldnn().requires_grad_(True)
+        self.assertTrue(gradcheck(fn, (a, c), atol=1e-1, check_batched_grad=False))
+
+    def test_gradcheck_output_shape_or_dtype_depend_on_values(self):
+        def fn(x):
+            if torch.all(x >= 1):
+                return torch.cat([x, x])
+            else:
+                return x
+        a = torch.ones(1, requires_grad=True)
+        with self.assertRaisesRegex(AssertionError, 'return outputs with the same shape when inputs are perturbed'):
+            self.assertTrue(gradcheck(fn, (a,)))
+
+        def fn2(x):
+            if torch.all(x >= 1):
+                return x.to(torch.float32)
+            else:
+                return x
+        with self.assertRaisesRegex(AssertionError, 'return outputs with the same dtype when inputs are perturbed'):
+            self.assertTrue(gradcheck(fn2, (a,)))
+
+    def test_gradcheck_complex_non_complex_outputs(self):
+        def fn(x, y):
+            z = torch.complex(x, y)
+            return z, x + 1
+        a = torch.ones(2, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.ones(2, 2, requires_grad=True, dtype=torch.float64)
+        self.assertTrue(gradcheck(fn, (a, b)))
+
+        def fn2(z):
+            return z, torch.real(z)
+        c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
+        self.assertTrue(gradcheck(fn2, (c)))
+
+    def test_gradcheck_get_numerical_jacobian(self):
+        # get_numerical_jacobian is deprecated and no longer used internally by gradcheck
+        from torch.autograd.gradcheck import get_numerical_jacobian
+
+        def fn(inputs):
+            # get_numerical_jacobian requires fn to take inputs as a tuple
+            # and returns the jacobian wrt the first output
+            x = inputs[0]
+            y = inputs[1]
+            return 2 * x + y, x + 2 * y
+        a = torch.rand(2, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.rand(2, 2, requires_grad=True, dtype=torch.float64)
+
+        with self.assertWarnsRegex(UserWarning, "get_numerical_jacobian was part of PyTorch's private API"):
+            jacobian = get_numerical_jacobian(fn, (a, b), target=a, eps=1e-6)
+        self.assertEqual(jacobian[0], 2 * torch.eye(4))
+
+        with self.assertWarnsRegex(UserWarning, "get_numerical_jacobian was part of PyTorch's private API"):
+            jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6)
+        self.assertEqual(jacobian[0], 2 * torch.eye(4))
+        self.assertEqual(jacobian[1], 1 * torch.eye(4))
+
+    def test_gradcheck_get_analytical_jacobian(self):
+        from torch.autograd.gradcheck import get_analytical_jacobian
+
+        def fn(x, y):
+            return 2 * x + y, x + 2 * y
+
+        a = torch.rand(2, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.rand(2, 2, requires_grad=True, dtype=torch.float64)
+
+        outputs = fn(a, b)
+        with self.assertWarnsRegex(UserWarning, "get_analytical_jacobian was part of PyTorch's private API"):
+            jacobians, reentrant, correct_grad_sizes, correct_grad_types = get_analytical_jacobian((a, b), outputs[0])
+        self.assertEqual(jacobians[0], 2 * torch.eye(4))
+        self.assertEqual(jacobians[1], 1 * torch.eye(4))
+        self.assertTrue(reentrant)
+
+        class NonDetFunc(Function):
+            @staticmethod
+            def forward(ctx, x, jitter=0.0):
+                ctx._jitter = jitter
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return NonDetFunc.apply(grad_out, ctx._jitter) * (1 + torch.rand_like(grad_out) * ctx._jitter), None
+
+        outputs = NonDetFunc.apply(a, 1e-6)
+        with self.assertWarnsRegex(UserWarning, "get_analytical_jacobian was part of PyTorch's private API"):
+            jacobians, reentrant, correct_grad_sizes, correct_grad_types = get_analytical_jacobian((a,), outputs)
+        self.assertFalse(reentrant)
 
     def test_version_counter(self):
         x = torch.randn(1, 2)
@@ -7842,6 +7949,14 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(fn, (vec))
         gradgradcheck(fn, (vec))
+
+    @onlyCUDA
+    def test_gradcheck_input_output_different_device(self, device):
+        x = torch.ones((1,), device="cuda", requires_grad=True)
+        gradcheck(lambda x: x.to("cpu"), (x,))
+
+        x = torch.ones((1,), device="cpu", requires_grad=True)
+        gradcheck(lambda x: x.to("cuda"), (x,))
 
     def test_logcumsumexp_large_value(self, device):
         a = torch.rand(4, 4, 4, dtype=torch.double, requires_grad=True)
