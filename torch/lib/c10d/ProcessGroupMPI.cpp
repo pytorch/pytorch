@@ -238,7 +238,15 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
       MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
       MPI_CHECK(
           MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
-      MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));
+      constexpr int kMaxNumRetries = 3;
+      bool groupComm_updated = false;
+      for (int i = 0; i < kMaxNumRetries; ++i) {
+        if (MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm)) {
+          groupComm_updated = true;
+          break;
+        }
+      }
+      MPI_CHECK(groupComm_updated);
       MPI_CHECK(MPI_Group_free(&worldGroup));
       MPI_CHECK(MPI_Group_free(&ranksGroup));
     }
