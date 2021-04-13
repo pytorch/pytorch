@@ -74,7 +74,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         # TODO: output_shape[0] == sym1, output_shape[2] == sym3
         # both require additional cleanup / optimization passes
 
-
     def test_sharing_of_list_len(self):
         # testing generic sharing of logic, a la _convolution and conv2s
         @torch.jit.script
