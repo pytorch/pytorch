@@ -428,6 +428,7 @@ def handle_copy_nodes(
     observed_nodes: Set[Node] = set()
     copy_nodes: Set[Node] = set()
     non_tensor_input_binary_op_nodes: Set[Node] = set()
+    unmatched_nodes: Set[Node] = set()
     app_to_remove: Set[Node] = set()
     env: Dict[Any, Any] = {}
 
@@ -465,9 +466,33 @@ def handle_copy_nodes(
                 copy_nodes.add(node)
                 # if previous node is observed, the copy node will be observed as well
                 if in_nodes(node.args[0], observed_nodes):
-                    observed_nodes.add(node)
+                    prev_node = node.args[0]
+                    if (
+                        isinstance(prev_node, Node) and
+                        prev_node.op == "call_module" and
+                        is_activation_post_process(modules[prev_node.target])  # type: ignore
+                    ):
+                        prev_prev_node = prev_node.args[0]
+                        # If previous node is unmatched, the input to copy node should not
+                        # be observed. For example, in the pattern of
+                        #
+                        # user_node_unmatched -> obs -> copy_node_matched -> next_node
+                        #
+                        # we delete `obs`, because user_node_unmatched is not quantizeable,
+                        # and the input to copy_node_matched does not need observation.
+                        if in_nodes(prev_prev_node, unmatched_nodes):
+                            app_to_remove.add(prev_node)
+                            observed_nodes.remove(prev_node)
+                        else:
+                            observed_nodes.add(node)
+                    else:
+                        observed_nodes.add(node)
+
+
         if all_node_args_have_no_tensors(node, modules, cache_for_no_tensor_check):
             non_tensor_input_binary_op_nodes.add(node)
+        if root_node is None and node.op != 'placeholder':
+            unmatched_nodes.add(node)
 
         # rule 3: for special node, we'll just remove observer for its input
         special_nodes = [
@@ -1189,8 +1214,9 @@ class Quantizer:
                         # and all it's inputs.
                         if len(quant_uses) == 1:
                             quantized.graph.erase_node(node)
-                            for arg in quant_args[1 :]:
-                                quantized.graph.erase_node(arg)
+                            for arg in quant_args[1:]:
+                                if isinstance(arg, Node):
+                                    quantized.graph.erase_node(arg)
         return quantized
 
     def convert(self, model: GraphModule, is_reference: bool = False,
