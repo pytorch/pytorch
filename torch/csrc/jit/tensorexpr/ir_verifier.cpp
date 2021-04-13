@@ -89,9 +89,6 @@ void IRVerifier::visit(const Load* v) {
   if (index_dtype.scalar_type() != ScalarType::Int) {
     throw malformed_ir("Index scalar dtype is not Int!");
   }
-  if (index_dtype.lanes() != v->mask()->dtype().lanes()) {
-    throw malformed_ir("lane mismatch in Load mask");
-  }
 
   IRVisitor::visit(v);
 }
@@ -134,9 +131,6 @@ void IRVerifier::visit(const Store* v) {
   }
   if (index_dtype.scalar_type() != ScalarType::Int) {
     throw malformed_ir("Index scalar dtype is not Int!");
-  }
-  if (index_dtype.lanes() != v->mask()->dtype().lanes()) {
-    throw malformed_ir("lane mismatch in Store mask");
   }
   if (v->buf()->dtype() != v->value()->dtype()) {
     throw malformed_ir("buf and value dtype mismatch in Store");
