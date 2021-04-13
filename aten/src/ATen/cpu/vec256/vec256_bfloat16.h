@@ -64,7 +64,8 @@ private:
   __m256i values;
 public:
   using value_type = uint16_t;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 16;
   }
   Vec256() {}
