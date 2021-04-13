@@ -19,10 +19,12 @@ namespace native {
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     const Tensor& input,
-    IntArrayRef normalized_shape,
-    const Tensor& weight /* optional */,
-    const Tensor& bias /* optional */,
+    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     double eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
 
   auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto X = std::get<0>(inputs);
@@ -31,7 +33,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
   auto M = std::get<3>(inputs);
   auto N = std::get<4>(inputs);
 
-  Tensor Y = at::native::empty_like(X, at::MemoryFormat::Contiguous);
+  Tensor Y = at::native::empty_like(
+      X,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      at::MemoryFormat::Contiguous);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
   if (M > 0) {
@@ -59,10 +67,12 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const Tensor& mean,
-    const Tensor& rstd,
-    const Tensor& weight /* optional */,
-    const Tensor& bias /* optional */,
+    const Tensor& rstd, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     std::array<bool, 3> grad_input_mask) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
 
     auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
     auto X = std::get<0>(inputs);
@@ -75,13 +85,45 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
     Tensor dgamma;
     Tensor dbeta;
     if (grad_input_mask[0]) {
-      dX = at::native::empty_like(X, at::MemoryFormat::Contiguous);
+      dX = at::native::empty_like(
+          X,
+          c10::nullopt /* dtype */,
+          c10::nullopt /* layout */,
+          c10::nullopt /* device */,
+          c10::nullopt /* pin_memory */,
+          at::MemoryFormat::Contiguous);
     }
     if (grad_input_mask[1]) {
-      dgamma = M > 0 ? at::native::empty_like(gamma, at::MemoryFormat::Contiguous) : at::native::zeros_like(gamma, at::MemoryFormat::Contiguous);
+      dgamma = M > 0 ? at::native::empty_like(
+                           gamma,
+                           c10::nullopt /* dtype */,
+                           c10::nullopt /* layout */,
+                           c10::nullopt /* device */,
+                           c10::nullopt /* pin_memory */,
+                           at::MemoryFormat::Contiguous)
+                     : at::native::zeros_like(
+                           gamma,
+                           c10::nullopt /* dtype */,
+                           c10::nullopt /* layout */,
+                           c10::nullopt /* device */,
+                           c10::nullopt /* pin_memory */,
+                           at::MemoryFormat::Contiguous);
     }
     if (grad_input_mask[2]) {
-      dbeta = M > 0 ? at::native::empty_like(beta, at::MemoryFormat::Contiguous) : at::native::zeros_like(beta, at::MemoryFormat::Contiguous);
+      dbeta = M > 0 ? at::native::empty_like(
+                          beta,
+                          c10::nullopt /* dtype */,
+                          c10::nullopt /* layout */,
+                          c10::nullopt /* device */,
+                          c10::nullopt /* pin_memory */,
+                          at::MemoryFormat::Contiguous)
+                    : at::native::zeros_like(
+                          beta,
+                          c10::nullopt /* dtype */,
+                          c10::nullopt /* layout */,
+                          c10::nullopt /* device */,
+                          c10::nullopt /* pin_memory */,
+                          at::MemoryFormat::Contiguous);
     }
     if (M > 0) {
       LayerNormBackwardKernel(
@@ -92,11 +134,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
 
 Tensor layer_norm(
     const Tensor& input,
-    IntArrayRef normalized_shape,
-    const Tensor& weight /* optional */,
-    const Tensor& bias /* optional */,
+    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
 
   return std::get<0>(at::native_layer_norm(input, normalized_shape, weight, bias, eps));
 }
@@ -107,10 +151,12 @@ DEFINE_DISPATCH(LayerNormBackwardKernel);
 // Ported from pytorch/xla repo
 std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
     const Tensor& input,
-    IntArrayRef normalized_shape,
-    const Tensor& weight,
-    const Tensor& bias,
+    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     double eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto X = std::get<0>(inputs);
   auto gamma = std::get<1>(inputs);

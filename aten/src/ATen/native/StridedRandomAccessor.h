@@ -143,7 +143,7 @@ public:
     return (ptr - other.ptr) / stride;
   }
   // }
-  
+
   // Comparison operators {
   C10_HOST_DEVICE
   bool operator==(const ConstStridedRandomAccessor& other) const {
@@ -175,7 +175,7 @@ public:
     return !(*this < other);
   }
   // }
-  
+
 protected:
   PtrType ptr;
   index_t stride;
@@ -186,7 +186,7 @@ template <
   typename index_t = int64_t,
   template <typename U> class PtrTraits = DefaultPtrTraits
 >
-class StridedRandomAccessor 
+class StridedRandomAccessor
   : public ConstStridedRandomAccessor<T, index_t, PtrTraits> {
 public:
   using difference_type = index_t;

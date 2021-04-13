@@ -8,6 +8,8 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <string>
 
@@ -65,7 +67,7 @@ at::Tensor PackedLinearWeight::apply_impl(
     // Process the per channel quantization.
     output_multiplier_float.resize(N, 0.0);
     act_times_w_scale.resize(N, 1.0f);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       act_times_w_scale[i] = (input_scale_float * w_scale[i]);
       output_multiplier_float[i] =
           act_times_w_scale[i] / static_cast<float>(output_scale);
@@ -101,7 +103,7 @@ at::Tensor PackedLinearWeight::apply_impl(
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
-    for (int task_id = begin; task_id < end; ++task_id) {
+    for (const auto task_id : c10::irange(begin, end)) {
       // This operation does the following:
       // 1) Creates a "row buffer" vector with offset values that must be
       //    added to the integer matrix multiplication operation to ensure

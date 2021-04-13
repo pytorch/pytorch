@@ -33,7 +33,7 @@ template <typename scalar_t, template<class> class Op> void foreach_unary_op_(Te
     multi_tensor_apply<1>(tensor_lists,
                           UnaryOpFunctor<scalar_t,
                                          /* depth */ 1,
-                                         /* r_args_depth */ 1, 
+                                         /* r_args_depth */ 1,
                                          /* res_arg_index */ 0>(),
                           Op<opmath_t>());
 }
@@ -211,6 +211,10 @@ OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
 
 std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
+    TORCH_CHECK(tensors[0].scalar_type() != kBool,
+                "_foreach_neg: There is a bool tensor in the passed-in TensorList. "
+                "Negation on a bool tensor is not supported. If you are trying to invert a mask, please use the `~`"
+                "or `logical_not()` operator on the individual tensors instead.");
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_neg_slow(tensors);
@@ -221,6 +225,10 @@ std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
 
 void foreach_tensor_neg_cuda_(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
+    TORCH_CHECK(tensors[0].scalar_type() != kBool,
+                "_foreach_neg: There is a bool tensor in the passed-in TensorList. "
+                "Negation on a bool tensor is not supported. If you are trying to invert a mask, please use the `~`"
+                "or `logical_not()` operator on the individual tensors instead.");
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_neg_slow_(tensors);
@@ -230,7 +238,7 @@ void foreach_tensor_neg_cuda_(TensorList tensors) {
 }
 
 // Abs have to go via slow path in case of a complex type.
-// This is because foreach kernels can't return a different dtype than passed, while 
+// This is because foreach kernels can't return a different dtype than passed, while
 // abs with complex inputs will produce float output.
 template<typename T>
 struct Abs {
@@ -283,7 +291,7 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
         multi_tensor_apply<1>(tensor_lists,
                               ZeroFunctor<scalar_t,
                                           /* depth */ 1,
-                                          /* r_args_depth */ 1, 
+                                          /* r_args_depth */ 1,
                                           /* res_arg_index */ 0>());
     });
 }

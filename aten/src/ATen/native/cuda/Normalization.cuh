@@ -425,7 +425,7 @@ __global__ void batch_norm_backward_kernel(
   // 2. DotProduct(input - mean, grad_output)
   GradOp<input_scalar_t, stat_accscalar_t, GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t>> g(mean, input, grad_output);
   Float2<input_scalar_t, stat_accscalar_t> res = reduce<Float2<input_scalar_t, stat_accscalar_t>, GradOp<input_scalar_t, stat_accscalar_t,
-                                                                                   GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t>>>(g, grad_output, plane);
+                                                                                   GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t>> >(g, grad_output, plane);
 
   stat_accscalar_t grad_output_sum = res.v1;
   stat_accscalar_t dot_p = res.v2;
@@ -526,7 +526,7 @@ __global__ void batch_norm_backward_reduce_kernel(
 
   GradOp<input_scalar_t, stat_accscalar_t, GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t>> g(r_mean, input, grad_output);
   Float2<input_scalar_t, stat_accscalar_t> res = reduce<Float2<input_scalar_t, stat_accscalar_t>, GradOp<input_scalar_t, stat_accscalar_t,
-                                                                                   GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t>>>(g, grad_output, plane);
+                                                                                   GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t>> >(g, grad_output, plane);
 
   if (threadIdx.x == 0) {
     if (grad_weight.size(0) > 0) {
@@ -555,7 +555,7 @@ __global__ void batch_norm_backward_elemt_kernel(
     const GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> sum_dy_xmu,
     GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t> grad_input,
     const int* __restrict__ numel, const int world_size) {
-  
+
   int64_t div = 0;
   for (int i = 0; i < world_size; i ++) {
     div += numel[i];
@@ -955,7 +955,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda_template(
 }
 
 // welford kernel for c last tensor calculating mean/biased_variance/unbiased_variance
-// original apex name: welford_kernel_c_last 
+// original apex name: welford_kernel_c_last
 template
    <template<typename T> class VarTransform,
     typename scalar_t,
@@ -1459,6 +1459,7 @@ void batch_norm_elemt_channels_last_cuda_template(
           reduction_size,
           stride,
           fuse_relu);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   } else {
     if (weight.defined()){
@@ -1479,9 +1480,9 @@ void batch_norm_elemt_channels_last_cuda_template(
           reduction_size,
           stride,
           fuse_relu);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
@@ -1539,6 +1540,7 @@ batch_norm_backward_reduce_cuda_channels_last_template(const at::Tensor& grad_ou
           semaphores_ptr,
           reduction_size,
           stride);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   } else {
     if (weight.defined()) {
@@ -1563,9 +1565,9 @@ batch_norm_backward_reduce_cuda_channels_last_template(const at::Tensor& grad_ou
           semaphores_ptr,
           reduction_size,
           stride);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return std::make_tuple(sumn_dy, sum_dy_xmu, grad_weight, grad_bias);
 }
@@ -1607,6 +1609,7 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
           count.numel(),
           reduction_size,
           stride);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   } else {
     if (weight.defined()) {
@@ -1629,10 +1632,10 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
           count.numel(),
           reduction_size,
           stride);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
- 
+
   return grad_input;
 }
 

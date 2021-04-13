@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import unittest
 import torch
 
@@ -66,7 +61,6 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                             example_outputs=output,
                                             do_constant_folding=do_constant_folding,
                                             training=TrainingMode.EVAL,
-                                            use_new_jit_passes=self.use_new_jit_passes,
                                             dynamic_axes=dynamic_axes)
         verify_inferred_shape(graph)
 

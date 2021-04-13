@@ -174,7 +174,7 @@ TORCH_LIBRARY(cuda, m) {
       .def("wait_event", &CUDAStream::waitEvent)
       .def("wait_stream", &CUDAStream::waitStream)
       .def("device_index", &CUDAStream::device_index)
-      .def("device", &CUDAStream::device)
+      .def_property("device", &CUDAStream::device)
       .def("pack", &CUDAStream::pack)
       .def("id", &CUDAStream::id);
 

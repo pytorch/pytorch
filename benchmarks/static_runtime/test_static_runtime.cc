@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include "deep_wide_pt.h"
 #include "test_scripts.h"
 
@@ -28,26 +30,34 @@ static at::Tensor getTensor(const at::IValue& ival) {
 }
 
 void compareTensorLists(
-    const std::vector<IValue>& l, /* values */
-    const std::vector<IValue>& r /* expects */) {
+    const std::vector<IValue>& l, /* expects */
+    const std::vector<IValue>& r /* values */) {
   EXPECT_TRUE(l.size() == r.size());
   for (int i = 0; i < l.size(); ++i) {
     ASSERT_TRUE(l[i].isTensor());
     ASSERT_TRUE(r[i].isTensor());
-    LOG(INFO) << "output " << i << ": \n" << l[i] << std::endl;
-    LOG(INFO) << "expect " << i << ": \n" << r[i] << std::endl;
-    EXPECT_TRUE(l[i].toTensor().equal(r[i].toTensor()));
+    VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
+    VLOG(2) << "output " << i << ": \n" << r[i] << std::endl;
+    if (! l[i].toTensor().defined()) {
+      EXPECT_TRUE(! r[i].toTensor().defined());
+    } else {
+      EXPECT_TRUE(l[i].toTensor().equal(r[i].toTensor()));
+    }
   }
 }
 
 void compareTensorLists(
-    const std::vector<at::Tensor>& l, /* values */
-    const std::vector<at::Tensor>& r /* expects */) {
+    const std::vector<at::Tensor>& l, /* expects */
+    const std::vector<at::Tensor>& r /* values */) {
   EXPECT_TRUE(l.size() == r.size());
   for (int i = 0; i < l.size(); ++i) {
-    LOG(INFO) << "output " << i << ": \n" << l[i] << std::endl;
-    LOG(INFO) << "expect " << i << ": \n" << r[i] << std::endl;
-    EXPECT_TRUE(l[i].equal(r[i]));
+    VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
+    VLOG(2) << "output " << i << ": \n" << r[i] << std::endl;
+    if (! l[i].defined()) {
+      EXPECT_TRUE(! r[i].defined());
+    } else {
+      EXPECT_TRUE(l[i].equal(r[i]));
+    }
   }
 }
 
@@ -85,7 +95,24 @@ void testStaticRuntime(
   // make sure inputs were not modified
   compareTensorLists(args_tensors, args_copy);
 }
+
+bool testHasInplaceOp(const std::string& jit_script) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  Method method = module.get_method("forward");
+  auto graph = module.get_method("forward").graph();
+
+  torch::jit::AliasDb alias_db(graph);
+  return torch::jit::HasInplaceOp(graph, alias_db);
+}
 } // namespace
+
+TEST(StaticRuntime, InPlace) {
+  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
+  EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
+  EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
+}
 
 TEST(StaticRuntime, UnaryOps) {
   auto a = at::ones({2, 3});
@@ -97,6 +124,21 @@ TEST(StaticRuntime, UnaryOps) {
   testStaticRuntime(aten_sum_1, args);
   testStaticRuntime(aten_sum_0_true, args);
   testStaticRuntime(aten_sum_1_true, args);
+}
+
+TEST(StaticRuntime, EmbeddingBag) {
+  at::Tensor weight = torch::ones({3, 11}, at::ScalarType::Float);
+  at::Tensor input = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset = torch::tensor({0, 2, 4});
+
+  std::vector<IValue> args{weight, input, offset};
+
+  testStaticRuntime(embedding_bag_default, args);
+  testStaticRuntime(embedding_bag_mean, args);
+  testStaticRuntime(embedding_bag_max, args);
+  testStaticRuntime(embedding_bag_sum_last_offset, args);
+  testStaticRuntime(embedding_bag_mean_last_offset, args);
+  testStaticRuntime(embedding_bag_max_last_offset, args);
 }
 
 TEST(StaticRuntime, IndividualOps_Binary) {
@@ -125,6 +167,8 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
   testStaticRuntime(reshape_script_3, args);
   testStaticRuntime(reshape_script_4, args);
   testStaticRuntime(reshape_script_5, args);
+  testStaticRuntime(reshape_inplace_script, args);
+  testStaticRuntime(reshape_incontiguous_script, args);
 }
 
 TEST(StaticRuntime, IndividualOps_flatten) {
@@ -385,7 +429,7 @@ TEST(StaticRuntime, FusionPass) {
 
       Method method = module.get_method("forward");
       auto graph = method.graph();
-      fuseStaticSubgraphs(graph);
+      fuseStaticSubgraphs(graph, 2);
       bool hit = false;
       for (const auto& n : module.get_method("forward").graph()->nodes()) {
         if (n->kind() == torch::jit::prim::StaticSubgraph) {
