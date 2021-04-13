@@ -1091,7 +1091,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC, ExecMode.REMOTE]:
             with dist_autograd.context() as context_id:
                 val = self._exec_func(exec_mode, torch.matmul, t1, t2)
-                val = self._exec_func(exec_mode, torch.chain_matmul, [val, t3, t4])
+                val = self._exec_func(exec_mode, torch.linalg.multi_dot, (val, t3, t4))
                 loss = val.sum()
 
                 ret = self._verify_backwards(
@@ -1132,7 +1132,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 t2 = tensor_list[2]
                 t3 = tensor_list[4]
 
-                val = self._exec_func(exec_mode, torch.chain_matmul, [t1, t2, t3])
+                val = self._exec_func(exec_mode, torch.linalg.multi_dot, (t1, t2, t3))
 
                 loss = val.sum()
                 ret = self._verify_backwards(
@@ -1368,7 +1368,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         t3 = torch.nn.functional.linear(t1, t2)
         t4 = torch.nn.functional.linear(t2, t3)
         t5 = torch.nn.functional.linear(t3, t4)
-        return torch.chain_matmul(t1, t2, t3, t4, t5)
+        return torch.linalg.multi_dot([t1, t2, t3, t4, t5])
 
     @dist_init
     def test_backward_complex_python_udf(self):
@@ -1391,7 +1391,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     def _python_udf_with_backward_error(t1, t2):
         t3 = t1 + t2
         t4 = SimulateBackwardError.apply(t3)
-        return torch.chain_matmul(t1, t2, t3, t4)
+        return torch.linalg.multi_dot([t1, t2, t3, t4])
 
     @staticmethod
     def _nested_rpc_call_backward_error(t1, t2, dst):
@@ -1402,7 +1402,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             DistAutogradTest._python_udf_with_backward_error,
             args=(t1, t2),
         )
-        return torch.chain_matmul(t1, t2, res)
+        return torch.linalg.multi_dot([t1, t2, res])
 
     @dist_init
     def test_backward_python_udf_error(self):
@@ -1472,7 +1472,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         t3 = t1 * t2
         t4 = t1 + t2
         res = rpc.rpc_sync(worker_name(dst), my_py_add, args=(t3, t4))
-        return torch.chain_matmul(t1, t2, t3, t4, res)
+        return torch.linalg.multi_dot([t1, t2, t3, t4, res])
 
     @dist_init
     def test_backwards_nested_python_udf(self):
@@ -1482,7 +1482,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         t3 = t1 * t2
         t4 = t1 + t2
         res = t3 + t4
-        loss = torch.chain_matmul(t1, t2, t3, t4, res).sum()
+        loss = torch.linalg.multi_dot([t1, t2, t3, t4, res]).sum()
         torch.autograd.backward([loss])
 
         # Now run distributed autograd.

@@ -760,6 +760,34 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         )
         self.assertDeviceChecks(dc, op, [X], [0])
 
+    @given(X=hu.tensor(dtype=np.float32), **hu.gcs)
+    @settings(deadline=10000)
+    def test_log1p(self, X, gc, dc):
+        op = core.CreateOperator(
+            "Log1p",
+            ["X"],
+            ["Y"]
+        )
+
+        def ref_log1p(input):
+            result = np.log1p(input)
+            return (result,)
+
+        def ref_log1p_grad(g_out, outputs, fwd_inputs):
+            result = g_out / (fwd_inputs[0] + 1)
+            return (result,)
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=ref_log1p,
+            output_to_grad="Y",
+            grad_reference=ref_log1p_grad,
+            ensure_outputs_are_inferred=True,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+
 
 if __name__ == "__main__":
     unittest.main()
