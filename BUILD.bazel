@@ -1733,7 +1733,6 @@ cc_library(
         "@foxi",
         "@gloo",
         "@onnx",
-        "@optimizer",
         "@fmt",
     ] + if_cuda(
         [
