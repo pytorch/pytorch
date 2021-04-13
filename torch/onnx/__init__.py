@@ -50,7 +50,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
             1. ONLY A TUPLE OF ARGUMENTS or torch.Tensor::
 
-                ‘’args = (x, y, z)’'
+                "args = (x, y, z)"
 
             The inputs to the model, e.g., such that ``model(*args)`` is a valid invocation
             of the model. Any non-Tensor arguments will be hard-coded into the exported model;
@@ -60,11 +60,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
             2. A TUPLE OF ARGUEMENTS WITH A DICTIONARY OF NAMED PARAMETERS::
 
-                ‘’args = (x,
+                "args = (x,
                         {
-                        ‘y’: input_y,
-                        ‘z’: input_z
-                        }) ‘’
+                        'y': input_y,
+                        'z': input_z
+                        })"
 
             The inputs to the model are structured as a tuple consisting of
             non-keyword arguments and the last value of this tuple being a dictionary
@@ -82,20 +82,20 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                         return x
 
                 m = Model()
-                k = torch.randn(2, 3)  
-                x = {torch.tensor(1.): torch.randn(2, 3)}
+                k = torch.randn(2, 3)
+                x = {torch.tensor(1.): torch.randn(2, 3)}
 
                 In the previous iteration, the call to export API would look like
 
-                    torch.onnx.export(model, (k, x), ‘test.onnx’)
+                    torch.onnx.export(model, (k, x), 'test.onnx')
 
                 This would work as intended. However, the export function
-                would now assume that the ‘x’ input is intended to represent the optional
+                would now assume that the `x` input is intended to represent the optional
                 dictionary consisting of named arguments. In order to prevent this from being
                 an issue a constraint is placed to provide an empty dictionary as the last
                 input in the tuple args in such cases. The new call would look like this.
 
-                    torch.onnx.export(model, (k, x, {}), ‘test.onnx’)
+                    torch.onnx.export(model, (k, x, {}), 'test.onnx')
 
         f: a file-like object (has to implement fileno that returns a file descriptor)
             or a string containing a file name.  A binary Protobuf will be written

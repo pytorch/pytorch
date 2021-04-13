@@ -1784,7 +1784,7 @@ class TestFrozenOptimizations(JitTestCase):
     @unittest.skipIf(not TEST_CUDNN, "requires CUDNN")
     def test_freeze_conv_relu_fusion(self):
         conv_bias = [True, False]
-        conv_ops = [nn.Conv2d]
+        conv_ops = [nn.Conv2d, nn.Conv3d]
         add_z = [True, False]
         use_tracing = [True, False]
         for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, add_z, use_tracing):
@@ -1805,11 +1805,8 @@ class TestFrozenOptimizations(JitTestCase):
 
             mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
 
-            inps = [5, 3, 4]
-            if conv == nn.Conv2d:
-                inps.append(inps[-1])
+            inps = [5, 3, 4, 4]
             if conv == nn.Conv3d:
-                inps.append(inps[-1])
                 inps.append(inps[-1])
             inp = torch.rand(inps).cuda()
 
@@ -1827,6 +1824,7 @@ class TestFrozenOptimizations(JitTestCase):
                 FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
 
             self.assertEqual(mod_eager(inp), frozen_mod(inp))
+
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
     def setUp(self):

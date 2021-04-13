@@ -659,24 +659,6 @@ std::string generateKernel(
     env.s("RandInit", "");
   }
 
-  // HIP headers must be included until precompiled header feature is available
-  // clang-format off
-#ifdef __HIP_PLATFORM_HCC__
-#if ROCM_VERSION < 40200
-  if (use_cuda && has_half_tensor) {
-    env.s("RuntimeHeader", R"(
-#include <hip/hip_runtime.h>
-#include <hip/hip_fp16.h>
-)");
-  } else if (use_cuda) {
-    env.s("RuntimeHeader", R"(
-#include <hip/hip_runtime.h>
-)");
-  }
-#endif
-#endif
-  // clang-format on
-
   // Instantiates the CUDA or CPU-specific templates
   env.s("tensorOffsets", tensorOffsets.str());
   env.s("tensorChecks", tensorChecks.str());
