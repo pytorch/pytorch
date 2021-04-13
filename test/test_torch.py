@@ -3670,6 +3670,38 @@ class TestTorchDeviceType(TestCase):
         test_func_expect_error(self, device, 'method with indices')
         test_func_expect_error(self, device, 'out with indices')
 
+    def _test_gather_backward_one_dim(self, device, deterministic: bool = False) -> None:
+        with DeterministicGuard(deterministic):
+            m = random.randint(2000, 3000)
+            elems = random.randint(10 * m, 20 * m)
+            dim = 0
+            src = torch.randn(m, device=device, requires_grad=True)
+            idx = torch.randint(m, (elems,), device=device)
+            res = torch.gather(src, dim, idx)
+            weight = torch.rand_like(res, device=device) * 10 ** 6
+            res.backward(weight)
+            grad = src.grad.detach().clone()
+
+            if torch.device(device).type == 'cuda':
+                for _ in range(2):
+                    src.grad.data.zero_()
+                    res = torch.gather(src, dim, idx)
+                    res.backward(weight)
+                    self.assertEqual(src.grad, grad, atol=0, rtol=0)
+            else:
+                expected = torch.zeros_like(src, device=device)
+                for i in range(elems):
+                    expected[idx[i]] += weight[i]
+                self.assertEqual(grad, expected, atol=0, rtol=0)
+
+    @onlyOnCPUAndCUDA
+    def test_gather_backward_deterministic_path(self, device) -> None:
+        self._test_gather_backward_one_dim(device, True)
+
+    @onlyCPU
+    def test_gather_backward_one_dim(self, device) -> None:
+        self._test_gather_backward_one_dim(device, False)
+
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_log_normal(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).log_normal_()
