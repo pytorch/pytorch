@@ -588,9 +588,9 @@ void testSetGet(const std::string& path) {
 
   // test that get() gets the same value as the one that was set()
   std::vector<uint8_t> testVector = {1, 1, 1, 1};
-  auto store1 = tests[0].getProcessGroup()._getStore();
+  auto store1 = tests[0].getProcessGroup().getStore();
   store1->setUint("testKey", testVector);
-  auto store2 = tests[1].getProcessGroup()._getStore();
+  auto store2 = tests[1].getProcessGroup().getStore();
   std::vector<uint8_t> value = store2->getUint("testKey");
   EXPECT_TRUE(value == testVector);
 }

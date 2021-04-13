@@ -302,7 +302,7 @@ class GlooStore : public ::gloo::rendezvous::Store {
       bool waitAllRanks = false) override;
 
  protected:
-  std::unique_ptr<::gloo::rendezvous::Store> store_;
+  std::unique_ptr<::gloo::rendezvous::Store> store_; //this used to be a unique_ptr
   const c10::intrusive_ptr<Options> options_;
 
   // Every Gloo context represents a set of connections to its peers.
