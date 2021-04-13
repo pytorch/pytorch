@@ -307,6 +307,7 @@ namespace c10 {
   _(cuda, _set_device)               \
   _(cuda, set_stream)                \
   _(cuda, _current_device)           \
+  _(cuda, synchronize)               \
   _(aten, swapaxes)                  \
   _(aten, swapaxes_)                 \
   _(aten, swapdims)                  \
