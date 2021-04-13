@@ -54,9 +54,11 @@ struct TORCH_API InferenceMode {
     c10::impl::_force_tls_local_dispatch_key_set(prev_keyset);
   }
   static bool is_enabled();
+  // set_enabled() is not user facing and should be only used in
+  // ThreadLocalState.cpp.
+  static void set_enabled(bool enabled);
 
   private:
-    static void set_enabled(bool enabled);
     bool prev_mode;
     c10::impl::LocalDispatchKeySet prev_keyset;
 };

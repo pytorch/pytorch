@@ -10,7 +10,8 @@ namespace at {
 
 ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
-      debug_info_(c10::ThreadLocalDebugInfo::current()) {
+      debug_info_(c10::ThreadLocalDebugInfo::current()),
+      inference_mode_enabled_(c10::InferenceMode::is_enabled()) {
   rf_tls_ = at::get_record_function_tls_();
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
@@ -36,6 +37,8 @@ void ThreadLocalState::setThreadLocalState(
   c10::ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
 
   c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
+
+  c10::InferenceMode::set_enabled(state.inference_mode_enabled_);
 }
 
 } // namespace at
