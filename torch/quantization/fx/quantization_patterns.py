@@ -963,7 +963,8 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.stack)
 @register_quant_pattern(torch.unsqueeze)
 @register_quant_pattern(operator.floordiv)
-@register_quant_pattern(operator.getitem)
+# remov getitem for now until CopyNode is properly handled
+# @register_quant_pattern(operator.getitem)
 @register_quant_pattern('chunk')
 @register_quant_pattern('clamp')
 @register_quant_pattern('contiguous')
