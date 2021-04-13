@@ -103,7 +103,7 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
 
   // read records through readers
   PyTorchStreamReader reader(&iss);
-  EXPECT_THROW(reader.getRecord("key3"), c10::ValueError);
+  EXPECT_THROW(reader.getRecord("key3"), c10::Error);
 
   // Reader should still work after throwing
   EXPECT_TRUE(reader.hasRecord("key1"));

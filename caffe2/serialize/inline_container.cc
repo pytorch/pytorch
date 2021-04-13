@@ -140,15 +140,14 @@ void PyTorchStreamReader::init() {
 }
 
 void PyTorchStreamReader::valid(const char* what, const char* info) {
-  auto err = mz_zip_get_last_error(ar_.get());
-  if (err != MZ_ZIP_NO_ERROR) {
-    CAFFE_THROW(
-        "PytorchStreamReader failed ",
-        what,
-        info,
-        ": ",
-        mz_zip_get_error_string(err));
-  }
+  const auto err = mz_zip_get_last_error(ar_.get());
+  TORCH_CHECK(
+      err == MZ_ZIP_NO_ERROR,
+      "PytorchStreamReader failed ",
+      what,
+      info,
+      ": ",
+      mz_zip_get_error_string(err));
 }
 
 constexpr int MZ_ZIP_LOCAL_DIR_HEADER_SIZE = 30;
