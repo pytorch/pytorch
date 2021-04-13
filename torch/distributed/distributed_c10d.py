@@ -2027,6 +2027,7 @@ def gather(tensor,
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
+    .. note:: Note that this API is not supported when using the NCCL backend.
     """
     _check_single_tensor(tensor, "tensor")
 
