@@ -2,7 +2,6 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
@@ -2031,7 +2030,7 @@ struct to_ir {
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
       if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT ||
-          assignee.kind() == TK_TUPLE_LITERAL) {
+          assignee.kind() == TK_TUPLE_LITERAL || assignee.kind() == '.') {
         num_normal_assign++;
       } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
@@ -2483,6 +2482,10 @@ struct to_ir {
               sub_starred_unpack);
           i++;
         } break;
+        case '.': {
+          emitSelectAssign(assignee, outputs.at(i), rhs_loc);
+          i++;
+        } break;
         default:
           throw ErrorReport(assignee)
               << "unexpected expression on the left-hand side";
@@ -2595,6 +2598,16 @@ struct to_ir {
     const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1, type_hint)
                               ->asValue(stmt.rhs().range(), method);
     lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
+  }
+
+  void emitSelectAssign(
+      const Expr& lhs,
+      SugaredValuePtr rhs,
+      const SourceRange& loc) {
+    const auto lhs_select = Select(lhs);
+    auto lhs_sv = emitSugaredExpr(lhs_select.value(), 1);
+    const auto rhs_value = rhs->asValue(loc, method);
+    lhs_sv->setAttr(loc, method, lhs_select.selector().name(), rhs_value);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -3485,6 +3498,21 @@ struct to_ir {
       // checked is second)
       std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
     }
+
+    // if this is adding two tuples, we deal with it here.
+    // the reason is we can't specify the length of tuples
+    // when registering custom aten::add.
+    if (named_values[0].type()->kind() == TupleType::Kind &&
+        named_values[1].type()->kind() == TupleType::Kind &&
+        kind == aten::add) {
+      auto first_tuple = createTupleUnpack(named_values[0].value(*graph)).vec();
+      auto second_tuple =
+          createTupleUnpack(named_values[1].value(*graph)).vec();
+      first_tuple.insert(
+          first_tuple.end(), second_tuple.begin(), second_tuple.end());
+      return graph->insertNode(graph->createTuple(first_tuple))->output();
+    }
+
     return asSimple(
         makeMagic(
             overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
@@ -3943,7 +3971,7 @@ struct to_ir {
       rdim =
           handle_indexing(subscript_expr, rev_idx, rdim, /*is_reverse=*/true);
     }
-    for (const auto i : c10::irange(exprs.size())) {
+    for (size_t i = 0; i < exprs.size(); i++) {
       if (!exprs[i].has_value()) {
         if (subscript_exprs[i].kind() == TK_SLICE_EXPR) {
           sliceable = emitSlice(
@@ -4400,7 +4428,7 @@ std::vector<Function*> CompilationUnit::define(
     this->register_function(std::move(fn));
   };
 
-  for (const auto i : c10::irange(properties.size())) {
+  for (size_t i = 0; i < properties.size(); i++) {
     PropertyPair property_fns = define_property(
         prefix,
         properties[i],
@@ -4419,7 +4447,7 @@ std::vector<Function*> CompilationUnit::define(
     }
   }
 
-  for (const auto i : c10::irange(definitions.size())) {
+  for (size_t i = 0; i < definitions.size(); i++) {
     auto fn = define(
         prefix,
         definitions[i],
@@ -4498,7 +4526,7 @@ void CompilationUnit::define_hooks(
   };
 
   // define hooks
-  for (const auto i : c10::irange(hookDefs.size())) {
+  for (size_t i = 0; i < hookDefs.size(); i++) {
     // check to see if already defined this hook
     auto existing_fn = check_collisions(hookDefs[i]);
     if (existing_fn != nullptr) {
@@ -4525,7 +4553,7 @@ void CompilationUnit::define_hooks(
   }
 
   // define pre_hooks
-  for (const auto i : c10::irange(preHookDefs.size())) {
+  for (size_t i = 0; i < preHookDefs.size(); i++) {
     // check to see if already defined this hook
     auto existing_fn = check_collisions(preHookDefs[i]);
     if (existing_fn != nullptr) {

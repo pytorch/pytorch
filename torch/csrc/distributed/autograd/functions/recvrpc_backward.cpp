@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <ATen/core/functional.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
@@ -23,7 +22,7 @@ RecvRpcBackward::RecvRpcBackward(
 
 variable_list RecvRpcBackward::apply(variable_list&& grads) {
   std::vector<Variable> outputGrads;
-  for(const auto i : c10::irange(grads.size())) {
+  for (size_t i = 0; i < grads.size(); i++) {
     const auto& grad = grads[i];
     if (grad.defined()) {
       outputGrads.emplace_back(grad);

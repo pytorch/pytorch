@@ -12,6 +12,7 @@ from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple
+from torch.testing._internal.common_utils import IS_MACOS
 
 import torch
 import torch.cuda
@@ -3241,6 +3242,7 @@ class DistributedTest:
                 powersgd_state = powerSGD.PowerSGDState(
                     process_group=None,
                     matrix_approximation_rank=1,
+                    start_powerSGD_iter=2,
                     warm_start=warm_start,
                 )
                 self._test_ddp_hook_parity(state=powersgd_state, hook=powerSGD.powerSGD_hook)
@@ -5133,6 +5135,10 @@ class DistributedTest:
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
+        @unittest.skipIf(
+            IS_MACOS,
+            "MacOS uses uv transport which does not have as robust error handling as tcp transport"
+        )
         def test_monitored_barrier_gloo(self):
             tensors = [torch.ones(10) * self.rank]
             # Kick off some allreduce work on all ranks
@@ -5230,9 +5236,6 @@ class DistributedTest:
                     err_regex
                 ):
                     gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks)
-            # We need a barrier since otherwise non-zero ranks exit too early
-            # and cause a timeout.
-            self._barrier(timeout=30)
 
         @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})
@@ -5271,6 +5274,10 @@ class DistributedTest:
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
         @skip_if_small_worldsize
+        @unittest.skipIf(
+            IS_MACOS,
+            "MacOS uses uv transport which does not have as robust error handling as tcp transport"
+        )
         def test_monitored_barrier_failure_order(self):
             # Ensure that the first (in sorted order) rank is reported when
             # multiple ranks fail to pass the monitored_barrier.
@@ -5290,10 +5297,6 @@ class DistributedTest:
                 with self.assertRaisesRegex(RuntimeError, err_regex):
                     dist.monitored_barrier(timeout=timeout)
 
-            # We need a barrier since otherwise expected_first_failed_rank exits too early
-            # and cause a timeout.
-            self._barrier(timeout=30)
-
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
         @skip_if_small_worldsize
@@ -5306,7 +5309,3 @@ class DistributedTest:
                 err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
                 with self.assertRaisesRegex(RuntimeError, err_regex):
                     dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
-
-            # We need a barrier since otherwise non-zero ranks exit too early
-            # and cause a timeout.
-            self._barrier(timeout=30)

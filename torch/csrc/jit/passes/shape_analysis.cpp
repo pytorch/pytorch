@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -239,7 +238,7 @@ class ShapePropagator {
     c10::ScalarType dimmed = c10::ScalarType::Undefined;
     c10::ScalarType zerodim = c10::ScalarType::Undefined;
     // binary arithmetic ops, more than 2 args is alpha.
-    for (const auto i : c10::irange(2)) {
+    for (size_t i = 0; i < 2; i++) {
       auto dtt = node->inputs()[i]->type()->expect<TensorType>();
       auto inputDtype = dtt->scalarType();
       if (!dtt || !inputDtype) {
@@ -2111,12 +2110,12 @@ class ShapePropagator {
             "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
             /*const_inputs=*/attr::size)) {
       auto tp = tensor_types.at(0);
-      std::vector<int64_t> sizes, strides;
-      std::tie(sizes, strides) = at::inferExpandGeometry(
+      auto sizesAndStrides = at::inferExpandGeometry_dimvector(
           tp->sizes().concrete_sizes().value(),
           tp->strides().concrete_sizes().value(),
           node->get<c10::List<int64_t>>(attr::size).value().vec());
-      node->output()->setType(tp->withSizesStrides(sizes, strides));
+      node->output()->setType(tp->withSizesStrides(
+          std::get<0>(sizesAndStrides), std::get<1>(sizesAndStrides)));
       return true;
     } else if (
         node->matches(

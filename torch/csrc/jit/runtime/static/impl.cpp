@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/InferenceMode.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -667,7 +667,7 @@ std::vector<at::Tensor> StaticRuntime::operator()(
     const std::vector<at::Tensor>& inps) {
   std::vector<c10::IValue> stack;
   stack.resize(inps.size());
-  for (const auto i : c10::irange(inps.size())) {
+  for (size_t i = 0; i < inps.size(); i++) {
     stack[i] = inps[i];
   }
 
@@ -694,7 +694,7 @@ c10::IValue StaticRuntime::operator()(
   // autograd. Enabling this is a significant win on dispatcher
   // overhead because it saves a round of dispatch for at least some
   // functions, such as resize_ and resize_as_.
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  c10::InferenceMode mode;
 
   if (planner_) {
     planner_->allocate();
@@ -708,11 +708,11 @@ c10::IValue StaticRuntime::operator()(
         "with StaticModule(const torch::jit::Module& m) instead.");
     std::vector<c10::IValue> s = args;
     static_module_.schema()->checkAndNormalizeInputs(s, kwargs);
-    for (const auto i : c10::irange(s.size())) {
+    for (size_t i = 0; i < s.size(); i++) {
       Input(i) = std::move(s[i]);
     }
   } else {
-    for (const auto i : c10::irange(args.size())) {
+    for (size_t i = 0; i < args.size(); i++) {
       Input(i) = args[i];
     }
   }
@@ -770,7 +770,7 @@ void StaticRuntime::benchmark(
   IndividualMetrics results =
       benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
 
-  for (const auto i : c10::irange(nodes_.size())) {
+  for (size_t i = 0; i < nodes_.size(); i++) {
     const Node* node = nodes_[i].node();
     std::cout << "Node #" << i << ": " << results.time_per_node[i]
               << " ms/iter, ";
@@ -839,9 +839,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
 
-  // See comment on above use of AutoNonVariableTypeMode for
+  // See comment on above use of InferenceMode for
   // explanation.
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  c10::InferenceMode mode;
 
   IndividualMetrics results;
   results.time_per_node.resize(nodes_.size(), 0);
@@ -857,7 +857,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         "with StaticModule(const torch::jit::Module& m) instead.");
     static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
   }
-  for (const auto i : c10::irange(stack.size())) {
+  for (size_t i = 0; i < stack.size(); i++) {
     Input(i) = stack[i];
   }
   results.setup_time = timer.MilliSeconds();
@@ -868,8 +868,8 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // main runs
-  for (const auto k : c10::irange(main_runs)) {
-    for (const auto i : c10::irange(stack.size())) {
+  for (int k = 0; k < main_runs; k++) {
+    for (size_t i = 0; i < stack.size(); i++) {
       Input(i) = stack[i];
     }
     timer.Start();
@@ -879,7 +879,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     float millis = timer.MilliSeconds();
     results.memory_alloc_time += millis;
 
-    for (const auto i : c10::irange(nodes_.size())) {
+    for (size_t i = 0; i < nodes_.size(); i++) {
       timer.Start();
       nodes_[i].run();
       millis = timer.MilliSeconds();
@@ -929,7 +929,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   // post processing
-  for (const auto i : c10::irange(nodes_.size())) {
+  for (size_t i = 0; i < nodes_.size(); i++) {
     const Node* node = nodes_[i].node();
     std::string kind = std::string(node->kind().toQualString());
     results.time_per_node[i] /= static_cast<float>(main_runs);
@@ -953,15 +953,15 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
   }
 
   // check for inputs
-  for (const auto i : c10::irange(inputs_.size())) {
+  for (size_t i = 0; i < inputs_.size(); i++) {
     TORCH_CHECK(inputs_[i].isNone(), "Input ", i, " was not cleaned up");
   }
 
   std::unordered_set<const IValue*> output_ivalues(
       outputs_.begin(), outputs_.end());
-  for (const auto n : c10::irange(nodes_.size())) {
+  for (size_t n = 0; n < nodes_.size(); n++) {
     auto& pnode = nodes_[n];
-    for (const auto i : c10::irange(pnode.outputs().size())) {
+    for (size_t i = 0; i < pnode.outputs().size(); i++) {
       const IValue* ival = &pnode.Output(i);
       const std::string error_msg = "Output " + c10::to_string(i) +
           " of node " + c10::to_string(n) + " was not cleaned up";
@@ -1183,7 +1183,7 @@ void ProcessedNode::run() {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
     stack.reserve(size);
-    for (const auto i : c10::irange(size)) {
+    for (size_t i = 0; i < size; i++) {
       stack.emplace_back(Input(i));
     }
 

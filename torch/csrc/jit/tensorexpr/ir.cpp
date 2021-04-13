@@ -2,8 +2,6 @@
 
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-#include <c10/util/irange.h>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -35,9 +33,12 @@ void castIndicesToInts(std::vector<const Expr*>& indices) {
 Load::Load(
     Dtype dtype,
     const Buf* buf,
-    const std::vector<const Expr*>& indices,
+    std::vector<const Expr*> indices,
     const Expr* mask)
-    : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
+    : ExprNodeBase(dtype),
+      buf_(buf),
+      indices_(std::move(indices)),
+      mask_(mask) {
   castIndicesToInts(indices_);
 }
 
@@ -136,7 +137,7 @@ const Expr* flatten_index(
   }
 
   const Expr* total_index = new IntImm(0);
-  for (const auto i : c10::irange(ndim)) {
+  for (size_t i = 0; i < ndim; i++) {
     total_index = new Add(total_index, new Mul(indices[i], strides[i]));
   }
   return total_index;
@@ -230,7 +231,7 @@ ExternalCall* ExternalCall::make(
 std::vector<const Expr*> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>& v) {
   std::vector<const Expr*> result(v.size());
-  for (const auto i : c10::irange(v.size())) {
+  for (size_t i = 0; i < v.size(); i++) {
     result[i] = v[i].node();
   }
   return result;
@@ -239,7 +240,7 @@ std::vector<const Expr*> ExprHandleVectorToExprVector(
 std::vector<ExprHandle> ExprVectorToExprHandleVector(
     const std::vector<const Expr*>& v) {
   std::vector<ExprHandle> result(v.size());
-  for (const auto i : c10::irange(v.size())) {
+  for (size_t i = 0; i < v.size(); i++) {
     result[i] = ExprHandle(v[i]);
   }
   return result;
@@ -248,7 +249,7 @@ std::vector<ExprHandle> ExprVectorToExprHandleVector(
 std::vector<const Var*> VarHandleVectorToVarVector(
     const std::vector<VarHandle>& v) {
   std::vector<const Var*> result(v.size());
-  for (const auto i : c10::irange(v.size())) {
+  for (size_t i = 0; i < v.size(); i++) {
     result[i] = v[i].node();
   }
   return result;
@@ -257,7 +258,7 @@ std::vector<const Var*> VarHandleVectorToVarVector(
 std::vector<VarHandle> VarVectorToVarHandleVector(
     const std::vector<const Var*>& v) {
   std::vector<VarHandle> result(v.size());
-  for (const auto i : c10::irange(v.size())) {
+  for (size_t i = 0; i < v.size(); i++) {
     result[i] = VarHandle(v[i]);
   }
   return result;

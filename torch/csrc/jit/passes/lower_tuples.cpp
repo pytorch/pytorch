@@ -2,7 +2,6 @@
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
@@ -171,7 +170,7 @@ static void VisitNode(Node* n, Node* insert_point) {
           "tuple appears in op that does not forward tuples, ",
           "unsupported kind: ",
           n->kind().toQualString());
-      for (const auto j : c10::irange(tt->elements().size())) {
+      for (size_t j = 0; j < tt->elements().size(); j++) {
         n->insertOutput(i + 1 + j)->setType(tt->elements()[j]);
       }
       auto new_tup =
