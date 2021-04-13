@@ -49,14 +49,12 @@ fi
 
 # determine number of GPU devices available for running tests in parallel
 # this also only turns on the --run-parallel feature for GPU jobs; CPU jobs run normally
-if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   PYTORCH_DEVICE_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
   export PYTORCH_DEVICE_COUNT
-  export PYTORCH_GPU_RUN_PARALLEL="-- --run-parallel $PYTORCH_DEVICE_COUNT"
 elif [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   PYTORCH_DEVICE_COUNT=$(rocminfo | grep -c 'Name:.*\sgfx')
   export PYTORCH_DEVICE_COUNT
-  export PYTORCH_GPU_RUN_PARALLEL="-- --run-parallel $PYTORCH_DEVICE_COUNT"
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
@@ -142,12 +140,20 @@ test_python_legacy_jit() {
 }
 
 test_python_shard1() {
-  time python test/run_test.py --exclude-jit-executor --shard 1 2 --verbose --determine-from="$DETERMINE_FROM" "$PYTORCH_GPU_RUN_PARALLEL"
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    time python test/run_test.py --exclude-jit-executor --shard 1 2 --verbose --determine-from="$DETERMINE_FROM" -- --run-parallel "$PYTORCH_DEVICE_COUNT"
+  else
+    time python test/run_test.py --exclude-jit-executor --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
+  fi
   assert_git_not_dirty
 }
 
 test_python_shard2() {
-  time python test/run_test.py --exclude-jit-executor --shard 2 2 --verbose --determine-from="$DETERMINE_FROM" "$PYTORCH_GPU_RUN_PARALLEL"
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    time python test/run_test.py --exclude-jit-executor --shard 2 2 --verbose --determine-from="$DETERMINE_FROM" -- --run-parallel "$PYTORCH_DEVICE_COUNT"
+  else
+    time python test/run_test.py --exclude-jit-executor --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
+  fi
   assert_git_not_dirty
 }
 
