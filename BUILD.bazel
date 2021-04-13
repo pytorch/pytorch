@@ -1649,7 +1649,7 @@ cc_library(
         "caffe2/utils/*.h",
         "caffe2/utils/math/*.h",
         "caffe2/utils/threadpool/*.h",
-        "third_party/optimizer/*.h"
+        "third_party/optimizer/*.h",
         "modules/**/*.h",
     ]) + if_cuda(glob([
         "caffe2/**/*.cuh",
