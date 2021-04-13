@@ -38,8 +38,6 @@ class MultiheadAttention(nn.MultiheadAttention):
                        value sequences at dim=1.
         kdim: total number of features in key. Default: None.
         vdim: total number of features in value. Default: None.
-        batch_first: If ``True``, then the input and output tensors are provided
-            as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
 
     Note that if :attr:`kdim` and :attr:`vdim` are None, they will be set
     to :attr:`embed_dim` such that query, key, and value have the same
@@ -54,15 +52,13 @@ class MultiheadAttention(nn.MultiheadAttention):
     Note::
         Please, follow the quantization flow to convert the quantizable MHA.
     """
-    __constants__ = ['batch_first']
-
     def __init__(self, embed_dim: int, num_heads: int,
                  dropout: float = 0., bias: bool = True,
                  add_bias_kv: bool = False, add_zero_attn: bool = False,
-                 kdim: int = None, vdim: int = None, batch_first: bool = False):
+                 kdim: int = None, vdim: int = None):
         super(MultiheadAttention, self).__init__(embed_dim, num_heads, dropout,
                                                  bias, add_bias_kv,
-                                                 add_zero_attn, kdim, vdim, batch_first)
+                                                 add_zero_attn, kdim, vdim)
         self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
         self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias)
         self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias)
@@ -159,7 +155,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         fp = self._FLOAT_MODULE(self.embed_dim, self.num_heads, self.dropout,
                                 (self.in_proj_bias is not None),
                                 (self.bias_k is not None),
-                                self.add_zero_attn, self.kdim, self.vdim, self.batch_first)
+                                self.add_zero_attn, self.kdim, self.vdim)
         assert fp._qkv_same_embed_dim == self._qkv_same_embed_dim
         if self.bias_k is not None:
             fp.bias_k = nn.Parameter(self.bias_k.dequantize())
@@ -271,11 +267,11 @@ class MultiheadAttention(nn.MultiheadAttention):
     Shape:
         - Inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
-          the embedding dimension. :math:`(N, L, E)` if ``batch_first`` is ``True``.
+          the embedding dimension.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
-          the embedding dimension. :math:`(N, S, E)` if ``batch_first`` is ``True``.
+          the embedding dimension.
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
-          the embedding dimension. :math:`(N, S, E)` if ``batch_first`` is ``True``.
+          the embedding dimension.
         - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
           If a ByteTensor is provided, the non-zero positions will be ignored while the position
           with the zero positions will be unchanged. If a BoolTensor is provided, the positions with the
@@ -290,7 +286,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         - Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
-          E is the embedding dimension. :math:`(N, L, E)` if ``batch_first`` is ``True``.
+          E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
         """
@@ -311,9 +307,6 @@ class MultiheadAttention(nn.MultiheadAttention):
         # `torch.nn.functional.multi_head_attention`. Will need to refactor.
         static_k = None
         static_v = None
-
-        if self.batch_first:
-            query, key, value = [x.transpose(0, 1) for x in (query, key, value)]
 
         tgt_len, bsz, embed_dim_to_check = query.size()
         assert self.embed_dim == embed_dim_to_check
@@ -433,10 +426,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         attn_output = torch.bmm(attn_output_weights, v)
         assert list(attn_output.size()) == [bsz * self.num_heads, tgt_len, head_dim]
-        if self.batch_first:
-            attn_output = attn_output.view(bsz, tgt_len, self.embed_dim)
-        else:
-            attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, self.embed_dim)
+        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, self.embed_dim)
 
         # Reentering the quantized zone
         attn_output = self.quant_attn_output(attn_output)
