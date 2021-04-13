@@ -245,9 +245,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(const Store* v) override;
   void visit(const Broadcast* v) override;
   void visit(const IfThenElse* v) override;
-  void visit(const BaseCallNode* v) override;
   void visit(const Intrinsics* v) override;
-  void visit(const FunctionCall* v) override;
   void visit(const Allocate* v) override;
   void visit(const Free* v) override;
   void visit(const Let* v) override;
@@ -1542,10 +1540,6 @@ void LLVMCodeGenImpl::visit(const IfThenElse* v) {
   value_ = phi;
 }
 
-void LLVMCodeGenImpl::visit(const BaseCallNode* v) {
-  throw unimplemented_lowering(v);
-}
-
 static void applyMathFunctionAttributes(llvm::Function* f) {
   f->addFnAttr(llvm::Attribute::ReadNone);
   f->addFnAttr(llvm::Attribute::NoUnwind);
@@ -1827,10 +1821,6 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
       value_ = irb_.CreateInsertElement(value_, val, i);
     }
   }
-}
-
-void LLVMCodeGenImpl::visit(const FunctionCall* v) {
-  throw unimplemented_lowering(v);
 }
 
 void LLVMCodeGenImpl::visit(const ExternalCall* v) {

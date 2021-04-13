@@ -29,8 +29,6 @@ inline c10::BFloat16 lgamma(c10::BFloat16 a) { return std::lgamma(float(a));}
 inline c10::BFloat16 sqrt(c10::BFloat16 a) { return std::sqrt(float(a));}
 inline c10::BFloat16 rsqrt(c10::BFloat16 a) { return 1.0 / std::sqrt(float(a));}
 inline c10::BFloat16 abs(c10::BFloat16 a) { return std::abs(float(a));}
-inline c10::BFloat16 min(c10::BFloat16 a, c10::BFloat16 b) { return std::min(float(a), float(b));}
-inline c10::BFloat16 max(c10::BFloat16 a, c10::BFloat16 b) { return std::max(float(a), float(b));}
 #if defined(_MSC_VER) && defined(__CUDACC__)
 inline c10::BFloat16 pow(c10::BFloat16 a, double b) { return std::pow(float(a), float(b));}
 #else
@@ -38,8 +36,5 @@ inline c10::BFloat16 pow(c10::BFloat16 a, double b) { return std::pow(float(a), 
 #endif
 inline c10::BFloat16 pow(c10::BFloat16 a, c10::BFloat16 b) { return std::pow(float(a), float(b));}
 inline c10::BFloat16 fmod(c10::BFloat16 a, c10::BFloat16 b) { return std::fmod(float(a), float(b));}
-inline c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
-   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
-}
 
 } // namespace std
