@@ -52,7 +52,7 @@ def allocate_jacobians_with_outputs(output_tensors: Tuple, dtype=None, device=No
     for t in output_tensors:
         if is_float_or_complex_tensor(t):
             if numel_input is None:
-                out.append(t.new_zeros((t.nelement(),), **options))
+                out.append(t.new_zeros((t.numel(),), **options))
             else:
                 out.append(t.new_zeros((numel_input, t.numel()), **options))
     return tuple(out)
@@ -124,8 +124,7 @@ def iter_tensor(x_tensor):
             yield x_tensor, x_idx, d_idx
 
 
-def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
-                            grad_out=1.0) -> List[Tuple[torch.Tensor, ...]]:
+def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3) -> List[Tuple[torch.Tensor, ...]]:
     """Computes the numerical jacobian for a given fn and inputs. Returns M * N jacobians
     where M is the number of input tensors that require grad, and N is the number of output
     float/complex tensors.
@@ -136,7 +135,6 @@ def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
         outputs: provide precomputed outputs to avoid one extra invocation of fn
         target: the Tensors wrt whom Jacobians are calculated (default=`inputs`)
         eps: the magnitude of the perturbation during finite differencing (default=`1e-3`)
-        grad_out: grad output value used to calculate gradients.
 
     Returns:
         A list of M N-tuples of tensors
@@ -147,11 +145,14 @@ def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
     jacobians: List[Tuple[torch.Tensor, ...]] = []
     if outputs is None:
         outputs = _as_tuple(fn(*_as_tuple(inputs)))
+    if any(o.is_complex() for o in outputs):
+        raise ValueError("Expected output to be non-complex. get_numerical_jacobian no "
+                         "longer supports functions that return complex outputs.")
     if target is None:
         target = inputs
     inp_indices = [i for i, a in enumerate(target) if is_tensor_like(a) and a.requires_grad]
     for i, (inp, inp_idx) in enumerate(zip(iter_tensors(target, True), inp_indices)):
-        jacobians += [get_numerical_jacobian_wrt_specific_input(fn, inp, inp_idx, inputs, outputs, eps, grad_out)]
+        jacobians += [get_numerical_jacobian_wrt_specific_input(fn, inp, inp_idx, inputs, outputs, eps)]
     return jacobians
 
 
@@ -162,7 +163,6 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
         input: input to `fn`
         target: the Tensors wrt whom Jacobians are calculated (default=`input`)
         eps: the magnitude of the perturbation during finite differencing (default=`1e-3`)
-        grad_out: grad output value used to calculate gradients.
 
     Returns:
         A list of jacobians wrt each input (or target) and the first output
@@ -175,10 +175,13 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
                   "in a future version of PyTorch. If you have a specific use for "
                   "this or feature request for this to be a stable API, please file "
                   "us an issue at https://github.com/pytorch/pytorch/issues/new")
+    if grad_out != 1.0:
+        raise ValueError("Expected grad_out to be 1.0. get_numerical_jacobian no longer "
+                         "supports values of grad_out != 1.0.")
 
     def fn_pack_inps(*inps):
         return fn(inps)
-    jacobians = _get_numerical_jacobian(fn_pack_inps, inputs, None, target, eps, grad_out)
+    jacobians = _get_numerical_jacobian(fn_pack_inps, inputs, None, target, eps)
 
     return tuple(jacobian_for_each_output[0] for jacobian_for_each_output in jacobians)
 
@@ -186,9 +189,6 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
 def compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
     # Performs finite differencing by perturbing `entry` in-place by `v` and
     # returns the gradient of each of the outputs wrt to x at idx.
-    if isinstance(v, torch.Tensor) and v.layout != torch.sparse_coo:
-        v = v.reshape(entry.shape)
-
     orig = entry.clone()
     entry.copy_(orig - v)
     outa = fn()
@@ -204,7 +204,7 @@ def compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
     return tuple(compute(a, b) for (a, b) in zip(outa, outb))
 
 
-def compute_numerical_jacobian_cols(jvp_fn, delta, input_is_complex, grad_out, delta_i=None) -> List[torch.Tensor]:
+def compute_numerical_jacobian_cols(jvp_fn, delta, input_is_complex, delta_i=None) -> List[torch.Tensor]:
     # Computing the jacobian only works for pure real or pure imaginary delta
     # For details on the algorithm used here, refer:
     # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
@@ -212,7 +212,6 @@ def compute_numerical_jacobian_cols(jvp_fn, delta, input_is_complex, grad_out, d
     # and z = x + yj for complex valued input
     jacobians_cols: List[torch.Tensor] = []
     ds_dx_tup = jvp_fn(delta)
-    assert(not isinstance(grad_out, complex))
 
     if input_is_complex:  # C -> R
         ds_dy_tup = jvp_fn(delta * 1j) if delta_i is None else jvp_fn(delta_i * 1j)
@@ -220,11 +219,11 @@ def compute_numerical_jacobian_cols(jvp_fn, delta, input_is_complex, grad_out, d
             assert(not ds_dx.is_complex())
             # conjugate wirtinger derivative
             conj_w_d = ds_dx + ds_dy * 1j
-            jacobians_cols.append(grad_out * conj_w_d)
+            jacobians_cols.append(conj_w_d)
     else:
         for ds_dx in ds_dx_tup:  # R-> R
             assert(not ds_dx.is_complex())
-            jacobians_cols.append(ds_dx * grad_out)
+            jacobians_cols.append(ds_dx)
     return jacobians_cols
 
 
@@ -270,7 +269,7 @@ def prepped_input(input: torch.Tensor, maybe_perturbed_input: Optional[torch.Ten
 def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, eps, idx=None) -> None:
     # Check that the returned outputs don't have different dtype or shape when you
     # perturb the input
-    on_index = "on index {idx}" if idx is not None else " "
+    on_index = "on index {idx} " if idx is not None else ""
     assert output1.shape == output2.shape, \
         (f"Expected `func` to return outputs with the same shape"
          f" when inputs are perturbed {on_index}by {eps}, but got:"
@@ -281,15 +280,14 @@ def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, eps, id
          f" dtypes {output1.dtype} and {output2.dtype}.")
 
 
-def get_numerical_jacobian_wrt_specific_input(fn, input, input_idx, inputs, outputs, eps,
-                                              grad_out) -> Tuple[torch.Tensor, ...]:
+def get_numerical_jacobian_wrt_specific_input(fn, input, input_idx, inputs, outputs,
+                                              eps) -> Tuple[torch.Tensor, ...]:
     # Computes the numerical jacobians wrt to a single input. Returns N jacobian
     # tensors, where N is the number of outputs. Input must require grad.
     assert input.requires_grad
     # We need a dictionary because for sparse inputs, d_idx aren't necessarily consecutive
     # the ith entry of jacobian_cols[j] is the jth column of jacobian w.r.t. the ith output
-    # and input at `input_idx`. The ith entry may be None for when grad_out is 1j but the ith output
-    # is not complex.
+    # and input at `input_idx`.
     jacobian_cols: Dict[int, List[torch.Tensor]] = {}
 
     for x, idx, d_idx in iter_tensor(input):
@@ -302,15 +300,17 @@ def get_numerical_jacobian_wrt_specific_input(fn, input, input_idx, inputs, outp
         nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, idx=idx, eps=eps)
 
         def jvp_fn(delta):
+            if isinstance(delta, torch.Tensor) and delta.layout != torch.sparse_coo:
+                delta = delta.reshape(x.shape)
             return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, eps, nbhd_checks_fn)
 
-        jacobian_cols[d_idx] = compute_numerical_jacobian_cols(jvp_fn, eps, x.is_complex(), grad_out)
+        jacobian_cols[d_idx] = compute_numerical_jacobian_cols(jvp_fn, eps, x.is_complex())
 
     return combine_jacobian_cols(jacobian_cols, outputs, input, input.numel())
 
 
-def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, input, inputs, outputs, ur, ui, eps,
-                                                   grad_out) -> Tuple[torch.Tensor, ...]:
+def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, input, inputs, outputs, ur, ui,
+                                                   eps) -> Tuple[torch.Tensor, ...]:
     # If fast_mode=False, iter_tensor handles the below cases:
     # basically we want to prepare the input so that it can be modified in-place and do certain
     # operations that require the tensor to have strides
@@ -331,9 +331,11 @@ def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, input, inputs,
     nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, eps=eps)
 
     def jvp_fn(delta):
+        if isinstance(delta, torch.Tensor) and delta.layout != torch.sparse_coo:
+            delta = delta.reshape(input_to_perturb.shape)
         return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, eps, nbhd_checks_fn)
 
-    jacobian_cols = compute_numerical_jacobian_cols(jvp_fn, ur * eps, input.is_complex(), grad_out, ui * eps)
+    jacobian_cols = compute_numerical_jacobian_cols(jvp_fn, ur * eps, input.is_complex(), ui * eps)
     jacobians = allocate_jacobians_with_outputs(outputs, dtype=input.dtype, device=input.device)
 
     for i, jacobian in enumerate(jacobians):
@@ -389,7 +391,7 @@ If the test
 """
 
 
-def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_scale, check_grad_dtypes,
+def check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad_dtypes,
                                          fast_mode=False, v=None) -> Tuple[torch.Tensor, ...]:
     diff_input_list = list(iter_tensors(inputs, True))
 
@@ -397,11 +399,11 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_sc
         return torch.autograd.grad(output, diff_input_list, grad_output,
                                    retain_graph=True, allow_unused=True)
     if fast_mode:
-        jacobians_rows = compute_fast_analytical_jacobian_rows(vjp_fn, output.clone(), v, grad_out_scale)
-        jacobians_rows_reentrant = compute_fast_analytical_jacobian_rows(vjp_fn, output.clone(), v, grad_out_scale)
+        jacobians_rows = compute_fast_analytical_jacobian_rows(vjp_fn, output.clone(), v)
+        jacobians_rows_reentrant = compute_fast_analytical_jacobian_rows(vjp_fn, output.clone(), v)
     else:
-        jacobians_rows = compute_analytical_jacobian_rows(vjp_fn, output.clone(), grad_out_scale)
-        jacobians_rows_reentrant = compute_analytical_jacobian_rows(vjp_fn, output.clone(), grad_out_scale)
+        jacobians_rows = compute_analytical_jacobian_rows(vjp_fn, output.clone())
+        jacobians_rows_reentrant = compute_analytical_jacobian_rows(vjp_fn, output.clone())
     output_numel = output.numel() if not fast_mode else 1
 
     jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, output_numel)
@@ -409,15 +411,12 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_sc
 
     reentrant = check_jacobians_equal(jacobians, jacobians_reentrant, nondet_tol)
 
-    complex_str = '(calculated using complex valued grad output) ' \
-        if isinstance(grad_out_scale, complex) else ''
-
     if not correct_grad_types and check_grad_dtypes:
-        raise GradcheckError(f'Gradient{complex_str} has dtype mismatch')
+        raise GradcheckError('Gradient has dtype mismatch')
     if not correct_grad_sizes:
-        raise GradcheckError(f'Analytical gradient{complex_str} has incorrect size')
+        raise GradcheckError('Analytical gradient has incorrect size')
     if not reentrant:
-        raise GradcheckError(f'Backward{complex_str} is not reentrant, i.e., running backward with '
+        raise GradcheckError('Backward is not reentrant, i.e., running backward with '
                              'same input and grad_output multiple times gives different values, '
                              'although analytical gradient matches numerical gradient.'
                              f'The tolerance for nondeterminism was {nondet_tol}.' + FAILED_NONDET_MSG)
@@ -431,6 +430,12 @@ def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
                   "in a future version of PyTorch. If you have a specific use for "
                   "this or feature request for this to be a stable API, please file "
                   "us an issue at https://github.com/pytorch/pytorch/issues/new")
+    if grad_out != 1.0:
+        raise ValueError("Expected grad_out to be 1.0. get_analytical_jacobian no longer "
+                         "supports values of grad_out != 1.0.")
+    if output.is_complex():
+        raise ValueError("Expected output to be non-complex. get_analytical_jacobian no "
+                         "longer supports functions that return complex outputs.")
 
     diff_input_list = list(iter_tensors(inputs, True))
 
@@ -438,8 +443,8 @@ def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
         return torch.autograd.grad(output, diff_input_list, grad_output,
                                    retain_graph=True, allow_unused=True)
 
-    jacobians_rows = compute_analytical_jacobian_rows(backward_fn, output.clone(), grad_out)
-    jacobians_rows_reentrant = compute_analytical_jacobian_rows(backward_fn, output.clone(), grad_out)
+    jacobians_rows = compute_analytical_jacobian_rows(backward_fn, output.clone())
+    jacobians_rows_reentrant = compute_analytical_jacobian_rows(backward_fn, output.clone())
 
     output_numel = output.numel()
     jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, output_numel)
@@ -453,11 +458,11 @@ def _get_analytical_jacobian(inputs, outputs, input_idx, output_idx):
     # Computes the analytical jacobian in slow mode for a single input_idx, output_idx pair
     # without performing checks for dtype, shape, and reentrancy
     jacobians = check_analytical_jacobian_attributes(inputs, outputs[output_idx],
-                                                     nondet_tol=float('inf'), grad_out_scale=1.0, check_grad_dtypes=False)
+                                                     nondet_tol=float('inf'), check_grad_dtypes=False)
     return jacobians[input_idx]
 
 
-def compute_analytical_jacobian_rows(vjp_fn, sample_output, grad_out_scale) -> List[List[Optional[torch.Tensor]]]:
+def compute_analytical_jacobian_rows(vjp_fn, sample_output) -> List[List[Optional[torch.Tensor]]]:
     # Computes Jacobian row-by-row using backward function `vjp_fn` = v^T J
     # NB: this function does not assume vjp_fn(v) to return tensors with
     # the same number of elements for different v. This is checked when we
@@ -469,7 +474,7 @@ def compute_analytical_jacobian_rows(vjp_fn, sample_output, grad_out_scale) -> L
 
     for j in range(flat_grad_out.numel()):
         flat_grad_out.zero_()
-        flat_grad_out[j] = grad_out_scale
+        flat_grad_out[j] = 1.0
         grad_inputs = vjp_fn(grad_out_base)
         for i, d_x in enumerate(grad_inputs):
             if j == 0:
@@ -478,11 +483,10 @@ def compute_analytical_jacobian_rows(vjp_fn, sample_output, grad_out_scale) -> L
     return jacobians_rows
 
 
-def compute_fast_analytical_jacobian_rows(vjp_fn, sample_output, v,
-                                          grad_out_scale) -> List[List[Optional[torch.Tensor]]]:
+def compute_fast_analytical_jacobian_rows(vjp_fn, sample_output, v) -> List[List[Optional[torch.Tensor]]]:
     # For each input, computes vjp_fn(v), which is *supposed* to be v^T J
     jacobians_rows: List[List[Optional[torch.Tensor]]] = []
-    grad_inputs = vjp_fn(v.reshape(sample_output.shape) * grad_out_scale)
+    grad_inputs = vjp_fn(v.reshape(sample_output.shape))
     for i, d_x in enumerate(grad_inputs):
         jacobians_rows.append([d_x.clone() if isinstance(d_x, torch.Tensor) else None])
     return jacobians_rows
@@ -546,7 +550,7 @@ def check_no_differentiable_outputs_fast(func, func_out, all_inputs, input_tenso
                                          all_ur, all_ui, eps, nondet_tol):
     for inp_idx, inp, ur, ui in zip(inputs_indices, input_tensors, all_ur, all_ui):
         numerical_jacobians = get_fast_numerical_jacobian_wrt_specific_input(func, inp_idx, inp, all_inputs,
-                                                                             _as_tuple(func_out), ur, ui, eps, 1.0)
+                                                                             _as_tuple(func_out), ur, ui, eps)
         for jacobian in numerical_jacobians:
             if jacobian.numel() == 0:
                 continue
@@ -788,7 +792,7 @@ def slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
     numerical = transpose(_get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps))
 
     for i, o in enumerate(outputs):
-        analytical = check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, 1.0, check_grad_dtypes)
+        analytical = check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, check_grad_dtypes)
         inp_tensors = iter_tensors(tupled_inputs, True)
 
         for j, (a, n, inp) in enumerate(zip(analytical, numerical[i], inp_tensors)):
@@ -919,13 +923,13 @@ def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
     # Numerically approximate v^T (J u)
     for i, (inp, input_idx, ur, ui) in enumerate(zip(inp_tensors, inp_tensor_indices, all_ur, all_ui)):
         numerical = get_fast_numerical_jacobian_wrt_specific_input(func, input_idx, inp, tupled_inputs,
-                                                                   outputs, ur, ui, eps, 1.0)
+                                                                   outputs, ur, ui, eps)
         for j, (a, v) in enumerate(zip(numerical, all_v)):
             all_numerical[i].append(dot(a, v.to(device=a.device)))
 
     # Analytically calculate (v^T J) u
     for i, (out, v) in enumerate(zip(outputs, all_v)):
-        analytical = check_analytical_jacobian_attributes(tupled_inputs, out, nondet_tol, 1.0, check_grad_dtypes,
+        analytical = check_analytical_jacobian_attributes(tupled_inputs, out, nondet_tol, check_grad_dtypes,
                                                           fast_mode=True, v=v)
         for a, ur, ui in zip(analytical, all_ur_dense, all_ui_dense):
             if a.is_complex():
@@ -983,8 +987,8 @@ def gradcheck(
     For complex functions, no notion of Jacobian exists. Gradcheck verifies if the numerical and
     analytical values of Wirtinger and Conjugate Wirtinger derivative are consistent. The gradient
     computation is done under the assumption that the overall function has a real valued output.
-    For functions with complex output, gradcheck compares the numerical and analytical gradients
-    for two values of :attr:`grad_output`: 1 and 1j. For more details, check out
+    For functions with complex output, gradcheck treats them as if they are two separate functions
+    with real output. For more details, check out
     :ref:`complex_autograd-doc`.
 
     .. note::
@@ -1126,9 +1130,9 @@ def gradgradcheck(
         check_undefined_grad (bool, optional): if True, check if undefined output grads
             are supported and treated as zeros
         check_batched_grad (bool, optional): if True, check if we can compute
-            batched gradients using prototype
+            batched gradients using prototype vmap support. Defaults to False.
         fast_mode (bool, optional): if True, run a faster implementation of gradgradcheck that
-            no longer computes the entire jacobian.vmap support. Defaults to False.
+            no longer computes the entire jacobian.
 
     Returns:
         True if all differences satisfy allclose condition
