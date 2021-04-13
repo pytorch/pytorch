@@ -7072,10 +7072,7 @@ tensor_op_tests = [
         _cpu_types, True, [tf32_on_and_off(0.05), _wrap_warn_once("This overload of baddbmm_? is deprecated")]),
     ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
-    ('addcdiv', '', _small_2d,
-        lambda t, d: [_small_2d(t, d),
-                      _small_2d(t, d, has_zeros=False)], 1, 1, 1e-3,
-        torch.testing.get_all_fp_dtypes(), _cpu_types, True),
+    # TODO: finish the deprecation cycle for this overload of addcdiv and remove this test
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
