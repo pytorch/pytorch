@@ -588,7 +588,7 @@ void testSetGet(const std::string& path) {
   constexpr uint64_t tag = 0x1337;
   // test that get() gets the same value as the one that was set()
   std::vector<uint8_t> testVector = {1, 1, 1, 1};
-  for (auto selfRank; selfRank < size ; selfRank++) {
+  for (auto selfRank = 0; selfRank < size ; selfRank++) {
     auto store = tests[selfRank].getProcessGroup().getStore();
     store.set("testKey", testVector);
   }
