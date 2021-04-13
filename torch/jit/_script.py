@@ -840,7 +840,7 @@ def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
-def script(obj, optimize=None, _frames_up=0, _rcb=None):
+def script(obj, optimize=None, _frames_up: int = 0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
