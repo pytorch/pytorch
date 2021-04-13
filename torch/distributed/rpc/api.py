@@ -1,7 +1,6 @@
 import collections
 import contextlib
 import functools
-import hashlib
 import inspect
 import logging
 import threading
@@ -194,8 +193,8 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
         concat_names = "".join(sorted(worker_names))
         sequence_num = _all_gather_sequence_id.get(concat_names, 0)
         _all_gather_sequence_id[concat_names] = sequence_num + 1
-        sequence_id = hashlib.sha256((concat_names + str(sequence_num)).encode("utf-8")).hexdigest()
-        
+        sequence_id = concat_names + str(sequence_num)
+
     is_leader = leader_name == self_name
     if timeout == UNSET_RPC_TIMEOUT:
         timeout = get_rpc_timeout()
@@ -247,6 +246,25 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
         states = _all_gather_sequence_id_to_states.pop(sequence_id)
     return states.gathered_objects
 
+
+@_require_initialized
+def _barrier(worker_names):
+    r"""
+    Synchronizes local and remote RPC processes.
+
+    This will block until all local and remote RPC processes specified under worker_names
+    reach this method to wait for all outstanding work to complete.
+
+    Args:
+        worker_names (List[str]): The set of workers to synchronize.
+
+    """
+    try:
+        _all_gather(None, set(worker_names), timeout=DEFAULT_SHUTDOWN_TIMEOUT)
+    except RuntimeError as ex:
+        logger.error(
+            f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
+        )
 
 @_require_initialized
 def _wait_all_workers():

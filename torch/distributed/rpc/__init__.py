@@ -198,25 +198,6 @@ if is_available():
         _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
 
 
-    @api._require_initialized
-    def barrier(worker_names=None):
-        r"""
-        Synchronizes local and remote RPC processes.
-
-        This will block until all local and remote RPC processes specified under worker_names
-        reach this method to wait for all outstanding work to complete.
-
-        Args:
-            worker_names (List[str], optional): The set of workers to synchronize. If ``None``, the
-            set will be all workers. Default is ``None``.
-
-        """
-        if worker_names:
-            api._all_gather(None, set(worker_names))
-        else:
-            api._all_gather(None)
-
-
     def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
         type_mapping = {
             backend: backend_registry.BackendType,

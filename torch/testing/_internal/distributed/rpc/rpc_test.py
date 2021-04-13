@@ -1060,29 +1060,29 @@ class RpcTest(RpcAgentTestFixture):
         info = rpc.get_worker_info()
         all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
         names = [worker.name for worker in all_worker_info]
-        rpc.barrier(names)
+        rpc.api._barrier(names)
 
     @dist_init
     def test_rpc_barrier_subset(self):
         info = rpc.get_worker_info()
         all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
         if info.id % 2:
-            names = ([worker.name for worker in all_worker_info if worker.id % 2])
-            rpc.barrier(names)
+            names = [worker.name for worker in all_worker_info if worker.id % 2]
+            rpc.api._barrier(names)
         else:
-            names = ([worker.name for worker in all_worker_info if not worker.id % 2])
-            rpc.barrier(names)
+            names = [worker.name for worker in all_worker_info if not worker.id % 2]
+            rpc.api._barrier(names)
 
     @dist_init
     def test_rpc_barrier_partial_subset(self):
         info = rpc.get_worker_info()
         all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
         if info.id % 2:
-            names = ([worker.name for worker in all_worker_info if worker.id % 2])
-            rpc.barrier(names)
+            names = [worker.name for worker in all_worker_info if worker.id % 2]
+            rpc.api._barrier(names)
         elif info.id == 0:
-            names = ([worker.name for worker in all_worker_info if worker.id == 0])
-            rpc.barrier(names)
+            names = ["worker0"]
+            rpc.api._barrier(names)
 
     @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
