@@ -238,8 +238,11 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
       MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
       MPI_CHECK(
           MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
+      // `MPI_Comm_create` can be flaky in certain cases.
+      // See: https://github.com/pytorch/pytorch/issues/53899
       constexpr int kMaxNumRetries = 3;
       bool groupComm_updated = false;
+      MPI_Barrier(MPI_COMM_WORLD);
       for (int i = 0; i < kMaxNumRetries; ++i) {
         if (MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm)) {
           groupComm_updated = true;
