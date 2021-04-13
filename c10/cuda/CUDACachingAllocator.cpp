@@ -293,7 +293,6 @@ private:
     const char *val = getenv("PYTORCH_CUDA_ALLOC_CONF");
     if (val != NULL) {
       const std::string config(val);
-      size_t pos = 0;
 
       std::regex exp("[\\s,]+");
       std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
@@ -301,19 +300,19 @@ private:
       std::vector<std::string> options(it, end);
 
       for (auto option : options) {
-        std::regex exp("[:]+");
-        std::sregex_token_iterator it(option.begin(), option.end(), exp, -1);
-        std::sregex_token_iterator end;
-        std::vector<std::string> kv(it, end);
+        std::regex exp2("[:]+");
+        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
+        std::sregex_token_iterator end2;
+        std::vector<std::string> kv(it2, end2);
         if (kv.size() >= 2) {
           /* Maximum split size in MB.  Limited to large size blocks */
           if (kv[0].compare("max_split_size_mb") == 0) {
-            size_t val = stoi(kv[1]);
-            TORCH_CHECK(val > kLargeBuffer/(1024*1024), "CachingAllocator option max_split_size_mb too small, must be >= ",
+            size_t val2 = stoi(kv[1]);
+            TORCH_CHECK(val2 > kLargeBuffer/(1024*1024), "CachingAllocator option max_split_size_mb too small, must be >= ",
               kLargeBuffer/(1024*1024), "");
-            val = std::max(val, kLargeBuffer/(1024*1024));
-            val = std::min(val, (std::numeric_limits<size_t>::max() / (1024*1024)));
-            m_max_split_size = val * 1024 * 1024;
+            val2 = std::max(val2, kLargeBuffer/(1024*1024));
+            val2 = std::min(val2, (std::numeric_limits<size_t>::max() / (1024*1024)));
+            m_max_split_size = val2 * 1024 * 1024;
           }
           else {
             TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
