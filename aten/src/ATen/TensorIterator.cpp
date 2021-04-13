@@ -1257,7 +1257,7 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
   TORCH_INTERNAL_ASSERT(t.defined());
   if (!op.tensor.defined()) {
     op.tensor = t;
-    op.current_dtype = op.target_dtype;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op.current_dtype == t.scalar_type());
   } else if (op.will_resize) {
     if (op.original_tensor.defined()) {
       // OK, so this is pretty weird.  To understand how we can end up in
@@ -1312,6 +1312,10 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
       }
     }
   }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      op.tensor.is_same(t) || op.current_dtype == op.tensor.scalar_type());
+  // TODO: move this up before the will_resize check
+  op.current_dtype = op.tensor.scalar_type();
 }
 
 // This is the "traditional" implementation of set_output.  On TensorIterator
