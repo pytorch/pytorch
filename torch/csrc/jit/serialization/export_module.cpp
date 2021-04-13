@@ -391,7 +391,7 @@ class ScriptModuleSerializer {
     // Serialize the model object
     writeArchive("data", module._ivalue());
     // Then we serialize all code info.
-    writeCode(module.type());
+    writeCode(module.type(), bytecode_format);
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
@@ -488,7 +488,9 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeCode(const at::NamedTypePtr& root_type) {
+  void writeCode(
+      const at::NamedTypePtr& root_type,
+      const bool bytecode_format) {
     class_deps_.add(root_type);
     for (size_t i = 0; i < class_deps_.size(); ++i) {
       // note: convertNameType may extend class_deps_, so re-checking
@@ -515,14 +517,17 @@ class ScriptModuleSerializer {
           src.size() > kMinToCompress /*compress*/);
 
       // Write out the debug information
-      std::string debugFilename = filename + ".debug_pkl";
-      SourceRangePickler source_range_pickler;
-      auto range_data = source_range_pickler.pickle(item.value().ranges());
-      writer_.writeRecord(
-          debugFilename,
-          range_data.data(),
-          range_data.size(),
-          range_data.size() > kMinToCompress /*compress*/);
+      // Disable export debug information when exporting bytecode
+      if (!bytecode_format) {
+        std::string debugFilename = filename + ".debug_pkl";
+        SourceRangePickler source_range_pickler;
+        auto range_data = source_range_pickler.pickle(item.value().ranges());
+        writer_.writeRecord(
+            debugFilename,
+            range_data.data(),
+            range_data.size(),
+            range_data.size() > kMinToCompress /*compress*/);
+      }
     }
   }
 
