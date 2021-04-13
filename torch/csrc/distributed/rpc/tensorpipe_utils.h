@@ -43,16 +43,22 @@ struct TensorpipeReadBuffers {
   std::vector<c10::DataPtr> tensors;
 };
 
+inline std::shared_ptr<LazyStreamContext> createLazyStreamContext() {
+  return createLazyStreamContext(
 #ifdef USE_CUDA_NOT_ROCM
-static const auto cuda_stream_creator = [](c10::DeviceIndex index) {
-  return at::cuda::getStreamFromPool(
-      /* isHighPriority */ false, /* device */ index);
-};
-
-static const auto cuda_current_stream_provider = [](c10::DeviceIndex index) {
-  return at::cuda::getCurrentCUDAStream(index);
-};
+      c10::DeviceType::CUDA,
+      [](c10::DeviceIndex index) {
+        return at::cuda::getStreamFromPool(
+            /* isHighPriority */ false, /* device */ index);
+      },
+      [](c10::DeviceIndex index) {
+        return at::cuda::getCurrentCUDAStream(index);
+      }
+#else
+      c10::DeviceType::CPU, nullptr, nullptr
 #endif
+  );
+}
 
 // Convert an RPC message into a TensorPipe message, plus a holder to all the
 // data that must be kept alive while the write is performed asynchronously.
@@ -60,17 +66,7 @@ TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
 tensorpipeSerialize(
     Message&& rpcMessage,
     std::vector<c10::DeviceIndex> devices = {},
-    const std::shared_ptr<LazyStreamContext>& = createLazyStreamContext(
-#ifdef USE_CUDA_NOT_ROCM
-        c10::DeviceType::CUDA,
-        cuda_stream_creator,
-        cuda_current_stream_provider
-#else
-        c10::DeviceType::CPU,
-        nullptr,
-        nullptr
-#endif
-        ));
+    const std::shared_ptr<LazyStreamContext>& = createLazyStreamContext());
 
 // Allocate the buffers that will hold the incoming data. They will be managed
 // by the returned holder, which must be kept alive until the asynchronous read
@@ -78,17 +74,7 @@ tensorpipeSerialize(
 // TensorPipe message.
 TORCH_API TensorpipeReadBuffers tensorpipeAllocate(
     tensorpipe::Message& tpMessage,
-    const std::shared_ptr<LazyStreamContext>& ctx = createLazyStreamContext(
-#ifdef USE_CUDA_NOT_ROCM
-        c10::DeviceType::CUDA,
-        cuda_stream_creator,
-        cuda_current_stream_provider
-#else
-        c10::DeviceType::CPU,
-        nullptr,
-        nullptr
-#endif
-        ));
+    const std::shared_ptr<LazyStreamContext>& ctx = createLazyStreamContext());
 
 // Convert a TensorPipe message back into an RPC message. This requires the data
 // to be available and can thus only be performed once the asynchronous read has

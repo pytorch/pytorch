@@ -617,13 +617,7 @@ void TensorPipeAgent::pipeRead(
       return;
     }
 
-    auto ctx = createLazyStreamContext(
-#ifdef USE_CUDA_NOT_ROCM
-        c10::DeviceType::CUDA, cuda_stream_creator, cuda_current_stream_provider
-#else
-        c10::DeviceType::CPU, nullptr, nullptr
-#endif
-    );
+    auto ctx = createLazyStreamContext();
 
     TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage, ctx);
 
@@ -952,13 +946,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is sending request #"
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
-  auto ctx = createLazyStreamContext(
-#ifdef USE_CUDA_NOT_ROCM
-      c10::DeviceType::CUDA, cuda_stream_creator, cuda_current_stream_provider
-#else
-      c10::DeviceType::CPU, nullptr, nullptr
-#endif
-  );
+  auto ctx = createLazyStreamContext();
   ctx->waitForCurrentStreams(requestMessage.tensors());
   pipeWrite(
       clientPipe.pipe_,

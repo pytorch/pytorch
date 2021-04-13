@@ -167,7 +167,7 @@ struct TORCH_API LazyStreamContext {
     return devices;
   }
 
-  c10::DeviceType device_type() const {
+  c10::DeviceType deviceType() const {
     return device_type_;
   }
 

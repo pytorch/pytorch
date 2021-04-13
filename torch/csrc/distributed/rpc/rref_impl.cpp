@@ -262,7 +262,7 @@ void OwnerRRef::recordAllStreams(
     const std::shared_ptr<LazyStreamContext>& ctx) {
   if (ctx) {
     for (auto stream : ctx->getReservedStreams()) {
-      c10::Event event{ctx->device_type()};
+      c10::Event event{ctx->deviceType()};
       event.record(stream);
       events_.push_back(std::move(event));
     }
