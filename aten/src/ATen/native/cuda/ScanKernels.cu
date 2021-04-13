@@ -9,7 +9,7 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
 
-#include <ATen/cuda/CubUtils.cuh>
+#include <ATen/cuda/cub.cuh>
 
 
 namespace at { namespace native {
