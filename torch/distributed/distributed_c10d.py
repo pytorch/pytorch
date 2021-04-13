@@ -586,7 +586,6 @@ def _new_process_group_helper(world_size,
     backend = Backend(backend)
     pg: Union[ProcessGroupGloo, ProcessGroupMPI, ProcessGroupNCCL]
     if backend == Backend.MPI:
-        print("DBG: calling ProcessGroupMPI.create which invokes ProcessGroupMPI::createProcessGroupMPI and calls MPI_Comm_create.")
         if not is_mpi_available():
             raise RuntimeError(
                 "Distributed package doesn't have MPI built in."
