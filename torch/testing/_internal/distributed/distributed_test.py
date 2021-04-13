@@ -456,9 +456,7 @@ class DistributedTest:
 
         def _init_full_group_test(self, **kwargs):
             group = list(range(0, dist.get_world_size()))
-            # print("DBG: before calling dist.new_group in _init_full_group_test")
             group_id = dist.new_group(**kwargs)
-            # print("DBG: after calling dist.new_group in _init_full_group_test")
             rank = dist.get_rank()
             return (group, group_id, rank)
 
@@ -5050,7 +5048,7 @@ class DistributedTest:
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def xtest_ddp_model_diff_across_ranks(self):
+        def test_ddp_model_diff_across_ranks(self):
             torch.cuda.set_device(self.rank)
             # Creates network with different sized embedding table on different
             # ranks. This should throw an error during DDP init.
