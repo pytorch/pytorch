@@ -22,8 +22,8 @@ int64_t custom_op2(std::string s1, std::string s2) {
 }
 
 
-// torch::Tensor custom_op3(c10::intrusive_ptr<torch::jit::Module> my_module, torch::Tensor testData) {
-torch::Tensor custom_op3(torch::jit::Module my_module, torch::Tensor testData) {
+torch::Tensor custom_op3(c10::intrusive_ptr<torch::jit::Module> my_module, torch::Tensor testData) {
+//torch::Tensor custom_op3(torch::jit::Module my_module, torch::Tensor testData) {
   return testData.clone();
 }
 
