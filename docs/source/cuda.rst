@@ -1,6 +1,6 @@
 torch.cuda
 ===================================
-
+.. automodule:: torch.cuda
 .. currentmodule:: torch.cuda
 
 .. autosummary::
