@@ -409,6 +409,7 @@ def use_deterministic_algorithms(d):
         * :func:`torch.scatter_add_` when called on a CUDA tensor
         * :func:`torch.index_add_` when called on a CUDA tensor
         * :func:`torch.index_copy`
+        * :func:`torch.Tensor.index_put_` when ``accumulate=False``
         * :func:`torch.put` when ``accumulate=False``
         * :func:`torch.put` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.index_select` when called on a CUDA tensor that requires grad
