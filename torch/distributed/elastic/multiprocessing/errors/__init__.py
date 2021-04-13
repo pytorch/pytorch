@@ -57,7 +57,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar
 
 from .error_handler import ErrorHandler  # noqa F401
 from .handlers import get_error_handler  # noqa F401
@@ -67,6 +67,8 @@ JSON = Dict
 
 _EMPTY_ERROR_DATA = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -273,7 +275,7 @@ def _no_error_file_warning_msg(rank: int, failure: ProcessFailure) -> str:
     return "\n".join(["\n", boarder, header, boarder, *msg, boarder])
 
 
-def record(fn, error_handler: Optional[ErrorHandler] = None) -> Callable:
+def record(fn: Callable[..., T], error_handler: Optional[ErrorHandler] = None) -> Callable[..., T]:
     """
     Syntactic sugar to record errors/exceptions that happened in the decorated
     function using the provided ``error_handler``.
