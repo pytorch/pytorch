@@ -1,8 +1,8 @@
 import sys
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable, Iterable, List, Tuple
 
 
-def trace_dependencies(callable: Callable[[Any], Any], inputs: List[Tuple[Any, ...]]) -> List[str]:
+def trace_dependencies(callable: Callable[[Any], Any], inputs: Iterable[Tuple[Any, ...]]) -> List[str]:
     """Trace the execution of a callable in order to determine which modules it uses.
 
     Args:
@@ -43,14 +43,16 @@ def trace_dependencies(callable: Callable[[Any], Any], inputs: List[Tuple[Any, .
         if module:
             modules_used.add(module)
 
-    # Attach record_used_modules as the profiler function.
-    sys.setprofile(record_used_modules)
+    try:
+        # Attach record_used_modules as the profiler function.
+        sys.setprofile(record_used_modules)
 
-    # Execute the callable with all inputs.
-    for inp in inputs:
-        callable(*inp)
+        # Execute the callable with all inputs.
+        for inp in inputs:
+            callable(*inp)
 
-    # Detach the profiler function.
-    sys.setprofile(None)
+    finally:
+        # Detach the profiler function.
+        sys.setprofile(None)
 
     return list(modules_used)
