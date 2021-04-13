@@ -25,14 +25,16 @@ class Dtype;
 class TORCH_API LoopNest {
  public:
   // A constructor for building a LoopNest from a list of Tensors
-  LoopNest(const std::vector<Tensor*>& output_tensors);
   LoopNest(
       const std::vector<Tensor*>& output_tensors,
       const std::vector<Tensor*>& tensors_to_compute);
 
+  // A convenience constructor for the case when all tensors are output tensors
+  LoopNest(const std::vector<Tensor*>& output_tensors);
+
   // A constructor for building a LoopNest from an Stmt and a list of output
   // buffers.
-  LoopNest(Stmt* stmt, const std::unordered_set<const Buf*>& output_bufs);
+  LoopNest(Stmt* stmt, std::unordered_set<const Buf*> output_bufs);
 
   // A constructor for building a LoopNest from another loopnest. It clones the
   // other loopnest's stmt.
@@ -200,6 +202,32 @@ class TORCH_API LoopNest {
 
   void reorderAxis(For* a, For* b);
 
+  // Reorder the given list of loops according to the permutation specified.
+  // Here permutation[i] represents the location of the loop i in the result.
+  //
+  // For example, consider the following code:
+  //   for p
+  //     for q
+  //       for r
+  //         for s
+  //           A[p,q,r,s] =
+  //
+  // reorder({p, q, r, s}, {2, 3, 0, 1}) will return the list of loops in the
+  // following form:
+  //    for r
+  //      for s
+  //        for p
+  //          for q
+  //            A[p,q,r,s] =
+  static std::vector<For*> reorder(
+      const std::vector<For*>& loops,
+      const std::vector<size_t>& permutation);
+
+  // Returns true if the given loops are perfectly nested, i.e., every loop
+  // (except the innermost) should have exactly one statement in its body
+  // and that statement must be the next inner loop.
+  static bool areLoopsPerfectlyNested(const std::vector<For*>& loops);
+
   static void unroll(For* f, Stmt** unrolled);
   static void normalize(For* f, For** normalized);
   static bool flatten(const std::vector<For*>& f, For** flattened);
@@ -209,8 +237,10 @@ class TORCH_API LoopNest {
 
   // LoopOptions are propagated to tail.
   void sliceHead(For* f, int factor, For** head, For** tail);
+  void sliceHead(For* f, int factor);
   // LoopOptions are propagated to head.
   void sliceTail(For* f, int factor, For** head, For** tail);
+  void sliceTail(For* f, int factor);
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
