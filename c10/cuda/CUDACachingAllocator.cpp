@@ -327,14 +327,13 @@ class DeviceCachingAllocator {
 
     if (C10_LIKELY(captures_underway == 0)) {
       // Processes end-of-life events for outstanding allocations used on multiple streams
-      // (checks if their GPU-side uses are complete and repurposes their memory if so)
+      // (checks if their GPU-side uses are complete and recycles their memory if so)
       //
       // Q. Why skip process_events if a capture might be underway?
-      // A. process_events involves a cudaEventQuery, illegal during CUDA graph capture
-      //    (rightfully illegal, because you'd be "querying" the completion of ghost CUDA
-      //    work that doesn't really run). Dumb simple solution: defer reclaiming these
-      //    allocations until after capture. Cross-stream memory use is uncommon, so the
-      //    deferral's effect on memory use during capture should be small.
+      // A. process_events involves cudaEventQueries, illegal during CUDA graph capture.
+      //    Dumb simple solution: defer reclaiming these allocations until after capture.
+      //    Cross-stream memory use is uncommon, so the deferral's effect on memory use
+      //    during capture should be small.
       process_events();
     }
 
