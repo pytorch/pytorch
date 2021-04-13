@@ -17,7 +17,7 @@ from .pattern_utils import (
     get_default_fusion_patterns,
 )
 
-from .fusion_patterns import *  # noqa: F401
+from .fusion_patterns import *  # noqa: F401,F403
 
 from .quantization_types import Pattern
 
