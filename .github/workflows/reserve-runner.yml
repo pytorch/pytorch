@@ -3,7 +3,9 @@ name: Reserve Github Actions Runner
 on:
   workflow-dispatch:
     inputs:
-      runnerType: "linux.2xlarge"
+      runnerType:
+        description: 'The type of runner you would like to reserve'
+        default: "linux.2xlarge"
 
 jobs:
   reserve-runner:
