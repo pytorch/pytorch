@@ -803,32 +803,33 @@ class TestGradCheckOverride(TestCase):
         # if the gradcheck implementation changes. It's best to
         # aim for attributes that may be commonly present on other
         # Tensor-likes.
-        self.assertEqual(total_used_attrs, {
+        self.assertEqual({
             'data',
+            'device',
             'dtype',
             'is_complex',
             'is_floating_point',
             'is_sparse',
             'layout',
-            'nelement',
             'new_zeros',
+            'numel',
             'requires_grad',
             'retain_grad',
             'size',
             'stride',
-        })
+        }, total_used_attrs)
 
-        self.assertEqual(total_used_calls, {
+        self.assertEqual({
             torch.Tensor.new_zeros,
             torch.Tensor.size,
             torch.Tensor.is_complex,
             torch.Tensor.is_floating_point,
-            torch.Tensor.nelement,
+            torch.Tensor.numel,
             torch.Tensor.retain_grad,
             torch.Tensor.stride,
             torch.autograd.grad,
             torch.add,
-        })
+        }, total_used_calls)
 
 class TestNamedTuple(TestCase):
     """ Regression test for gh-47090 """
