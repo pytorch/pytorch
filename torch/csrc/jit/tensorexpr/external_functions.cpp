@@ -23,6 +23,7 @@ std::vector<at::Tensor> constructTensors(
   for (const auto i : c10::irange(bufs_num)) {
     buf_data_vec.push_back(buf_data[i]);
     buf_dims_vec.emplace_back();
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
     for (const auto dim : c10::irange(buf_ranks[i])) {
       buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
     }
@@ -67,7 +68,9 @@ void nnc_aten_conv2d(
     int64_t paddingH = extra_args[2];
     int64_t paddingW = extra_args[3];
     int64_t dilationH = extra_args[4];
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t dilationW = extra_args[5];
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t groups = extra_args[6];
 
     try {
