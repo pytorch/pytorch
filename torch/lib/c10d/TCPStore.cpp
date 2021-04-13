@@ -178,9 +178,15 @@ void TCPStoreDaemon::compareSetHandler(int socket) {
 
   auto pos = tcpStore_.find(key);
   if (pos == tcpStore_.end()) {
-    // TODO: This code path is not ideal as we are "lying" to the caller in case
-    // the key does not exist. We should come up with a working solution.
-    tcputil::sendVector<uint8_t>(socket, currentValue);
+    if (currentValue.empty()) {
+      tcpStore_[key] = newValue;
+
+      tcputil::sendVector<uint8_t>(socket, newValue);
+    } else {
+      // TODO: This code path is not ideal as we are "lying" to the caller in case
+      // the key does not exist. We should come up with a working solution.
+      tcputil::sendVector<uint8_t>(socket, currentValue);
+    }
   } else {
     if (pos->second == currentValue) {
       pos->second = std::move(newValue);
