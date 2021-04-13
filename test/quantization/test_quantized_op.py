@@ -2005,20 +2005,31 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_instance_norm(self):
         max_sides = (4, 5)
-        side_lens = (2, 8, 11)
+        shape_list = ([2, 2, 2, 2], [8, 8, 8, 8], [11, 11, 11, 11])
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
         channels_last_list = (True, False)
         affine_list = (True, False)
-        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
-        test_cases = itertools.product(*combined)
-
+        combined = [shape_list, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
+        test_cases_product = itertools.product(*combined)
+        test_cases = list(test_case for test_case in test_cases_product)
+        # add just one test case to test overflow
+        test_cases.append([
+            [1, 4, 224, 224, 160],  # shape,
+            torch.qint8,  # torch_type
+            0.1,  # scale
+            0,  # zero_point
+            False,   # channels_last
+            True,  # affine
+        ])
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
-                side_len, torch_type, Y_scale, Y_zero_point, channels_last, affine = test_case
-                shapes = [side_len] * 4
+                shapes, torch_type, Y_scale, Y_zero_point, channels_last, affine = test_case
+                if channels_last and shapes.__len__() >= 5:
+                    # required rank 4 tensor to use channels_last format
+                    continue
 
                 # In the FP kernel, sums and sums of squares are calculated in floating point.
                 # In the int8 and uint8 versions of the quantized kernel, they are
@@ -2064,7 +2075,7 @@ class TestQuantizedOps(TestCase):
                         ch_vals = dqX[batch_idx][ch_idx]
                         assume(
                             float(torch.unique(ch_vals).shape[0]) / ch_vals.numel() > 0.01
-                            or group_vals.numel() < 5)
+                            or ch_vals.numel() < 5 or ch_vals.numel() > 25600)
 
                 qY = torch.ops.quantized.instance_norm(qX, weight, bias, eps, Y_scale, Y_zero_point)
 

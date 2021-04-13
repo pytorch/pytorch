@@ -281,30 +281,34 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   int i = 0;
 
 #ifdef CPU_CAPABILITY_AVX2
-  __m256i sum_v_epu32 = _mm256_setzero_si256();
   // vectorized
-  for (; i < len / 16 * 16; i += 16) {
-    // (i15, ..., i0)
-    __m128i src_epu8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
-    __m256i src_epu16 = _mm256_cvtepu8_epi16(src_epu8);
-    // (i15 ^ 2, ..., i0 ^ 2)
-    __m256i sq_epu16 = _mm256_mullo_epi16(src_epu16, src_epu16);
-    // (i7 ^ 2, ..., i0 ^ 2)
-    __m128i sq_lo_epu16 = _mm256_castsi256_si128(sq_epu16);
-    // (i15 ^ 2, ..., i8 ^ 2)
-    __m128i sq_hi_epu16 = _mm256_extractf128_si256(sq_epu16, 1);
-    // widen to epu32
-    __m256i sq_lo_epu32 = _mm256_cvtepu16_epi32(sq_lo_epu16);
-    __m256i sq_hi_epu32 = _mm256_cvtepu16_epi32(sq_hi_epu16);
-    // add to running sum
-    sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_lo_epu32);
-    sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_hi_epu32);
-  }
-
+  __m256i sum_v_epu32 = _mm256_setzero_si256();
   alignas(64) int32_t temp[8];
-  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epu32);
-  for (int k = 0; k < 8; ++k) {
-    row_sum += temp[k];
+  int overflow_threshold = 262144; // 2147483647(max of int32)/(256*256)*8 = 262144
+  int loop = len / overflow_threshold + 1;
+  for(int j=0; j<=loop; j++){
+    for (; ((i < overflow_threshold * j) && (i < len / 16 * 16)); i += 16) {
+      // (i15, ..., i0)
+      __m128i src_epu8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
+      __m256i src_epu16 = _mm256_cvtepu8_epi16(src_epu8);
+      // (i15 ^ 2, ..., i0 ^ 2)
+      __m256i sq_epu16 = _mm256_mullo_epi16(src_epu16, src_epu16);
+      // (i7 ^ 2, ..., i0 ^ 2)
+      __m128i sq_lo_epu16 = _mm256_castsi256_si128(sq_epu16);
+      // (i15 ^ 2, ..., i8 ^ 2)
+      __m128i sq_hi_epu16 = _mm256_extractf128_si256(sq_epu16, 1);
+      // widen to epu32
+      __m256i sq_lo_epu32 = _mm256_cvtepu16_epi32(sq_lo_epu16);
+      __m256i sq_hi_epu32 = _mm256_cvtepu16_epi32(sq_hi_epu16);
+      // add to running sum
+      sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_lo_epu32);
+      sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_hi_epu32);
+    }
+    _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epu32);
+    for (int k = 0; k < 8; ++k) {
+      row_sum += temp[k];
+    }
+    sum_v_epu32 = _mm256_setzero_si256();
   }
 #endif // CPU_CAPABILITY_AVX2
 
@@ -322,30 +326,37 @@ int64_t hsum_sq(const int8_t* A, int len) {
   int i = 0;
 
 #ifdef CPU_CAPABILITY_AVX2
-  __m256i sum_v_epi32 = _mm256_setzero_si256();
   // vectorized
-  for (; i < len / 16 * 16; i += 16) {
-    // (i15, ..., i0)
-    __m128i src_epi8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
-    __m256i src_epi16 = _mm256_cvtepi8_epi16(src_epi8);
-    // (i15 ^ 2, ..., i0 ^ 2)
-    __m256i sq_epi16 = _mm256_mullo_epi16(src_epi16, src_epi16);
-    // (i7 ^ 2, ..., i0 ^ 2)
-    __m128i sq_lo_epi16 = _mm256_castsi256_si128(sq_epi16);
-    // (i15 ^ 2, ..., i8 ^ 2)
-    __m128i sq_hi_epi16 = _mm256_extractf128_si256(sq_epi16, 1);
-    // widen to epi32
-    __m256i sq_lo_epi32 = _mm256_cvtepi16_epi32(sq_lo_epi16);
-    __m256i sq_hi_epi32 = _mm256_cvtepi16_epi32(sq_hi_epi16);
-    // add to running sum
-    sum_v_epi32 = _mm256_add_epi32(sum_v_epi32, sq_lo_epi32);
-    sum_v_epi32 = _mm256_add_epi32(sum_v_epi32, sq_hi_epi32);
-  }
-
+  __m256i sum_v_epi32 = _mm256_setzero_si256();
   alignas(64) int32_t temp[8];
-  _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epi32);
-  for (int k = 0; k < 8; ++k) {
-    row_sum += temp[k];
+
+  int overflow_threshold = 1048576; //2147483647/(128*128)*8 = 1048576
+  int loop = len / overflow_threshold + 1;
+
+  for(int j=0; j<=loop; j++){
+    for (; ((i < overflow_threshold * j) && (i < len / 16 * 16)); i += 16) {
+      // (i15, ..., i0)
+      __m128i src_epi8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
+      __m256i src_epi16 = _mm256_cvtepi8_epi16(src_epi8);
+      // (i15 ^ 2, ..., i0 ^ 2)
+      __m256i sq_epi16 = _mm256_mullo_epi16(src_epi16, src_epi16);
+      // (i7 ^ 2, ..., i0 ^ 2)
+      __m128i sq_lo_epi16 = _mm256_castsi256_si128(sq_epi16);
+      // (i15 ^ 2, ..., i8 ^ 2)
+      __m128i sq_hi_epi16 = _mm256_extractf128_si256(sq_epi16, 1);
+      // widen to epi32
+      __m256i sq_lo_epi32 = _mm256_cvtepi16_epi32(sq_lo_epi16);
+      __m256i sq_hi_epi32 = _mm256_cvtepi16_epi32(sq_hi_epi16);
+      // add to running sum
+      sum_v_epi32 = _mm256_add_epi32(sum_v_epi32, sq_lo_epi32);
+      sum_v_epi32 = _mm256_add_epi32(sum_v_epi32, sq_hi_epi32);
+    }
+    _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epi32);
+
+    for (int k = 0; k < 8; ++k) {
+      row_sum += temp[k];
+    }
+    sum_v_epi32 = _mm256_setzero_si256();
   }
 #endif // CPU_CAPABILITY_AVX2
 
