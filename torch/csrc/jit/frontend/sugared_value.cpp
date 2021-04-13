@@ -103,25 +103,16 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   static const PropertiesLookup builtin_properties = {
       {TypeKind::TensorType,
        {
-           {"dtype", "prim"},
-           {"device", "prim"},
-           {"grad", "prim"},
-           {"data", "prim"},
-           {"shape", "prim"},
-           {"is_cuda", "prim"},
-           {"is_xpu", "prim"},
-           {"is_sparse", "prim"},
-           {"is_mkldnn", "prim"},
-           {"is_mlc", "prim"},
-           {"is_quantized", "prim"},
-           {"is_vulkan", "prim"},
-           {"is_meta", "prim"},
-           {"is_leaf", "aten"},
-           {"requires_grad", "prim"},
-           {"layout", "prim"},
-           {"T", "prim"},
-           {"ndim", "prim"},
-           {"name", "prim"},
+           {"dtype", "prim"},         {"device", "prim"},
+           {"grad", "prim"},          {"data", "prim"},
+           {"shape", "prim"},         {"is_cuda", "prim"},
+           {"is_xpu", "prim"},        {"is_sparse", "prim"},
+           {"is_sparse_csr", "prim"}, {"is_mkldnn", "prim"},
+           {"is_mlc", "prim"},        {"is_quantized", "prim"},
+           {"is_vulkan", "prim"},     {"is_meta", "prim"},
+           {"is_leaf", "aten"},       {"requires_grad", "prim"},
+           {"layout", "prim"},        {"T", "prim"},
+           {"ndim", "prim"},          {"name", "prim"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
   auto kind = value_->type()->kind();
@@ -212,7 +203,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   report << "'" << value_->type()->repr_str()
          << "' object has no attribute or method '" << field << "'.";
   if (auto classType = value_->type()->cast<ClassType>()) {
-    if (classType->hasUnresolvedClassAttribute(field)) {
+    if (classType->isUnresolvedClassAttribute(field)) {
       report
           << " '" << field
           << "' is defined as a class attribute which currently is not"
@@ -245,6 +236,9 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     Node* unpack =
         graph->insertNode(graph->createListUnpack(value_, *size_hint));
     return fmap(unpack->outputs(), make_simple_value);
+  } else if (value_->type()->kind() == TypeKind::AnyTupleType) {
+    throw ErrorReport(loc)
+        << "Provided tuple is not fully defined/refined including its element types, please provide a value of type like Tuple[int, int]";
   }
   throw ErrorReport(loc) << value_->type()->repr_str()
                          << " cannot be used as a tuple";

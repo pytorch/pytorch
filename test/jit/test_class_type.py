@@ -1472,25 +1472,16 @@ class TestClassType(JitTestCase):
         self.checkModule(ShouldCompile(UnscriptableClass(4)), (4,))
 
 
-    def test_unresolved_attributes(self):
-        class Bar(object):
-            def __init__(self, x):
-                self.x = x
-                self._prop = 0
+    def test_unresolved_class_attributes(self):
+        class UnresolvedAttrClass(object):
+            def __init__(self):
+                pass
 
-            def getX(self):
-                return self.x
-
-            @property
-            def prop(self) -> int:
-                return self._prop
-
-            attr = ""
+            attr, attr_b = "", ""
 
         def fn(x):
-            bar = Bar(x)
-            bar.attr
-            return bar.getX()
+            u = UnresolvedAttrClass()
+            return u.attr
 
         error_message_regex = "object has no attribute or method.*is defined as a class attribute"
         with self.assertRaisesRegex(RuntimeError, error_message_regex):

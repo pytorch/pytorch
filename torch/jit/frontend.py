@@ -156,11 +156,6 @@ def get_class_properties(cls, self_name):
 
     return properties
 
-def get_unresolved_class_attributes(cls, ast):
-    resolved_names = set(ast.method_names())
-    resolved_names.update(ast.property_names())
-    return [name for name in cls.__dict__ if name not in resolved_names]
-
 def get_jit_class_def(cls, self_name):
     # Get defs for each method within the current class independently
     # TODO: proper overriding analysis when implementing class inheritance
@@ -187,7 +182,11 @@ def get_jit_class_def(cls, self_name):
     py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
-    return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
+    class_ast = py_ast.body[0]
+    assert isinstance(class_ast, ast.ClassDef)
+    assigns = [StmtBuilder.build_Assign(ctx, entry) for entry in class_ast.body if isinstance(entry, ast.Assign)]
+
+    return build_class_def(ctx, class_ast, methods, properties, self_name, assigns)
 
 
 def normalize_source_lines(sourcelines: List[str]) -> List[str]:
@@ -283,10 +282,10 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_class_def(ctx, py_def, methods, properties, self_name):
+def build_class_def(ctx, py_def, methods, properties, self_name, assigns):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties)
+    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties, assigns)
 
 
 def build_def(ctx, py_def, type_line, def_name, self_name=None):
