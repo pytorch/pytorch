@@ -567,6 +567,7 @@
   device_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function, method
   device_guard: False
   dispatch:

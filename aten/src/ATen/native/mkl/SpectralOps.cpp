@@ -362,7 +362,8 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
   for (int64_t i = batch_dims; i < ndim; ++i) {
     out_strides[dim_permute[i]] = out.strides()[1 + (i - batch_dims)];
   }
-  return out.as_strided_(out_sizes, out_strides, out.storage_offset());
+  out.as_strided_(out_sizes, out_strides, out.storage_offset());
+  return out;
 }
 
 // Sort transform dimensions by input layout, for best performance
