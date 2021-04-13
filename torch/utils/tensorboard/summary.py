@@ -10,7 +10,7 @@ from six.moves import range
 from tensorboard.compat.proto.summary_pb2 import (
     HistogramProto,
     Summary,
-    SummaryMetadata
+    SummaryMetadata,
 )
 from tensorboard.compat.proto.tensor_pb2 import TensorProto
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
@@ -76,19 +76,19 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
         HParamInfo,
         MetricInfo,
         MetricName,
-        Status
+        Status,
     )
     from tensorboard.plugins.hparams.metadata import (
         EXPERIMENT_TAG,
         PLUGIN_DATA_VERSION,
         PLUGIN_NAME,
         SESSION_END_INFO_TAG,
-        SESSION_START_INFO_TAG
+        SESSION_START_INFO_TAG,
     )
     from tensorboard.plugins.hparams.plugin_data_pb2 import (
         HParamsPluginData,
         SessionEndInfo,
-        SessionStartInfo
+        SessionStartInfo,
     )
 
     import torch

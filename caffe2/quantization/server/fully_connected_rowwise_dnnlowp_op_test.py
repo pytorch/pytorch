@@ -12,7 +12,7 @@ from caffe2.quantization.server import utils as dnnlowp_utils
 from caffe2.quantization.server.dnnlowp_test_utils import (
     avoid_vpmaddubsw_overflow_fc,
     check_quantized_results_close,
-    run_conv_or_fc
+    run_conv_or_fc,
 )
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")

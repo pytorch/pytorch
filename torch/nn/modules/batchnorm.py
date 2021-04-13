@@ -5,7 +5,7 @@ from torch import Tensor
 from torch.nn.parameter import (
     Parameter,
     UninitializedBuffer,
-    UninitializedParameter
+    UninitializedParameter,
 )
 
 from .. import functional as F

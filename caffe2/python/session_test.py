@@ -13,7 +13,7 @@ from caffe2.python.schema import (
     FetchRecord,
     InitEmptyRecord,
     NewRecord,
-    Struct
+    Struct,
 )
 from caffe2.python.session import LocalSession
 from caffe2.python.task import TaskGroup

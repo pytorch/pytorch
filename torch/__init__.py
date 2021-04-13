@@ -24,7 +24,7 @@ from ._utils_internal import (
     USE_GLOBAL_DEPS,
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
     get_file_path,
-    prepare_multiprocessing_environment
+    prepare_multiprocessing_environment,
 )
 
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
@@ -570,7 +570,7 @@ from .random import (
     initial_seed,
     manual_seed,
     seed,
-    set_rng_state
+    set_rng_state,
 )
 from .serialization import load, save
 

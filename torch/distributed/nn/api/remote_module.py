@@ -10,7 +10,7 @@ from typing import (
     Set,
     Tuple,
     TypeVar,
-    Union
+    Union,
 )
 
 import torch

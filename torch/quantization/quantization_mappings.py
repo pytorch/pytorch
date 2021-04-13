@@ -13,7 +13,7 @@ from torch import nn
 
 from .fake_quantize import (
     default_affine_fixed_qparams_fake_quant,
-    default_symmetric_fixed_qparams_fake_quant
+    default_symmetric_fixed_qparams_fake_quant,
 )
 from .stubs import DeQuantStub, QuantStub
 from .utils import get_combined_dict

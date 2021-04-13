@@ -7,7 +7,7 @@ from torch._utils import (
     _get_all_device_indices,
     _get_available_device_type,
     _get_device_index,
-    _get_devices_properties
+    _get_devices_properties,
 )
 
 from ..modules import Module

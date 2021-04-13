@@ -8,13 +8,13 @@ from ..util.setting import (
     CompilerType,
     TestList,
     TestPlatform,
-    TestStatusType
+    TestStatusType,
 )
 from ..util.utils import (
     detect_compiler_type,
     print_error,
     print_time,
-    related_to_test_list
+    related_to_test_list,
 )
 from .parser.coverage_record import CoverageRecord
 from .parser.gcov_coverage_parser import GcovCoverageParser
@@ -22,7 +22,7 @@ from .parser.llvm_coverage_parser import LlvmCoverageParser
 from .print_report import (
     file_oriented_report,
     html_oriented_report,
-    line_oriented_report
+    line_oriented_report,
 )
 
 # coverage_records: Dict[str, LineInfo] = dict()

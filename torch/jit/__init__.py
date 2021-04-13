@@ -12,14 +12,14 @@ from torch._jit_internal import (
     export,
     ignore,
     is_scripting,
-    unused
+    unused,
 )
 from torch.jit._async import fork, wait
 from torch.jit._freeze import freeze, optimize_frozen_module
 from torch.jit._fuser import (
     fuser,
     last_executed_optimized_graph,
-    optimized_execution
+    optimized_execution,
 )
 from torch.jit._script import (
     Attribute,
@@ -31,7 +31,7 @@ from torch.jit._script import (
     _unwrap_optional,
     interface,
     script,
-    script_method
+    script_method,
 )
 from torch.jit._serialization import load, save
 from torch.jit._trace import (
@@ -46,7 +46,7 @@ from torch.jit._trace import (
     _unique_state_dict,
     is_tracing,
     trace,
-    trace_module
+    trace_module,
 )
 from torch.utils import set_module
 

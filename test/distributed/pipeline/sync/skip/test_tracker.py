@@ -13,7 +13,7 @@ import torch
 from torch import nn
 from torch.distributed.pipeline.sync.checkpoint import (
     enable_checkpointing,
-    enable_recomputing
+    enable_recomputing,
 )
 from torch.distributed.pipeline.sync.microbatch import Batch
 from torch.distributed.pipeline.sync.skip import pop, skippable, stash
@@ -21,7 +21,7 @@ from torch.distributed.pipeline.sync.skip.layout import SkipLayout
 from torch.distributed.pipeline.sync.skip.tracker import (
     SkipTracker,
     SkipTrackerThroughPotals,
-    current_skip_tracker
+    current_skip_tracker,
 )
 
 

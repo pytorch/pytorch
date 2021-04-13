@@ -9,7 +9,7 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple
 from tools.stats_utils.s3_stat_parser import (
     Report,
     get_cases,
-    get_test_stats_summaries
+    get_test_stats_summaries,
 )
 
 

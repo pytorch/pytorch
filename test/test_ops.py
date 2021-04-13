@@ -10,15 +10,15 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyOnCPUAndCUDA,
     ops,
-    skipCUDAIfRocm
+    skipCUDAIfRocm,
 )
 from torch.testing._internal.common_jit import (
     JitCommonTestCase,
-    check_against_reference
+    check_against_reference,
 )
 from torch.testing._internal.common_methods_invocations import (
     method_tests,
-    op_db
+    op_db,
 )
 from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
@@ -26,15 +26,15 @@ from torch.testing._internal.common_utils import (
     clone_input_helper,
     is_iterable_of_tensors,
     make_tensor,
-    run_tests
+    run_tests,
 )
 from torch.testing._internal.jit_metaprogramming_utils import (
     check_alias_annotation,
     create_script_fn,
-    create_traced_fn
+    create_traced_fn,
 )
 from torch.testing._internal.jit_utils import (
-    disable_autodiff_subgraph_inlining
+    disable_autodiff_subgraph_inlining,
 )
 
 # Get names of all the operators which have entry in `method_tests` (legacy testing infra)

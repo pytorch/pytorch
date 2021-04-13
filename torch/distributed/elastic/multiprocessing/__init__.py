@@ -74,7 +74,7 @@ from torch.distributed.elastic.multiprocessing.api import (  # noqa F401
     Std,
     SubprocessContext,
     _validate_full_rank,
-    to_map
+    to_map,
 )
 
 

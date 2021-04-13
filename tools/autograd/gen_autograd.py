@@ -29,7 +29,7 @@ from typing import List
 from tools.codegen.api import cpp
 from tools.codegen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo,
-    match_differentiability_info
+    match_differentiability_info,
 )
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.selective_build.selector import SelectiveBuilder
@@ -37,7 +37,7 @@ from tools.codegen.selective_build.selector import SelectiveBuilder
 from . import gen_python_functions
 from .gen_autograd_functions import (
     gen_autograd_functions_lib,
-    gen_autograd_functions_python
+    gen_autograd_functions_python,
 )
 from .gen_inplace_or_view_type import gen_inplace_or_view_type
 from .gen_trace_type import gen_trace_type

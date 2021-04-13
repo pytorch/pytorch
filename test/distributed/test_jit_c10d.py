@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_TSAN,
     load_tests,
-    run_tests
+    run_tests,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 

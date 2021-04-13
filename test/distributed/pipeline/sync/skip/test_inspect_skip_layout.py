@@ -9,7 +9,7 @@ from torch.distributed.pipeline.sync.skip import (
     Namespace,
     pop,
     skippable,
-    stash
+    stash,
 )
 from torch.distributed.pipeline.sync.skip.layout import inspect_skip_layout
 

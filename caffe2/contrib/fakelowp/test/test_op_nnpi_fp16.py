@@ -10,7 +10,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.fakelowp.test_utils import (
     compute_ulp_error,
-    print_test_debug_info
+    print_test_debug_info,
 )
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 

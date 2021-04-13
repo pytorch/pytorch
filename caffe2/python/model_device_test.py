@@ -8,7 +8,7 @@ from caffe2.python import (
     device_checker,
     model_helper,
     test_util,
-    workspace
+    workspace,
 )
 
 

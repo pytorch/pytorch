@@ -6,16 +6,16 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     ops,
-    skipCUDAIfRocm
+    skipCUDAIfRocm,
 )
 from torch.testing._internal.common_methods_invocations import (
-    foreach_unary_op_db
+    foreach_unary_op_db,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
     TestCase,
-    run_tests
+    run_tests,
 )
 
 # Includes some values such that N * N won't be a multiple of 4,

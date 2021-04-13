@@ -24,7 +24,7 @@ from onnx import (
     checker,
     helper,
     mapping,
-    numpy_helper
+    numpy_helper,
 )
 from onnx.helper import make_model, make_tensor_value_info
 

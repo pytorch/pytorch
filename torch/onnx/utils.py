@@ -20,7 +20,7 @@ from torch._C import (
     ListType,
     OptionalType,
     _check_onnx_proto,
-    _propagate_and_assign_input_shapes
+    _propagate_and_assign_input_shapes,
 )
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
@@ -28,7 +28,7 @@ from torch.onnx import (
     ONNX_ARCHIVE_MODEL_PROTO_NAME,
     ExportTypes,
     OperatorExportTypes,
-    TrainingMode
+    TrainingMode,
 )
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -230,7 +230,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
     from torch.onnx.symbolic_helper import (
         _export_onnx_opset_version,
-        _onnx_shape_inference
+        _onnx_shape_inference,
     )
     if _onnx_shape_inference:
         torch._C._jit_pass_onnx_graph_shape_type_inference(graph, params_dict, _export_onnx_opset_version)
@@ -555,7 +555,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     from torch.onnx.symbolic_helper import (
         _default_onnx_opset_version,
         _set_operator_export_type,
-        _set_opset_version
+        _set_opset_version,
     )
     if opset_version is None:
         opset_version = _default_onnx_opset_version
@@ -616,7 +616,7 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
     """
     from torch.onnx.symbolic_helper import (
         _default_onnx_opset_version,
-        _set_opset_version
+        _set_opset_version,
     )
     if opset_version is None:
         opset_version = _default_onnx_opset_version
@@ -663,7 +663,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         from torch.onnx.symbolic_helper import (
             _default_onnx_opset_version,
             _set_operator_export_type,
-            _set_opset_version
+            _set_opset_version,
         )
         if opset_version is None:
             opset_version = _default_onnx_opset_version
@@ -1172,7 +1172,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     import torch.onnx.symbolic_registry as sym_registry
     from torch.onnx.symbolic_helper import (
         _onnx_main_opset,
-        _onnx_stable_opsets
+        _onnx_stable_opsets,
     )
 
     for version in _onnx_stable_opsets + [_onnx_main_opset]:

@@ -17,7 +17,7 @@ from typing import (
     Tuple,
     Type,
     Union,
-    cast
+    cast,
 )
 
 import torch

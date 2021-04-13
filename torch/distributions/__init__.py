@@ -105,7 +105,7 @@ from .negative_binomial import NegativeBinomial
 from .normal import Normal
 from .one_hot_categorical import (
     OneHotCategorical,
-    OneHotCategoricalStraightThrough
+    OneHotCategoricalStraightThrough,
 )
 from .pareto import Pareto
 from .poisson import Poisson

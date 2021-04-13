@@ -44,6 +44,6 @@ from .api import (  # noqa F401
     TimerRequest,
     TimerServer,
     configure,
-    expires
+    expires,
 )
 from .local_timer import LocalTimerClient, LocalTimerServer  # noqa F401

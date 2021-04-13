@@ -23,7 +23,7 @@ from typing import (  # noqa: F401
     Optional,
     Tuple,
     TypeVar,
-    Union
+    Union,
 )
 
 import torch

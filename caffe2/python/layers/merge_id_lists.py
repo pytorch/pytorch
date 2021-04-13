@@ -9,7 +9,7 @@ from caffe2.python import schema
 from caffe2.python.layers.layers import (
     IdList,
     ModelLayer,
-    get_categorical_limit
+    get_categorical_limit,
 )
 
 

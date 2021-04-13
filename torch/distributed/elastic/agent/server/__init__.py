@@ -35,5 +35,5 @@ from .api import (  # noqa F401
     Worker,
     WorkerGroup,
     WorkerSpec,
-    WorkerState
+    WorkerState,
 )

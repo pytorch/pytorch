@@ -13,7 +13,7 @@ from torch.jit._check import AttributeTypeIsSupportedChecker
 from torch.jit.frontend import (
     get_class_properties,
     get_default_args,
-    get_jit_def
+    get_jit_def,
 )
 from torch.nn import Module
 

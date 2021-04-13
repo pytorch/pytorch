@@ -10,13 +10,13 @@ from torch.nn.modules.utils import _pair, _single, _triple
 from torch.onnx.symbolic_helper import (
     _is_tensor_list,
     _unimplemented,
-    parse_args
+    parse_args,
 )
 from torch.onnx.symbolic_opset9 import expand, unused
 from torch.onnx.utils import (
     _add_block,
     _add_input_to_block,
-    _add_output_to_block
+    _add_output_to_block,
 )
 
 # EDITING THIS FILE? READ THIS FIRST!

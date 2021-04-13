@@ -7,7 +7,7 @@ from torch.nn import (
     Conv2d,
     Conv3d,
     Linear,
-    ReLU
+    ReLU,
 )
 
 

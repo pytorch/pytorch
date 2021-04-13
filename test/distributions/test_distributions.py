@@ -80,7 +80,7 @@ from torch.distributions import (
     VonMises,
     Weibull,
     constraints,
-    kl_divergence
+    kl_divergence,
 )
 from torch.distributions.constraint_registry import transform_to
 from torch.distributions.constraints import Constraint, is_dependent
@@ -91,13 +91,13 @@ from torch.distributions.transforms import (
     CatTransform,
     ExpTransform,
     StackTransform,
-    identity_transform
+    identity_transform,
 )
 from torch.distributions.utils import (
     lazy_property,
     probs_to_logits,
     tril_matrix_to_vec,
-    vec_to_tril_matrix
+    vec_to_tril_matrix,
 )
 from torch.nn.functional import softmax
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -107,7 +107,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     load_tests,
     run_tests,
-    set_rng_seed
+    set_rng_seed,
 )
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for

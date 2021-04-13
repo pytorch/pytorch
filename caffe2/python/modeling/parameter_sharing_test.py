@@ -9,7 +9,7 @@ from caffe2.python import brew, model_helper, scope
 from caffe2.python.modeling.initializers import Initializer
 from caffe2.python.modeling.parameter_sharing import (
     ParameterSharing,
-    parameter_sharing_context
+    parameter_sharing_context,
 )
 
 

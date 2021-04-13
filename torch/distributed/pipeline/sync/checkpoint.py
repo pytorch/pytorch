@@ -35,7 +35,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    Union
+    Union,
 )
 
 import torch

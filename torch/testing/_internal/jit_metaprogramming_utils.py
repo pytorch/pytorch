@@ -13,12 +13,12 @@ import torch.nn.functional as F
 from torch._six import inf
 from torch.jit.annotations import (  # noqa: F401
     BroadcastingList2,
-    BroadcastingList3
+    BroadcastingList3,
 )
 from torch.testing._internal.common_methods_invocations import (
     create_input,
     non_differentiable,
-    unpack_variables
+    unpack_variables,
 )
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 from torch.testing._internal.common_utils import is_iterable_of_tensors

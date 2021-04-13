@@ -24,7 +24,7 @@ from caffe2.python.layers.layers import (
     ModelLayer,
     almost_equal_schemas,
     get_categorical_limit,
-    get_key
+    get_key,
 )
 from caffe2.python.optimizer import FP16_ENGINES, Optimizer
 

@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     onlyOnCPUAndCUDA,
-    precisionOverride
+    precisionOverride,
 )
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     slowTest,
-    torch_to_numpy_dtype_dict
+    torch_to_numpy_dtype_dict,
 )
 
 

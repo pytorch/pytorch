@@ -31,7 +31,7 @@ from tools.codegen.api.autograd import (
     SavedAttribute,
     dispatch_strategy,
     gen_differentiable_outputs,
-    is_differentiable
+    is_differentiable,
 )
 from tools.codegen.api.types import Binding, DispatcherSignature
 from tools.codegen.code_template import CodeTemplate
@@ -42,7 +42,7 @@ from tools.codegen.model import (
     NativeFunction,
     SchemaKind,
     SelfArgument,
-    TensorOptionsArguments
+    TensorOptionsArguments,
 )
 from tools.codegen.utils import mapMaybe
 
@@ -57,7 +57,7 @@ from .gen_inplace_or_view_type import (
     is_tensor_list_type,
     modifies_arguments,
     unpack_args,
-    use_derived
+    use_derived,
 )
 from .gen_trace_type import (
     MANUAL_AUTOGRAD_AND_TRACER,
@@ -65,7 +65,7 @@ from .gen_trace_type import (
     declare_returned_variables,
     get_return_value,
     tie_return_values,
-    type_wrapper_name
+    type_wrapper_name,
 )
 
 # We don't set or modify grad_fn on these methods. Generally, they return

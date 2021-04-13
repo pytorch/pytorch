@@ -9,7 +9,7 @@ from hypothesis.strategies import (
     composite,
     integers,
     sampled_from,
-    text
+    text,
 )
 
 from torch.testing._internal import expecttest

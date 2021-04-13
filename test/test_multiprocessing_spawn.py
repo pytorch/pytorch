@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     NO_MULTIPROCESSING_SPAWN,
     TestCase,
-    run_tests
+    run_tests,
 )
 
 

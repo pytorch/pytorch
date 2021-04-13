@@ -11,7 +11,7 @@ from utils import (
     InputsType,
     TimingResultType,
     VType,
-    to_markdown_table
+    to_markdown_table,
 )
 
 import torch

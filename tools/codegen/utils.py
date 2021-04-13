@@ -10,7 +10,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    TypeVar
+    TypeVar,
 )
 
 # Many of these functions share logic for defining both the definition

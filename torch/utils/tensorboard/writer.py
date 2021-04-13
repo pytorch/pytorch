@@ -18,7 +18,7 @@ from ._embedding import (
     make_mat,
     make_sprite,
     make_tsv,
-    write_pbtxt
+    write_pbtxt,
 )
 from ._onnx_graph import load_onnx_graph
 from ._pytorch_graph import graph
@@ -36,7 +36,7 @@ from .summary import (
     pr_curve_raw,
     scalar,
     text,
-    video
+    video,
 )
 
 
@@ -748,7 +748,7 @@ class SummaryWriter(object):
             from ._caffe2_graph import (
                 model_to_graph_def,
                 nets_to_graph_def,
-                protos_to_graph_def
+                protos_to_graph_def,
             )
             if isinstance(model, list):
                 if isinstance(model[0], core.Net):

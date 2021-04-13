@@ -29,7 +29,7 @@ from .gen_python_functions import (
     is_py_nn_function,
     is_py_torch_function,
     is_py_variable_method,
-    should_generate_py_binding
+    should_generate_py_binding,
 )
 
 

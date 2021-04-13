@@ -23,7 +23,7 @@ from typing import (
     Type,
     TypeVar,
     Union,
-    cast
+    cast,
 )
 
 from torch import Tensor, nn

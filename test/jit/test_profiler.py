@@ -9,7 +9,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import (
     FileCheck,
     JitTestCase,
-    warmup_backward
+    warmup_backward,
 )
 
 if __name__ == '__main__':

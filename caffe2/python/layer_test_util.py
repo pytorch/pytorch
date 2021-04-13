@@ -17,7 +17,7 @@ from caffe2.python import (
     schema,
     test_util,
     utils,
-    workspace
+    workspace,
 )
 
 

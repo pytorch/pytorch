@@ -42,7 +42,7 @@ from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_freezing import (  # noqa: F401
     TestFreezing,
     TestFrozenOptimizations,
-    TestMKLDNNReinplacing
+    TestMKLDNNReinplacing,
 )
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
@@ -96,21 +96,21 @@ from torch.autograd import Variable
 from torch.jit.annotations import (  # noqa: F401
     Any,
     BroadcastingList2,
-    BroadcastingList3
+    BroadcastingList3,
 )
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing import FileCheck
 # Testing utils
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests
+    instantiate_device_type_tests,
 )
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_methods_invocations import (
     EXCLUDE_FUNCTIONAL,
     EXCLUDE_GRADCHECK,
     create_input,
-    exclude_tensor_method
+    exclude_tensor_method,
 )
 from torch.testing._internal.common_methods_invocations import \
     method_tests as autograd_method_tests
@@ -118,7 +118,7 @@ from torch.testing._internal.common_methods_invocations import unpack_variables
 from torch.testing._internal.common_nn import (
     criterion_tests,
     module_tests,
-    new_module_tests
+    new_module_tests,
 )
 from torch.testing._internal.common_utils import (
     GRAPH_EXECUTOR,
@@ -136,7 +136,7 @@ from torch.testing._internal.common_utils import (
     set_rng_seed,
     skipIfCompiledWithoutNumpy,
     slowTest,
-    suppress_warnings
+    suppress_warnings,
 )
 from torch.testing._internal.jit_metaprogramming_utils import (
     EXCLUDE_SCRIPT,
@@ -148,7 +148,7 @@ from torch.testing._internal.jit_metaprogramming_utils import (
     get_nn_module_name_from_kwargs,
     get_script_args,
     nn_functional_tests,
-    script_method_template
+    script_method_template,
 )
 from torch.testing._internal.jit_utils import (
     RUN_CUDA,
@@ -162,16 +162,16 @@ from torch.testing._internal.jit_utils import (
     enable_cpu_fuser_if,
     execWrapper,
     get_execution_plan,
-    make_global
+    make_global,
 )
 # For testing truediv in python 2
 from torch.testing._internal.test_module.future_div import (
     div_float_future,
-    div_int_future
+    div_int_future,
 )
 from torch.testing._internal.test_module.no_future_div import (
     div_float_nofuture,
-    div_int_nofuture
+    div_int_nofuture,
 )
 
 
@@ -9190,7 +9190,7 @@ dedent """
     def test_pack_padded_pad_packed_trace(self):
         from torch.nn.utils.rnn import (
             pack_padded_sequence,
-            pad_packed_sequence
+            pad_packed_sequence,
         )
         T, B, C = 3, 5, 7
 
@@ -9236,7 +9236,7 @@ dedent """
     def test_script_pack_padded_sequence(self):
         from torch.nn.utils.rnn import (
             pack_padded_sequence,
-            pad_packed_sequence
+            pad_packed_sequence,
         )
 
         def pack_padded_pad_packed_script(x, seq_lens):
@@ -9283,7 +9283,7 @@ dedent """
         from torch.nn.utils.rnn import (
             pack_sequence,
             pad_packed_sequence,
-            pad_sequence
+            pad_sequence,
         )
 
         def pad_sequence_func(tensor_list, batch_first=False, padding_value=0.0):
@@ -9434,7 +9434,7 @@ dedent """
     def test_rnn_trace_override(self):
         from torch.nn.utils.rnn import (
             pack_padded_sequence,
-            pad_packed_sequence
+            pad_packed_sequence,
         )
         num_layers = 3
         T, B, C = 11, 5, 7

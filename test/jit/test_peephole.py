@@ -6,7 +6,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import (
     RUN_CUDA,
     JitTestCase,
-    _inline_everything
+    _inline_everything,
 )
 
 if __name__ == '__main__':

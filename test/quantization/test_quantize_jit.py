@@ -29,7 +29,7 @@ from torch.quantization import (
     quantize,
     quantize_dynamic,
     quantize_dynamic_jit,
-    quantize_jit
+    quantize_jit,
 )
 # torch.quantization.quantize_jit
 from torch.quantization.quantize_jit import (
@@ -38,7 +38,7 @@ from torch.quantization.quantize_jit import (
     fuse_conv_bn_jit,
     prepare_dynamic_jit,
     prepare_jit,
-    script_qconfig
+    script_qconfig,
 )
 from torch.testing import FileCheck
 # Annotated models
@@ -59,18 +59,18 @@ from torch.testing._internal.common_quantization import (
     default_per_channel_qconfig,
     get_script_module,
     skipIfNoFBGEMM,
-    test_only_eval_fn
+    test_only_eval_fn,
 )
 # Testing utils
 from torch.testing._internal.common_quantized import (
     override_qengines,
     qengine_is_fbgemm,
-    qengine_is_qnnpack
+    qengine_is_qnnpack,
 )
 from torch.testing._internal.jit_utils import (
     attrs_with_prefix,
     get_forward,
-    get_forward_graph
+    get_forward_graph,
 )
 
 

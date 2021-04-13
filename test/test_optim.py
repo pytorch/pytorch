@@ -23,7 +23,7 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
     ReduceLROnPlateau,
     StepLR,
-    _LRScheduler
+    _LRScheduler,
 )
 from torch.optim.swa_utils import SWALR, AveragedModel, update_bn
 from torch.testing._internal.common_utils import (
@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
     run_tests,
-    skipIfRocm
+    skipIfRocm,
 )
 
 # load_tests from common_utils is used to automatically filter tests for

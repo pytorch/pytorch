@@ -10,7 +10,7 @@ from torch import nn
 from torch.distributed.pipeline.sync.skip import (
     Namespace,
     skippable,
-    verify_skippables
+    verify_skippables,
 )
 
 

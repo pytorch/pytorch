@@ -9,14 +9,14 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     instantiate_device_type_tests,
     onlyCPU,
-    onlyOnCPUAndCUDA
+    onlyOnCPUAndCUDA,
 )
 from torch.testing._internal.common_utils import (
     TEST_NUMPY,
     TestCase,
     load_tests,
     run_tests,
-    torch_to_numpy_dtype_dict
+    torch_to_numpy_dtype_dict,
 )
 
 if TEST_NUMPY:

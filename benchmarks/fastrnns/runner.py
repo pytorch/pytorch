@@ -17,7 +17,7 @@ from .factory import (
     lstm_simple_creator,
     pytorch_lstm_creator,
     varlen_lstm_creator,
-    varlen_pytorch_lstm_creator
+    varlen_pytorch_lstm_creator,
 )
 
 

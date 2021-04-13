@@ -11,7 +11,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.testing._internal.common_quantized import (
     override_qengines,
-    qengine_is_fbgemm
+    qengine_is_fbgemm,
 )
 # Testing utils
 from torch.testing._internal.common_utils import TestCase

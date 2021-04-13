@@ -25,7 +25,7 @@ from .laplace import Laplace
 from .lowrank_multivariate_normal import (
     LowRankMultivariateNormal,
     _batch_lowrank_logdet,
-    _batch_lowrank_mahalanobis
+    _batch_lowrank_mahalanobis,
 )
 from .multivariate_normal import MultivariateNormal, _batch_mahalanobis
 from .normal import Normal

@@ -12,7 +12,7 @@ from ..common_types import (
     _size_3_opt_t,
     _size_3_t,
     _size_any_opt_t,
-    _size_any_t
+    _size_any_t,
 )
 from .module import Module
 from .utils import _pair, _single, _triple

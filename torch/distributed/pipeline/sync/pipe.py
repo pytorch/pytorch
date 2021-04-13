@@ -15,7 +15,7 @@ from typing import (
     Sequence,
     Tuple,
     Union,
-    cast
+    cast,
 )
 
 import torch

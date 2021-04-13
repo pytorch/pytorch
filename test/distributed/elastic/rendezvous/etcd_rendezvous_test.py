@@ -9,7 +9,7 @@ import uuid
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import (
-    create_rdzv_handler
+    create_rdzv_handler,
 )
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 

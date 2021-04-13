@@ -13,11 +13,11 @@ from rendezvous_backend_test import RendezvousBackendTestMixin
 
 from torch.distributed.elastic.rendezvous import (
     RendezvousConnectionError,
-    RendezvousParameters
+    RendezvousParameters,
 )
 from torch.distributed.elastic.rendezvous.etcd_rendezvous_backend import (
     EtcdRendezvousBackend,
-    create_backend
+    create_backend,
 )
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 

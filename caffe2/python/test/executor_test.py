@@ -14,7 +14,7 @@ from caffe2.python.test.executor_test_util import (
     build_resnet50_dataparallel_model,
     executor_test_model_names,
     executor_test_settings,
-    run_resnet50_epoch
+    run_resnet50_epoch,
 )
 from caffe2.python.test_util import TestCase
 

@@ -15,19 +15,19 @@ import torch.testing._internal.hypothesis_utils as hu
 from torch.quantization import (
     PerChannelMinMaxObserver,
     default_float_qparams_observer,
-    get_default_static_quant_module_mappings
+    get_default_static_quant_module_mappings,
 )
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     _make_conv_test_input,
     lengths_to_offsets,
     prepare_dynamic,
-    skipIfNoFBGEMM
+    skipIfNoFBGEMM,
 )
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
     override_qengines,
-    override_quantized_engine
+    override_quantized_engine,
 )
 
 hu.assert_deadline_disabled()

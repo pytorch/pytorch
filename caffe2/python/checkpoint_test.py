@@ -17,7 +17,7 @@ from caffe2.python.checkpoint import (
     MultiNodeCheckpointManager,
     UploadTaskGroupBuilder,
     db_name,
-    epoch_limiter
+    epoch_limiter,
 )
 from caffe2.python.dataio import ReaderWithLimit
 from caffe2.python.dataset import Dataset

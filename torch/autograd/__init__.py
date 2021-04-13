@@ -261,7 +261,7 @@ from torch._C._autograd import (
     _enable_record_function,
     _profiler_enabled,
     _set_empty_test_observer,
-    kineto_available
+    kineto_available,
 )
 
 if kineto_available():

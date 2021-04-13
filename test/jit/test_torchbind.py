@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    TEST_WITH_ROCM
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 

@@ -11,7 +11,7 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionMode,
     get_extra_size_of,
     get_latency_of_partitioned_graph,
-    get_partition_to_latency_mapping
+    get_partition_to_latency_mapping,
 )
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node, map_arg

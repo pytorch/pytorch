@@ -15,7 +15,7 @@ from torch.distributed.rpc import RRef, remote, rpc_async, rpc_sync
 from torch.distributions import Categorical
 from torch.testing._internal.dist_utils import dist_init, worker_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
-    RpcAgentTestFixture
+    RpcAgentTestFixture,
 )
 
 TOTAL_EPISODE_STEP = 5000

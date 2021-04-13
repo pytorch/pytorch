@@ -12,7 +12,7 @@ from .utils import (
     get_node_first_input_and_output_type,
     get_number_of_non_param_args,
     getattr_from_fqn,
-    return_first_non_observer_node
+    return_first_non_observer_node,
 )
 
 

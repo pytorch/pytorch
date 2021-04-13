@@ -6,13 +6,13 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
-    onlyOnCPUAndCUDA
+    onlyOnCPUAndCUDA,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
     make_tensor,
     run_tests,
-    slowTest
+    slowTest,
 )
 from torch.testing._internal.framework_utils import calculate_shards
 

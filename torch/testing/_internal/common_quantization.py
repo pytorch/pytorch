@@ -28,12 +28,12 @@ from torch.quantization import (
     get_default_qconfig,
     propagate_qconfig_,
     quantize_dynamic_jit,
-    quantize_jit
+    quantize_jit,
 )
 from torch.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_qat_module_mappings,
-    get_default_qconfig_propagation_list
+    get_default_qconfig_propagation_list,
 )
 from torch.testing._internal.common_utils import TestCase
 
@@ -43,12 +43,12 @@ try:
     from torch.fx.graph import Node
     from torch.quantization.ns.ns_types import (
         NSSingleResultValuesType,
-        NSSubgraph
+        NSSubgraph,
     )
     from torch.quantization.quantize_fx import (
         convert_fx,
         prepare_fx,
-        prepare_qat_fx
+        prepare_qat_fx,
     )
     HAS_FX = True
 except ImportError:

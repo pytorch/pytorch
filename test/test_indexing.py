@@ -13,12 +13,12 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     instantiate_device_type_tests,
     onlyCUDA,
-    onlyOnCPUAndCUDA
+    onlyOnCPUAndCUDA,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
     make_tensor,
-    run_tests
+    run_tests,
 )
 
 

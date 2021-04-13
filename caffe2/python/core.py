@@ -25,7 +25,7 @@ from caffe2.python.control_ops_grad import (
     disambiguate_grad_if_op_output,
     gen_do_gradient,
     gen_if_gradient,
-    gen_while_gradient
+    gen_while_gradient,
 )
 from caffe2.python.lazy import TriggerLazyImport
 

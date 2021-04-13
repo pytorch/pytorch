@@ -10,7 +10,7 @@ from torch.nn.intrinsic import _FusedModule
 from .qconfig import (
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
-    float_qparams_weight_only_qconfig
+    float_qparams_weight_only_qconfig,
 )
 from .quantization_mappings import (
     _get_special_act_post_process,
@@ -19,7 +19,7 @@ from .quantization_mappings import (
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
     get_default_static_quant_module_mappings,
-    no_observer_set
+    no_observer_set,
 )
 from .stubs import DeQuantStub, QuantWrapper
 

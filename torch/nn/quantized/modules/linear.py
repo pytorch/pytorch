@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.intrinsic as nni
 from torch.nn.quantized.modules.utils import (
     _quantize_weight,
-    hide_packed_params_repr
+    hide_packed_params_repr,
 )
 
 

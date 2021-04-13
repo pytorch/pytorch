@@ -6,7 +6,7 @@ import torch
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyCPU
+    onlyCPU,
 )
 from torch.testing._internal.common_utils import TestCase, run_tests
 

@@ -13,7 +13,7 @@ if is_available():
     # Registers FAULTY_PROCESS_GROUP RPC backend.
     from torch._C._distributed_rpc_testing import (
         FaultyProcessGroupAgent,
-        FaultyProcessGroupRpcBackendOptions
+        FaultyProcessGroupRpcBackendOptions,
     )
 
     from . import faulty_agent_backend_registry

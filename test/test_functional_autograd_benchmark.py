@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TestCase,
     run_tests,
-    slowTest
+    slowTest,
 )
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))

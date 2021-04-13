@@ -23,7 +23,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    cast
+    cast,
 )
 from xml.dom import minidom
 
@@ -42,7 +42,7 @@ from tools.stats_utils.s3_stat_parser import (
     VersionedReport,
     get_S3_object_from_bucket,
     get_test_stats_summaries_for_job,
-    newify_case
+    newify_case,
 )
 
 SimplerSuite = Dict[str, Version2Case]

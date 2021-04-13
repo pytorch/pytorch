@@ -16,7 +16,7 @@ from typing import (  # type: ignore
     _tp_cache,
     _type_check,
     _type_repr,
-    get_type_hints
+    get_type_hints,
 )
 
 # TODO: Use TypeAlias when Python 3.6 is deprecated

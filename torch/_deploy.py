@@ -5,7 +5,7 @@ from torch.package import (
     Importer,
     OrderedImporter,
     PackageImporter,
-    sys_importer
+    sys_importer,
 )
 from torch.package._package_pickler import create_pickler
 from torch.package._package_unpickler import PackageUnpickler

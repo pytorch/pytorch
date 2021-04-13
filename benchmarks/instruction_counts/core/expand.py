@@ -24,7 +24,7 @@ from core.api import (
     AutoLabels,
     GroupedBenchmark,
     RuntimeMode,
-    TimerArgs
+    TimerArgs,
 )
 from core.types import FlatDefinition, FlatIntermediateDefinition, Label
 from core.utils import get_temp_dir

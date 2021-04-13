@@ -15,7 +15,7 @@ from typing import (
     Pattern,
     Sequence,
     TypeVar,
-    cast
+    cast,
 )
 
 from typing_extensions import TypedDict

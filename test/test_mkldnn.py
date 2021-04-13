@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     gradcheck,
     gradgradcheck,
-    run_tests
+    run_tests,
 )
 from torch.utils import mkldnn as mkldnn_utils
 

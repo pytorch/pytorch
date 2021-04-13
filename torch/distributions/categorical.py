@@ -5,7 +5,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.utils import (
     lazy_property,
     logits_to_probs,
-    probs_to_logits
+    probs_to_logits,
 )
 
 

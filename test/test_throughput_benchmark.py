@@ -4,7 +4,7 @@ from torch.testing import assert_allclose
 from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TestCase,
-    run_tests
+    run_tests,
 )
 from torch.utils import ThroughputBenchmark
 

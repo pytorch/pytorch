@@ -7,7 +7,7 @@ from itertools import (
     combinations,
     combinations_with_replacement,
     permutations,
-    product
+    product,
 )
 
 import numpy as np
@@ -25,13 +25,13 @@ from torch.testing._internal.common_device_type import (
     onlyOnCPUAndCUDA,
     precisionOverride,
     skipCPUIf,
-    skipMeta
+    skipMeta,
 )
 # TODO: refactor tri_tests_args, _compare_trilu_indices, run_additional_tri_tests
 from torch.testing._internal.common_methods_invocations import (
     _compare_trilu_indices,
     run_additional_tri_tests,
-    tri_tests_args
+    tri_tests_args,
 )
 from torch.testing._internal.common_utils import (
     IS_MACOS,
@@ -44,7 +44,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     slowTest,
     suppress_warnings,
-    torch_to_numpy_dtype_dict
+    torch_to_numpy_dtype_dict,
 )
 
 

@@ -3,12 +3,12 @@ from torch.utils.data._decorator import (
     functional_datapipe,
     guaranteed_datapipes_determinism,
     non_deterministic,
-    runtime_validation
+    runtime_validation,
 )
 from torch.utils.data.dataloader import (
     DataLoader,
     _DatasetKind,
-    get_worker_info
+    get_worker_info,
 )
 from torch.utils.data.dataset import ChainDataset, ConcatDataset, Dataset
 from torch.utils.data.dataset import IterableDataset
@@ -21,7 +21,7 @@ from torch.utils.data.sampler import (
     Sampler,
     SequentialSampler,
     SubsetRandomSampler,
-    WeightedRandomSampler
+    WeightedRandomSampler,
 )
 
 __all__ = ['Sampler', 'SequentialSampler', 'RandomSampler',

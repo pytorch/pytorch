@@ -8,13 +8,13 @@ from test_jit import RUN_CUDA, JitTestCase
 
 import torch
 from torch.testing._internal.codegen.random_topo_test import (
-    runDefaultTestWithSeed
+    runDefaultTestWithSeed,
 )
 from torch.testing._internal.common_utils import (
     GRAPH_EXECUTOR,
     TEST_WITH_ROCM,
     ProfilingMode,
-    run_tests
+    run_tests,
 )
 
 os.environ['PYTORCH_CUDA_FUSER_DISABLE_FALLBACK'] = '1'

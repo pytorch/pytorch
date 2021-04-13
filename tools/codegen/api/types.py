@@ -7,7 +7,7 @@ from tools.codegen.model import (
     FunctionSchema,
     NativeFunction,
     SelfArgument,
-    TensorOptionsArguments
+    TensorOptionsArguments,
 )
 
 _T = TypeVar('_T')

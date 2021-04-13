@@ -5,7 +5,7 @@ from typing import Dict, List, Sequence
 
 from tools.codegen.api.python import (
     PythonSignatureGroup,
-    PythonSignatureNativeFunctionPair
+    PythonSignatureNativeFunctionPair,
 )
 from tools.codegen.gen import FileManager
 from tools.codegen.model import Variant
@@ -13,7 +13,7 @@ from tools.codegen.model import Variant
 from ..autograd.gen_python_functions import (
     group_overloads,
     load_signatures,
-    should_generate_py_binding
+    should_generate_py_binding,
 )
 
 """

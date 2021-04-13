@@ -39,7 +39,7 @@ from torch._C import (  # noqa: F401
     _error_if_any_worker_fails,
     _remove_worker_pids,
     _set_worker_pids,
-    _set_worker_signal_handlers
+    _set_worker_signal_handlers,
 )
 
 from . import IS_WINDOWS

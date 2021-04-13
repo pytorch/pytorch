@@ -18,28 +18,28 @@ from ..utils import (
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
     weight_dtype,
-    weight_is_quantized
+    weight_is_quantized,
 )
 from .graph_module import (
     ObservedGraphModule,
     ObservedStandaloneGraphModule,
     QuantizedGraphModule,
     is_observed_module,
-    is_observed_standalone_module
+    is_observed_standalone_module,
 )
 from .pattern_utils import (
     Pattern,
     get_default_output_activation_post_process_map,
     get_default_quant_patterns,
     input_output_observed,
-    is_match
+    is_match,
 )
 from .qconfig_utils import (
     QConfigAny,
     convert_dict_to_ordered_dict,
     get_flattened_qconfig_dict,
     get_object_type_qconfig,
-    get_qconfig
+    get_qconfig,
 )
 from .quantization_patterns import (
     BinaryOpQuantizeHandler,
@@ -49,7 +49,7 @@ from .quantization_patterns import (
     FixedQParamsOpQuantizeHandler,
     QuantizeHandler,
     StandaloneModuleQuantizeHandler,
-    binary_op_supported_dtypes
+    binary_op_supported_dtypes,
 )
 from .utils import (
     _parent_name,
@@ -60,7 +60,7 @@ from .utils import (
     get_new_attr_name_with_prefix,
     graph_module_from_producer_nodes,
     node_return_type_is_int,
-    quantize_node
+    quantize_node,
 )
 
 # Define helper types

@@ -26,7 +26,7 @@ from pt import (  # noqa
     softmax_test,
     split_test,
     sum_test,
-    tensor_to_test
+    tensor_to_test,
 )
 
 if __name__ == "__main__":

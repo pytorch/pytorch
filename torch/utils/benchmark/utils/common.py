@@ -13,7 +13,7 @@ from typing import (
     List,
     Optional,
     Tuple,
-    cast
+    cast,
 )
 
 import numpy as np

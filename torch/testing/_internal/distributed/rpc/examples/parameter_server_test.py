@@ -12,7 +12,7 @@ import torch.nn as nn
 from torch import optim
 from torch.testing._internal.dist_utils import dist_init, worker_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
-    RpcAgentTestFixture
+    RpcAgentTestFixture,
 )
 
 batch_size = 20

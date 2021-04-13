@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TestCase,
     run_tests,
-    slowTest
+    slowTest,
 )
 
 CALLGRIND_ARTIFACTS: str = os.path.join(
@@ -543,7 +543,7 @@ class TestBenchmarkUtils(TestCase):
         self.assertGreater(max(counts.values()), 1, f"Every instruction count total was unique: {counts}")
 
         from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import (
-            wrapper_singleton
+            wrapper_singleton,
         )
         self.assertIsNone(
             wrapper_singleton()._bindings_module,

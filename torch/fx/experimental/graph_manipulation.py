@@ -10,7 +10,7 @@ from torch.fx.node import (
     Target,
     _get_qualified_name,
     map_aggregate,
-    map_arg
+    map_arg,
 )
 from torch.fx.passes.shape_prop import ShapeProp
 

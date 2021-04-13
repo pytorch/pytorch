@@ -18,7 +18,7 @@ from pt import (  # noqa
     qrnn_test,
     qtensor_method_test,
     quantization_test,
-    qunary_test
+    qunary_test,
 )
 
 if __name__ == "__main__":

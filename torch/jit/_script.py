@@ -24,21 +24,21 @@ from torch.jit._fuser import _graph_for
 from torch.jit._recursive import (
     ScriptMethodStub,
     infer_methods_to_compile,
-    wrap_cpp_module
+    wrap_cpp_module,
 )
 from torch.jit._state import (
     _enabled,
     _set_jit_function_cache,
     _set_jit_overload_cache,
     _try_get_jit_cached_function,
-    _try_get_jit_cached_overloads
+    _try_get_jit_cached_overloads,
 )
 from torch.jit.frontend import get_default_args, get_jit_class_def, get_jit_def
 from torch.nn import Module
 from torch.overrides import (
     has_torch_function,
     has_torch_function_unary,
-    has_torch_function_variadic
+    has_torch_function_variadic,
 )
 from torch.utils import set_module
 

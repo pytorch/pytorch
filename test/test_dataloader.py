@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     run_tests,
     skipIfRocm,
-    slowTest
+    slowTest,
 )
 from torch.utils.data import (
     ChainDataset,
@@ -35,7 +35,7 @@ from torch.utils.data import (
     Dataset,
     IterableDataset,
     TensorDataset,
-    _utils
+    _utils,
 )
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
@@ -1479,7 +1479,7 @@ except RuntimeError as e:
         from torch.utils.data import (
             RandomSampler,
             SubsetRandomSampler,
-            WeightedRandomSampler
+            WeightedRandomSampler,
         )
 
         weights = [0.1, 0.9, 0.4, 0.7, 3.0, 0.6]

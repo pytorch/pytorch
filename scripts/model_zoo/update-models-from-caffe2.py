@@ -22,7 +22,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python.models.download import (
     deleteDirectory,
     downloadFromURLToFile,
-    getURLFromName
+    getURLFromName,
 )
 
 """A script converting Caffe2 models to ONNX, and updating ONNX model zoos.

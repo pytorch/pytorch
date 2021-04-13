@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
     dtype2prec_DONTUSE,
     gradcheck,
     repeat_test_for_types,
-    run_tests
+    run_tests,
 )
 
 torch.set_default_dtype(torch.double)

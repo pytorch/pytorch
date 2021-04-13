@@ -8,7 +8,7 @@ from tools.codegen.api.types import (
     Expr,
     MutRefCType,
     OptionalCType,
-    SpecialArgName
+    SpecialArgName,
 )
 
 # This file implements a small program synthesis engine that implements

@@ -19,7 +19,7 @@ from caffe2.python import (
     gradient_checker,
     model_helper,
     test_util,
-    workspace
+    workspace,
 )
 from caffe2.python.gradient_checker import NetGradientChecker
 from caffe2.python.net_builder import NetBuilder, ops

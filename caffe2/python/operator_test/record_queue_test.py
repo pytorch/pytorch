@@ -13,7 +13,7 @@ from caffe2.python.schema import (
     NewRecord,
     Scalar,
     Struct,
-    from_blob_list
+    from_blob_list,
 )
 from caffe2.python.test_util import TestCase
 

@@ -14,7 +14,7 @@ from onnx.helper import (
     make_graph,
     make_model,
     make_node,
-    make_tensor_value_info
+    make_tensor_value_info,
 )
 
 from caffe2.proto import caffe2_pb2

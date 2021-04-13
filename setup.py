@@ -226,7 +226,7 @@ from tools.setup_helpers.env import (
     IS_LINUX,
     IS_WINDOWS,
     build_type,
-    check_env_flag
+    check_env_flag,
 )
 
 ################################################################################

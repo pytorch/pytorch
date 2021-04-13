@@ -26,7 +26,7 @@ from .activation import (
     Softsign,
     Tanh,
     Tanhshrink,
-    Threshold
+    Threshold,
 )
 from .adaptive import AdaptiveLogSoftmaxWithLoss
 from .batchnorm import (
@@ -36,7 +36,7 @@ from .batchnorm import (
     LazyBatchNorm1d,
     LazyBatchNorm2d,
     LazyBatchNorm3d,
-    SyncBatchNorm
+    SyncBatchNorm,
 )
 from .channelshuffle import ChannelShuffle
 from .container import (
@@ -45,7 +45,7 @@ from .container import (
     ModuleList,
     ParameterDict,
     ParameterList,
-    Sequential
+    Sequential,
 )
 from .conv import (
     Conv1d,
@@ -59,7 +59,7 @@ from .conv import (
     LazyConv3d,
     LazyConvTranspose1d,
     LazyConvTranspose2d,
-    LazyConvTranspose3d
+    LazyConvTranspose3d,
 )
 from .distance import CosineSimilarity, PairwiseDistance
 from .dropout import (
@@ -67,7 +67,7 @@ from .dropout import (
     Dropout,
     Dropout2d,
     Dropout3d,
-    FeatureAlphaDropout
+    FeatureAlphaDropout,
 )
 from .flatten import Flatten, Unflatten
 from .fold import Fold, Unfold
@@ -95,14 +95,14 @@ from .loss import (
     SmoothL1Loss,
     SoftMarginLoss,
     TripletMarginLoss,
-    TripletMarginWithDistanceLoss
+    TripletMarginWithDistanceLoss,
 )
 from .module import Module
 from .normalization import (
     CrossMapLRN2d,
     GroupNorm,
     LayerNorm,
-    LocalResponseNorm
+    LocalResponseNorm,
 )
 from .padding import (
     ConstantPad1d,
@@ -113,7 +113,7 @@ from .padding import (
     ReplicationPad1d,
     ReplicationPad2d,
     ReplicationPad3d,
-    ZeroPad2d
+    ZeroPad2d,
 )
 from .pixelshuffle import PixelShuffle, PixelUnshuffle
 from .pooling import (
@@ -135,7 +135,7 @@ from .pooling import (
     MaxPool3d,
     MaxUnpool1d,
     MaxUnpool2d,
-    MaxUnpool3d
+    MaxUnpool3d,
 )
 from .rnn import (
     GRU,
@@ -145,7 +145,7 @@ from .rnn import (
     LSTMCell,
     RNNBase,
     RNNCell,
-    RNNCellBase
+    RNNCellBase,
 )
 from .sparse import Embedding, EmbeddingBag
 from .transformer import (
@@ -153,7 +153,7 @@ from .transformer import (
     TransformerDecoder,
     TransformerDecoderLayer,
     TransformerEncoder,
-    TransformerEncoderLayer
+    TransformerEncoderLayer,
 )
 from .upsampling import Upsample, UpsamplingBilinear2d, UpsamplingNearest2d
 

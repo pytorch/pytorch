@@ -5,7 +5,7 @@ from torch._six import inf
 from torch.distributions import constraints
 from torch.distributions.cauchy import Cauchy
 from torch.distributions.transformed_distribution import (
-    TransformedDistribution
+    TransformedDistribution,
 )
 from torch.distributions.transforms import AbsTransform
 

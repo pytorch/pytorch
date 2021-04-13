@@ -21,7 +21,7 @@ from torch.distributed.elastic.rendezvous import (
     RendezvousError,
     RendezvousHandler,
     RendezvousParameters,
-    RendezvousTimeoutError
+    RendezvousTimeoutError,
 )
 
 from .etcd_store import EtcdStore, cas_delay

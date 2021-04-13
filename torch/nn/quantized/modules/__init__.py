@@ -10,7 +10,7 @@ from .conv import (
     ConvTranspose1d,
     ConvTranspose2d,
     ConvTranspose3d,
-    _ConvNd
+    _ConvNd,
 )
 from .embedding_ops import Embedding, EmbeddingBag
 from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
@@ -20,7 +20,7 @@ from .normalization import (
     InstanceNorm1d,
     InstanceNorm2d,
     InstanceNorm3d,
-    LayerNorm
+    LayerNorm,
 )
 
 

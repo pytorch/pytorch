@@ -13,7 +13,7 @@ from torch.distributions.utils import (
     broadcast_all,
     lazy_property,
     tril_matrix_to_vec,
-    vec_to_tril_matrix
+    vec_to_tril_matrix,
 )
 from torch.nn.functional import pad, softplus
 

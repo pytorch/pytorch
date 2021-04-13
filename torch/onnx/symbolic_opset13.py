@@ -8,7 +8,7 @@ from torch.onnx.symbolic_helper import _unimplemented, parse_args
 from torch.onnx.symbolic_opset9 import (
     _maybe_cast_reduce_op_input,
     nonzero,
-    overload_by_arg_count
+    overload_by_arg_count,
 )
 
 # EDITING THIS FILE? READ THIS FIRST!

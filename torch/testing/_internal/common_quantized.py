@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
-    TEST_WITH_UBSAN
+    TEST_WITH_UBSAN,
 )
 
 supported_qengines = torch.backends.quantized.supported_engines

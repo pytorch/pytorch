@@ -28,13 +28,13 @@ from torch.testing._internal.common_quantized import (
     override_qengines,
     override_quantized_engine,
     qengine_is_qnnpack,
-    supported_qengines
+    supported_qengines,
 )
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_PPC,
     TEST_WITH_UBSAN,
-    TestCase
+    TestCase,
 )
 
 np_dtype = {

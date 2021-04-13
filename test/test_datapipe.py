@@ -16,7 +16,7 @@ from typing import (
     Tuple,
     Type,
     TypeVar,
-    Union
+    Union,
 )
 from unittest import skipIf
 
@@ -32,7 +32,7 @@ from torch.utils.data import (
     IterDataPipe,
     RandomSampler,
     construct_time_validation,
-    runtime_validation
+    runtime_validation,
 )
 from torch.utils.data.datapipes.utils.decoder import \
     basichandlers as decoder_basichandlers
@@ -120,7 +120,7 @@ class TestIterableDataPipeBasic(TestCase):
         # test import datapipe class directly
         from torch.utils.data.datapipes.iter import (
             ListDirFiles,
-            LoadFilesFromDisk
+            LoadFilesFromDisk,
         )
 
         temp_dir = self.temp_dir.name

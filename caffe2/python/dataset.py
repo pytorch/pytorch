@@ -23,7 +23,7 @@ from caffe2.python.schema import (
     InitEmptyRecord,
     Struct,
     from_blob_list,
-    from_column_list
+    from_column_list,
 )
 
 

@@ -45,7 +45,7 @@ from .constants import (
     CONV_TYPE,
     CONV_VDPAU,
     CONV_VERSION,
-    HIP_UNSUPPORTED
+    HIP_UNSUPPORTED,
 )
 
 """ Mapping of CUDA functions, include files, constants, and types to ROCm/HIP equivalents

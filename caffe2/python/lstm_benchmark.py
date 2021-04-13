@@ -18,7 +18,7 @@ from caffe2.python import (
     recurrent,
     rnn_cell,
     utils,
-    workspace
+    workspace,
 )
 
 logging.basicConfig()

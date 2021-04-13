@@ -5,7 +5,7 @@ from torch.nn.parallel.comm import (
     gather,
     reduce_add,
     reduce_add_coalesced,
-    scatter
+    scatter,
 )
 
 __all__ = ['broadcast', 'broadcast_coalesced', 'reduce_add', 'reduce_add_coalesced', 'scatter', 'gather']

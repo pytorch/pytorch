@@ -10,7 +10,7 @@ from typing import Any, Callable, Optional, Tuple, cast
 from torch.distributed.elastic.rendezvous import RendezvousStateError
 from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     RendezvousBackend,
-    Token
+    Token,
 )
 
 

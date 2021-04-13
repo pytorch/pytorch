@@ -5,7 +5,7 @@ from torch.utils.data import (
     IterDataPipe,
     Sampler,
     SequentialSampler,
-    functional_datapipe
+    functional_datapipe,
 )
 
 T_co = TypeVar('T_co', covariant=True)

@@ -78,7 +78,7 @@ from caffe2.python.parallel_workers import (
     State,
     Worker,
     WorkerCoordinator,
-    run_worker
+    run_worker,
 )
 
 log = logging.getLogger("data_workers")

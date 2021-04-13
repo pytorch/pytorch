@@ -25,7 +25,7 @@ from . import (
     RandomSampler,
     Sampler,
     SequentialSampler,
-    _utils
+    _utils,
 )
 
 T_co = TypeVar('T_co', covariant=True)

@@ -13,7 +13,7 @@ from torch.distributed.pipeline.sync.skip import pop, skippable, stash
 from torch.distributed.pipeline.sync.skip.portal import (
     PortalBlue,
     PortalCopy,
-    PortalOrange
+    PortalOrange,
 )
 from torch.distributed.pipeline.sync.utils import partition_model
 

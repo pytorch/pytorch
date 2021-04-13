@@ -13,13 +13,13 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     onlyOnCPUAndCUDA,
-    skipCUDAIfRocm
+    skipCUDAIfRocm,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
     make_tensor,
     run_tests,
-    slowTest
+    slowTest,
 )
 
 # TODO: remove this

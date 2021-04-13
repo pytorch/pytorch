@@ -8,7 +8,7 @@ from torch.onnx.symbolic_helper import (
     _block_list_in_opset,
     _try_get_scalar_type,
     _unimplemented,
-    parse_args
+    parse_args,
 )
 from torch.onnx.symbolic_opset7 import div  # noqa: F401
 from torch.onnx.symbolic_opset9 import _cast_Float  # type: ignore

@@ -11,7 +11,7 @@ from torch.distributed import Store
 from torch.distributed.elastic.rendezvous import (
     RendezvousHandler,
     RendezvousHandlerRegistry,
-    RendezvousParameters
+    RendezvousParameters,
 )
 
 

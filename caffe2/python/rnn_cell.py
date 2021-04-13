@@ -20,7 +20,7 @@ from caffe2.python.attention import (
     apply_dot_attention,
     apply_recurrent_attention,
     apply_regular_attention,
-    apply_soft_coverage_attention
+    apply_soft_coverage_attention,
 )
 from caffe2.python.model_helper import ModelHelper
 from caffe2.python.modeling.initializers import Initializer

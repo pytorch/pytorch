@@ -16,7 +16,7 @@ from tools.codegen.api.types import (
     DispatcherSignature,
     Expr,
     MutRefCType,
-    NativeSignature
+    NativeSignature,
 )
 from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (
@@ -27,7 +27,7 @@ from tools.codegen.model import (
     TensorOptionsArguments,
     assert_never,
     is_cuda_dispatch_key,
-    is_structured_dispatch_key
+    is_structured_dispatch_key,
 )
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import Target, mapMaybe

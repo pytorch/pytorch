@@ -26,15 +26,15 @@ import torch.distributed.rpc as rpc
 from torch.distributed.elastic.agent.server.api import (
     RunResult,
     WorkerSpec,
-    WorkerState
+    WorkerState,
 )
 from torch.distributed.elastic.agent.server.local_elastic_agent import (
-    LocalElasticAgent
+    LocalElasticAgent,
 )
 from torch.distributed.elastic.multiprocessing import Std
 from torch.distributed.elastic.multiprocessing.errors import (
     ChildFailedError,
-    record
+    record,
 )
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer

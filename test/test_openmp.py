@@ -5,7 +5,7 @@ import torch
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TestCase,
-    run_tests
+    run_tests,
 )
 
 try:

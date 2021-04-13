@@ -14,7 +14,7 @@ from torch.distributed.elastic.metrics.api import (
     MetricHandler,
     MetricStream,
     _get_metric_name,
-    prof
+    prof,
 )
 
 

@@ -10,7 +10,7 @@ from typing import (
     Optional,
     Sized,
     Tuple,
-    TypeVar
+    TypeVar,
 )
 
 from torch.utils.data import IterDataPipe, functional_datapipe

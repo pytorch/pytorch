@@ -7,7 +7,7 @@ import torch.utils.show_pickle
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TestCase,
-    run_tests
+    run_tests,
 )
 
 

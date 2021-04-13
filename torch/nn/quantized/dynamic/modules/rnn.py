@@ -9,7 +9,7 @@ from torch._jit_internal import (  # noqa: F401
     List,
     Optional,
     Tuple,
-    Union
+    Union,
 )
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils.rnn import PackedSequence

@@ -17,7 +17,7 @@ from onnx.helper import (
     make_model,
     make_node,
     make_tensor,
-    make_tensor_value_info
+    make_tensor_value_info,
 )
 
 import caffe2.python._import_c_extension as C

@@ -10,7 +10,7 @@ from collections import namedtuple
 import caffe2.python.models.seq2seq.seq2seq_util as seq2seq_util
 from caffe2.python import core
 from caffe2.python.models.seq2seq.seq2seq_model_helper import (
-    Seq2SeqModelHelper
+    Seq2SeqModelHelper,
 )
 
 

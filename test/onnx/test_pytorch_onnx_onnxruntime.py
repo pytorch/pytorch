@@ -14,12 +14,12 @@ import onnxruntime  # noqa
 import torchvision
 from model_defs.lstm_flattening_result import (
     LstmFlatteningResultWithoutSeqLength,
-    LstmFlatteningResultWithSeqLength
+    LstmFlatteningResultWithSeqLength,
 )
 from model_defs.rnn_model_with_packed_sequence import (
     RnnModelWithPackedSequence,
     RnnModelWithPackedSequenceWithoutState,
-    RnnModelWithPackedSequenceWithState
+    RnnModelWithPackedSequenceWithState,
 )
 from test_pytorch_common import (
     BATCH_SIZE,
@@ -32,19 +32,19 @@ from test_pytorch_common import (
     skipIfONNXShapeInference,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
-    skipIfUnsupportedOpsetVersion
+    skipIfUnsupportedOpsetVersion,
 )
 from torchvision import ops
 from torchvision.models.detection.faster_rcnn import (
     FastRCNNPredictor,
-    TwoMLPHead
+    TwoMLPHead,
 )
 from torchvision.models.detection.image_list import ImageList
 from torchvision.models.detection.roi_heads import RoIHeads
 from torchvision.models.detection.rpn import (
     AnchorGenerator,
     RegionProposalNetwork,
-    RPNHead
+    RPNHead,
 )
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
@@ -549,7 +549,7 @@ class TestONNXRuntime(unittest.TestCase):
         maps = torch.rand(10, 1, 26, 26)
         rois = torch.rand(10, 4)
         from torchvision.models.detection.roi_heads import (
-            heatmaps_to_keypoints
+            heatmaps_to_keypoints,
         )
         out = heatmaps_to_keypoints(maps, rois)
         jit_trace = torch.jit.trace(heatmaps_to_keypoints, (maps, rois))
@@ -561,7 +561,7 @@ class TestONNXRuntime(unittest.TestCase):
         maps2 = torch.rand(20, 2, 21, 21)
         rois2 = torch.rand(20, 4)
         from torchvision.models.detection.roi_heads import (
-            heatmaps_to_keypoints
+            heatmaps_to_keypoints,
         )
         out2 = heatmaps_to_keypoints(maps2, rois2)
         out_trace2 = jit_trace(maps2, rois2)

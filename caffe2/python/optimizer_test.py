@@ -24,12 +24,12 @@ from caffe2.python.optimizer import (
     build_sgd,
     build_storm,
     build_wngrad,
-    build_yellowfin
+    build_yellowfin,
 )
 from caffe2.python.optimizer_context import UseOptimizer
 from caffe2.python.optimizer_test_util import (
     LRModificationTestBase,
-    OptimizerTestBase
+    OptimizerTestBase,
 )
 from caffe2.python.test_util import TestCase
 

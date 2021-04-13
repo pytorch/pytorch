@@ -16,7 +16,7 @@ from .env import (
     IS_64BIT,
     IS_DARWIN,
     IS_WINDOWS,
-    check_negative_env_flag
+    check_negative_env_flag,
 )
 from .numpy_ import NUMPY_INCLUDE_DIR, USE_NUMPY
 

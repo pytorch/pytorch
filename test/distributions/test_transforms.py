@@ -9,7 +9,7 @@ from torch.distributions import (
     Independent,
     Normal,
     TransformedDistribution,
-    constraints
+    constraints,
 )
 from torch.distributions.transforms import (
     AbsTransform,
@@ -27,7 +27,7 @@ from torch.distributions.transforms import (
     TanhTransform,
     Transform,
     _InverseTransform,
-    identity_transform
+    identity_transform,
 )
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
 

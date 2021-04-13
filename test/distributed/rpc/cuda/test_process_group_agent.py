@@ -10,13 +10,13 @@ if not dist.is_available():
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed.rpc.process_group_agent_test_fixture import (
-    ProcessGroupRpcAgentTestFixture
+    ProcessGroupRpcAgentTestFixture,
 )
 from torch.testing._internal.distributed.rpc_utils import (
     GENERIC_CUDA_TESTS,
     PROCESS_GROUP_CUDA_TESTS,
     MultiProcess,
-    generate_tests
+    generate_tests,
 )
 
 globals().update(

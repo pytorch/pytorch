@@ -6,7 +6,7 @@ from typing import IO, Iterable, Iterator, Optional, Tuple, cast
 
 from torch.utils.data import IterDataPipe
 from torch.utils.data.datapipes.utils.common import (
-    validate_pathname_binary_tuple
+    validate_pathname_binary_tuple,
 )
 
 

@@ -10,13 +10,13 @@ if not dist.is_available():
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
-    TensorPipeRpcAgentTestFixture
+    TensorPipeRpcAgentTestFixture,
 )
 from torch.testing._internal.distributed.rpc_utils import (
     GENERIC_TESTS,
     TENSORPIPE_TESTS,
     MultiProcess,
-    generate_tests
+    generate_tests,
 )
 
 globals().update(

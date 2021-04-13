@@ -3,7 +3,7 @@ from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import (
-    TransformedDistribution
+    TransformedDistribution,
 )
 from torch.distributions.transforms import ExpTransform
 from torch.distributions.utils import broadcast_all, clamp_probs

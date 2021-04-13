@@ -12,7 +12,7 @@ from caffe2.python.docs.generator import (
     DocUploader,
     OpDocGenerator,
     OperatorDoc,
-    OperatorEngine
+    OperatorEngine,
 )
 
 

@@ -56,7 +56,7 @@ from torch.testing._internal import expecttest
 from .._core import (
     _compare_return_type,
     _compare_scalars_internal,
-    _compare_tensors_internal
+    _compare_tensors_internal,
 )
 
 torch.backends.disable_global_flags()
@@ -747,7 +747,7 @@ class CudaMemoryLeakCheck():
         # initialize context & RNG to prevent false positive detections
         # when the test is the first to initialize those
         from torch.testing._internal.common_cuda import (
-            initialize_cuda_context_rng
+            initialize_cuda_context_rng,
         )
         initialize_cuda_context_rng()
 

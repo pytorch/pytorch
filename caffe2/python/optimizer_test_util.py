@@ -13,7 +13,7 @@ from caffe2.python import brew, cnn, core, optimizer, workspace
 from caffe2.python.model_helper import ModelHelper
 from caffe2.python.modeling.initializers import (
     Initializer,
-    PseudoFP16Initializer
+    PseudoFP16Initializer,
 )
 
 

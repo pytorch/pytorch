@@ -13,7 +13,7 @@ from debug_embed_params import run_embed_params
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.mnist import MNIST
 from model_defs.rnn_model_with_packed_sequence import (
-    RnnModelWithPackedSequence
+    RnnModelWithPackedSequence,
 )
 from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
@@ -28,7 +28,7 @@ from test_pytorch_common import (
     skipIfNoLapack,
     skipIfTravis,
     skipIfUnsupportedMinOpsetVersion,
-    skipIfUnsupportedOpsetVersion
+    skipIfUnsupportedOpsetVersion,
 )
 # Import various models for testing
 from torchvision.models.alexnet import alexnet
@@ -43,7 +43,7 @@ import torch.onnx.operators
 import torch.utils.model_zoo as model_zoo
 from caffe2.python.operator_test.torch_integration_test import (
     create_bbox_transform_inputs,
-    generate_rois_rotated
+    generate_rois_rotated,
 )
 from torch import nn
 from torch.autograd import Variable, function

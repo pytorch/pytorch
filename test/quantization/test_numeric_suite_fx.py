@@ -15,22 +15,22 @@ from torch.quantization._numeric_suite_fx import (
     add_shadow_loggers,
     extract_logger_info,
     extract_shadow_logger_info,
-    extract_weights
+    extract_weights,
 )
 from torch.quantization.ns.graph_matcher import (
     GraphMatchingException,
-    get_matching_subgraph_pairs
+    get_matching_subgraph_pairs,
 )
 from torch.quantization.quantize_fx import (
     convert_fx,
     prepare_fx,
-    prepare_qat_fx
+    prepare_qat_fx,
 )
 from torch.testing._internal.common_quantization import (
     ConvBnModel,
     ConvBnReLUModel,
     ConvModel,
-    LSTMwithHiddenDynamicModel
+    LSTMwithHiddenDynamicModel,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantization import (
@@ -39,7 +39,7 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearModel,
     SparseNNModel,
     skip_if_no_torchvision,
-    skipIfNoFBGEMM
+    skipIfNoFBGEMM,
 )
 from torch.testing._internal.common_quantized import override_qengines
 

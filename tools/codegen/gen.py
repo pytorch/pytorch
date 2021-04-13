@@ -14,7 +14,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    Union
+    Union,
 )
 
 import yaml
@@ -32,13 +32,13 @@ from tools.codegen.api.types import (
     CppSignature,
     CppSignatureGroup,
     DispatcherSignature,
-    NativeSignature
+    NativeSignature,
 )
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import (
     method_with_native_function,
     native_function_manager,
-    with_native_function
+    with_native_function,
 )
 from tools.codegen.model import (
     Argument,
@@ -56,7 +56,7 @@ from tools.codegen.model import (
     Variant,
     assert_never,
     is_cuda_dispatch_key,
-    is_generic_dispatch_key
+    is_generic_dispatch_key,
 )
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import Target, concatMap, context, mapMaybe

@@ -21,7 +21,7 @@ from caffe2.python import (
     model_helper,
     scope,
     utils,
-    workspace
+    workspace,
 )
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops")

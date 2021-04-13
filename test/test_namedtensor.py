@@ -15,7 +15,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     TEST_NUMPY,
     TestCase,
-    run_tests
+    run_tests,
 )
 
 

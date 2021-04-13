@@ -21,7 +21,7 @@ from caffe2.python.layers.layers import (
     almost_equal_schemas,
     get_key,
     is_request_only_scalar,
-    set_request_only
+    set_request_only,
 )
 from caffe2.python.layers.tags import Tags
 

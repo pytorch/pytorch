@@ -19,7 +19,7 @@ from .stream import (
     get_device,
     record_stream,
     use_stream,
-    wait_stream
+    wait_stream,
 )
 
 __all__: List[str] = []

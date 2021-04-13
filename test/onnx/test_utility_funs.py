@@ -8,7 +8,7 @@ from test_pytorch_common import (
     TestCase,
     run_tests,
     skipIfUnsupportedMinOpsetVersion,
-    skipIfUnsupportedOpsetVersion
+    skipIfUnsupportedOpsetVersion,
 )
 from verify import verify
 
@@ -19,7 +19,7 @@ import torch.utils.cpp_extension
 from torch.onnx import OperatorExportTypes, TrainingMode, utils
 from torch.onnx.symbolic_helper import (
     _set_operator_export_type,
-    _set_opset_version
+    _set_opset_version,
 )
 
 skip = unittest.skip

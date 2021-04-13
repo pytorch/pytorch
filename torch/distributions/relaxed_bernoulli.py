@@ -4,7 +4,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import (
-    TransformedDistribution
+    TransformedDistribution,
 )
 from torch.distributions.transforms import SigmoidTransform
 from torch.distributions.utils import (
@@ -12,7 +12,7 @@ from torch.distributions.utils import (
     clamp_probs,
     lazy_property,
     logits_to_probs,
-    probs_to_logits
+    probs_to_logits,
 )
 
 

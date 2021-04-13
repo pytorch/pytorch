@@ -9,7 +9,7 @@ from torch.distributions.utils import (
     clamp_probs,
     lazy_property,
     logits_to_probs,
-    probs_to_logits
+    probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
 

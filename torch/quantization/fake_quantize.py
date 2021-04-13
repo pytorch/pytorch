@@ -8,7 +8,7 @@ from .observer import (
     HistogramObserver,
     MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
-    _with_args
+    _with_args,
 )
 
 

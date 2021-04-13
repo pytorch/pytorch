@@ -8,7 +8,7 @@ from tools.codegen.api.types import (
     ConstRefCType,
     CType,
     MutRefCType,
-    OptionalCType
+    OptionalCType,
 )
 from tools.codegen.model import (
     Argument,
@@ -17,7 +17,7 @@ from tools.codegen.model import (
     SelfArgument,
     TensorOptionsArguments,
     Type,
-    assert_never
+    assert_never,
 )
 
 # This file describes the translation of JIT schema to the native functions API.

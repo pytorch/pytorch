@@ -17,7 +17,7 @@ from torch.distributed.pipeline.sync.stream import (
     record_stream,
     use_device,
     use_stream,
-    wait_stream
+    wait_stream,
 )
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")

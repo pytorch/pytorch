@@ -4,12 +4,12 @@ from tools.codegen.api import cpp
 from tools.codegen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo,
     dispatch_strategy,
-    gen_differentiable_outputs
+    gen_differentiable_outputs,
 )
 from tools.codegen.api.types import (
     Binding,
     CppSignatureGroup,
-    DispatcherSignature
+    DispatcherSignature,
 )
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
@@ -21,7 +21,7 @@ from tools.codegen.model import (
     TensorOptionsArguments,
     Type,
     Variant,
-    is_foreach_op
+    is_foreach_op,
 )
 from tools.codegen.utils import mapMaybe
 
@@ -29,7 +29,7 @@ from .gen_trace_type import (
     MANUAL_AUTOGRAD,
     get_return_value,
     tie_return_values,
-    type_wrapper_name
+    type_wrapper_name,
 )
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.

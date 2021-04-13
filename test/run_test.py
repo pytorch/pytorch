@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     TEST_WITH_ROCM,
     set_cwd,
-    shell
+    shell,
 )
 from torch.testing._internal.framework_utils import calculate_shards
 from torch.utils import cpp_extension
@@ -31,7 +31,7 @@ try:
     from tools.stats_utils.s3_stat_parser import (
         HAVE_BOTO3,
         Report,
-        get_previous_reports_for_branch
+        get_previous_reports_for_branch,
     )
 except ImportError:
     print("Unable to import s3_stat_parser from tools. Running without S3 stats...")

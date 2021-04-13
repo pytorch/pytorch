@@ -23,7 +23,7 @@ from typing import (
     Optional,
     Tuple,
     Union,
-    cast
+    cast,
 )
 
 import torch

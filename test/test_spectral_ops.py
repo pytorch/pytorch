@@ -17,7 +17,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     skipCPUIfNoMkl,
     skipCUDAIfRocm,
-    skipIf
+    skipIf,
 )
 from torch.testing._internal.common_methods_invocations import spectral_funcs
 from torch.testing._internal.common_utils import (
@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
     TEST_MKL,
     TEST_NUMPY,
     TestCase,
-    run_tests
+    run_tests,
 )
 
 if TEST_NUMPY:

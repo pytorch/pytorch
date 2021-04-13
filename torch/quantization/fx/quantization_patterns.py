@@ -9,24 +9,24 @@ import torch.nn.quantized.dynamic as nnqd
 from torch.fx.graph import Node
 from torch.quantization import (
     default_affine_fixed_qparams_fake_quant,
-    default_symmetric_fixed_qparams_fake_quant
+    default_symmetric_fixed_qparams_fake_quant,
 )
 
 from ..quantization_mappings import (
     get_dynamic_quant_module_class,
     get_quantized_operator,
-    get_static_quant_module_class
+    get_static_quant_module_class,
 )
 from ..utils import (
     activation_is_int8_quantized,
     activation_is_statically_quantized,
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
-    weight_is_statically_quantized
+    weight_is_statically_quantized,
 )
 from .pattern_utils import (
     mark_input_output_not_observed,
-    register_quant_pattern
+    register_quant_pattern,
 )
 from .quantization_types import QuantizerCls
 from .utils import (
@@ -37,7 +37,7 @@ from .utils import (
     get_per_tensor_qparams,
     get_qconv_op,
     get_qconv_prepack_op,
-    quantize_node
+    quantize_node,
 )
 
 # -------------------------

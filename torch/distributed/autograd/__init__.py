@@ -23,7 +23,7 @@ if is_available():
         _release_context,
         _retrieve_context,
         backward,
-        get_gradients
+        get_gradients,
     )
 
 class context(object):

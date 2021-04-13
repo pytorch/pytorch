@@ -1,7 +1,7 @@
 import torch.distributed.rpc as rpc
 import torch.distributed.rpc._testing  # noqa
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
-    RpcAgentTestFixture
+    RpcAgentTestFixture,
 )
 
 # The following message types are currently retried in the RREF protocol and

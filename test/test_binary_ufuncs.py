@@ -22,7 +22,7 @@ from torch.testing._internal.common_device_type import (
     onlyOnCPUAndCUDA,
     precisionOverride,
     skipCUDAIfRocm,
-    skipIf
+    skipIf,
 )
 from torch.testing._internal.common_utils import (
     TEST_SCIPY,
@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import (
     make_tensor,
     run_tests,
     set_default_dtype,
-    torch_to_numpy_dtype_dict
+    torch_to_numpy_dtype_dict,
 )
 
 if TEST_SCIPY:

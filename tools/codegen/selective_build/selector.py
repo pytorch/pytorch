@@ -8,7 +8,7 @@ from tools.codegen.selective_build.operator import (
     SelectiveBuildOperator,
     merge_debug_info,
     merge_operator_dicts,
-    strip_operator_overload_name
+    strip_operator_overload_name,
 )
 
 

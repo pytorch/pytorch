@@ -40,12 +40,12 @@ if is_available():
         _register_builtin_comm_hook,
         _register_comm_hook,
         _test_python_store,
-        _verify_model_across_ranks
+        _verify_model_across_ranks,
     )
     if sys.platform != 'win32':
         from torch._C._distributed_c10d import (
             HashStore,
-            _round_robin_process_groups
+            _round_robin_process_groups,
         )
 
     # Variables prefixed with underscore are not auto imported

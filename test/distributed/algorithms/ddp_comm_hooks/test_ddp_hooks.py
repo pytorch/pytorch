@@ -14,13 +14,13 @@ if not dist.is_available():
 
 from torch.distributed.algorithms.ddp_comm_hooks import (
     DDPCommHookType,
-    register_ddp_comm_hook
+    register_ddp_comm_hook,
 )
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
-    skip_if_lt_x_gpu
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import run_tests
 

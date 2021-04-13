@@ -25,7 +25,7 @@ from torch import multiprocessing as mp
 from torch._six import inf, nan, string_classes
 from torch.testing._internal.common_cuda import (
     tf32_is_not_fp32,
-    tf32_on_and_off
+    tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
     PYTORCH_CUDA_MEMCHECK,
@@ -41,7 +41,7 @@ from torch.testing._internal.common_device_type import (
     onlyOnCPUAndCUDA,
     skipCUDAIfNoMagma,
     skipCUDAVersionIn,
-    skipMeta
+    skipMeta,
 )
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -66,7 +66,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoSciPy,
     skipIfRocm,
     slowTest,
-    wrapDeterministicFlagAPITest
+    wrapDeterministicFlagAPITest,
 )
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
@@ -165,7 +165,7 @@ class AbstractTestCases:
                 factory_common_args,
                 factory_like_common_args,
                 multi_dim_common,
-                single_dim_common
+                single_dim_common,
             )
 
             with open(doc_file, "r", encoding="utf-8") as f:

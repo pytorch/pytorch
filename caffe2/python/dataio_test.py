@@ -19,7 +19,7 @@ from caffe2.python.dataio import (
     ReaderBuilder,
     ReaderWithDelay,
     ReaderWithLimit,
-    ReaderWithTimeLimit
+    ReaderWithTimeLimit,
 )
 from caffe2.python.dataset import Dataset
 from caffe2.python.db_file_reader import DBFileReader

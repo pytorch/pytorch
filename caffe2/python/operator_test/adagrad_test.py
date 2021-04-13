@@ -11,7 +11,7 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 from caffe2.python import core
 from caffe2.python.operator_test.adagrad_test_helper import (
     adagrad_sparse_test_helper,
-    ref_adagrad
+    ref_adagrad,
 )
 
 

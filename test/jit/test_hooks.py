@@ -23,7 +23,7 @@ from jit.test_hooks_modules import (
     create_submodule_multiple_hooks_single_input,
     create_submodule_no_forward_input,
     create_submodule_same_hook_repeated,
-    create_submodule_to_call_directly_with_hooks
+    create_submodule_to_call_directly_with_hooks,
 )
 
 import torch

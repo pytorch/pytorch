@@ -15,11 +15,11 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionerConfig,
     PartitionMode,
     get_latency_of_partitioned_graph,
-    get_partition_to_latency_mapping
+    get_partition_to_latency_mapping,
 )
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import (
-    AnnotateTypesWithSchema
+    AnnotateTypesWithSchema,
 )
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node

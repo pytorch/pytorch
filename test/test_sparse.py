@@ -15,17 +15,17 @@ from typing import Any, Dict
 
 from torch.testing._internal.common_cuda import (
     TEST_CUDA,
-    _get_torch_cuda_version
+    _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
-    ops
+    ops,
 )
 from torch.testing._internal.common_methods_invocations import (
-    sparse_unary_ufuncs
+    sparse_unary_ufuncs,
 )
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     load_tests,
     run_tests,
-    skipIfRocm
+    skipIfRocm,
 )
 
 if TEST_SCIPY:

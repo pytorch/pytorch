@@ -28,7 +28,7 @@ from torch.autograd import Variable
 from torch.autograd.function import _nested_map
 from torch.jit.annotations import (  # noqa: F401
     BroadcastingList2,
-    BroadcastingList3
+    BroadcastingList3,
 )
 from torch.onnx import OperatorExportTypes
 # Testing utils
@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_BAILOUTS,
     ProfilingMode,
     enable_profiling_mode_for_profiling_tests,
-    freeze_rng_state
+    freeze_rng_state,
 )
 
 RUN_CUDA = torch.cuda.is_available()

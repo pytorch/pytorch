@@ -10,11 +10,11 @@ from torch.quantization._correct_bias import (
     bias_correction,
     get_module,
     get_param,
-    parent_child_names
+    parent_child_names,
 )
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
-    skipIfNoFBGEMM
+    skipIfNoFBGEMM,
 )
 
 

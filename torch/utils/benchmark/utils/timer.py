@@ -12,7 +12,7 @@ from typing import (
     Tuple,
     Type,
     Union,
-    overload
+    overload,
 )
 
 import numpy as np

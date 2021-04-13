@@ -4,7 +4,7 @@ from torch.onnx.symbolic_helper import _parse_arg, _unimplemented, parse_args
 from torch.onnx.utils import (
     _add_block,
     _add_input_to_block,
-    _add_output_to_block
+    _add_output_to_block,
 )
 
 # EDITING THIS FILE? READ THIS FIRST!

@@ -6,7 +6,7 @@ from torch.distributions.utils import (
     broadcast_all,
     lazy_property,
     logits_to_probs,
-    probs_to_logits
+    probs_to_logits,
 )
 
 

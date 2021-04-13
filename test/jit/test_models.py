@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.testing._internal.common_utils import (
     GRAPH_EXECUTOR,
     ProfilingMode,
-    enable_profiling_mode_for_profiling_tests
+    enable_profiling_mode_for_profiling_tests,
 )
 
 # Make the helper files in test/ importable

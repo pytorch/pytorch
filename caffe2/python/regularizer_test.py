@@ -11,14 +11,14 @@ from caffe2.python import (
     layer_model_instantiator,
     regularizer,
     schema,
-    workspace
+    workspace,
 )
 from caffe2.python.layer_test_util import LayersTestCase
 from caffe2.python.optimizer import SgdOptimizer
 from caffe2.python.regularizer import L1Norm, RegularizationBy
 from caffe2.python.regularizer_context import (
     RegularizerContext,
-    UseRegularizer
+    UseRegularizer,
 )
 
 

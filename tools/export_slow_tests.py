@@ -10,7 +10,7 @@ from typing import DefaultDict, Dict, List, cast
 from tools.stats_utils.s3_stat_parser import (
     Report,
     Version2Report,
-    get_previous_reports_for_branch
+    get_previous_reports_for_branch,
 )
 
 SLOW_TESTS_FILE = '.pytorch-slow-tests'

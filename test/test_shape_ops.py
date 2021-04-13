@@ -14,14 +14,14 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyOnCPUAndCUDA,
-    ops
+    ops,
 )
 from torch.testing._internal.common_methods_invocations import shape_funcs
 from torch.testing._internal.common_utils import (
     TestCase,
     make_tensor,
     run_tests,
-    torch_to_numpy_dtype_dict
+    torch_to_numpy_dtype_dict,
 )
 
 

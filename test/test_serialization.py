@@ -16,7 +16,7 @@ from torch._utils import _rebuild_tensor
 from torch._utils_internal import get_file_path_2
 from torch.serialization import check_module_version_greater_or_equal
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests
+    instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TestCase,
     download_file,
-    run_tests
+    run_tests,
 )
 
 # These tests were all copied from `test/test_torch.py` at some point, so see

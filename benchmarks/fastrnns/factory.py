@@ -8,7 +8,7 @@ from .cells import (
     flat_lstm_cell,
     lstm_cell,
     premul_lstm_cell,
-    premul_lstm_cell_no_bias
+    premul_lstm_cell_no_bias,
 )
 
 

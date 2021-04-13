@@ -4,7 +4,7 @@ from torch import Tensor  # noqa: F401
 from torch._jit_internal import List, Optional  # noqa: F401
 from torch.nn.quantized.modules.utils import (
     _quantize_weight,
-    hide_packed_params_repr
+    hide_packed_params_repr,
 )
 
 
@@ -225,7 +225,7 @@ class EmbeddingBag(Embedding):
             nn.EmbeddingBag.__name__
         assert hasattr(mod, 'qconfig'), 'EmbeddingBag input float module must have qconfig defined'
         from torch.quantization.qconfig import (
-            float_qparams_weight_only_qconfig
+            float_qparams_weight_only_qconfig,
         )
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()

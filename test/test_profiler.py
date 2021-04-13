@@ -14,7 +14,7 @@ from torch.profiler import (
     ProfilerActivity,
     kineto_available,
     profile,
-    record_function
+    record_function,
 )
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
@@ -24,7 +24,7 @@ from torch.testing._internal.common_utils import (
     TemporaryDirectoryName,
     TemporaryFileName,
     TestCase,
-    run_tests
+    run_tests,
 )
 
 try:

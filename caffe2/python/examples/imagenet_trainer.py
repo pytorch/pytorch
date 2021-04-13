@@ -20,11 +20,11 @@ from caffe2.python import (
     model_helper,
     optimizer,
     timeout_guard,
-    workspace
+    workspace,
 )
 from caffe2.python.modeling.initializers import (
     Initializer,
-    PseudoFP16Initializer
+    PseudoFP16Initializer,
 )
 from caffe2.python.predictor_constants import predictor_constants
 

@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     enable_profiling_mode_for_profiling_tests,
     freeze_rng_state,
-    is_iterable_of_tensors
+    is_iterable_of_tensors,
 )
 
 

@@ -13,7 +13,7 @@ from ..nn.modules.utils import (
     _pair,
     _quadruple,
     _single,
-    _triple
+    _triple,
 )
 
 _builtin_table: Optional[Dict[int, str]] = None

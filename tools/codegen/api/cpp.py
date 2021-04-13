@@ -8,7 +8,7 @@ from tools.codegen.api.types import (
     CType,
     MutRefCType,
     OptionalCType,
-    SpecialArgName
+    SpecialArgName,
 )
 from tools.codegen.model import (
     Argument,
@@ -23,7 +23,7 @@ from tools.codegen.model import (
     SelfArgument,
     TensorOptionsArguments,
     Type,
-    assert_never
+    assert_never,
 )
 
 # This file describes the translation of JIT schema to the public C++

@@ -10,7 +10,7 @@ import etcd
 
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import (
     EtcdRendezvous,
-    EtcdRendezvousHandler
+    EtcdRendezvousHandler,
 )
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 

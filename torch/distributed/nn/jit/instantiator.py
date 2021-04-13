@@ -8,7 +8,7 @@ from typing import Optional
 
 import torch
 from torch.distributed.nn.jit.templates.remote_module_template import (
-    REMOTE_MODULE_TEMPLATE
+    REMOTE_MODULE_TEMPLATE,
 )
 
 logger = logging.getLogger(__name__)

@@ -13,7 +13,7 @@ from test_jit import (
     all_backward_graphs,
     backward_graph,
     get_lstm_inputs,
-    get_milstm_inputs
+    get_milstm_inputs,
 )
 
 import torch
@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import (
     TemporaryDirectoryName,
     enable_profiling_mode_for_profiling_tests,
     run_tests,
-    shell
+    shell,
 )
 from torch.testing._internal.jit_utils import (
     RUN_CUDA,
@@ -38,7 +38,7 @@ from torch.testing._internal.jit_utils import (
     JitTestCase,
     _inline_everything,
     enable_cpu_fuser,
-    warmup_backward
+    warmup_backward,
 )
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:

@@ -53,7 +53,7 @@ from tools.codegen.api.python import (
     dispatch_lambda_return_str,
     has_tensor_options,
     namedtuple_fieldnames,
-    signature
+    signature,
 )
 from tools.codegen.api.types import CppSignatureGroup
 from tools.codegen.code_template import CodeTemplate
@@ -64,7 +64,7 @@ from tools.codegen.model import (
     BaseOperatorName,
     NativeFunction,
     Type,
-    Variant
+    Variant,
 )
 from tools.codegen.utils import split_name_params
 

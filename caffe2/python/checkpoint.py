@@ -16,7 +16,7 @@ from caffe2.python.task import (
     TaskGroup,
     TaskOutput,
     WorkspaceType,
-    final_output
+    final_output,
 )
 
 logger = logging.getLogger(__name__)

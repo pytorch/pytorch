@@ -1,7 +1,7 @@
 import cimodel.data.simple.util.branch_filters as branch_filters
 from cimodel.data.simple.util.docker_constants import (
     DOCKER_IMAGE_NDK,
-    DOCKER_REQUIREMENT_NDK
+    DOCKER_REQUIREMENT_NDK,
 )
 
 

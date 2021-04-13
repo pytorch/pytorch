@@ -9,10 +9,10 @@ from unittest.mock import patch
 
 from torch.distributed.elastic.multiprocessing.errors.error_handler import (
     ErrorHandler,
-    _write_error
+    _write_error,
 )
 from torch.distributed.elastic.multiprocessing.errors.handlers import (
-    get_error_handler
+    get_error_handler,
 )
 
 

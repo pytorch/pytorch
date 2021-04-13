@@ -36,20 +36,20 @@ from torch.quantization import (
     prepare,
     prepare_qat,
     quant_type_to_str,
-    quantize_dynamic
+    quantize_dynamic,
 )
 from torch.quantization.fx.pattern_utils import MatchAllNode, is_match
 # graph mode quantization based on fx
 from torch.quantization.quantize_fx import (
     convert_fx,
     prepare_fx,
-    prepare_qat_fx
+    prepare_qat_fx,
 )
 from torch.testing import FileCheck
 # test utils
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_quantization import (
-    LinearModelWithSubmodule
+    LinearModelWithSubmodule,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantization import (
@@ -62,12 +62,12 @@ from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     test_only_eval_fn,
     test_only_train_fn,
-    train_one_epoch
+    train_one_epoch,
 )
 from torch.testing._internal.common_quantized import (
     override_qengines,
     override_quantized_engine,
-    supported_qengines
+    supported_qengines,
 )
 from torch.testing._internal.common_utils import TemporaryFileName
 

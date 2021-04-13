@@ -15,7 +15,7 @@ import unittest
 from torch.distributed.elastic.multiprocessing.redirects import (
     redirect,
     redirect_stderr,
-    redirect_stdout
+    redirect_stdout,
 )
 
 libc = ctypes.CDLL("libc.so.6")

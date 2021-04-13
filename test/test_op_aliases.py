@@ -6,7 +6,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     skipCPUIfNoLapack,
-    skipCUDAIfNoMagma
+    skipCUDAIfNoMagma,
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase

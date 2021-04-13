@@ -8,7 +8,7 @@ from .conv_fused import (
     ConvReLU2d,
     ConvReLU3d,
     freeze_bn_stats,
-    update_bn_stats
+    update_bn_stats,
 )
 from .linear_relu import LinearReLU
 

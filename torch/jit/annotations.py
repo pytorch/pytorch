@@ -25,7 +25,7 @@ from torch._C import (
     StreamObjType,
     StringType,
     TensorType,
-    TupleType
+    TupleType,
 )
 from torch._utils_internal import get_source_lines_and_file
 
@@ -45,7 +45,7 @@ from .._jit_internal import (  # type: ignore
     is_ignored_fn,
     is_list,
     is_optional,
-    is_tuple
+    is_tuple,
 )
 from ._state import _get_script_class
 

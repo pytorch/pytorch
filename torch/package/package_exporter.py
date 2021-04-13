@@ -14,7 +14,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    Union
+    Union,
 )
 from urllib.parse import quote
 
@@ -23,7 +23,7 @@ from torch.serialization import location_tag, normalize_storage_type
 
 from ._file_structure_representation import (
     Folder,
-    _create_folder_from_file_list
+    _create_folder_from_file_list,
 )
 from ._glob_group import GlobPattern, _GlobGroup
 from ._importlib import _normalize_path

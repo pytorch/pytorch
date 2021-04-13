@@ -10,7 +10,7 @@ from tools.codegen.model import (
     SelfArgument,
     TensorOptionsArguments,
     Type,
-    assert_never
+    assert_never,
 )
 
 # This file describes the translation of JIT schema to the dispatcher

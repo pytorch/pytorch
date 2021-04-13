@@ -10,7 +10,7 @@ from tools.codegen.model import (
     Argument,
     NativeFunction,
     SchemaKind,
-    TensorOptionsArguments
+    TensorOptionsArguments,
 )
 from tools.codegen.utils import mapMaybe
 

@@ -12,7 +12,7 @@ from torch.testing._internal.jit_utils import get_forward, get_forward_graph
 from torch.utils.mobile_optimizer import (
     LintCode,
     generate_mobile_module_lints,
-    optimize_for_mobile
+    optimize_for_mobile,
 )
 
 try:

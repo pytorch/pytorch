@@ -11,7 +11,7 @@ from .fused import (
     ConvReLU2d,
     ConvReLU3d,
     LinearReLU,
-    _FusedModule
+    _FusedModule,
 )
 
 __all__ = [

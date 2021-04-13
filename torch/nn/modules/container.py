@@ -13,7 +13,7 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
-    overload
+    overload,
 )
 
 import torch

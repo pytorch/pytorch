@@ -5,7 +5,7 @@ from torch.utils.benchmark import (
     FuzzedParameter,
     FuzzedSparseTensor,
     Fuzzer,
-    ParameterAlias
+    ParameterAlias,
 )
 
 _MIN_DIM_SIZE = 16

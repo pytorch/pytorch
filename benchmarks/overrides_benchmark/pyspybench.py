@@ -3,7 +3,7 @@ import argparse
 from common import (  # noqa: F401
     SubTensor,
     SubWithTorchFunction,
-    WithTorchFunction
+    WithTorchFunction,
 )
 
 import torch

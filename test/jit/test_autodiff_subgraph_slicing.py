@@ -6,7 +6,7 @@ import torch
 from torch.testing._internal.common_utils import (
     GRAPH_EXECUTOR,
     ProfilingMode,
-    enable_profiling_mode_for_profiling_tests
+    enable_profiling_mode_for_profiling_tests,
 )
 
 # Make the helper files in test/ importable
@@ -16,7 +16,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import num_profiled_runs
 from torch.testing._internal.jit_utils import (
     JitTestCase,
-    disable_autodiff_subgraph_inlining
+    disable_autodiff_subgraph_inlining,
 )
 
 if __name__ == '__main__':

@@ -22,7 +22,7 @@ from typing import (
     NamedTuple,
     Optional,
     Tuple,
-    Union
+    Union,
 )
 
 from fx.named_tup import MyNamedTup
@@ -42,7 +42,7 @@ from torch.fx import (
     Tracer,
     Transformer,
     symbolic_trace,
-    wrap
+    wrap,
 )
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -55,7 +55,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
-    ops
+    ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
@@ -63,7 +63,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     TEST_WITH_ROCM,
-    run_tests
+    run_tests,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 

@@ -61,7 +61,7 @@ if is_available():
         _set_rpc_timeout,
         _TensorPipeRpcBackendOptionsBase,
         enable_gil_profiling,
-        get_rpc_timeout
+        get_rpc_timeout,
     )
 
     from . import api, backend_registry, functions

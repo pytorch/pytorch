@@ -14,13 +14,13 @@ from torch._namedtensor_internals import (
     resolve_ellipsis,
     single_ellipsis_index,
     unzip_namedshape,
-    update_names
+    update_names,
 )
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
     has_torch_function_unary,
-    has_torch_function_variadic
+    has_torch_function_variadic,
 )
 
 

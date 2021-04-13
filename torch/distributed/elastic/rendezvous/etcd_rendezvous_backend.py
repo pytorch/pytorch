@@ -15,13 +15,13 @@ from etcd import (  # type: ignore
     EtcdCompareFailed,
     EtcdException,
     EtcdKeyNotFound,
-    EtcdResult
+    EtcdResult,
 )
 
 from .api import (
     RendezvousConnectionError,
     RendezvousParameters,
-    RendezvousStateError
+    RendezvousStateError,
 )
 from .dynamic_rendezvous import RendezvousBackend, Token
 from .utils import _parse_rendezvous_endpoint

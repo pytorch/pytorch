@@ -8,7 +8,7 @@ from cimodel.data.simple.util.docker_constants import (
     DOCKER_IMAGE_ASAN,
     DOCKER_IMAGE_NDK,
     DOCKER_REQUIREMENT_ASAN,
-    DOCKER_REQUIREMENT_NDK
+    DOCKER_REQUIREMENT_NDK,
 )
 
 

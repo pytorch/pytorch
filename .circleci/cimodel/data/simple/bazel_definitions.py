@@ -1,6 +1,6 @@
 from cimodel.data.simple.util.docker_constants import (
     DOCKER_IMAGE_GCC7,
-    DOCKER_REQUIREMENT_GCC7
+    DOCKER_REQUIREMENT_GCC7,
 )
 
 

@@ -7,7 +7,7 @@ from tools.codegen.context import with_native_function
 from tools.codegen.model import (
     NativeFunction,
     NativeFunctionsGroup,
-    is_structured_dispatch_key
+    is_structured_dispatch_key,
 )
 from tools.codegen.utils import concatMap
 

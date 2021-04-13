@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     # mypy-strict.ini)
     from torch.utils.benchmark.utils.timer import Language, Timer
     from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import (
-        CallgrindStats
+        CallgrindStats,
     )
 
 else:

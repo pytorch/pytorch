@@ -16,7 +16,7 @@ from torch.package import (
     Importer,
     PackageExporter,
     PackageImporter,
-    sys_importer
+    sys_importer,
 )
 
 from .graph import Graph, PythonCode, _custom_builtins, _is_from_torch

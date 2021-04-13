@@ -7,7 +7,7 @@ from typing import NamedTuple
 import torch
 from torch.testing._internal.common_utils import (
     skipCUDANonDefaultStreamIf,
-    skipIfRocm
+    skipIfRocm,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 

@@ -13,7 +13,7 @@ import torch
 from torch.utils import cpp_extension
 from torch.utils.benchmark.utils._stubs import (
     CallgrindModuleType,
-    TimeitModuleType
+    TimeitModuleType,
 )
 
 LOCK = threading.Lock()

@@ -15,7 +15,7 @@ from torch.distributed.pipeline.sync.checkpoint import (
     Checkpointing,
     checkpoint,
     is_checkpointing,
-    is_recomputing
+    is_recomputing,
 )
 from torch.distributed.pipeline.sync.dependency import fork, join
 from torch.distributed.pipeline.sync.microbatch import Batch

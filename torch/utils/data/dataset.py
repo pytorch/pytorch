@@ -11,7 +11,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    TypeVar
+    TypeVar,
 )
 
 # No 'default_generator' in torch/__init__.pyi

@@ -1,7 +1,7 @@
 from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
 from torch.distributions.transformed_distribution import (
-    TransformedDistribution
+    TransformedDistribution,
 )
 from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.utils import broadcast_all

@@ -9,7 +9,7 @@ import numpy as np
 
 from caffe2.python import brew, model_helper, workspace
 from caffe2.python.modeling.compute_histogram_for_blobs import (
-    ComputeHistogramForBlobs
+    ComputeHistogramForBlobs,
 )
 
 

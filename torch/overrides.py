@@ -32,7 +32,7 @@ from torch._C import (
     _add_docstr,
     _has_torch_function,
     _has_torch_function_unary,
-    _has_torch_function_variadic
+    _has_torch_function_variadic,
 )
 
 __all__ = [

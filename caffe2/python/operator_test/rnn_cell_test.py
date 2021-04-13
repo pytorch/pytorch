@@ -19,7 +19,7 @@ from caffe2.python import (
     rnn_cell,
     scope,
     utils,
-    workspace
+    workspace,
 )
 from caffe2.python.attention import AttentionType
 from caffe2.python.model_helper import ExtractPredictorNet, ModelHelper

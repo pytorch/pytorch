@@ -8,7 +8,7 @@ from .fake_quantize import (
     FakeQuantize,
     default_fake_quant,
     default_per_channel_weight_fake_quant,
-    default_weight_fake_quant
+    default_weight_fake_quant,
 )
 from .observer import (
     HistogramObserver,
@@ -20,7 +20,7 @@ from .observer import (
     default_observer,
     default_per_channel_weight_observer,
     default_placeholder_observer,
-    default_weight_observer
+    default_weight_observer,
 )
 
 

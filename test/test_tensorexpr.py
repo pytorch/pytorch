@@ -8,14 +8,14 @@ from torch import nn
 from torch.testing._internal.common_utils import (
     num_profiled_runs,
     run_tests,
-    suppress_warnings
+    suppress_warnings,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.te_utils import (
     CudaCodeGenCreated,
     CudaCodeGenExecuted,
     LLVMCodeGenExecuted,
-    SimpleIREvalExecuted
+    SimpleIREvalExecuted,
 )
 
 

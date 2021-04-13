@@ -32,7 +32,7 @@ from torch.quantization import (
     default_observer,
     default_per_channel_weight_observer,
     get_observer_dict,
-    prepare
+    prepare,
 )
 from torch.quantization._learnable_fake_quantize import _LearnableFakeQuantize
 
@@ -42,12 +42,12 @@ from torch.testing._internal.common_quantization import (
     AnnotatedSingleLayerLinearModel,
     QuantizationTestCase,
     SingleLayerLinearModel,
-    test_only_eval_fn
+    test_only_eval_fn,
 )
 from torch.testing._internal.common_quantized import (
     override_qengines,
     override_quantized_engine,
-    supported_qengines
+    supported_qengines,
 )
 from torch.testing._internal.common_utils import TestCase
 

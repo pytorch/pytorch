@@ -11,7 +11,7 @@ from six.moves.urllib.request import urlretrieve
 from caffe2.python.models.download import (
     deleteDirectory,
     downloadFromURLToFile,
-    getURLFromName
+    getURLFromName,
 )
 
 

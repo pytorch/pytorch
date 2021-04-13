@@ -13,7 +13,7 @@ from torch.onnx.symbolic_helper import (
     _set_onnx_shape_inference,
     _set_operator_export_type,
     _set_opset_version,
-    _set_training_mode
+    _set_training_mode,
 )
 from torch.onnx.utils import _validate_dynamic_axes
 

@@ -149,7 +149,7 @@ from .api import (  # noqa F401
     prof,
     profile,
     publish_metric,
-    put_metric
+    put_metric,
 )
 
 

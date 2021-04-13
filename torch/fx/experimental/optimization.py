@@ -13,7 +13,7 @@ from typing import (
     Optional,
     Tuple,
     Type,
-    cast
+    cast,
 )
 
 import torch

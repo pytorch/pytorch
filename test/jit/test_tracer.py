@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName,
     enable_profiling_mode_for_profiling_tests,
     skipIfCompiledWithoutNumpy,
-    suppress_warnings
+    suppress_warnings,
 )
 from torch.testing._internal.jit_utils import (
     RUN_CUDA,
@@ -35,7 +35,7 @@ from torch.testing._internal.jit_utils import (
     _tmp_donotuse_dont_inline_everything,
     _trace,
     enable_cpu_fuser,
-    make_global
+    make_global,
 )
 
 if __name__ == '__main__':

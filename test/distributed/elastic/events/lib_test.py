@@ -12,7 +12,7 @@ from unittest.mock import patch
 from torch.distributed.elastic.events import (
     Event,
     EventSource,
-    _get_or_create_logger
+    _get_or_create_logger,
 )
 
 

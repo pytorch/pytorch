@@ -9,7 +9,7 @@ from torch.utils.cpp_extension import (
     ROCM_HOME,
     BuildExtension,
     CppExtension,
-    CUDAExtension
+    CUDAExtension,
 )
 
 if sys.platform == 'win32':

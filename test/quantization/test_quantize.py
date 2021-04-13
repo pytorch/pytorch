@@ -30,7 +30,7 @@ from torch.quantization import (
     prepare_qat,
     quantize,
     quantize_dynamic,
-    quantize_qat
+    quantize_qat,
 )
 # annotated models
 from torch.testing._internal.common_quantization import (
@@ -66,16 +66,16 @@ from torch.testing._internal.common_quantization import (
     prepare_dynamic,
     skipIfNoFBGEMM,
     test_only_eval_fn,
-    test_only_train_fn
+    test_only_train_fn,
 )
 from torch.testing._internal.common_quantized import (
     override_qengines,
     override_quantized_engine,
-    supported_qengines
+    supported_qengines,
 )
 from torch.testing._internal.common_utils import (
     TemporaryFileName,
-    suppress_warnings
+    suppress_warnings,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 

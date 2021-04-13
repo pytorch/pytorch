@@ -12,7 +12,7 @@ from hypothesis.strategies import SearchStrategy
 import torch
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
-    _calculate_dynamic_qparams
+    _calculate_dynamic_qparams,
 )
 
 # Setup for the hypothesis tests.

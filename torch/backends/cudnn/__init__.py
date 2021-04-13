@@ -6,7 +6,7 @@ import torch
 from torch.backends import (
     ContextProp,
     PropModule,
-    __allow_nonbracketed_mutation
+    __allow_nonbracketed_mutation,
 )
 
 try:

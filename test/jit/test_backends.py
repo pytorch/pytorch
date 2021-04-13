@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     TEST_WITH_ROCM,
-    skipIfRocm
+    skipIfRocm,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 

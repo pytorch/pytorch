@@ -5,7 +5,7 @@ import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
-    TEST_NUMBA_CUDA
+    TEST_NUMBA_CUDA,
 )
 from torch.testing._internal.common_utils import TEST_NUMPY
 

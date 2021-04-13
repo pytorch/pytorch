@@ -16,7 +16,7 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
-    Tuple
+    Tuple,
 )
 
 import torch
@@ -27,7 +27,7 @@ from .node import (
     Target,
     _get_qualified_name,
     _type_repr,
-    map_arg
+    map_arg,
 )
 
 if TYPE_CHECKING:

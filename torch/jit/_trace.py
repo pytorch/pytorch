@@ -20,7 +20,7 @@ import torch
 from torch._jit_internal import (
     _qualified_name,
     get_callable_argument_names,
-    is_scripting
+    is_scripting,
 )
 from torch.autograd import function
 from torch.jit._script import ScriptModule, _CachedForward, script

@@ -13,7 +13,7 @@ from tools.codegen.model import (
     OptionalType,
     Return,
     Type,
-    Variant
+    Variant,
 )
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #

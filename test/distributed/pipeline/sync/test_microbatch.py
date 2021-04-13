@@ -12,7 +12,7 @@ from torch.distributed.pipeline.sync.microbatch import (
     Batch,
     check,
     gather,
-    scatter
+    scatter,
 )
 
 

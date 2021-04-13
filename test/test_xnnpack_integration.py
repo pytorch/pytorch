@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TestCase,
     run_tests,
-    slowTest
+    slowTest,
 )
 from torch.utils.mobile_optimizer import optimize_for_mobile
 

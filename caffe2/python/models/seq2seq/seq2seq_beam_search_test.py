@@ -12,7 +12,7 @@ import caffe2.python.models.seq2seq.seq2seq_util as seq2seq_util
 from caffe2.python import test_util, workspace
 from caffe2.python.models.seq2seq.train import Seq2SeqModelCaffe2
 from caffe2.python.models.seq2seq.translate import (
-    Seq2SeqModelCaffe2EnsembleDecoder
+    Seq2SeqModelCaffe2EnsembleDecoder,
 )
 
 

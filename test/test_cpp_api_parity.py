@@ -9,7 +9,7 @@ from cpp_api_parity import (
     functional_impl_check,
     module_impl_check,
     sample_functional,
-    sample_module
+    sample_module,
 )
 from cpp_api_parity.parity_table_parser import parse_parity_tracker_table
 from cpp_api_parity.utils import is_torch_nn_functional_test

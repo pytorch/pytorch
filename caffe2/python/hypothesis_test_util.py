@@ -56,7 +56,7 @@ from caffe2.python import (
     device_checker,
     gradient_checker,
     test_util,
-    workspace
+    workspace,
 )
 
 

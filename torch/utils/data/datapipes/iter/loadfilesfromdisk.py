@@ -3,7 +3,7 @@ from typing import Iterable, Iterator, Tuple
 
 from torch.utils.data import IterDataPipe
 from torch.utils.data.datapipes.utils.common import (
-    get_file_binaries_from_pathnames
+    get_file_binaries_from_pathnames,
 )
 
 

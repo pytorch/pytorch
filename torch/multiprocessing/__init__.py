@@ -42,7 +42,7 @@ from .spawn import (
     ProcessRaisedException,
     SpawnContext,
     spawn,
-    start_processes
+    start_processes,
 )
 
 if sys.platform == 'darwin' or sys.platform == 'win32':

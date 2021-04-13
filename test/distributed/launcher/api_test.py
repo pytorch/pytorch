@@ -21,7 +21,7 @@ from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.launcher.api import (
     LaunchConfig,
     _get_entrypoint_name,
-    elastic_launch
+    elastic_launch,
 )
 
 

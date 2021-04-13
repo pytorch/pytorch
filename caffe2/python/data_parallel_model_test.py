@@ -25,7 +25,7 @@ from caffe2.python import (
     model_helper,
     optimizer,
     rnn_cell,
-    workspace
+    workspace,
 )
 from caffe2.python.test_util import TestCase
 

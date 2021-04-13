@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.nn.quantized.functional as qF
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
-    _make_conv_test_input
+    _make_conv_test_input,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN

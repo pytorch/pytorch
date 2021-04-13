@@ -16,7 +16,7 @@ from worker.main import (
     WorkerFailure,
     WorkerOutput,
     WorkerTimerArgs,
-    WorkerUnpickler
+    WorkerUnpickler,
 )
 
 if TYPE_CHECKING:

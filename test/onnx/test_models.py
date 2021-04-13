@@ -8,7 +8,7 @@ from model_defs.op_test import (
     DummyNet,
     FakeQuantNet,
     PermuteNet,
-    PReluNet
+    PReluNet,
 )
 from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
@@ -18,7 +18,7 @@ from test_pytorch_common import (
     disableScriptTest,
     run_tests,
     skipIfNoLapack,
-    skipIfUnsupportedMinOpsetVersion
+    skipIfUnsupportedMinOpsetVersion,
 )
 from torchvision.models import shufflenet_v2_x1_0
 from torchvision.models.alexnet import alexnet
@@ -30,7 +30,7 @@ from torchvision.models.mobilenet import mobilenet_v2
 from torchvision.models.resnet import resnet50
 from torchvision.models.segmentation.segmentation import (
     deeplabv3_resnet101,
-    fcn_resnet101
+    fcn_resnet101,
 )
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 from torchvision.models.video import mc3_18, r2plus1d_18, r3d_18

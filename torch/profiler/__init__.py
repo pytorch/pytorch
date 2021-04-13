@@ -17,5 +17,5 @@ from .profiler import (
     ProfilerActivity,
     profile,
     schedule,
-    tensorboard_trace_handler
+    tensorboard_trace_handler,
 )

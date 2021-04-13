@@ -9,7 +9,7 @@ from hypothesis import assume, given
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core, dyndep, workspace
 from caffe2.quantization.server.dnnlowp_test_utils import (
-    check_quantized_results_close
+    check_quantized_results_close,
 )
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")

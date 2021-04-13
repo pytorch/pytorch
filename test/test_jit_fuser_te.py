@@ -28,14 +28,14 @@ from test_jit import (
     all_backward_graphs,
     backward_graph,
     get_lstm_inputs,
-    get_milstm_inputs
+    get_milstm_inputs,
 )
 
 from torch.testing._internal.common_utils import (
     GRAPH_EXECUTOR,
     ProfilingMode,
     enable_profiling_mode_for_profiling_tests,
-    run_tests
+    run_tests,
 )
 from torch.testing._internal.jit_utils import (
     RUN_CUDA,
@@ -44,7 +44,7 @@ from torch.testing._internal.jit_utils import (
     JitTestCase,
     _inline_everything,
     set_fusion_group_inlining,
-    warmup_backward
+    warmup_backward,
 )
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
 

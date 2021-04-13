@@ -13,7 +13,7 @@ from torch.testing import (
     all_types_and_complex_and,
     floating_and_complex_types_and,
     floating_types,
-    floating_types_and
+    floating_types_and,
 )
 from torch.testing._internal.common_device_type import (
     OpDTypes,
@@ -26,11 +26,11 @@ from torch.testing._internal.common_device_type import (
     onlyOnCPUAndCUDA,
     ops,
     precisionOverride,
-    skipCUDAIfRocm
+    skipCUDAIfRocm,
 )
 from torch.testing._internal.common_methods_invocations import (
     _NOTHING,
-    unary_ufuncs
+    unary_ufuncs,
 )
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoSciPy,
     slowTest,
     suppress_warnings,
-    torch_to_numpy_dtype_dict
+    torch_to_numpy_dtype_dict,
 )
 
 if TEST_SCIPY:

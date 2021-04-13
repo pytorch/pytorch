@@ -24,7 +24,7 @@ from torch.testing._internal.common_methods_invocations import (
     _compare_large_trilu_indices,
     _compare_trilu_indices,
     tri_large_tests_args,
-    tri_tests_args
+    tri_tests_args,
 )
 from torch.testing._internal.common_utils import (
     IS_REMOTE_GPU,
@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
-    slowTest
+    slowTest,
 )
 from torch.utils.checkpoint import checkpoint_sequential
 

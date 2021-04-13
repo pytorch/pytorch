@@ -12,7 +12,7 @@ import numpy as np
 from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
-    run_tests
+    run_tests,
 )
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
