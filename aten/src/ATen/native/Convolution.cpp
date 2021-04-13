@@ -234,6 +234,9 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
+  if (input.device().is_cpu() && input.scalar_type() == kBFloat16) {
+    return true;
+  }
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.device().is_cpu() &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
