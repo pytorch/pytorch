@@ -372,66 +372,87 @@ void SetExportModuleMobileInfoConverter(
   GetMobileInfoConverter() = std::move(converter);
 }
 
-void ScriptModuleSerializer::convertNamedType(
-    const c10::NamedTypePtr& class_type) {
-  if (converted_types_.count(class_type)) {
-    return;
+int ScriptModuleSerializer::serialize(
+    const Module& module,
+    const ExtraFilesMap& extra_files,
+    bool bytecode_format,
+    bool save_mobile_debug_info) {
+  C10_LOG_API_USAGE_ONCE("torch.script.save");
+  writeExtraFiles(module, extra_files);
+  // Serialize the model object
+  uint64_t next_tensor_id = writeArchive(
+      module._ivalue(),
+      /*archive_name=*/"data",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"data/");
+  // Then we serialize all code info.
+  convertTypes(module.type());
+  writeFiles("code/");
+  // The tensor constants from the code are written to a separate archive
+  // so loading the code does not depend on loading the data
+  std::vector<IValue> ivalue_constants(
+      constant_table_.begin(), constant_table_.end());
+  writeArchive(
+      c10::ivalue::Tuple::create(ivalue_constants),
+      /*archive_name=*/"constants",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"constants/",
+      next_tensor_id);
+  if (bytecode_format) {
+    writeByteCode(module, save_mobile_debug_info);
+    writeMobileMetadata(module, extra_files);
   }
-  converted_types_.insert(class_type);
-  auto qualname = type_name_uniquer_.getUniqueName(class_type);
-  std::string qualifier = qualname.prefix();
-  PythonPrint* pp = file_streams_.find(qualifier);
 
-  auto type_printer =
-      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-    auto namedType = t->cast<c10::NamedType>();
-    if (namedType && namedType->name()) {
-      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-    }
-    return c10::nullopt;
-  };
-  if (!pp) {
-    pp = &file_streams_.insert(
-        std::move(qualifier),
-        PythonPrint(constant_table_, class_deps_, type_printer, true));
-  }
-  pp->printNamedType(class_type);
-}
-
-void ScriptModuleSerializer::convertTypes(const at::NamedTypePtr& root_type) {
-  class_deps_.add(root_type);
-  for (size_t i = 0; i < class_deps_.size(); ++i) {
-    // note: convertNameType may extend class_deps_, so re-checking .size() is
-    // necessary
-    convertNamedType(class_deps_[i]);
-  }
-}
-
-void ScriptModuleSerializer::writeFiles(const std::string& code_dir) {
-  // Mapping of filename => src. We need this because multiple classes may go
-  // in the same file (e.g. foo.bar.Baz and foo.bar.Qux)
+  // Acquires and sets minimum (dynamic) version
   for (auto& item : file_streams_) {
-    const std::string filename = qualifierToArchivePath(item.key(), code_dir);
-
-    std::string src = item.value().str();
-    // Only compress these records if they're not tiny.
-    // The cpu cost of generating zip datastructs and compressing isn't
-    // well-spent for very small records.
-    static constexpr size_t kMinToCompress = 200;
-
-    writer_.writeRecord(
-        filename, src.c_str(), src.size(), src.size() > kMinToCompress);
-
-    // Write out the debug information
-    std::string debugFilename = filename + ".debug_pkl";
-    SourceRangePickler source_range_pickler;
-    auto range_data = source_range_pickler.pickle(item.value().ranges());
-    writer_.writeRecord(
-        debugFilename,
-        range_data.data(),
-        range_data.size(),
-        range_data.size() > kMinToCompress);
+    writer_.setMinVersion(item.value().minVersion());
   }
+  return 0;
+}
+
+uint64_t ScriptModuleSerializer::writeArchive(
+    const IValue& value,
+    const std::string& archive_name,
+    const std::string& archive_dir,
+    const std::string& tensor_dir,
+    uint64_t next_tensor_id) {
+  std::vector<char> data;
+  // Vector to capture the run-time class types during pickling the IValues
+  std::vector<c10::ClassTypePtr> memoizedClassTypes;
+  std::vector<std::string> tensor_names;
+  Pickler data_pickle(
+      [&](const char* buf, size_t size) {
+        data.insert(data.end(), buf, buf + size);
+      },
+      nullptr,
+      [&](const c10::ClassTypePtr& t) {
+        return type_name_uniquer_.getUniqueName(t);
+      },
+      &memoizedClassTypes,
+      [&]() {
+        // returns a string to use in picker.cpp as storage obj key
+        tensor_names.push_back(std::to_string(next_tensor_id++) + ".storage");
+        return tensor_names.back();
+      });
+  data_pickle.protocol();
+  data_pickle.pushIValue(value);
+  data_pickle.stop();
+  // write out tensor data
+  size_t i = 0;
+  TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
+  for (const auto& td : data_pickle.tensorData()) {
+    WriteableTensorData writable_td = getWriteableTensorData(td);
+    std::string fname = tensor_dir + tensor_names[i++];
+    writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+  }
+  std::string fname = archive_dir + archive_name + ".pkl";
+  writer_.writeRecord(fname, data.data(), data.size());
+
+  // serialize all the captured run-time class types
+  for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
+    convertNamedType(wroteType);
+  }
+  return next_tensor_id;
 }
 
 void ScriptModuleSerializer::writeExtraFiles(
@@ -479,7 +500,48 @@ void ScriptModuleSerializer::writeMobileMetadata(
   }
   auto content_to_write = converter(module, files_to_write);
   if (!content_to_write.empty()) {
-    writeArchive(content_to_write, "metadata", "", "metadata/", 0);
+    writeArchive(
+        content_to_write,
+        /*archive_name=*/"metadata",
+        /*archive_dir=*/"",
+        /*tensor_dir=*/"metadata/");
+    ;
+  }
+}
+
+void ScriptModuleSerializer::convertTypes(const at::NamedTypePtr& root_type) {
+  class_deps_.add(root_type);
+  for (size_t i = 0; i < class_deps_.size(); ++i) {
+    // note: convertNameType may extend class_deps_, so re-checking .size() is
+    // necessary
+    convertNamedType(class_deps_[i]);
+  }
+}
+
+void ScriptModuleSerializer::writeFiles(const std::string& code_dir) {
+  // Mapping of filename => src. We need this because multiple classes may go
+  // in the same file (e.g. foo.bar.Baz and foo.bar.Qux)
+  for (auto& item : file_streams_) {
+    const std::string filename = qualifierToArchivePath(item.key(), code_dir);
+
+    std::string src = item.value().str();
+    // Only compress these records if they're not tiny.
+    // The cpu cost of generating zip datastructs and compressing isn't
+    // well-spent for very small records.
+    static constexpr size_t kMinToCompress = 200;
+
+    writer_.writeRecord(
+        filename, src.c_str(), src.size(), src.size() > kMinToCompress);
+
+    // Write out the debug information
+    std::string debugFilename = filename + ".debug_pkl";
+    SourceRangePickler source_range_pickler;
+    auto range_data = source_range_pickler.pickle(item.value().ranges());
+    writer_.writeRecord(
+        debugFilename,
+        range_data.data(),
+        range_data.size(),
+        range_data.size() > kMinToCompress);
   }
 }
 
@@ -499,17 +561,50 @@ void ScriptModuleSerializer::writeByteCode(
   moduleMethodsTuple(
       module, elements, debug_info_elements, save_mobile_debug_info);
   auto telements = Tup(std::move(elements));
-  uint64_t next_tensor_id =
-      writeArchive(telements, "bytecode", "", "bytecode/", 0);
+  uint64_t next_tensor_id = writeArchive(
+      telements,
+      /*archive_name=*/"bytecode",
+      /*archive_dir=*/"",
+      /*tensor_dir=*/"bytecode/");
   if (save_mobile_debug_info) {
     auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
     writeArchive(
         debug_info_telements,
-        "mobile_debug",
-        "",
-        "mobile_debug/",
+        /*archive_name=*/"mobile_debug",
+        /*archive_dir=*/"",
+        /*tensor_dir=*/"mobile_debug/",
         next_tensor_id);
   }
+}
+
+void ScriptModuleSerializer::convertNamedType(
+    const c10::NamedTypePtr& class_type) {
+  if (converted_types_.count(class_type)) {
+    return;
+  }
+  converted_types_.insert(class_type);
+  auto qualname = type_name_uniquer_.getUniqueName(class_type);
+  std::string qualifier = qualname.prefix();
+  PythonPrint* pp = file_streams_.find(qualifier);
+
+  auto type_printer =
+      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
+    auto namedType = t->cast<c10::NamedType>();
+    if (namedType && namedType->name()) {
+      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+    }
+    return c10::nullopt;
+  };
+  if (!pp) {
+    pp = &file_streams_.insert(
+        std::move(qualifier),
+        PythonPrint(
+            constant_table_,
+            class_deps_,
+            type_printer,
+            /*enforce_importable=*/true));
+  }
+  pp->printNamedType(class_type);
 }
 
 std::tuple<uint64_t, uint64_t> ScriptModuleSerializer::serialize_unified_format(
@@ -521,7 +616,11 @@ std::tuple<uint64_t, uint64_t> ScriptModuleSerializer::serialize_unified_format(
 
   // Serialize the model object
   uint64_t next_tensor_id = writeArchive(
-      module._ivalue(), "data", archive_dir, ".data/", starting_tensor_id);
+      module._ivalue(),
+      "data",
+      archive_dir,
+      /*tensor_dir=*/".data/",
+      starting_tensor_id);
   // Then we serialize all code info.
   convertTypes(module.type());
   // The tensor constants from the code are written to a separate archive
@@ -532,93 +631,12 @@ std::tuple<uint64_t, uint64_t> ScriptModuleSerializer::serialize_unified_format(
       c10::ivalue::Tuple::create(ivalue_constants),
       "constants",
       archive_dir,
-      ".data/",
+      /*tensor_dir=*/".data/",
       next_tensor_id);
 
   // writeFiles() call needs to be made in addition to calling this function
   // to have the code actually saved
   return std::make_tuple(ts_id, next_tensor_id);
-}
-
-int ScriptModuleSerializer::serialize(
-    const Module& module,
-    const ExtraFilesMap& extra_files,
-    bool bytecode_format,
-    bool save_mobile_debug_info) {
-  C10_LOG_API_USAGE_ONCE("torch.script.save");
-  writeExtraFiles(module, extra_files);
-  // Serialize the model object
-  uint64_t next_tensor_id =
-      writeArchive(module._ivalue(), "data", "", "data/", 0);
-  // Then we serialize all code info.
-  convertTypes(module.type());
-  writeFiles("code/");
-  // The tensor constants from the code are written to a separate archive
-  // so loading the code does not depend on loading the data
-  std::vector<IValue> ivalue_constants(
-      constant_table_.begin(), constant_table_.end());
-  writeArchive(
-      c10::ivalue::Tuple::create(ivalue_constants),
-      "constants",
-      "",
-      "constants/",
-      next_tensor_id);
-  if (bytecode_format) {
-    writeByteCode(module, save_mobile_debug_info);
-    writeMobileMetadata(module, extra_files);
-  }
-
-  // Acquires and sets minimum (dynamic) version
-  for (auto& item : file_streams_) {
-    writer_.setMinVersion(item.value().minVersion());
-  }
-  return 0;
-}
-
-uint64_t ScriptModuleSerializer::writeArchive(
-    const IValue& value,
-    const std::string& archive_name,
-    const std::string& archive_dir,
-    const std::string& tensor_dir,
-    uint64_t next_tensor_id) {
-  std::vector<char> data;
-  // Vector to capture the run-time class types during pickling the IValues
-  std::vector<c10::ClassTypePtr> memoizedClassTypes;
-  std::vector<std::string> tensor_names;
-  Pickler data_pickle(
-      [&](const char* buf, size_t size) {
-        data.insert(data.end(), buf, buf + size);
-      },
-      nullptr,
-      [&](const c10::ClassTypePtr& t) {
-        return type_name_uniquer_.getUniqueName(t);
-      },
-      &memoizedClassTypes,
-      [&]() {
-        // returns a string to use in picker.cpp as storage obj key
-        tensor_names.push_back(std::to_string(next_tensor_id++) + ".storage");
-        return tensor_names.back();
-      });
-  data_pickle.protocol();
-  data_pickle.pushIValue(value);
-  data_pickle.stop();
-
-  // write out tensor data
-  size_t i = 0;
-  assert(tensor_names.size() == data_pickle.tensorData().size());
-  for (const auto& td : data_pickle.tensorData()) {
-    WriteableTensorData writable_td = getWriteableTensorData(td);
-    std::string fname = tensor_dir + tensor_names[i++];
-    writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
-  }
-  std::string fname = archive_dir + archive_name + ".pkl";
-  writer_.writeRecord(fname, data.data(), data.size());
-
-  // serialize all the captured run-time class types
-  for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
-    convertNamedType(wroteType);
-  }
-  return next_tensor_id;
 }
 
 void ExportModule(
