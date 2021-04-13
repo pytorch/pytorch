@@ -7664,7 +7664,7 @@ add_docstr(torch.sinc,
            r"""
 sinc(input, *, out=None) -> Tensor
 
-Alias for :func:`torch.special.expit`.
+Alias for :func:`torch.special.sinc`.
 """)
 
 add_docstr(torch.sinh,
