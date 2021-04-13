@@ -68,6 +68,7 @@ Features described in this documentation are classified by release status:
    torch.linalg <linalg>
    torch.special <special>
    torch.overrides
+   torch.package <package>
    profiler
    nn.init
    onnx
