@@ -1452,7 +1452,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if(NOT USE_SYSTEM_ONNX)
     include_directories(${ONNX_INCLUDE_DIRS})
     # In mobile build we care about code size, and so we need drop
-    # everything (e.g. checker, optimizer) in onnx but the pb definition.
+    # everything (e.g. checker) in onnx but the pb definition.
     if(ANDROID OR IOS)
       caffe2_interface_library(onnx_proto onnx_library)
     else()
