@@ -108,7 +108,9 @@ void modifyTensorShapeDimSize(
       "] = ",
       tensor_shape->dims(dim_index),
       " cannot be divided by old_size ",
-      old_size);
+      old_size,
+      " tensor name: ",
+      tensor_shape->name());
   int64_t modified_size = (tensor_shape->dims(dim_index) * new_size) / old_size;
   tensor_shape->set_dims(dim_index, modified_size);
 }
