@@ -222,6 +222,16 @@ struct SourceImporterImpl : public Resolver,
       return std::make_shared<SimpleValue>(
           graph->insertConstant(std::numeric_limits<double>::quiet_NaN(), loc));
     }
+    if (name == "infj") {
+      return std::make_shared<SimpleValue>(graph->insertConstant(
+          c10::complex<double>(0, std::numeric_limits<double>::infinity()),
+          loc));
+    }
+    if (name == "nanj") {
+      return std::make_shared<SimpleValue>(graph->insertConstant(
+          c10::complex<double>(0, std::numeric_limits<double>::quiet_NaN()),
+          loc));
+    }
     if (name == "__torch__") {
       return std::make_shared<ClassNamespaceValue>(
           c10::QualifiedName(name), shared_from_this());
