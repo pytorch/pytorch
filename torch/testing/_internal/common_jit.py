@@ -13,11 +13,9 @@ import torch.jit.quantized
 # Testing utils
 from torch.testing import floating_and_complex_types_and
 from torch.testing._internal.common_utils import (  # noqa: F401
-    enable_profiling_mode,
-)
-from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TestCase,
+    enable_profiling_mode,
     enable_profiling_mode_for_profiling_tests,
     freeze_rng_state,
     is_iterable_of_tensors,

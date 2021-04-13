@@ -35,12 +35,10 @@ from torch.onnx import OperatorExportTypes
 from torch.testing import FileCheck
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_utils import (  # noqa: F401
-    enable_profiling_mode,
-)
-from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_BAILOUTS,
     ProfilingMode,
+    enable_profiling_mode,
     enable_profiling_mode_for_profiling_tests,
     freeze_rng_state,
 )
