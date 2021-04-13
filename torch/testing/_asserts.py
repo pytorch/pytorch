@@ -1,7 +1,6 @@
 import collections.abc
 import contextlib
 import functools
-import numbers
 import sys
 from collections import namedtuple
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type, TypeVar, Union
@@ -359,22 +358,19 @@ def _check_tensors_close(
     return None
 
 
-Data = Union[Tensor, np.ndarray, numbers.Number]
-
-
 def _check_by_type(
-    a: Union[Data, Sequence[Data], Mapping[Any, Data]],
-    b: Union[Data, Sequence[Data], Mapping[Any, Data]],
-    check_data: Callable[[Data, Data], Optional[Exception]],
+    a: Any,
+    b: Any,
+    check_data: Callable[[Any, Any], Optional[Exception]],
 ) -> Optional[Exception]:
     """Delegates tensor checking based on the inputs types.
 
     :class:`~collections.abc.Sequence`'s and :class:`~collections.abc.Mapping`'s are checked elementwise.
 
     Args:
-        a (Union[Data, Sequence[Data], Mapping[Any, Data]]): First input.
-        b (Union[Data, Sequence[Data], Mapping[Any, Data]]): Second input.
-        check_data (Callable[[Data, Data], Optional[Exception]]): Callable used to check if a data pair matches.
+        a (Any): First input.
+        b (Any): Second input.
+        check_data (Callable[[Any, Any], Optional[Exception]]): Callable used to check if a data pair matches.
             In case it mismatches should return an :class:`Exception` with an expressive error message.
 
     Returns:
@@ -408,14 +404,14 @@ _SEQUENCE_MSG_FMTSTR = "The failure occurred at index {} of the sequences."
 
 
 def _check_sequence(
-    a: Sequence[Data], b: Sequence[Data], check_data: Callable[[Data, Data], Optional[Exception]]
+    a: Sequence[Any], b: Sequence[Any], check_data: Callable[[Any, Any], Optional[Exception]]
 ) -> Optional[Exception]:
     """Checks if the data in two sequences matches.
 
     Args:
         a (Sequence[Tensor]): First sequence.
         b (Sequence[Tensor]): Second sequence.
-        check_data (Callable[[Data, Data], Optional[Exception]]): Callable used to check if a data pair matches.
+        check_data (Callable[[Any, Any], Optional[Exception]]): Callable used to check if a data pair matches.
             In case it mismatches should return an :class:`Exception` with an expressive error message.
 
     Returns:
@@ -439,14 +435,14 @@ _MAPPING_MSG_FMTSTR = "The failure occurred for key '{}' of the mappings."
 
 
 def _check_mapping(
-    a: Mapping[Any, Data], b: Mapping[Any, Data], check_data: Callable[[Data, Data], Optional[Exception]]
+    a: Mapping[str, Any], b: Mapping[str, Any], check_data: Callable[[Any, Any], Optional[Exception]]
 ) -> Optional[Exception]:
     """Checks if the data of two mappings matches.
 
     Args:
         a (Mapping[Any, Tensor]): First mapping.
         b (Mapping[Any, Tensor]): Second mapping.
-        check_data (Callable[[Data, Data], Optional[Exception]]): Callable used to check if a data pair matches.
+        check_data (Callable[[Any, Any], Optional[Exception]]): Callable used to check if a data pair matches.
             In case it mismatches should return an :class:`Exception` with an expressive error message.
 
     Returns:
@@ -475,14 +471,14 @@ def _check_mapping(
     return None
 
 
-def _maybe_to_tensor(input: Data) -> Optional[Tensor]:
+def _maybe_to_tensor(input: Any) -> Optional[Tensor]:
     """Maybe casts the input to a tensor.
 
     :class:`~torch.Tensor`'s are returned without modification. If :mod:`numpy` is available, :class:`numpy.ndarray`'s
-    are casted with :func:`torch.from_numpy`. Everything else is casted with :func:`torch.tensor`.
+    are cast with :func:`torch.from_numpy`. Everything else is casted with :func:`torch.tensor`.
 
     Args:
-        input (Data): Input to be casted.
+        input (Any): Input to be cated.
 
     Returns:
         Optional[Tensor]: :class:`~torch.Tensor` if it :attr:`input` is castable and ``None`` otherwise.
@@ -505,7 +501,7 @@ def _cast_inputs(check_tensors):
     instead of executing the decorated function.
     """
 
-    def wrapper(a: Data, b: Data, **kwargs):
+    def wrapper(a: Any, b: Any, **kwargs):
         a_t = _maybe_to_tensor(a)
         b_t = _maybe_to_tensor(b)
         if a_t is None or b_t is None:
@@ -520,8 +516,8 @@ def _cast_inputs(check_tensors):
 
 
 def assert_equal(
-    a: Union[Data, Sequence[Data], Mapping[Any, Data]],
-    b: Union[Data, Sequence[Data], Mapping[Any, Data]],
+    a: Any,
+    b: Any,
     *,
     check_device: bool = True,
     check_dtype: bool = True,
@@ -535,8 +531,8 @@ def assert_equal(
     and :class:`~collections.abc.Mapping`'s of any valid input type.
 
     Args:
-        a (Union[Data, Sequence[Data], Mapping[Any, Data]]): First input.
-        b (Union[Data, Sequence[Data], Mapping[Any, Data]]): Second input.
+        a (Any): First input.
+        b (Any): Second input.
         check_device (bool): If ``True`` (default), asserts that tensors live in the same :attr:`~torch.Tensor.device`
             memory. If this check is disabled **and** they do not live in the same memory :attr:`~torch.Tensor.device`,
             they are moved CPU memory before their values are compared.
@@ -577,8 +573,8 @@ def assert_equal(
 
 
 def assert_close(
-    a: Union[Data, Sequence[Data], Mapping[Any, Data]],
-    b: Union[Data, Sequence[Data], Mapping[Any, Data]],
+    a: Any,
+    b: Any,
     *,
     rtol: Optional[float] = None,
     atol: Optional[float] = None,
@@ -603,8 +599,8 @@ def assert_close(
     and :class:`~collections.abc.Mapping`'s of any valid input type.
 
     Args:
-        a (Union[Data, Sequence[Data], Mapping[Any, Data]]): First input.
-        b (Union[Data, Sequence[Data], Mapping[Any, Data]]): Second input.
+        a (Any): First input.
+        b (Any): Second input.
         rtol (Optional[float]): Relative tolerance. If specified :attr:`atol` must also be specified. If omitted,
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
         atol (Optional[float]): Absolute tolerance. If specified :attr:`rtol` must also be specified. If omitted,
