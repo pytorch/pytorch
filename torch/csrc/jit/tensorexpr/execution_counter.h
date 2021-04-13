@@ -2,6 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#include <iostream>
 #include <string>
 #include <unordered_map>
 
@@ -56,12 +57,13 @@ class ExecutionTriggerList {
     return iter->second;
   }
 
+  ExecutionTriggerList(const ExecutionTriggerList&) = delete;
+  ExecutionTriggerList& operator=(const ExecutionTriggerList&) = delete;
+
  private:
   friend class ExecutionTrigger;
 
-  ExecutionTriggerList() {}
-  ExecutionTriggerList(const ExecutionTriggerList&) = delete;
-  ExecutionTriggerList& operator=(const ExecutionTriggerList&) = delete;
+  ExecutionTriggerList() = default;
 
   void AddTrigger(const std::string& name, ExecutionTrigger* trigger) {
     auto insert_ret = trigger_list_.insert(std::make_pair(name, trigger));
@@ -78,6 +80,8 @@ class ExecutionTrigger {
   explicit ExecutionTrigger(const std::string& name) : name_(name) {
     ExecutionTriggerList::GetInstance().AddTrigger(name, this);
   }
+  ExecutionTrigger(const ExecutionTrigger&) = delete;
+  ExecutionTrigger& operator=(const ExecutionTrigger&) = delete;
 
   int value() const {
     return value_;
@@ -88,8 +92,6 @@ class ExecutionTrigger {
   }
 
  private:
-  ExecutionTrigger(const ExecutionTrigger&) = delete;
-  ExecutionTrigger& operator=(const ExecutionTrigger&) = delete;
   int value_ = 0;
   const std::string name_;
 };
