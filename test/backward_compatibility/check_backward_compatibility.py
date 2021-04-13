@@ -85,16 +85,15 @@ allow_list = [
     ("aten::divide", datetime.date(2021, 4, 28)),
     ("aten::_var", datetime.date(2021, 4, 28)),
     ("aten::_std", datetime.date(2021, 4, 28)),
-    ("aten::var", datetime.date(2021, 4, 28)),
     ("aten::std", datetime.date(2021, 4, 28)),
-    ("aten::var_mean", datetime.date(2021, 4, 28)),
     ("aten::std_mean", datetime.date(2021, 4, 28)),
+    ("aten::var", datetime.date(2021, 4, 28)),
+    ("aten::var_mean", datetime.date(2021, 4, 28)),
     ("aten::batch_norm_backward_elemt", datetime.date(2021, 5, 1)),
     ("aten::assert_async", datetime.date(2021, 5, 1)),
     ("aten::cumprod_backward", datetime.date(2021, 5, 1)),
     ("aten::_triangular_solve_helper", datetime.date(9999, 1, 1)),
-    ("aten::complex*", datetime.date(2021, 5, 1)),
-    ("aten::take_backward", datetime.date(2021, 5, 1)),
+    ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
 ]
 
 def allow_listed(schema, allow_list):
