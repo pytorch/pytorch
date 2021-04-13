@@ -1028,6 +1028,38 @@ class TestAsserts(TestCase):
         for fn in self.assert_fns_with_inputs(a, b):
             fn()
 
+    @onlyCPU
+    def test_msg_str(self, device):
+        msg = "Custom error message!"
+
+        a = torch.tensor(1, device=device)
+        b = torch.tensor(2, device=device)
+
+        for fn in self.assert_fns_with_inputs(a, b):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=msg)
+
+    @onlyCPU
+    def test_msg_callable(self, device):
+        msg = "Custom error message!"
+
+
+
+        def make_msg(a, b, info):
+            return str(info)
+            return (
+                f"Argh, we found {info.total_mismatches} mismatches! "
+                f"That is {info.mismatch_ratio:.1%}!"
+            )
+            return msg
+
+        a = torch.tensor(1, device=device)
+        b = torch.tensor(2, device=device)
+
+        for fn in self.assert_fns_with_inputs(a, b):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=make_msg)
+
 
 instantiate_device_type_tests(TestAsserts, globals())
 
