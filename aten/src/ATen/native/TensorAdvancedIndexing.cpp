@@ -434,6 +434,11 @@ Tensor take(const Tensor& self, const Tensor& index) {
 }
 
 Tensor & index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate) {
+  if (!accumulate) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("index_put_ with accumulate=False");
+  }
   return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 
