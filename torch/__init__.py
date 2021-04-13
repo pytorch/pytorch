@@ -386,6 +386,8 @@ def use_deterministic_algorithms(d):
           tensor
         * :func:`torch.put` with ``accumulate=True`` when called on a CPU
           tensor
+        * :func:`torch.gather` when ``input`` dimension is one and called
+          on a CUDA tensor that requires grad
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when `d=True`:
@@ -416,6 +418,7 @@ def use_deterministic_algorithms(d):
         * :func:`torch.scatter_add_` when called on a CUDA tensor
         * :func:`torch.index_add_` when called on a CUDA tensor
         * :func:`torch.index_copy`
+        * :func:`torch.Tensor.index_put_` when ``accumulate=False``
         * :func:`torch.put` when ``accumulate=False``
         * :func:`torch.put` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.index_select` when called on a CUDA tensor that requires grad
@@ -424,6 +427,8 @@ def use_deterministic_algorithms(d):
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
+        * :func:`torch.gather` when ``input`` dimension is larger than one
+          and called on a CUDA tensor that requires grad
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`
