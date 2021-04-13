@@ -4,6 +4,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
+#include <c10/core/InferenceMode.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -62,6 +63,24 @@ TensorImpl::TensorImpl(
     // Use std::forward to suppress static analyzer false positive.
     : TensorImpl(std::forward<Storage>(storage), key_set, data_type, storage.device()) {}
 
+TensorImpl::TensorImpl(
+    ImplType type,
+    Storage&& storage,
+    DispatchKeySet key_set,
+    const caffe2::TypeMeta data_type)
+    : storage_(std::move(storage)),
+      storage_offset_(0),
+      numel_(0),
+      data_type_(data_type),
+      device_opt_(storage_.device()),
+      key_set_(key_set) {
+  init_bitfields();
+  // Inference tensor doesn't have version counter.
+  if (!is_inference_tensor()) {
+    version_counter_ = VariableVersion(/*version=*/0);
+  }
+}
+
 TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta data_type, c10::optional<c10::Device> device_opt)
     : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
 
@@ -80,14 +99,26 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
     // UndefinedTensorImpl is a singleton, so we skip logging it
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }
-  // After we removed Autograd keys from globally enabled set, every Tensor must be created with
-  // a backend DispatchKey and an AutogradBackend key.
-  // We automatically add the corresponding autograd key to key_set_ so that backends can stay
-  // in the old way of only registering with backend key like DispatchKey::CPU.
-  // TODO: Ideally this logic fits best in Variable/Autograd layer so that we only
-  // add AutogradBackend key when the tensor requires grad.
-  DispatchKey k = key_set.highestPriorityBackendTypeId();
-  key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
+
+  bool inference_mode = c10::InferenceMode::is_enabled();
+
+  // Inference tensor doesn't have autograd related keys.
+  if (inference_mode) {
+    // See Note [Expected TLS state in InferenceMode] for why we exclude Autograd & InplaceOrView keys.
+    // Normally key_set only contains backend keys but we do the substraction
+    // here to make sure.
+    key_set_ = key_set - c10::autograd_dispatch_keyset_with_InplaceOrView;
+  } else {
+    // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
+    //       See Note [Dream: skip VariableType kernel when requires_grad=false]
+    DispatchKey k = key_set.highestPriorityBackendTypeId();
+    key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
+  }
+
+  // Inference tensor doesn't have version counter.
+  if (!is_inference_tensor()) {
+    version_counter_ = VariableVersion(/*version=*/0);
+  }
 
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
   // Storages with default devices.
@@ -270,17 +301,22 @@ void TensorImpl::throw_storage_access_error() const {
   TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
-bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
-#ifdef DEBUG
-  AT_ASSERT(compute_contiguous() == is_contiguous_);
-#endif
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-      return is_channels_last_contiguous_;
+bool TensorImpl::is_contiguous_nondefault_policy_impl(at::MemoryFormat memory_format) const {
+  if (has_contiguity_ == static_cast<uint8_t>(HasContiguityPolicy::ContiguityNotSupported)) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "Tensors of type ", tensorimpl_type_name(),
+        " do not have is_contiguous");
+  } else {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(has_contiguity_ == static_cast<uint8_t>(HasContiguityPolicy::CustomBehavior));
+    return is_contiguous_custom(memory_format);
   }
-  else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-      return is_channels_last_3d_contiguous_;
-  }
-  return is_contiguous_;
+}
+
+bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "TensorImpl::is_contiguous_custom should never be called; did you "
+      "set_has_contiguity_policy and forget to override is_contiguous_custom?");
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -301,7 +337,15 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
+// Setting requires_grad to true on inference tensor outside InferenceMode
+// is forbidden.  Ideally it would also be illegal inside InferenceMode.
+// But there's no way that we can directly allocate a tensor to have
+// requires_grad = true in C++ constructor so set_requires_grad is widely
+// used in C++ frontend. Forbidding it inside InferenceMode will force users
+// to delete these setter code in their code which is not ideal.
 void TensorImpl::set_requires_grad(bool requires_grad) {
+  TORCH_CHECK(!(requires_grad && is_inference_tensor() && !c10::InferenceMode::is_enabled()),
+    "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.");
   if (!requires_grad && !autograd_meta_) return;
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
   // NB: In principle, setting requires_grad to false could result in
@@ -375,6 +419,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->device_opt_ = src_impl->device_opt_;
   dest_impl->key_set_ = src_impl->key_set_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
+  dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
   dest_impl->is_channels_last_3d_contiguous_ = src_impl->is_channels_last_3d_contiguous_;
   dest_impl->is_channels_last_ = src_impl->is_channels_last_;
@@ -395,7 +440,11 @@ void TensorImpl::copy_tensor_metadata(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) {
   copy_tensor_metadata_except_version_counter(src_impl, dest_impl, allow_tensor_metadata_change);
-  dest_impl->set_version_counter(version_counter);
+  // TODO: In the ideal end state, it's okay to set disabled version_counter
+  // on inference tensor since it's a no-op. This requires refactor on call sites.
+  if (!dest_impl->is_inference_tensor()) {
+    dest_impl->set_version_counter(version_counter);
+  }
 }
 
 void TensorImpl::copy_tensor_metadata(
@@ -404,7 +453,9 @@ void TensorImpl::copy_tensor_metadata(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) {
   copy_tensor_metadata_except_version_counter(src_impl, dest_impl, allow_tensor_metadata_change);
-  dest_impl->set_version_counter(std::move(version_counter));
+  if (!dest_impl->is_inference_tensor()) {
+    dest_impl->set_version_counter(std::move(version_counter));
+  }
 }
 
 namespace impl {

@@ -71,7 +71,7 @@ void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Sc
     auto max_vec = Vec256<scalar_t>(max_scalar);
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t {
-        return std::min(max_scalar, std::max(min_scalar, a + alpha * b));
+        return std::min(max_scalar, std::max(min_scalar, static_cast<scalar_t>(a + alpha * b)));
       },
       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
         auto add_clamp_res = vec256::fmadd(b, alpha_vec, a);
@@ -82,7 +82,7 @@ void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Sc
     });
 }
 
-void atan2_kernel(TensorIterator& iter) {
+void atan2_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atan2_cpu", [&]() {
     cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
     return std::atan2(a, b);
@@ -932,7 +932,7 @@ void heaviside_kernel(TensorIterator& iter) {
   });
 }
 
-void copysign_kernel(TensorIterator& iter) {
+void copysign_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "copysign_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         return copysign(a, b);

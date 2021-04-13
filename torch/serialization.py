@@ -334,7 +334,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
          pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
     """Saves an object to a disk file.
 
-    See also: `saving-loading-tensors`
+    See also: :ref:`saving-loading-tensors`
 
     Args:
         obj: saved object
@@ -348,7 +348,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
 
     .. note::
         PyTorch preserves storage sharing across serialization. See
-        `preserve-storage-sharing` for more details.
+        :ref:`preserve-storage-sharing` for more details.
 
     .. note::
         The 1.6 release of PyTorch switched ``torch.save`` to use a new

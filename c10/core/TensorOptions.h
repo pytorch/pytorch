@@ -337,6 +337,10 @@ struct C10_API TensorOptions {
     return layout_ == c10::Layout::Sparse;
   }
 
+  bool is_sparse_csr() const {
+    return layout_ == c10::Layout::SparseCsr;
+  }
+
   // For compatibility with legacy tensor.type() comparisons
   bool type_equal(const TensorOptions& other) const {
     return computeDispatchKey() == other.computeDispatchKey() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
@@ -397,11 +401,6 @@ struct C10_API TensorOptions {
       merged.set_memory_format(*optional_memory_format);
     }
     return merged;
-  }
-
-  // Resolves the tensor type set specified by the current construction axes.
-  DispatchKeySet key_set() const noexcept {
-    return DispatchKeySet(computeDispatchKey());
   }
 
   // INVARIANT: computeDispatchKey returns only the subset of dispatch keys for
@@ -665,6 +664,15 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
           default:
             TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for mkldnn layout: ", device_.type());
         }
+      case Layout::SparseCsr:
+        switch(device_.type()) {
+          case DeviceType::CPU:
+            return DispatchKey::SparseCsrCPU;
+          case DeviceType::CUDA:
+            return DispatchKey::SparseCsrCUDA;
+          default:
+            AT_ERROR("Unsupported device type for sparse CSR layout: ", device_.type());
+        }
       default:
         TORCH_CHECK(false, "Unsupported layout: ", layout_);
     }
@@ -676,6 +684,8 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     case DispatchKey::SparseCUDA:
     case DispatchKey::SparseHIP:
     case DispatchKey::SparseXPU:
+    case DispatchKey::SparseCsrCPU:
+    case DispatchKey::SparseCsrCUDA:
       return Layout::Sparse;
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
@@ -706,6 +716,8 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
       return DeviceType::XLA;
     case DispatchKey::Vulkan:
       return DeviceType::Vulkan;
+    case DispatchKey::Meta:
+      return DeviceType::Meta;
 
     // stuff that people are actively developing
     case DispatchKey::XPU:

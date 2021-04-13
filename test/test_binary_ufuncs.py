@@ -290,7 +290,7 @@ class TestBinaryUfuncs(TestCase):
             # floor(a / b) * b can be < a, so fixup slightly to avoid underflow
             a = torch.where(a < 0, a + b, a)
 
-        d_true = torch.divide(a, b, rounding_mode='true')
+        d_true = torch.divide(a, b, rounding_mode=None)
         self.assertTrue(d_true.is_floating_point())
         self.assertEqual(d_true * b, a.to(d_true.dtype))
 
@@ -324,11 +324,12 @@ class TestBinaryUfuncs(TestCase):
         else:
             an, bn = a.float().cpu().numpy(), b.float().cpu().numpy()
 
-        for mode, np_ref in (("true", np.true_divide), ("floor", np.floor_divide)):
+        for mode, np_ref in ((None, np.true_divide), ("floor", np.floor_divide)):
             with np.errstate(all='ignore'):
                 expect = np_ref(an, bn)
+            kwargs = dict(rounding_mode=mode) if mode is not None else {}
             with set_default_dtype(torch.double):
-                actual = torch.divide(a, b, rounding_mode=mode)
+                actual = torch.divide(a, b, **kwargs)
             self.assertEqual(actual, torch.from_numpy(expect),
                              exact_device=False, exact_dtype=exact_dtype)
 
@@ -337,7 +338,7 @@ class TestBinaryUfuncs(TestCase):
         storage[::2, ::2] = a
         storage[1::2, 1::2] = b
 
-        for rounding_mode in ("true", "trunc", "floor"):
+        for rounding_mode in (None, "trunc", "floor"):
             expect = torch.divide(storage[::2, ::2], storage[1::2, 1::2], rounding_mode=rounding_mode)
             actual = torch.divide(a, b, rounding_mode=rounding_mode)
             self.assertEqual(actual, expect)
@@ -366,22 +367,23 @@ class TestBinaryUfuncs(TestCase):
             an, bn = a.float().cpu().numpy(), b.float().cpu().numpy()
 
         for mode, np_ref in (
-                ("true", np.true_divide),
+                (None, np.true_divide),
                 ("floor", np.floor_divide),
                 ("trunc", lambda a, b: np.trunc(np.true_divide(a, b)).astype(a.dtype))
         ):
             with np.errstate(all='ignore'):
                 expect = torch.from_numpy(np_ref(an, bn))
 
+            kwargs = dict(rounding_mode=mode) if mode is not None else {}
             # Contiguous (likely vectorized)
             with set_default_dtype(torch.double):
-                actual = torch.divide(a, b, rounding_mode=mode)
+                actual = torch.divide(a, b, **kwargs)
             self.assertEqual(actual, expect, exact_device=False, exact_dtype=exact_dtype)
 
             # Non-contiguous (not vectorized)
             expect = expect[::2]
             with set_default_dtype(torch.double):
-                actual = torch.divide(a[::2], b[::2], rounding_mode=mode)
+                actual = torch.divide(a[::2], b[::2], **kwargs)
 
             self.assertEqual(actual, expect, exact_device=False, exact_dtype=exact_dtype)
 
@@ -728,6 +730,15 @@ class TestBinaryUfuncs(TestCase):
             # Binary ops with a cpu + cuda tensor are allowed if the cpu tensor has 0 dimension
             base = torch.tensor(3.0, device='cpu')
             self._test_pow(base, exp)
+
+    @onlyCUDA
+    @dtypes(torch.complex64, torch.complex128)
+    def test_pow_cuda_complex_extremal_failing(self, device, dtype):
+        t = torch.tensor(complex(-1., float('inf')), dtype=dtype, device=device)
+        with self.assertRaises(AssertionError):
+            cuda_out = t.pow(2)
+            cpu_out = t.cpu().pow(2)
+            self.assertEqual(cpu_out, cuda_out)
 
     @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_dtypes(include_bool=False, include_bfloat16=False)))
@@ -2057,18 +2068,23 @@ class TestBinaryUfuncs(TestCase):
         pt_outcome = torch.ldexp(mantissas, exponents)
         self.assertEqual(np_outcome, pt_outcome)
 
-    def test_lerp(self, device):
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_lerp(self, device, dtype):
         start_end_weight_shapes = [(), (5,), (5, 5)]
         for shapes in product(start_end_weight_shapes, start_end_weight_shapes, start_end_weight_shapes):
-            start = torch.randn(shapes[0], device=device)
-            end = torch.randn(shapes[1], device=device)
+            start = torch.randn(shapes[0], device=device, dtype=dtype)
+            end = torch.randn(shapes[1], device=device, dtype=dtype)
 
             # Tensor weights
-            for weight in [torch.randn(shapes[2], device=device), random.random()]:
+            weights = [torch.randn(shapes[2], device=device, dtype=dtype), random.random()]
+            if dtype.is_complex:
+                weights += [complex(0, 1), complex(0.4, 1.2)]
+
+            for weight in weights:
                 actual = torch.lerp(start, end, weight)
                 actual_method = start.lerp(end, weight)
                 self.assertEqual(actual, actual_method)
-                actual_out = torch.Tensor().to(device)
+                actual_out = torch.tensor(1., dtype=dtype, device=device)
                 torch.lerp(start, end, weight, out=actual_out)
                 self.assertEqual(actual, actual_out)
                 expected = start + weight * (end - start)
@@ -2223,13 +2239,16 @@ class TestBinaryUfuncs(TestCase):
                                lambda: torch.add(m1, m2, alpha=1.0))
 
         # mismatched alpha, float / double tensor and complex alpha
+        msg = r"For non-complex input tensors, argument alpha must not be a complex number\."
         m1 = torch.tensor([3., 4.], device=device)
         m2 = torch.tensor([4., 3.], device=device)
-        self.assertRaises(RuntimeError, lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2)))
+        self.assertRaisesRegex(RuntimeError, msg,
+                               lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2)))
 
         m1 = torch.tensor([3., 4.], dtype=torch.double, device=device)
         m2 = torch.tensor([4., 3.], dtype=torch.double, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2)))
+        self.assertRaisesRegex(RuntimeError, msg,
+                               lambda: torch.add(m1, m2, alpha=complex(0.1, 0.2)))
 
         # complex
         m1 = torch.tensor((4.0000 + 4.0000j), dtype=torch.complex64)
