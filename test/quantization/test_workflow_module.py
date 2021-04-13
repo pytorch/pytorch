@@ -1,4 +1,3 @@
-# Torch
 # Standard library
 import copy
 import io
@@ -11,6 +10,7 @@ import numpy as np
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+# Torch
 import torch
 import torch.nn as nn
 import torch.testing._internal.hypothesis_utils as hu

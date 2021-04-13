@@ -5,8 +5,6 @@
 
 import inspect
 import logging
-# instantiate logger outside of distributed operators may trigger error
-# logger need to be created in each idividual operator instead.
 import os
 import time
 from abc import abstractmethod
@@ -17,6 +15,8 @@ from . import ModuleRegister as ModuleRegister
 from . import checkpoint as checkpoint
 from . import module_map as module_map
 
+# instantiate logger outside of distributed operators may trigger error
+# logger need to be created in each idividual operator instead.
 logging.basicConfig()
 log = logging.getLogger("AnyExp")
 log.setLevel(logging.DEBUG)

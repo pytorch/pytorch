@@ -1,10 +1,10 @@
-# Torch
 # Standard library
 import numpy as np
 # Testing utils
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
+# Torch
 import torch
 import torch.nn.functional as F
 import torch.nn.quantized.functional as qF

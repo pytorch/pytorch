@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-# torch
+# Standard library
 import io
 import itertools
 import unittest
-# Standard library
 from typing import List, Tuple
 
+# torch
 import torch
 import torch.jit
 import torch.jit.quantized
@@ -41,7 +41,6 @@ from torch.quantization.quantize_jit import (
     script_qconfig,
 )
 from torch.testing import FileCheck
-# Annotated models
 from torch.testing._internal.common_quantization import (
     AnnotatedConvBnModel,
     AnnotatedConvModel,

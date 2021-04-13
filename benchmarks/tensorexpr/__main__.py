@@ -3,8 +3,8 @@ import itertools
 import os
 
 # from . import normalization  # noqa: F401
-# from . import pooling        # noqa: F401
-# from . import conv           # noqa: F401
+# from . import pooling  # noqa: F401
+# from . import conv  # noqa: F401
 from . import attention  # noqa: F401
 from . import broadcast  # noqa: F401
 from . import concat  # noqa: F401

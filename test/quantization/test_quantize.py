@@ -32,7 +32,6 @@ from torch.quantization import (
     quantize_dynamic,
     quantize_qat,
 )
-# annotated models
 from torch.testing._internal.common_quantization import (
     ActivationsTestModel,
     AnnotatedCustomConfigNestedModel,
@@ -81,10 +80,10 @@ from torch.testing._internal.jit_utils import JitTestCase
 
 hu.assert_deadline_disabled()
 
+# Standard library
 import copy
 import io
 import unittest
-# Standard library
 from typing import Tuple
 
 import numpy as np
