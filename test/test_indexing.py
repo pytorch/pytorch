@@ -18,7 +18,7 @@ class TestIndexing(TestCase):
     def test_index(self, device):
 
         def consec(size, start=1):
-            sequence = torch.ones(int(torch.Tensor(size).prod(0))).cumsum(0)
+            sequence = torch.ones(torch.tensor(size).prod(0)).cumsum(0)
             sequence.add_(start - 1)
             return sequence.view(*size)
 
@@ -36,10 +36,10 @@ class TestIndexing(TestCase):
         self.assertEqual(reference[:], consec((3, 3, 3)), atol=0, rtol=0)
 
         # indexing with Ellipsis
-        self.assertEqual(reference[..., 2], torch.Tensor([[3, 6, 9],
-                                                          [12, 15, 18],
-                                                          [21, 24, 27]]), atol=0, rtol=0)
-        self.assertEqual(reference[0, ..., 2], torch.Tensor([3, 6, 9]), atol=0, rtol=0)
+        self.assertEqual(reference[..., 2], torch.tensor([[3., 6., 9.],
+                                                          [12., 15., 18.],
+                                                          [21., 24., 27.]]), atol=0, rtol=0)
+        self.assertEqual(reference[0, ..., 2], torch.tensor([3., 6., 9.]), atol=0, rtol=0)
         self.assertEqual(reference[..., 2], reference[:, :, 2], atol=0, rtol=0)
         self.assertEqual(reference[0, ..., 2], reference[0, :, 2], atol=0, rtol=0)
         self.assertEqual(reference[0, 2, ...], reference[0, 2], atol=0, rtol=0)

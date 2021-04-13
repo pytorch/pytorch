@@ -15,6 +15,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 #include <ciso646>
 #include <algorithm>
@@ -362,8 +363,8 @@ Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   return handle_r_to_c(self_st, out);
 }
 
-Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, c10::string_view rounding_mode) {
-  if (rounding_mode != "true") {
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, const c10::optional<std::string>& rounding_mode) {
+  if (rounding_mode.has_value()) {
     return at::zeros_like(grad, grad.options().dtype(self_st));
   }
 
@@ -372,11 +373,11 @@ Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, c
 }
 
 Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
-  return div_tensor_self_backward(grad, other, self_st, "true");
+  return div_tensor_self_backward(grad, other, self_st, c10::nullopt);
 }
 
-Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, c10::string_view rounding_mode) {
-  if (rounding_mode != "true") {
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, const c10::optional<std::string>& rounding_mode) {
+  if (rounding_mode.has_value()) {
     return at::zeros_like(grad, grad.options().dtype(other.scalar_type()));
   }
 
@@ -385,7 +386,7 @@ Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, c10::st
 }
 
 Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
-  return div_tensor_other_backward(grad, self, other, "true");
+  return div_tensor_other_backward(grad, self, other, c10::nullopt);
 }
 
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
@@ -606,7 +607,7 @@ Tensor unsqueeze_to(const Tensor & self, IntArrayRef sizes) {
   auto result = self;
 
   int64_t nDims = sizes.size();
-  for (int64_t dim = 0; dim < nDims; dim++) {
+  for(const auto dim : c10::irange(nDims)) {
     if (sizes[dim] == 1) {
       result = result.unsqueeze(dim);
     }
@@ -1799,7 +1800,7 @@ static inline bool _maybe_overlapping_memory(IntArrayRef sizes, IntArrayRef stri
 static inline int64_t _min_storage_size(IntArrayRef sizes, IntArrayRef strides, int64_t storage_offset) {
   int64_t storage_size = storage_offset + 1;
   int64_t dim = sizes.size();
-  for (int64_t i = 0; i < dim; i++) {
+  for(const auto i : c10::irange(dim)) {
     auto size_i = sizes[i];
     if (size_i == 0) {
       return storage_offset;
@@ -1978,7 +1979,8 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
       // so the expand succeeds.
       auto dims_to_unsqueeze = std::max<int64_t>(input.dim() - 2, 0);
       auto ggW_expanded = ggW;
-      for (int64_t i = 0; i < dims_to_unsqueeze; i++) {
+      for(const auto i : c10::irange(dims_to_unsqueeze)) {
+          (void)i; // Suppress unused variable warning
           ggW_expanded = ggW_expanded.unsqueeze(1);
       }
       ggW_expanded = ggW_expanded.expand_as(ggI);
@@ -1997,7 +1999,8 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
       if (gO.requires_grad()) {
           // expand weight as input as in ggW/ggI above
           auto weight_expanded = weight;
-          for (int64_t i = 0; i < dims_to_unsqueeze; i++) {
+          for(const auto i : c10::irange(dims_to_unsqueeze)) {
+              (void)i; // Suppress unused variable warning
               weight_expanded = weight_expanded.unsqueeze(1);
           }
           weight_expanded = weight_expanded.expand_as(input);
@@ -2445,7 +2448,7 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
 
 // Invertible case is derived from Jacobi's formula, and also can be found at:
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
-Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
+Tensor linalg_det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
   auto singular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();

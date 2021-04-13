@@ -44,10 +44,15 @@ struct TORCH_API TracingState
   TracingState();
   ~TracingState();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Graph> graph;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool warn = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool strict = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool force_outplace = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::function<std::string(const Variable& var)> lookup_var_name_fn =
       [](const Variable& var) { return ""; };
 
@@ -137,6 +142,7 @@ struct ArgumentStash {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local ArgumentStash stash;
   std::unordered_map<std::string, IntArrayRefTrace> intlists;
   std::unordered_map<std::string, Value*> values;
@@ -152,9 +158,13 @@ inline bool isTracing() {
 }
 
 using warn_fn_type = void (*)(const std::string& msg);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* WARN_PYTHON_DATAFLOW;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* WARN_CONSTRUCTOR;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* WARN_RESIZE;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern const char* STRICT_TRACER_MSG;
 TORCH_API void _do_warn(const char* _reason, const char* _kind);
 inline void warn(const char* _reason, const char* _kind = nullptr) {
