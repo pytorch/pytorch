@@ -5236,9 +5236,6 @@ class DistributedTest:
                     err_regex
                 ):
                     gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks)
-            # We need a barrier since otherwise non-zero ranks exit too early
-            # and cause a timeout.
-            self._barrier(timeout=30)
 
         @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})
@@ -5300,10 +5297,6 @@ class DistributedTest:
                 with self.assertRaisesRegex(RuntimeError, err_regex):
                     dist.monitored_barrier(timeout=timeout)
 
-            # We need a barrier since otherwise expected_first_failed_rank exits too early
-            # and cause a timeout.
-            self._barrier(timeout=30)
-
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
         @skip_if_small_worldsize
@@ -5316,7 +5309,3 @@ class DistributedTest:
                 err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
                 with self.assertRaisesRegex(RuntimeError, err_regex):
                     dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
-
-            # We need a barrier since otherwise non-zero ranks exit too early
-            # and cause a timeout.
-            self._barrier(timeout=30)
