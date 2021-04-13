@@ -19,8 +19,6 @@ namespace at { namespace native {
 // Returns a bool saying whether or not the resize actually happened or not
 TORCH_API bool resize_output(Tensor& output, IntArrayRef shape);
 
-TORCH_API bool resize_output_cpu(Tensor& output, IntArrayRef shape);
-
 // These functions are called by native::resize_ as well as (legacy) TH resize.
 // They are not in TH/THTensor.cpp because the at namespace is easier
 // to benchmark than TH; I can't get gbenchmark to call fns from THTensor.cpp
@@ -84,7 +82,7 @@ static inline void checkInBoundsForStorage(
     const caffe2::TypeMeta data_type,
     const Storage& new_storage) {
   int64_t storage_size_bytes =
-      detail::computeStorageNbytes(size, stride, data_type.itemsize());
+      at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
   int64_t storage_offset_bytes = storage_offset * data_type.itemsize();
   if (storage_size_bytes == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
