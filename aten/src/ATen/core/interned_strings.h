@@ -322,6 +322,10 @@ namespace c10 {
   _(aten, special_erfc)              \
   _(aten, erfinv)                    \
   _(aten, special_erfinv)            \
+  _(aten, logit)                     \
+  _(aten, special_logit)             \
+  _(aten, sigmoid)                   \
+  _(aten, special_expit)             \
   _(aten, expm1)                     \
   _(aten, special_expm1)             \
   _(aten, exp2)                      \
