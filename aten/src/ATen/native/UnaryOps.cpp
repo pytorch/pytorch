@@ -493,6 +493,8 @@ Tensor& fix_out(const Tensor& self, Tensor& result) { return at::trunc_out(resul
 Tensor fix(const Tensor& self) { return self.trunc(); }
 Tensor& fix_(Tensor& self) { return self.trunc_(); }
 
+Tensor positive(const Tensor& self) { return at::clone(self); }
+
 Tensor& neg_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "

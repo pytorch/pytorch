@@ -6684,6 +6684,30 @@ Example::
     tensor([ -24.8863, -771.4742])
 """.format(**common_args))
 
+add_docstr(torch.positive,
+           r"""
+positive(input, *, out=None) -> Tensor
+
+Returns a new tensor with the positive of the elements of :attr:`input`.
+
+.. math::
+    \text{out} = +1 \times \text{input}
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(5)
+    >>> a
+    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
+    >>> torch.positive(a)
+    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
+""".format(**common_args))
+
 add_docstr(torch.pow,
            r"""
 pow(input, exponent, *, out=None) -> Tensor

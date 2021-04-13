@@ -4014,6 +4014,10 @@
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
 
+# Alias for clone
+- func: positive(Tensor self) -> Tensor
+  variants: function, method
+
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: function, method
