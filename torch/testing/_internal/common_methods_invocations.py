@@ -2608,7 +2608,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Skips unsupported bfloat16 check because cuDNN 8 & below
                # are buggy. This test works on cuDNN 8.1 & CUDA 11.2
-               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=[torch.bfloat16], device_type='cuda'),
+               #SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=[torch.bfloat16], device_type='cuda'),
            ),
            sample_inputs_func=sample_inputs_addmm),
     OpInfo('addmm',
@@ -2622,7 +2622,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Skips unsupported bfloat16 check because cuDNN 8 & below
                # are buggy. This test works on cuDNN 8.1 & CUDA 11.2.
-               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=[torch.bfloat16], device_type='cuda'),
+               #SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=[torch.bfloat16], device_type='cuda'),
            ),
            sample_inputs_func=sample_inputs_addmm_non_fusible_nodes),
     OpInfo('addmv',
@@ -3446,7 +3446,7 @@ op_db: List[OpInfo] = [
                # mm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
                # This test fails with cuDNN 8 & CUDA 11.1 on Nvidia Tesla T4 GPUs used for CI.
-               SkipInfo('TestOpInfo', 'test_supported_backward', device_type='cuda', dtypes=[torch.bfloat16]),
+               #SkipInfo('TestOpInfo', 'test_supported_backward', device_type='cuda', dtypes=[torch.bfloat16]),
            )),
     OpInfo('mode',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
