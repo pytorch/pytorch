@@ -16,8 +16,9 @@ from torch.distributed.elastic.agent.server.api import (  # type: ignore[import]
     WorkerSpec,
     WorkerState,
 )
-from torch.distributed.elastic.agent.server.local_elastic_agent import \
-    LocalElasticAgent  # type: ignore[import]
+from torch.distributed.elastic.agent.server.local_elastic_agent import (
+    LocalElasticAgent,  # type: ignore[import]
+)
 from torch.distributed.elastic.multiprocessing import Std
 from torch.distributed.elastic.multiprocessing.errors import (
     ChildFailedError,

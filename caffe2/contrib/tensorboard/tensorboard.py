@@ -18,8 +18,9 @@ try:
     # tensorboard>=1.14.0
     from tensorboard.compat.proto.event_pb2 import Event
     from tensorboard.compat.proto.summary_pb2 import HistogramProto, Summary
-    from tensorboard.summary.writer.event_file_writer import \
-        EventFileWriter as FileWriter
+    from tensorboard.summary.writer.event_file_writer import (
+        EventFileWriter as FileWriter,
+    )
 except ImportError:
     from tensorflow.core.framework.summary_pb2 import HistogramProto, Summary
     from tensorflow.core.util.event_pb2 import Event

@@ -40,8 +40,9 @@ if args.aten_root:
     sys.path.insert(0, os.path.join(args.aten_root, '..'))
     from tools.codegen.code_template import CodeTemplate as CT
 else:
-    from tools.codegen.code_template import \
-        CodeTemplate as CT  # type: ignore[import,no-redef]
+    from tools.codegen.code_template import (
+        CodeTemplate as CT,  # type: ignore[import,no-redef]
+    )
 
 OP_TEMPLATE = CT.from_file(
     os.path.join(args.template_dir, 'aten_op_template.h'))

@@ -14,8 +14,9 @@ from urllib.request import Request, urlopen
 import torch
 
 try:
-    from tqdm.auto import \
-        tqdm  # automatically select proper tqdm submodule if available
+    from tqdm.auto import (
+        tqdm,  # automatically select proper tqdm submodule if available
+    )
 except ImportError:
     try:
         from tqdm import tqdm

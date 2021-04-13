@@ -896,8 +896,9 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 
     from torch.onnx.symbolic_helper import _onnx_shape_inference
     if _onnx_shape_inference:
-        from torch.onnx.symbolic_helper import \
-            _export_onnx_opset_version as opset_version
+        from torch.onnx.symbolic_helper import (
+            _export_onnx_opset_version as opset_version,
+        )
         torch._C._jit_pass_onnx_node_shape_type_inference(n, _params_dict, opset_version)
 
     if outputs == 1:
@@ -961,8 +962,9 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
     try:
         import torch
         import torch.onnx.symbolic_registry as sym_registry
-        from torch.onnx.symbolic_helper import \
-            _export_onnx_opset_version as opset_version
+        from torch.onnx.symbolic_helper import (
+            _export_onnx_opset_version as opset_version,
+        )
 
         sym_registry.register_version('', opset_version)
 

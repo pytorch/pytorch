@@ -6238,8 +6238,9 @@ else:
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinverse(self, device, dtype):
-        from torch.testing._internal.common_utils import \
-            random_fullrank_matrix_distinct_singular_value as fullrank
+        from torch.testing._internal.common_utils import (
+            random_fullrank_matrix_distinct_singular_value as fullrank,
+        )
 
         def run_test(M):
             # Testing against definition for pseudo-inverses

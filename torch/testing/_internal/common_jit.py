@@ -12,8 +12,9 @@ import torch.jit.frontend
 import torch.jit.quantized
 # Testing utils
 from torch.testing import floating_and_complex_types_and
-from torch.testing._internal.common_utils import \
-    enable_profiling_mode  # noqa: F401
+from torch.testing._internal.common_utils import (  # noqa: F401
+    enable_profiling_mode,
+)
 from torch.testing._internal.common_utils import (
     TemporaryFileName,
     TestCase,

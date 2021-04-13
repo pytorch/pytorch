@@ -28,8 +28,9 @@ from typing import Dict, List, NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 from jit.test_async import TestAsync  # noqa: F401
-from jit.test_autodiff_subgraph_slicing import \
-    TestAutodiffSubgraphSlicing  # noqa: F401
+from jit.test_autodiff_subgraph_slicing import (  # noqa: F401
+    TestAutodiffSubgraphSlicing,
+)
 from jit.test_backends import TestBackends  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
@@ -64,8 +65,9 @@ from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
-from jit.test_scriptmod_ann import \
-    TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
+from jit.test_scriptmod_ann import (  # noqa: F401
+    TestScriptModuleInstanceAttributeTypeAnnotation,
+)
 from jit.test_slice import TestSlice  # noqa: F401
 from jit.test_string_formatting import TestStringFormatting  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
@@ -112,8 +114,9 @@ from torch.testing._internal.common_methods_invocations import (
     create_input,
     exclude_tensor_method,
 )
-from torch.testing._internal.common_methods_invocations import \
-    method_tests as autograd_method_tests
+from torch.testing._internal.common_methods_invocations import (
+    method_tests as autograd_method_tests,
+)
 from torch.testing._internal.common_methods_invocations import unpack_variables
 from torch.testing._internal.common_nn import (
     criterion_tests,

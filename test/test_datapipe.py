@@ -34,10 +34,12 @@ from torch.utils.data import (
     construct_time_validation,
     runtime_validation,
 )
-from torch.utils.data.datapipes.utils.decoder import \
-    basichandlers as decoder_basichandlers
-from torch.utils.data.datapipes.utils.decoder import \
-    imagehandler as decoder_imagehandler
+from torch.utils.data.datapipes.utils.decoder import (
+    basichandlers as decoder_basichandlers,
+)
+from torch.utils.data.datapipes.utils.decoder import (
+    imagehandler as decoder_imagehandler,
+)
 
 try:
     import torchvision.transforms

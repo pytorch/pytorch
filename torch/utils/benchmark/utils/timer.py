@@ -20,8 +20,9 @@ import numpy as np
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
 from torch.utils.benchmark.utils._stubs import TimeitModuleType, TimerClass
-from torch.utils.benchmark.utils.valgrind_wrapper import \
-    timer_interface as valgrind_timer_interface
+from torch.utils.benchmark.utils.valgrind_wrapper import (
+    timer_interface as valgrind_timer_interface,
+)
 
 __all__ = ["Timer", "timer", "Language"]
 

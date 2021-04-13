@@ -6,8 +6,9 @@
 import os
 import uuid
 
-from caffe2.distributed.python import \
-    StoreHandlerTimeoutError  # type: ignore[import]
+from caffe2.distributed.python import (
+    StoreHandlerTimeoutError,  # type: ignore[import]
+)
 from caffe2.distributed.store_ops_test_util import StoreOpsTests
 from caffe2.python import core, dyndep, workspace
 from caffe2.python.test_util import TestCase

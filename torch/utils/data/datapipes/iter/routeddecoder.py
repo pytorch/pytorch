@@ -3,10 +3,12 @@ from typing import Any, Callable, Iterable, Iterator, List, Tuple, Union
 
 from torch.utils.data import IterDataPipe
 from torch.utils.data.datapipes.utils.decoder import Decoder
-from torch.utils.data.datapipes.utils.decoder import \
-    basichandlers as decoder_basichandlers
-from torch.utils.data.datapipes.utils.decoder import \
-    imagehandler as decoder_imagehandler
+from torch.utils.data.datapipes.utils.decoder import (
+    basichandlers as decoder_basichandlers,
+)
+from torch.utils.data.datapipes.utils.decoder import (
+    imagehandler as decoder_imagehandler,
+)
 
 
 class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):

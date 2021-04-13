@@ -21,10 +21,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
-from torch.distributed.algorithms.ddp_comm_hooks import \
-    default_hooks as default
-from torch.distributed.algorithms.ddp_comm_hooks import \
-    quantization as quantization_hooks
+from torch.distributed.algorithms.ddp_comm_hooks import (
+    default_hooks as default,
+)
+from torch.distributed.algorithms.ddp_comm_hooks import (
+    quantization as quantization_hooks,
+)
 from torch.distributed.distributed_c10d import (
     AllreduceOptions,
     GroupMember,
