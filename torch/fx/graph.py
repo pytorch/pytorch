@@ -49,6 +49,7 @@ _register_custom_builtin('nan', 'from math import nan', math.nan)
 _register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
 _register_custom_builtin('torch', 'import torch', torch)
 _register_custom_builtin('device', 'from torch import device', torch.device)
+_register_custom_builtin('pytree', 'import torch.utils._pytree as pytree', torch.utils._pytree)
 
 
 def _is_magic(x: str) -> bool:
@@ -280,6 +281,7 @@ class Graph:
         self._graph_namespace = _Namespace()
         self._owners = 0
         self._owning_module = owning_module
+        self.in_spec = None
 
     @property
     def owning_module(self):
@@ -922,11 +924,15 @@ class Graph:
             # have been emitted. To continue to have valid Python code, emit a
             # single pass statement
             body.append('pass\n')
-
+        if self.in_spec is not None:
+            orig_vars = self.in_spec[1]
+            body.insert(0, f"{', '.join(free_vars)} = pytree.tree_flatten([{', '.join(orig_vars)}])[0]\n")
+        else:
+            orig_vars = free_vars
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""
-def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
+def forward(self, {', '.join(orig_vars)}){maybe_return_annotation[0]}:
 {code}"""
 
         return PythonCode(fn_code,

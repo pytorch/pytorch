@@ -314,9 +314,9 @@ class Tracer(TracerBase):
         fn_for_analysis = inspect.unwrap(root_fn)
         co = fn_for_analysis.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
+        orig_args = list(co.co_varnames)
         names_iter = iter(co.co_varnames)
         args : List[Any] = []
-        specs = []
         skip_arg_idx = 0
         if is_module:
             if total_args == 0:
@@ -324,7 +324,6 @@ class Tracer(TracerBase):
             skip_arg_idx = 1
             next(names_iter)  # skip self
             args.append(self.root)
-            specs.append((pytree.LeafSpec(), 1))
 
         sig = inspect.signature(fn_for_analysis)
 
@@ -339,18 +338,6 @@ class Tracer(TracerBase):
             return self.create_proxy('placeholder', name, default, {},
                                     type_expr=fn_for_analysis.__annotations__.get(name, None))
 
-        def convert_pytrees(name):
-            if concrete_args is not None and name in concrete_args:
-                flat_inp, spec = pytree.tree_flatten(concrete_args[name])
-                proxies = []
-                for idx, inp in enumerate(flat_inp):
-                    if inp == HOLE:
-                        proxies.append(self.create_proxy('placeholder', name+str(idx), (), {}))
-                    else:
-                        proxies.append(inp)
-                return proxies, spec
-            return ((proxy_placeholder(name),), pytree.LeafSpec())
-
         args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
 
 
@@ -361,13 +348,15 @@ class Tracer(TracerBase):
             if co.co_flags & inspect.CO_VARKEYWORDS:
                 args.append(proxy_placeholder('**' + next(names_iter)))
             root_fn = _patch_function(root_fn, len(args))
-        flat_args, spec = pytree.tree_flatten(args)
+
+        flat_args, in_spec = pytree.tree_flatten(tuple(args))
+        self.graph.in_spec = (in_spec, orig_args[skip_arg_idx:total_args])
         for idx, arg in enumerate(flat_args):
             if arg is HOLE:
                 flat_args[idx] = self.create_proxy('placeholder', f'tree_{str(idx)}', (), {})
 
         def flatten_fn(*args):
-            tree_args = pytree.tree_unflatten(args, spec)
+            tree_args = pytree.tree_unflatten(args, in_spec)
             return root_fn(*tree_args)
 
         return flatten_fn, flat_args

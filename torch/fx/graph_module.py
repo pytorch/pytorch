@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.overrides
+import torch.utils._pytree as pytree
 from torch.nn.modules.module import _addindent
 from torch.package import PackageImporter, PackageExporter
 import linecache
@@ -456,6 +457,11 @@ class {module_name}(torch.nn.Module):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
 
+    def flatten_args(self, *args):
+        flat_args, spec = pytree.tree_flatten(args)
+        assert(spec == self.graph.in_spec)
+        return flat_args
+
     def recompile(self) -> PythonCode:
         """
         Recompile this GraphModule from its ``graph`` attribute. This should be
@@ -485,7 +491,7 @@ class {module_name}(torch.nn.Module):
             err_line_len = len(frame_summary.line)
             all_src_lines = _eval_cache[frame_summary.filename]
 
-            # constiuent substrings of the error message
+            # constituent substrings of the error message
             tb_repr = traceback.format_exc()
             custom_msg = ("Call using an FX-traced Module, "
                           f"line {err_lineno} of the traced Module's "
