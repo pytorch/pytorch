@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Adds docstrings to functions defined in the torch._C"""
 
 import re
@@ -1550,7 +1551,7 @@ Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
 
 .. math::
-    \text{out}_{i} = \left\lceil \text{input}_{i} \right\rceil = \left\lfloor \text{input}_{i} \right\rfloor + 1
+    \text{out}_{i} = \left\lceil \text{input}_{i} \right\rceil
 """ + r"""
 Args:
     {input}
@@ -2982,75 +2983,22 @@ add_docstr(torch.erf,
            r"""
 erf(input, *, out=None) -> Tensor
 
-Computes the error function of each element. The error function is defined as follows:
-
-.. math::
-    \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
-""" + r"""
-
-.. note:: Alias for :func:`torch.special.erf`.
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.erf(torch.tensor([0, -1., 10.]))
-    tensor([ 0.0000, -0.8427,  1.0000])
-""".format(**common_args))
+Alias for :func:`torch.special.erf`.
+""")
 
 add_docstr(torch.erfc,
            r"""
 erfc(input, *, out=None) -> Tensor
 
-Computes the complementary error function of each element of :attr:`input`.
-The complementary error function is defined as follows:
-
-.. math::
-    \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
-""" + r"""
-
-.. note:: Alias for :func:`torch.special.erfc`.
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.erfc(torch.tensor([0, -1., 10.]))
-    tensor([ 1.0000, 1.8427,  0.0000])
-""".format(**common_args))
+Alias for :func:`torch.special.erfc`.
+""")
 
 add_docstr(torch.erfinv,
            r"""
 erfinv(input, *, out=None) -> Tensor
 
-Computes the inverse error function of each element of :attr:`input`.
-The inverse error function is defined in the range :math:`(-1, 1)` as:
-
-.. math::
-    \mathrm{erfinv}(\mathrm{erf}(x)) = x
-""" + r"""
-
-.. note:: Alias for :func:`torch.special.erfinv`.
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.erfinv(torch.tensor([0, 0.5, -1.]))
-    tensor([ 0.0000,  0.4769,    -inf])
-""".format(**common_args))
+Alias for :func:`torch.special.erfinv`.
+""")
 
 add_docstr(torch.exp,
            r"""
@@ -3078,52 +3026,15 @@ add_docstr(torch.exp2,
            r"""
 exp2(input, *, out=None) -> Tensor
 
-Computes the base two exponential function of :attr:`input`.
-
-.. math::
-    y_{i} = 2^{x_{i}}
-
-.. note:: Alias for :func:`torch.special.exp2`.
-""" + r"""
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
-    tensor([ 1.,  2.,  8., 16.])
-""".format(**common_args))
+Alias for :func:`torch.special.exp2`.
+""")
 
 add_docstr(torch.expm1,
            r"""
 expm1(input, *, out=None) -> Tensor
 
-Returns a new tensor with the exponential of the elements minus 1
-of :attr:`input`.
-
-.. math::
-    y_{i} = e^{x_{i}} - 1
-
-.. note:: This function provides greater precision than exp(x) - 1 for small values of x.
-
-.. note:: Alias for :func:`torch.special.expm1`.
-""" + r"""
-
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.expm1(torch.tensor([0, math.log(2.)]))
-    tensor([ 0.,  1.])
-""".format(**common_args))
+Alias for :func:`torch.special.expm1`.
+""")
 
 add_docstr(torch.eye,
            r"""
@@ -5089,13 +5000,14 @@ matrix_power(input, n, *, out=None) -> Tensor
 Alias for :func:`torch.linalg.matrix_power`
 """.format(**common_args))
 
-add_docstr(torch.matrix_exp,
-           r"""
-Returns the matrix exponential. Supports batched input.
-For a matrix ``A``, the matrix exponential is defined as
+add_docstr(torch.matrix_exp, r"""
+matrix_exp(input) -> Tensor
+
+Computes the matrix exponential of a square matrix or of each square matrix in a batch.
+For a matrix :attr:`input`, the matrix exponential is defined as
 
 .. math::
-    \mathrm{e}^A = \sum_{k=0}^\infty A^k / k!
+    \mathrm{e}^\text{input} = \sum_{k=0}^\infty \text{input}^k / k!
 
 """ + r"""
 The implementation is based on:
@@ -5294,7 +5206,7 @@ Returns the indices of the maximum value of all elements in the :attr:`input` te
 This is the second value returned by :meth:`torch.max`. See its
 documentation for the exact semantics of this method.
 
-.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
+.. note:: If there are multiple maximal values then the indices of the first maximal value are returned.
 
 Args:
     {input}
@@ -7677,58 +7589,15 @@ Sets the number of threads used for interop parallelism
 add_docstr(torch.sigmoid, r"""
 sigmoid(input, *, out=None) -> Tensor
 
-Returns a new tensor with the sigmoid of the elements of :attr:`input`.
-
-.. math::
-    \text{out}_{i} = \frac{1}{1 + e^{-\text{input}_{i}}}
-""" + r"""
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.9213,  1.0887, -0.8858, -1.7683])
-    >>> torch.sigmoid(a)
-    tensor([ 0.7153,  0.7481,  0.2920,  0.1458])
-""".format(**common_args))
+Alias for :func:`torch.special.expit`.
+""")
 
 add_docstr(torch.logit,
            r"""
 logit(input, eps=None, *, out=None) -> Tensor
 
-Returns a new tensor with the logit of the elements of :attr:`input`.
-:attr:`input` is clamped to [eps, 1 - eps] when eps is not None.
-When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
-
-.. math::
-    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
-    z_{i} = \begin{cases}
-        x_{i} & \text{if eps is None} \\
-        \text{eps} & \text{if } x_{i} < \text{eps} \\
-        x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
-        1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
-    \end{cases}
-""" + r"""
-Args:
-    {input}
-    eps (float, optional): the epsilon for input clamp bound. Default: ``None``
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.rand(5)
-    >>> a
-    tensor([0.2796, 0.9331, 0.6486, 0.1523, 0.6516])
-    >>> torch.logit(a, eps=1e-6)
-    tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
-""".format(**common_args))
+Alias for :func:`torch.special.logit`.
+""")
 
 add_docstr(torch.sign,
            r"""
@@ -8010,6 +7879,49 @@ Example::
             [-0.1321, -0.1259, -0.5495,  0.3077],
             [-0.0881,  0.4370,  0.2275,  1.0284]])
 """.format(**common_args))
+
+add_docstr(torch.sparse_csr_tensor,
+           r"""
+sparse_csr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a :ref:`sparse tensor in CSR (Compressed Sparse Row) <sparse-csr-docs>` with specified
+values at the given :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix multiplication operations
+in CSR format are typically faster than that for sparse tensors in COO format. Make you have a look
+at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
+
+Args:
+    crow_indices (array_like): One-dimensional array of size size[0] + 1. The last element
+        is the number of non-zeros. This tensor encodes the index in values and col_indices
+        depending on where the given row starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of elements in a given row.
+    col_indices (array_like): Column co-ordinates of each element in values. Strictly one
+        dimensional tensor with the same length as values.
+    values (array_list): Initial values for the tensor. Can be a list, tuple, NumPy ``ndarray``, scalar,
+        and other types.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the sparse tensor. If not provided, the
+        size will be inferred as the minimum size big enough to hold all non-zero elements.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if None, infers data type from :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    {requires_grad}
+
+Example ::
+    >>> crow_indices = [0, 2, 4]
+    >>> col_indices = [0, 1, 0, 1]
+    >>> values = [1, 2, 3, 4]
+    >>> torch.sparse_csr_tensor(torch.tensor(crow_indices, dtype=torch.int64),
+    ...                         torch.tensor(col_indices, dtype=torch.int64),
+    ...                         torch.tensor(values), dtype=torch.double)
+    tensor(crow_indices=tensor([0, 2, 4]),
+           col_indices=tensor([0, 1, 0, 1]),
+           values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+           dtype=torch.float64, layout=torch.sparse_csr)
+""".format(**factory_common_args))
 
 add_docstr(torch.sparse_coo_tensor,
            r"""
@@ -8540,7 +8452,7 @@ add_docstr(torch.symeig, r"""
 symeig(input, eigenvectors=False, upper=True, *, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
-of a real symmetric matrix :attr:`input` or a batch of real symmetric matrices,
+of a real symmetric or complex Hermitian matrix :attr:`input` or a batch thereof,
 represented by a namedtuple (eigenvalues, eigenvectors).
 
 This function calculates all eigenvalues (and vectors) of :attr:`input`
@@ -8552,7 +8464,7 @@ both eigenvectors and eigenvalues or eigenvalues only.
 If it is ``False``, only eigenvalues are computed. If it is ``True``,
 both eigenvalues and eigenvectors are computed.
 
-Since the input matrix :attr:`input` is supposed to be symmetric,
+Since the input matrix :attr:`input` is supposed to be symmetric or Hermitian,
 only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
@@ -8569,7 +8481,7 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
-                    batch dimensions consisting of symmetric matrices.
+                    batch dimensions consisting of symmetric or Hermitian matrices.
     eigenvectors(bool, optional): controls whether eigenvectors have to be computed
     upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
 

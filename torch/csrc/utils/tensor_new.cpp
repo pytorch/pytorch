@@ -22,6 +22,7 @@
 #include <c10/core/Backend.h>
 #include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 
 #include <stdexcept>
@@ -33,6 +34,7 @@ using at::IntArrayRef;
 using at::kCPU;
 using at::kCUDA;
 using at::kLong;
+using at::kInt;
 using at::Scalar;
 using at::ScalarType;
 using at::Storage;
@@ -189,7 +191,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
   }
 
   PyObject** items = PySequence_Fast_ITEMS(seq.get());
-  for (int64_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     recursive_store(data, sizes, strides, dim + 1, scalarType, elementSize, items[i]);
     data += strides[dim] * elementSize;
   }
@@ -594,6 +596,66 @@ Tensor indexing_tensor_from_data(
                                   /*copy_variables=*/false, /*copy_numpy=*/false,
                                   /*type_inference=*/false);
   }
+}
+
+Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  TORCH_INTERNAL_ASSERT(!isSparseCsr(dispatchKeyToBackend(dispatch_key)));
+  static PythonArgParser parser({
+      "sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+      "sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+  });
+  const int NUM_ARGS = 9, CROW_INDICES_ARG = 0, COL_INDICES_ARG = 1, VALUES_ARG = 2;
+  ParsedArgs<NUM_ARGS> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  THPObjectPtr crow_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(CROW_INDICES_ARG), "dtype"));
+  THPObjectPtr col_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(COL_INDICES_ARG), "dtype"));
+  at::ScalarType crow_indices_scalar_type = reinterpret_cast<THPDtype*>(
+    crow_indices_dtype_attr.get())->scalar_type;
+  at::ScalarType col_indices_scalar_type = reinterpret_cast<THPDtype*>(
+    col_indices_dtype_attr.get())->scalar_type;
+
+  if (r.idx == 0) {
+    const int SIZE_ARRAY_ARG = 3, TYPE_INFERENCE_ARG = 4, DEVICE_TYPE_ARG = 7, REQ_GRAD_ARG = 8;
+    bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
+    const auto inferred_options = typeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
+    const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(DEVICE_TYPE_ARG));
+
+    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
+                                           r.pyobject(VALUES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
+                                           /*type_inference=*/type_inference);
+    Tensor crow_indices =  internal_new_from_data(values.options(),
+      crow_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(CROW_INDICES_ARG),
+      /*copy_variables=*/false, /*copy_numpy=*/true,
+      /*type_inference=*/false);
+    Tensor col_indices = internal_new_from_data(values.options(),
+      col_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(COL_INDICES_ARG),
+      /*copy_variables=*/false, /*copy_numpy=*/true,
+      /*type_inference=*/false);
+
+    return at::sparse_csr_tensor(crow_indices, col_indices, values, r.intlist(SIZE_ARRAY_ARG),
+                                 values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(REQ_GRAD_ARG));
+  } else if (r.idx == 1) {
+    const int TYPE_INFERENCE_ARG = 3, DEVICE_TYPE_ARG = 6, REQ_GRAD_ARG = 7;
+    bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
+    const auto inferred_options = typeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
+    const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(DEVICE_TYPE_ARG));
+
+    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
+                                           r.pyobject(VALUES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
+                                           /*type_inference=*/type_inference);
+    Tensor crow_indices = internal_new_from_data(values.options(),
+      crow_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
+      r.pyobject(CROW_INDICES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
+      /*type_inference=*/false);
+    Tensor col_indices = internal_new_from_data(values.options(), col_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
+      r.pyobject(COL_INDICES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
+      /*type_inference=*/false);
+    return at::sparse_csr_tensor(crow_indices, col_indices, values,
+                                 values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(REQ_GRAD_ARG));
+  }
+  throw std::runtime_error("sparse_csr_tensor(): invalid arguments");
 }
 
 // Note [Ensuring sparse values and indices match devices]

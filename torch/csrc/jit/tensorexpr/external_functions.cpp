@@ -2,6 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
 namespace torch {
@@ -19,17 +20,18 @@ std::vector<at::Tensor> constructTensors(
   std::vector<std::vector<int64_t>> buf_dims_vec;
   std::vector<c10::ScalarType> buf_dtypes_vec;
   int64_t buf_dims_idx = 0;
-  for (int64_t i = 0; i < bufs_num; i++) {
+  for (const auto i : c10::irange(bufs_num)) {
     buf_data_vec.push_back(buf_data[i]);
     buf_dims_vec.emplace_back();
-    for (int64_t dim = 0; dim < buf_ranks[i]; dim++) {
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
+    for (const auto dim : c10::irange(buf_ranks[i])) {
       buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
     }
     buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
   }
 
   std::vector<at::Tensor> tensors;
-  for (const auto i : c10::irange(buf_data_vec.size())) {
+  for (size_t i = 0; i < buf_data_vec.size(); i++) {
     auto options = at::TensorOptions()
                        .dtype(buf_dtypes_vec[i])
                        .layout(at::kStrided)
@@ -66,7 +68,9 @@ void nnc_aten_conv2d(
     int64_t paddingH = extra_args[2];
     int64_t paddingW = extra_args[3];
     int64_t dilationH = extra_args[4];
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t dilationW = extra_args[5];
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int64_t groups = extra_args[6];
 
     try {

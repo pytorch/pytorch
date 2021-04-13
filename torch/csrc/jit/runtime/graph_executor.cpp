@@ -2,7 +2,6 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -158,7 +157,7 @@ struct CaptureList {
         case CAPTURE_LIST: {
           c10::List<at::Tensor> lst;
           auto size = *size_it++;
-          for (const auto i : c10::irange(size)) {
+          for (size_t i = 0; i < size; i++) {
             lst.emplace_back(var_capture_it->unpack(saved_for));
             var_capture_it++;
           }
@@ -974,12 +973,12 @@ Node* replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
   fallback->g_(attr::Subgraph, graph);
   b->prependNode(fallback);
 
-  for (const auto i : c10::irange(inputs.size())) {
+  for (size_t i = 0; i < inputs.size(); i++) {
     graph->inputs()[i]->setType(inputs[i]->type());
     graph->inputs()[i]->copyMetadata(inputs[i]);
   }
 
-  for (const auto i : c10::irange(b->outputs().size())) {
+  for (size_t i = 0; i < b->outputs().size(); i++) {
     fallback->output(i)->setType(b->outputs()[i]->type());
     fallback->output(i)->copyMetadata(b->outputs()[i]);
     b->replaceOutput(i, fallback->output(i));

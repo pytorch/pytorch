@@ -68,7 +68,7 @@ RegisterOperators reg(
            return [rg_props](Stack* stack) {
              auto num_inputs = rg_props.size();
              // Check every input's shape against profiled (expected) shape.
-             for (const auto i : c10::irange(num_inputs)) {
+             for (size_t i = 0; i < num_inputs; i++) {
                auto& input = peek(stack, i, num_inputs);
                const auto& t = input.toTensor();
                if (rg_props[i] != t.requires_grad()) {
@@ -279,6 +279,14 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_sparse());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_sparse_csr(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_sparse_csr());
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -691,7 +699,7 @@ RegisterOperators logging_operators(
              tracer::recordSourceLocation(node);
              graph->insertNode(node);
            }
-           auto output = autograd::profiler::getTime();
+           auto output = autograd::profiler::getTime(/*allow_monotonic=*/true);
            push(stack, output);
            if (jit::tracer::isTracing()) {
              jit::tracer::addOutput(node, output);
@@ -1029,7 +1037,7 @@ RegisterOperators reg2({
           c10::List<int64_t> l = pop(stack).toIntList();
           auto t = torch::empty(
               {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
-          for (const auto i : c10::irange(l.size())) {
+          for (size_t i = 0; i < l.size(); i++) {
             t[i] = l.get(i);
           }
           push(stack, std::move(t));

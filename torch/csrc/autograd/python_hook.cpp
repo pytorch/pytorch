@@ -1,14 +1,13 @@
 #include <torch/csrc/autograd/python_hook.h>
 
-#include <c10/util/irange.h>
+#include <sstream>
+
 #include <pybind11/pybind11.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/Exceptions.h>
-
-#include <sstream>
 
 using torch::autograd::variable_list;
 using torch::autograd::Variable;
@@ -106,7 +105,7 @@ static PyObject *wrap_variables(const variable_list& c_variables)
 
 static variable_list unwrap_variables(PyObject* py_variables)  {
   variable_list results(PyTuple_GET_SIZE(py_variables));
-  for(const auto i : c10::irange(results.size())) {
+  for (size_t i = 0; i < results.size(); i++) {
     PyObject* item = PyTuple_GET_ITEM(py_variables, i);
     if (item == Py_None) {
       continue;

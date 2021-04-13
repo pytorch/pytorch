@@ -422,7 +422,7 @@ void IRPrinter::visit(const Allocate* v) {
        << "); // dtype=" << v->dtype().ToCppString();
   os() << ", dims=[";
   const std::vector<const Expr*>& dims = v->dims();
-  for (const auto i : c10::irange(dims.size())) {
+  for (size_t i = 0; i < dims.size(); i++) {
     if (i != 0) {
       os() << ", ";
     }
@@ -601,7 +601,7 @@ std::string to_string(const Tensor* t) {
   std::ostringstream oss;
   // TODO: move this to Buf printer
   oss << "Tensor " << t->buf()->name_hint() << "[";
-  for (const auto i : c10::irange(t->buf()->ndim())) {
+  for (size_t i = 0; i < t->buf()->ndim(); i++) {
     if (i != 0) {
       oss << ", ";
     }

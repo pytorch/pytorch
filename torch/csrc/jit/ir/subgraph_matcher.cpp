@@ -1,7 +1,5 @@
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
-
 #include <regex>
 #include <stack>
 
@@ -297,12 +295,12 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
   // Add nodes to the map before calling matchValues to avoid infinite
   // recursion.
   nodes_map_[n1] = n2;
-  for (const auto i : c10::irange(n1->outputs().size())) {
+  for (size_t i = 0; i < n1->outputs().size(); i++) {
     if (!matchValues(n1->outputs()[i], n2->outputs()[i])) {
       return false;
     }
   }
-  for (const auto i : c10::irange(n1->inputs().size())) {
+  for (size_t i = 0; i < n1->inputs().size(); i++) {
     if (!matchValues(n1->inputs()[i], n2->inputs()[i])) {
       return false;
     }

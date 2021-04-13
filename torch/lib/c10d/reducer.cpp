@@ -6,7 +6,6 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
-#include <c10/util/irange.h>
 #include <c10d/comm.hpp>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
@@ -174,7 +173,7 @@ Reducer::Reducer(
       local_used_maps_.resize(replica_count);
       local_used_maps_dev_.resize(replica_count);
 
-      for(const auto i : c10::irange(replica_count)) {
+      for (size_t i = 0; i < replica_count; i++) {
         at::TensorOptions options;
         options = options.dtype(at::kInt);
 
@@ -559,7 +558,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     // See Note [Skip allreducing local_used_maps_dev]
     if (find_unused_parameters_) {
       // H2D from local_used_maps_ to local_used_maps_dev_
-      for(const auto i : c10::irange(local_used_maps_.size())) {
+      for (size_t i = 0; i < local_used_maps_.size(); i++) {
         if (local_used_maps_dev_[i].is_cuda()) {
           // Note [local_used_maps_ -> local_used_maps_dev copying]
           // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -658,7 +657,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     } else {
       GradBucket grad_bucket(
           next_bucket_,
-          tensors,
+          tensors[0],
           // Since currently we do not support single-process multiple-device
           // mode, we can assume only one replica in the bucket.
           bucket.replicas[0].offsets,
@@ -700,7 +699,7 @@ void Reducer::initialize_buckets(
   const auto bucket_count = bucket_indices.size();
   const auto replica_count = replicas_.size();
   buckets_.reserve(bucket_count);
-  for(const auto bucket_index : c10::irange(bucket_count)) {
+  for (size_t bucket_index = 0; bucket_index < bucket_count; bucket_index++) {
     Bucket bucket;
 
     // TODO(@pietern): Validate indices.
@@ -842,7 +841,7 @@ void Reducer::initialize_buckets(
 void Reducer::initialize_bucket_views(
     Reducer::BucketReplica& replica,
     at::Tensor& contents) {
-  for(const auto i : c10::irange(replica.variables.size())) {
+  for (size_t i = 0; i < replica.variables.size(); i++) {
     auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
     const auto length = replica.lengths[i];
@@ -893,7 +892,7 @@ void Reducer::populate_bucket_views_out(
     Reducer::BucketReplica& replica,
     at::Tensor& tensor) {
   replica.bucket_views_out.clear();
-  for(const auto i : c10::irange(replica.variables.size())) {
+  for (size_t i = 0; i < replica.variables.size(); i++) {
     const auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
     const auto length = replica.lengths[i];
@@ -1076,7 +1075,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
           // Wait for local_used_maps reduction to complete.
           local_used_work_->wait();
           // D2H from local_used_maps_dev_ to local_used_maps_
-          for(const auto i : c10::irange(local_used_maps_.size())) {
+          for (size_t i = 0; i < local_used_maps_.size(); i++) {
             // Blocking copy, if local_used_maps_dev_ is cuda
             local_used_maps_[i].copy_(local_used_maps_dev_[i]);
           }
@@ -1175,7 +1174,7 @@ void Reducer::finalize_backward() {
       auto future_result =
           comm_hook_->parseHookResult(bucket.future_work->value());
 
-      for(const auto i : c10::irange(future_result.size())) {
+      for (size_t i = 0; i < future_result.size(); i++) {
         auto& replica = bucket.replicas[i];
         if (bucket.expect_sparse_gradient) {
           replica.contents.copy_(future_result[i]);
@@ -1250,7 +1249,7 @@ void Reducer::sync_bucket_indices(
   std::vector<size_t> bucket_sizes;
   bucket_sizes.reserve(num_buckets);
   int64_t total_size = 0;
-  for(const auto i : c10::irange(num_buckets)) {
+  for (size_t i = 0; i < num_buckets; i++) {
     auto bucket_size = bucket_indices.at(i).size();
     bucket_sizes.push_back(bucket_size);
     total_size += bucket_size;
@@ -1265,9 +1264,9 @@ void Reducer::sync_bucket_indices(
   auto indices_tensor = at::empty({total_size + 1}, at::kInt);
   auto indices_accessor = indices_tensor.accessor<int, 1>();
   auto indices_accessor_Index = 0;
-  for(const auto i : c10::irange(num_buckets)) {
+  for (size_t i = 0; i < num_buckets; i++) {
     const auto& bucket_size = bucket_indices.at(i).size();
-    for(const auto j : c10::irange(bucket_size)) {
+    for (size_t j = 0; j < bucket_size; j++) {
       indices_accessor[indices_accessor_Index++] = bucket_indices[i][j];
     }
   }
@@ -1287,7 +1286,7 @@ void Reducer::sync_bucket_indices(
   // Broadcast bucket_sizes
   auto bucket_sizes_tensor = at::empty({(int64_t)num_buckets}, at::kInt);
   auto bucket_sizes_accessor = bucket_sizes_tensor.accessor<int, 1>();
-  for(const auto i : c10::irange(num_buckets)) {
+  for (size_t i = 0; i < num_buckets; i++) {
     // For rank != 0, it is possible that local num buckets bucket_sizes.size()
     // is smaller than broadcasted num_buckets
     bucket_sizes_accessor[i] =
@@ -1306,11 +1305,11 @@ void Reducer::sync_bucket_indices(
   bucket_indices.clear();
   bucket_indices.reserve(num_buckets);
   indices_accessor_Index = 0;
-  for(const auto i : c10::irange(num_buckets)) {
+  for (size_t i = 0; i < num_buckets; i++) {
     const auto& bucket_size = bucket_sizes_accessor[i];
     std::vector<size_t> bucket;
     bucket.reserve(bucket_size);
-    for(const auto j : c10::irange(bucket_size)) {
+    for (size_t j = 0; j < bucket_size; j++) {
       bucket.push_back(indices_accessor[indices_accessor_Index++]);
     }
     bucket_indices.emplace_back(std::move(bucket));
@@ -1322,8 +1321,8 @@ bool Reducer::rebuild_buckets() {
   // has unused parameters for example, this will raise an error recommending to
   // run with find_unused_parameters=True, instead of the size mismatch
   // exception below.
-  ensure_prior_reduction_finished();
   std::lock_guard<std::mutex> lock(mutex_);
+  ensure_prior_reduction_finished();
   if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
     return false;
   }
@@ -1371,11 +1370,6 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_comm_hook or register_builtin_comm_hook can only be called once.");
-  // TODO(#42542): Single-process multiple-device mode support for DDP
-  // communication hook.
-  TORCH_CHECK(
-      replicas_.size() == 1,
-      "Communication hook does not support single-process multiple-device mode.");
 
   comm_hook_ = std::move(iface);
 }
@@ -1386,9 +1380,6 @@ void Reducer::register_builtin_comm_hook(
   TORCH_CHECK(
       comm_hook_ == nullptr,
       "register_builtin_comm_hook or register_comm_hook can only be called once.");
-  TORCH_CHECK(
-      replicas_.size() == 1,
-      "Communication hook does not support single-process multiple-device mode.");
   // TODO: Support GLOO and MPI backends for DDP communication hook.
   TORCH_CHECK(
       process_group_->getBackendName() == "nccl",
@@ -1606,7 +1597,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   std::unordered_map<BucketKey, BucketAccumulator, c10::hash<BucketKey>>
       buckets;
 
-  for(const auto i : c10::irange(tensors.size())) {
+  for (size_t i = 0; i < tensors.size(); i++) {
     const auto& tensor = tensors[i];
     TORCH_CHECK(!tensor.is_sparse(), "No support for sparse tensors.");
 
@@ -1677,54 +1668,6 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   return result;
 }
 
-// Verifies replicas in this process treat the same number of params,
-// all params require grad, and corresponding params across replicas
-// have the same dtype/size/layout.
-void verify_replicas_within_process(
-    std::vector<std::vector<at::Tensor>> model_replicas,
-    std::vector<std::vector<bool>> expect_sparse_gradients) {
-  const auto replica_count = model_replicas.size();
-  if (replica_count == 1) {
-    // Single device per process, nothing to check.
-    return;
-  }
-  for (size_t replica_index = 0; replica_index < replica_count;
-       replica_index++) {
-    const auto variable_count = model_replicas[replica_index].size();
-    TORCH_CHECK(
-        model_replicas[replica_index].size() == model_replicas[0].size(),
-        "Model replicas must have an equal number of parameters.");
-    TORCH_CHECK(
-        expect_sparse_gradients[replica_index].size() ==
-            expect_sparse_gradients[0].size(),
-        "Expected number of entries in expect_sparse_gradients ",
-        "to be equal across replicas.");
-    for (size_t variable_index = 0; variable_index < variable_count;
-         variable_index++) {
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].requires_grad(),
-          "Variables must require gradients (have `requires_grad` set).");
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].sizes() ==
-              model_replicas[0][variable_index].sizes(),
-          "Variables across model replicas must have identical sizes.");
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].strides() ==
-              model_replicas[0][variable_index].strides(),
-          "Variables across model replicas must have identical strides.");
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].dtype() ==
-              model_replicas[0][variable_index].dtype(),
-          "Variables across model replicas must have identical dtype.");
-      TORCH_CHECK(
-          expect_sparse_gradients[replica_index][variable_index] ==
-              expect_sparse_gradients[0][variable_index],
-          "Expected the same variables across replicas to either both ",
-          "or neither expect a sparse gradient.");
-    }
-  }
-}
-
 // Verifies corresponding params in replica 0 have the same sizes/strides
 // across processes.
 void verify_replica0_across_processes(
@@ -1761,7 +1704,7 @@ void verify_replica0_across_processes(
   control.copy_(metadata_dev, /*non_blocking=*/false);
   auto control_accessor = control.accessor<int64_t, 1>();
   i = 0;
-  for(const auto p : c10::irange(model_replicas[0].size())) {
+  for (size_t p = 0; p < model_replicas[0].size(); p++) {
     const auto& t = model_replicas[0][p];
     // I'd like to include which process we are in the message,
     // but ProcessGroup::getRank is not public!

@@ -5,7 +5,6 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -381,7 +380,7 @@ static IValue addInput(
 
     if (input.isTensorList()) {
       auto elems = input.toTensorList();
-      for (const auto i : c10::irange(num_elems)) {
+      for (size_t i = 0; i < num_elems; i++) {
         elems[i] = addInput(
                        state,
                        elems.get(i),
@@ -392,7 +391,7 @@ static IValue addInput(
       return elems;
     } else {
       auto elems = input.toList();
-      for (const auto i : c10::irange(num_elems)) {
+      for (size_t i = 0; i < num_elems; i++) {
         elems[i] = addInput(
             state,
             elems.get(i),
