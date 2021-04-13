@@ -49,7 +49,6 @@ class TORCH_API LoopNest {
   std::vector<For*> getLoopStmtsFor(Stmt*) const;
   Stmt* getLoopBodyFor(Tensor*) const;
   Stmt* getLoopBodyFor(const Buf*) const;
-  bool hasLoopBodyFor(Tensor*) const;
 
   // Returns the For stmt that is immediately enclosing the given stmt.
   static For* getParentLoop(const Stmt* st);
