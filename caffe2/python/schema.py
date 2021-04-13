@@ -19,16 +19,17 @@ in-memory dataset.
 
 
 import logging
-import numpy as np
-from caffe2.python import core
-from caffe2.python import workspace
-from caffe2.python.core import BlobReference
 from collections import OrderedDict, namedtuple
-from past.builtins import basestring
-from future.utils import viewitems, viewkeys, viewvalues
 from itertools import islice
-from six import StringIO
 from typing import Sequence
+
+import numpy as np
+from future.utils import viewitems, viewkeys, viewvalues
+from past.builtins import basestring
+from six import StringIO
+
+from caffe2.python import core, workspace
+from caffe2.python.core import BlobReference
 
 logger = logging.getLogger(__name__)
 

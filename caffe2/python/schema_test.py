@@ -3,12 +3,14 @@
 
 
 
-from caffe2.python import core, schema
-import numpy as np
-
-import unittest
 import pickle
 import random
+import unittest
+
+import numpy as np
+
+from caffe2.python import core, schema
+
 
 class TestField(unittest.TestCase):
     def testInitShouldSetEmptyParent(self):

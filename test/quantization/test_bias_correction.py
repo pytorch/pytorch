@@ -1,12 +1,9 @@
+import copy
+
 import torch
 import torch.nn as nn
-from torch.testing._internal.common_quantization import QuantizationTestCase
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM
-
-from torch.quantization import default_qconfig
-from torch.quantization import QuantWrapper
 import torch.quantization._numeric_suite as ns
-
+from torch.quantization import QuantWrapper, default_qconfig
 from torch.quantization._correct_bias import (
     _supported_modules,
     _supported_modules_quantized,
@@ -15,8 +12,10 @@ from torch.quantization._correct_bias import (
     get_param,
     parent_child_names
 )
-
-import copy
+from torch.testing._internal.common_quantization import (
+    QuantizationTestCase,
+    skipIfNoFBGEMM
+)
 
 
 class TestBiasCorrection(QuantizationTestCase):

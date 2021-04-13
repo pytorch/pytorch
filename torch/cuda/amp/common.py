@@ -1,5 +1,6 @@
-import torch
 from importlib.util import find_spec
+
+import torch
 
 
 def amp_definitely_not_available():

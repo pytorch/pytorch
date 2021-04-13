@@ -5,14 +5,14 @@ enough, so that more sophisticated ones can be also easily integrated in the
 future.
 """
 
+from .adadelta import Adadelta
 from .adam import Adam
+from .adamax import Adamax
 from .adamw import AdamW
-from .sgd import SGD
+from .asgd import ASGD
 from .rmsprop import RMSprop
 from .rprop import Rprop
-from .asgd import ASGD
-from .adamax import Adamax
-from .adadelta import Adadelta
+from .sgd import SGD
 
 del adam
 del adamw

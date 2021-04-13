@@ -1,13 +1,12 @@
 import argparse
+import json
 import os
 import time
 
-import json
+from coordinator import CoordinatorBase
+
 import torch.distributed.rpc as rpc
 import torch.multiprocessing as mp
-
-
-from coordinator import CoordinatorBase
 
 COORDINATOR_NAME = "coordinator"
 AGENT_NAME = "agent"

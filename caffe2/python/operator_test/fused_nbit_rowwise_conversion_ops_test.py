@@ -3,16 +3,16 @@
 import math
 import struct
 
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import assume, given, settings
+
+import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core, workspace
 from caffe2.python.operator_test.fused_nbit_rowwise_test_helper import (
     _compress_uniform_simplified,
-    param_search_greedy,
+    param_search_greedy
 )
-from hypothesis import assume, given, settings
-
 
 # Eigen/Python round 0.5 away from 0, Numpy rounds to even
 round_to_nearest = np.vectorize(round)

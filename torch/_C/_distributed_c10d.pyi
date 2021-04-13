@@ -1,6 +1,6 @@
 from datetime import timedelta
 from enum import Enum
-from typing import Optional, List, Any, Tuple, overload
+from typing import Any, List, Optional, Tuple, overload
 
 from torch import Tensor
 

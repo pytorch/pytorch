@@ -14,19 +14,31 @@
 # 4. Compare Python/C++ module's forward output and backward gradients. If they
 # are the same, then we have implementation parity between Python/C++ module.
 
-import tempfile
-from string import Template
-import types
-import pprint
 import os
+import pprint
+import tempfile
+import types
+from string import Template
+
+from cpp_api_parity.sample_module import SAMPLE_MODULE_CPP_SOURCE
+from cpp_api_parity.utils import (
+    TORCH_NN_COMMON_TEST_HARNESS,
+    TorchNNModuleTestParams,
+    add_test,
+    compile_cpp_code_inline,
+    compute_arg_dict,
+    compute_cpp_args_construction_stmts_and_forward_arg_symbols,
+    compute_temp_file_path,
+    decorate_test_fn,
+    generate_error_msg,
+    is_torch_nn_functional_test,
+    move_python_tensors_to_device,
+    serialize_arg_dict_as_script_module,
+    set_python_tensors_requires_grad,
+    try_remove_folder
+)
 
 import torch
-from cpp_api_parity.utils import TorchNNModuleTestParams, TORCH_NN_COMMON_TEST_HARNESS, \
-    compile_cpp_code_inline, set_python_tensors_requires_grad, move_python_tensors_to_device, \
-    add_test, compute_cpp_args_construction_stmts_and_forward_arg_symbols, serialize_arg_dict_as_script_module, \
-    compute_arg_dict, decorate_test_fn, compute_temp_file_path, generate_error_msg, is_torch_nn_functional_test, \
-    try_remove_folder
-from cpp_api_parity.sample_module import SAMPLE_MODULE_CPP_SOURCE
 
 # Expected substitutions:
 #

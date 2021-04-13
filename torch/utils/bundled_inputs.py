@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
-from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Sequence, Dict, Callable
 import textwrap
-import torch
-from torch._C import TupleType, ListType
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union
+)
 
+import torch
+from torch._C import ListType, TupleType
 
 T = TypeVar("T")
 

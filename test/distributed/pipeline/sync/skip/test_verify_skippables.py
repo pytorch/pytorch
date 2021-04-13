@@ -5,9 +5,13 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 import pytest
-from torch import nn
 
-from torch.distributed.pipeline.sync.skip import Namespace, skippable, verify_skippables
+from torch import nn
+from torch.distributed.pipeline.sync.skip import (
+    Namespace,
+    skippable,
+    verify_skippables
+)
 
 
 def test_matching():

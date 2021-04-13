@@ -1,16 +1,17 @@
-import numpy as np
 import copy
-import time
-from functools import partial, reduce
-from future.utils import viewitems, viewkeys
-from hypothesis import assume, given, settings, HealthCheck
-import hypothesis.strategies as st
-import unittest
 import threading
+import time
+import unittest
+from functools import partial, reduce
 
-from caffe2.python import core, workspace, tt_core, dyndep
+import hypothesis.strategies as st
+import numpy as np
+from future.utils import viewitems, viewkeys
+from hypothesis import HealthCheck, assume, given, settings
+
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.proto import caffe2_pb2
+from caffe2.python import core, dyndep, tt_core, workspace
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/optimizers:sgd_simd_ops')
 
@@ -1296,8 +1297,8 @@ class TestOperators(hu.HypothesisTestCase):
         - Verify that the output matrices are permutation of the rows of the
           original matrices.
         """
-        import threading
         import queue
+        import threading
         op = core.CreateOperator(
             "CreateBlobsQueue",
             [],
@@ -1839,8 +1840,8 @@ class TestOperators(hu.HypothesisTestCase):
            **hu.gcs)
     @settings(deadline=10000)
     def test_dag_net_forking(self, net_type, num_workers, gc, dc):
-        from caffe2.python.model_helper import ModelHelper
         from caffe2.python import brew
+        from caffe2.python.model_helper import ModelHelper
         m = ModelHelper(name="test_model")
         n = 10
         d = 2
@@ -2263,7 +2264,7 @@ class TestOperators(hu.HypothesisTestCase):
            d=st.integers(1, 5))
     @settings(deadline=10000)
     def test_elman_recurrent_network(self, t, n, d):
-        from caffe2.python import model_helper, brew
+        from caffe2.python import brew, model_helper
         np.random.seed(1701)
         step_net = model_helper.ModelHelper(name="Elman")
         # TODO: name scope external inputs and outputs

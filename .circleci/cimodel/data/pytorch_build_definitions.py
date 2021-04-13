@@ -6,7 +6,7 @@ import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.pytorch_build_data import CONFIG_TREE_DATA, TopLevelNode
-from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN
+from cimodel.data.simple.util.branch_filters import RC_PATTERN, gen_filter_dict
 from cimodel.data.simple.util.docker_constants import gen_docker_image
 
 

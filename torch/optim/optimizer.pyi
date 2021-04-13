@@ -1,4 +1,5 @@
-from typing import Iterable, Union, Callable, Optional, List
+from typing import Callable, Iterable, List, Optional, Union
+
 from .. import Tensor
 
 _params_t = Union[Iterable[Tensor], Iterable[dict]]

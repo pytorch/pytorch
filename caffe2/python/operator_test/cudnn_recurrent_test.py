@@ -3,11 +3,12 @@
 
 
 
-from caffe2.python import model_helper, workspace, core, rnn_cell
-from future.utils import viewitems
-import numpy as np
-
 import unittest
+
+import numpy as np
+from future.utils import viewitems
+
+from caffe2.python import core, model_helper, rnn_cell, workspace
 
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")

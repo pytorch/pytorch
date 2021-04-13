@@ -1,9 +1,9 @@
-import torch
+import os
+import pathlib
 
+import torch
 from torch.jit._serialization import validate_map_location
 
-import pathlib
-import os
 
 def _load_for_lite_interpreter(f, map_location=None):
     r"""

@@ -4,8 +4,10 @@
 
 
 import unittest
-import numpy as np
 from random import randint
+
+import numpy as np
+
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 

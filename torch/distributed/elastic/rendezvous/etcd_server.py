@@ -18,7 +18,6 @@ from typing import Optional, TextIO, Union
 
 import etcd  # type: ignore[import]
 
-
 log = logging.getLogger(__name__)
 
 

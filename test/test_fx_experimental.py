@@ -1,35 +1,37 @@
-import torch
 import operator
-import unittest
 import sys
-from typing import Callable, Dict, Union, List
-from torch.fx.symbolic_trace import symbolic_trace
+import unittest
+from typing import Callable, Dict, List, Union
+
+import torch
+import torch.fx.experimental.optimization as optimization
+from torch.fx.experimental import graph_manipulation, merge_matmul
+from torch.fx.experimental.accelerator_partitioner import Partitioner
+from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
+from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx.experimental.partitioner_utils import (
+    Device,
+    NodeLatency,
+    PartitionerConfig,
+    PartitionMode,
+    get_latency_of_partitioned_graph,
+    get_partition_to_latency_mapping
+)
+from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.experimental.schema_type_annotation import (
+    AnnotateTypesWithSchema
+)
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx.experimental import graph_manipulation
-from torch.fx.experimental.accelerator_partitioner import Partitioner
-from torch.fx.experimental.rewriter import RewritingTracer
-from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx.passes.split_module import split_module
+from torch.fx.symbolic_trace import symbolic_trace
+from torch.testing._internal.common_nn import module_tests, new_module_tests
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.fx.passes.split_module import split_module
-from torch.fx.experimental.partitioner_utils import (
-    NodeLatency,
-    get_partition_to_latency_mapping,
-    get_latency_of_partitioned_graph,
-    Device,
-    PartitionerConfig,
-    PartitionMode
-)
-import torch.fx.experimental.optimization as optimization
-from torch.fx.experimental import merge_matmul
-from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
-from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
-from torch.testing._internal.common_nn import module_tests, new_module_tests
 
 try:
-    from torchvision.models import resnet18
     import torchvision.models
+    from torchvision.models import resnet18
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False

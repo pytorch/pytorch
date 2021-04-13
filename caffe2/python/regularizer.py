@@ -2,8 +2,9 @@
 # Module caffe2.python.regularizer
 
 
-from caffe2.python import core, utils
 import numpy as np
+
+from caffe2.python import core, utils
 
 
 class RegularizationBy(object):

@@ -1,9 +1,10 @@
-from .module import Module
-from .. import functional as F
+from typing import Optional
 
 from torch import Tensor
-from typing import Optional
-from ..common_types import _size_2_t, _ratio_2_t, _size_any_t, _ratio_any_t
+
+from .. import functional as F
+from ..common_types import _ratio_2_t, _ratio_any_t, _size_2_t, _size_any_t
+from .module import Module
 
 
 class Upsample(Module):

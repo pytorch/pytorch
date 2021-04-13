@@ -1,4 +1,5 @@
-from typing import Iterable, Any, Optional, Callable, Union, List
+from typing import Any, Callable, Iterable, List, Optional, Union
+
 from .optimizer import Optimizer
 
 class _LRScheduler:

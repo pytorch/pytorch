@@ -1,14 +1,13 @@
-from functools import reduce
-import time
 import threading
+import time
+from functools import reduce
 
 import torch
-from torch.distributions import Categorical
 import torch.distributed.rpc as rpc
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-
+from torch.distributions import Categorical
 
 OBSERVER_NAME = "observer{}"
 

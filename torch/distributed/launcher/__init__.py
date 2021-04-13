@@ -10,5 +10,5 @@
 from torch.distributed.launcher.api import (  # noqa F401
     LaunchConfig,
     elastic_launch,
-    launch_agent,
+    launch_agent
 )

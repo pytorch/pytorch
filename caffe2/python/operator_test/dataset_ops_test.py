@@ -5,6 +5,8 @@ import string
 import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
+from hypothesis import given
+
 from caffe2.python import core, dataset, workspace
 from caffe2.python.dataset import Const
 from caffe2.python.schema import (
@@ -16,10 +18,9 @@ from caffe2.python.schema import (
     NewRecord,
     Scalar,
     Struct,
-    from_blob_list,
+    from_blob_list
 )
 from caffe2.python.test_util import TestCase
-from hypothesis import given
 
 
 def _assert_arrays_equal(actual, ref, err_msg):

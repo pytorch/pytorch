@@ -1,14 +1,13 @@
 
 import collections
-from datetime import timedelta
 import enum
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
 
 from . import api
 from . import constants as rpc_constants
-
 
 BackendValue = collections.namedtuple(
     "BackendValue", ["construct_rpc_backend_options_handler", "init_backend_handler"]
@@ -138,8 +137,7 @@ def _init_process_group(store, rank, world_size):
 def _process_group_init_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
-    from . import ProcessGroupRpcBackendOptions
-    from . import ProcessGroupAgent
+    from . import ProcessGroupAgent, ProcessGroupRpcBackendOptions
 
     if not isinstance(store, dist.Store):
         raise TypeError("`store` must be a c10d::Store. {}".format(store))
@@ -242,8 +240,7 @@ def _tensorpipe_check_device_maps(agent, device_maps):
 
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
-    from . import TensorPipeRpcBackendOptions
-    from . import TensorPipeAgent
+    from . import TensorPipeAgent, TensorPipeRpcBackendOptions
 
     if not isinstance(store, dist.Store):
         raise TypeError("`store` must be a c10d::Store. {}".format(store))

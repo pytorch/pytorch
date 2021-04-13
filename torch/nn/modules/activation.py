@@ -3,13 +3,12 @@ from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
-from .linear import Linear
-from torch.nn.init import xavier_uniform_
-from torch.nn.init import constant_
-from torch.nn.init import xavier_normal_
+from torch.nn.init import constant_, xavier_normal_, xavier_uniform_
 from torch.nn.parameter import Parameter
-from .module import Module
+
 from .. import functional as F
+from .linear import Linear
+from .module import Module
 
 
 class Threshold(Module):

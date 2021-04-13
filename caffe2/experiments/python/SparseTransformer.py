@@ -19,8 +19,9 @@
 
 
 
-from caffe2.python import workspace
 import scipy.sparse
+
+from caffe2.python import workspace
 
 
 class NetDefNode():

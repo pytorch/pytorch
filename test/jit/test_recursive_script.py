@@ -1,19 +1,23 @@
 import os
 import sys
 import typing
+from collections import OrderedDict
+from typing import Dict, List, Optional, Tuple
+
 import typing_extensions
-from typing import List, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.testing import FileCheck
-from collections import OrderedDict
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, _tmp_donotuse_dont_inline_everything
+from torch.testing._internal.jit_utils import (
+    JitTestCase,
+    _tmp_donotuse_dont_inline_everything
+)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

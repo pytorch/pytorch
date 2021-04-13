@@ -3,16 +3,16 @@
 
 
 
-from caffe2.proto import caffe2_pb2
-from caffe2.python import model_helper, workspace, core, rnn_cell, test_util
-from caffe2.python.attention import AttentionType
-
-import numpy as np
-
 import unittest
-import caffe2.python.hypothesis_test_util as hu
+
 import hypothesis.strategies as st
+import numpy as np
 from hypothesis import given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, model_helper, rnn_cell, test_util, workspace
+from caffe2.python.attention import AttentionType
 
 
 class TestRNNExecutor(test_util.TestCase):

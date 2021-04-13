@@ -6,10 +6,10 @@ import logging
 from collections import namedtuple
 
 import numpy as np
+
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, schema, scope, utils, workspace
 from caffe2.python.layers.tags import TagContext
-
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

@@ -1,7 +1,8 @@
-from typing import Tuple, Optional, Any, List, Dict, Union
-from torch.optim import Optimizer
-from torch.nn import Parameter
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import torch
+from torch.nn import Parameter
+from torch.optim import Optimizer
 
 class ZeroRedundancyOptimizer(Optimizer):
     def __init__(

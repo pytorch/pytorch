@@ -1,6 +1,5 @@
 import os
 
-
 QNNPACK_SOURCES = {
     # Generic functions
     None: [

@@ -1,22 +1,37 @@
 
 
 
-from caffe2.proto import caffe2_pb2
-import caffe2.python.optimizer as optimizer
-from caffe2.python.optimizer import (
-    build_sgd, build_multi_precision_sgd, build_ftrl, build_gftrl, build_wngrad,
-    build_adagrad, build_adadelta, build_adam, build_yellowfin, build_rms_prop,
-    build_storm, build_decay_adagrad, add_weight_decay, SgdOptimizer)
-from caffe2.python.optimizer_context import UseOptimizer
-from caffe2.python.optimizer_test_util import (
-    OptimizerTestBase, LRModificationTestBase
-)
-from caffe2.python import core, workspace
-from caffe2.python.test_util import TestCase
-import numpy as np
-from numpy.testing import assert_allclose, assert_equal
 import math
 import unittest
+
+import numpy as np
+from numpy.testing import assert_allclose, assert_equal
+
+import caffe2.python.optimizer as optimizer
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
+from caffe2.python.optimizer import (
+    SgdOptimizer,
+    add_weight_decay,
+    build_adadelta,
+    build_adagrad,
+    build_adam,
+    build_decay_adagrad,
+    build_ftrl,
+    build_gftrl,
+    build_multi_precision_sgd,
+    build_rms_prop,
+    build_sgd,
+    build_storm,
+    build_wngrad,
+    build_yellowfin
+)
+from caffe2.python.optimizer_context import UseOptimizer
+from caffe2.python.optimizer_test_util import (
+    LRModificationTestBase,
+    OptimizerTestBase
+)
+from caffe2.python.test_util import TestCase
 
 
 class TestLars(OptimizerTestBase, TestCase):

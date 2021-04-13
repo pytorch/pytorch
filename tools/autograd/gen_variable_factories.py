@@ -3,15 +3,15 @@
 # This writes one file: variable_factories.h
 
 import re
-from typing import Optional, List
+from typing import List, Optional
 
-from tools.codegen.api.types import CppSignatureGroup
-from tools.codegen.api import cpp
 import tools.codegen.api.python as python
-from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.api import cpp
+from tools.codegen.api.types import CppSignatureGroup
 from tools.codegen.context import with_native_function
-from tools.codegen.utils import mapMaybe
+from tools.codegen.gen import FileManager, parse_native_yaml
 from tools.codegen.model import NativeFunction, TensorOptionsArguments, Variant
+from tools.codegen.utils import mapMaybe
 
 OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
 TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")

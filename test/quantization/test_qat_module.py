@@ -1,15 +1,18 @@
 import math
+
+from hypothesis import given
+from hypothesis import strategies as st
+
 import torch
+import torch.backends.mkldnn
 import torch.nn as nn
-from torch.nn import Conv2d, BatchNorm2d, ReLU, init
+import torch.testing._internal.hypothesis_utils as hu
+from torch.nn import BatchNorm2d, Conv2d, ReLU, init
 from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
 from torch.quantization.qconfig import default_qat_qconfig
-import torch.backends.mkldnn
 from torch.testing._internal.common_utils import TestCase
-from hypothesis import given
-from hypothesis import strategies as st
-import torch.testing._internal.hypothesis_utils as hu
+
 hu.assert_deadline_disabled()
 from functools import reduce
 

@@ -9,7 +9,6 @@
 import argparse
 import os
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="test binary, raises a RuntimeError")
     parser.add_argument("--raises", type=bool, default=False)

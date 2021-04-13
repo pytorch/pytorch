@@ -1,7 +1,7 @@
+from typing import Generic, Iterator, List, Optional, Sequence, Sized, TypeVar
+
 import torch
 from torch import Tensor
-
-from typing import Iterator, Optional, Sequence, List, TypeVar, Generic, Sized
 
 T_co = TypeVar('T_co', covariant=True)
 

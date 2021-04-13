@@ -2,14 +2,13 @@
 # https://github.com/tmbdev/webdataset/blob/master/webdataset/autodecode.py
 
 import io
+import json
 import os
 import pickle
 import re
 import tempfile
 
-import json
 import torch
-
 
 ################################################################
 # handle basic datatypes

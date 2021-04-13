@@ -1,14 +1,14 @@
-import types
 import math
-from torch._six import inf
-from functools import wraps
+import types
 import warnings
 import weakref
-from collections import Counter
 from bisect import bisect_right
+from collections import Counter
+from functools import wraps
+
+from torch._six import inf
 
 from .optimizer import Optimizer
-
 
 EPOCH_DEPRECATION_WARNING = (
     "The epoch parameter in `scheduler.step()` was not necessary and is being "

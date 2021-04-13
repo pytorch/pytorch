@@ -3,11 +3,12 @@
 
 
 
+import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given, settings
+
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core, utils
-from hypothesis import given, settings
-import hypothesis.strategies as st
 
 
 class Depthwise3x3ConvOpsTest(hu.HypothesisTestCase):

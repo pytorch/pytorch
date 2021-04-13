@@ -1,10 +1,11 @@
 import warnings
+from typing import List, Optional
 
 import torch
-from . import comm
-from torch.autograd import Function
 from torch._utils import _get_device_index
-from typing import List, Optional
+from torch.autograd import Function
+
+from . import comm
 
 
 class Broadcast(Function):

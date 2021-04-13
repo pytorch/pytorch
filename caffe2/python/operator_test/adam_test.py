@@ -6,12 +6,12 @@
 import functools
 
 import hypothesis
-from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given
 
-from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core
 
 
 class TestAdam(hu.HypothesisTestCase):

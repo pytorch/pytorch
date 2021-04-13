@@ -3,10 +3,11 @@ import math
 import torch
 from torch import Tensor
 from torch.nn.parameter import Parameter, UninitializedParameter
+
 from .. import functional as F
 from .. import init
-from .module import Module
 from .lazy import LazyModuleMixin
+from .module import Module
 
 
 class Identity(Module):

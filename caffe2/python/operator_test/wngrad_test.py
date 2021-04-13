@@ -4,17 +4,16 @@
 
 
 import functools
-
 import logging
 
 import hypothesis
-from hypothesis import given, settings, HealthCheck
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import HealthCheck, given, settings
 
-from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python import core
 
 logger = logging.getLogger(__name__)
 

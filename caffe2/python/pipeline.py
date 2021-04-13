@@ -8,7 +8,7 @@
 from caffe2.python import core, queue_util
 from caffe2.python.dataio import Reader, Writer
 from caffe2.python.net_builder import NetBuilder, ops
-from caffe2.python.schema import as_record, Field
+from caffe2.python.schema import Field, as_record
 from caffe2.python.task import Node, Task, TaskGroup
 
 

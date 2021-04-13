@@ -14,7 +14,6 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
 from typing import Dict, List, TextIO
 
-
 log = logging.getLogger(__name__)
 
 

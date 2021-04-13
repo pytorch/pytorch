@@ -1,24 +1,32 @@
-import torch
-import unittest
-import io
-import tempfile
-import os
-import sys
-import zipfile
-import warnings
-import gzip
 import copy
+import gzip
+import io
+import os
+import pathlib
 import pickle
 import shutil
-import pathlib
+import sys
+import tempfile
+import unittest
+import warnings
+import zipfile
 
-from torch._utils_internal import get_file_path_2
+import torch
 from torch._utils import _rebuild_tensor
+from torch._utils_internal import get_file_path_2
 from torch.serialization import check_module_version_greater_or_equal
-
-from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests
+)
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    TEST_DILL,
+    BytesIOContext,
+    TemporaryFileName,
+    TestCase,
+    download_file,
+    run_tests
+)
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision

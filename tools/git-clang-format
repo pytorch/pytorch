@@ -23,6 +23,7 @@ Requires Python 2.7 or Python 3
 """
 
 from __future__ import absolute_import, division, print_function
+
 import argparse
 import collections
 import contextlib
@@ -31,7 +32,8 @@ import os
 import re
 import subprocess
 import sys
-from clang_format_utils import get_and_check_clang_format, CLANG_FORMAT_PATH
+
+from clang_format_utils import CLANG_FORMAT_PATH, get_and_check_clang_format
 
 usage = "git clang-format [OPTIONS] [<commit>] [<commit>] [--] [<file>...]"
 

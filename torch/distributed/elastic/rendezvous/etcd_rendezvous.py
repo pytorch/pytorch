@@ -15,17 +15,17 @@ import time
 from typing import Optional
 
 import etcd  # type: ignore[import]
+
 from torch.distributed.elastic.rendezvous import (
     RendezvousClosedError,
     RendezvousError,
     RendezvousHandler,
     RendezvousParameters,
-    RendezvousTimeoutError,
+    RendezvousTimeoutError
 )
 
-from .utils import _parse_rendezvous_endpoint
 from .etcd_store import EtcdStore, cas_delay
-
+from .utils import _parse_rendezvous_endpoint
 
 _log_fmt = logging.Formatter("%(levelname)s %(asctime)s %(message)s")
 _log_handler = logging.StreamHandler(sys.stderr)

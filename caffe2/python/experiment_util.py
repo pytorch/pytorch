@@ -5,13 +5,13 @@
 
 
 
+import abc
 import datetime
-import time
 import logging
 import socket
-import abc
-
+import time
 from collections import OrderedDict
+
 from future.utils import viewkeys, viewvalues
 
 '''

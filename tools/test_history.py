@@ -6,8 +6,11 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
-from tools.stats_utils.s3_stat_parser import (Report, get_cases,
-                                              get_test_stats_summaries)
+from tools.stats_utils.s3_stat_parser import (
+    Report,
+    get_cases,
+    get_test_stats_summaries
+)
 
 
 def get_git_commit_history(

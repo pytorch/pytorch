@@ -1,16 +1,23 @@
+import re
+import sys
 import unittest
 
-import sys
 import torch
-import torch.cuda.nccl as nccl
 import torch.cuda
-
-from torch.testing._internal.common_utils import (TestCase, run_tests,
-                                                  IS_WINDOWS, load_tests,
-                                                  TEST_WITH_ROCM)
+import torch.cuda.nccl as nccl
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
-import re
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests
+)
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    TEST_WITH_ROCM,
+    TestCase,
+    load_tests,
+    run_tests
+)
+
 HIP_VERSION = 0.0 if torch.version.hip is None else float(re.search(r"^\d+\.\d+", torch.version.hip)[0])
 
 # load_tests from common_utils is used to automatically filter tests for

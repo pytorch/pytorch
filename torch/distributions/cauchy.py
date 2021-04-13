@@ -1,8 +1,8 @@
 import math
-from torch._six import inf, nan
 from numbers import Number
 
 import torch
+from torch._six import inf, nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all

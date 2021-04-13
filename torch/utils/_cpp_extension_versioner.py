@@ -1,6 +1,5 @@
 import collections
 
-
 Entry = collections.namedtuple('Entry', 'version, hash')
 
 

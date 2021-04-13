@@ -2,7 +2,6 @@
 
 import argparse
 import copy
-from datetime import datetime
 import json
 import modulefinder
 import os
@@ -11,18 +10,29 @@ import signal
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+from typing_extensions import TypedDict
 
 import torch
-from torch.utils import cpp_extension
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
-from torch.testing._internal.framework_utils import calculate_shards
 import torch.distributed as dist
-from typing import Dict, Optional, Tuple, List, Any
-from typing_extensions import TypedDict
+from torch.testing._internal.common_utils import (
+    FILE_SCHEMA,
+    TEST_WITH_ROCM,
+    set_cwd,
+    shell
+)
+from torch.testing._internal.framework_utils import calculate_shards
+from torch.utils import cpp_extension
 
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    from tools.stats_utils.s3_stat_parser import (get_previous_reports_for_branch, Report, HAVE_BOTO3)
+    from tools.stats_utils.s3_stat_parser import (
+        HAVE_BOTO3,
+        Report,
+        get_previous_reports_for_branch
+    )
 except ImportError:
     print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
     HAVE_BOTO3 = False

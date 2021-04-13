@@ -1,8 +1,9 @@
 
-from .throughput_benchmark import ThroughputBenchmark
-
 import os.path as _osp
 import sys
+
+from .throughput_benchmark import ThroughputBenchmark
+
 
 # Set the module for a given object for nicer printing
 def set_module(obj, mod):

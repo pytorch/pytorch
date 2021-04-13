@@ -12,14 +12,17 @@ from weakref import WeakValueDictionary
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
-from ._file_structure_representation import Folder, _create_folder_from_file_list
+from ._file_structure_representation import (
+    Folder,
+    _create_folder_from_file_list
+)
 from ._glob_group import GlobPattern
 from ._importlib import (
     _calc___package__,
     _normalize_line_endings,
     _normalize_path,
     _resolve_name,
-    _sanity_check,
+    _sanity_check
 )
 from ._mangling import PackageMangler, demangle
 from ._mock_zipreader import MockZipReader

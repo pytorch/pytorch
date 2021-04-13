@@ -1,17 +1,21 @@
-import unittest
+import itertools
 import os
+import unittest
+
+import numpy as np
+from jit.test_fuser_common import TestFuserCommon  # noqa: F401
+from test_jit import RUN_CUDA, JitTestCase
 
 import torch
-
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM
-from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
-
-from test_jit import JitTestCase, RUN_CUDA
-
-from jit.test_fuser_common import TestFuserCommon  # noqa: F401
-
-import itertools
-import numpy as np
+from torch.testing._internal.codegen.random_topo_test import (
+    runDefaultTestWithSeed
+)
+from torch.testing._internal.common_utils import (
+    GRAPH_EXECUTOR,
+    TEST_WITH_ROCM,
+    ProfilingMode,
+    run_tests
+)
 
 os.environ['PYTORCH_CUDA_FUSER_DISABLE_FALLBACK'] = '1'
 os.environ['PYTORCH_CUDA_FUSER_DISABLE_FMA'] = '1'

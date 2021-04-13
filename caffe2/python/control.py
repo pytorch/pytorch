@@ -16,9 +16,9 @@ Implement functions for controlling execution of nets and steps, including
 
 
 
-from caffe2.python import core
 from future.utils import viewitems
 
+from caffe2.python import core
 
 # Used to generate names of the steps created by the control functions.
 # It is actually the internal index of these steps.

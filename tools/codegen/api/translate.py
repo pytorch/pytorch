@@ -1,7 +1,15 @@
-from typing import Dict, Sequence, List, NoReturn, Union
-from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType, CType,
-                                     Expr, MutRefCType, OptionalCType,
-                                     SpecialArgName)
+from typing import Dict, List, NoReturn, Sequence, Union
+
+from tools.codegen.api.types import (
+    BaseCType,
+    Binding,
+    ConstRefCType,
+    CType,
+    Expr,
+    MutRefCType,
+    OptionalCType,
+    SpecialArgName
+)
 
 # This file implements a small program synthesis engine that implements
 # conversions between one API to another.

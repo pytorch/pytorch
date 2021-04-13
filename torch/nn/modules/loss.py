@@ -1,12 +1,12 @@
 import warnings
-
-from .distance import PairwiseDistance
-from .module import Module
-from .. import functional as F
-from .. import _reduction as _Reduction
+from typing import Callable, Optional
 
 from torch import Tensor
-from typing import Callable, Optional
+
+from .. import _reduction as _Reduction
+from .. import functional as F
+from .distance import PairwiseDistance
+from .module import Module
 
 
 class _Loss(Module):

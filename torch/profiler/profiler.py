@@ -1,10 +1,10 @@
-import torch
-import torch.autograd.profiler as prof
-from torch.autograd import ProfilerActivity
-
 from enum import Enum
 from typing import Any, Callable, Iterable, Optional
 from warnings import warn
+
+import torch
+import torch.autograd.profiler as prof
+from torch.autograd import ProfilerActivity
 
 
 class ProfilerAction(Enum):

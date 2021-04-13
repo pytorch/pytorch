@@ -1,9 +1,9 @@
 import argparse
 
-import torch
-
 import benchmark_core
 import benchmark_utils
+
+import torch
 
 """Performance microbenchmarks's main binary.
 

@@ -1,10 +1,11 @@
-import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests
-import tempfile
-import torch
 import doctest
-import os
 import inspect
+import os
+import tempfile
+import unittest
+
+import torch
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 try:
     import mypy.api

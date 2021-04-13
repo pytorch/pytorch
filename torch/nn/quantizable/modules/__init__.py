@@ -1,6 +1,5 @@
 from .activation import MultiheadAttention
-from .rnn import LSTM
-from .rnn import LSTMCell
+from .rnn import LSTM, LSTMCell
 
 __all__ = [
     'LSTM',

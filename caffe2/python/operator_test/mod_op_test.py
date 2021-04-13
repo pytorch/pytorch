@@ -1,11 +1,10 @@
+import hypothesis.strategies as st
 import numpy
-
-from caffe2.python import core
+import numpy as np
 from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
-import hypothesis.strategies as st
-import numpy as np
+from caffe2.python import core
 
 
 @st.composite

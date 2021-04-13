@@ -7,10 +7,14 @@
 import time
 
 import pytest
+
 import torch
 from torch import nn
-
-from torch.distributed.pipeline.sync._balance import balance_by_size, balance_by_time, blockpartition
+from torch.distributed.pipeline.sync._balance import (
+    balance_by_size,
+    balance_by_time,
+    blockpartition
+)
 from torch.distributed.pipeline.sync._balance.profile import layerwise_sandbox
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")

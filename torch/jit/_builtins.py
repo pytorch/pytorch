@@ -1,15 +1,20 @@
-import math
 import cmath
+import math
 import warnings
+from collections import OrderedDict
+from typing import Dict, Optional
 
 import torch
 import torch.backends.cudnn as cudnn
-
 from torch._six import PY37
-from ..nn.modules.utils import _single, _pair, _triple, _quadruple, _list_with_default
 
-from collections import OrderedDict
-from typing import Dict, Optional
+from ..nn.modules.utils import (
+    _list_with_default,
+    _pair,
+    _quadruple,
+    _single,
+    _triple
+)
 
 _builtin_table: Optional[Dict[int, str]] = None
 

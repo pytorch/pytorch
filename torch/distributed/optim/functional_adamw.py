@@ -1,8 +1,9 @@
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+
 import torch
 import torch.optim._functional as F
-
 from torch import Tensor
+
 
 # Define a TorchScript compatible Functional AdamW Optimizer
 # where we use these optimizer in a functional way.

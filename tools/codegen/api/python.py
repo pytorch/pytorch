@@ -1,12 +1,20 @@
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Set, List, Dict, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 
-from tools.codegen.api.types import Binding, CppSignature, CppSignatureGroup
 from tools.codegen.api import cpp
+from tools.codegen.api.types import Binding, CppSignature, CppSignatureGroup
 from tools.codegen.gen import pythonify_default
-from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
-                                 NativeFunction, OptionalType, Return, Type,
-                                 Variant)
+from tools.codegen.model import (
+    Argument,
+    BaseTy,
+    BaseType,
+    ListType,
+    NativeFunction,
+    OptionalType,
+    Return,
+    Type,
+    Variant
+)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #

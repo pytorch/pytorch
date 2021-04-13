@@ -1,9 +1,8 @@
-import torch
-
 from collections import defaultdict
+from typing import Callable, Dict, List, Tuple, Union
 
-from torch import nn, Tensor
-from typing import List, Tuple, Dict, Union, Callable
+import torch
+from torch import Tensor, nn
 
 # Type helpers
 InputsType = Union[Tensor, Tuple[Tensor, ...]]

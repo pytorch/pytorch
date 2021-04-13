@@ -2,22 +2,21 @@
 
 
 
-from caffe2.python import core, workspace
-from caffe2.python.test.executor_test_util import (
-    build_conv_model,
-    build_resnet50_dataparallel_model,
-    run_resnet50_epoch,
-    ExecutorTestBase,
-    executor_test_settings,
-    executor_test_model_names)
-
-from caffe2.python.test_util import TestCase
-
-from hypothesis import given
-import hypothesis.strategies as st
-
 import unittest
 
+import hypothesis.strategies as st
+from hypothesis import given
+
+from caffe2.python import core, workspace
+from caffe2.python.test.executor_test_util import (
+    ExecutorTestBase,
+    build_conv_model,
+    build_resnet50_dataparallel_model,
+    executor_test_model_names,
+    executor_test_settings,
+    run_resnet50_epoch
+)
+from caffe2.python.test_util import TestCase
 
 EXECUTORS = ["parallel", "async_scheduling"]
 ITERATIONS = 1

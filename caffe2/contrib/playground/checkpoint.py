@@ -3,15 +3,15 @@
 
 
 
-import numpy as np
+import logging
 import pickle
 from collections import OrderedDict
 
+import numpy as np
+
 from caffe2.proto import caffe2_pb2
+from caffe2.python import core, scope, workspace
 
-from caffe2.python import workspace, core, scope
-
-import logging
 logging.basicConfig()
 log = logging.getLogger("AnyExpOnTerm")
 log.setLevel(logging.DEBUG)

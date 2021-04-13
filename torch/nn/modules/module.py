@@ -1,15 +1,28 @@
-from collections import OrderedDict, namedtuple
+import functools
 import itertools
 import warnings
-import functools
+from collections import OrderedDict, namedtuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+    overload
+)
 
 import torch
-from ..parameter import Parameter
 import torch.utils.hooks as hooks
-
 from torch import Tensor, device, dtype
-from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
+
 from ...utils.hooks import RemovableHandle
+from ..parameter import Parameter
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use

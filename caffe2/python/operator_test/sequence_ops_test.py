@@ -3,14 +3,16 @@
 
 
 
-from caffe2.python import core
+import unittest
 from functools import partial
-from hypothesis import given, settings
-import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
+
 import hypothesis.strategies as st
 import numpy as np
-import unittest
+from hypothesis import given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python import core
 
 
 def _gen_test_add_padding(with_pad_data=True,

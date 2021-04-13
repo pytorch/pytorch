@@ -3,13 +3,13 @@
 
 
 
-from inspect import currentframe, getframeinfo
 import unittest
+from inspect import currentframe, getframeinfo
 
 import numpy as np
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, schema, test_util
+from caffe2.python import core, schema, test_util, workspace
 from caffe2.python.task import Node, Task
 
 
@@ -432,7 +432,7 @@ class TestExtractPredictorNet(test_util.TestCase):
     @unittest.skipIf('ImageInput' not in workspace.RegisteredOperators(), "Needs OpenCV")
     def test_extract_simple(self):
         from caffe2.python import brew
-        from caffe2.python.model_helper import ModelHelper, ExtractPredictorNet
+        from caffe2.python.model_helper import ExtractPredictorNet, ModelHelper
 
         model = ModelHelper(name="test", arg_scope={'order': 'NCHW'})
         [data, label] = brew.image_input(

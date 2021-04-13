@@ -1,14 +1,21 @@
 import torch
+
 # NN tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
 import os
 
-import torch.testing._internal.common_utils as common
-import torch.testing._internal.common_nn as common_nn
+from cpp_api_parity import (
+    functional_impl_check,
+    module_impl_check,
+    sample_functional,
+    sample_module
+)
 from cpp_api_parity.parity_table_parser import parse_parity_tracker_table
 from cpp_api_parity.utils import is_torch_nn_functional_test
-from cpp_api_parity import module_impl_check, functional_impl_check, sample_module, sample_functional
+
+import torch.testing._internal.common_nn as common_nn
+import torch.testing._internal.common_utils as common
 
 # NOTE: turn this on if you want to print source code of all C++ tests (e.g. for debugging purpose)
 PRINT_CPP_SOURCE = False

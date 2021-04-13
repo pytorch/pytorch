@@ -1,13 +1,24 @@
-from tools.codegen.model import (Argument, FunctionSchema, Return,
-                                 SelfArgument, TensorOptionsArguments, Type,
-                                 assert_never)
+from typing import List, Optional, Sequence, Union
 
-from tools.codegen.api.types import (ArgName, BaseCType, Binding,
-                                     ConstRefCType, CType, MutRefCType,
-                                     OptionalCType)
 from tools.codegen.api import cpp
-
-from typing import Union, Sequence, List, Optional
+from tools.codegen.api.types import (
+    ArgName,
+    BaseCType,
+    Binding,
+    ConstRefCType,
+    CType,
+    MutRefCType,
+    OptionalCType
+)
+from tools.codegen.model import (
+    Argument,
+    FunctionSchema,
+    Return,
+    SelfArgument,
+    TensorOptionsArguments,
+    Type,
+    assert_never
+)
 
 # This file describes the translation of JIT schema to the native functions API.
 # This looks a lot like the C++ API (which makes historical sense, because the

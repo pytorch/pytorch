@@ -1,8 +1,9 @@
 from functools import update_wrapper
 from numbers import Number
+from typing import Any, Dict
+
 import torch
 import torch.nn.functional as F
-from typing import Dict, Any
 from torch.overrides import has_torch_function
 
 euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant

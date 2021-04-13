@@ -1,7 +1,7 @@
 import torch
 import torch.distributed as dist
-
 from torch.autograd.function import Function
+
 
 class SyncBatchNorm(Function):
 

@@ -14,7 +14,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     DynamicRendezvousHandler,
     RendezvousBackend,
     RendezvousTimeout,
-    create_handler,
+    create_handler
 )
 
 

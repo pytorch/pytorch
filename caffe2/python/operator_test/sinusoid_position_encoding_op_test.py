@@ -3,13 +3,15 @@
 
 
 
-from caffe2.python import core
-from hypothesis import given, settings
-import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
+import math
+
 import hypothesis.strategies as st
 import numpy as np
-import math
+from hypothesis import given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python import core
 
 MAX_TEST_EMBEDDING_SIZE = 20
 MAX_TEST_SEQUENCE_LENGTH = 10

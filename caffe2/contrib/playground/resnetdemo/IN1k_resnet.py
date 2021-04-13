@@ -5,9 +5,8 @@
 
 import numpy as np
 
-from caffe2.python import workspace, cnn, core
-from caffe2.python import timeout_guard
 from caffe2.proto import caffe2_pb2
+from caffe2.python import cnn, core, timeout_guard, workspace
 
 
 def init_model(self):

@@ -16,16 +16,16 @@
 import os
 import unittest
 
-from PIL import Image
 import numpy as np
-import torch
-import torchvision.models as models
-
-import pycuda.driver as cuda
 # This import causes pycuda to automatically manage CUDA context creation and cleanup.
 import pycuda.autoinit
-
+import pycuda.driver as cuda
 import tensorrt as trt
+import torchvision.models as models
+from PIL import Image
+
+import torch
+
 TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
 def allocate_buffers(engine):

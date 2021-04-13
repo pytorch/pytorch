@@ -20,10 +20,12 @@ See `dataset.py` for an example of implementation.
 
 
 
+import time
+
+import numpy as np
+
 from caffe2.python import core
 from caffe2.python.schema import Field, Struct, from_blob_list
-import numpy as np
-import time
 
 
 class Reader(object):

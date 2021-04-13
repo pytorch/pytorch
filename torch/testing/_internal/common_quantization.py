@@ -3,47 +3,69 @@ checking quantization api and properties of resulting modules.
 """
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.nn.intrinsic import _FusedModule
-import torch.distributed as dist
-
-from torch.testing._internal.common_utils import TestCase
-from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
-    default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_weight_only_qconfig, \
-    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic, QuantType
+from torch.quantization import (
+    DeQuantStub,
+    PerChannelMinMaxObserver,
+    QConfig,
+    QConfigDynamic,
+    QuantStub,
+    QuantType,
+    QuantWrapper,
+    convert,
+    default_dynamic_qconfig,
+    default_dynamic_quant_observer,
+    default_observer,
+    default_per_channel_qconfig,
+    default_qconfig,
+    default_weight_observer,
+    float_qparams_weight_only_qconfig,
+    get_default_qat_qconfig,
+    get_default_qconfig,
+    propagate_qconfig_,
+    quantize_dynamic_jit,
+    quantize_jit
+)
 from torch.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
-    get_default_qconfig_propagation_list,
     get_default_qat_module_mappings,
+    get_default_qconfig_propagation_list
 )
+from torch.testing._internal.common_utils import TestCase
 
 try:
     # graph mode quantization based on fx
-    from torch.quantization.quantize_fx import (
-        prepare_fx,
-        prepare_qat_fx,
-        convert_fx,
-    )
-    from torch.quantization.ns.ns_types import NSSingleResultValuesType, NSSubgraph
-    from torch.fx.graph import Node
     from torch.fx import GraphModule
+    from torch.fx.graph import Node
+    from torch.quantization.ns.ns_types import (
+        NSSingleResultValuesType,
+        NSSubgraph
+    )
+    from torch.quantization.quantize_fx import (
+        convert_fx,
+        prepare_fx,
+        prepare_qat_fx
+    )
     HAS_FX = True
 except ImportError:
     HAS_FX = False
 
 import copy
-import io
 import functools
-import time
+import io
 import os
-
+import time
 import unittest
+from typing import Any, Callable, Dict, Tuple
+
 import numpy as np
+
 from torch.testing import FileCheck
-from typing import Callable, Tuple, Dict, Any
+
 
 class NodeSpec:
     ''' Used for checking GraphModule Node

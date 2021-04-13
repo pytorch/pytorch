@@ -1,10 +1,13 @@
 import contextlib
-import numpy as np
+import json
 import os
 import time
-from . import tensor_engine
+
+import numpy as np
+
 import torch
-import json
+
+from . import tensor_engine
 
 
 class Benchmark(object):

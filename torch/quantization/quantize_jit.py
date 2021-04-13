@@ -1,8 +1,10 @@
 
 import torch
+from torch.jit._recursive import wrap_cpp_module
+
 from .qconfig import QConfig
 from .quant_type import QuantType
-from torch.jit._recursive import wrap_cpp_module
+
 
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):

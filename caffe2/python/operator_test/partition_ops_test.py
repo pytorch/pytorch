@@ -3,6 +3,7 @@
 
 
 import numpy as np
+
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase, rand_array
 

@@ -1,4 +1,5 @@
-from typing import TypeVar, Union, Tuple, Optional
+from typing import Optional, Tuple, TypeVar, Union
+
 from .. import Tensor
 
 # Create some useful type aliases

@@ -1,5 +1,6 @@
 import torch
 
+
 def set_fuser(fuser_name, executor_name):
     assert fuser_name in ['te', 'old', 'none', 'default']
     if fuser_name == 'te':

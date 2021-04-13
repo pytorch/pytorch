@@ -1,6 +1,7 @@
 import torch
 from torch.testing._internal.jit_utils import JitTestCase
 
+
 class TestFuserCommon(JitTestCase):
     def test_autodiff_fallback(self):
         for rq in [True, False]:

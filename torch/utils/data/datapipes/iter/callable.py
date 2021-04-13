@@ -1,7 +1,8 @@
 import warnings
+from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
+
 import torch.nn as nn
 from torch.utils.data import IterDataPipe, _utils, functional_datapipe
-from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
 
 try:
     import dill

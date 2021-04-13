@@ -1,6 +1,7 @@
 import torch
-import torch.nn.quantized._reference as nnqr
 import torch.nn.functional as F
+import torch.nn.quantized._reference as nnqr
+
 
 class ConvReLU1d(nnqr.Conv1d):
     _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d  # type: ignore[assignment]

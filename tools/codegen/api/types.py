@@ -1,8 +1,14 @@
-from tools.codegen.model import (Argument, FunctionSchema, NativeFunction,
-                                 SelfArgument, TensorOptionsArguments)
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, TypeVar, List, Set
 from enum import Enum
+from typing import List, Optional, Sequence, Set, TypeVar, Union
+
+from tools.codegen.model import (
+    Argument,
+    FunctionSchema,
+    NativeFunction,
+    SelfArgument,
+    TensorOptionsArguments
+)
 
 _T = TypeVar('_T')
 

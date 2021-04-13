@@ -1,7 +1,8 @@
-import numpy as np
 import unittest
 
-from caffe2.python import core, workspace, muji, test_util
+import numpy as np
+
+from caffe2.python import core, muji, test_util, workspace
 
 
 @unittest.skipIf(not workspace.has_gpu_support, "no gpu")

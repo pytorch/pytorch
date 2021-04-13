@@ -5,16 +5,16 @@
 
 
 
-from hypothesis import given, settings
-import hypothesis.strategies as st
+import shutil
+import tempfile
+import unittest
 from multiprocessing import Process
 
+import hypothesis.strategies as st
 import numpy as np
-import tempfile
-import shutil
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
-import unittest
 
 op_engine = 'GLOO'
 
@@ -28,9 +28,9 @@ class TemporaryDirectory:
 
 
 def allcompare_process(filestore_dir, process_id, data, num_procs):
-    from caffe2.python import core, data_parallel_model, workspace, lazy_dyndep
-    from caffe2.python.model_helper import ModelHelper
     from caffe2.proto import caffe2_pb2
+    from caffe2.python import core, data_parallel_model, lazy_dyndep, workspace
+    from caffe2.python.model_helper import ModelHelper
     lazy_dyndep.RegisterOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 
     workspace.RunOperatorOnce(
@@ -83,8 +83,9 @@ class TestLazyDynDepAllCompare(hu.HypothesisTestCase):
 
 class TestLazyDynDepError(unittest.TestCase):
     def test_errorhandler(self):
-        from caffe2.python import core, lazy_dyndep
         import tempfile
+
+        from caffe2.python import core, lazy_dyndep
 
         with tempfile.NamedTemporaryFile() as f:
             lazy_dyndep.RegisterOpsLibrary(f.name)
@@ -96,8 +97,9 @@ class TestLazyDynDepError(unittest.TestCase):
                 core.RefreshRegisteredOperators()
 
     def test_importaftererror(self):
-        from caffe2.python import core, lazy_dyndep
         import tempfile
+
+        from caffe2.python import core, lazy_dyndep
 
         with tempfile.NamedTemporaryFile() as f:
             lazy_dyndep.RegisterOpsLibrary(f.name)
@@ -115,8 +117,9 @@ class TestLazyDynDepError(unittest.TestCase):
             core.RefreshRegisteredOperators()
 
     def test_workspacecreatenet(self):
-        from caffe2.python import workspace, lazy_dyndep
         import tempfile
+
+        from caffe2.python import lazy_dyndep, workspace
 
         with tempfile.NamedTemporaryFile() as f:
             lazy_dyndep.RegisterOpsLibrary(f.name)

@@ -104,7 +104,6 @@ process:
 from .api import *  # noqa: F403
 from .registry import _register_default_handlers
 
-
 _register_default_handlers()
 
 

@@ -1,9 +1,9 @@
-from utils import ms_to_us, benchmark_module, BenchmarkConfig, ModuleConfig
 import argparse
-from C2Module import C2SimpleNet
 
-from SimpleAddModule import SimpleAddModule, add_tensors_loop
+from C2Module import C2SimpleNet
 from pt_wrapper_module import WrapperModule
+from SimpleAddModule import SimpleAddModule, add_tensors_loop
+from utils import BenchmarkConfig, ModuleConfig, benchmark_module, ms_to_us
 
 """ Framework overhead benchmark script.
 Benchmark framework overhead.

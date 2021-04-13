@@ -19,10 +19,11 @@
 
 
 import unittest
-from caffe2.python import workspace, brew, model_helper
-from caffe2.python.modeling.get_entry_from_blobs import GetEntryFromBlobs
 
 import numpy as np
+
+from caffe2.python import brew, model_helper, workspace
+from caffe2.python.modeling.get_entry_from_blobs import GetEntryFromBlobs
 
 
 class GetEntryFromBlobsTest(unittest.TestCase):

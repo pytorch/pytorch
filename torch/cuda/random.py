@@ -1,7 +1,9 @@
+from typing import Iterable, List, Union, cast
+
 import torch
-from typing import cast, Iterable, List, Union
-from . import _lazy_init, _lazy_call, device_count, current_device
+
 from .. import Tensor
+from . import _lazy_call, _lazy_init, current_device, device_count
 
 __all__ = ['get_rng_state', 'get_rng_state_all',
            'set_rng_state', 'set_rng_state_all',

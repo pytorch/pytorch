@@ -5,19 +5,19 @@
 
 
 
-from hypothesis import given, settings
-import hypothesis.strategies as st
-from multiprocessing import Process, Queue
-
-import numpy as np
 import os
 import pickle
-import tempfile
 import shutil
+import tempfile
+from multiprocessing import Process, Queue
 
-from caffe2.python import core, workspace, dyndep
-import caffe2.python.hypothesis_test_util as hu
+import hypothesis.strategies as st
+import numpy as np
 from gloo.python import IoError
+from hypothesis import given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, dyndep, workspace
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:redis_store_handler_ops")

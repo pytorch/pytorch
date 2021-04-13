@@ -4,6 +4,7 @@ import torch
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import QuantizationTestCase
 
+
 class TestFusionPasses(QuantizationTestCase):
     def test_quantized_add_relu_fusion(self):
         class MAdd(torch.nn.Module):

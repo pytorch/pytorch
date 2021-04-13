@@ -15,12 +15,13 @@
 # limitations under the License.
 ##############################################################################
 
-import sys
-import yaml
 import argparse
 import os
+import sys
 from copy import deepcopy
 from typing import Dict, List, Set
+
+import yaml
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--template_dir", default=".", help="where template.h is")
@@ -39,7 +40,8 @@ if args.aten_root:
     sys.path.insert(0, os.path.join(args.aten_root, '..'))
     from tools.codegen.code_template import CodeTemplate as CT
 else:
-    from tools.codegen.code_template import CodeTemplate as CT  # type: ignore[import,no-redef]
+    from tools.codegen.code_template import \
+        CodeTemplate as CT  # type: ignore[import,no-redef]
 
 OP_TEMPLATE = CT.from_file(
     os.path.join(args.template_dir, 'aten_op_template.h'))

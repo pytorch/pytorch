@@ -6,14 +6,11 @@
 
 
 import logging
+
 import numpy as np
 
 from caffe2.python import core, schema
-from caffe2.python.layers.layers import (
-    get_categorical_limit,
-    ModelLayer,
-)
-
+from caffe2.python.layers.layers import ModelLayer, get_categorical_limit
 from caffe2.python.layers.tags import Tags
 
 logger = logging.getLogger(__name__)

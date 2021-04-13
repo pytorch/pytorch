@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
+from datetime import timedelta
+
 import torch.distributed as dist
-import torch.distributed.rpc as rpc
 import torch.distributed.distributed_c10d as dc10d
+import torch.distributed.rpc as rpc
 from torch.distributed.rpc import constants as rpc_constants
 
-from datetime import timedelta
 
 def _faulty_process_group_construct_rpc_backend_options_handler(
     rpc_timeout,

@@ -179,7 +179,9 @@
 
 # This future is needed to print Python2 EOL message
 from __future__ import print_function
+
 import sys
+
 if sys.version_info < (3,):
     print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
     sys.exit(-1)
@@ -188,6 +190,7 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
+
 python_min_version = (3, 6, 2)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
@@ -195,30 +198,36 @@ if sys.version_info < python_min_version:
                                                                      python_min_version_str))
     sys.exit(-1)
 
-from setuptools import setup, Extension, find_packages
-from collections import defaultdict
-from distutils import core
-from distutils.core import Distribution
-from distutils.errors import DistutilsArgError
-import setuptools.command.build_ext
-import setuptools.command.install
 import distutils.command.clean
 import distutils.command.sdist
 import distutils.sysconfig
 import filecmp
-import shutil
-import subprocess
-import os
-import json
 import glob
 import importlib
+import json
+import os
+import shutil
+import subprocess
 import time
+from collections import defaultdict
+from distutils import core
+from distutils.core import Distribution
+from distutils.errors import DistutilsArgError
+
+import setuptools.command.build_ext
+import setuptools.command.install
+from setuptools import Extension, find_packages, setup
 
 from tools.build_pytorch_libs import build_caffe2
-from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
-                                     check_env_flag, build_type)
-from tools.setup_helpers.cmake import CMake
 from tools.generate_torch_version import get_torch_version
+from tools.setup_helpers.cmake import CMake
+from tools.setup_helpers.env import (
+    IS_DARWIN,
+    IS_LINUX,
+    IS_WINDOWS,
+    build_type,
+    check_env_flag
+)
 
 ################################################################################
 # Parameters parsed from environment

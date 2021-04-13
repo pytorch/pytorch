@@ -1,5 +1,7 @@
-from torch import nn
 from typing import List
+
+from torch import nn
+
 
 def partition_model(
         module: nn.Sequential,

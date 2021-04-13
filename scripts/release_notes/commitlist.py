@@ -1,12 +1,11 @@
 import argparse
-from common import run, topics
-from collections import defaultdict
-import os
 import csv
+import os
 import pprint
-from common import CommitDataCache
 import re
+from collections import defaultdict
 
+from common import CommitDataCache, run, topics
 
 """
 Example Usages

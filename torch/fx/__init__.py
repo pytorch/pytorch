@@ -82,10 +82,11 @@ Several example transformations can be found at the
 repository.
 '''
 
-from .graph_module import GraphModule
-from .symbolic_trace import symbolic_trace, Tracer, wrap
 from .graph import Graph
+from .graph_module import GraphModule
+from .interpreter import Interpreter as Interpreter
+from .interpreter import Transformer as Transformer
 from .node import Node, map_arg
 from .proxy import Proxy
-from .interpreter import Interpreter as Interpreter, Transformer as Transformer
 from .subgraph_rewriter import replace_pattern
+from .symbolic_trace import Tracer, symbolic_trace, wrap

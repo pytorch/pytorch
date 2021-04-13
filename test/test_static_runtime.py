@@ -1,11 +1,12 @@
-import numpy as np
-import torch
 import unittest
+from typing import Dict, Optional
 
+import numpy as np
+
+import torch
 from torch import nn
 from torch.testing._internal.common_utils import TestCase, run_tests
 
-from typing import Dict, Optional
 
 class StaticModule:
     def __init__(self, scripted):

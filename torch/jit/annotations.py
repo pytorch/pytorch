@@ -1,27 +1,58 @@
 import ast
+import builtins
 import enum
 import inspect
 import re
-import builtins
-import torch
 import warnings
-from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
-from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
-from ._state import _get_script_class
-
-from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
-    ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, StreamObjType, FutureType, EnumType
-
-
 from textwrap import dedent
-from torch._utils_internal import get_source_lines_and_file
 from typing import Type
 
+import torch
+from torch._C import (
+    AnyType,
+    BoolType,
+    ComplexType,
+    DeviceObjType,
+    DictType,
+    EnumType,
+    FloatType,
+    FutureType,
+    InterfaceType,
+    IntType,
+    ListType,
+    NoneType,
+    OptionalType,
+    StreamObjType,
+    StringType,
+    TensorType,
+    TupleType
+)
+from torch._utils_internal import get_source_lines_and_file
+
+from .._jit_internal import (  # type: ignore
+    Any,
+    BroadcastingList1,
+    BroadcastingList2,
+    BroadcastingList3,
+    Dict,
+    Future,
+    List,
+    Optional,
+    Tuple,
+    _qualified_name,
+    is_dict,
+    is_future,
+    is_ignored_fn,
+    is_list,
+    is_optional,
+    is_tuple
+)
+from ._state import _get_script_class
+
 if torch.distributed.rpc.is_available():
-    from .._jit_internal import RRef, is_rref
     from torch._C import RRefType
+
+    from .._jit_internal import RRef, is_rref
 
 
 class Module(object):

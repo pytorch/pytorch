@@ -7,7 +7,7 @@ from torch.package import (
     DeniedModuleError,
     EmptyMatchError,
     PackageExporter,
-    PackageImporter,
+    PackageImporter
 )
 from torch.testing._internal.common_utils import run_tests
 

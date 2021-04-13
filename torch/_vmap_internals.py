@@ -1,9 +1,14 @@
-import torch
 import functools
-from torch import Tensor
-from typing import Any, Callable, Optional, Tuple, Union, List
-from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten
 import warnings
+from typing import Any, Callable, List, Optional, Tuple, Union
+
+import torch
+from torch import Tensor
+from torch.utils._pytree import (
+    _broadcast_to_and_flatten,
+    tree_flatten,
+    tree_unflatten
+)
 
 in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]

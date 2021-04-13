@@ -1,13 +1,26 @@
-from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
-                                 NativeFunctionsGroup, OptionalType,
-                                 SelfArgument, TensorOptionsArguments, Type,
-                                 assert_never)
+from typing import List, Union
 
-from tools.codegen.api.types import (ArgName, BaseCType, Binding,
-                                     ConstRefCType, CType, OptionalCType)
 from tools.codegen.api import cpp
-
-from typing import Union, List
+from tools.codegen.api.types import (
+    ArgName,
+    BaseCType,
+    Binding,
+    ConstRefCType,
+    CType,
+    OptionalCType
+)
+from tools.codegen.model import (
+    Argument,
+    BaseTy,
+    BaseType,
+    ListType,
+    NativeFunctionsGroup,
+    OptionalType,
+    SelfArgument,
+    TensorOptionsArguments,
+    Type,
+    assert_never
+)
 
 # This file describes the translation of JIT schema to the structured functions API.
 # This is similar to native API, but a number of historical problems with native

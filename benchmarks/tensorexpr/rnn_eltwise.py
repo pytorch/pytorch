@@ -1,5 +1,7 @@
-from . import benchmark
 import torch
+
+from . import benchmark
+
 
 class RNNEltwise(benchmark.Benchmark):
     def __init__(self, mode, device, dtype, b, hs):

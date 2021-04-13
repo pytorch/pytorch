@@ -1,50 +1,44 @@
+import operator
+import warnings
+from abc import ABC, abstractmethod
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
 import torch
-from torch.fx.graph import (
-    Node,
-)
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+from torch.fx.graph import Node
 from torch.quantization import (
     default_affine_fixed_qparams_fake_quant,
-    default_symmetric_fixed_qparams_fake_quant,
+    default_symmetric_fixed_qparams_fake_quant
 )
 
 from ..quantization_mappings import (
-    get_static_quant_module_class,
     get_dynamic_quant_module_class,
     get_quantized_operator,
+    get_static_quant_module_class
 )
 from ..utils import (
-    get_swapped_custom_module_class,
-    activation_is_statically_quantized,
     activation_is_int8_quantized,
-    weight_is_statically_quantized,
+    activation_is_statically_quantized,
     get_qconfig_dtypes,
+    get_swapped_custom_module_class,
+    weight_is_statically_quantized
 )
-
 from .pattern_utils import (
-    register_quant_pattern,
     mark_input_output_not_observed,
+    register_quant_pattern
 )
-
+from .quantization_types import QuantizerCls
 from .utils import (
     _parent_name,
     all_node_args_have_no_tensors,
-    quantize_node,
-    get_per_tensor_qparams,
-    get_linear_prepack_op_for_dtype,
     create_qparam_nodes,
-    get_qconv_prepack_op,
+    get_linear_prepack_op_for_dtype,
+    get_per_tensor_qparams,
     get_qconv_op,
+    get_qconv_prepack_op,
+    quantize_node
 )
-
-from .quantization_types import QuantizerCls
-
-from abc import ABC, abstractmethod
-import operator
-import warnings
-
-from typing import Any, Callable, Dict, Union, Optional, Tuple, List
 
 # -------------------------
 # Pattern Registrations

@@ -1,8 +1,9 @@
 import collections
 from typing import Any, Dict, List, Optional, Protocol, Tuple, Union, overload
 
-import numpy as np
 import google.protobuf.message
+import numpy as np
+
 import torch
 from caffe2.proto import caffe2_pb2
 

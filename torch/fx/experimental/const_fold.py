@@ -1,9 +1,9 @@
 import operator
-from typing import Dict, Set, List, Optional
+import re
+from typing import Dict, List, Optional, Set
 
 import torch.fx
 from torch.fx.passes.split_module import split_module
-import re
 
 
 def _make_tuple(x):

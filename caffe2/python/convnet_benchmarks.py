@@ -60,7 +60,7 @@ pass.
 
 import argparse
 
-from caffe2.python import workspace, brew, model_helper
+from caffe2.python import brew, model_helper, workspace
 
 
 def MLP(order, cudnn_ws):

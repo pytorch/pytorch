@@ -3,11 +3,12 @@
 
 
 
-from caffe2.python import core
-from hypothesis import given, settings
-import caffe2.python.hypothesis_test_util as hu
-
 import unittest
+
+from hypothesis import given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core
 
 
 class TestSoftplus(hu.HypothesisTestCase):

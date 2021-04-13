@@ -1,11 +1,11 @@
 import os
 import sys
+from collections import namedtuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
-from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS
-from collections import namedtuple
-from typing import List, Tuple, Optional, Dict
+from torch.testing._internal.jit_utils import JitTestCase
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

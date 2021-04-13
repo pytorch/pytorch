@@ -1,7 +1,9 @@
+from typing import List, Tuple
+
 from test_jit import JitTestCase
+
 from torch.testing._internal.common_utils import run_tests
 
-from typing import List, Tuple
 
 class TestScript(JitTestCase):
     def test_str_ops(self):

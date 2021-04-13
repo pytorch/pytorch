@@ -5,10 +5,11 @@
 
 
 
+import numpy as np
+
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
 from caffe2.python.layers.tags import Tags
-import numpy as np
 
 
 class BatchSigmoidCrossEntropyLoss(ModelLayer):

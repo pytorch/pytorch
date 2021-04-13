@@ -1,22 +1,36 @@
-import torch
+import math
+import random
+import unittest
+import warnings
+from functools import partial
+from itertools import combinations, permutations, product
+from typing import Dict, List
+
 import numpy as np
 
-import unittest
-import math
-from typing import Dict, List
-import random
-from functools import partial
-from itertools import product, combinations, permutations
-import warnings
-
+import torch
 from torch._six import inf, nan
-from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_SCIPY, slowTest, torch_to_numpy_dtype_dict,
-    IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
-    onlyOnCPUAndCUDA, onlyCUDA, expectedAlertNondeterministic, largeTensorTest,
-    precisionOverride)
+    dtypes,
+    dtypesIfCPU,
+    dtypesIfCUDA,
+    expectedAlertNondeterministic,
+    instantiate_device_type_tests,
+    largeTensorTest,
+    onlyCPU,
+    onlyCUDA,
+    onlyOnCPUAndCUDA,
+    precisionOverride
+)
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    TEST_SCIPY,
+    TestCase,
+    run_tests,
+    slowTest,
+    torch_to_numpy_dtype_dict
+)
+
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):

@@ -1,5 +1,3 @@
-from itertools import repeat, chain, product
-from typing import NamedTuple
 import collections
 import gc
 import io
@@ -10,23 +8,40 @@ import sys
 import tempfile
 import threading
 import unittest
+from itertools import chain, product, repeat
+from typing import NamedTuple
+
+from test_torch import AbstractTestCases
 
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
-from torch.nn.parallel import scatter_gather
-from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan
-
-from test_torch import AbstractTestCases
-
-from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
-    _compare_trilu_indices, _compare_large_trilu_indices
-from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
-    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
-    slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
+from torch.nn.parallel import scatter_gather
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
+from torch.testing._internal.common_methods_invocations import (
+    _compare_large_trilu_indices,
+    _compare_trilu_indices,
+    tri_large_tests_args,
+    tri_tests_args
+)
+from torch.testing._internal.common_utils import (
+    IS_REMOTE_GPU,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    NO_MULTIPROCESSING_SPAWN,
+    TEST_NUMPY,
+    TEST_WITH_ROCM,
+    TestCase,
+    freeze_rng_state,
+    load_tests,
+    run_tests,
+    skipCUDANonDefaultStreamIf,
+    skipIfRocm,
+    slowTest
+)
+from torch.utils.checkpoint import checkpoint_sequential
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

@@ -2,7 +2,6 @@ from collections import OrderedDict
 
 import cimodel.lib.miniutils as miniutils
 
-
 LIST_MARKER = "- "
 INDENTATION_WIDTH = 2
 

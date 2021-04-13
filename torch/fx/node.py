@@ -1,9 +1,21 @@
 # Nodes represent a definition of a value in our graph of operators.
-from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict, Set
-from .immutable_collections import immutable_dict, immutable_list
-import torch
 import builtins
 import types
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union
+)
+
+import torch
+
+from .immutable_collections import immutable_dict, immutable_list
 
 if TYPE_CHECKING:
     from .graph import Graph

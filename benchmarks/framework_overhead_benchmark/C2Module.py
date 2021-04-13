@@ -1,7 +1,7 @@
-from caffe2.python import workspace, core
 import numpy as np
-
 from utils import NUM_LOOP_ITERS
+
+from caffe2.python import core, workspace
 
 workspace.GlobalInit(['caffe2'])
 

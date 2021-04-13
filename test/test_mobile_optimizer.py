@@ -1,16 +1,19 @@
 import unittest
+
 import torch
-import torch.nn as nn
 import torch.backends.xnnpack
+import torch.nn as nn
 import torch.utils.bundled_inputs
+from torch._C import MobileOptimizerType
+from torch.nn import functional as F
+from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.jit_utils import get_forward, get_forward_graph
-from torch.utils.mobile_optimizer import (LintCode,
-                                          generate_mobile_module_lints,
-                                          optimize_for_mobile)
-from torch.nn import functional as F
-from torch._C import MobileOptimizerType
-from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.utils.mobile_optimizer import (
+    LintCode,
+    generate_mobile_module_lints,
+    optimize_for_mobile
+)
 
 try:
     import torchvision

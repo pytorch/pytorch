@@ -1,10 +1,10 @@
 import math
-from typing import TypeVar, Optional, Iterator
+from typing import Iterator, Optional, TypeVar
 
 import torch
-from . import Sampler, Dataset
 import torch.distributed as dist
 
+from . import Dataset, Sampler
 
 T_co = TypeVar('T_co', covariant=True)
 

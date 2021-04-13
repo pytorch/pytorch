@@ -8,6 +8,7 @@ import unittest
 import torch
 from caffe2.python import core, workspace
 
+
 # This is a standalone test that doesn't use test_util as we're testing
 # initialization and thus we should be the ones calling GlobalInit
 @unittest.skipIf(not workspace.has_cuda_support,

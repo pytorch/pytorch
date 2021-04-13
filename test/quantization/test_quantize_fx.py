@@ -1,87 +1,76 @@
-import torch
-import torch.nn.functional as F
-import torch.nn as nn
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
-import torch.multiprocessing as mp
-
-# graph mode quantization based on fx
-from torch.quantization.quantize_fx import (
-    prepare_fx,
-    convert_fx,
-    prepare_qat_fx,
-)
-
-from torch.quantization.fx.pattern_utils import (
-    is_match,
-    MatchAllNode,
-)
-
-from torch.quantization import (
-    QuantType,
-    QuantStub,
-    DeQuantStub,
-    QuantWrapper,
-    quant_type_to_str,
-    default_qconfig,
-    default_dynamic_qconfig,
-    default_qat_qconfig,
-    per_channel_dynamic_qconfig,
-    float16_dynamic_qconfig,
-    float16_static_qconfig,
-    float_qparams_weight_only_qconfig,
-    get_default_qconfig,
-    get_default_qat_qconfig,
-    fuse_modules,
-    prepare,
-    prepare_qat,
-    convert,
-    quantize_dynamic,
-    default_placeholder_observer,
-    PerChannelMinMaxObserver,
-    QConfigDynamic,
-    FixedQParamsFakeQuantize,
-)
-
-# test utils
-from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_quantization import (
-    QuantizationTestCase,
-    skipIfNoFBGEMM,
-    skip_if_no_torchvision,
-    train_one_epoch,
-    run_ddp,
-    test_only_eval_fn,
-    test_only_train_fn,
-)
-
-from torch.testing._internal.common_quantization import (
-    LinearModelWithSubmodule,
-    ResNetBase,
-    RNNDynamicModel,
-    RNNCellDynamicModel,
-)
-
-from torch.testing._internal.common_quantized import (
-    supported_qengines,
-    override_qengines,
-    override_quantized_engine,
-)
-
-from torch.testing._internal.common_utils import TemporaryFileName
-
-from torch.testing._internal.common_quantization import NodeSpec as ns
-
-from torch.testing import FileCheck
-
 import copy
+import io
 import itertools
 import operator
 import unittest
-import io
 from typing import Callable
+
+import torch
+import torch.multiprocessing as mp
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.quantized as nniq
+import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
+from torch.quantization import (
+    DeQuantStub,
+    FixedQParamsFakeQuantize,
+    PerChannelMinMaxObserver,
+    QConfigDynamic,
+    QuantStub,
+    QuantType,
+    QuantWrapper,
+    convert,
+    default_dynamic_qconfig,
+    default_placeholder_observer,
+    default_qat_qconfig,
+    default_qconfig,
+    float16_dynamic_qconfig,
+    float16_static_qconfig,
+    float_qparams_weight_only_qconfig,
+    fuse_modules,
+    get_default_qat_qconfig,
+    get_default_qconfig,
+    per_channel_dynamic_qconfig,
+    prepare,
+    prepare_qat,
+    quant_type_to_str,
+    quantize_dynamic
+)
+from torch.quantization.fx.pattern_utils import MatchAllNode, is_match
+# graph mode quantization based on fx
+from torch.quantization.quantize_fx import (
+    convert_fx,
+    prepare_fx,
+    prepare_qat_fx
+)
+from torch.testing import FileCheck
+# test utils
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_quantization import (
+    LinearModelWithSubmodule
+)
+from torch.testing._internal.common_quantization import NodeSpec as ns
+from torch.testing._internal.common_quantization import (
+    QuantizationTestCase,
+    ResNetBase,
+    RNNCellDynamicModel,
+    RNNDynamicModel,
+    run_ddp,
+    skip_if_no_torchvision,
+    skipIfNoFBGEMM,
+    test_only_eval_fn,
+    test_only_train_fn,
+    train_one_epoch
+)
+from torch.testing._internal.common_quantized import (
+    override_qengines,
+    override_quantized_engine,
+    supported_qengines
+)
+from torch.testing._internal.common_utils import TemporaryFileName
+
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -205,6 +194,7 @@ class TestFuseFx(QuantizationTestCase):
         # test eval mode
         m = M().eval()
         from torch.quantization.quantize_fx import fuse_fx
+
         # fuse_fx is a top level api and only supports eval mode
         m = fuse_fx(m)
         expected_nodes = [

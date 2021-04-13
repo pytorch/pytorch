@@ -1,7 +1,7 @@
 
 import operator_benchmark as op_bench
-import torch
 
+import torch
 
 """Microbenchmarks for quantized unary operators (point-wise and reduction)."""
 

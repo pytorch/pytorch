@@ -2,10 +2,7 @@ from io import BytesIO
 from textwrap import dedent
 
 import torch
-from torch.package import (
-    PackageExporter,
-    PackageImporter,
-)
+from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_utils import run_tests
 
 try:

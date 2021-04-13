@@ -1,6 +1,7 @@
 import torch
-import torch.nn.quantized._reference as nnqr
 import torch.nn.functional as F
+import torch.nn.quantized._reference as nnqr
+
 
 class LinearReLU(nnqr.Linear):
     def __init__(

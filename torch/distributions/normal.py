@@ -1,6 +1,5 @@
 import math
-from numbers import Real
-from numbers import Number
+from numbers import Number, Real
 
 import torch
 from torch.distributions import constraints

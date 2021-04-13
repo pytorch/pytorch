@@ -1,9 +1,12 @@
-import torch
 import functools
-import random
 import operator
-import numpy as np
+import random
 import time
+
+import numpy as np
+
+import torch
+
 
 # shim for torch.cuda.Event when running on cpu
 class Event(object):

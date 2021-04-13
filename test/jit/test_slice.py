@@ -1,8 +1,8 @@
 import os
 import sys
+from typing import List
 
 import torch
-from typing import List
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

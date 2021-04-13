@@ -1,7 +1,9 @@
+from typing import Any
+
 import torch
 import torch.fx
 from torch.fx.node import Node
-from typing import Any
+
 
 class ShapeProp(torch.fx.Interpreter):
     """

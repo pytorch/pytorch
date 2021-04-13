@@ -1,13 +1,21 @@
-import torch
-
 import math
 import random
 
-from torch.testing._internal.common_utils import \
-    (TestCase, make_tensor, run_tests, slowTest)
+import torch
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+    onlyCUDA,
+    onlyOnCPUAndCUDA
+)
+from torch.testing._internal.common_utils import (
+    TestCase,
+    make_tensor,
+    run_tests,
+    slowTest
+)
 from torch.testing._internal.framework_utils import calculate_shards
-from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
+
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):

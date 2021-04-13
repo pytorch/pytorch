@@ -6,36 +6,35 @@
 To run this, you will need to have Caffe2 installed as well.
 """
 import collections
-import sys
-import zipfile
 import itertools
+import sys
+import warnings
+import zipfile
 
+import numpy as np
+import onnx
 # When onnx is built against a version of protobuf that is older than
 # that which is vendored with caffe2, onnx will crash if caffe2's
 # vendored protobuf is loaded first. We can work around this by
 # importing onnx first, which will cause it to go out and pick up the
 # system protobuf.
 import onnx.backend
-from caffe2.python import core, workspace, rnn_cell, gru_cell
-from caffe2.python.model_helper import ModelHelper
-from caffe2.proto import caffe2_pb2
-import caffe2.python.utils
-import numpy as np
-import onnx
-from onnx import TensorProto
-import onnx.numpy_helper
 import onnx.defs
+import onnx.numpy_helper
 import onnx.optimizer
 import onnx.shape_inference
 import onnx.utils
+from onnx import TensorProto
 from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
 
-from caffe2.python.onnx.workspace import Workspace
-from caffe2.python.onnx.backend_rep import Caffe2Rep
-
 import caffe2.python._import_c_extension as C
+import caffe2.python.utils
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, gru_cell, rnn_cell, workspace
+from caffe2.python.model_helper import ModelHelper
+from caffe2.python.onnx.backend_rep import Caffe2Rep
+from caffe2.python.onnx.workspace import Workspace
 
-import warnings
 
 def force_unicode(s):
     try:

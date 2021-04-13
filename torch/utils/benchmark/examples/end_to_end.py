@@ -24,13 +24,13 @@ import queue
 import subprocess
 import tempfile
 import textwrap
+from typing import Dict, List, Tuple
 
 import numpy as np
-import torch
-from torch.utils.benchmark.op_fuzzers import unary
-from torch.utils.benchmark import Timer, Measurement
-from typing import Dict, Tuple, List
 
+import torch
+from torch.utils.benchmark import Measurement, Timer
+from torch.utils.benchmark.op_fuzzers import unary
 
 _MAIN, _SUBPROCESS = "main", "subprocess"
 

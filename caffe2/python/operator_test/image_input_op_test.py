@@ -4,31 +4,34 @@
 
 
 import unittest
+
 try:
     import cv2
     import lmdb
 except ImportError:
     pass  # Handled below
 
-from PIL import Image
-import numpy as np
-import shutil
 import io
+import shutil
 import sys
 import tempfile
+
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import Verbosity, given, settings
+from PIL import Image
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
 
 # TODO: This test does not test scaling because
 # the algorithms used by OpenCV in the C and Python
 # version seem to differ slightly. It does test
 # most other features
 
-from hypothesis import given, settings, Verbosity
-import hypothesis.strategies as st
 
-from caffe2.proto import caffe2_pb2
-import caffe2.python.hypothesis_test_util as hu
 
-from caffe2.python import workspace, core
 
 
 # Verification routines (applies transformations to image to

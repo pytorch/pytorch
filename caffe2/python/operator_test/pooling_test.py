@@ -2,15 +2,17 @@
 
 
 
-import numpy as np
-from hypothesis import assume, given, settings
-import hypothesis.strategies as st
 import os
 import unittest
 
-from caffe2.python import core, utils, workspace
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import assume, given, settings
+
 import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, utils, workspace
+
 
 class TestPooling(hu.HypothesisTestCase):
     # CUDNN does NOT support different padding values and we skip it

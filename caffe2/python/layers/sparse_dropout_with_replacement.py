@@ -4,10 +4,7 @@
 
 
 from caffe2.python import schema
-from caffe2.python.layers.layers import (
-    IdList,
-    ModelLayer,
-)
+from caffe2.python.layers.layers import IdList, ModelLayer
 
 # Model layer for implementing probabilistic replacement of elements in
 # IdLists.  Takes probabilities for train, eval and predict nets as input, as

@@ -30,10 +30,10 @@ in the same job) to make a collective decision.
 
 from .api import (  # noqa F401
     ElasticAgent,
+    RunResult,
     SimpleElasticAgent,
     Worker,
     WorkerGroup,
-    RunResult,
     WorkerSpec,
-    WorkerState,
+    WorkerState
 )

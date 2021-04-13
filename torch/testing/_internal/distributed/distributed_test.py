@@ -1,47 +1,53 @@
 import copy
-from collections import namedtuple
 import itertools
-import random
 import math
 import os
+import random
 import sys
-import time
 import tempfile
+import time
 import unittest
+from collections import namedtuple
 from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
-from typing import Union, NamedTuple
+from typing import NamedTuple, Union
 
 import torch
 import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
-from torch.distributed.algorithms.ddp_comm_hooks import quantization as quantization_hooks
-from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
-from torch.utils.data.distributed import DistributedSampler
-from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
-from torch.testing._internal.common_utils import FILE_SCHEMA
-from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
-    TEST_SKIPS,
-    initialize_temp_directories,
-    cleanup_temp_dir,
-    simple_sparse_reduce_tests,
-    skip_if_rocm,
-    skip_if_small_worldsize,
-    skip_if_lt_x_gpu,
-    skip_if_no_gpu,
-    require_n_gpus_for_nccl_backend,
-    requires_nccl_version,
-    captured_output,
-    with_nccl_blocking_wait,
-)
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
+from torch.distributed.algorithms.ddp_comm_hooks import \
+    default_hooks as default
+from torch.distributed.algorithms.ddp_comm_hooks import \
+    quantization as quantization_hooks
+from torch.distributed.distributed_c10d import (
+    AllreduceOptions,
+    GroupMember,
+    _get_default_group
+)
+from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
+from torch.testing._internal.common_distributed import (
+    TEST_SKIPS,
+    MultiProcessTestCase,
+    captured_output,
+    cleanup_temp_dir,
+    initialize_temp_directories,
+    require_n_gpus_for_nccl_backend,
+    requires_nccl_version,
+    simple_sparse_reduce_tests,
+    skip_if_lt_x_gpu,
+    skip_if_no_gpu,
+    skip_if_rocm,
+    skip_if_small_worldsize,
+    with_nccl_blocking_wait
+)
+from torch.testing._internal.common_utils import FILE_SCHEMA
+from torch.utils.data.distributed import DistributedSampler
 
 try:
     import torchvision

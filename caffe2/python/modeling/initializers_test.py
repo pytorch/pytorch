@@ -4,9 +4,12 @@
 
 
 import unittest
+
 from caffe2.python import brew, model_helper, workspace
 from caffe2.python.modeling.initializers import (
-        Initializer, PseudoFP16Initializer)
+    Initializer,
+    PseudoFP16Initializer
+)
 
 
 class InitializerTest(unittest.TestCase):

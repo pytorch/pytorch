@@ -1,9 +1,10 @@
 
 
 import numpy as np
-from caffe2.python import core, workspace
-from caffe2.quantization.server import dnnlowp_pybind11  # type: ignore[attr-defined]
 
+from caffe2.python import core, workspace
+from caffe2.quantization.server import \
+    dnnlowp_pybind11  # type: ignore[attr-defined]
 
 net = core.Net("test_net")
 

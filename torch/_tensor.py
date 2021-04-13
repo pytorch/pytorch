@@ -1,19 +1,27 @@
-from collections import OrderedDict
 import functools
-from numbers import Number
-from typing import Any, Dict, Optional, Tuple, Union
 import warnings
 import weakref
+from collections import OrderedDict
+from numbers import Number
+from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch._C as _C
-from torch._namedtensor_internals import (
-    update_names, check_serializing_named_tensor, resolve_ellipsis,
-    unzip_namedshape, single_ellipsis_index, is_ellipsis)
-from torch.overrides import (
-    has_torch_function, has_torch_function_unary, has_torch_function_variadic,
-    handle_torch_function)
 import torch.utils.hooks as hooks
+from torch._namedtensor_internals import (
+    check_serializing_named_tensor,
+    is_ellipsis,
+    resolve_ellipsis,
+    single_ellipsis_index,
+    unzip_namedshape,
+    update_names
+)
+from torch.overrides import (
+    handle_torch_function,
+    has_torch_function,
+    has_torch_function_unary,
+    has_torch_function_variadic
+)
 
 
 def _wrap_type_error_to_not_implemented(f):
@@ -98,7 +106,7 @@ class Tensor(torch._C._TensorBase):
         if type(self) is Tensor:
             return self._reduce_ex_internal(proto)
         relevant_args = (self,)
-        from torch.overrides import has_torch_function, handle_torch_function
+        from torch.overrides import handle_torch_function, has_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.__reduce_ex__, relevant_args, self, proto)
         func, args = self._reduce_ex_internal(proto)

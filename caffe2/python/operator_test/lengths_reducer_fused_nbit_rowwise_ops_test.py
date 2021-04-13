@@ -1,10 +1,11 @@
 
 
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, workspace
 from hypothesis import given
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, workspace
 
 
 class TestLengthsReducerOpsFusedNBitRowwise(hu.HypothesisTestCase):

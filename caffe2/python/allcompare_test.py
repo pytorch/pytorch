@@ -5,13 +5,13 @@
 
 
 
-from hypothesis import given, settings
-import hypothesis.strategies as st
+import shutil
+import tempfile
 from multiprocessing import Process
 
+import hypothesis.strategies as st
 import numpy as np
-import tempfile
-import shutil
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
 
@@ -28,9 +28,9 @@ class TemporaryDirectory:
 
 
 def allcompare_process(filestore_dir, process_id, data, num_procs):
-    from caffe2.python import core, data_parallel_model, workspace, dyndep
-    from caffe2.python.model_helper import ModelHelper
     from caffe2.proto import caffe2_pb2
+    from caffe2.python import core, data_parallel_model, dyndep, workspace
+    from caffe2.python.model_helper import ModelHelper
     dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 
     workspace.RunOperatorOnce(

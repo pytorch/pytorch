@@ -3,15 +3,15 @@
 
 
 
-import numpy as np
-
-from hypothesis import given, settings
-import hypothesis.strategies as st
 import unittest
 
-from caffe2.python import core
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given, settings
+
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python import core
 
 
 class TestNumpyTile(serial.SerializedTestCase):

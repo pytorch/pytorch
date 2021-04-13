@@ -1,27 +1,12 @@
-from typing import Dict, Any
+from typing import Any, Callable, Dict, Tuple
 
-from torch.fx import (  # type: ignore
-    GraphModule,
-    Node,
-    map_arg
-)
-
+from torch.fx import GraphModule, Node, map_arg  # type: ignore
 from torch.fx.graph import Graph
 
-from ..utils import (
-    get_combined_dict
-)
-
-from .pattern_utils import (
-    is_match,
-    get_default_fusion_patterns,
-)
-
+from ..utils import get_combined_dict
 from .fusion_patterns import *  # noqa: F401,F403
-
+from .pattern_utils import get_default_fusion_patterns, is_match
 from .quantization_types import Pattern
-
-from typing import Callable, Tuple
 
 
 class Fuser:

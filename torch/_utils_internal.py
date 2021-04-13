@@ -1,6 +1,6 @@
 
-import os
 import inspect
+import os
 import sys
 import tempfile
 

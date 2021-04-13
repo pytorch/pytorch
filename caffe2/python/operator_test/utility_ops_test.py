@@ -3,14 +3,16 @@
 
 
 
-from caffe2.python import core, workspace
-from hypothesis import assume, given, settings
-from caffe2.proto import caffe2_pb2
-import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
+import random
+
 import hypothesis.strategies as st
 import numpy as np
-import random
+from hypothesis import assume, given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
 
 
 class TestUtilityOps(serial.SerializedTestCase):

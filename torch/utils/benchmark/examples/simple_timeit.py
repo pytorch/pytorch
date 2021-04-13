@@ -4,7 +4,6 @@ $ python -m examples.simple_timeit
 """
 
 import torch
-
 import torch.utils.benchmark as benchmark_utils
 
 

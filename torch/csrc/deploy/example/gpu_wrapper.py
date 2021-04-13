@@ -1,6 +1,8 @@
 # used by the benchmarking program to wrap cpu models for GPU use
-import torch
 from copy import deepcopy
+
+import torch
+
 
 def to_device(i, d):
     if isinstance(i, torch.Tensor):
@@ -54,6 +56,7 @@ if __name__ == '__main__':
             assert torch.allclose(a, b)
 
     import sys
+
     from torch.package import PackageImporter
     i = PackageImporter(sys.argv[1])
     torch.version.interp = 0

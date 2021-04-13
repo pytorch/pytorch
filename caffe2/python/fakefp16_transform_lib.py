@@ -6,6 +6,7 @@
 import caffe2.python._import_c_extension as C
 from caffe2.proto.caffe2_pb2 import NetDef
 
+
 def fakeFp16FuseOps(net : NetDef) -> NetDef:
     net_str = net.SerializeToString()
 

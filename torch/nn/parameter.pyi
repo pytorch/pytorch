@@ -1,7 +1,9 @@
-import torch
-from .. import Tensor
-from typing import Tuple, Optional
 import builtins
+from typing import Optional, Tuple
+
+import torch
+
+from .. import Tensor
 
 class Parameter(Tensor):
     def __init__(self, data: Tensor=..., requires_grad: builtins.bool=...): ...

@@ -1,8 +1,10 @@
-from typing import Optional, Tuple, Union
+import math
 from numbers import Number
+from typing import Optional, Tuple, Union
+
 import torch
 from torch.utils.benchmark import FuzzedTensor
-import math
+
 
 class FuzzedSparseTensor(FuzzedTensor):
     def __init__(

@@ -1,10 +1,19 @@
-import torch
 from numbers import Number
+
+import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.transformed_distribution import TransformedDistribution
+from torch.distributions.transformed_distribution import (
+    TransformedDistribution
+)
 from torch.distributions.transforms import SigmoidTransform
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
+from torch.distributions.utils import (
+    broadcast_all,
+    clamp_probs,
+    lazy_property,
+    logits_to_probs,
+    probs_to_logits
+)
 
 
 class LogitRelaxedBernoulli(Distribution):

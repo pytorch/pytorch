@@ -1,11 +1,10 @@
 # The Tensor classes are added to this module by python_tensor.cpp
-from typing import Optional, Tuple, List, Union
+# A workaround to support both TorchScript and MyPy:
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
 
-# A workaround to support both TorchScript and MyPy:
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
     DimOrDims = Optional[Union[int, Tuple[int], List[int]]]

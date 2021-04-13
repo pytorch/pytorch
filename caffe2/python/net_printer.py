@@ -5,16 +5,18 @@
 
 
 
-from caffe2.proto.caffe2_pb2 import OperatorDef, NetDef
-from caffe2.python.checkpoint import Job
-from caffe2.python.core import Net, ExecutionStep, Plan
-from caffe2.python.task import Task, TaskGroup, WorkspaceType, TaskOutput
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import copy
-from future.utils import viewkeys
 from itertools import chain
+
+from future.utils import viewkeys
 from six import binary_type, text_type
+
+from caffe2.proto.caffe2_pb2 import NetDef, OperatorDef
+from caffe2.python.checkpoint import Job
+from caffe2.python.core import ExecutionStep, Net, Plan
+from caffe2.python.task import Task, TaskGroup, TaskOutput, WorkspaceType
 
 
 class Visitor(object):

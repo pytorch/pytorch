@@ -3,35 +3,28 @@
 
 
 
+import logging
+
 import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
 from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
-
-from caffe2.python import (
-    layer_model_instantiator,
-    core,
-    schema,
-    workspace,
-)
+from caffe2.python import core, layer_model_instantiator, schema, workspace
+from caffe2.python.layer_test_util import LayersTestCase, OpSpec
 from caffe2.python.layers.layers import (
     AccessedFeatures,
-    almost_equal_schemas,
-    get_key,
     IdList,
     IdScoreList,
     InstantiationContext,
+    almost_equal_schemas,
+    get_key,
     is_request_only_scalar,
-    set_request_only,
+    set_request_only
 )
 from caffe2.python.layers.tags import Tags
-from caffe2.python.layer_test_util import (
-    LayersTestCase,
-    OpSpec,
-)
-import logging
+
 logger = logging.getLogger(__name__)
 
 

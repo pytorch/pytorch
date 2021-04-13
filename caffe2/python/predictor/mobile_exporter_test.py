@@ -2,11 +2,12 @@
 
 
 
-from caffe2.python.test_util import TestCase
-from caffe2.python import workspace, brew
+import numpy as np
+
+from caffe2.python import brew, workspace
 from caffe2.python.model_helper import ModelHelper
 from caffe2.python.predictor import mobile_exporter
-import numpy as np
+from caffe2.python.test_util import TestCase
 
 
 class TestMobileExporter(TestCase):

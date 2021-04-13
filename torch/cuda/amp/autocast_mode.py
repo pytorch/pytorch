@@ -1,13 +1,16 @@
-import torch
+import collections
 import functools
 import warnings
-import collections
+
+import torch
+
 try:
     import numpy as np
     HAS_NUMPY = True
 except ModuleNotFoundError:
     HAS_NUMPY = False
 from torch._six import string_classes
+
 from .common import amp_definitely_not_available
 
 

@@ -10,6 +10,7 @@ python -m tools.code_analyzer.op_deps_processor \
 """
 
 import argparse
+
 import yaml
 
 from tools.codegen.code_template import CodeTemplate

@@ -5,8 +5,10 @@
 
 
 
-from caffe2.python import core, workspace
 from future.utils import viewitems, viewkeys
+
+from caffe2.python import core, workspace
+
 
 def recurrent_net(
         net, cell_net, inputs, initial_cell_inputs,

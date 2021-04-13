@@ -7,11 +7,10 @@ that opens libneuralnetworks.so with dlopen and finds the functions
 we need with dlsym.  We also generate a "check" wrapper that checks
 return values and throws C++ exceptions on errors.
 """
-import sys
-import re
 import pathlib
+import re
+import sys
 import textwrap
-
 
 PREFIX = """\
 /**

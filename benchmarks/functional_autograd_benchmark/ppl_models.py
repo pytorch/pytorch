@@ -1,8 +1,9 @@
-import torch
-from torch import Tensor
-import torch.distributions as dist
-
 from utils import GetterReturnType
+
+import torch
+import torch.distributions as dist
+from torch import Tensor
+
 
 def get_simple_regression(device: torch.device) -> GetterReturnType:
     N = 10

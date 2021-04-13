@@ -24,24 +24,23 @@ well. This can be done with
 Pulling will reinstalle the conda dependencies as well as the nightly binaries into
 the repo directory.
 """
+import contextlib
+import datetime
+import functools
+import glob
+import json
+import logging
 import os
 import re
+import shutil
+import subprocess
 import sys
-import json
-import glob
+import tempfile
 import time
 import uuid
-import shutil
-import logging
-import datetime
-import tempfile
-import functools
-import contextlib
-import subprocess
-from ast import literal_eval
 from argparse import ArgumentParser
-from typing import Dict, Optional, Iterator
-
+from ast import literal_eval
+from typing import Dict, Iterator, Optional
 
 LOGGER = None
 URL_FORMAT = "{base_url}/{platform}/{dist_name}.tar.bz2"

@@ -8,11 +8,11 @@
 
 
 import collections
+
 from future.utils import viewitems
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
-from caffe2.python import attention, core, rnn_cell, brew
-
+from caffe2.python import attention, brew, core, rnn_cell
 
 PAD_ID = 0
 PAD = '<PAD>'

@@ -4,12 +4,13 @@
 
 
 import unittest
-import numpy as np
+
 import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given, settings
+
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
-
-from hypothesis import given, settings
 from caffe2.python import core, workspace
 
 

@@ -9,7 +9,7 @@ from ..util.setting import (
     Option,
     Test,
     TestList,
-    TestType,
+    TestType
 )
 from ..util.utils import (
     clean_up,
@@ -17,7 +17,7 @@ from ..util.utils import (
     print_log,
     raise_no_test_found_exception,
     remove_file,
-    remove_folder,
+    remove_folder
 )
 from ..util.utils_init import add_arguments_utils, create_folders, get_options
 from .utils import (
@@ -25,9 +25,8 @@ from .utils import (
     detect_compiler_type,
     get_llvm_tool_path,
     get_oss_binary_folder,
-    get_pytorch_folder,
+    get_pytorch_folder
 )
-
 
 BLOCKED_PYTHON_TESTS = {
     "run_test.py",

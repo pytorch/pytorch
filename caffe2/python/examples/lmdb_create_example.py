@@ -6,11 +6,12 @@
 
 
 import argparse
-import numpy as np
 
 import lmdb
+import numpy as np
+
 from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace, model_helper
+from caffe2.python import model_helper, workspace
 
 '''
 Simple example to create an lmdb database of random image data and labels.

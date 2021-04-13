@@ -7,9 +7,9 @@ import tempfile
 import unittest
 
 import numpy as np
+
 from caffe2.proto import caffe2_pb2
 from caffe2.python import model_helper, workspace
-
 
 try:
     import lmdb

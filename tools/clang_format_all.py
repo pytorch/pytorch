@@ -9,10 +9,11 @@ and S3 bucket and verifies it against a precommited set of blessed binary hashes
 """
 import argparse
 import asyncio
-import re
 import os
+import re
 import sys
-from clang_format_utils import get_and_check_clang_format, CLANG_FORMAT_PATH
+
+from clang_format_utils import CLANG_FORMAT_PATH, get_and_check_clang_format
 
 # Allowlist of directories to check. All files that in that directory
 # (recursively) will be checked.

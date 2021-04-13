@@ -20,10 +20,13 @@ from torch.distributed.elastic.agent.server.api import (
     WorkerSpec,
     WorkerState,
     _get_fq_hostname,
-    _RoleInstanceInfo,
+    _RoleInstanceInfo
 )
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure
-from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
+from torch.distributed.elastic.rendezvous import (
+    RendezvousHandler,
+    RendezvousParameters
+)
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 
 

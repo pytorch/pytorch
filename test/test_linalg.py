@@ -1,31 +1,61 @@
 # -*- coding: utf-8 -*-
-import torch
+import itertools
+import math
+import os
+import random
+import subprocess
+import sys
+import unittest
+import warnings
+from functools import reduce
+from itertools import product
+from math import inf, isnan, nan
+from random import randrange
+
 import numpy as np
 
-import sys
-import subprocess
-import os
-import unittest
-import itertools
-import warnings
-import math
-from math import inf, nan, isnan
-import random
-from random import randrange
-from itertools import product
-from functools import reduce
-
-from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
-     TEST_WITH_ASAN, make_tensor, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
-     wrapDeterministicFlagAPITest, iter_indices, gradcheck, gradgradcheck, skipIfRocm)
-from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes,
-     onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
-     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
-     onlyCUDA, skipMeta, skipCUDAIfNoCusolver)
-from torch.testing import floating_and_complex_types, floating_types, all_types
-from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
+import torch
+from torch.testing import all_types, floating_and_complex_types, floating_types
+from torch.testing._internal.common_cuda import (
+    CUDA9,
+    CUDA11OrLater,
+    SM53OrLater,
+    tf32_on_and_off
+)
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    dtypesIfCUDA,
+    instantiate_device_type_tests,
+    onlyCPU,
+    onlyCUDA,
+    onlyOnCPUAndCUDA,
+    precisionOverride,
+    skipCPUIfNoLapack,
+    skipCUDAIf,
+    skipCUDAIfNoCusolver,
+    skipCUDAIfNoMagma,
+    skipCUDAIfNoMagmaAndNoCusolver,
+    skipCUDAIfRocm,
+    skipMeta
+)
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_MACOS,
+    IS_REMOTE_GPU,
+    IS_WINDOWS,
+    TEST_SCIPY,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TestCase,
+    gradcheck,
+    gradgradcheck,
+    iter_indices,
+    make_tensor,
+    run_tests,
+    skipIfRocm,
+    slowTest,
+    wrapDeterministicFlagAPITest
+)
 
 # Protects against includes accidentally setting the default dtype
 # NOTE: jit_metaprogramming_utils sets the default dtype to double!
@@ -122,7 +152,9 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_lstsq(self, device, dtype):
-        from torch.testing._internal.common_utils import random_well_conditioned_matrix
+        from torch.testing._internal.common_utils import (
+            random_well_conditioned_matrix
+        )
         if self.device_type == 'cpu':
             drivers = ('gels', 'gelsy', 'gelsd', 'gelss', None)
         else:
@@ -235,7 +267,9 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_lstsq_batch_broadcasting(self, device, dtype):
-        from torch.testing._internal.common_utils import random_well_conditioned_matrix
+        from torch.testing._internal.common_utils import (
+            random_well_conditioned_matrix
+        )
 
         def check_correctness(a, b):
             sol = torch.linalg.lstsq(a, b).solution
@@ -366,7 +400,9 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_pd_matrix
+        )
 
         def run_test(shape, batch, contiguous):
             A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
@@ -407,7 +443,9 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky_errors_and_warnings(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_pd_matrix
+        )
 
         # cholesky requires the input to be a square matrix or batch of square matrices
         A = torch.randn(2, 3, device=device, dtype=dtype)
@@ -487,7 +525,9 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_old_cholesky_batched_many_batches(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import (
+            random_symmetric_pd_matrix
+        )
 
         def cholesky_test_helper(n, batchsize, device, upper):
             A = random_symmetric_pd_matrix(n, batchsize, dtype=dtype, device=device)
@@ -511,7 +551,9 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_old_cholesky_batched(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_pd_matrix
+        )
 
         def cholesky_test_helper(n, batch_dims, upper):
             A = random_hermitian_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
@@ -528,7 +570,9 @@ class TestLinalg(TestCase):
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @tf32_on_and_off(0.01)
     def test_old_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_pd_matrix
+        )
 
         A = random_hermitian_pd_matrix(10, dtype=dtype, device=device)
 
@@ -756,7 +800,9 @@ class TestLinalg(TestCase):
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigh(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_matrix
+        )
 
         def run_test(shape, batch, uplo):
             matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
@@ -813,7 +859,9 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_eigh_errors_and_warnings(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_matrix
+        )
 
         # eigh requires a square matrix
         t = torch.randn(2, 3, device=device, dtype=dtype)
@@ -869,7 +917,9 @@ class TestLinalg(TestCase):
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigh_non_contiguous(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_matrix
+        )
 
         def run_test(matrix, uplo):
             self.assertFalse(matrix.is_contiguous())
@@ -902,7 +952,9 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float64, torch.complex128)
     def test_eigh_hermitian_grad(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_matrix
+        )
 
         def run_test(dims, uplo):
             x = random_hermitian_matrix(dims[-1], *dims[:-2]).requires_grad_()
@@ -918,7 +970,9 @@ class TestLinalg(TestCase):
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigvalsh(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_matrix
+        )
 
         def run_test(shape, batch, uplo):
             matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
@@ -982,7 +1036,9 @@ class TestLinalg(TestCase):
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigvalsh_non_contiguous(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_matrix
+        )
 
         def run_test(matrix, uplo):
             self.assertFalse(matrix.is_contiguous())
@@ -1946,7 +2002,9 @@ class TestLinalg(TestCase):
     @dtypes(torch.float64, torch.complex128)
     def test_eig_numpy(self, device, dtype):
         def run_test(shape, *, symmetric=False):
-            from torch.testing._internal.common_utils import random_symmetric_matrix
+            from torch.testing._internal.common_utils import (
+                random_symmetric_matrix
+            )
 
             if not dtype.is_complex and symmetric:
                 # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
@@ -1994,7 +2052,9 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     def test_eig_compare_backends(self, device, dtype):
         def run_test(shape, *, symmetric=False):
-            from torch.testing._internal.common_utils import random_symmetric_matrix
+            from torch.testing._internal.common_utils import (
+                random_symmetric_matrix
+            )
 
             if not dtype.is_complex and symmetric:
                 # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
@@ -2104,7 +2164,9 @@ class TestLinalg(TestCase):
     @dtypes(torch.float64, torch.complex128)
     def test_eigvals_numpy(self, device, dtype):
         def run_test(shape, *, symmetric=False):
-            from torch.testing._internal.common_utils import random_symmetric_matrix
+            from torch.testing._internal.common_utils import (
+                random_symmetric_matrix
+            )
 
             if not dtype.is_complex and symmetric:
                 # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
@@ -2149,7 +2211,9 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     def test_eigvals_compare_backends(self, device, dtype):
         def run_test(shape, *, symmetric=False):
-            from torch.testing._internal.common_utils import random_symmetric_matrix
+            from torch.testing._internal.common_utils import (
+                random_symmetric_matrix
+            )
 
             if not dtype.is_complex and symmetric:
                 # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
@@ -2549,7 +2613,10 @@ class TestLinalg(TestCase):
     @dtypes(torch.double)
     @skipCUDAIfRocm
     def test_svd_lowrank(self, device, dtype):
-        from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
+        from torch.testing._internal.common_utils import (
+            random_lowrank_matrix,
+            random_sparse_matrix
+        )
 
         def run_subtest(actual_rank, matrix_size, batches, device, svd_lowrank, **options):
             density = options.pop('density', 1)
@@ -2798,7 +2865,9 @@ class TestLinalg(TestCase):
             self.assertEqual(USV.S, np_s)
 
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_pd_matrix
+        )
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = random_hermitian_pd_matrix(*A_dims, dtype=dtype, device=device)
@@ -2841,7 +2910,10 @@ class TestLinalg(TestCase):
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        from torch.testing._internal.common_utils import (
+            random_hermitian_pd_matrix
+        )
 
         for upper in [True, False]:
             A = random_hermitian_pd_matrix(2, 2, dtype=dtype, device='cpu')
@@ -2875,7 +2947,10 @@ class TestLinalg(TestCase):
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_cholesky_solve_batched_broadcasting(self, device, dtype):
         from numpy.linalg import solve
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        from torch.testing._internal.common_utils import (
+            random_hermitian_pd_matrix
+        )
 
         def run_test(A_dims, b_dims, upper):
             A_matrix_size = A_dims[-1]
@@ -2957,7 +3032,9 @@ class TestLinalg(TestCase):
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     @skipCUDAIfRocm
     def test_inverse(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import (
+            random_fullrank_matrix_distinct_singular_value
+        )
 
         def run_test(torch_inverse, matrix, batches, n):
             matrix_inverse = torch_inverse(matrix)
@@ -3022,7 +3099,9 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3,
                         torch.float64: 1e-5, torch.complex128: 1e-5})
     def test_inverse_many_batches(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import (
+            random_fullrank_matrix_distinct_singular_value
+        )
 
         def test_inverse_many_batches_helper(torch_inverse, b, n):
             matrices = random_fullrank_matrix_distinct_singular_value(b, n, n, dtype=dtype).to(device)
@@ -3075,7 +3154,9 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinv(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_pd_matrix
+        )
 
         def run_test_main(A, hermitian):
             # Testing against definition for pseudo-inverses
@@ -3233,7 +3314,9 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
     def solve_test_helper(self, A_dims, b_dims, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import (
+            random_fullrank_matrix_distinct_singular_value
+        )
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype).to(device)
@@ -3293,7 +3376,9 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
     @skipCUDAIfRocm
     def test_solve_batched_non_contiguous(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import (
+            random_fullrank_matrix_distinct_singular_value
+        )
         A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
         b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
         self.assertFalse(A.is_contiguous())
@@ -3403,7 +3488,10 @@ class TestLinalg(TestCase):
     @skipCUDAIfRocm
     def test_old_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        from torch.testing._internal.common_utils import (
+            random_fullrank_matrix_distinct_singular_value
+        )
         A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
         b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
         x, _ = torch.solve(b, A)
@@ -5221,9 +5309,12 @@ class TestLinalg(TestCase):
         self._test_lobpcg_method(device, dtype, 'ortho')
 
     def _test_lobpcg_method(self, device, dtype, method):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix
         from torch._linalg_utils import matmul, qform
         from torch._lobpcg import lobpcg
+        from torch.testing._internal.common_utils import (
+            random_sparse_pd_matrix,
+            random_symmetric_pd_matrix
+        )
 
         def test_tracker(worker):
             k = worker.iparams['k']
@@ -5339,8 +5430,10 @@ class TestLinalg(TestCase):
     @onlyCPU
     @dtypes(torch.double)
     def test_lobpcg_torchscript(self, device, dtype):
-        from torch.testing._internal.common_utils import random_sparse_pd_matrix
         from torch._linalg_utils import matmul as mm
+        from torch.testing._internal.common_utils import (
+            random_sparse_pd_matrix
+        )
 
         lobpcg = torch.jit.script(torch.lobpcg)
 
@@ -5360,10 +5453,14 @@ class TestLinalg(TestCase):
         """Compare torch and scipy.sparse.linalg implementations of lobpcg
         """
         import time
-        from torch.testing._internal.common_utils import random_sparse_pd_matrix
-        from torch._linalg_utils import matmul as mm
-        from scipy.sparse.linalg import lobpcg as scipy_lobpcg
+
         import scipy.sparse
+        from scipy.sparse.linalg import lobpcg as scipy_lobpcg
+
+        from torch._linalg_utils import matmul as mm
+        from torch.testing._internal.common_utils import (
+            random_sparse_pd_matrix
+        )
 
         def toscipy(A):
             if A.layout == torch.sparse_coo:
@@ -6141,7 +6238,8 @@ else:
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinverse(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
+        from torch.testing._internal.common_utils import \
+            random_fullrank_matrix_distinct_singular_value as fullrank
 
         def run_test(M):
             # Testing against definition for pseudo-inverses
@@ -6194,7 +6292,9 @@ else:
     @skipCUDAIfNoMagmaAndNoCusolver
     @dtypes(torch.double, torch.cdouble)
     def test_matrix_power_negative(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import (
+            random_fullrank_matrix_distinct_singular_value
+        )
 
         def check(*size):
             t = random_fullrank_matrix_distinct_singular_value(*size, dtype=dtype, device=device)
@@ -6516,8 +6616,12 @@ else:
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_slogdet(self, device, dtype):
-        from torch.testing._internal.common_utils import (random_hermitian_matrix, random_hermitian_psd_matrix,
-                                                          random_hermitian_pd_matrix, random_square_matrix_of_rank)
+        from torch.testing._internal.common_utils import (
+            random_hermitian_matrix,
+            random_hermitian_pd_matrix,
+            random_hermitian_psd_matrix,
+            random_square_matrix_of_rank
+        )
 
         # mat_chars denotes matrix characteristics
         # possible values are: hermitian, hermitian_psd, hermitian_pd, singular, non_singular
@@ -6788,8 +6892,12 @@ else:
     @dtypes(torch.double)
     @skipCUDAIfRocm
     def test_det_logdet_slogdet_batched(self, device, dtype):
-        from torch.testing._internal.common_utils import (random_symmetric_matrix, random_symmetric_psd_matrix,
-                                                          random_symmetric_pd_matrix, random_square_matrix_of_rank)
+        from torch.testing._internal.common_utils import (
+            random_square_matrix_of_rank,
+            random_symmetric_matrix,
+            random_symmetric_pd_matrix,
+            random_symmetric_psd_matrix
+        )
 
         # mat_chars denotes matrix characteristics
         # possible values are: sym, sym_psd, sym_pd, sing, non_sym
@@ -6840,7 +6948,9 @@ else:
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky_inverse(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_pd_matrix
+        )
 
         def run_test(shape, batch, upper, contiguous):
             A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
@@ -7074,7 +7184,10 @@ else:
     @skipCUDAIfRocm
     def test_lu_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        from torch.testing._internal.common_utils import (
+            random_fullrank_matrix_distinct_singular_value
+        )
 
         A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device='cpu')
         b = torch.randn(2, 2, 2, dtype=dtype, device='cpu')
@@ -7087,7 +7200,9 @@ else:
         self.assertEqual(x, x_exp)
 
     def lu_solve_test_helper(self, A_dims, b_dims, pivot, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import (
+            random_fullrank_matrix_distinct_singular_value
+        )
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype).to(device)
@@ -7163,7 +7278,10 @@ else:
     @skipCUDAIfRocm
     def test_lu_solve_batched_broadcasting(self, device, dtype):
         from numpy.linalg import solve
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        from torch.testing._internal.common_utils import (
+            random_fullrank_matrix_distinct_singular_value
+        )
 
         def run_test(A_dims, b_dims, pivot=True):
             A_matrix_size = A_dims[-1]
@@ -7215,7 +7333,9 @@ else:
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_symeig(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_matrix
+        )
 
         def run_test(dims, eigenvectors, upper):
             x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
@@ -7266,7 +7386,9 @@ else:
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_symeig_out_errors_and_warnings(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
+        from torch.testing._internal.common_utils import (
+            random_hermitian_matrix
+        )
 
         # if non-empty out tensor with wrong shape is passed a warning is given
         a = random_hermitian_matrix(3, dtype=dtype, device=device)
@@ -7307,7 +7429,10 @@ else:
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_pca_lowrank(self, device):
-        from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
+        from torch.testing._internal.common_utils import (
+            random_lowrank_matrix,
+            random_sparse_matrix
+        )
 
         dtype = torch.double
 

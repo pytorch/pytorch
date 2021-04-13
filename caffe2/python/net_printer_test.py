@@ -3,11 +3,12 @@
 
 
 
+import unittest
+
 from caffe2.python import net_printer
 from caffe2.python.checkpoint import Job
 from caffe2.python.net_builder import ops
-from caffe2.python.task import Task, final_output, WorkspaceType
-import unittest
+from caffe2.python.task import Task, WorkspaceType, final_output
 
 
 def example_loop():

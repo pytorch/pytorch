@@ -1,10 +1,19 @@
 r"""Importing this file includes common utility methods for checking quantized
 tensors and modules.
 """
-import numpy as np
-import torch
 from contextlib import contextmanager
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_TSAN, TEST_WITH_UBSAN, IS_PPC, IS_MACOS, IS_WINDOWS
+
+import numpy as np
+
+import torch
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    IS_PPC,
+    IS_WINDOWS,
+    TEST_WITH_ASAN,
+    TEST_WITH_TSAN,
+    TEST_WITH_UBSAN
+)
 
 supported_qengines = torch.backends.quantized.supported_engines
 supported_qengines.remove('none')

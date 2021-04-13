@@ -6,8 +6,13 @@ import sys
 import time
 import unittest
 
-from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
 import torch.multiprocessing as mp
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    NO_MULTIPROCESSING_SPAWN,
+    TestCase,
+    run_tests
+)
 
 
 def test_success_func(i):

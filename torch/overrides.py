@@ -25,12 +25,15 @@ import __future__
 import collections
 import functools
 import types
-from typing import Dict, Set, List, Any, Callable, Iterable, Type
+from typing import Any, Callable, Dict, Iterable, List, Set, Type
 
 import torch
 from torch._C import (
-    _has_torch_function, _has_torch_function_unary,
-    _has_torch_function_variadic, _add_docstr)
+    _add_docstr,
+    _has_torch_function,
+    _has_torch_function_unary,
+    _has_torch_function_variadic
+)
 
 __all__ = [
     "get_ignored_functions",

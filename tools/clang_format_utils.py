@@ -1,10 +1,10 @@
-import platform
-import sys
-import stat
 import hashlib
 import os
-import urllib.request
+import platform
+import stat
+import sys
 import urllib.error
+import urllib.request
 
 # String representing the host platform (e.g. Linux, Darwin).
 HOST_PLATFORM = platform.system()

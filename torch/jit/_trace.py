@@ -7,23 +7,25 @@ This module contains functionality to support the JIT's tracing frontend, notabl
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
-import torch
-
-import copy
-import os
 import contextlib
+import copy
 import functools
-import warnings
 import inspect
+import os
 import re
+import warnings
 from typing import Any, Dict, List, Optional, Set
 
-from torch.jit._state import _python_cu, _enabled
-from torch.jit._script import ScriptModule, _CachedForward, script
-from torch._jit_internal import _qualified_name, is_scripting, get_callable_argument_names
+import torch
+from torch._jit_internal import (
+    _qualified_name,
+    get_callable_argument_names,
+    is_scripting
+)
 from torch.autograd import function
+from torch.jit._script import ScriptModule, _CachedForward, script
+from torch.jit._state import _enabled, _python_cu
 from torch.nn import Module
-
 from torch.testing._core import _get_default_tolerance
 
 _flatten = torch._C._jit_flatten

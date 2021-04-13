@@ -1,7 +1,7 @@
 """Intermediate layer between `Timer` and `valgrind`."""
 import collections
-import enum
 import dataclasses
+import enum
 import itertools as it
 import os
 import pickle
@@ -12,13 +12,23 @@ import sys
 import tempfile
 import textwrap
 from typing import (
-    cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple,
-    Optional, Tuple, Union, TYPE_CHECKING)
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    DefaultDict,
+    Dict,
+    Generator,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+    Union,
+    cast
+)
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
 from torch.utils.benchmark.utils._stubs import CallgrindModuleType
-
 
 __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
 

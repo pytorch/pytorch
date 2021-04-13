@@ -1,18 +1,21 @@
 # -*- coding: utf-8 -*-
 
-import sys
 import os
+import sys
 
 # torch
 import torch
 import torch.nn as nn
+import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic.quantized as nniq
-
+from torch.testing._internal.common_quantized import (
+    override_qengines,
+    qengine_is_fbgemm
+)
 # Testing utils
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_quantized import override_qengines, qengine_is_fbgemm
+
 
 def remove_prefix(text, prefix):
     if text.startswith(prefix):

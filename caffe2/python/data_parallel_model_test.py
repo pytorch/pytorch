@@ -2,23 +2,32 @@
 
 
 
-from future.utils import viewkeys
-from multiprocessing import Process, Queue
-import numpy as np
 import os
 import shutil
 import tempfile
-import unittest
 import time
-from mock import Mock
-from hypothesis import assume, given, settings
+import unittest
+from multiprocessing import Process, Queue
+
 import hypothesis.strategies as st
+import numpy as np
+from future.utils import viewkeys
+from hypothesis import assume, given, settings
+from mock import Mock
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import brew, core, cnn, data_parallel_model, dyndep, \
-    model_helper, optimizer, rnn_cell, workspace
+from caffe2.python import (
+    brew,
+    cnn,
+    core,
+    data_parallel_model,
+    dyndep,
+    model_helper,
+    optimizer,
+    rnn_cell,
+    workspace
+)
 from caffe2.python.test_util import TestCase
-
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 

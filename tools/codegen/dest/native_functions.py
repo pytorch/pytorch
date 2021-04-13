@@ -1,12 +1,16 @@
-from typing import List, Union, Set, Any
+from typing import Any, List, Set, Union
 
-from tools.codegen.context import with_native_function
-from tools.codegen.utils import concatMap
-from tools.codegen.model import (NativeFunction, NativeFunctionsGroup,
-                                 is_structured_dispatch_key)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.native as native
 import tools.codegen.api.structured as structured
+from tools.codegen.context import with_native_function
+from tools.codegen.model import (
+    NativeFunction,
+    NativeFunctionsGroup,
+    is_structured_dispatch_key
+)
+from tools.codegen.utils import concatMap
+
 
 @with_native_function
 def gen_unstructured(f: NativeFunction) -> List[str]:

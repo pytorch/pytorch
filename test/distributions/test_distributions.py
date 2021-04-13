@@ -36,33 +36,79 @@ import torch
 torch.set_default_dtype(torch.double)
 
 from torch._six import inf
-from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests, \
-    gradcheck
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
 from torch.autograd.functional import jacobian
-from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
-                                 Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
-                                 Distribution, Exponential, ExponentialFamily,
-                                 FisherSnedecor, Gamma, Geometric, Gumbel,
-                                 HalfCauchy, HalfNormal, Independent, Kumaraswamy,
-                                 LKJCholesky, Laplace, LogisticNormal,
-                                 LogNormal, LowRankMultivariateNormal,
-                                 MixtureSameFamily, Multinomial, MultivariateNormal,
-                                 NegativeBinomial, Normal,
-                                 OneHotCategorical, OneHotCategoricalStraightThrough,
-                                 Pareto, Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
-                                 StudentT, TransformedDistribution, Uniform,
-                                 VonMises, Weibull, constraints, kl_divergence)
+from torch.distributions import (
+    Bernoulli,
+    Beta,
+    Binomial,
+    Categorical,
+    Cauchy,
+    Chi2,
+    ContinuousBernoulli,
+    Dirichlet,
+    Distribution,
+    Exponential,
+    ExponentialFamily,
+    FisherSnedecor,
+    Gamma,
+    Geometric,
+    Gumbel,
+    HalfCauchy,
+    HalfNormal,
+    Independent,
+    Kumaraswamy,
+    Laplace,
+    LKJCholesky,
+    LogisticNormal,
+    LogNormal,
+    LowRankMultivariateNormal,
+    MixtureSameFamily,
+    Multinomial,
+    MultivariateNormal,
+    NegativeBinomial,
+    Normal,
+    OneHotCategorical,
+    OneHotCategoricalStraightThrough,
+    Pareto,
+    Poisson,
+    RelaxedBernoulli,
+    RelaxedOneHotCategorical,
+    StudentT,
+    TransformedDistribution,
+    Uniform,
+    VonMises,
+    Weibull,
+    constraints,
+    kl_divergence
+)
 from torch.distributions.constraint_registry import transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.kl import _kl_expfamily_expfamily
-from torch.distributions.transforms import (AffineTransform, CatTransform, ExpTransform,
-                                            StackTransform, identity_transform)
-from torch.distributions.utils import (probs_to_logits, lazy_property, tril_matrix_to_vec,
-                                       vec_to_tril_matrix)
+from torch.distributions.transforms import (
+    AffineTransform,
+    CatTransform,
+    ExpTransform,
+    StackTransform,
+    identity_transform
+)
+from torch.distributions.utils import (
+    lazy_property,
+    probs_to_logits,
+    tril_matrix_to_vec,
+    vec_to_tril_matrix
+)
 from torch.nn.functional import softmax
+from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import (
+    TEST_WITH_UBSAN,
+    TestCase,
+    gradcheck,
+    load_tests,
+    run_tests,
+    set_rng_seed
+)
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -71,8 +117,8 @@ load_tests = load_tests
 TEST_NUMPY = True
 try:
     import numpy as np
-    import scipy.stats
     import scipy.special
+    import scipy.stats
 except ImportError:
     TEST_NUMPY = False
 

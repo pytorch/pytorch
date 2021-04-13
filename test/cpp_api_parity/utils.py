@@ -1,12 +1,12 @@
-from collections import namedtuple
-import unittest
 import os
-import warnings
 import shutil
+import unittest
+import warnings
+from collections import namedtuple
 
 import torch
-import torch.utils.cpp_extension
 import torch.testing._internal.common_nn as common_nn
+import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 # Note that this namedtuple is for C++ parity test mechanism's internal use.

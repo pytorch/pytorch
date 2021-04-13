@@ -1,25 +1,51 @@
-import torch
+import math
+import random
+import sys
+import unittest
+import warnings
+from itertools import (
+    combinations,
+    combinations_with_replacement,
+    permutations,
+    product
+)
+
 import numpy as np
 
-import sys
-import math
-import warnings
-import unittest
-from itertools import product, combinations, combinations_with_replacement, permutations
-import random
-
-from torch.testing._internal.common_utils import (
-    TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
-    torch_to_numpy_dtype_dict, slowTest, TEST_SCIPY, IS_MACOS, IS_PPC,
-    IS_WINDOWS)
+import torch
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
-    onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta)
-
+    deviceCountAtLeast,
+    dtypes,
+    dtypesIfCPU,
+    dtypesIfCUDA,
+    instantiate_device_type_tests,
+    largeTensorTest,
+    onlyCPU,
+    onlyCUDA,
+    onlyOnCPUAndCUDA,
+    precisionOverride,
+    skipCPUIf,
+    skipMeta
+)
 # TODO: refactor tri_tests_args, _compare_trilu_indices, run_additional_tri_tests
 from torch.testing._internal.common_methods_invocations import (
-    tri_tests_args, _compare_trilu_indices, run_additional_tri_tests)
+    _compare_trilu_indices,
+    run_additional_tri_tests,
+    tri_tests_args
+)
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    IS_PPC,
+    IS_WINDOWS,
+    TEST_SCIPY,
+    TEST_WITH_ROCM,
+    TestCase,
+    do_test_empty_full,
+    run_tests,
+    slowTest,
+    suppress_warnings,
+    torch_to_numpy_dtype_dict
+)
 
 
 # TODO: replace with make_tensor

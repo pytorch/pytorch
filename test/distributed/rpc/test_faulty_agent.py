@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+
 import torch.distributed as dist
 
 if not dist.is_available():
@@ -9,14 +10,13 @@ if not dist.is_available():
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
-    FaultyRpcAgentTestFixture,
+    FaultyRpcAgentTestFixture
 )
 from torch.testing._internal.distributed.rpc_utils import (
     FAULTY_AGENT_TESTS,
     MultiProcess,
-    generate_tests,
+    generate_tests
 )
-
 
 globals().update(
     generate_tests(

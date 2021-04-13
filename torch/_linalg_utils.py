@@ -2,10 +2,10 @@
 
 """
 
-from torch import Tensor
-import torch
-
 from typing import Optional, Tuple
+
+import torch
+from torch import Tensor
 
 
 def is_sparse(A):

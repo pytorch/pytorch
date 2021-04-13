@@ -1,10 +1,10 @@
-from tools.codegen.utils import S, T, context
-from tools.codegen.model import NativeFunction, NativeFunctionsGroup
-import tools.codegen.local as local
-
-import functools
-from typing import TypeVar, Union, Iterator, Callable
 import contextlib
+import functools
+from typing import Callable, Iterator, TypeVar, Union
+
+import tools.codegen.local as local
+from tools.codegen.model import NativeFunction, NativeFunctionsGroup
+from tools.codegen.utils import S, T, context
 
 # Helper functions for defining generators on things in the model
 

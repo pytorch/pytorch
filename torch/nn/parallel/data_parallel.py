@@ -1,17 +1,20 @@
 import operator
-import torch
 import warnings
 from itertools import chain
-from ..modules import Module
-from .scatter_gather import scatter_kwargs, gather
-from .replicate import replicate
-from .parallel_apply import parallel_apply
+
+import torch
 from torch._utils import (
     _get_all_device_indices,
     _get_available_device_type,
     _get_device_index,
     _get_devices_properties
 )
+
+from ..modules import Module
+from .parallel_apply import parallel_apply
+from .replicate import replicate
+from .scatter_gather import gather, scatter_kwargs
+
 
 def _check_balance(device_ids):
     imbalance_warn = """

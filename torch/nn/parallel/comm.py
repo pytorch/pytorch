@@ -1,9 +1,17 @@
 import warnings
-import torch
-from torch.cuda import nccl
-from torch._utils import _take_tensors, _flatten_dense_tensors, \
-    _unflatten_dense_tensors, _reorder_tensors_as, _get_device_index, _handle_complex
 from typing import List
+
+import torch
+from torch._utils import (
+    _flatten_dense_tensors,
+    _get_device_index,
+    _handle_complex,
+    _reorder_tensors_as,
+    _take_tensors,
+    _unflatten_dense_tensors
+)
+from torch.cuda import nccl
+
 
 def broadcast(tensor, devices=None, *, out=None):
     r"""Broadcasts a tensor to specified GPU devices.

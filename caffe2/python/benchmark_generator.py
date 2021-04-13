@@ -4,15 +4,14 @@
 
 
 
-import string
-
 import argparse
+import string
 
 import numpy as np
 
+from caffe2.python import brew, core, utils, workspace
 from caffe2.python.model_helper import ModelHelper
 from caffe2.python.predictor import mobile_exporter
-from caffe2.python import core, workspace, brew, utils
 
 
 def parse_kwarg(kwarg_str):

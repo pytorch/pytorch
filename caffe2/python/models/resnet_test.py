@@ -3,13 +3,14 @@
 
 
 
-import numpy as np
-
-import caffe2.python.models.resnet as resnet
 import hypothesis.strategies as st
+import numpy as np
 from hypothesis import given, settings
+
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.models.imagenet_trainer_test_utils as utils
+import caffe2.python.models.resnet as resnet
+
 
 class ResnetMemongerTest(hu.HypothesisTestCase):
 
@@ -50,8 +51,8 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
 
 
 if __name__ == "__main__":
-    import unittest
     import random
+    import unittest
     random.seed(2603)
     # pyre-fixme[10]: Name `workspace` is used but not defined in the current scope
     workspace.GlobalInit([

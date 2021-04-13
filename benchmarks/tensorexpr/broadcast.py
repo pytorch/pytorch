@@ -1,7 +1,10 @@
-from . import benchmark
 import itertools
+
 import numpy as np
+
 import torch
+
+from . import benchmark
 
 
 class BroadcastMulBench(benchmark.Benchmark):

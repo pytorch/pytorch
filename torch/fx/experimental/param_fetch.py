@@ -1,7 +1,8 @@
-from torch.fx.graph_module import GraphModule
 from typing import Any, Callable, Dict, List, Tuple, Type
+
 import torch
 import torch.nn as nn
+from torch.fx.graph_module import GraphModule
 
 
 # Matching method matches the attribute name of current version to the attribute name of `target_version`

@@ -4,9 +4,16 @@ import warnings
 import torch
 import torch.nn as nn
 from torch import Tensor  # noqa: F401
-from torch._jit_internal import Tuple, Optional, List, Union, Dict  # noqa: F401
-from torch.nn.utils.rnn import PackedSequence
+from torch._jit_internal import (  # noqa: F401
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Union
+)
 from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.nn.utils.rnn import PackedSequence
+
 
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)

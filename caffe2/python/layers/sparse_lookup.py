@@ -5,26 +5,28 @@
 
 
 
-from caffe2.python.optimizer import FP16_ENGINES, Optimizer
-from caffe2.python.helpers.arg_scope import get_current_scope
-from caffe2.python import schema
-from caffe2.python.layers.layers import (
-    get_categorical_limit,
-    get_key,
-    IdList,
-    IdScoreList,
-    IdListWithEvicted,
-    IdScoreListWithEvicted,
-    LayerPsParam,
-    ModelLayer,
-    almost_equal_schemas,
-)
 import collections
 import functools
 import logging
 import math
-import numpy as np
 import operator
+
+import numpy as np
+
+from caffe2.python import schema
+from caffe2.python.helpers.arg_scope import get_current_scope
+from caffe2.python.layers.layers import (
+    IdList,
+    IdListWithEvicted,
+    IdScoreList,
+    IdScoreListWithEvicted,
+    LayerPsParam,
+    ModelLayer,
+    almost_equal_schemas,
+    get_categorical_limit,
+    get_key
+)
+from caffe2.python.optimizer import FP16_ENGINES, Optimizer
 
 logger = logging.getLogger(__name__)
 

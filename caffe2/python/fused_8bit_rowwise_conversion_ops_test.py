@@ -3,12 +3,13 @@
 
 
 
-from caffe2.python import core, workspace
-import caffe2.python.hypothesis_test_util as hu
+import struct
 
 import numpy as np
-import struct
 from hypothesis import given
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, workspace
 
 # Eigen/Python round 0.5 away from 0, Numpy rounds to even
 round_to_nearest = np.vectorize(round)

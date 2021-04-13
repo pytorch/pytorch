@@ -1,9 +1,9 @@
-import numpy as np
-import itertools
-import random
-import os
 import bisect
+import itertools
+import os
+import random
 
+import numpy as np
 
 """Performance microbenchmarks's utils.
 

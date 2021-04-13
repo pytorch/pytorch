@@ -4,12 +4,11 @@ $ python -m examples.op_benchmark
 """
 
 import numpy as np
-import torch
 
+import torch
 from torch.utils.benchmark import Timer
 from torch.utils.benchmark.op_fuzzers.binary import BinaryOpFuzzer
 from torch.utils.benchmark.op_fuzzers.unary import UnaryOpFuzzer
-
 
 _MEASURE_TIME = 1.0
 

@@ -1,8 +1,10 @@
-import torch
 import copy
+from typing import Any, Dict, List, Union
+
+import torch
 from torch.fx import GraphModule  # type: ignore
 from torch.fx.graph import Graph
-from typing import Union, Dict, Any, List
+
 
 class ObservedGraphModule(GraphModule):
 

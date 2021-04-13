@@ -1,15 +1,16 @@
-from collections import namedtuple
-from typing import Dict, List, Optional, Tuple
-
-from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing import FileCheck
-from textwrap import dedent
-from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import inspect
 import os
 import sys
+from collections import namedtuple
+from textwrap import dedent
+from typing import Dict, List, Optional, Tuple
+
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
+
 import torch
 import torch.testing._internal.jit_utils
+from torch.testing import FileCheck
+from torch.testing._internal.jit_utils import JitTestCase
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

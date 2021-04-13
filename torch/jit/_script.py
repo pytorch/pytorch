@@ -6,35 +6,41 @@ This module contains functionality to support the JIT's scripting frontend, nota
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
-import functools
 import collections
-import enum
-import inspect
 import copy
+import enum
+import functools
+import inspect
 import pickle
 import warnings
 from typing import Any, Dict
 
-
 import torch
 import torch._jit_internal as _jit_internal
-from torch.utils import set_module
-from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_methods_to_compile
-from torch.nn import Module
-from torch.jit._state import _enabled
-from torch.jit._builtins import _register_builtin
-from torch._six import with_metaclass
-from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
+from torch._six import with_metaclass
+from torch.jit._builtins import _register_builtin
 from torch.jit._fuser import _graph_for
+from torch.jit._recursive import (
+    ScriptMethodStub,
+    infer_methods_to_compile,
+    wrap_cpp_module
+)
 from torch.jit._state import (
-    _try_get_jit_cached_function,
-    _try_get_jit_cached_overloads,
+    _enabled,
     _set_jit_function_cache,
     _set_jit_overload_cache,
+    _try_get_jit_cached_function,
+    _try_get_jit_cached_overloads
 )
+from torch.jit.frontend import get_default_args, get_jit_class_def, get_jit_def
+from torch.nn import Module
 from torch.overrides import (
-    has_torch_function, has_torch_function_unary, has_torch_function_variadic)
+    has_torch_function,
+    has_torch_function_unary,
+    has_torch_function_variadic
+)
+from torch.utils import set_module
 
 torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore

@@ -3,31 +3,32 @@
 
 
 
+import os
+import shutil
+import tempfile
+import unittest
+
+import numpy as np
+import numpy.testing as npt
+
+from caffe2.python import core, schema, workspace
+from caffe2.python.cached_reader import CachedReader
 from caffe2.python.dataio import (
     CompositeReader,
     CompositeReaderBuilder,
     ReaderBuilder,
     ReaderWithDelay,
     ReaderWithLimit,
-    ReaderWithTimeLimit,
+    ReaderWithTimeLimit
 )
 from caffe2.python.dataset import Dataset
 from caffe2.python.db_file_reader import DBFileReader
-from caffe2.python.pipeline import pipe
-from caffe2.python.schema import Struct, NewRecord, FeedRecord
-from caffe2.python.session import LocalSession
-from caffe2.python.task import TaskGroup, final_output, WorkspaceType
-from caffe2.python.test_util import TestCase
-from caffe2.python.cached_reader import CachedReader
-from caffe2.python import core, workspace, schema
 from caffe2.python.net_builder import ops
-
-import numpy as np
-import numpy.testing as npt
-import os
-import shutil
-import unittest
-import tempfile
+from caffe2.python.pipeline import pipe
+from caffe2.python.schema import FeedRecord, NewRecord, Struct
+from caffe2.python.session import LocalSession
+from caffe2.python.task import TaskGroup, WorkspaceType, final_output
+from caffe2.python.test_util import TestCase
 
 
 def make_source_dataset(ws, size=100, offset=0, name=None):

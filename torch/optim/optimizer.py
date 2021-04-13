@@ -1,10 +1,11 @@
-from collections import defaultdict, abc as container_abcs
-
-import torch
+import functools
+import warnings
+from collections import abc as container_abcs
+from collections import defaultdict
 from copy import deepcopy
 from itertools import chain
-import warnings
-import functools
+
+import torch
 
 
 class _RequiredParameter(object):

@@ -1,15 +1,23 @@
 
+import warnings
 from sys import maxsize
+
+import numpy
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
-import warnings
-import numpy
-
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
+from torch.nn.modules.utils import _pair, _single, _triple
+from torch.onnx.symbolic_helper import (
+    _is_tensor_list,
+    _unimplemented,
+    parse_args
+)
 from torch.onnx.symbolic_opset9 import expand, unused
-from torch.nn.modules.utils import _single, _pair, _triple
-from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
+from torch.onnx.utils import (
+    _add_block,
+    _add_input_to_block,
+    _add_output_to_block
+)
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -221,13 +229,13 @@ def cumsum(g, self, dim, dtype=None):
 
 
 def masked_select(g, self, mask):
-    from torch.onnx.symbolic_opset9 import nonzero, expand_as
+    from torch.onnx.symbolic_opset9 import expand_as, nonzero
     index = nonzero(g, expand_as(g, mask, self))
     return g.op('GatherND', self, index)
 
 
 def masked_scatter(g, self, mask, source):
-    from torch.onnx.symbolic_opset9 import nonzero, expand_as, view, size
+    from torch.onnx.symbolic_opset9 import expand_as, nonzero, size, view
     index = nonzero(g, expand_as(g, mask, self))
     # NOTE: source can have more elements than needed.
     # It could also have arbitrary shape.

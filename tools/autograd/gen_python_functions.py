@@ -30,35 +30,45 @@
 #   message, but use what's there
 #
 
-from collections import defaultdict
 import itertools
 import re
+from collections import defaultdict
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+
 import yaml
 
-from .gen_trace_type import should_trace
-
-from tools.codegen.code_template import CodeTemplate
 from tools.codegen.api import cpp
+from tools.codegen.api.python import (
+    PythonArgument,
+    PythonSignature,
+    PythonSignatureDeprecated,
+    PythonSignatureGroup,
+    PythonSignatureNativeFunctionPair,
+    arg_parser_output_exprs,
+    argument_type_str,
+    cpp_dispatch_exprs,
+    cpp_dispatch_target,
+    dispatch_lambda_args,
+    dispatch_lambda_exprs,
+    dispatch_lambda_return_str,
+    has_tensor_options,
+    namedtuple_fieldnames,
+    signature
+)
 from tools.codegen.api.types import CppSignatureGroup
-from tools.codegen.api.python import (PythonArgument, PythonSignature,
-                                      PythonSignatureDeprecated,
-                                      PythonSignatureGroup,
-                                      PythonSignatureNativeFunctionPair,
-                                      arg_parser_output_exprs,
-                                      argument_type_str, cpp_dispatch_exprs,
-                                      cpp_dispatch_target,
-                                      dispatch_lambda_args,
-                                      dispatch_lambda_exprs,
-                                      dispatch_lambda_return_str,
-                                      has_tensor_options,
-                                      namedtuple_fieldnames, signature)
-from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
+from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
-from tools.codegen.model import (Argument, BaseOperatorName, NativeFunction,
-                                 Type, Variant)
+from tools.codegen.gen import FileManager, cpp_string, parse_native_yaml
+from tools.codegen.model import (
+    Argument,
+    BaseOperatorName,
+    NativeFunction,
+    Type,
+    Variant
+)
 from tools.codegen.utils import split_name_params
 
-from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
+from .gen_trace_type import should_trace
 
 try:
     # use faster C loader if available

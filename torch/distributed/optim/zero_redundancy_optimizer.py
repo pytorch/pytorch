@@ -6,6 +6,7 @@
 import collections
 import copy
 import io
+import logging
 from collections import OrderedDict
 from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Type
@@ -14,7 +15,6 @@ import torch
 import torch.distributed as dist
 from torch.nn import Parameter
 from torch.optim import Optimizer
-import logging
 
 __all__ = ["ZeroRedundancyOptimizer"]
 

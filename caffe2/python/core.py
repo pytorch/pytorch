@@ -5,26 +5,29 @@
 
 
 
-from collections import namedtuple, OrderedDict, defaultdict
-from past.builtins import basestring
-from future.utils import viewitems, viewkeys, viewvalues
-from itertools import chain
-from six import binary_type, string_types, text_type
-
-from caffe2.proto import caffe2_pb2
-from caffe2.python import scope, utils, workspace
-from caffe2.python.lazy import TriggerLazyImport
-from caffe2.python.control_ops_grad import \
-    gen_do_gradient, gen_if_gradient, gen_while_gradient, disambiguate_grad_if_op_output
-
-import caffe2.python._import_c_extension as C
-
 import copy
+import os
 import pickle
-import numpy as np
 import sys
 import traceback
-import os
+from collections import OrderedDict, defaultdict, namedtuple
+from itertools import chain
+
+import numpy as np
+from future.utils import viewitems, viewkeys, viewvalues
+from past.builtins import basestring
+from six import binary_type, string_types, text_type
+
+import caffe2.python._import_c_extension as C
+from caffe2.proto import caffe2_pb2
+from caffe2.python import scope, utils, workspace
+from caffe2.python.control_ops_grad import (
+    disambiguate_grad_if_op_output,
+    gen_do_gradient,
+    gen_if_gradient,
+    gen_while_gradient
+)
+from caffe2.python.lazy import TriggerLazyImport
 
 # Mac os specific message
 if (sys.platform == 'darwin' and 'leveldb' in C.registered_dbs()):

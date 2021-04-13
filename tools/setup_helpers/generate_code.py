@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+
 import yaml
 
 try:
@@ -35,10 +36,9 @@ def generate_code(ninja_global=None,
                   disable_autograd=False,
                   force_schema_registration=False,
                   operator_selector=None):
-    from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
+    from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.codegen.selective_build.selector import SelectiveBuilder
-
 
     # Build ATen based Variable classes
     if install_dir is None:

@@ -1,7 +1,9 @@
 import sys
-import torch
 import types
 from typing import List
+
+import torch
+
 
 # This function should correspond to the enums present in c10/core/QEngine.h
 def _get_qengine_id(qengine: str) -> int:

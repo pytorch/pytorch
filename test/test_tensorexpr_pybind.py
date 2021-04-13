@@ -1,9 +1,10 @@
-import torch
+import unittest
+
 import numpy as np
 
+import torch
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
-import unittest
 
 LLVM_ENABLED = torch._C._llvm_enabled()
 

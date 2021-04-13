@@ -19,10 +19,11 @@
 
 
 import unittest
-from caffe2.python import workspace, brew, model_helper
-from caffe2.python.modeling.gradient_clipping import GradientClipping
 
 import numpy as np
+
+from caffe2.python import brew, model_helper, workspace
+from caffe2.python.modeling.gradient_clipping import GradientClipping
 
 
 class GradientClippingTest(unittest.TestCase):

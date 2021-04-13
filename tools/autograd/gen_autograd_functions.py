@@ -4,17 +4,21 @@
 #  Functions.h/cpp: subclasses of autograd::Node
 #  python_functions.h/cpp: Python bindings for the above classes
 #
-from .gen_inplace_or_view_type import VIEW_FUNCTIONS
-
 from typing import List, Sequence, Tuple
 
-from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
-                                        SavedAttribute, uses_retain_variables,
-                                        uses_single_grad)
+from tools.codegen.api.autograd import (
+    Derivative,
+    DifferentiabilityInfo,
+    SavedAttribute,
+    uses_retain_variables,
+    uses_single_grad
+)
 from tools.codegen.api.types import Binding
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.gen import FileManager
 from tools.codegen.model import Argument
+
+from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
 FUNCTION_DECLARATION = CodeTemplate("""\
 struct TORCH_API ${op} : public ${superclass} {

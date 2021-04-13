@@ -15,8 +15,8 @@
 
 
 
-from distutils import sysconfig
 import sys
+from distutils import sysconfig
 
 flags = [
     '-DPYTHON_EXECUTABLE:FILEPATH={}'.format(sys.executable),

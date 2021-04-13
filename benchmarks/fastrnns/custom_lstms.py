@@ -1,12 +1,13 @@
-import torch
-import torch.nn as nn
-from torch.nn import Parameter
-import torch.jit as jit
+import numbers
 import warnings
 from collections import namedtuple
 from typing import List, Tuple
+
+import torch
+import torch.jit as jit
+import torch.nn as nn
 from torch import Tensor
-import numbers
+from torch.nn import Parameter
 
 '''
 Some helper classes for writing custom TorchScript LSTMs.

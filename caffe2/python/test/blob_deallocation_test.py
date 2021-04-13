@@ -2,8 +2,9 @@
 
 
 
-from caffe2.python import core, workspace
 import unittest
+
+from caffe2.python import core, workspace
 
 core.GlobalInit(['python'])
 

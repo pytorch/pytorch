@@ -4,15 +4,21 @@ import os
 import re
 import textwrap
 import timeit
-from typing import Any, List, Tuple
 import unittest
+from typing import Any, List, Tuple
+
+import numpy as np
 
 import torch
 import torch.utils.benchmark as benchmark_utils
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_SANDCASTLE, IS_WINDOWS, slowTest
 from torch.testing._internal import expecttest
-import numpy as np
-
+from torch.testing._internal.common_utils import (
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    TestCase,
+    run_tests,
+    slowTest
+)
 
 CALLGRIND_ARTIFACTS: str = os.path.join(
     os.path.split(os.path.abspath(__file__))[0],
@@ -536,7 +542,9 @@ class TestBenchmarkUtils(TestCase):
         counts = collections.Counter([s.counts(denoise=True) // 10_000 * 10_000 for s in stats])
         self.assertGreater(max(counts.values()), 1, f"Every instruction count total was unique: {counts}")
 
-        from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import wrapper_singleton
+        from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import (
+            wrapper_singleton
+        )
         self.assertIsNone(
             wrapper_singleton()._bindings_module,
             "JIT'd bindings are only for back testing."

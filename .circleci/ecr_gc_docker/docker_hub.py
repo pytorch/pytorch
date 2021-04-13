@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 
+import os
 from collections import namedtuple
 
 import boto3
 import requests
-import os
-
 
 IMAGE_INFO = namedtuple(
     "IMAGE_INFO", ("repo", "tag", "size", "last_updated_at", "last_updated_by")

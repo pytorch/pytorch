@@ -1,18 +1,30 @@
-import torch.fx as fx
-from torch.fx.node import Argument, Target
-from torch.nn.utils.fusion import fuse_conv_bn_eval
-from typing import Type, Dict, Any, Tuple, Iterable, Optional, List, cast, Callable
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.fx.passes.shape_prop import ShapeProp
 import copy
-from collections import defaultdict
-import torch.utils.mkldnn as th_mkldnn
+import logging
 import operator
 import time
-import logging
+from collections import defaultdict
 from enum import Enum
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    cast
+)
+
+import torch
+import torch.fx as fx
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.utils.mkldnn as th_mkldnn
+from torch.fx.node import Argument, Target
+from torch.fx.passes.shape_prop import ShapeProp
+from torch.nn.utils.fusion import fuse_conv_bn_eval
+
 
 def _parent_name(target : str) -> Tuple[str, str]:
     """

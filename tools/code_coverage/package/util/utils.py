@@ -10,7 +10,7 @@ from .setting import (
     CompilerType,
     TestList,
     TestPlatform,
-    TestType,
+    TestType
 )
 
 
@@ -94,7 +94,7 @@ def detect_compiler_type(platform: TestPlatform) -> CompilerType:
         cov_type = detect_compiler_type()
     else:
         from caffe2.fb.code_coverage.tool.package.fbcode.utils import (
-            detect_compiler_type,
+            detect_compiler_type
         )
 
         cov_type = detect_compiler_type()

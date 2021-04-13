@@ -1,4 +1,5 @@
-from typing import Union, Sequence
+from typing import Sequence, Union
+
 from ... import device
 
 _device_t = Union[int, device]

@@ -1,8 +1,9 @@
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
+
 import torch
 import torch.optim._functional as F
-
 from torch import Tensor
+
 
 # Define a TorchScript compatible Functional RMSprop Optimizer
 # where we use these optimizer in a functional way.

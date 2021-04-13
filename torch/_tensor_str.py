@@ -1,7 +1,8 @@
 import math
+from typing import Optional
+
 import torch
 from torch._six import inf
-from typing import Optional
 
 
 class __PrinterOptions(object):

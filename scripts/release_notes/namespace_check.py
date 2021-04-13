@@ -1,8 +1,8 @@
 import argparse
-import torch
-from os import path
 import json
+from os import path
 
+import torch
 # Import all utils so that getattr below can find them
 from torch.utils import bottleneck, checkpoint, model_zoo
 

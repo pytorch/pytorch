@@ -6,11 +6,11 @@
 # LICENSE file in the root directory of this source tree.
 """Manipulation of micro-batches."""
 import typing
-from typing import Callable, Iterable, Iterator, List, Union, cast, Sequence
+from typing import Callable, Iterable, Iterator, List, Sequence, Union, cast
 
 import torch
-from torch import Tensor
 import torch.cuda.comm
+from torch import Tensor
 
 __all__: List[str] = []
 

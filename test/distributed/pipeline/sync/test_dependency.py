@@ -7,8 +7,8 @@
 import weakref
 
 import pytest
-import torch
 
+import torch
 from torch.distributed.pipeline.sync.dependency import Fork, Join, fork, join
 
 

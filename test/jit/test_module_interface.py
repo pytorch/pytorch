@@ -1,11 +1,12 @@
 # flake8: noqa
 # TODO: enable linting check for this file
 
-from typing import List, Any
-import torch
-import torch.nn as nn
 import os
 import sys
+from typing import Any, List
+
+import torch
+import torch.nn as nn
 from torch import Tensor
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 

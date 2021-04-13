@@ -1,43 +1,74 @@
 # -*- coding: utf-8 -*-
-import torch
-import numpy as np
-
-import io
+import copy
 import inspect
+import io
 import math
+import pickle
 import random
 import re
-import copy
 import tempfile
+import textwrap
+import types
 import unittest
 import warnings
-import types
-import pickle
-import textwrap
-from torch.utils.dlpack import from_dlpack, to_dlpack
-from torch._six import inf, nan, string_classes
-from itertools import product, combinations, permutations
 from functools import partial
-from torch import multiprocessing as mp
-from torch.testing._internal.common_utils import (
-    TestCase, TEST_WITH_ROCM, run_tests,
-    IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
-    skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
-    skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor, _wrap_warn_once)
+from itertools import combinations, permutations, product
 from multiprocessing.reduction import ForkingPickler
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    skipCUDAIfNoMagma, skipCUDAVersionIn,
-    onlyCUDA, onlyCPU,
-    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipMeta,
-    PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
-    expectedAlertNondeterministic)
 from typing import Dict, List
+
+import numpy as np
+
+import torch
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
+from torch import multiprocessing as mp
+from torch._six import inf, nan, string_classes
+from torch.testing._internal.common_cuda import (
+    tf32_is_not_fp32,
+    tf32_on_and_off
+)
+from torch.testing._internal.common_device_type import (
+    PYTORCH_CUDA_MEMCHECK,
+    deviceCountAtLeast,
+    dtypes,
+    dtypesIfCPU,
+    dtypesIfCUDA,
+    expectedAlertNondeterministic,
+    instantiate_device_type_tests,
+    largeTensorTest,
+    onlyCPU,
+    onlyCUDA,
+    onlyOnCPUAndCUDA,
+    skipCUDAIfNoMagma,
+    skipCUDAVersionIn,
+    skipMeta
+)
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_FILESYSTEM_UTF8_ENCODING,
+    IS_REMOTE_GPU,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    NO_MULTIPROCESSING_SPAWN,
+    TEST_WITH_ROCM,
+    BytesIOContext,
+    DeterministicGuard,
+    TemporaryDirectoryName,
+    TemporaryFileName,
+    TestCase,
+    _wrap_warn_once,
+    do_test_dtypes,
+    load_tests,
+    make_tensor,
+    noarchTest,
+    run_tests,
+    skipCUDAMemoryLeakCheckIf,
+    skipIfNoSciPy,
+    skipIfRocm,
+    slowTest,
+    wrapDeterministicFlagAPITest
+)
+from torch.utils.dlpack import from_dlpack, to_dlpack
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -130,7 +161,12 @@ class AbstractTestCases:
 
         def test_doc_template(self) -> None:
             from torch._torch_docs import __file__ as doc_file
-            from torch._torch_docs import multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args
+            from torch._torch_docs import (
+                factory_common_args,
+                factory_like_common_args,
+                multi_dim_common,
+                single_dim_common
+            )
 
             with open(doc_file, "r", encoding="utf-8") as f:
                 doc_strs = f.read()

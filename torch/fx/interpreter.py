@@ -1,9 +1,11 @@
-from .graph_module import GraphModule
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+
 from .graph import Graph
-from .node import Argument, Node, Target, map_arg, map_aggregate
+from .graph_module import GraphModule
+from .node import Argument, Node, Target, map_aggregate, map_arg
 from .proxy import Proxy
 from .symbolic_trace import Tracer
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+
 
 class Interpreter:
     """

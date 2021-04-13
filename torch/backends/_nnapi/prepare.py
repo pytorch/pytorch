@@ -1,7 +1,8 @@
-from typing import Optional, List
+from typing import List, Optional
 
 import torch
 from torch.backends._nnapi.serializer import serialize_model
+
 
 class NnapiModule(torch.nn.Module):
     """Torch Module that wraps an NNAPI Compilation.

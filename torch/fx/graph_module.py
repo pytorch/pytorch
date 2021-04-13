@@ -1,19 +1,25 @@
+import copy
+import itertools
+import linecache
+import os
+import sys
+import traceback
+import warnings
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Type, Union
+
 import torch
 import torch.nn as nn
 import torch.overrides
 from torch.nn.modules.module import _addindent
-from torch.package import PackageImporter, PackageExporter
-import linecache
-from typing import Type, Dict, List, Any, Union, Optional, Set
-from .graph import Graph, _is_from_torch, _custom_builtins, PythonCode
-from torch.package import Importer, sys_importer
-import copy
-import itertools
-import sys
-import traceback
-from pathlib import Path
-import os
-import warnings
+from torch.package import (
+    Importer,
+    PackageExporter,
+    PackageImporter,
+    sys_importer
+)
+
+from .graph import Graph, PythonCode, _custom_builtins, _is_from_torch
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.

@@ -12,16 +12,16 @@ import torch.distributed as dist
 
 RPC_AVAILABLE = False
 if dist.is_available():
-    from torch.distributed.distributed_c10d import ReduceOp
-    from torch.distributed.distributed_c10d import _get_default_group
+    from torch.distributed.distributed_c10d import ReduceOp, _get_default_group
 if torch.distributed.rpc.is_available():
     RPC_AVAILABLE = True
     from torch.distributed.rpc import RRef
+
 from torch._utils import _get_device_index
 
 from ..modules import Module
 from ._functions import _get_stream
-from .scatter_gather import scatter_kwargs, gather, is_namedtuple
+from .scatter_gather import gather, is_namedtuple, scatter_kwargs
 
 
 def _find_tensors(obj):

@@ -1,9 +1,9 @@
-import torch
-from torch import nn, Tensor
-
 import torchaudio_models as models
+from utils import GetterReturnType, extract_weights, load_weights
 
-from utils import extract_weights, load_weights, GetterReturnType
+import torch
+from torch import Tensor, nn
+
 
 def get_wav2letter(device: torch.device) -> GetterReturnType:
     N = 10

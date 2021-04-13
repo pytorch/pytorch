@@ -6,6 +6,7 @@
 import os
 import shutil
 
+
 # Module caffe2...caffe2.python.control_test
 def insert(originalfile, first_line, description):
     with open(originalfile, 'r') as f:

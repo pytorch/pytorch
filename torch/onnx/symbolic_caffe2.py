@@ -1,8 +1,10 @@
-from torch.onnx.symbolic_helper import parse_args
-import torch.onnx.symbolic_helper as sym_help
-import torch.onnx.symbolic_registry as sym_registry
 import importlib
 from inspect import getmembers, isfunction
+
+import torch.onnx.symbolic_helper as sym_help
+import torch.onnx.symbolic_registry as sym_registry
+from torch.onnx.symbolic_helper import parse_args
+
 
 def register_quantized_ops(domain, version):
     # Register all the non-quantized ops
@@ -141,7 +143,8 @@ def _empty_affine_quantized(g, input, shape, scale, zero_point, dtype, pin_memor
 
 def upsample_nearest2d(g, input, output_size, align_corners=None, scales_h=None, scales_w=None):
     if input not in sym_help._quantized_ops:
-        from torch.onnx.symbolic_opset9 import upsample_nearest2d as upsample_nearest2d_impl
+        from torch.onnx.symbolic_opset9 import \
+            upsample_nearest2d as upsample_nearest2d_impl
         return upsample_nearest2d_impl(g, input, output_size, align_corners)
 
     output_size = sym_help._parse_arg(output_size, 'is')

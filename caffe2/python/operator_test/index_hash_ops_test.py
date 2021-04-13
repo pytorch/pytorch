@@ -3,12 +3,13 @@
 
 
 
-from caffe2.python import core, workspace
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given, settings
+
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-import hypothesis.strategies as st
-from hypothesis import given, settings
-import numpy as np
+from caffe2.python import core, workspace
 
 
 class TestIndexHashOps(serial.SerializedTestCase):

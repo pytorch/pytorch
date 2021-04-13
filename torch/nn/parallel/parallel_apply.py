@@ -1,8 +1,9 @@
 import threading
+
 import torch
+from torch._utils import ExceptionWrapper
 from torch.cuda._utils import _get_device_index
 from torch.cuda.amp import autocast
-from torch._utils import ExceptionWrapper
 
 
 def get_a_var(obj):

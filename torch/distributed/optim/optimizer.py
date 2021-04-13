@@ -1,23 +1,22 @@
-from typing import List, Optional
 import logging
+from collections import defaultdict
+from threading import Lock
+from typing import List, Optional
 
+import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-import torch.optim as optim
 import torch.jit as jit
 import torch.nn as nn
+import torch.optim as optim
 from torch import Tensor
 from torch.distributed.rpc import RRef
+
+from .functional_adadelta import _FunctionalAdadelta
 from .functional_adagrad import _FunctionalAdagrad
 from .functional_adam import _FunctionalAdam
 from .functional_adamw import _FunctionalAdamW
-from .functional_sgd import _FunctionalSGD
-from .functional_adadelta import _FunctionalAdadelta
 from .functional_rmsprop import _FunctionalRMSprop
-import torch.distributed.autograd as dist_autograd
-
-
-from collections import defaultdict
-from threading import Lock
+from .functional_sgd import _FunctionalSGD
 
 logger = logging.getLogger(__name__)
 

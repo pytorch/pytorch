@@ -3,7 +3,6 @@
 import argparse
 import sys
 
-
 sizeof = {"float": 4, "at::Half": 2, "uint8_t": 1}
 
 

@@ -1,7 +1,10 @@
 import math
-import torch
-from ..optimizer import Optimizer
 from collections import defaultdict
+
+import torch
+
+from ..optimizer import Optimizer
+
 
 class ASGD(Optimizer):
     """Implements Averaged Stochastic Gradient Descent.

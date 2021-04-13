@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, utils
 from hypothesis import given
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, utils
 
 
 class TestAliasWithNameOp(hu.HypothesisTestCase):

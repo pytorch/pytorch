@@ -1,12 +1,14 @@
-import numpy as np
+import io
 import unittest
-import torch.onnx
+
+import numpy as np
+import onnx
+
+import caffe2.python.onnx.backend as c2
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import io
+import torch.onnx
 
-import onnx
-import caffe2.python.onnx.backend as c2
 
 class TestQuantizedOps(unittest.TestCase):
 

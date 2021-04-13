@@ -1,7 +1,7 @@
-import torch
+import builtins
 from typing import Any, List, Sequence, Tuple, Union
 
-import builtins
+import torch
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch

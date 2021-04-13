@@ -1,13 +1,23 @@
-from functools import wraps
 import itertools
 import unittest
+from functools import wraps
 
 import torch
-
-from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
-                                                  TEST_NUMPY, torch_to_numpy_dtype_dict)
-from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyOnCPUAndCUDA,
-                                                        dtypes, dtypesIfCUDA, onlyCPU, expectedFailureMeta)
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    dtypesIfCUDA,
+    expectedFailureMeta,
+    instantiate_device_type_tests,
+    onlyCPU,
+    onlyOnCPUAndCUDA
+)
+from torch.testing._internal.common_utils import (
+    TEST_NUMPY,
+    TestCase,
+    load_tests,
+    run_tests,
+    torch_to_numpy_dtype_dict
+)
 
 if TEST_NUMPY:
     import numpy as np

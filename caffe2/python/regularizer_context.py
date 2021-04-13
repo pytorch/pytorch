@@ -6,8 +6,7 @@
 
 
 from caffe2.python import context
-from caffe2.python.modifier_context import (
-    ModifierContext, UseModifierBase)
+from caffe2.python.modifier_context import ModifierContext, UseModifierBase
 
 
 class RegularizerContext(ModifierContext, context.DefaultManaged):

@@ -1,6 +1,6 @@
 
 from .linear import Linear
-from .rnn import LSTM, GRU, LSTMCell, RNNCell, GRUCell
+from .rnn import GRU, LSTM, GRUCell, LSTMCell, RNNCell
 
 __all__ = [
     'Linear',

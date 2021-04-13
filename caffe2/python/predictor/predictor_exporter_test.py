@@ -5,14 +5,15 @@
 
 import tempfile
 import unittest
+
 import numpy as np
-from caffe2.python import cnn, workspace, core
 from future.utils import viewitems
 
-from caffe2.python.predictor_constants import predictor_constants as pc
 import caffe2.python.predictor.predictor_exporter as pe
 import caffe2.python.predictor.predictor_py_utils as pred_utils
 from caffe2.proto import caffe2_pb2, metanet_pb2
+from caffe2.python import cnn, core, workspace
+from caffe2.python.predictor_constants import predictor_constants as pc
 
 
 class MetaNetDefTest(unittest.TestCase):

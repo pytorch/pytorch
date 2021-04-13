@@ -8,7 +8,7 @@ from torch.quantization import (
     default_qconfig,
     prepare,
     quantize,
-    quantize_dynamic,
+    quantize_dynamic
 )
 from torch.quantization._numeric_suite import (
     OutputLogger,
@@ -16,17 +16,17 @@ from torch.quantization._numeric_suite import (
     ShadowLogger,
     compare_model_outputs,
     compare_model_stub,
-    compare_weights,
+    compare_weights
 )
 from torch.testing._internal.common_quantization import (
     AnnotatedConvBnReLUModel,
     AnnotatedConvModel,
     AnnotatedSingleLayerLinearModel,
-    LSTMwithHiddenDynamicModel,
     AnnotatedTwoLayerLinearModel,
+    LSTMwithHiddenDynamicModel,
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
-    test_only_eval_fn,
+    test_only_eval_fn
 )
 from torch.testing._internal.common_quantized import override_qengines
 

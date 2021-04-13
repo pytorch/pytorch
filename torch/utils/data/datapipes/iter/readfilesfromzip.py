@@ -1,12 +1,15 @@
-from torch.utils.data import IterDataPipe
-from torch.utils.data.datapipes.utils.common import validate_pathname_binary_tuple
-from typing import Iterable, Iterator, Tuple, IO, cast
-from io import BufferedIOBase
-
 import os
 import sys
-import zipfile
 import warnings
+import zipfile
+from io import BufferedIOBase
+from typing import IO, Iterable, Iterator, Tuple, cast
+
+from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.utils.common import (
+    validate_pathname_binary_tuple
+)
+
 
 class ReadFilesFromZipIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     r""" :class:`ReadFilesFromZipIterDataPipe`.

@@ -1,25 +1,60 @@
-import torch
-import sys
 import ast
 import inspect
 import string
+import sys
 from textwrap import dedent
 from typing import List
-from torch._C._jit_tree_views import (
-    ClassDef, Ident, Stmt, Decl, Def, Var,
-    EmptyTypeAnnotation, Param, ExprStmt, Assign,
-    Delete, Return, Raise, Assert, AugAssign, While,
-    For, If, Pass, Break, Continue, Apply, Dots, Select,
-    TrueLiteral, FalseLiteral, NoneLiteral, Starred,
-    ListLiteral, TupleLiteral, DictLiteral, Const,
-    StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
-    SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
-    DictComp,
-)
-from torch._utils_internal import get_source_lines_and_file
 
-from torch._jit_internal import SourceContext, should_drop, is_static_fn
+import torch
 import torch.jit.annotations
+from torch._C._jit_tree_views import (
+    Apply,
+    Assert,
+    Assign,
+    Attribute,
+    AugAssign,
+    BinOp,
+    Break,
+    ClassDef,
+    Const,
+    Continue,
+    Decl,
+    Def,
+    Delete,
+    DictComp,
+    DictLiteral,
+    Dots,
+    EmptyTypeAnnotation,
+    ExprStmt,
+    FalseLiteral,
+    For,
+    Ident,
+    If,
+    ListComp,
+    ListLiteral,
+    NoneLiteral,
+    Param,
+    Pass,
+    Property,
+    Raise,
+    Return,
+    Select,
+    SliceExpr,
+    Starred,
+    Stmt,
+    StringLiteral,
+    Subscript,
+    TernaryIf,
+    TrueLiteral,
+    TupleLiteral,
+    UnaryOp,
+    Var,
+    While,
+    With,
+    WithItem
+)
+from torch._jit_internal import SourceContext, is_static_fn, should_drop
+from torch._utils_internal import get_source_lines_and_file
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#

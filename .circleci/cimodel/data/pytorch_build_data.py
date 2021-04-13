@@ -1,6 +1,5 @@
 from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
-
 CONFIG_TREE_DATA = [
     ("xenial", [
         ("gcc", [

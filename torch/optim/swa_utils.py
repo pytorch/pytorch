@@ -1,7 +1,8 @@
-import torch
 import math
-from torch.nn import Module
 from copy import deepcopy
+
+import torch
+from torch.nn import Module
 from torch.optim.lr_scheduler import _LRScheduler
 
 

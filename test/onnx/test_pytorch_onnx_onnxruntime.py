@@ -1,40 +1,57 @@
-import unittest
-import onnxruntime  # noqa
-import torch
-
-import numpy as np
+import copy
 import io
 import itertools
-import copy
 import os
 import random
-
-from torch.nn.utils import rnn as rnn_utils
-from model_defs.lstm_flattening_result import (LstmFlatteningResultWithSeqLength,
-                                               LstmFlatteningResultWithoutSeqLength)
-from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequence,
-                                                       RnnModelWithPackedSequenceWithState,
-                                                       RnnModelWithPackedSequenceWithoutState)
-from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
-                                 skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
-                                 skipIfUnsupportedMaxOpsetVersion)
-from test_pytorch_common import BATCH_SIZE
-from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from typing import List, Tuple, Optional, Dict
-import model_defs.word_language_model as word_language_model
-
-import onnx
-
-import torchvision
-from torchvision import ops
-from torchvision.models.detection.image_list import ImageList
-from torchvision.models.detection.transform import GeneralizedRCNNTransform
-from torchvision.models.detection.rpn import AnchorGenerator, RPNHead, RegionProposalNetwork
-from torchvision.models.detection.roi_heads import RoIHeads
-from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHead
+import unittest
 from collections import OrderedDict
+from typing import Dict, List, Optional, Tuple
 
+import model_defs.word_language_model as word_language_model
+import numpy as np
+import onnx
+import onnxruntime  # noqa
+import torchvision
+from model_defs.lstm_flattening_result import (
+    LstmFlatteningResultWithoutSeqLength,
+    LstmFlatteningResultWithSeqLength
+)
+from model_defs.rnn_model_with_packed_sequence import (
+    RnnModelWithPackedSequence,
+    RnnModelWithPackedSequenceWithoutState,
+    RnnModelWithPackedSequenceWithState
+)
+from test_pytorch_common import (
+    BATCH_SIZE,
+    RNN_BATCH_SIZE,
+    RNN_HIDDEN_SIZE,
+    RNN_INPUT_SIZE,
+    RNN_SEQUENCE_LENGTH,
+    disableScriptTest,
+    skipIfNoLapack,
+    skipIfONNXShapeInference,
+    skipIfUnsupportedMaxOpsetVersion,
+    skipIfUnsupportedMinOpsetVersion,
+    skipIfUnsupportedOpsetVersion
+)
+from torchvision import ops
+from torchvision.models.detection.faster_rcnn import (
+    FastRCNNPredictor,
+    TwoMLPHead
+)
+from torchvision.models.detection.image_list import ImageList
+from torchvision.models.detection.roi_heads import RoIHeads
+from torchvision.models.detection.rpn import (
+    AnchorGenerator,
+    RegionProposalNetwork,
+    RPNHead
+)
+from torchvision.models.detection.transform import GeneralizedRCNNTransform
+
+import torch
+from torch.nn.utils import rnn as rnn_utils
 from torch.nn.utils.rnn import PackedSequence
+
 
 def to_numpy(tensor):
     if tensor.requires_grad:
@@ -424,10 +441,12 @@ class TestONNXRuntime(unittest.TestCase):
 
     def get_image_from_url(self, url, size=(300, 200)):
         import os
-        from urllib.parse import urlsplit
         from urllib import request
+        from urllib.parse import urlsplit
+
         from PIL import Image
         from torchvision import transforms
+
         from torch._utils_internal import get_writable_path
 
         filename = os.path.basename(urlsplit(url)[2])
@@ -529,7 +548,9 @@ class TestONNXRuntime(unittest.TestCase):
 
         maps = torch.rand(10, 1, 26, 26)
         rois = torch.rand(10, 4)
-        from torchvision.models.detection.roi_heads import heatmaps_to_keypoints
+        from torchvision.models.detection.roi_heads import (
+            heatmaps_to_keypoints
+        )
         out = heatmaps_to_keypoints(maps, rois)
         jit_trace = torch.jit.trace(heatmaps_to_keypoints, (maps, rois))
         out_trace = jit_trace(maps, rois)
@@ -539,7 +560,9 @@ class TestONNXRuntime(unittest.TestCase):
 
         maps2 = torch.rand(20, 2, 21, 21)
         rois2 = torch.rand(20, 4)
-        from torchvision.models.detection.roi_heads import heatmaps_to_keypoints
+        from torchvision.models.detection.roi_heads import (
+            heatmaps_to_keypoints
+        )
         out2 = heatmaps_to_keypoints(maps2, rois2)
         out_trace2 = jit_trace(maps2, rois2)
 
@@ -6547,7 +6570,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     @disableScriptTest()  # TODO: RuntimeError: Exporting the operator __is_ to ONNX is not supported
     def test_transformer_encoder(self):
-        from torch.nn import TransformerEncoderLayer, TransformerEncoder
+        from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
         class MyModule(torch.nn.Module):
             def __init__(self, ninp, nhead, nhid, dropout, nlayers):

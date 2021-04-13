@@ -11,10 +11,12 @@ Note that ONNX-TRT enforce an NCHW input!
 
 
 
+import numpy as np
+
+import caffe2.python._import_c_extension as C
 from caffe2.proto import caffe2_pb2
 from caffe2.python import workspace
-import caffe2.python._import_c_extension as C
-import numpy as np
+
 
 def _dim_values_to_list(dim_values):
     return [x.dim_value for x in dim_values]

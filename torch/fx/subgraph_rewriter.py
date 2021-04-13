@@ -1,10 +1,11 @@
-from .graph_module import GraphModule
+import copy
+from typing import Callable, Dict, List, NamedTuple, Set
+
 from .graph import Graph
+from .graph_module import GraphModule
 from .node import Node
 from .symbolic_trace import symbolic_trace
 
-import copy
-from typing import Callable, Dict, List, NamedTuple, Set
 
 class Match(NamedTuple):
     # Node from which the match was found

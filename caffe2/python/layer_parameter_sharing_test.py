@@ -4,11 +4,9 @@
 
 
 from caffe2.python import core, scope
-from caffe2.python.modeling.parameter_sharing import (
-    ParameterSharing,
-)
-from caffe2.python.optimizer import AdagradOptimizer, AdamOptimizer
 from caffe2.python.layer_test_util import LayersTestCase
+from caffe2.python.modeling.parameter_sharing import ParameterSharing
+from caffe2.python.optimizer import AdagradOptimizer, AdamOptimizer
 
 
 class ParameterSharingTest(LayersTestCase):

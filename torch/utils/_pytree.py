@@ -1,4 +1,14 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+    Type,
+    cast
+)
 
 """
 Contains utility functions for working with nested python data structures.

@@ -6,8 +6,8 @@
 
 
 import argparse
-from textwrap import dedent
 from subprocess import call
+from textwrap import dedent
 
 
 def parse_lines(lines):

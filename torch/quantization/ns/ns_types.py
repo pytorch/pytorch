@@ -3,6 +3,7 @@ from typing import NamedTuple
 
 from torch.fx.graph import Node
 
+
 class NSSingleResultValuesType(str, enum.Enum):
     WEIGHT = 'weight'
     NODE_OUTPUT = 'node_output'

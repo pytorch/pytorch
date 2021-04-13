@@ -4,41 +4,44 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.quantization import default_dynamic_qconfig
 import torch.nn.quantized as nnq
+from torch.quantization import default_dynamic_qconfig
+
 toq = torch.ops.quantized
+from torch.quantization._numeric_suite_fx import (
+    OutputLogger,
+    _extract_weights_impl,
+    add_loggers,
+    add_shadow_loggers,
+    extract_logger_info,
+    extract_shadow_logger_info,
+    extract_weights
+)
+from torch.quantization.ns.graph_matcher import (
+    GraphMatchingException,
+    get_matching_subgraph_pairs
+)
 from torch.quantization.quantize_fx import (
     convert_fx,
     prepare_fx,
-    prepare_qat_fx,
+    prepare_qat_fx
 )
 from torch.testing._internal.common_quantization import (
     ConvBnModel,
     ConvBnReLUModel,
     ConvModel,
-    QuantizationTestCase,
-    skipIfNoFBGEMM,
-    SingleLayerLinearDynamicModel,
-    SingleLayerLinearModel,
-    LSTMwithHiddenDynamicModel,
-    SparseNNModel,
-    skip_if_no_torchvision,
+    LSTMwithHiddenDynamicModel
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
+from torch.testing._internal.common_quantization import (
+    QuantizationTestCase,
+    SingleLayerLinearDynamicModel,
+    SingleLayerLinearModel,
+    SparseNNModel,
+    skip_if_no_torchvision,
+    skipIfNoFBGEMM
+)
 from torch.testing._internal.common_quantized import override_qengines
-from torch.quantization.ns.graph_matcher import (
-    get_matching_subgraph_pairs,
-    GraphMatchingException,
-)
-from torch.quantization._numeric_suite_fx import (
-    extract_weights,
-    _extract_weights_impl,
-    add_loggers,
-    OutputLogger,
-    add_shadow_loggers,
-    extract_logger_info,
-    extract_shadow_logger_info,
-)
 
 
 # Note: these models are not for use outside of this file. While it's good

@@ -1,4 +1,5 @@
 from numbers import Number
+
 import torch
 from torch._six import nan
 from torch.distributions import constraints

@@ -2,17 +2,17 @@
 
 import collections
 
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given
+
+import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core, dyndep, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
 from caffe2.quantization.server.dnnlowp_test_utils import (
     check_quantized_results_close,
     run_conv_or_fc
 )
-from hypothesis import given
-
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
 workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])

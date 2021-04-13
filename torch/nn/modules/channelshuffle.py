@@ -1,5 +1,5 @@
-from .module import Module
 from .. import functional as F
+from .module import Module
 
 
 class ChannelShuffle(Module):

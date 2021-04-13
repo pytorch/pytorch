@@ -1,7 +1,9 @@
 
 
 import copy
+
 import torch
+
 
 def fuse_conv_bn_eval(conv, bn):
     assert(not (conv.training or bn.training)), "Fusion only for eval!"

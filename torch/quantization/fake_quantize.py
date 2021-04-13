@@ -1,8 +1,16 @@
-import torch
-from torch.nn import Module
-from .observer import MovingAverageMinMaxObserver, HistogramObserver, MovingAveragePerChannelMinMaxObserver, _with_args
 import re
 from abc import ABC, abstractmethod
+
+import torch
+from torch.nn import Module
+
+from .observer import (
+    HistogramObserver,
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver,
+    _with_args
+)
+
 
 def _is_per_channel(qscheme: 'torch.qscheme') -> bool:
     return qscheme in [torch.per_channel_symmetric, torch.per_channel_affine]

@@ -6,11 +6,11 @@ from torch import Tensor
 from torch.distributed.rpc import RRef
 from torch.testing._internal.dist_utils import (
     dist_init,
-    worker_name,
-    wait_until_pending_futures_and_users_flushed
+    wait_until_pending_futures_and_users_flushed,
+    worker_name
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
-    RpcAgentTestFixture,
+    RpcAgentTestFixture
 )
 
 

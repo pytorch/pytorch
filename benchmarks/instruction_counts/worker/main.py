@@ -20,18 +20,19 @@ import dataclasses
 import io
 import os
 import pickle
+import sys
 import timeit
 import traceback
-from typing import Any, Tuple, Union, TYPE_CHECKING
-import sys
-
+from typing import TYPE_CHECKING, Any, Tuple, Union
 
 if TYPE_CHECKING:
     # Benchmark utils are only partially strict compliant, so MyPy won't follow
     # imports using the public namespace. (Due to an exclusion rule in
     # mypy-strict.ini)
     from torch.utils.benchmark.utils.timer import Language, Timer
-    from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import CallgrindStats
+    from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import (
+        CallgrindStats
+    )
 
 else:
     from torch.utils.benchmark import CallgrindStats, Language, Timer

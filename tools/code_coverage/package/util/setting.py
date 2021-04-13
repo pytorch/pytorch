@@ -2,7 +2,6 @@ import os
 from enum import Enum
 from typing import Dict, List, Set
 
-
 # <project folder>
 HOME_DIR = os.environ["HOME"]
 TOOLS_FOLDER = os.path.join(

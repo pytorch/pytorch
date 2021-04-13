@@ -17,7 +17,6 @@ from core.types import FlatIntermediateDefinition
 from core.utils import flatten, parse_stmts
 from definitions.setup import Setup
 
-
 BENCHMARKS: FlatIntermediateDefinition = flatten({
     "Empty": {
         "no allocation": GroupedStmts(

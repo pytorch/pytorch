@@ -1,7 +1,7 @@
-import tempfile
 import contextlib
-from . import cudart, check_error
+import tempfile
 
+from . import check_error, cudart
 
 DEFAULT_FLAGS = [
     "gpustarttimestamp",

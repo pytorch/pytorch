@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
 import math
 import warnings
+from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
+from torch._torch_docs import reproducibility_notes
 from torch.nn.parameter import Parameter, UninitializedParameter
+
 from .. import functional as F
 from .. import init
+from ..common_types import _size_1_t, _size_2_t, _size_3_t
 from .lazy import LazyModuleMixin
 from .module import Module
-from .utils import _single, _pair, _triple, _reverse_repeat_tuple
-from torch._torch_docs import reproducibility_notes
-
-from ..common_types import _size_1_t, _size_2_t, _size_3_t
-from typing import Optional, List, Tuple, Union
+from .utils import _pair, _reverse_repeat_tuple, _single, _triple
 
 convolution_notes = \
     {"groups_note": r"""* :attr:`groups` controls the connections between inputs and outputs.

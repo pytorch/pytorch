@@ -1,18 +1,21 @@
-import inspect
-import torch
-import types
 import collections
-import textwrap
 import functools
+import inspect
+import textwrap
+import types
 import warnings
 from typing import Dict, List, Set, Type
 
+import torch
 import torch._jit_internal as _jit_internal
-from torch.jit.frontend import get_default_args, get_jit_def, get_class_properties
 from torch.jit._builtins import _find_builtin
 from torch.jit._check import AttributeTypeIsSupportedChecker
+from torch.jit.frontend import (
+    get_class_properties,
+    get_default_args,
+    get_jit_def
+)
 from torch.nn import Module
-
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 PropertyStub = collections.namedtuple('PropertyStub', ('resolution_callback', 'def_'))

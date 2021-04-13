@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
-import yaml
 from pathlib import Path
+
+import yaml
 
 workflow_paths = (Path(__file__).parent.parent / 'workflows').rglob('*')
 for path in workflow_paths:

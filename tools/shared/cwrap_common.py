@@ -3,6 +3,7 @@
 
 import copy
 
+
 def parse_arguments(args):
     new_args = []
     for arg in args:

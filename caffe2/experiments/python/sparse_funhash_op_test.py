@@ -18,14 +18,13 @@
 
 
 
+import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given
 from scipy.sparse import coo_matrix
 
-from hypothesis import given
-import hypothesis.strategies as st
-
-from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core
 
 
 class TestFunHash(hu.HypothesisTestCase):

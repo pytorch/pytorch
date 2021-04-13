@@ -1,4 +1,5 @@
 import operator_benchmark as op_bench
+
 import torch
 
 '''Microbenchmarks for the quantized interpolate op.

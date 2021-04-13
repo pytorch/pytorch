@@ -18,11 +18,11 @@ Usage::
     pipe = Pipe(model, balance, chunks=8)
 
 """
-from typing import List, Union, Sequence
+from typing import List, Sequence, Union
 
 import torch
-from torch import Tensor
 import torch.nn as nn
+from torch import Tensor
 
 from . import blockpartition
 from .profile import profile_sizes, profile_times

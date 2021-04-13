@@ -1,9 +1,10 @@
-import caffe2.python.hypothesis_test_util as hu
 import hypothesis
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core
 from hypothesis import HealthCheck, given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core
 
 
 class TestSparseNormalize(hu.HypothesisTestCase):

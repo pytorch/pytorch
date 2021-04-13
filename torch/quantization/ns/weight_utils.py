@@ -1,15 +1,17 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
+import torch.nn.quantized.dynamic as nnqd
+
 toq = torch.ops.quantized
+from typing import List
+
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
 from .utils import getattr_from_fqn
 
-from typing import List
 
 def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
     # TODO(future PR): handle QAT variants

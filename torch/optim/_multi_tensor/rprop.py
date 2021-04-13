@@ -1,6 +1,9 @@
-import torch
-from ..optimizer import Optimizer
 from collections import defaultdict
+
+import torch
+
+from ..optimizer import Optimizer
+
 
 class Rprop(Optimizer):
     """Implements the resilient backpropagation algorithm.

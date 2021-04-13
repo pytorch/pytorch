@@ -3,7 +3,6 @@ from collections import OrderedDict
 from cimodel.data.simple.util.branch_filters import gen_filter_dict
 from cimodel.lib.miniutils import quote
 
-
 CHANNELS_TO_PRUNE = ["pytorch-nightly", "pytorch-test"]
 PACKAGES_TO_PRUNE = "pytorch torchvision torchaudio torchtext ignite torchcsprng"
 

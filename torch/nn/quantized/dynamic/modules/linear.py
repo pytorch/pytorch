@@ -2,6 +2,7 @@ import torch
 import torch.nn.quantized as nnq
 from torch.nn.quantized.modules.utils import _quantize_weight
 
+
 class Linear(nnq.Linear):
     r"""
     A dynamic quantized linear module with floating point tensor as inputs and outputs.

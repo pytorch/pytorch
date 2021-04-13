@@ -3,12 +3,12 @@
 
 
 
-from caffe2.python import core
-from caffe2.proto import caffe2_pb2
-from caffe2.python.optimizer import get_param_device
-from caffe2.python.modeling.net_modifier import NetModifier
-
 import logging
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core
+from caffe2.python.modeling.net_modifier import NetModifier
+from caffe2.python.optimizer import get_param_device
 
 logger = logging.getLogger(__name__)
 

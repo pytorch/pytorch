@@ -1,6 +1,7 @@
-import torch
 import warnings
 from typing import Any, Iterable, List, Tuple
+
+import torch
 
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:

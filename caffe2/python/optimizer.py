@@ -7,11 +7,11 @@ import logging
 from collections import defaultdict, namedtuple
 
 import numpy as np
+from past.builtins import basestring
+
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, scope, utils, workspace
 from caffe2.python.modeling import parameter_info
-from past.builtins import basestring
-
 
 _LEARNING_RATE_INJECTION = "lr_injection"
 

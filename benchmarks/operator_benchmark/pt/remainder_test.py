@@ -1,6 +1,6 @@
 import operator_benchmark as op_bench
-import torch
 
+import torch
 
 """Microbenchmarks for remainder operators."""
 

@@ -5,18 +5,20 @@
 
 
 
-from abc import ABCMeta, abstractmethod
 import argparse
-from future.utils import viewitems
 import logging
-import numpy as np
 import sys
+from abc import ABCMeta, abstractmethod
 
+import numpy as np
+from future.utils import viewitems
+
+import caffe2.python.models.seq2seq.seq2seq_util as seq2seq_util
 from caffe2.python import core, rnn_cell, workspace
 from caffe2.python.models.seq2seq.beam_search import BeamSearchForwardOnly
-from caffe2.python.models.seq2seq.seq2seq_model_helper import Seq2SeqModelHelper
-import caffe2.python.models.seq2seq.seq2seq_util as seq2seq_util
-
+from caffe2.python.models.seq2seq.seq2seq_model_helper import (
+    Seq2SeqModelHelper
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

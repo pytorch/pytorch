@@ -1,17 +1,22 @@
 import os
 import sys
 import unittest
-from torch.testing._internal.common_utils import enable_profiling_mode_for_profiling_tests, GRAPH_EXECUTOR, ProfilingMode
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.testing._internal.common_utils import (
+    GRAPH_EXECUTOR,
+    ProfilingMode,
+    enable_profiling_mode_for_profiling_tests
+)
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
-from torch.testing._internal.common_utils import slowTest, suppress_warnings
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_utils import slowTest, suppress_warnings
+from torch.testing._internal.jit_utils import RUN_CUDA, JitTestCase
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

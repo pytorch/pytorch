@@ -1,14 +1,16 @@
-from torch.testing._internal.common_utils import TestCase, run_tests
+import functools
+import itertools
+import types
+import warnings
+
 import torch
 import torch.nn.functional as F
 from torch import Tensor, vmap
-import functools
-import itertools
-import warnings
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
     skipCUDAIfNoMagma
-import types
-
+)
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 FALLBACK_REGEX = r'falling back to slow \(for loop( and stack)?\) implementation'
 

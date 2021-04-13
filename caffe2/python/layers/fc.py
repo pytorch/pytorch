@@ -5,12 +5,16 @@
 
 
 
-from caffe2.python.helpers.arg_scope import get_current_scope
-from caffe2.python import schema
-from caffe2.python.layers.layers import ModelLayer
-from caffe2.python.layers.sampling_trainable_mixin import SamplingTrainableMixin
 import math
+
 import numpy as np
+
+from caffe2.python import schema
+from caffe2.python.helpers.arg_scope import get_current_scope
+from caffe2.python.layers.layers import ModelLayer
+from caffe2.python.layers.sampling_trainable_mixin import (
+    SamplingTrainableMixin
+)
 
 
 def get_fc_predictor_version(fc_version):

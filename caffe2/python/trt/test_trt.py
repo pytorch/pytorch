@@ -3,25 +3,36 @@
 
 
 
-from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace
-import onnx
-import onnx.defs
-from onnx.helper import make_node, make_graph, make_tensor_value_info, make_model
-from onnx.backend.base import namedtupledict
-from caffe2.python.models.download import ModelDownloader
-import caffe2.python.onnx.backend as c2
-from caffe2.python.onnx.workspace import Workspace
-from caffe2.python.trt.transform import convert_onnx_model_to_trt_op, transform_caffe2_net
-from caffe2.python.onnx.tests.test_utils import TestCase
-import numpy as np
 import os.path
-import time
-import unittest
+import shutil
 import tarfile
 import tempfile
-import shutil
+import time
+import unittest
+
+import numpy as np
+import onnx
+import onnx.defs
+from onnx.backend.base import namedtupledict
+from onnx.helper import (
+    make_graph,
+    make_model,
+    make_node,
+    make_tensor_value_info
+)
 from six.moves.urllib.request import urlretrieve
+
+import caffe2.python.onnx.backend as c2
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
+from caffe2.python.models.download import ModelDownloader
+from caffe2.python.onnx.tests.test_utils import TestCase
+from caffe2.python.onnx.workspace import Workspace
+from caffe2.python.trt.transform import (
+    convert_onnx_model_to_trt_op,
+    transform_caffe2_net
+)
+
 
 def _print_net(net):
     for i in net.external_input:

@@ -1,16 +1,27 @@
 import torch
 from torch.nn.modules.pooling import MaxPool2d
 
-from .activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid
+from .activation import ELU, Hardswish, LeakyReLU, ReLU6, Sigmoid
 from .batchnorm import BatchNorm2d, BatchNorm3d
-from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
-    InstanceNorm2d, InstanceNorm3d
-from .conv import _ConvNd, Conv1d, Conv2d, Conv3d
-from .conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
-from .linear import Linear
+from .conv import (
+    Conv1d,
+    Conv2d,
+    Conv3d,
+    ConvTranspose1d,
+    ConvTranspose2d,
+    ConvTranspose3d,
+    _ConvNd
+)
 from .embedding_ops import Embedding, EmbeddingBag
-
 from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
+from .linear import Linear
+from .normalization import (
+    GroupNorm,
+    InstanceNorm1d,
+    InstanceNorm2d,
+    InstanceNorm3d,
+    LayerNorm
+)
 
 
 class Quantize(torch.nn.Module):

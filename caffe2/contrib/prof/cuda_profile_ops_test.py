@@ -4,6 +4,7 @@
 
 
 import unittest
+
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, dyndep, workspace
 

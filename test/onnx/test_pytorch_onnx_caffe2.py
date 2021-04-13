@@ -1,20 +1,35 @@
-from typing import Tuple
 import io
 import itertools
 import sys
 import unittest
+from typing import Tuple
 
+import model_defs.dcgan as dcgan
+import model_defs.word_language_model as word_language_model
 import numpy as np
-
+import onnx
+import verify
 from debug_embed_params import run_embed_params
-from torch import nn
-from torch.autograd import Variable, function
-from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import ExportTypes
-import torch.onnx
-import torch.onnx.operators
-import torch.utils.model_zoo as model_zoo
-
+from model_defs.lstm_flattening_result import LstmFlatteningResult
+from model_defs.mnist import MNIST
+from model_defs.rnn_model_with_packed_sequence import (
+    RnnModelWithPackedSequence
+)
+from model_defs.squeezenet import SqueezeNet
+from model_defs.srresnet import SRResNet
+from model_defs.super_resolution import SuperResolutionNet
+from test_pytorch_common import (
+    BATCH_SIZE,
+    RNN_BATCH_SIZE,
+    RNN_HIDDEN_SIZE,
+    RNN_INPUT_SIZE,
+    RNN_SEQUENCE_LENGTH,
+    skipIfNoCuda,
+    skipIfNoLapack,
+    skipIfTravis,
+    skipIfUnsupportedMinOpsetVersion,
+    skipIfUnsupportedOpsetVersion
+)
 # Import various models for testing
 from torchvision.models.alexnet import alexnet
 from torchvision.models.densenet import densenet121
@@ -22,24 +37,18 @@ from torchvision.models.inception import inception_v3
 from torchvision.models.resnet import resnet50
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 
-from model_defs.squeezenet import SqueezeNet
-from model_defs.super_resolution import SuperResolutionNet
-from model_defs.srresnet import SRResNet
-import model_defs.dcgan as dcgan
-import model_defs.word_language_model as word_language_model
-from model_defs.mnist import MNIST
-from model_defs.lstm_flattening_result import LstmFlatteningResult
-from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from caffe2.python.operator_test.torch_integration_test import (generate_rois_rotated,
-                                                                create_bbox_transform_inputs)
-
-import onnx
 import caffe2.python.onnx.backend as c2
-
-from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda
-from test_pytorch_common import BATCH_SIZE, RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
-import verify
+import torch.onnx
+import torch.onnx.operators
+import torch.utils.model_zoo as model_zoo
+from caffe2.python.operator_test.torch_integration_test import (
+    create_bbox_transform_inputs,
+    generate_rois_rotated
+)
+from torch import nn
+from torch.autograd import Variable, function
+from torch.nn.utils import rnn as rnn_utils
+from torch.onnx import ExportTypes
 
 skip = unittest.skip
 

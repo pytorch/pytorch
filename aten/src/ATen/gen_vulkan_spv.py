@@ -3,8 +3,9 @@
 import argparse
 import array
 import os
-import sys
 import subprocess
+import sys
+
 from tools.codegen.code_template import CodeTemplate
 
 H_NAME = "spv.h"

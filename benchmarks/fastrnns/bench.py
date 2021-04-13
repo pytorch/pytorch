@@ -1,15 +1,15 @@
 import argparse
-from collections import namedtuple
-import torch
-import gc
-import sys
-import json
 import copy
+import gc
+import json
+import sys
 import time
+from collections import namedtuple
+
+import torch
 
 from .fuser import set_fuser
 from .runner import get_nn_runners
-
 
 BenchResult = namedtuple('BenchResult', [
     'name', 'avg_fwd', 'std_fwd', 'info_fwd', 'avg_bwd', 'std_bwd', 'info_bwd',

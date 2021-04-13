@@ -1,8 +1,13 @@
-import sys
-import os
 import contextlib
+import os
 import subprocess
-from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
+import sys
+
+from torch.testing._internal.common_utils import (
+    TemporaryFileName,
+    TestCase,
+    run_tests
+)
 
 
 @contextlib.contextmanager

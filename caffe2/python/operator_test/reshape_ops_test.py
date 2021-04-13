@@ -5,9 +5,9 @@
 import numpy as np
 from numpy.testing import assert_array_equal
 
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase
-from caffe2.proto import caffe2_pb2
 
 
 class TestLengthsToShapeOps(TestCase):

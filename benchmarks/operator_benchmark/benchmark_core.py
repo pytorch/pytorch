@@ -1,16 +1,16 @@
-import functools
-import numpy as np
-import timeit
-import json
-import torch
-import copy
 import ast
-
-# needs to be imported after torch
-import torch.utils.cpp_extension as cpp_extension # noqa
+import copy
+import functools
+import json
+import timeit
+from collections import namedtuple
 
 import benchmark_utils
-from collections import namedtuple
+import numpy as np
+
+import torch
+# needs to be imported after torch
+import torch.utils.cpp_extension as cpp_extension  # noqa
 
 """Performance microbenchmarks.
 

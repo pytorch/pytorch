@@ -4,12 +4,12 @@
 
 
 import hypothesis
-from hypothesis import given, settings, HealthCheck
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import HealthCheck, given, settings
 
-from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core
 
 
 class TestSparseLpNorm(hu.HypothesisTestCase):

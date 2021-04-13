@@ -1,6 +1,9 @@
-import torch
-from ..optimizer import Optimizer, required
 from collections import defaultdict
+
+import torch
+
+from ..optimizer import Optimizer, required
+
 
 class SGD(Optimizer):
     r"""Implements stochastic gradient descent (optionally with momentum).

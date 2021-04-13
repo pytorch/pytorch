@@ -1,11 +1,11 @@
 import random
 import time
 
+from agent import AgentBase
+
 import torch
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc import rpc_sync
-
-from agent import AgentBase
 
 
 class ObserverBase:

@@ -17,13 +17,13 @@ from typing import (
     Iterable,
     List,
     Optional,
-    Set,
     Sequence,
+    Set,
     Tuple,
     Type,
     TypeVar,
     Union,
-    cast,
+    cast
 )
 
 from torch import Tensor, nn

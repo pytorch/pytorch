@@ -1,6 +1,6 @@
 import operator_benchmark as op_bench
-from caffe2.python import core
 
+from caffe2.python import core
 
 add_configs = op_bench.cross_product_configs(
     M=[8],

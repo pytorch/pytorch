@@ -1,7 +1,7 @@
-from ..modules import Module
 from typing import Any, Optional
-from .common_types import _devices_t, _device_t
 
+from ..modules import Module
+from .common_types import _device_t, _devices_t
 
 class DistributedDataParallel(Module):
     process_group: Any = ...

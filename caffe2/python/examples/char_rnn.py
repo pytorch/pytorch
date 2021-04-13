@@ -5,16 +5,16 @@
 
 
 
-from caffe2.python import core, workspace, model_helper, utils, brew
-from caffe2.python.rnn_cell import LSTM
-from caffe2.proto import caffe2_pb2
-from caffe2.python.optimizer import build_sgd
-
-
 import argparse
 import logging
-import numpy as np
 from datetime import datetime
+
+import numpy as np
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import brew, core, model_helper, utils, workspace
+from caffe2.python.optimizer import build_sgd
+from caffe2.python.rnn_cell import LSTM
 
 '''
 This script takes a text file as input and uses a recurrent neural network

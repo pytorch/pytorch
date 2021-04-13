@@ -1,10 +1,12 @@
 ## @package device_checker
 # Module caffe2.python.device_checker
-import numpy as np
 import copy
+
+import numpy as np
+from future.utils import viewitems
+
 from caffe2.python import workspace
 from caffe2.python.core import InferOpBlobDevicesAsDict
-from future.utils import viewitems
 
 
 class DeviceChecker(object):

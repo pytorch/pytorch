@@ -3,18 +3,18 @@
 
 
 
-from caffe2.python import (
-    brew, cnn, core, workspace, data_parallel_model,
-    timeout_guard, model_helper, optimizer)
-from caffe2.python.test_util import TestCase
-import caffe2.python.models.resnet as resnet
-from caffe2.python.modeling.initializers import Initializer
-from caffe2.python import convnet_benchmarks as cb
-from caffe2.python import hypothesis_test_util as hu
-
 import time
+
 import numpy as np
 
+import caffe2.python.models.resnet as resnet
+from caffe2.python import brew, cnn
+from caffe2.python import convnet_benchmarks as cb
+from caffe2.python import core, data_parallel_model
+from caffe2.python import hypothesis_test_util as hu
+from caffe2.python import model_helper, optimizer, timeout_guard, workspace
+from caffe2.python.modeling.initializers import Initializer
+from caffe2.python.test_util import TestCase
 
 CI_MAX_EXAMPLES = 2
 CI_TIMEOUT = 600

@@ -8,8 +8,8 @@ import itertools as it
 import os
 import re
 import textwrap
-from typing import cast, List, Optional, Tuple, TYPE_CHECKING
 import uuid
+from typing import TYPE_CHECKING, List, Optional, Tuple, cast
 
 import torch
 
@@ -19,10 +19,15 @@ if TYPE_CHECKING:
 else:
     from torch.utils.benchmark import Language
 
-from core.api import AutogradMode, AutoLabels, GroupedBenchmark, RuntimeMode, TimerArgs
+from core.api import (
+    AutogradMode,
+    AutoLabels,
+    GroupedBenchmark,
+    RuntimeMode,
+    TimerArgs
+)
 from core.types import FlatDefinition, FlatIntermediateDefinition, Label
 from core.utils import get_temp_dir
-
 
 _ALL_MODES = tuple(it.product(
     RuntimeMode,

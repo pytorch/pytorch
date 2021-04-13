@@ -3,13 +3,14 @@
 
 
 
-from caffe2.python import workspace
-from caffe2.python.core import Plan, to_execution_step, Net
-from caffe2.python.task import Task, TaskGroup, final_output
-from caffe2.python.net_builder import ops, NetBuilder
-from caffe2.python.session import LocalSession
-import unittest
 import threading
+import unittest
+
+from caffe2.python import workspace
+from caffe2.python.core import Net, Plan, to_execution_step
+from caffe2.python.net_builder import NetBuilder, ops
+from caffe2.python.session import LocalSession
+from caffe2.python.task import Task, TaskGroup, final_output
 
 
 class PythonOpStats(object):

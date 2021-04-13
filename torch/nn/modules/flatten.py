@@ -1,8 +1,9 @@
-from .module import Module
-
 from typing import Tuple, Union
+
 from torch import Tensor
 from torch.types import _size
+
+from .module import Module
 
 
 class Flatten(Module):

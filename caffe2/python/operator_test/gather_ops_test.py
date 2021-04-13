@@ -2,14 +2,15 @@
 
 
 
+import hypothesis.extra.numpy as hnp
+import hypothesis.strategies as st
 import numpy as np
-
-from caffe2.python import core, workspace
 from hypothesis import given, settings
+
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-import hypothesis.strategies as st
-import hypothesis.extra.numpy as hnp
+from caffe2.python import core, workspace
+
 
 # Basic implementation of gather for axis == 0, shich is lookup of indices
 # in the outer dimension. Keeping it for reference here, although is similar

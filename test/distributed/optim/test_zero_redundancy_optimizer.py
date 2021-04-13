@@ -9,9 +9,10 @@ import copy
 import os
 import sys
 from contextlib import suppress
-from typing import List, Any, Type, cast
+from typing import Any, List, Type, cast
 
 import numpy as np
+
 import torch
 import torch.distributed as dist
 
@@ -22,7 +23,7 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD
-from torch.testing._internal import common_utils, common_distributed
+from torch.testing._internal import common_distributed, common_utils
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO  # type: ignore
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"

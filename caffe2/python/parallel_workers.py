@@ -33,13 +33,12 @@ for each GPU. Note that the 'coordinator' returned by the function is same
 each time.
 '''
 
+import atexit
+import collections
 import logging
 import threading
-import atexit
 import time
-import collections
 import traceback
-
 from abc import ABCMeta, abstractmethod
 
 log = logging.getLogger("parallel_workers")

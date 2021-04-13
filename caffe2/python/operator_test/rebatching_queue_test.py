@@ -2,16 +2,15 @@
 
 
 
-from caffe2.python import core, workspace
-from caffe2.python.test_util import TestCase
+import functools
 
+import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
-
 from hypothesis import given, settings
-import hypothesis.strategies as st
 
-import functools
+from caffe2.python import core, workspace
+from caffe2.python.test_util import TestCase
 
 
 def primefac(n):

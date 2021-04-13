@@ -18,13 +18,14 @@
 
 
 
-from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given
 
-from caffe2.python.transformations import Transformer
-from caffe2.python import core, workspace
+from caffe2.python import core
 from caffe2.python import test_util as tu
+from caffe2.python import workspace
+from caffe2.python.transformations import Transformer
 
 transformer = Transformer()
 

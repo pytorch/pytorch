@@ -1,23 +1,21 @@
 import copy
+from typing import Any, Callable, Dict, Optional, Set, Union
 
 import torch
-from torch import nn
-
 import torch.nn.functional as F
 import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
+import torch.nn.intrinsic.quantized as nniq
+import torch.nn.qat as nnqat
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn.qat as nnqat
+from torch import nn
 
-from typing import Optional, Union, Dict, Set, Callable, Any
-
-from .stubs import QuantStub, DeQuantStub
 from .fake_quantize import (
     default_affine_fixed_qparams_fake_quant,
-    default_symmetric_fixed_qparams_fake_quant,
+    default_symmetric_fixed_qparams_fake_quant
 )
+from .stubs import DeQuantStub, QuantStub
 from .utils import get_combined_dict
 
 # Default map for swapping float module to quantized ones

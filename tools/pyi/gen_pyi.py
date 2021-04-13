@@ -1,15 +1,20 @@
+import argparse
 import collections
 from pprint import pformat
+from typing import Dict, List, Sequence
 
-import argparse
-
-from tools.codegen.model import Variant
-from tools.codegen.api.python import (PythonSignatureGroup,
-                                      PythonSignatureNativeFunctionPair)
+from tools.codegen.api.python import (
+    PythonSignatureGroup,
+    PythonSignatureNativeFunctionPair
+)
 from tools.codegen.gen import FileManager
-from typing import Sequence, List, Dict
+from tools.codegen.model import Variant
 
-from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
+from ..autograd.gen_python_functions import (
+    group_overloads,
+    load_signatures,
+    should_generate_py_binding
+)
 
 """
 This module implements generation of type stubs for PyTorch,

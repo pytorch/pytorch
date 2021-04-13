@@ -1,13 +1,19 @@
-from torch.testing._internal import expecttest
-from torch.testing._internal.common_utils import TestCase, run_tests
-
+import doctest
 import string
 import textwrap
-import doctest
-from typing import Dict, Any
+from typing import Any, Dict
 
 import hypothesis
-from hypothesis.strategies import text, integers, composite, sampled_from, booleans
+from hypothesis.strategies import (
+    booleans,
+    composite,
+    integers,
+    sampled_from,
+    text
+)
+
+from torch.testing._internal import expecttest
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 @composite

@@ -1,39 +1,41 @@
+from hypothesis import assume, given
+from hypothesis import strategies as st
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized._reference as nniqr
 import torch.nn.quantized as nnq
 import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn.functional as F
 import torch.quantization
-
+import torch.testing._internal.hypothesis_utils as hu
 from torch.quantization import (
-    get_default_static_quant_module_mappings,
-    default_float_qparams_observer,
     PerChannelMinMaxObserver,
+    default_float_qparams_observer,
+    get_default_static_quant_module_mappings
 )
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
-    prepare_dynamic,
     _make_conv_test_input,
-    skipIfNoFBGEMM,
-    lengths_to_offsets
+    lengths_to_offsets,
+    prepare_dynamic,
+    skipIfNoFBGEMM
 )
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
-    override_quantized_engine,
     override_qengines,
+    override_quantized_engine
 )
-from hypothesis import assume, given
-from hypothesis import strategies as st
-import torch.testing._internal.hypothesis_utils as hu
+
 hu.assert_deadline_disabled()
 
 import io
-import numpy as np
 import itertools
+
+import numpy as np
 
 """
 Note that tests in this file are just API test, to make sure we wrapped the

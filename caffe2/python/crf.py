@@ -3,8 +3,8 @@
 
 
 import numpy as np
-from caffe2.python import brew, core, model_helper, recurrent
 
+from caffe2.python import brew, core, model_helper, recurrent
 
 """
 Due to a limitation in ReccurentNetworkOp, this layer only supports batch_size=1

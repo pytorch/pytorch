@@ -7,11 +7,16 @@
 from functools import partial
 
 import pytest
-import torch
-from torch import nn
-import torch.cuda
 
-from torch.distributed.pipeline.sync.checkpoint import Checkpointing, checkpoint, is_checkpointing, is_recomputing
+import torch
+import torch.cuda
+from torch import nn
+from torch.distributed.pipeline.sync.checkpoint import (
+    Checkpointing,
+    checkpoint,
+    is_checkpointing,
+    is_recomputing
+)
 from torch.distributed.pipeline.sync.dependency import fork, join
 from torch.distributed.pipeline.sync.microbatch import Batch
 

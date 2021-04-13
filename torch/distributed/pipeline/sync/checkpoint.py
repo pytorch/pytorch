@@ -24,23 +24,23 @@ and :class:`Checkpoint` to delay only :class:`Checkpoint` until the gradient is
 copied entirely.
 
 """
+import threading
 from collections import deque
 from contextlib import contextmanager
-import threading
 from typing import (
     TYPE_CHECKING,
     Deque,
     Generator,
     List,
     Optional,
-    Union,
     Sequence,
-    Tuple
+    Tuple,
+    Union
 )
 
 import torch
-from torch import Tensor
 import torch.autograd
+from torch import Tensor
 
 from .dependency import fork, join
 from .microbatch import Batch

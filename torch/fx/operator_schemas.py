@@ -1,9 +1,10 @@
-import torch
+import enum
 import inspect
 import numbers
 import typing
-import enum
 from typing import Any, Callable, Dict, List, Optional
+
+import torch
 
 _manual_overrides : Dict[Callable, List[inspect.Signature]] = {}
 

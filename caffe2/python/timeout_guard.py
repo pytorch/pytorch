@@ -6,13 +6,13 @@
 
 
 import contextlib
-import threading
-import os
-import time
-import signal
 import logging
-from future.utils import viewitems
+import os
+import signal
+import threading
+import time
 
+from future.utils import viewitems
 
 '''
 Sometimes CUDA devices can get stuck, 'deadlock'. In this case it is often

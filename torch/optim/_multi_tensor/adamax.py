@@ -1,6 +1,9 @@
-import torch
-from ..optimizer import Optimizer
 from collections import defaultdict
+
+import torch
+
+from ..optimizer import Optimizer
+
 
 class Adamax(Optimizer):
     """Implements Adamax algorithm (a variant of Adam based on infinity norm).

@@ -5,10 +5,10 @@
 
 
 
-from caffe2.python import scope
-from caffe2.python.modeling.parameter_info import ParameterTags
 from caffe2.proto import caffe2_pb2
+from caffe2.python import scope
 from caffe2.python.modeling import initializers
+from caffe2.python.modeling.parameter_info import ParameterTags
 
 
 def lrn(model, blob_in, blob_out, order="NCHW", use_cudnn=False, **kwargs):

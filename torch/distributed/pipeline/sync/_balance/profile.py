@@ -7,11 +7,11 @@
 """Per-layer profilers."""
 import copy
 import time
-from typing import Generator, List, Union, Sequence
+from typing import Generator, List, Sequence, Union
 
 import torch
-from torch import Tensor
 import torch.nn as nn
+from torch import Tensor
 
 from ..microbatch import Batch
 

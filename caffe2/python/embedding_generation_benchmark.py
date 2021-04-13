@@ -5,14 +5,14 @@
 
 
 
-from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace, core, utils, model_helper
-
 import argparse
-import numpy as np
+import logging
 import time
 
-import logging
+import numpy as np
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, model_helper, utils, workspace
 
 logging.basicConfig()
 log = logging.getLogger("embedding_generation_benchmark")

@@ -8,8 +8,8 @@
 
 import unittest
 
-from caffe2.python.onnx.tests.test_utils import TestCase
 import caffe2.python._import_c_extension as C
+from caffe2.python.onnx.tests.test_utils import TestCase
 
 
 class TestCaffe2Basic(TestCase):

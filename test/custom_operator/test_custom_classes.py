@@ -1,10 +1,10 @@
-import unittest
-import torch
-from torch import ops
-import torch.jit as jit
 import glob
 import os
+import unittest
 
+import torch
+import torch.jit as jit
+from torch import ops
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 

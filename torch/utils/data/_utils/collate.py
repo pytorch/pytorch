@@ -5,9 +5,10 @@ These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
 """
 
-import torch
-import re
 import collections
+import re
+
+import torch
 from torch._six import string_classes
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')

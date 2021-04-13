@@ -1,7 +1,7 @@
-from typing import Any, Dict, List, Tuple, overload, TypeVar
+from typing import Any, Dict, List, Tuple, TypeVar, overload
+
 from ... import Tensor
 from .common_types import _device_t, _devices_t
-
 
 T = TypeVar('T', Dict, List, Tuple)
 

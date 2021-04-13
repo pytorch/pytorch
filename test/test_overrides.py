@@ -1,18 +1,19 @@
-import torch
-import numpy as np
-import inspect
 import functools
-import pprint
+import inspect
 import pickle
+import pprint
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+import numpy as np
+
+import torch
 from torch.overrides import (
-    handle_torch_function,
-    has_torch_function,
     get_overridable_functions,
     get_testing_overrides,
+    handle_torch_function,
+    has_torch_function,
     is_tensor_method_or_property
 )
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 Tensor = torch.Tensor
 
@@ -542,7 +543,9 @@ class TestTorchFunctionOverride(TestCase):
 
 
 def generate_tensor_like_override_tests(cls):
-    from torch.testing._internal.generated.annotated_fn_args import annotated_args
+    from torch.testing._internal.generated.annotated_fn_args import (
+        annotated_args
+    )
 
     def test_generator(func, override):
         # If func corresponds to a torch.Tensor method or property.
@@ -785,7 +788,10 @@ class TestEinsumOverride(TestCase):
 class TestGradCheckOverride(TestCase):
     "Test that wrappers work with gradcheck."
     def test_gradcheck(self):
-        from torch.testing._internal.common_utils import gradcheck, gradgradcheck
+        from torch.testing._internal.common_utils import (
+            gradcheck,
+            gradgradcheck
+        )
 
         a = wrap(torch.tensor(5.0, dtype=torch.double))
         b = wrap(torch.tensor(6.0, dtype=torch.double))

@@ -1,22 +1,45 @@
 # -*- coding: utf-8 -*-
-import unittest
 import os
 import sys
+import unittest
+from itertools import permutations, product
+from textwrap import dedent
+
+from test_jit import (
+    LSTMCellC,
+    LSTMCellF,
+    LSTMCellS,
+    MiLSTMCell,
+    all_backward_graphs,
+    backward_graph,
+    get_lstm_inputs,
+    get_milstm_inputs
+)
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
-
-from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests, IS_WINDOWS, TemporaryDirectoryName, shell
-from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, _inline_everything, \
-    RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward
-from textwrap import dedent
-from itertools import product, permutations
 from torch.testing._internal.common_cuda import with_tf32_off
-
-from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
-    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
+from torch.testing._internal.common_utils import (
+    GRAPH_EXECUTOR,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    ProfilingMode,
+    TemporaryDirectoryName,
+    enable_profiling_mode_for_profiling_tests,
+    run_tests,
+    shell
+)
+from torch.testing._internal.jit_utils import (
+    RUN_CUDA,
+    RUN_CUDA_HALF,
+    RUN_CUDA_MULTI_GPU,
+    JitTestCase,
+    _inline_everything,
+    enable_cpu_fuser,
+    warmup_backward
+)
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_profiling_executor(True)

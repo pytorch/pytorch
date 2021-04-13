@@ -4,21 +4,23 @@ import operator
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.qat as nniqat
+import torch.nn.intrinsic.quantized as nniq
+import torch.nn.qat as nnqat
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn.qat as nnqat
-import torch.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.qat as nniqat
-import torch.nn.intrinsic as nni
+
 toq = torch.ops.quantized
+
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
-from .utils import getattr_from_fqn
 from .ns_types import NSSubgraph
+from .utils import getattr_from_fqn
 
-from typing import Dict, Tuple, List, Optional, Set, Callable, Any, Union
 
 def _get_output_nodes(g: Graph) -> List[Node]:
     return [n for n in g.nodes if n.op == 'output']

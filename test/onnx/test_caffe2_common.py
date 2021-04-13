@@ -1,9 +1,11 @@
 import glob
+import os
+
 import numpy as np
 import onnx.backend.test
-import caffe2.python.onnx.backend as c2
-import os
 from onnx import numpy_helper
+
+import caffe2.python.onnx.backend as c2
 
 
 def load_tensor_as_numpy_array(f):

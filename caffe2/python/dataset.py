@@ -15,11 +15,16 @@ deserialization is necessary.
 
 
 
+import numpy as np
+
 from caffe2.python import core, workspace
 from caffe2.python.dataio import Reader, Writer
 from caffe2.python.schema import (
-    Struct, from_blob_list, from_column_list, InitEmptyRecord)
-import numpy as np
+    InitEmptyRecord,
+    Struct,
+    from_blob_list,
+    from_column_list
+)
 
 
 class _DatasetReader(Reader):

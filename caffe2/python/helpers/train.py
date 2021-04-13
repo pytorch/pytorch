@@ -5,8 +5,8 @@
 
 
 
-from caffe2.python import core, scope
 from caffe2.proto import caffe2_pb2
+from caffe2.python import core, scope
 
 
 def _get_weights(model, namescope=None):

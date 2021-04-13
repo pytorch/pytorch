@@ -1,13 +1,13 @@
 r"""This file is allowed to initialize CUDA context when imported."""
 
+import contextlib
 import functools
+import inspect
+from distutils.version import LooseVersion
+
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import TEST_NUMBA
-import inspect
-import contextlib
-from distutils.version import LooseVersion
-
 
 TEST_CUDA = torch.cuda.is_available()
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2

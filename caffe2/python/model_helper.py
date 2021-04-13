@@ -5,23 +5,17 @@
 
 
 
+import logging
+from itertools import chain
+
+from future.utils import viewitems, viewkeys
+
 from caffe2.python import core, scope, workspace
 from caffe2.python.helpers.db_input import db_input
 from caffe2.python.modeling import parameter_info
-from caffe2.python.modeling.parameter_sharing import (
-    parameter_sharing_context,
-)
-from caffe2.python.optimizer_context import (
-    OptimizerContext,
-    DEFAULT_OPTIM,
-)
+from caffe2.python.modeling.parameter_sharing import parameter_sharing_context
+from caffe2.python.optimizer_context import DEFAULT_OPTIM, OptimizerContext
 from caffe2.python.regularizer_context import RegularizerContext
-
-from future.utils import viewitems, viewkeys
-from itertools import chain
-
-import logging
-
 
 # _known_working_ops are operators that do not need special care.
 _known_working_ops = [

@@ -3,8 +3,9 @@
 
 
 
-from caffe2.python import context, test_util
 from threading import Thread
+
+from caffe2.python import context, test_util
 
 
 class MyContext(context.Managed):

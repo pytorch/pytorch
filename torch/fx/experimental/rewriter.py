@@ -1,13 +1,15 @@
 import ast
+import copy
 import inspect
 import textwrap
-import copy
 from types import FunctionType
-from typing import cast, Union, Callable, Dict, Optional, Any
-from torch.fx.symbolic_trace import Tracer
-from torch.fx.graph import Graph
-from torch.jit.frontend import normalize_source_lines
+from typing import Any, Callable, Dict, Optional, Union, cast
+
 import torch
+from torch.fx.graph import Graph
+from torch.fx.symbolic_trace import Tracer
+from torch.jit.frontend import normalize_source_lines
+
 
 class AST_Rewriter(ast.NodeTransformer):
     """

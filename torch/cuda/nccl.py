@@ -1,9 +1,8 @@
 import collections
 import warnings
-
-import torch.cuda
 from typing import Optional, Sequence, Union
 
+import torch.cuda
 
 __all__ = ['all_reduce', 'reduce', 'broadcast', 'all_gather', 'reduce_scatter']
 

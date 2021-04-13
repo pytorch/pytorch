@@ -9,9 +9,8 @@ should be "pruned".
 
 from collections import OrderedDict
 
-from cimodel.lib.conf_tree import ConfigNode
 import cimodel.data.dimensions as dimensions
-
+from cimodel.lib.conf_tree import ConfigNode
 
 LINKING_DIMENSIONS = [
     "shared",

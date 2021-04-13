@@ -1,9 +1,16 @@
 import io
+
 import torch
+from torch.package import (
+    Importer,
+    OrderedImporter,
+    PackageImporter,
+    sys_importer
+)
 from torch.package._package_pickler import create_pickler
 from torch.package._package_unpickler import PackageUnpickler
-from torch.package import sys_importer, OrderedImporter, PackageImporter, Importer
 from torch.serialization import _maybe_decode_ascii
+
 
 def _save_storages(importer, obj):
     serialized_storages = []

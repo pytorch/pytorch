@@ -1,6 +1,10 @@
+from typing import Iterator, List, Union
+
 from torch.utils.data import IterDataPipe
-from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
-from typing import List, Union, Iterator
+from torch.utils.data.datapipes.utils.common import (
+    get_file_pathnames_from_root
+)
+
 
 class ListDirFilesIterDataPipe(IterDataPipe[str]):
     r""" :class:`ListDirFilesIterDataPipe`

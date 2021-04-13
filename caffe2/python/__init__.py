@@ -1,7 +1,9 @@
 
-from caffe2.proto import caffe2_pb2
 import os
 import sys
+
+from caffe2.proto import caffe2_pb2
+
 # TODO: refactor & remove the following alias
 caffe2_pb2.CPU = caffe2_pb2.PROTO_CPU
 caffe2_pb2.CUDA = caffe2_pb2.PROTO_CUDA
@@ -25,8 +27,8 @@ if sys.platform == "win32":
     else:
         nvtoolsext_dll_path = ''
 
-    import importlib.util
     import glob
+    import importlib.util
     spec = importlib.util.spec_from_file_location('torch_version', os.path.join(th_root, 'version.py'))
     torch_version = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(torch_version)

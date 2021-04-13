@@ -1,12 +1,17 @@
-from tools.codegen.model import (Argument, FunctionSchema, Return,
-                                 SelfArgument, TensorOptionsArguments, Type,
-                                 assert_never)
-
-from tools.codegen.api.types import ArgName, Binding, CType
-from tools.codegen.api import cpp
-
 import itertools
-from typing import Sequence, List, Union
+from typing import List, Sequence, Union
+
+from tools.codegen.api import cpp
+from tools.codegen.api.types import ArgName, Binding, CType
+from tools.codegen.model import (
+    Argument,
+    FunctionSchema,
+    Return,
+    SelfArgument,
+    TensorOptionsArguments,
+    Type,
+    assert_never
+)
 
 # This file describes the translation of JIT schema to the dispatcher
 # API, the *unboxed* calling convention by which invocations through

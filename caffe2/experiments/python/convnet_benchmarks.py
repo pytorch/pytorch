@@ -82,9 +82,8 @@ pass.
 import argparse
 import time
 
-from caffe2.python import cnn, workspace, core
-
 import caffe2.python.SparseTransformer as SparseTransformer  # type: ignore[import]
+from caffe2.python import cnn, core, workspace
 
 
 def MLP(order):

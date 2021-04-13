@@ -1,4 +1,5 @@
 import operator_benchmark as op_bench
+
 import torch
 
 """Microbenchmarks for linear_prepack_fp16_ operator. Supports both Caffe2/PyTorch."""

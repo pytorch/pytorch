@@ -1,4 +1,5 @@
 import enum
+from typing import Any, Callable, Tuple
 
 import torch
 import torch.nn as nn
@@ -6,7 +7,6 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.fx.quantize import is_activation_post_process
 
-from typing import Any, Tuple, Callable
 
 def getattr_from_fqn(gm: GraphModule, fqn: str) -> Any:
     """

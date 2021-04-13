@@ -3,13 +3,15 @@
 
 
 
-from caffe2.python import core
-from caffe2.python.test_util import rand_array
-import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
-from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python import core
+from caffe2.python.test_util import rand_array
+
 
 class TestScatterOps(serial.SerializedTestCase):
     # TODO(dzhulgakov): add test cases for failure scenarios

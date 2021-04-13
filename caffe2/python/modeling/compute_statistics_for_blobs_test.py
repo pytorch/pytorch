@@ -4,12 +4,13 @@
 
 
 import unittest
-from caffe2.python import workspace, brew, model_helper
+
+import numpy as np
+
+from caffe2.python import brew, model_helper, workspace
 from caffe2.python.modeling.compute_statistics_for_blobs import (
     ComputeStatisticsForBlobs
 )
-
-import numpy as np
 
 
 class ComputeStatisticsForBlobsTest(unittest.TestCase):

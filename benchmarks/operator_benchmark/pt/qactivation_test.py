@@ -1,7 +1,7 @@
+import operator_benchmark as op_bench
+
 import torch
 import torch.nn.quantized as nnq
-
-import operator_benchmark as op_bench
 
 r"""Microbenchmarks for the quantized activations."""
 

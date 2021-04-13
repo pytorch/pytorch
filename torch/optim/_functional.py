@@ -1,8 +1,9 @@
 r"""Functional interface"""
 import math
+from typing import List, Optional
+
 import torch
 from torch import Tensor
-from typing import List, Optional
 
 # TODO: use foreach API in optim._functional to do all the computation
 

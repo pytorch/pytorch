@@ -1,10 +1,10 @@
-import torch._C as C
-from torch.testing._internal.common_utils import TestCase, run_tests
-from torch._python_dispatcher import PythonDispatcher
-
-from collections import namedtuple
 import itertools
 import re
+from collections import namedtuple
+
+import torch._C as C
+from torch._python_dispatcher import PythonDispatcher
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
 # the dispatcher from Python!

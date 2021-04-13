@@ -8,13 +8,23 @@ import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
-    TemporaryFileName, TemporaryDirectoryName)
 from torch.autograd.profiler import profile as _profile
 from torch.profiler import (
-    kineto_available, profile, record_function, DeviceType, ProfilerActivity
+    DeviceType,
+    ProfilerActivity,
+    kineto_available,
+    profile,
+    record_function
+)
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TemporaryDirectoryName,
+    TemporaryFileName,
+    TestCase,
+    run_tests
 )
 
 try:

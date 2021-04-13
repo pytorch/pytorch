@@ -2,15 +2,15 @@
 
 
 
-import numpy as np
-from hypothesis import given, assume, settings
-import hypothesis.strategies as st
+import unittest
 
-from caffe2.python import core, model_helper, brew, utils
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import assume, given, settings
+
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-
-import unittest
+from caffe2.python import brew, core, model_helper, utils
 
 
 class TestInstanceNorm(serial.SerializedTestCase):

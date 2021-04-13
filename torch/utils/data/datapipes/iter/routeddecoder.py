@@ -1,11 +1,13 @@
-from torch.utils.data import IterDataPipe
-from torch.utils.data.datapipes.utils.decoder import (
-    Decoder,
-    basichandlers as decoder_basichandlers,
-    imagehandler as decoder_imagehandler)
-
-from typing import Iterable, Iterator, Union, List, Tuple, Any, Callable
 from io import BufferedIOBase
+from typing import Any, Callable, Iterable, Iterator, List, Tuple, Union
+
+from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.utils.decoder import Decoder
+from torch.utils.data.datapipes.utils.decoder import \
+    basichandlers as decoder_basichandlers
+from torch.utils.data.datapipes.utils.decoder import \
+    imagehandler as decoder_imagehandler
+
 
 class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     r""" :class:`RoutedDecoderIterDataPipe`.

@@ -9,17 +9,19 @@ import argparse
 import collections
 import logging
 import math
-import numpy as np
-import random
-import time
-import sys
 import os
+import random
+import sys
+import time
+
+import numpy as np
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
-from caffe2.python import core, workspace, data_parallel_model
 import caffe2.python.models.seq2seq.seq2seq_util as seq2seq_util
-from caffe2.python.models.seq2seq.seq2seq_model_helper import Seq2SeqModelHelper
-
+from caffe2.python import core, data_parallel_model, workspace
+from caffe2.python.models.seq2seq.seq2seq_model_helper import (
+    Seq2SeqModelHelper
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

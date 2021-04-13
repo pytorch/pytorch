@@ -4,16 +4,17 @@
 
 
 
-import numpy as np
-from caffe2.python import core, workspace
-
 import os
 import pathlib
 import shutil
 import tempfile
 import unittest
-from typing import Any, Callable, Tuple, Type
 from types import TracebackType
+from typing import Any, Callable, Tuple, Type
+
+import numpy as np
+
+from caffe2.python import core, workspace
 
 
 def rand_array(*dims):

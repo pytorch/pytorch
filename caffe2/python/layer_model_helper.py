@@ -5,23 +5,20 @@
 
 
 
-from caffe2.python import core, model_helper, schema, scope, utils, muji
-from caffe2.python.modeling.parameter_info import (
-    ParameterInfo,
-)
-from caffe2.python.modeling.parameter_sharing import (
-    parameter_sharing_context,
-)
-from caffe2.python.modeling.net_modifier import NetModifier
+import copy
+import logging
 
-from caffe2.python.optimizer import get_param_device, Optimizer
-from caffe2.python.regularizer import Regularizer, RegularizationBy
-from caffe2.python.layers import layers
+import numpy as np
 from future.utils import viewitems, viewvalues
 
-import logging
-import numpy as np
-import copy
+from caffe2.python import core, model_helper, muji, schema, scope, utils
+from caffe2.python.layers import layers
+from caffe2.python.modeling.net_modifier import NetModifier
+from caffe2.python.modeling.parameter_info import ParameterInfo
+from caffe2.python.modeling.parameter_sharing import parameter_sharing_context
+from caffe2.python.optimizer import Optimizer, get_param_device
+from caffe2.python.regularizer import RegularizationBy, Regularizer
+
 logger = logging.getLogger(__name__)
 
 

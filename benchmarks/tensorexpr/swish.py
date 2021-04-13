@@ -1,5 +1,6 @@
-from . import benchmark
 import torch
+
+from . import benchmark
 
 
 class SwishBench(benchmark.Benchmark):

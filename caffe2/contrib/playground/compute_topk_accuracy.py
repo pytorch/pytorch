@@ -3,9 +3,10 @@
 
 
 
+import numpy as np
+
 import caffe2.contrib.playground.meter as Meter
 from caffe2.python import workspace
-import numpy as np
 
 
 class ComputeTopKAccuracy(Meter.Meter):

@@ -1,7 +1,7 @@
-import operator_benchmark as op_bench
-import torch
 import numpy
+import operator_benchmark as op_bench
 
+import torch
 
 """Microbenchmarks for index_select operator."""
 

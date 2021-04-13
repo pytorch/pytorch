@@ -3,10 +3,12 @@
 
 
 
-import numpy as np
 import time
 
-from caffe2.python import workspace, cnn, memonger, core
+import numpy as np
+
+from caffe2.python import cnn, core, memonger, workspace
+
 
 def has_blob(proto, needle):
     for op in proto.op:

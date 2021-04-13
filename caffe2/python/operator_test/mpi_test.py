@@ -3,14 +3,14 @@
 
 
 
-from hypothesis import given
-import hypothesis.strategies as st
-
-import numpy as np
 import unittest
 
-from caffe2.python import core, workspace, dyndep
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given
+
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, dyndep, workspace
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/mpi:mpi_ops")
 

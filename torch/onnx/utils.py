@@ -5,21 +5,31 @@ IR format.  These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
 
-import torch
-import torch.jit
-import torch.autograd
-import torch.serialization
-import re
 import collections
 import contextlib
 import numbers
+import re
 import warnings
+from typing import List, Tuple, Union
+
+import torch
+import torch.autograd
+import torch.jit
+import torch.serialization
+from torch._C import (
+    ListType,
+    OptionalType,
+    _check_onnx_proto,
+    _propagate_and_assign_input_shapes
+)
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
-from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
-from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
-from typing import Union, Tuple, List
-
+from torch.onnx import (
+    ONNX_ARCHIVE_MODEL_PROTO_NAME,
+    ExportTypes,
+    OperatorExportTypes,
+    TrainingMode
+)
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
@@ -218,7 +228,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
     graph = torch._C._jit_pass_canonicalize(graph)
     torch._C._jit_pass_lint(graph)
-    from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version
+    from torch.onnx.symbolic_helper import (
+        _export_onnx_opset_version,
+        _onnx_shape_inference
+    )
     if _onnx_shape_inference:
         torch._C._jit_pass_onnx_graph_shape_type_inference(graph, params_dict, _export_onnx_opset_version)
     return graph
@@ -435,6 +448,7 @@ def _model_to_graph(model, args, verbose=False,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
                     training=None, dynamic_axes=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
+
     # Special case for common case of passing a single Tensor
     if isinstance(args, (torch.Tensor, int, float, bool)):
         args = (args, )
@@ -538,8 +552,11 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              do_constant_folding=True, keep_initializers_as_inputs=None,
                              fixed_batch_size=False, custom_opsets=None, add_node_names=True,
                              onnx_shape_inference=True):
-    from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
-    from torch.onnx.symbolic_helper import _set_operator_export_type
+    from torch.onnx.symbolic_helper import (
+        _default_onnx_opset_version,
+        _set_operator_export_type,
+        _set_opset_version
+    )
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     if custom_opsets is None:
@@ -597,7 +614,10 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
         through and provides a list of unsupported ops, the result being:
             Unsupported ops : [aten:cumsum]
     """
-    from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+    from torch.onnx.symbolic_helper import (
+        _default_onnx_opset_version,
+        _set_opset_version
+    )
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
@@ -640,8 +660,11 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         from torch.onnx.symbolic_helper import _set_onnx_shape_inference
         _set_onnx_shape_inference(onnx_shape_inference)
 
-        from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
-        from torch.onnx.symbolic_helper import _set_operator_export_type
+        from torch.onnx.symbolic_helper import (
+            _default_onnx_opset_version,
+            _set_operator_export_type,
+            _set_opset_version
+        )
         if opset_version is None:
             opset_version = _default_onnx_opset_version
         if not operator_export_type:
@@ -873,7 +896,8 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 
     from torch.onnx.symbolic_helper import _onnx_shape_inference
     if _onnx_shape_inference:
-        from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
+        from torch.onnx.symbolic_helper import \
+            _export_onnx_opset_version as opset_version
         torch._C._jit_pass_onnx_node_shape_type_inference(n, _params_dict, opset_version)
 
     if outputs == 1:
@@ -936,8 +960,9 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
     # the new graph
     try:
         import torch
-        from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
         import torch.onnx.symbolic_registry as sym_registry
+        from torch.onnx.symbolic_helper import \
+            _export_onnx_opset_version as opset_version
 
         sym_registry.register_version('', opset_version)
 
@@ -1145,7 +1170,10 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
     import torch.onnx.symbolic_registry as sym_registry
-    from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
+    from torch.onnx.symbolic_helper import (
+        _onnx_main_opset,
+        _onnx_stable_opsets
+    )
 
     for version in _onnx_stable_opsets + [_onnx_main_opset]:
         if version >= opset_version:

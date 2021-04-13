@@ -1,8 +1,8 @@
+from .data_parallel import DataParallel, data_parallel
+from .distributed import DistributedDataParallel
 from .parallel_apply import parallel_apply
 from .replicate import replicate
-from .data_parallel import DataParallel, data_parallel
-from .scatter_gather import scatter, gather
-from .distributed import DistributedDataParallel
+from .scatter_gather import gather, scatter
 
 __all__ = ['replicate', 'scatter', 'parallel_apply', 'gather', 'data_parallel',
            'DataParallel', 'DistributedDataParallel']

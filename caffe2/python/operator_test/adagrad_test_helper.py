@@ -2,8 +2,9 @@
 
 from functools import partial
 
-import caffe2.python.hypothesis_test_util as hu
 import numpy as np
+
+import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core
 
 

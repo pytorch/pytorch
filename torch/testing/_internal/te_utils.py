@@ -1,5 +1,6 @@
 import torch
 
+
 class ExecutionCounter(object):
     def try_get_trigger_value(self):
         try:

@@ -3,12 +3,12 @@
 
 
 
-from caffe2.python import core
+import hypothesis.strategies as st
+import numpy as np
 from hypothesis import assume, given, settings
 
 import caffe2.python.hypothesis_test_util as hu
-import hypothesis.strategies as st
-import numpy as np
+from caffe2.python import core
 
 
 class TestReduceFrontSum(hu.HypothesisTestCase):

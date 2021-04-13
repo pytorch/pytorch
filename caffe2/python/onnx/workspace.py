@@ -10,6 +10,7 @@ import uuid
 
 from caffe2.python import workspace
 
+
 # Separating out the context manager part so that users won't
 # (mis-)use Workspace instances as context managers
 class _WorkspaceCtx(object):

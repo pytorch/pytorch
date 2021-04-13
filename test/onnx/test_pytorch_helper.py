@@ -1,14 +1,15 @@
 # Some standard imports
-import numpy as np
-from torch import nn
-import torch.onnx
-import torch.nn.init as init
-from caffe2.python.model_helper import ModelHelper
-from pytorch_helper import PyTorchModule
 import unittest
-from caffe2.python.core import workspace
 
+import numpy as np
+from pytorch_helper import PyTorchModule
 from test_pytorch_common import skipIfNoLapack
+
+import torch.nn.init as init
+import torch.onnx
+from caffe2.python.core import workspace
+from caffe2.python.model_helper import ModelHelper
+from torch import nn
 
 
 class TestCaffe2Backend(unittest.TestCase):

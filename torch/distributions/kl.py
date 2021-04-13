@@ -1,7 +1,7 @@
 import math
 import warnings
 from functools import total_ordering
-from typing import Type, Dict, Callable, Tuple
+from typing import Callable, Dict, Tuple, Type
 
 import torch
 from torch._six import inf
@@ -14,24 +14,28 @@ from .cauchy import Cauchy
 from .continuous_bernoulli import ContinuousBernoulli
 from .dirichlet import Dirichlet
 from .distribution import Distribution
-from .exponential import Exponential
 from .exp_family import ExponentialFamily
+from .exponential import Exponential
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
 from .half_normal import HalfNormal
 from .independent import Independent
 from .laplace import Laplace
-from .lowrank_multivariate_normal import (LowRankMultivariateNormal, _batch_lowrank_logdet,
-                                          _batch_lowrank_mahalanobis)
-from .multivariate_normal import (MultivariateNormal, _batch_mahalanobis)
+from .lowrank_multivariate_normal import (
+    LowRankMultivariateNormal,
+    _batch_lowrank_logdet,
+    _batch_lowrank_mahalanobis
+)
+from .multivariate_normal import MultivariateNormal, _batch_mahalanobis
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
 from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
-from .utils import _sum_rightmost, euler_constant as _euler_gamma
+from .utils import _sum_rightmost
+from .utils import euler_constant as _euler_gamma
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE: Dict[Tuple[Type, Type], Callable] = {}  # Memoized version mapping many specific (type, type) pairs to functions.

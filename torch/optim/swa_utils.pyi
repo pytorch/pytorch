@@ -1,8 +1,9 @@
-from .optimizer import Optimizer
+from typing import Any, Callable, Iterable, List, Optional, Union
+
+from .. import Tensor, device
 from ..nn.modules import Module
 from .lr_scheduler import _LRScheduler
-from .. import device, Tensor
-from typing import Iterable, Any, Optional, Callable, Union, List
+from .optimizer import Optimizer
 
 class AveragedModel(Module):
     def __init__(self, model: Module, device: Union[int, device]=...,

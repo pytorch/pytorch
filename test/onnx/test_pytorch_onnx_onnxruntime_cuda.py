@@ -1,13 +1,12 @@
 import unittest
-import onnxruntime  # noqa
-import torch
 
+import onnxruntime  # noqa
+from test_pytorch_common import skipIfNoCuda, skipIfUnsupportedMinOpsetVersion
+from test_pytorch_onnx_onnxruntime import TestONNXRuntime
+
+import torch
 from torch.cuda.amp import autocast
 
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
-from test_pytorch_common import skipIfNoCuda
-
-from test_pytorch_onnx_onnxruntime import TestONNXRuntime
 
 class TestONNXRuntime_cuda(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version

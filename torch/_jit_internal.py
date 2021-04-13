@@ -4,25 +4,36 @@ can be used in other places in torch/ (namely torch.nn) without running into
 circular dependency problems
 """
 
-import contextlib
+import ast
+import builtins
 import collections
+import contextlib
 import enum
 import inspect
-import ast
-import weakref
-import warnings
-from textwrap import dedent
-import torch
 import sys
-import builtins
+import warnings
+import weakref
+from textwrap import dedent
+from typing import (  # noqa: F401
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union
+)
+
+import torch
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
+import torch.package._mangling as package_mangling
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
-import torch.package._mangling as package_mangling
-from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
 
 if sys.version_info[:2] > (3, 7):
     from typing import Final

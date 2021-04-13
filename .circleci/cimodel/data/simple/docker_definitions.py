@@ -1,8 +1,7 @@
 from collections import OrderedDict
 
+from cimodel.data.simple.util.branch_filters import RC_PATTERN, gen_filter_dict
 from cimodel.lib.miniutils import quote
-from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN
-
 
 # TODO: make this generated from a matrix rather than just a static list
 IMAGE_NAMES = [

@@ -3,10 +3,10 @@
 
 
 
-from caffe2.python import core, workspace
-from caffe2.python.test_util import TestCase
 import numpy as np
 
+from caffe2.python import core, workspace
+from caffe2.python.test_util import TestCase
 
 lengths = [[0], [1, 2], [1, 0, 2, 0]]
 features1 = [[],

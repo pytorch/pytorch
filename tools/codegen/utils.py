@@ -1,8 +1,17 @@
-import re
-from typing import Tuple, List, Iterable, Iterator, Callable, Sequence, TypeVar, Optional
-from enum import Enum
 import contextlib
+import re
 import textwrap
+from enum import Enum
+from typing import (
+    Callable,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar
+)
 
 # Many of these functions share logic for defining both the definition
 # and declaration (for example, the function signature is the same), so

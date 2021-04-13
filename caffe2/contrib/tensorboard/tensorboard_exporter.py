@@ -3,10 +3,10 @@
 
 
 
-from builtins import bytes
 import copy
 import logging
 import os
+from builtins import bytes
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
@@ -14,16 +14,16 @@ from caffe2.python import core, workspace
 try:
     # tensorboard>=1.14.0
     from tensorboard.compat.proto import tensor_shape_pb2
-    from tensorboard.compat.proto.node_def_pb2 import NodeDef
     from tensorboard.compat.proto.graph_pb2 import GraphDef
+    from tensorboard.compat.proto.node_def_pb2 import NodeDef
 except ImportError:
     from tensorflow.core.framework import tensor_shape_pb2
     try:
         # tensorflow>=1.0.0
-        from tensorflow import NodeDef, GraphDef
+        from tensorflow import GraphDef, NodeDef
     except ImportError:
         # tensorflow<=0.12.1
-        from tensorflow.core.framework.graph_pb2 import NodeDef, GraphDef
+        from tensorflow.core.framework.graph_pb2 import GraphDef, NodeDef
 
 
 def _make_unique_name(seen, name, min_version=0):

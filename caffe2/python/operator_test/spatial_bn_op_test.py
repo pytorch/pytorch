@@ -3,16 +3,17 @@
 
 
 
-from caffe2.python import brew, core, utils, workspace
-import caffe2.python.hip_test_util as hiputl
-import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.model_helper import ModelHelper
-import caffe2.python.serialized_test.serialized_test_util as serial
+import unittest
 
-from hypothesis import given, assume, settings
 import hypothesis.strategies as st
 import numpy as np
-import unittest
+from hypothesis import assume, given, settings
+
+import caffe2.python.hip_test_util as hiputl
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python import brew, core, utils, workspace
+from caffe2.python.model_helper import ModelHelper
 
 
 class TestSpatialBN(serial.SerializedTestCase):

@@ -1,8 +1,8 @@
 import argparse
 import cProfile
+import os
 import pstats
 import sys
-import os
 from typing import Dict
 
 import torch

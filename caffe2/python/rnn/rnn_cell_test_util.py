@@ -3,10 +3,10 @@
 
 
 
-from caffe2.python import workspace, scope
-from caffe2.python.model_helper import ModelHelper
-
 import numpy as np
+
+from caffe2.python import scope, workspace
+from caffe2.python.model_helper import ModelHelper
 
 
 def sigmoid(x):

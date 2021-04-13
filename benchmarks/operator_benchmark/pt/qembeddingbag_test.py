@@ -1,9 +1,10 @@
 
+import numpy
 import operator_benchmark as op_bench
+from pt import configs
+
 import torch
 import torch.nn.quantized as nnq
-import numpy
-from pt import configs
 
 """
 Microbenchmarks for qEmbeddingBag operators.

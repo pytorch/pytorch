@@ -1,11 +1,13 @@
 ## @package task
 # Module caffe2.python.task
 
-from caffe2.python import core, context
-from caffe2.python.schema import Field, from_blob_list
 from collections import defaultdict
 from copy import copy
+
 from future.utils import viewitems
+
+from caffe2.python import context, core
+from caffe2.python.schema import Field, from_blob_list
 
 
 def _merge_node_kwargs(a, b):

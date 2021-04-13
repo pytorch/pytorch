@@ -2,6 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.intrinsic import LinearReLU
 
+
 class Linear(nn.Linear):
     r"""
     A linear module attached with FakeQuantize modules for weight,

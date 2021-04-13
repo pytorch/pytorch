@@ -4,10 +4,12 @@
 
 
 import unittest
+
+import numpy as np
+
 from caffe2.python import core, test_util, workspace
 from caffe2.python.control_ops_grad import disambiguate_grad_if_op_output
 from caffe2.python.model_helper import ModelHelper
-import numpy as np
 
 
 class TestControl(test_util.TestCase):

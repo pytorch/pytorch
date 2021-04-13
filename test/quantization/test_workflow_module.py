@@ -1,57 +1,56 @@
 # Torch
-import torch
-from torch.quantization import (
-    MinMaxObserver,
-    PerChannelMinMaxObserver,
-    MovingAverageMinMaxObserver,
-    MovingAveragePerChannelMinMaxObserver,
-    HistogramObserver,
-    RecordingObserver,
-    PlaceholderObserver,
-    NoopObserver,
-    FakeQuantize,
-    FixedQParamsFakeQuantize,
-    default_debug_qconfig,
-    default_observer,
-    default_histogram_observer,
-    default_per_channel_weight_observer,
-    default_affine_fixed_qparams_fake_quant,
-    get_observer_dict,
-    prepare,
-    QConfig,
-)
-
-from torch.quantization._learnable_fake_quantize import _LearnableFakeQuantize
-
-import torch.nn as nn
-
 # Standard library
 import copy
 import io
 import itertools
-import unittest
 import math
-import numpy as np
+import unittest
 
+import numpy as np
 # Testing utils
 from hypothesis import given, settings
 from hypothesis import strategies as st
-import torch.testing._internal.hypothesis_utils as hu
-hu.assert_deadline_disabled()
-from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_quantization import (
-    QuantizationTestCase,
-    AnnotatedSingleLayerLinearModel,
-    test_only_eval_fn,
-    SingleLayerLinearModel,
-)
 
-from torch.testing._internal.common_quantized import (
-    override_quantized_engine,
-    supported_qengines,
-    override_qengines,
+import torch
+import torch.nn as nn
+import torch.testing._internal.hypothesis_utils as hu
+from torch.quantization import (
+    FakeQuantize,
+    FixedQParamsFakeQuantize,
+    HistogramObserver,
+    MinMaxObserver,
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver,
+    NoopObserver,
+    PerChannelMinMaxObserver,
+    PlaceholderObserver,
+    QConfig,
+    RecordingObserver,
+    default_affine_fixed_qparams_fake_quant,
+    default_debug_qconfig,
+    default_histogram_observer,
+    default_observer,
+    default_per_channel_weight_observer,
+    get_observer_dict,
+    prepare
 )
+from torch.quantization._learnable_fake_quantize import _LearnableFakeQuantize
+
+hu.assert_deadline_disabled()
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_quantization import (
+    AnnotatedSingleLayerLinearModel,
+    QuantizationTestCase,
+    SingleLayerLinearModel,
+    test_only_eval_fn
+)
+from torch.testing._internal.common_quantized import (
+    override_qengines,
+    override_quantized_engine,
+    supported_qengines
+)
+from torch.testing._internal.common_utils import TestCase
+
 
 # Reference method for fake quantize
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):

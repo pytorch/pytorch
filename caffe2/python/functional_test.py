@@ -5,13 +5,13 @@
 
 import unittest
 
-from caffe2.python import core
-from hypothesis import given
 import hypothesis.strategies as st
-import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import workspace
-from caffe2.python.functional import Functional
 import numpy as np
+from hypothesis import given
+
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, workspace
+from caffe2.python.functional import Functional
 
 
 @st.composite

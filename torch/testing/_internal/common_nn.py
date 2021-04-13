@@ -1,30 +1,36 @@
-from abc import abstractmethod
 import math
 import tempfile
 import unittest
-
+from abc import abstractmethod
 from copy import deepcopy
 from functools import reduce
 from itertools import product
-from operator import mul
 from math import pi
-
+from operator import mul
+from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
 
 import torch
+import torch.backends.cudnn
 import torch.cuda
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn import _reduction as _Reduction
-from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    TEST_WITH_ROCM, gradcheck, gradgradcheck
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_device_type import expectedAlertNondeterministic
-from torch.autograd.gradcheck import _get_numerical_jacobian, iter_tensors
 from torch.autograd import Variable
+from torch.autograd.gradcheck import _get_numerical_jacobian, iter_tensors
+from torch.nn import _reduction as _Reduction
+from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import (
+    expectedAlertNondeterministic
+)
+from torch.testing._internal.common_utils import (
+    TEST_WITH_ROCM,
+    TestCase,
+    freeze_rng_state,
+    gradcheck,
+    gradgradcheck,
+    is_iterable,
+    to_gpu
+)
 from torch.types import _TensorOrTensors
-import torch.backends.cudnn
-
-from typing import Dict, Callable, Tuple, List, Sequence, Union, Any
 
 TemporaryFile = tempfile.TemporaryFile
 PRECISION = 1e-5

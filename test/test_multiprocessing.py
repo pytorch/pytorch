@@ -1,10 +1,10 @@
 import contextlib
+import copy
 import gc
 import os
 import sys
 import time
 import unittest
-import copy
 from sys import platform
 
 import torch
@@ -12,8 +12,16 @@ import torch.cuda
 import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
-from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
-                                                  load_tests, slowTest, TEST_WITH_TSAN)
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    NO_MULTIPROCESSING_SPAWN,
+    TEST_WITH_ASAN,
+    TEST_WITH_TSAN,
+    TestCase,
+    load_tests,
+    run_tests,
+    slowTest
+)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

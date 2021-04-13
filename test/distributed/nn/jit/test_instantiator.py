@@ -5,8 +5,8 @@ import unittest
 from typing import Tuple
 
 import torch
-from torch import Tensor, nn
 import torch.distributed as dist
+from torch import Tensor, nn
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)

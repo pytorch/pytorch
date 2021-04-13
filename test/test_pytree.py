@@ -1,7 +1,13 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec, LeafSpec
-from torch.utils._pytree import _broadcast_to_and_flatten
+from torch.utils._pytree import (
+    LeafSpec,
+    TreeSpec,
+    _broadcast_to_and_flatten,
+    tree_flatten,
+    tree_unflatten
+)
+
 
 class TestPytree(TestCase):
     def test_treespec_equality(self):

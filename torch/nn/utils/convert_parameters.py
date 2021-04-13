@@ -1,5 +1,6 @@
-import torch
 from typing import Iterable, Optional
+
+import torch
 
 
 def parameters_to_vector(parameters: Iterable[torch.Tensor]) -> torch.Tensor:

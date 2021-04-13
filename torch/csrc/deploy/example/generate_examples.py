@@ -1,10 +1,10 @@
 """
 Generate the example files that torchpy_test uses.
 """
-from pathlib import Path
-import torch
 import argparse
+from pathlib import Path
 
+import torch
 from torch.package import PackageExporter
 
 try:

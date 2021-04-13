@@ -3,17 +3,18 @@
 
 
 
-import unittest
-import numpy as np
 import copy
-from hypothesis import given
-import hypothesis.strategies as st
+import unittest
 
-from caffe2.python.model_helper import ModelHelper
-from caffe2.python.models import resnet
-from caffe2.python import workspace, brew
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given
+
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.mkl.rewrite_graph as rewrite_graph
+from caffe2.python import brew, workspace
+from caffe2.python.model_helper import ModelHelper
+from caffe2.python.models import resnet
 
 
 def deterministic_io(model):

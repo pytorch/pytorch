@@ -5,12 +5,23 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 """Multithreading in pipeline parallelism."""
+import sys
 from contextlib import contextmanager
 from queue import Queue
-import sys
 from threading import Thread
 from types import TracebackType
-from typing import TYPE_CHECKING, Callable, Dict, Generator, List, Optional, Tuple, Type, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+    cast
+)
 
 import torch
 

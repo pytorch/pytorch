@@ -5,10 +5,10 @@
 
 import unittest
 
-from caffe2.proto import caffe2_pb2
+import caffe2.contrib.tensorboard.tensorboard_exporter as tb
 import caffe2.python.cnn as cnn
 import caffe2.python.core as core
-import caffe2.contrib.tensorboard.tensorboard_exporter as tb
+from caffe2.proto import caffe2_pb2
 
 EXPECTED = """
 node {

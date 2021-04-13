@@ -3,13 +3,14 @@
 
 
 
-import numpy as np
 import unittest
-from hypothesis import given, settings
-import hypothesis.strategies as st
 
-from caffe2.python import brew, core, model_helper, rnn_cell
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given, settings
+
 import caffe2.python.workspace as ws
+from caffe2.python import brew, core, model_helper, rnn_cell
 
 
 class TestObservers(unittest.TestCase):

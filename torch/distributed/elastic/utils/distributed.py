@@ -12,7 +12,6 @@ from contextlib import closing
 import torch.distributed as dist
 from torch.distributed.elastic.utils.logging import get_logger
 
-
 log = get_logger()
 
 _ADDRESS_IN_USE = "Address already in use"

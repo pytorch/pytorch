@@ -4,6 +4,7 @@ import torch
 from torch import Tensor
 from torch._ops import ops
 
+
 class FloatFunctional(torch.nn.Module):
     r"""State collector class for float operations.
 

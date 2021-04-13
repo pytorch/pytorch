@@ -17,11 +17,10 @@ from torch.distributed.elastic.agent.server.api import (
     SimpleElasticAgent,
     WorkerGroup,
     WorkerSpec,
-    WorkerState,
+    WorkerState
 )
 from torch.distributed.elastic.metrics.api import prof
-from torch.distributed.elastic.multiprocessing import start_processes, PContext
-
+from torch.distributed.elastic.multiprocessing import PContext, start_processes
 
 log = logging.getLogger(__name__)
 

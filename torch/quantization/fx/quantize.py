@@ -1,60 +1,47 @@
+import operator
+from collections import defaultdict
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+
 import torch
-from torch.fx import (  # type: ignore
-    GraphModule,
-    Proxy,
-    map_arg
-)
-
-from torch.fx.graph import (
-    Graph,
-    Node,
-)
-
+from torch.fx import GraphModule, Proxy, map_arg  # type: ignore
+from torch.fx.graph import Graph, Node
 from torch.fx.node import Argument
+from torch.quantization import convert, propagate_qconfig_
 
-from torch.quantization import (
-    propagate_qconfig_,
-    convert,
-)
-
-from ..quantization_mappings import (
-    get_default_qat_module_mappings,
-)
-
-from ..quantize import (
-    _remove_qconfig,
-    is_activation_post_process
-)
-
+from ..quantization_mappings import get_default_qat_module_mappings
+from ..quantize import _remove_qconfig, is_activation_post_process
 from ..utils import (
+    activation_dtype,
+    activation_is_int8_quantized,
+    activation_is_statically_quantized,
     get_combined_dict,
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
-    weight_is_quantized,
-    activation_is_statically_quantized,
-    activation_is_int8_quantized,
-    activation_dtype,
     weight_dtype,
+    weight_is_quantized
 )
-
-from .pattern_utils import (
-    is_match,
-    get_default_quant_patterns,
-    get_default_output_activation_post_process_map,
-    input_output_observed,
-    Pattern,
-)
-
 from .graph_module import (
-    is_observed_module,
-    is_observed_standalone_module,
     ObservedGraphModule,
     ObservedStandaloneGraphModule,
     QuantizedGraphModule,
+    is_observed_module,
+    is_observed_standalone_module
 )
-
+from .pattern_utils import (
+    Pattern,
+    get_default_output_activation_post_process_map,
+    get_default_quant_patterns,
+    input_output_observed,
+    is_match
+)
+from .qconfig_utils import (
+    QConfigAny,
+    convert_dict_to_ordered_dict,
+    get_flattened_qconfig_dict,
+    get_object_type_qconfig,
+    get_qconfig
+)
 from .quantization_patterns import (
-    binary_op_supported_dtypes,
     BinaryOpQuantizeHandler,
     CopyNodeQuantizeHandler,
     CustomModuleQuantizeHandler,
@@ -62,33 +49,19 @@ from .quantization_patterns import (
     FixedQParamsOpQuantizeHandler,
     QuantizeHandler,
     StandaloneModuleQuantizeHandler,
+    binary_op_supported_dtypes
 )
-
 from .utils import (
     _parent_name,
     all_node_args_have_no_tensors,
-    quantize_node,
+    assert_and_get_unique_device,
+    collect_producer_nodes,
     get_custom_module_class_keys,
     get_new_attr_name_with_prefix,
-    collect_producer_nodes,
     graph_module_from_producer_nodes,
-    assert_and_get_unique_device,
     node_return_type_is_int,
+    quantize_node
 )
-
-from .qconfig_utils import (
-    convert_dict_to_ordered_dict,
-    get_flattened_qconfig_dict,
-    get_object_type_qconfig,
-    get_qconfig,
-    QConfigAny,
-)
-
-import operator
-
-from collections import defaultdict
-
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 # Define helper types
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,

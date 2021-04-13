@@ -10,7 +10,7 @@ Original copyright notice:
 import math
 
 import torch
-from torch.distributions import constraints, Beta
+from torch.distributions import Beta, constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 

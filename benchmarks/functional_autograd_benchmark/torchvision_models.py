@@ -1,11 +1,11 @@
 # Taken from https://github.com/pytorch/vision
 # So that we don't need torchvision to be installed
+from collections import OrderedDict
+
 import torch
 from torch import nn
-from torch.nn import functional as F
-
 from torch.jit.annotations import Dict
-from collections import OrderedDict
+from torch.nn import functional as F
 
 try:
     from scipy.optimize import linear_sum_assignment  # type: ignore

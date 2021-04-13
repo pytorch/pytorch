@@ -2,19 +2,20 @@ import io
 import os
 import sys
 import unittest
+from typing import Any
 
 import torch
 import torch.nn as nn
 from torch.testing import FileCheck
-from typing import Any
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, make_global
+from typing import Dict, Iterable, List, Optional, Tuple
+
 import torch.testing._internal.jit_utils
 from torch.testing._internal.common_utils import IS_SANDCASTLE
-from typing import List, Tuple, Iterable, Optional, Dict
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -471,8 +472,8 @@ class TestClassType(JitTestCase):
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):
-        import jit._imported_class_test.foo
         import jit._imported_class_test.bar
+        import jit._imported_class_test.foo
         import jit._imported_class_test.very.very.nested
 
         class MyMod(torch.jit.ScriptModule):

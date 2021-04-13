@@ -3,8 +3,10 @@
 
 
 import unittest
-from caffe2.python.fakefp16_transform_lib import fakeFp16FuseOps
+
 from caffe2.python import core
+from caffe2.python.fakefp16_transform_lib import fakeFp16FuseOps
+
 
 class Transformer(unittest.TestCase):
     def test_fuse(self):

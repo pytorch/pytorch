@@ -8,15 +8,17 @@ from datetime import timedelta
 from typing import ClassVar
 from unittest import TestCase
 
-from torch.distributed import TCPStore
+from rendezvous_backend_test import RendezvousBackendTestMixin
 
-from torch.distributed.elastic.rendezvous import RendezvousConnectionError, RendezvousParameters
+from torch.distributed import TCPStore
+from torch.distributed.elastic.rendezvous import (
+    RendezvousConnectionError,
+    RendezvousParameters
+)
 from torch.distributed.elastic.rendezvous.c10d_rendezvous_backend import (
     C10dRendezvousBackend,
-    create_backend,
+    create_backend
 )
-
-from rendezvous_backend_test import RendezvousBackendTestMixin
 
 
 class C10dRendezvousBackendTest(TestCase, RendezvousBackendTestMixin):

@@ -6,10 +6,11 @@
 
 
 import os
+
 import numpy as np
 
-from caffe2.python import core, workspace, net_drawer
 from caffe2.proto import caffe2_pb2
+from caffe2.python import core, net_drawer, workspace
 
 
 def getGradientForOp(op):

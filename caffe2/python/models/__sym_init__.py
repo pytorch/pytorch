@@ -3,6 +3,7 @@
 
 
 import os
+
 from caffe2.proto import caffe2_pb2
 
 

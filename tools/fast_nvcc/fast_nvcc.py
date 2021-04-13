@@ -15,7 +15,6 @@ import subprocess
 import sys
 import time
 
-
 help_msg = '''fast_nvcc [OPTION]... -- [NVCC_ARG]...
 
 Run the commands given by nvcc --dryrun, in parallel.

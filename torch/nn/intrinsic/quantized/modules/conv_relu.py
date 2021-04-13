@@ -1,10 +1,9 @@
 
 import torch
+import torch.nn.functional as F
 import torch.nn.intrinsic
 import torch.nn.intrinsic.qat
-import torch.nn.functional as F
 import torch.nn.quantized as nnq
-
 from torch.nn.utils import fuse_conv_bn_weights
 
 _reverse_repeat_padding = nnq.modules.conv._reverse_repeat_padding

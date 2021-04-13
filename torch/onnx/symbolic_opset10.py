@@ -1,16 +1,15 @@
 
+from sys import maxsize
+
 import torch
-from torch.nn.modules.utils import _single, _pair, _triple
 import torch.onnx
+import torch.onnx.symbolic_helper as sym_help
+import torch.onnx.symbolic_opset9
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
-
-import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _unimplemented
-import torch.onnx.symbolic_opset9
-
-from sys import maxsize
+from torch.nn.modules.utils import _pair, _single, _triple
+from torch.onnx.symbolic_helper import _unimplemented, parse_args
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -243,8 +242,9 @@ def embedding_bag(g,
                   include_last_offset):
     if scale_grad_by_freq and sym_help._training_mode:
         return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
-    from torch.onnx.symbolic_opset9 import select
     import warnings
+
+    from torch.onnx.symbolic_opset9 import select
     warnings.warn("Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
                   "Please use opset 11 or higher to export model for dynamic input shape.'")
     offsets_dim_0 = sym_help._get_tensor_dim_size(offsets, 0)

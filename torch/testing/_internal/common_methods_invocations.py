@@ -1,40 +1,66 @@
-from functools import reduce, wraps, partial
-from itertools import product
-from operator import mul
 import collections
+import collections.abc
 import operator
 import random
+from distutils.version import LooseVersion
+from functools import partial, reduce, wraps
+from itertools import product
+from operator import mul
+from typing import Any, Dict, List, Sequence, Tuple, Union
+
+import numpy as np
 
 import torch
-import numpy as np
 from torch._six import inf
 from torch.autograd import Variable
-import collections.abc
-
-from typing import List, Sequence, Tuple, Dict, Any, Union
-
-from torch.testing import \
-    (make_non_contiguous, floating_types, floating_types_and,
-     floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and, all_types)
-from .._core import _dispatch_dtypes
-from torch.testing._internal.common_device_type import \
-    (skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
-     skipCPUIfNoLapack, skipCPUIfNoMkl,
-     skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
+from torch.testing import (
+    all_types,
+    all_types_and,
+    all_types_and_complex,
+    all_types_and_complex_and,
+    floating_and_complex_types,
+    floating_and_complex_types_and,
+    floating_types,
+    floating_types_and,
+    integral_types_and,
+    make_non_contiguous
+)
 from torch.testing._internal.common_cuda import CUDA11OrLater
-from torch.testing._internal.common_utils import \
-    (is_iterable_of_tensors,
-     random_symmetric_matrix, random_symmetric_psd_matrix,
-     make_fullrank_matrices_with_distinct_singular_values,
-     random_symmetric_pd_matrix, make_symmetric_matrices,
-     make_symmetric_pd_matrices,
-     random_fullrank_matrix_distinct_singular_value, set_rng_seed, SEED,
-     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_warn_once)
+from torch.testing._internal.common_device_type import (
+    expectedAlertNondeterministic,
+    precisionOverride,
+    skipCPUIfNoLapack,
+    skipCPUIfNoMkl,
+    skipCUDAIfNoCusolver,
+    skipCUDAIfNoMagma,
+    skipCUDAIfNoMagmaAndNoCusolver,
+    skipCUDAIfRocm,
+    skipIf,
+    skipMeta
+)
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    IS_WINDOWS,
+    SEED,
+    TEST_SCIPY,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    _wrap_warn_once,
+    is_iterable_of_tensors,
+    make_fullrank_matrices_with_distinct_singular_values,
+    make_symmetric_matrices,
+    make_symmetric_pd_matrices,
+    make_tensor,
+    random_fullrank_matrix_distinct_singular_value,
+    random_symmetric_matrix,
+    random_symmetric_pd_matrix,
+    random_symmetric_psd_matrix,
+    set_rng_seed,
+    slowTest,
+    torch_to_numpy_dtype_dict
+)
 
-from distutils.version import LooseVersion
+from .._core import _dispatch_dtypes
 
 if TEST_SCIPY:
     import scipy.special
@@ -718,7 +744,9 @@ def sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad=False,
     'ns' gives 0x0 and 5x5 matrices.
     Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
     """
-    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+    from torch.testing._internal.common_utils import (
+        random_fullrank_matrix_distinct_singular_value
+    )
 
     batches = [(), (0, ), (2, ), (1, 1)]
     ns = [5, 0]
@@ -1534,7 +1562,9 @@ def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=
     return out
 
 def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kwargs):
-    from torch.testing._internal.common_utils import random_well_conditioned_matrix
+    from torch.testing._internal.common_utils import (
+        random_well_conditioned_matrix
+    )
     out = []
     for batch in ((), (3,), (3, 3)):
         shape = batch + (3, 3)
@@ -1670,7 +1700,9 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vect
     Once torch.solve / triangular_solve / cholesky_solve and its testing are removed,
     'vector_rhs_allowed' may be removed here as well.
     """
-    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+    from torch.testing._internal.common_utils import (
+        random_fullrank_matrix_distinct_singular_value
+    )
 
     batches = [(), (0, ), (2, )]
     ns = [5, 0]
@@ -1745,7 +1777,9 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
     Each SampleInput has a function 'output_process_fn_grad' attached to it that is applied on the output of torch.svd
     It is needed for autograd checks, because backward of svd doesn't work for an arbitrary loss function.
     """
-    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+    from torch.testing._internal.common_utils import (
+        random_fullrank_matrix_distinct_singular_value
+    )
 
     # svd and linalg.svd returns V and V.conj().T, respectively. So we need to slice
     # along different dimensions when needed (this is used by

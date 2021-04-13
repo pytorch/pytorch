@@ -1,10 +1,15 @@
-import torch
-
 from collections import namedtuple
 from typing import List, Tuple
+
+import torch
 from torch import Tensor
 
-from .cells import lstm_cell, premul_lstm_cell, premul_lstm_cell_no_bias, flat_lstm_cell
+from .cells import (
+    flat_lstm_cell,
+    lstm_cell,
+    premul_lstm_cell,
+    premul_lstm_cell_no_bias
+)
 
 
 # list[list[T]] -> list[T]
@@ -99,7 +104,7 @@ def lnlstm_creator(script=True, decompose_layernorm=False, **kwargs):
 
 def dropoutlstm_creator(script=True, **kwargs):
     assert script is True
-    from .custom_lstms import script_lstm, LSTMState
+    from .custom_lstms import LSTMState, script_lstm
     input_size = kwargs['inputSize']
     hidden_size = kwargs['hiddenSize']
     seq_len = kwargs['seqLength']

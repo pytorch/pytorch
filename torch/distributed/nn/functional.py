@@ -1,6 +1,6 @@
 import torch
-from torch.autograd import Function
 import torch.distributed as dist
+from torch.autograd import Function
 
 
 def broadcast(tensor, src, group=dist.group.WORLD):

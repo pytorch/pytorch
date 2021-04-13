@@ -3,11 +3,12 @@
 
 
 
-import numpy as np
 import unittest
 
+import numpy as np
+
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, test_util, model_helper, brew, build
+from caffe2.python import brew, build, core, model_helper, test_util, workspace
 
 
 @unittest.skipIf(build.CAFFE2_NO_OPERATOR_SCHEMA,

@@ -10,7 +10,6 @@ import argparse
 import os
 import sys
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="test binary, exits with exitcode")
     parser.add_argument("--exitcode", type=int, default=0)

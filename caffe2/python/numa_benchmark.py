@@ -2,9 +2,10 @@
 
 
 
-from caffe2.python import core, workspace
-from caffe2.proto import caffe2_pb2
 import time
+
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
 
 SHAPE_LEN = 4096
 NUM_ITER = 1000

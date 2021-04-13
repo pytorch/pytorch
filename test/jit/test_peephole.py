@@ -1,9 +1,13 @@
+import unittest
+
 import torch
-from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA, _inline_everything
 from torch import nn
 from torch.testing import FileCheck
-
-import unittest
+from torch.testing._internal.jit_utils import (
+    RUN_CUDA,
+    JitTestCase,
+    _inline_everything
+)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

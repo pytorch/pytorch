@@ -1,12 +1,14 @@
 
+import re
 import warnings
 from abc import ABCMeta, abstractmethod
-from functools import partial
-from typing import Any, List, Tuple, Optional, Dict, Union
 from collections import OrderedDict
+from functools import partial
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import torch
 import torch.nn as nn
-import re
+
 
 def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.

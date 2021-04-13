@@ -1,4 +1,4 @@
-from typing import cast, Callable, Generic, List, Type, TypeVar
+from typing import Callable, Generic, List, Type, TypeVar, cast
 
 import torch
 from torch._six import PY37

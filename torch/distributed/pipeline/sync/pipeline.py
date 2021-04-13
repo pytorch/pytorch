@@ -8,7 +8,17 @@
 """The pipeline parallelism of Pipe."""
 from queue import Queue
 from types import TracebackType
-from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, Type, Union, cast, Sequence
+from typing import (
+    TYPE_CHECKING,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+    cast
+)
 
 import torch
 from torch import Tensor, nn

@@ -3,13 +3,15 @@ try:
 except ImportError:
     raise ImportError("urllib cannot be found, urlparse from python2 is no longer supported.")
 
-import torch._six as six
 import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import Optional, Dict, Union
+from typing import Dict, Optional, Union
+
+import torch._six as six
 from torch._C._distributed_c10d import FileStore, TCPStore
+
 from .constants import default_pg_timeout
 
 _rendezvous_handlers = {}

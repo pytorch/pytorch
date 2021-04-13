@@ -3,19 +3,20 @@
 
 
 
-from caffe2.python import workspace, core, scope, gru_cell
-from caffe2.python.model_helper import ModelHelper
-from caffe2.python.rnn.rnn_cell_test_util import sigmoid, tanh, _prepare_rnn
+import unittest
+from functools import partial
+
+import hypothesis.strategies as st
+import numpy as np
+from hypothesis import given
+from hypothesis import settings as ht_settings
+
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 from caffe2.proto import caffe2_pb2
-
-from functools import partial
-from hypothesis import given
-from hypothesis import settings as ht_settings
-import hypothesis.strategies as st
-import numpy as np
-import unittest
+from caffe2.python import core, gru_cell, scope, workspace
+from caffe2.python.model_helper import ModelHelper
+from caffe2.python.rnn.rnn_cell_test_util import _prepare_rnn, sigmoid, tanh
 
 
 def gru_unit(*args, **kwargs):

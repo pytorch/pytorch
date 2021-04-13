@@ -2,10 +2,11 @@
 
 import hypothesis.strategies as st
 import numpy as np
+from hypothesis import given, settings
+
 import torch
 from caffe2.python import core
 from caffe2.python.test_util import TestCase
-from hypothesis import given, settings
 from torch import nn
 
 

@@ -1,11 +1,11 @@
-from .module import Module
-from .utils import _pair, _quadruple, _ntuple
-from .. import functional as F
-
-from torch import Tensor
-from ..common_types import _size_2_t, _size_4_t, _size_6_t
 from typing import Sequence, Tuple
 
+from torch import Tensor
+
+from .. import functional as F
+from ..common_types import _size_2_t, _size_4_t, _size_6_t
+from .module import Module
+from .utils import _ntuple, _pair, _quadruple
 
 # TODO: grad_output size asserts in THNN
 

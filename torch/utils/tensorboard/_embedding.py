@@ -1,9 +1,11 @@
 import math
+
 import numpy as np
-from ._convert_np import make_np
-from ._utils import make_grid
 from tensorboard.compat import tf
 from tensorboard.plugins.projector.projector_config_pb2 import EmbeddingInfo
+
+from ._convert_np import make_np
+from ._utils import make_grid
 
 
 def make_tsv(metadata, save_path, metadata_header=None):
@@ -22,8 +24,9 @@ def make_tsv(metadata, save_path, metadata_header=None):
 
 # https://github.com/tensorflow/tensorboard/issues/44 image label will be squared
 def make_sprite(label_img, save_path):
-    from PIL import Image
     from io import BytesIO
+
+    from PIL import Image
 
     # this ensures the sprite image has correct dimension as described in
     # https://www.tensorflow.org/get_started/embedding_viz

@@ -1,7 +1,10 @@
-from __future__ import annotations    # type: ignore[attr-defined]
-import torch
+from __future__ import annotations  # type: ignore[attr-defined]
+
 import typing
+
+import torch
 from torch.fx import symbolic_trace
+
 
 class A:
     def __call__(self, x: torch.Tensor):

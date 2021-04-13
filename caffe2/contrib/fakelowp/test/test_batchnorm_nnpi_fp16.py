@@ -1,16 +1,16 @@
-import numpy as np
+import datetime
 import unittest
 
-import caffe2.python.fakelowp.init_shared_libs  # noqa
+import numpy as np
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from caffe2.proto import caffe2_pb2
-from caffe2.python import core
-from caffe2.python import workspace
-from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
-from caffe2.python.fakelowp.test_utils import print_test_debug_info
+
+import caffe2.python.fakelowp.init_shared_libs  # noqa
 import caffe2.python.serialized_test.serialized_test_util as serial
-import datetime
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
+from caffe2.python.fakelowp.test_utils import print_test_debug_info
+from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 
 core.GlobalInit(["caffe2", "--glow_global_fp16=1",
                  "--glow_global_fused_scale_offset_fp16=1",

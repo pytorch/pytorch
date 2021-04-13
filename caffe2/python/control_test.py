@@ -3,9 +3,10 @@
 
 
 
+import logging
+
 from caffe2.python import control, core, test_util, workspace
 
-import logging
 logger = logging.getLogger(__name__)
 
 

@@ -2,11 +2,12 @@
 
 import logging
 
-import caffe2.python.hypothesis_test_util as hu
 import numpy as np
-from caffe2.python import core
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core
 
 logger = logging.getLogger(__name__)
 

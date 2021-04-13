@@ -6,8 +6,17 @@ import re
 import subprocess
 from bisect import bisect_right
 from collections import defaultdict
-from typing import (Callable, DefaultDict, Generic, List, Optional, Pattern,
-                    Sequence, TypeVar, cast)
+from typing import (
+    Callable,
+    DefaultDict,
+    Generic,
+    List,
+    Optional,
+    Pattern,
+    Sequence,
+    TypeVar,
+    cast
+)
 
 from typing_extensions import TypedDict
 

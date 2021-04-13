@@ -3,14 +3,16 @@
 
 
 
-from caffe2.proto import caffe2_pb2
-from caffe2.python import core
-from hypothesis import assume, given, settings, HealthCheck
-import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
+import unittest
+
 import hypothesis.strategies as st
 import numpy as np
-import unittest
+from hypothesis import HealthCheck, assume, given, settings
+
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core
 
 
 class TestFcOperator(serial.SerializedTestCase):

@@ -4,7 +4,9 @@
 
 
 import sys
+
 import numpy as np
+
 
 def print_test_debug_info(testname, items_dict):
     filename = "debug_operator_onnxifi_" + testname + ".txt"

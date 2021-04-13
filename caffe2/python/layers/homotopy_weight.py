@@ -6,10 +6,13 @@
 
 
 
+import logging
+
+import numpy as np
+
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer
-import numpy as np
-import logging
+
 logger = logging.getLogger(__name__)
 '''
 Homotopy Weighting between two weights x, y by doing:

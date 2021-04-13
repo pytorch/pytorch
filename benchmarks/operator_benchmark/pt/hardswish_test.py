@@ -1,8 +1,8 @@
 
 import operator_benchmark as op_bench
+
 import torch
 import torch.nn as nn
-
 
 """
 Microbenchmarks for the hardswish operators.

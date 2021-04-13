@@ -1,15 +1,16 @@
-from typing import Any, Dict, List, Optional, Tuple
-
-from torch.testing._internal.jit_utils import JitTestCase, make_global
-from torch.testing import FileCheck
-from torch import jit
-from jit.test_module_interface import TestModuleInterface  # noqa: F401
-import unittest
 import os
 import sys
+import unittest
+from typing import Any, Dict, List, Optional, Tuple
+
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
+
 import torch
-import torch.testing._internal.jit_utils
 import torch.nn as nn
+import torch.testing._internal.jit_utils
+from torch import jit
+from torch.testing import FileCheck
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

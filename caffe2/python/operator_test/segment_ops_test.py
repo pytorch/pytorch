@@ -3,16 +3,17 @@
 
 
 
+import unittest
 from functools import partial
+
+import hypothesis.strategies as st
+import numpy as np
 from hypothesis import given, settings
 
-import numpy as np
-import unittest
-import hypothesis.strategies as st
-
-from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python import core, workspace
+
 
 def sparse_lengths_sum_ref(D, I, L, normalize_by_lengths=False):
     R = np.zeros(shape=(L.size,) + D.shape[1:], dtype=np.float32)

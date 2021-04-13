@@ -1,8 +1,8 @@
+from .adadelta import Adadelta as Adadelta
 from .adam import Adam as Adam
+from .adamax import Adamax as Adamax
 from .adamw import AdamW as AdamW
-from .sgd import SGD as SGD
+from .asgd import ASGD as ASGD
 from .rmsprop import RMSprop as RMSprop
 from .rprop import Rprop as Rprop
-from .asgd import ASGD as ASGD
-from .adamax import Adamax as Adamax
-from .adadelta import Adadelta as Adadelta
+from .sgd import SGD as SGD
