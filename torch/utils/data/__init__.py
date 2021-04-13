@@ -9,7 +9,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader, _DatasetKind, get_worker_info
 from torch.utils.data._decorator import \
     (functional_datapipe, guaranteed_datapipes_determinism, non_deterministic,
-     argument_validation, runtime_validation)
+     argument_validation, runtime_validation_enabled, runtime_validation)
 
 
 __all__ = ['Sampler', 'SequentialSampler', 'RandomSampler',
@@ -18,7 +18,8 @@ __all__ = ['Sampler', 'SequentialSampler', 'RandomSampler',
            'ConcatDataset', 'ChainDataset', 'Subset', 'random_split',
            'DataLoader', '_DatasetKind', 'get_worker_info',
            'IterDataPipe', 'functional_datapipe', 'guaranteed_datapipes_determinism',
-           'non_deterministic', 'argument_validation', 'runtime_validation']
+           'non_deterministic', 'argument_validation',
+           'runtime_validation_enabled', 'runtime_validation']
 
 
 ################################################################################

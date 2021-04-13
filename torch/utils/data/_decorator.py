@@ -131,6 +131,26 @@ def argument_validation(f):
     return wrapper
 
 
+# Default value is True
+_runtime_validation_enabled: bool = True
+
+
+class runtime_validation_enabled(object):
+    prev: bool
+
+    def __init__(self, enabled=True) -> None:
+        global _runtime_validation_enabled
+        self.prev = _runtime_validation_enabled
+        _runtime_validation_enabled = enabled
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        global _runtime_validation_enabled
+        _runtime_validation_enabled = self.prev
+
+
 # Runtime checking
 # Validate output data is subtype of return hint
 def runtime_validation(f):
@@ -142,11 +162,15 @@ def runtime_validation(f):
 
     @wraps(f)
     def wrapper(self):
-        it = f(self)
-        for d in it:
-            if not self.type.issubtype_of_instance(d):
-                raise RuntimeError("Expected an instance of subtype {}, but found {}"
-                                   .format(self.type, d))
-            yield d
+        global _runtime_validation_enabled
+        if not _runtime_validation_enabled:
+            yield from f(self)
+        else:
+            it = f(self)
+            for d in it:
+                if not self.type.issubtype_of_instance(d):
+                    raise RuntimeError("Expected an instance of subtype {}, but found {}"
+                                       .format(self.type, d))
+                yield d
 
     return wrapper
