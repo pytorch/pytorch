@@ -601,7 +601,7 @@ class DistributedTest:
 
         # Test destroy full groups
         def test_destroy_full_group(self):
-            printf("DBG: rerun test_destroy_full_group for 100 times.\n")
+            print("DBG: rerun test_destroy_full_group for 100 times.\n")
             for i in range(100):
                 _, group_id, _ = self._init_full_group_test()
                 self._barrier()
