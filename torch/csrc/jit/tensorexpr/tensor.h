@@ -57,6 +57,7 @@ class TORCH_API Tensor : KernelScopedObject {
   Stmt* stmt_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class Placeholder {
  public:
   Placeholder() = default;

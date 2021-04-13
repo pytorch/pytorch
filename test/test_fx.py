@@ -470,7 +470,7 @@ class TestFX(JitTestCase):
                             # Pull out constants. These constants will later be
                             # fed to the interpreter C++ object via add_constant()
                             arg_name = f'constant_{constant_idx}'
-                            constants[arg_name] = torch.Tensor(
+                            constants[arg_name] = torch.tensor(
                                 [arg] if isinstance(arg, numbers.Number) else arg)
                             arg_names.append(arg_name)
                             constant_idx += 1
@@ -2306,12 +2306,12 @@ class TestFunctionalTracing(JitTestCase):
         "softshrink": BUILT_IN_FUNC,
         "threshold_": BUILT_IN_FUNC,
 
-        'adaptive_avg_pool2d': LEN_ERROR,
-        'adaptive_avg_pool3d': LEN_ERROR,
+        "adaptive_avg_pool2d": LEN_ERROR,
+        "adaptive_avg_pool3d": LEN_ERROR,
         "adaptive_max_pool2d_with_indices": LEN_ERROR,
         "adaptive_max_pool3d_with_indices": LEN_ERROR,
         "instance_norm": LEN_ERROR,
-        'pad': LEN_ERROR,
+        "pad": LEN_ERROR,
 
         "adaptive_max_pool1d": PROXY_ITERABLE,
         "adaptive_max_pool2d": PROXY_ITERABLE,
@@ -2411,6 +2411,21 @@ class TestFunctionalTracing(JitTestCase):
         "upsample_nearest",
     )
 
+    # For the operator like `in`, internal exception during the iteration
+    # can be raised on Python 3.8, rather than the error of `object is not iterable`
+    UNTRACEABLE_FUNCTIONALS_PY38 = {
+        "adaptive_max_pool1d": PROXY_ITERATED,
+        "adaptive_max_pool2d": PROXY_ITERATED,
+        "adaptive_max_pool3d": PROXY_ITERATED,
+        "fractional_max_pool2d": PROXY_ITERATED,
+        "fractional_max_pool3d": PROXY_ITERATED,
+        "max_pool1d": PROXY_ITERATED,
+        "max_pool2d": PROXY_ITERATED,
+        "max_pool3d": PROXY_ITERATED,
+
+        "group_norm": LEN_ERROR
+    }
+
     @classmethod
     def _get_functional(cls):
         functional_list = []
@@ -2450,7 +2465,12 @@ class TestFunctionalTracing(JitTestCase):
     def generate_test_func(cls, func_name, fn):
 
         def functional_test(self):
-            if func_name in self.UNTRACEABLE_FUNCTIONALS:
+            if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 9):
+                exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
+                with self.assertRaisesRegex(exc, err):
+                    symbolic_trace(fn)
+            elif func_name in self.UNTRACEABLE_FUNCTIONALS:
                 exc, err = self.UNTRACEABLE_FUNCTIONALS[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)
