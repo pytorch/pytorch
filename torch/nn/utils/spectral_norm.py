@@ -108,7 +108,7 @@ class SpectralNorm:
         # Tries to returns a vector `v` s.t. `u = normalize(W @ v)`
         # (the invariant at top of this class) and `u @ W @ v = sigma`.
         # This uses pinverse in case W^T W is not invertible.
-        v = torch.chain_matmul(weight_mat.t().mm(weight_mat).pinverse(), weight_mat.t(), u.unsqueeze(1)).squeeze(1)
+        v = torch.linalg.multi_dot([weight_mat.t().mm(weight_mat).pinverse(), weight_mat.t(), u.unsqueeze(1)]).squeeze(1)
         return v.mul_(target_sigma / torch.dot(u, torch.mv(weight_mat, v)))
 
     @staticmethod
