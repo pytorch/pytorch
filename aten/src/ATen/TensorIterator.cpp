@@ -1298,12 +1298,7 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
       // for the is_meta_ test.
       TORCH_INTERNAL_ASSERT(op.original_tensor.is_same(t));
       TORCH_INTERNAL_ASSERT(!op.tensor.is_same(t));
-      // fastpath CPU to skip a dispatcher trip
-      if (op.tensor.is_cpu()) {
-        at::native::resize_output_cpu(op.tensor, sizes);
-      } else {
-        at::native::resize_output(op.tensor, sizes);
-      }
+      at::native::resize_output(op.tensor, sizes);
       if (!strides.empty()) {
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
         op.tensor.as_strided_(sizes, strides);
@@ -1329,12 +1324,7 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
       }
       op.current_dtype = op.target_dtype;
   } else if (op.will_resize) {
-      // fastpath CPU to skip a dispatcher trip
-      if (op.tensor.is_cpu()) {
-        at::native::resize_output_cpu(op.tensor, sizes);
-      } else {
-        at::native::resize_output(op.tensor, sizes);
-      }
+      at::native::resize_output(op.tensor, sizes);
       if (!strides.empty()) {
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
         op.tensor.as_strided_(sizes, strides);
