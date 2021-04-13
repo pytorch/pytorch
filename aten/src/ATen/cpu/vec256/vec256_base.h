@@ -395,6 +395,12 @@ public:
   Vec256<T> i0e() const {
     return map(calc_i0e);
   }
+  Vec256<T> i1() const {
+    return map(calc_i1);
+  }
+  Vec256<T> i1e() const {
+    return map(calc_i1e);
+  }
   Vec256<T> igamma(const Vec256<T> &x) const {
     Vec256<T> ret;
     for (int64_t i = 0; i < size(); i++) {

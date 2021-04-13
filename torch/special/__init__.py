@@ -244,3 +244,7 @@ Example::
     >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
     tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
 """.format(**common_args))
+
+i1e = _add_docstr(_special.special_i1e, "")
+
+i1 = _add_docstr(_special.special_i1, "")

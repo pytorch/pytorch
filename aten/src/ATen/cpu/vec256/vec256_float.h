@@ -205,6 +205,12 @@ public:
   Vec256<float> i0e() const {
     return map(calc_i0e);
   }
+  Vec256<float> i1() const {
+    return map(calc_i1);
+  }
+  Vec256<float> i1e() const {
+    return map(calc_i1e);
+  }
   Vec256<float> igamma(const Vec256<float> &x) const {
     __at_align32__ float tmp[size()];
     __at_align32__ float tmp_x[size()];

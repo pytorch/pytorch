@@ -41,6 +41,8 @@ CREATE_UNARY_META_FUNC(cosh)
 CREATE_UNARY_META_FUNC(acosh)
 CREATE_UNARY_META_FUNC(cos)
 CREATE_UNARY_META_FUNC(special_i0e)
+CREATE_UNARY_META_FUNC(special_i1)
+CREATE_UNARY_META_FUNC(special_i1e)
 
 } // namespace meta
 
@@ -357,6 +359,14 @@ Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
 TORCH_IMPL_FUNC(special_i0e_out) (const Tensor& self, const Tensor& result) {
   i0e_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_i1_out) (const Tensor& self, const Tensor& result) {
+  i1_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_i1e_out) (const Tensor& self, const Tensor& result) {
+  i1e_stub(device_type(), *this);
 }
 
 Tensor& log_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, log_stub); }
@@ -810,6 +820,8 @@ DEFINE_DISPATCH(frac_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(frexp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(i0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(i0e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(i1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(i1e_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log10_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log1p_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)

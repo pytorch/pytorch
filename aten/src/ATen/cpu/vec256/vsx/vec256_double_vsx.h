@@ -355,6 +355,14 @@ class Vec256<double> {
     return map(calc_i0e);
   }
 
+  Vec256<double> i1() const {
+    return map(calc_i1);
+  }
+
+  Vec256<double> i1e() const {
+    return map(calc_i1e);
+  }
+
   DEFINE_MEMBER_OP(operator==, double, vec_cmpeq)
   DEFINE_MEMBER_OP(operator!=, double, vec_cmpne)
   DEFINE_MEMBER_OP(operator<, double, vec_cmplt)

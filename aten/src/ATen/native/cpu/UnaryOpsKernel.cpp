@@ -642,6 +642,28 @@ static void i0e_kernel(TensorIteratorBase& iter) {
       });
 }
 
+static void i1_kernel(TensorIteratorBase& iter) {
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, iter.common_dtype(), "i1_cpu", [&]() {
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t x) { return calc_i1(x); },
+            [](Vec256<scalar_t> x) { return x.i1(); });
+      });
+}
+
+static void i1e_kernel(TensorIteratorBase& iter) {
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, iter.common_dtype(), "i1e_cpu", [&]() {
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t x) { return calc_i1e(x); },
+            [](Vec256<scalar_t> x) { return x.i1e(); });
+      });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -748,6 +770,8 @@ REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel);
 REGISTER_DISPATCH(entr_stub, &entr_kernel);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel);
 REGISTER_DISPATCH(i0e_stub, &i0e_kernel);
+REGISTER_DISPATCH(i1_stub, &i1_kernel);
+REGISTER_DISPATCH(i1e_stub, &i1e_kernel);
 
 
 IMPLEMENT_COMPLEX_KERNEL(acos)
