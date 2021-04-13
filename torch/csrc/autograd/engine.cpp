@@ -896,6 +896,7 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
   // Computes the number of dependencies for each function which requires grad
   std::unordered_set<Node*> seen;
   std::vector<Node*> queue { root };
+  bool might_use_cuda = at::globalContext().hasCUDA();
   bool will_use_cuda = false;
 
   // Queue contains all nodes that will start propagating gradients.
@@ -906,7 +907,7 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
     if (fn->topological_nr() < min_topo_nr) {
       continue;
     }
-    if (!will_use_cuda) {
+    if (might_use_cuda && !will_use_cuda) {
       will_use_cuda = fn->stream(c10::DeviceType::CUDA).has_value();
     }
     for (const auto& edge : fn->next_edges()) {
@@ -918,7 +919,7 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
     }
   }
 
-  return will_use_cuda;
+  return might_use_cuda && will_use_cuda;
 }
 
 auto Engine::execute(const edge_list& roots,
