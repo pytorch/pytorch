@@ -11,12 +11,13 @@ from torch import nn
 from torch.distributed.pipeline.sync import Pipe
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 def test_inplace_on_requires_grad(setup_rpc):
-    model = nn.Sequential(nn.Linear(1, 1), nn.ReLU(inplace=True))
+    model = nn.Sequential(nn.Linear(1, 1).to(0), nn.ReLU(inplace=True))
     model = Pipe(model, checkpoint="always")
 
     x = torch.rand(1)
-    y = model(x).local_value()
+    y = model(x.to(0)).local_value()
 
     message = r"a leaf Variable that requires grad .* used in an in-place operation."
     with pytest.raises(RuntimeError, match=message):

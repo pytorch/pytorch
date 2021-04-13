@@ -15,6 +15,10 @@ from torch.distributed.pipeline.sync.skip.tracker import current_skip_tracker
 
 @skippable(stash=["skip"])
 class Stash(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.dummy = torch.nn.Parameter(torch.empty(0))
+
     def forward(self, input):
         yield stash("skip", input)
         return input # noqa
@@ -29,6 +33,7 @@ class Pop(nn.Module):
 
 @pytest.mark.parametrize("train", [True, False], ids=["train", "eval"])
 @pytest.mark.parametrize("checkpoint", ["always", "except_last", "never"])
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 def test_delete_portal_tensor(train, checkpoint, setup_rpc):
     # Without checkpointing:
     # +- Stash --+  +--- Pop ----+ - - - layers
@@ -53,7 +58,7 @@ def test_delete_portal_tensor(train, checkpoint, setup_rpc):
             return portal.tensor_life == tensor_life and portal.tensor is not None
 
     # Check the portal tensor after 'Stash'.
-    stash_ = Stash()
+    stash_ = Stash().to(0)
 
     @stash_.register_forward_hook
     def check_portal_tensor_after_stash(*_):

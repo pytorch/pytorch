@@ -117,20 +117,38 @@ def _retrieve_device(module: nn.Module) -> torch.device:
 
     return device if device is not None else torch.device("cpu")
 
+def _assemble_partition(modules: List[nn.Module]):
+    modules_list: List[nn.Module] = []
+    for module in modules:
+        if isinstance(module, nn.Sequential):
+            modules_list.extend(module.children())
+        else:
+            modules_list.append(module)
+    return nn.Sequential(*modules_list)
+
 def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[torch.device]]:
     partitions = []
     devices = []
+
+    current_partition = []
+    current_device = None
     for name, module in modules.named_children():
-        devices.append(_retrieve_device(module))
-        if isinstance(module, nn.Sequential):
-            partition = module
-        else:
-            partition = nn.Sequential(OrderedDict([(name, module)]))
-        partitions.append(partition)
+        device = _retrieve_device(module)
+        if current_device is not None and current_device != device:
+            partitions.append(_assemble_partition(current_partition))
+            devices.append(current_device)
+            current_partition = []
+        current_device = device
+        current_partition.append(module)
+
+    if current_device is not None:
+        partitions.append(_assemble_partition(current_partition))
+        devices.append(current_device)
 
     partitions = cast(List[nn.Sequential], nn.ModuleList(partitions))
 
     return partitions, devices
+
 
 MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pipe should manage device placement")
 
