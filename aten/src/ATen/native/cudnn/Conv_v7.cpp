@@ -625,7 +625,7 @@ void raw_cudnn_convolution_forward_out_32bit(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   args.idesc.set(input);
-  args.wdesc.set(weight, 0, input.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
+  args.wdesc.set(weight, input.suggest_memory_format(), 0);
   args.odesc.set(output);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.allow_tf32);
 
@@ -683,7 +683,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   args.idesc.set(grad_input);
-  args.wdesc.set(weight, 0, grad_output.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
+  args.wdesc.set(weight, grad_output.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.allow_tf32);
 
@@ -741,7 +741,7 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   args.idesc.set(input);
-  args.wdesc.set(grad_weight, 0, input.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
+  args.wdesc.set(grad_weight, input.suggest_memory_format(), 0);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.allow_tf32);
 
@@ -849,7 +849,7 @@ void raw_cudnn_convolution_add_relu_out(
       deterministic,
       allow_tf32);
   args.idesc.set(input);
-  args.wdesc.set(weight, 0, false);
+  args.wdesc.set(weight, input.suggest_memory_format(), 0);
   args.odesc.set(output);
   args.cdesc.set(
       dataType,

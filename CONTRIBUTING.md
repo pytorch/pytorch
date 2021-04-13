@@ -138,6 +138,10 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
 * A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
 with `brew install cmake` if you are developing on MacOS or Linux system.
 * Our `setup.py` requires Python >= 3.6
+* If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
+  that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
+  [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
+  Note that changing the pull request body or title on GitHub itself has no effect.
 * If you run into errors when running `python setup.py develop`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
@@ -881,7 +885,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
    nbytes_read_write = 4 # this is number of bytes read + written by a kernel. Change this to fit your kernel.
 
    for i in range(10):
-       a=torch.Tensor(size).cuda().uniform_()
+       a=torch.empty(size).cuda().uniform_()
        torch.cuda.synchronize()
        start = time.time()
        # dry run to alloc
