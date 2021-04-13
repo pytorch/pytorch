@@ -280,7 +280,7 @@ class OpInfo(object):
         if device_type == 'cpu':
             return self.dtypesIfCPU
         if device_type == 'cuda':
-            return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
+            return self.dtypesIfCUDA
         else:
             return self.dtypes
 
@@ -338,7 +338,7 @@ class UnaryUfuncInfo(OpInfo):
                  dtypes=floating_types(),
                  dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
                  dtypesIfCUDA=floating_and_complex_types_and(torch.half),
-                 dtypesIfROCM=floating_types_and(torch.half),
+                 dtypesIfROCM=floating_and_complex_types_and(torch.half),
                  default_test_dtypes=(
                      torch.uint8, torch.long, torch.half, torch.bfloat16,
                      torch.float32, torch.cfloat),  # dtypes which tests check by default
@@ -1497,7 +1497,7 @@ class ForeachUnaryFuncInfo(OpInfo):
                  dtypes=floating_and_complex_types(),
                  dtypesIfCPU=all_types_and_complex(),
                  dtypesIfCUDA=floating_and_complex_types_and(torch.half),
-                 dtypesIfROCM=None,
+                 dtypesIfROCM=floating_and_complex_types_and(torch.half),
                  safe_casts_outputs=True,
                  sample_inputs_func=sample_inputs_foreach,
                  **kwargs):
@@ -2649,7 +2649,7 @@ op_db: List[OpInfo] = [
            # BFloat16 support on CUDA requires CUDA 11 and SM53
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
                                            *[torch.bfloat16] if CUDA11OrLater else []),
-           dtypesIfROCM=floating_types_and(torch.half),
+           dtypesIfROCM=floating_types_and(torch.float16, torch.complex64, torch.complex128, torch.bfloat16),
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            skips=(
