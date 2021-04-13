@@ -192,8 +192,7 @@ void testWatchKeyCallback(const std::string& prefix = "") {
     threads.emplace_back(std::thread([&clientStores,
                                    &internalKey,
                                    &keyChangeOperationCount,
-                                   i,
-                                   &numThreads] {
+                                   i] {
       // Let each thread set and get key on its client store
       std::string key = internalKey + std::to_string(i);
       std::string keyCounter = internalKey + "counter" + std::to_string(i);
@@ -313,7 +312,7 @@ TEST(TCPStoreTest, testCleanShutdown) {
       0,
       numWorkers,
       true,
-      std::chrono::seconds(30),
+      std::chrono::seconds(defaultTimeout),
       /* wait */ false);
   c10d::test::set(*serverTCPStore, "key", "val");
 
@@ -322,7 +321,7 @@ TEST(TCPStoreTest, testCleanShutdown) {
       serverTCPStore->getPort(),
       numWorkers,
       false,
-      std::chrono::seconds(10),
+      std::chrono::seconds(defaultTimeout),
       /* wait */ false);
   clientTCPStore->get("key");
 

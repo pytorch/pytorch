@@ -151,8 +151,8 @@ void ListenThread::run() {
     SYSCHECK_ERR_RETURN_NEG1(
         res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count()))
     if (res == 0) {
-      auto rv = WaitForSingleObject(ghStopEvent_, 0);
-      if (rv != WAIT_TIMEOUT) {
+      auto rvPoll = WaitForSingleObject(ghStopEvent_, 0);
+      if (rvPoll != WAIT_TIMEOUT) {
         break;
       }
       continue;
@@ -162,8 +162,8 @@ void ListenThread::run() {
     char data;
     int ret = recv(fds[0].fd, &data, 1, MSG_PEEK);
     if (ret == 0) {
-      auto rv = WaitForSingleObject(ghStopEvent_, 0);
-      if (rv != WAIT_TIMEOUT) {
+      auto rvData = WaitForSingleObject(ghStopEvent_, 0);
+      if (rvData != WAIT_TIMEOUT) {
         break;
       }
       continue;
@@ -603,6 +603,10 @@ TCPStore::TCPStore(
         tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
     watchListener_ = std::make_unique<ListenThread>(listenSocket_);
   } catch (const std::exception&) {
+    if (isServer_) {
+      tcpStoreDaemon_ = nullptr;
+      tcputil::closeSocket(masterListenSocket_);
+    }
     watchListener_ = nullptr;
     if (listenSocket_ != -1) {
       tcputil::closeSocket(listenSocket_);
@@ -610,24 +614,20 @@ TCPStore::TCPStore(
     if (storeSocket_ != -1) {
       tcputil::closeSocket(storeSocket_);
     }
-    if (isServer_) {
-      tcpStoreDaemon_ = nullptr;
-      tcputil::closeSocket(masterListenSocket_);
-    }
     throw;
   }
 }
 
 TCPStore::~TCPStore() {
-  watchListener_ = nullptr;
-  tcputil::closeSocket(listenSocket_);
-  tcputil::closeSocket(storeSocket_);
   if (isServer_) {
     // Store daemon should end because of closed connection.
     // daemon destructor should join the thread
     tcpStoreDaemon_ = nullptr;
     tcputil::closeSocket(masterListenSocket_);
   }
+  watchListener_ = nullptr;
+  tcputil::closeSocket(listenSocket_);
+  tcputil::closeSocket(storeSocket_);
 }
 
 void TCPStore::waitForWorkers() {
