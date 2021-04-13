@@ -97,6 +97,25 @@ class TestMkldnn(TestCase):
                                        "Cannot access data pointer of Tensor that doesn't have storage",
                                        lambda: mkldnn_tensor.data_ptr() != 0)
 
+    def test_copy(self):
+        x = torch.randn(4, 5, dtype=torch.float32)
+        mkldnn_x = x.to_mkldnn()
+        mkldnn_y = torch.randn(4, 5, dtype=torch.float32).to_mkldnn()
+        mkldnn_z = torch.randn(4, 10, dtype=torch.float32).to_mkldnn()
+        mkldnn_y.copy_(mkldnn_x)
+        self.assertEqual(x, mkldnn_y.to_dense())
+        self.assertRaisesRegex(RuntimeError,
+                               "copy_mkldnn_: only support same size tensor.",
+                               lambda: mkldnn_z.copy_(mkldnn_x))
+        self.assertRaisesRegex(RuntimeError,
+                               "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! "
+                               "Found self type = torch.FloatTensor and src type = Mkldnntorch.FloatTensor",
+                               lambda: x.copy_(mkldnn_x))
+        self.assertRaisesRegex(RuntimeError,
+                               "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! "
+                               "Found self type = Mkldnntorch.FloatTensor and src type = torch.FloatTensor",
+                               lambda: mkldnn_x.copy_(x))
+
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
         for dtype in [torch.double, torch.half, torch.uint8, torch.int8,
