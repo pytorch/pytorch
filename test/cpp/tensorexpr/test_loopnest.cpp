@@ -4974,5 +4974,255 @@ TEST(LoopNest, fuseLoopsThatViolateDependencies7) {
       "not valid since it results in a loop carried dependence");
 }
 
+TEST(LoopNest, areLoopsPerfectlyNested) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       for (int k = 0; k < 40; k++) {
+  //         A[i,j,k] = i * j * k;
+  //       }
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store = Store::make(a_buf, {i, j, k}, Mul::make(Mul::make(i, j), k));
+  auto forK = For::make(k, 0, 40, store);
+  auto forJ = For::make(j, 0, 30, forK);
+  auto forI = For::make(i, 0, 20, forJ);
+  auto par = Block::make({forI});
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forI, forJ, forK}));
+
+  // Specifying the loops in any other order fails.
+  ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forJ, forI, forK}));
+  ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forI, forK, forJ}));
+  ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forK, forJ, forI}));
+
+  // Adding a statment to forK body should be OK.
+  auto init = Store::make(a_buf, {i, j}, 0);
+  forK->body()->insert_stmt_before(init, store);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forI, forJ, forK}));
+
+  // Adding a statement in forJ body should fail this test.
+  forK->body()->remove_stmt(init);
+  forJ->body()->insert_stmt_before(init, forK);
+  ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forI, forJ, forK}));
+
+  // Similarly, adding a statement in forI body should fail this test.
+  forJ->body()->remove_stmt(init);
+  forI->body()->insert_stmt_before(init, forJ);
+  ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forI, forJ, forK}));
+}
+
+TEST(LoopNest, reorderNestedLoops2D) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto store = Store::make(a_buf, {i, j}, Mul::make(i, j));
+  auto forJ = For::make(j, 0, 30, store);
+  auto forI = For::make(i, 0, 20, forJ);
+  auto par = Block::make({forI});
+
+  auto reordered = LoopNest::reorder({forI, forJ}, {1, 0});
+
+  ASSERT_EQ(reordered[0], forJ);
+  ASSERT_EQ(reordered[1], forI);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forJ, forI}));
+  ASSERT_EQ(forJ->get_parent(), par);
+  ASSERT_EQ(store->get_parent(), forI->body());
+}
+
+TEST(LoopNest, reorderNestedLoops3D) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       for (int k = 0; k < 40; k++) {
+  //         A[i,j,k] = i * j * k;
+  //       }
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store = Store::make(a_buf, {i, j, k}, Mul::make(Mul::make(i, j), k));
+  auto forK = For::make(k, 0, 40, store);
+  auto forJ = For::make(j, 0, 30, forK);
+  auto forI = For::make(i, 0, 20, forJ);
+  auto par = Block::make({forI});
+
+  auto reordered = LoopNest::reorder({forI, forJ, forK}, {2, 1, 0});
+
+  ASSERT_EQ(reordered[0], forK);
+  ASSERT_EQ(reordered[1], forJ);
+  ASSERT_EQ(reordered[2], forI);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forJ, forI}));
+  ASSERT_EQ(forK->get_parent(), par);
+  ASSERT_EQ(store->get_parent(), forI->body());
+}
+
+TEST(LoopNest, reorderNestedLoops4D) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       for (int k = 0; k < 40; k++) {
+  //         for (int l = 0; l < 50; l++) {
+  //           A[i,j,k,l] = i * j * k * l * 500;
+  //         }
+  //       }
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 30, 40, 50}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  VarHandle l("l", kInt);
+  auto store = Store::make(
+      a_buf,
+      {i, j, k, l},
+      Mul::make(Mul::make(Mul::make(Mul::make(i, j), k), l), 500));
+  auto forL = For::make(l, 0, 50, store);
+  auto forK = For::make(k, 0, 40, forL);
+  auto forJ = For::make(j, 0, 30, forK);
+  auto forI = For::make(i, 0, 20, forJ);
+  auto par = Block::make({forI});
+
+  auto reordered = LoopNest::reorder({forI, forJ, forK, forL}, {2, 3, 0, 1});
+
+  ASSERT_EQ(reordered[0], forK);
+  ASSERT_EQ(reordered[1], forL);
+  ASSERT_EQ(reordered[2], forI);
+  ASSERT_EQ(reordered[3], forJ);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forL, forI, forJ}));
+  ASSERT_EQ(forK->get_parent(), par);
+  ASSERT_EQ(store->get_parent(), forJ->body());
+}
+
+TEST(LoopNest, reorderTrivialPermutation) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       for (int k = 0; k < 40; k++) {
+  //         A[i,j,k] = i * j * k;
+  //       }
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store = Store::make(a_buf, {i, j, k}, Mul::make(Mul::make(i, j), k));
+  auto forK = For::make(k, 0, 40, store);
+  auto forJ = For::make(j, 0, 30, forK);
+  auto forI = For::make(i, 0, 20, forJ);
+  auto par = Block::make({forI});
+
+  auto reordered = LoopNest::reorder({forI, forJ, forK}, {0, 1, 2});
+
+  ASSERT_EQ(reordered[0], forI);
+  ASSERT_EQ(reordered[1], forJ);
+  ASSERT_EQ(reordered[2], forK);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forI, forJ, forK}));
+  ASSERT_EQ(forI->get_parent(), par);
+  ASSERT_EQ(store->get_parent(), forK->body());
+}
+
+TEST(LoopNest, reorderInvalidPermutations) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       for (int k = 0; k < 40; k++) {
+  //         A[i,j,k] = i * j * k;
+  //       }
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store = Store::make(a_buf, {i, j, k}, Mul::make(Mul::make(i, j), k));
+  auto forK = For::make(k, 0, 40, store);
+  auto forJ = For::make(j, 0, 30, forK);
+  auto forI = For::make(i, 0, 20, forJ);
+  auto par = Block::make({forI});
+
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {0, 1, 2, 3}),
+      "invalid permutation size");
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {1, 2}),
+      "invalid permutation size");
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {2, 1, 3}),
+      "invalid permutation for reorder");
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {1, 1, 0}),
+      "invalid permutation for reorder");
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {0, 0, 0}),
+      "invalid permutation for reorder");
+}
+
+TEST(LoopNest, reorderInvalidLoopNest) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 30; j++) {
+  //       A[i,j] = 0
+  //       for (int k = 0; k < 40; k++) {
+  //         A[i,j,k] = i * j * k;
+  //       }
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 30, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto store = Store::make(a_buf, {i, j, k}, Mul::make(Mul::make(i, j), k));
+  auto forK = For::make(k, 0, 40, store);
+  auto forJ = For::make(j, 0, 30, forK);
+  auto forI = For::make(i, 0, 20, forJ);
+  auto par = Block::make({forI});
+
+  // Specifying the loops in incorrect order fails.
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forK, forI, forJ}, {1, 0, 2}),
+      "reorder is only allowed on perfectly nested loops");
+
+  // Adding a statement to forJ loop fails.
+  auto init = Store::make(a_buf, {i}, 0);
+  forJ->body()->insert_stmt_before(init, forK);
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {1, 0, 2}),
+      "reorder is only allowed on perfectly nested loops");
+
+  // Moving that statement to forI loop also fails.
+  forJ->body()->remove_stmt(init);
+  forI->body()->insert_stmt_before(init, forJ);
+  ASSERT_THROWS_WITH(
+      LoopNest::reorder({forI, forJ, forK}, {1, 0, 2}),
+      "reorder is only allowed on perfectly nested loops");
+}
+
 } // namespace jit
 } // namespace torch

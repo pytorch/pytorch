@@ -1566,7 +1566,86 @@ void LoopNest::reorderAxis(For* a, For* b) {
   if (after) {
     root->insert_stmt_after(after, newInner);
   }
-} // namespace tensorexpr
+}
+
+bool isTrivialPermutation(const std::vector<size_t>& permutation) {
+  for (size_t i = 0; i < permutation.size(); ++i) {
+    if (permutation[i] != i) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool isValidPermutation(std::vector<size_t> permutation) {
+  std::sort(permutation.begin(), permutation.end());
+  return isTrivialPermutation(permutation);
+}
+
+std::vector<For*> LoopNest::reorder(
+    const std::vector<For*>& loops,
+    const std::vector<size_t>& permutation) {
+  if (loops.size() != permutation.size()) {
+    throw malformed_input("invalid permutation size");
+  }
+  if (isTrivialPermutation(permutation)) {
+    return loops;
+  }
+  if (!isValidPermutation(permutation)) {
+    throw malformed_input("invalid permutation for reorder");
+  }
+  if (loops.size() < 2) {
+    return loops;
+  }
+  if (!areLoopsPerfectlyNested(loops)) {
+    throw malformed_input("reorder is only allowed on perfectly nested loops");
+  }
+
+  auto parent = dynamic_cast<Block*>(loops.front()->get_parent());
+  if (parent == nullptr) {
+    throw malformed_input("parent of the loops must be a Block");
+  }
+
+  // Reorder the loops according to the permutation.
+  std::vector<For*> result(loops.size());
+  for (size_t i = 0; i < loops.size(); ++i) {
+    result[permutation[i]] = loops[i];
+  }
+
+  // Remove the bodies from all the loops.
+  auto innermost_body = loops.back()->removeBody();
+  // We use an empty block statement to replace the outermost loop
+  // so that we know the position where the outermost reordered loop
+  // is to be inserted.
+  auto empty_block = new Block({});
+  parent->replace_stmt(loops.front(), empty_block);
+  for (size_t i = 1; i < loops.size(); ++i) {
+    auto block = dynamic_cast<Block*>(loops[i]->get_parent());
+    TORCH_INTERNAL_ASSERT(block);
+    block->remove_stmt(loops[i]);
+  }
+
+  // Set the new bodies after reorder for all the loops.
+  for (size_t i = 0; i < result.size() - 1; ++i) {
+    result[i]->setBody(result[i + 1]);
+  }
+  result.back()->setBody(innermost_body);
+  parent->replace_stmt(empty_block, result.front());
+  return result;
+}
+
+bool LoopNest::areLoopsPerfectlyNested(const std::vector<For*>& loops) {
+  if (loops.size() < 2) {
+    return true;
+  }
+  for (size_t i = 0; i < loops.size() - 1; ++i) {
+    auto loop_body = loops[i]->body();
+    if (loop_body->nstmts() != 1 || loop_body->front() != loops[i + 1]) {
+      return false;
+    }
+  }
+  return true;
+}
 
 void LoopNest::unroll(For* f, Stmt** unrolled) {
   Block* p = dynamic_cast<Block*>(f->get_parent());
