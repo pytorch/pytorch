@@ -1218,7 +1218,7 @@ static Tensor& std_var_out(
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "std and var only support floating point and complex dtypes");
 
-	TORCH_CHECK(correction_opt.has_value(),
+  TORCH_CHECK(correction_opt.has_value(),
       fname, ": the correction parameter must be given explicitly. ",
       "Call with correction=1 for the old default behavior.")
   const auto correction = *correction_opt;
@@ -1296,7 +1296,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
            toString(result2.scalar_type()),
            ".");
 
-	TORCH_CHECK(correction_opt.has_value(),
+  TORCH_CHECK(correction_opt.has_value(),
       fname, ": the correction parameter must be given explicitly. ",
       "Call with correction=1 for the old default behavior.")
   const auto correction = *correction_opt;
