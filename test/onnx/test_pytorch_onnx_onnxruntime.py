@@ -1410,7 +1410,7 @@ class TestONNXRuntime(unittest.TestCase):
         @torch.jit.script
         def list_append(boxes: List[torch.Tensor]):
             temp = []
-            for i, b in enumerate(boxes):
+            for i, b in enumerate(boxes):  # enumerate is creating a prim::min op in torch graph
                 temp.append(torch.full_like(b[:, 1], i))
             return temp[0]
 
