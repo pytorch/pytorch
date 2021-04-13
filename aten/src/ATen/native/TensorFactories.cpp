@@ -819,8 +819,8 @@ Tensor normal(double mean, double std, IntArrayRef size,
   return result.normal_(mean, std, generator);
 }
 
-Tensor& normal_out(Tensor& result, double mean, double std,
-                   IntArrayRef size, c10::optional<Generator> generator) {
+Tensor& normal_out(double mean, double std,
+                   IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(mean, std, generator);
 }

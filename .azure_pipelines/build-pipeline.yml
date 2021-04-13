@@ -1,0 +1,63 @@
+# PyTorch CI Builds Pipeline on Azure DevOps
+#
+# This pipeline:
+#   1) builds PyTorch on select configurations
+#   2) runs only TestTorch unit tests.
+
+stages:
+- stage: 'Build'
+  displayName: 'Build PyTorch'
+  jobs:
+  - template: job_templates/build-verify-publish-template-unix.yml
+    parameters:
+      name: ubuntu_1804_CPU_docker
+      pool: 'PyTorch-Linux-CPU'
+      container_endpoint: pytorchms.azurecr.io
+      build_stage: True
+      is_ci_build: True
+      os: ubuntu
+      cuda: cpu
+      customMatrixes:
+        Py_38:
+          configuration: ubuntu_1804_py_38_cpu
+          container_image: pytorchms.azurecr.io/ubuntu_1804_py_38_cpu_dev
+
+  - template: job_templates/build-verify-publish-template-unix.yml
+    parameters:
+      name: ubuntu_1804_GPU_docker
+      pool: 'PyTorch-Linux-GPU'
+      container_endpoint: pytorchms.azurecr.io
+      build_stage: True
+      is_ci_build: True
+      os: ubuntu
+      cuda: gpu
+      customMatrixes:
+        Py_39_CUDA_112_cuDNN_810:
+          configuration: ubuntu_1804_py_39_cuda_112_cudnn_810
+          container_image: pytorchms.azurecr.io/ubuntu_1804_py_39_cuda_112_cudnn_8_dev
+          CUDA_VERSION: 112
+
+  - template: job_templates/build-verify-publish-template-win.yml
+    parameters:
+      name: windows_2019_CPU
+      pool: 'PyTorch-Win-CPU'
+      build_stage: True
+      is_ci_build: True
+      os: windows
+      cuda: cpu
+      customMatrixes:
+        Py_37:
+          configuration: windows_2019_py_37_cpu
+
+  - template: job_templates/build-verify-publish-template-win.yml
+    parameters:
+      name: windows_2019_GPU
+      pool: 'PyTorch-Win-GPU'
+      build_stage: True
+      is_ci_build: True
+      os: windows
+      cuda: gpu
+      customMatrixes:
+        Py_38_CUDA_102_cuDNN_765:
+          configuration: windows_2019_py_38_cuda_102_cudnn_765
+          CUDA_VERSION: 102

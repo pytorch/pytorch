@@ -281,7 +281,7 @@ else
     BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
     mkdir -p ../cpp-build/caffe2
     pushd ../cpp-build/caffe2
-    WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+    WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
     popd
   fi
 fi
@@ -309,10 +309,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     exit 1
   fi
 
-  bazels3cache --bucket=${XLA_CLANG_CACHE_S3_BUCKET_NAME} --maxEntrySizeBytes=0
+  bazels3cache --bucket="${XLA_CLANG_CACHE_S3_BUCKET_NAME}" --maxEntrySizeBytes=0
   pushd xla
   export CC=clang-9 CXX=clang++-9
   # Use cloud cache to build when available.
+  # shellcheck disable=SC1003
   sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
 
   python setup.py install
