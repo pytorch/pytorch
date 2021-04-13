@@ -159,7 +159,7 @@ bool inputsCanRunOutOfPlace(Node* n) {
   return true;
 }
 
-bool canOptimizeConstruct(Node* n) {
+bool isOptimizableContainerType(Node* n) {
   const auto& type = n->output()->type();
   if (type->kind() == TypeKind::ListType) {
     const auto& list_type = type->expectRef<ListType>();
@@ -184,7 +184,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim_ListConstruct,
     [](Node* n) -> SROperator {
       const auto& type = n->output()->type()->expectRef<ListType>();
-      bool can_optimize = canOptimizeConstruct(n);
+      bool can_optimize = isOptimizableContainerType(n);
       return [can_optimize, &type](ProcessedNode* p_node) {
         const auto& out_l = p_node->Output(0);
         if (!out_l.isNone() && can_optimize) {
@@ -204,7 +204,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim::TupleConstruct,
     prim_TupleConstruct,
     [](Node* n) -> SROperator {
-      bool can_optimize = canOptimizeConstruct(n);
+      bool can_optimize = isOptimizableContainerType(n);
       return [can_optimize](ProcessedNode* p_node) {
         const auto& out_l = p_node->Output(0);
         if (!out_l.isNone() && can_optimize) {
