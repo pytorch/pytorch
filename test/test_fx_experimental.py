@@ -1092,7 +1092,7 @@ class {test_classname}(torch.nn.Module):
                 self.rhs = rhs
 
             def forward(self, a, b, c, d, e):
-                s = torch.Tensor((0))
+                s = torch.tensor([])
                 matmuls = []
 
                 # For some reason using a list comprehension or for-loop for this

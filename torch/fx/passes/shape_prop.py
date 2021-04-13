@@ -1,7 +1,7 @@
 import torch
 import torch.fx
 from torch.fx.node import Node
-from typing import Any, List, NamedTuple, Optional
+from typing import Any, Tuple, NamedTuple, Optional
 
 class TensorMetadata(NamedTuple):
     # TensorMetadata is a structure containing pertinent information
@@ -10,15 +10,15 @@ class TensorMetadata(NamedTuple):
     # General Tensor metadata
     shape : torch.Size
     dtype : torch.dtype
-    stride : List[int]
+    stride : Tuple[int]
     memory_format : Optional[torch.memory_format]
 
 
     # Quantization metadata
     is_quantized : bool
     qscheme : Optional[torch.qscheme]
-    q_scale : float
-    q_zero_point : int
+    q_scale : Optional[float]
+    q_zero_point : Optional[int]
 
 def extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     """
