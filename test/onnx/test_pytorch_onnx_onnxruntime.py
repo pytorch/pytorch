@@ -4271,6 +4271,8 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::identity of sequence in opset 14
+    def test_list_append_nested_2(self):
         class ListModel(torch.nn.Module):
             def forward(self, x):
                 res = []
@@ -4659,7 +4661,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.zeros(12,)
         self.run_test(torch.jit.script(M()), (x))
 
-    @unittest.skip("Skip til ONNX opset 14 for Sequence Identity. Pass locally.")
+    @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::identity of sequence in opset 14
     def test_inplace_sequence_with_loop(self):
         class M(torch.nn.Module):
             def process(self, beam_hyps: List[torch.Tensor], done: torch.Tensor, x):
