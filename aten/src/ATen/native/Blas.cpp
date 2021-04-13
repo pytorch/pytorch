@@ -6,44 +6,18 @@
 
 namespace at {
 namespace meta {
-  TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha) {
-
-  Tensor self_ = self;
-  if (self.numel()==1 && self.dim()<=1) {
-    self_ = self.expand({mat.size(0)});
-  }
-  //if self was broadcastable, it's now correct size
-  //if it wasn't, it'll error out in the subsequent checks
-
-  TORCH_CHECK((mat.dim() == 2 && vec.dim() == 1 && self_.dim() == 1),
+TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha) {
+  TORCH_CHECK((mat.dim() == 2 && vec.dim() == 1 && self.dim() <= 1),
     "vector + matrix @ vector expected, got ", self.dim(), ", ", mat.dim(), ", ", vec.dim());
 
-  TORCH_CHECK((mat.size(1) == vec.size(0) && mat.size(0) == self_.size(0)),
-    "size mismatch, got ", self_.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
+  TORCH_CHECK(mat.size(1) == vec.size(0) && (mat.size(0) == self.numel() || self.numel() == 1),
+     "size mismatch, got ", self.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
   auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
   set_output(0, {mat.sizes()[0]}, {}, mat.options(), names);
-  auto result = maybe_get_output();
+  auto result = maybe_get_output(0);
   //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
   TORCH_CHECK(result.dim() == 1 && result.sizes()[0] == mat.sizes()[0], "output of addmv operation should be 1D with ",
   "size equal to mat.size(0), yet got output size ", result.sizes(), " and mat.size(0) ", mat.size(0));
-  if (mat.numel() != 0){
-    if (!result.is_same(self_)) {
-      at::native::copy_(result, self_);
-    }
-  } else {
-    // shortcut for an empty matrix
-    // By definition, when beta==0, values in self should be ignored. nans and infs
-    // should not propagate
-    if (beta.toComplexDouble() == 0.0) {
-      result.zero_();
-    } else {
-      at::cpu::mul_out(
-          result,
-          self,
-          at::native::scalar_tensor(
-              beta, self.scalar_type(), c10::nullopt /* layout */, at::kCPU, c10::nullopt /* pin_memory */));
-    }
-  }
 }
 
 
@@ -69,8 +43,28 @@ constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
 
 
 TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta_, const Scalar& alpha_, const Tensor& result) {
-// empty matrix was handled in meta function
-  if (mat.numel() != 0) {
+  Tensor self_ = self;
+  if (self.numel()==1 && self.dim()<=1) {
+    self_ = self.expand({mat.size(0)});
+  }
+  auto betaval = beta_.toComplexDouble();
+  if (mat.numel() == 0) {
+    // shortcut for an empty matrix
+    // By definition, when beta==0, values in self should be ignored. nans and infs
+    // should not propagate
+    if (betaval == 0.0) {
+      result.zero_();
+    } else {
+      at::cpu::mul_out(
+          const_cast<Tensor&>(result),
+          self,
+          at::native::scalar_tensor(
+              beta_, self.scalar_type(), c10::nullopt /* layout */, at::kCPU, c10::nullopt /* pin_memory */));
+    }
+  } else {
+    if (!result.is_same(self_) && betaval != 0.0) { //if beta is 0, result contents is ignored
+      at::native::copy_(const_cast<Tensor&>(result), self_);
+    }
     if (result.numel() != 0) {
       auto r_stride = result.stride(0);
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
