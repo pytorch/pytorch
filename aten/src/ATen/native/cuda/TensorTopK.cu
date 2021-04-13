@@ -309,7 +309,6 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     if (sliceSize <= maxSliceSize) {
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
-      //THCTensor_(sortKeyValueInplace)(state, topK, indices, dim, dir);
       legacy::cuda::_th_sort_key_value_inplace(values, indices, dim, largest);
     } else {
       // Depend upon the backup sort that returns indices, which we
