@@ -7,8 +7,14 @@ from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 from itertools import chain
 import torch
+<<<<<<< HEAD
 import torch._C._fx  # type: ignore[import]
 from torch._C import ScriptObject  # type: ignore[attr-defined]
+=======
+import torch._C._fx  # type: ignore
+from torch._C import ScriptObject  # type: ignore
+import torch.utils._pytree as pytree
+>>>>>>> 155b3eddb2 (test)
 
 import sys
 from .node import Argument, map_aggregate
@@ -86,6 +92,8 @@ class _CPatchManager(object):
 
     def __exit__(self, type, value, tb):
         sys.setprofile(None)
+
+HOLE = object()
 
 class Tracer(TracerBase):
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -308,6 +316,7 @@ class Tracer(TracerBase):
         total_args = co.co_argcount + co.co_kwonlyargcount
         names_iter = iter(co.co_varnames)
         args : List[Any] = []
+        specs = []
         skip_arg_idx = 0
         if is_module:
             if total_args == 0:
@@ -315,6 +324,7 @@ class Tracer(TracerBase):
             skip_arg_idx = 1
             next(names_iter)  # skip self
             args.append(self.root)
+            specs.append((pytree.LeafSpec(), 1))
 
         sig = inspect.signature(fn_for_analysis)
 
@@ -327,9 +337,22 @@ class Tracer(TracerBase):
                 param = sig.parameters[name]
                 default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore[assignment]
             return self.create_proxy('placeholder', name, default, {},
-                                     type_expr=fn_for_analysis.__annotations__.get(name, None))
+                                    type_expr=fn_for_analysis.__annotations__.get(name, None))
+
+        def convert_pytrees(name):
+            if concrete_args is not None and name in concrete_args:
+                flat_inp, spec = pytree.tree_flatten(concrete_args[name])
+                proxies = []
+                for idx, inp in enumerate(flat_inp):
+                    if inp == HOLE:
+                        proxies.append(self.create_proxy('placeholder', name+str(idx), (), {}))
+                    else:
+                        proxies.append(inp)
+                return proxies, spec
+            return ((proxy_placeholder(name),), pytree.LeafSpec())
 
         args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
+
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
             # TODO: type annotations for *args and **kwargs
@@ -338,8 +361,16 @@ class Tracer(TracerBase):
             if co.co_flags & inspect.CO_VARKEYWORDS:
                 args.append(proxy_placeholder('**' + next(names_iter)))
             root_fn = _patch_function(root_fn, len(args))
+        flat_args, spec = pytree.tree_flatten(args)
+        for idx, arg in enumerate(flat_args):
+            if arg is HOLE:
+                flat_args[idx] = self.create_proxy('placeholder', f'tree_{str(idx)}', (), {})
 
-        return root_fn, args
+        def flatten_fn(*args):
+            tree_args = pytree.tree_unflatten(args, spec)
+            return root_fn(*tree_args)
+
+        return flatten_fn, flat_args
 
 
     def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
@@ -429,7 +460,6 @@ class Tracer(TracerBase):
                 _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
                 for module in self._autowrap_search:
                     _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
-
                 self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                                  type_expr=fn.__annotations__.get('return', None))
 
