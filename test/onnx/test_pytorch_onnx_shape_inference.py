@@ -2,7 +2,6 @@ import unittest
 import torch
 import numpy as np
 
-import copy
 
 def expect_tensor(scalar_type, shape=None, dynamic_shape=None):
     def verify(actual_type):
@@ -49,7 +48,7 @@ class TestONNXShapeInference(unittest.TestCase):
         # Test ConstantOfShape with input of prim::ListConstruct of static tensor
         rank = 4
         g = self.create_empty_graph()
-        constants = [self.insert_tensor_constant(g, torch.tensor(i+1)) for i in range(rank)]
+        constants = [self.insert_tensor_constant(g, torch.tensor(i + 1)) for i in range(rank)]
         shape = g.op("prim::ListConstruct", *constants)
         shape.setType(torch._C.ListType.ofInts())
         constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
@@ -62,7 +61,7 @@ class TestONNXShapeInference(unittest.TestCase):
         shape = g.op("prim::ListConstruct", *inputs)
         shape.setType(torch._C.ListType.ofInts())
         constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
-        self.run_test(g, constant_of_shape.node(), expect_tensor('Float', None, (None, None, None, None)))
+        self.run_test(g, constant_of_shape.node(), expect_tensor('Float', dynamic_shape=(None, None, None, None)))
 
 if __name__ == '__main__':
     unittest.main()
