@@ -1,0 +1,4 @@
+sphinx==2.4.4
+docutils==0.16
+m2r
+-e git+git://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme

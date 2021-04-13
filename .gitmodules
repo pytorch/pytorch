@@ -133,3 +133,6 @@
 [submodule "third_party/kineto"]
     path = third_party/kineto
     url = https://github.com/pytorch/kineto
+[submodule "lazy_tensor_core/third_party/abseil-cpp"]
+	path = lazy_tensor_core/third_party/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
