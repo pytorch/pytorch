@@ -87,51 +87,94 @@ struct SymbolicShapeAnalyzer {
   c10::SymbolicShape run() {
     // TODO: only run while the last iteration has made a change
     for (size_t i = 0; i < 6; i++) {
-      substituteInputTensorProperties();
+      // XXX: we cannot substitute symbolic dims before passes like constant
+      // propagation, or we might inadvertently use them in arithmetic or
+      // other operators
+      substituteInputTensorProperties(/*substitute_symbolic_dims*/ false);
       LowerSimpleTuples(graph_);
       RemoveListMutation(graph_);
       UnrollConstantLoops(graph_);
       ConstantPropagation(graph_);
       PeepholeOptimize(graph_);
       ConstantPropagation(graph_);
+      EliminateCommonSubexpression(graph_);
     }
-    ConstantPooling(graph_);
-    EliminateDeadCode(graph_);
+    substituteInputTensorProperties(/*substitute_symbolic_dims*/ true);
+    // XXX: do not run any passes aftr we have substituted in symbolic dimension
+    // value, we do it so they can be easily extracted into the output shape
     return extractOutputShape();
   }
 
  private:
-  void substituteInputTensorProperties() {
-    for (auto index : tensor_indices) {
-      substituteTensorProperties(index);
-    }
-  }
+  void substituteInputTensorProperties(bool substitute_symbolic_dims) {
+    std::unordered_map<int64_t, std::vector<Value*>> symbolic_shape_map;
 
-  void substituteTensorProperties(int64_t tensor_index) {
-    auto tensor_value = node_->inputs().at(tensor_index);
-    auto shape = tensor_value->type()->expect<TensorType>()->symbolic_sizes();
-    if (!shape.rank().has_value()) {
-      return;
-    }
+    for (auto tensor_index : tensor_indices) {
+      auto tensor_value = node_->inputs().at(tensor_index);
+      auto shape = tensor_value->type()->expect<TensorType>()->symbolic_sizes();
+      if (!shape.rank().has_value()) {
+        return;
+      }
 
-    for (const auto& use : graph_->inputs().at(tensor_index)->uses()) {
-      // TODO: either decompose composite ops like slice or add handling here
-      switch (use.user->kind()) {
-        case aten::len: {
-          size_t len = shape.rank().value();
-          replaceWithIValue(use.user->output(), static_cast<int64_t>(len));
-        } break;
-        case aten::__getitem__: {
-          auto index = constant_as<int64_t>(use.user->inputs().at(1));
-          if (index) {
-            auto norm_index = normIndex(*index, *shape.rank());
-            // TODO: HANDLE non-static value (symbolic shape)
-            if (norm_index && shape[*norm_index].is_static()) {
-              replaceWithIValue(
-                  use.user->output(), shape[*norm_index].static_size());
+      for (const auto& use : graph_->inputs().at(tensor_index)->uses()) {
+        // TODO: either decompose composite ops like slice or add handling here
+        switch (use.user->kind()) {
+          case aten::len: {
+            size_t len = shape.rank().value();
+            replaceWithIValue(use.user->output(), static_cast<int64_t>(len));
+          } break;
+          case aten::__getitem__: {
+            auto index = constant_as<int64_t>(use.user->inputs().at(1));
+            if (index) {
+              auto norm_index = normIndex(*index, *shape.rank());
+              if (norm_index &&
+                  (shape[*norm_index].is_static() ||
+                   substitute_symbolic_dims)) {
+                replaceWithIValue(
+                    use.user->output(), shape[*norm_index].value());
+              } else if (norm_index) {
+                int64_t symbolic_index = shape[*norm_index].value();
+                if (!symbolic_shape_map.count(symbolic_index)) {
+                  symbolic_shape_map[symbolic_index] = {};
+                }
+                symbolic_shape_map[symbolic_index].push_back(
+                    use.user->output());
+              }
             }
           }
         }
+      }
+
+      for (const auto& symbolic_set : symbolic_shape_map) {
+        mergeSymbolicShapeSets(symbolic_set.second);
+      }
+    }
+  }
+
+  bool isDominatedBy(Node* node, Node* dominator) {
+    while (node) {
+      if (node->owningBlock() == dominator->owningBlock()) {
+        return dominator->isBefore(node);
+      }
+      node = node->owningBlock()->owningNode();
+    }
+    return false;
+  }
+
+  void mergeSymbolicShapeSets(const std::vector<Value*>& symbolic_set) {
+    // resolve all symbolic values to values which they are dominated by
+    // there are ways to compute this more efficiently but typically number of
+    // Values for each symbolic set is low and this is cheap to run
+    for (size_t i = 0; i < symbolic_set.size(); ++i) {
+      Value* v = symbolic_set[i];
+      Value* dominating_value = v;
+      for (size_t j = 0; j < symbolic_set.size(); ++j) {
+        if (isDominatedBy(dominating_value->node(), symbolic_set[j]->node())) {
+          dominating_value = symbolic_set[j];
+        }
+      }
+      if (dominating_value != v) {
+        v->replaceAllUsesWith(dominating_value);
       }
     }
   }
