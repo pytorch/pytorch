@@ -227,6 +227,16 @@ inline C10_HOST_DEVICE BFloat16 operator/(int64_t a, BFloat16 b) {
   return static_cast<BFloat16>(a) / b;
 }
 
+// Overloading < and > operators, because std::max and std::min use them.
+
+inline C10_HOST_DEVICE bool operator>(BFloat16& lhs, BFloat16& rhs) {
+  return float(lhs) > float(rhs);
+}
+
+inline C10_HOST_DEVICE bool operator<(BFloat16& lhs, BFloat16& rhs) {
+  return float(lhs) < float(rhs);
+}
+
 } // namespace c10
 
 namespace std {
