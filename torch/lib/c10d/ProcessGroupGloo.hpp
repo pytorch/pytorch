@@ -126,8 +126,8 @@ class ProcessGroupGloo : public ProcessGroup {
       store_->wait(keys, timeout);
     }
 
-  protected:
-   c10::intrusive_ptr<::c10d::Store> store_;
+   protected:
+    c10::intrusive_ptr<::c10d::Store> store_;
   };
 
   // For send and recv operations there is no need to pass them to the
