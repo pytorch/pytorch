@@ -315,7 +315,7 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-      - name: Install isort
-        run: pip install isort==5.8.0
-      - name: Run isort
-        run: isort . --check --diff
+      - name: Install and run isort
+        uses: isort/isort-action@b7b5b9a60c143024e66aafdc1107933949fe74a5
+        with:
+          isortVersion: 5.8.0
