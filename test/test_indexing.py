@@ -1049,8 +1049,8 @@ class TestIndexing(TestCase):
             self.assertEqual(actual, expected, atol=0, rtol=0)
 
         for shape in [(3, 2), (2, 3, 5), (2, 4, 0), (2, 3, 1, 4)]:
-            for discontiguous in [True, False]:
-                t = make_tensor(shape, device=device, dtype=dtype, discontiguous=discontiguous)
+            for noncontiguous in [True, False]:
+                t = make_tensor(shape, device=device, dtype=dtype, noncontiguous=noncontiguous)
                 for dim in list(range(t.ndim)) + [None]:
                     if dim is None:
                         indices = torch.argsort(t.view(-1))
