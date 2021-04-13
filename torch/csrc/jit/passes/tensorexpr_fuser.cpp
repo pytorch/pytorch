@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
+#include <ATen/core/interned_strings.h>
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
@@ -161,9 +162,7 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
 
-      // TODO: enable once we have an out variant for conv2d to use in the NNC's
-      // external call or when we have a performant TE representation for conv
-      // "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
   };
   // clang-format on
 
@@ -176,11 +175,6 @@ bool isSupported(Node* node) {
     return isSupportedForBlock(node);
   }
 
-  static const OperatorSet cuda_only_operator_set{
-      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
-  };
-  static const OperatorSet cpu_only_operator_set{
-      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"};
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
@@ -208,28 +202,6 @@ bool isSupported(Node* node) {
       }
     }
 
-    // Operator is only supported on CUDA.
-    if (node->isMemberOf(cuda_only_operator_set)) {
-      auto device = tensorexpr::pickDeviceType(node->inputs());
-      if (!device) {
-        device = tensorexpr::pickDeviceType(node->outputs());
-      }
-      if (!device || device->is_cpu()) {
-        return false;
-      }
-    }
-
-    // Operator is only supported on CPU.
-    if (node->isMemberOf(cpu_only_operator_set)) {
-      auto device = tensorexpr::pickDeviceType(node->inputs());
-      if (!device) {
-        device = tensorexpr::pickDeviceType(node->outputs());
-      }
-      if (!device || !device->is_cpu()) {
-        return false;
-      }
-    }
-
     // non-const dtype / device
     for (auto arg_name : {"dtype", "device"}) {
       if (auto index = node->schema().argumentIndexWithName(arg_name)) {
@@ -241,24 +213,6 @@ bool isSupported(Node* node) {
 
     if (FLAGS_torch_jit_disable_cat && node->kind() == aten::cat) {
       return false;
-    }
-
-    // We only support conv2d with constant strides/padding/dilation/groups
-    if (node->kind() == aten::conv2d) {
-      // Strides, padding and dilation are inputs 3, 4, and 5. They all must be
-      // an IntList of size 2.
-      for (size_t idx = 3; idx <= 5; idx++) {
-        if (node->input(idx)->node()->kind() != prim::Constant ||
-            !toIValue(node->input(idx))->isIntList() ||
-            toIValue(node->input(idx))->toIntList().size() != 2) {
-          return false;
-        }
-      }
-      // Groups is input 6. It must be a constant int.
-      if (node->input(6)->node()->kind() != prim::Constant ||
-          !toIValue(node->input(6))->isInt()) {
-        return false;
-      }
     }
 
     return true;
@@ -485,7 +439,9 @@ class TensorExprFuser {
       bool disable_shape_checks)
       : graph_(std::move(graph)),
         min_group_size_(min_group_size),
-        disable_shape_checks_(disable_shape_checks) {}
+        disable_shape_checks_(disable_shape_checks) {
+    parseTENotFuseOption();
+  }
 
   // Builds up expressions that compute shapes of all intermediates (and
   // outputs) of the fusion group, based on the sizes of inputs. You should run
@@ -654,7 +610,10 @@ class TensorExprFuser {
   // until there is nothing we can pull in.
   std::pair<graph_node_list::iterator, bool> createFusionGroup(
       Node* fusion_node) {
-    if (min_group_size_ == 1) {
+    // Allow single-node groups containing conv2d, since we'll only select
+    // those in cases where the tensorexpr implementation is faster than the
+    // aten implementation.
+    if (min_group_size_ == 1 || fusion_node->kind() == aten::conv2d) {
       fusion_node = getOrCreateTensorExprSubgraph(fusion_node);
     }
 
@@ -783,13 +742,25 @@ class TensorExprFuser {
     return num;
   }
 
+  bool hasConv(Block* block) {
+    for (Node* n : block->nodes()) {
+      if (n->kind() == aten::conv2d) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool inlineIfTooSmall(Node* n) {
     if (n->kind() != prim::TensorExprGroup) {
       return false;
     }
     auto subgraph = SubgraphUtils::getSubgraph(n);
-    size_t num_modes = blockSize(subgraph->block());
-    if (num_modes < min_group_size_) {
+    size_t num_nodes = blockSize(subgraph->block());
+    // Allow small subgraphs containing conv2d, since we'll only select those
+    // in cases where the tensorexpr implementation is faster than the aten
+    // implementation.
+    if (num_nodes < min_group_size_ && !hasConv(subgraph->block())) {
       GRAPH_UPDATE("Fusion group is too small, unmerging: ", *n);
       SubgraphUtils::unmergeSubgraph(n);
       return true;
@@ -895,6 +866,11 @@ class TensorExprFuser {
 
   bool isFusableOnDevice(Node* node) {
     for (const auto& input : node->inputs()) {
+      if (input->node()->kind() == prim::ListConstruct) {
+        if (!isFusableOnDevice(input->node())) {
+          return false;
+        }
+      }
       if (!canFuseOnDevice(input)) {
         return false;
       }
@@ -917,8 +893,15 @@ class TensorExprFuser {
       "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
     };
+    static const OperatorSet cuda_only_operator_set{
+      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
+    };
+    static const OperatorSet cpu_only_operator_set{
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"
+    };
     // clang-format on
 
+    // Check types of input values.
     for (const Value* v : node->inputs()) {
       if (auto const& tt = v->type()->cast<TensorType>()) {
         auto const& st = tt->scalarType();
@@ -955,6 +938,29 @@ class TensorExprFuser {
         }
       }
     }
+
+    // Operator is only supported on CUDA.
+    if (node->isMemberOf(cuda_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || device->is_cpu()) {
+        return false;
+      }
+    }
+
+    // Operator is only supported on CPU.
+    if (node->isMemberOf(cpu_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || !device->is_cpu()) {
+        return false;
+      }
+    }
+
     if (node->kind() == aten::to) {
       // only support same-device conversion
       auto device = tensorexpr::pickDeviceType(node->inputs());
@@ -983,7 +989,12 @@ class TensorExprFuser {
         }
       }
     }
-
+    if (node->kind() == aten::conv2d) {
+      if (!tensorexpr::conv2dIsSupported(node)) {
+        GRAPH_DEBUG("Params of conv2d are not supported");
+        return false;
+      }
+    }
     return true;
   }
 
@@ -996,6 +1007,8 @@ class TensorExprFuser {
   bool canHandle(Node* node) {
     REQ(disable_shape_checks_ || allShapesAreKnown(node));
     REQ(isFusableOnDevice(node));
+    REQ(operators_not_to_fuse.find(node->kind()) ==
+        operators_not_to_fuse.end());
 
     for (Value* input : node->inputs()) {
       if (auto const& tt = input->type()->cast<TensorType>()) {
@@ -1159,9 +1172,32 @@ class TensorExprFuser {
     }
   }
 
+  // This function parses the option provided by the environment variable
+  // "PYTORCH_TENSOREXPR_DONT_FUSE".
+  // This variable allows users to disable fusion on a list of specified
+  // operators that are separated by ':'. e.g.,
+  // 'PYTORCH_TENSOREXPR_DONT_FUSE="clamp:mul:add"' disables fusion on
+  // aten::clamp, aten::mul and aten::add.
+  void parseTENotFuseOption() {
+    const char* option = std::getenv("PYTORCH_TENSOREXPR_DONT_FUSE");
+    std::stringstream in_ss;
+    if (option) {
+      in_ss << option;
+    }
+
+    std::string line;
+    while (std::getline(in_ss, line, ':')) {
+      if (line.size() == 0) {
+        continue;
+      }
+      operators_not_to_fuse.insert(c10::Symbol::aten(line));
+    }
+  }
+
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
 
+  std::set<NodeKind> operators_not_to_fuse;
   // Minimal size of a fusion group
   size_t min_group_size_;
   // If true, shapes are ignored

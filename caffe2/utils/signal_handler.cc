@@ -227,8 +227,8 @@ void stacktraceSignalHandler(bool needsLock) {
     pthread_mutex_lock(&writingMutex);
   }
   pid_t tid = syscall(SYS_gettid);
-  std::cerr << fatalSignalName << "(" << fatalSignum << "), Thread " << tid
-            << ": " << std::endl;
+  std::cerr << fatalSignalName << "(" << fatalSignum << "), PID: " << ::getpid()
+            << ", Thread " << tid << ": " << std::endl;
   printStacktrace();
   std::cerr << std::endl;
   if (needsLock) {
