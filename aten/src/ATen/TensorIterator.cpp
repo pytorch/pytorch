@@ -1257,7 +1257,7 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
   TORCH_INTERNAL_ASSERT(t.defined());
   if (!op.tensor.defined()) {
     op.tensor = t;
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op.current_dtype == t.scalar_type());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op.target_dtype == t.scalar_type());
   } else if (op.will_resize) {
     if (op.original_tensor.defined()) {
       // OK, so this is pretty weird.  To understand how we can end up in
