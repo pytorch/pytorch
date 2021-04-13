@@ -484,17 +484,8 @@ TEST(LLVM, DirectVectorization) {
       Store::make(
           c,
           {Ramp::make(m * 64, 1, 64)},
-          Load::make(
-              {kFloat, 64},
-              a,
-              {Ramp::make(m * 64, 1, 64)},
-              Broadcast::make(1, 64)) *
-              Load::make(
-                  {kFloat, 64},
-                  b,
-                  {Ramp::make(m * 64, 1, 64)},
-                  Broadcast::make(1, 64)),
-          Broadcast::make(1, 64)));
+          Load::make({kFloat, 64}, a, {Ramp::make(m * 64, 1, 64)}) *
+              Load::make({kFloat, 64}, b, {Ramp::make(m * 64, 1, 64)})));
   LLVMCodeGen cg(s, {a, b, c});
 }
 
@@ -505,11 +496,7 @@ TEST(LLVM, VecLoadStoreTest) {
   std::vector<int32_t> a_buffer = {1, 1, 1, 1};
   std::vector<int32_t> b_buffer = {2, 2, 2, 2};
 
-  auto store = b.storeWithMask(
-      {Ramp::make(0, 1, 4)},
-      a.loadWithMask(
-          {Ramp::make(0, 1, 4)}, Broadcast::make(IntImm::make(1), 4)),
-      Broadcast::make(IntImm::make(1), 4));
+  auto store = b.store({Ramp::make(0, 1, 4)}, a.load({Ramp::make(0, 1, 4)}));
   LLVMCodeGen cg(store, {a, b});
   std::vector<void*> args({a_buffer.data(), b_buffer.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -523,26 +510,22 @@ TEST(LLVM, VecLoadStoreTest) {
   ASSERT_EQ(b_buffer[3], 1);
 }
 
-#define FLOAT_INTRINSICS_TEST(Name, Lanes)                       \
-  TEST(LLVM, VecFloat_##Name##Lane##Lanes##Test) {               \
-    KernelScope kernel_scope;                                    \
-    Placeholder a(BufHandle("A", {1}, kFloat));                  \
-    Placeholder b(BufHandle("B", {1}, kFloat));                  \
-    float val = 0.5f;                                            \
-    std::vector<float> a_buffer(Lanes, val);                     \
-    std::vector<float> b_buffer(Lanes, val);                     \
-    auto store = b.storeWithMask(                                \
-        {Ramp::make(0, 1, Lanes)},                               \
-        Name(a.loadWithMask(                                     \
-            {Ramp::make(0, 1, Lanes)},                           \
-            Broadcast::make(IntImm::make(1), Lanes))),           \
-        Broadcast::make(IntImm::make(1), Lanes));                \
-    LLVMCodeGen cg(store, {a, b});                               \
-    std::vector<void*> args({a_buffer.data(), b_buffer.data()}); \
-    ASSERT_EQ(cg.value<int>(args), 0);                           \
-    for (int i = 0; i < Lanes; i++) {                            \
-      ASSERT_FLOAT_EQ(a_buffer[i], val);                         \
-    }                                                            \
+#define FLOAT_INTRINSICS_TEST(Name, Lanes)                                   \
+  TEST(LLVM, VecFloat_##Name##Lane##Lanes##Test) {                           \
+    KernelScope kernel_scope;                                                \
+    Placeholder a(BufHandle("A", {1}, kFloat));                              \
+    Placeholder b(BufHandle("B", {1}, kFloat));                              \
+    float val = 0.5f;                                                        \
+    std::vector<float> a_buffer(Lanes, val);                                 \
+    std::vector<float> b_buffer(Lanes, val);                                 \
+    auto store = b.store(                                                    \
+        {Ramp::make(0, 1, Lanes)}, Name(a.load({Ramp::make(0, 1, Lanes)}))); \
+    LLVMCodeGen cg(store, {a, b});                                           \
+    std::vector<void*> args({a_buffer.data(), b_buffer.data()});             \
+    ASSERT_EQ(cg.value<int>(args), 0);                                       \
+    for (int i = 0; i < Lanes; i++) {                                        \
+      ASSERT_FLOAT_EQ(a_buffer[i], val);                                     \
+    }                                                                        \
   } // namespace jit
 FLOAT_INTRINSICS_TEST(erf, 4)
 FLOAT_INTRINSICS_TEST(erfc, 4)
@@ -566,26 +549,22 @@ FLOAT_INTRINSICS_TEST(expm1, 8)
 FLOAT_INTRINSICS_TEST(lgamma, 8)
 #undef FLOAT_INTRINSICS_TEST
 
-#define DOUBLE_INTRINSICS_TEST(Name, Lanes)                      \
-  TEST(LLVM, VecDouble_##Name##Lane##Lanes##Test) {              \
-    KernelScope kernel_scope;                                    \
-    Placeholder a(BufHandle("A", {1}, kDouble));                 \
-    Placeholder b(BufHandle("B", {1}, kDouble));                 \
-    float val = 0.5f;                                            \
-    std::vector<double> a_buffer(Lanes, val);                    \
-    std::vector<double> b_buffer(Lanes, val);                    \
-    auto store = b.storeWithMask(                                \
-        {Ramp::make(0, 1, Lanes)},                               \
-        Name(a.loadWithMask(                                     \
-            {Ramp::make(0, 1, Lanes)},                           \
-            Broadcast::make(IntImm::make(1), Lanes))),           \
-        Broadcast::make(IntImm::make(1), Lanes));                \
-    LLVMCodeGen cg(store, {a, b});                               \
-    std::vector<void*> args({a_buffer.data(), b_buffer.data()}); \
-    ASSERT_EQ(cg.value<int>(args), 0);                           \
-    for (int i = 0; i < Lanes; i++) {                            \
-      ASSERT_FLOAT_EQ(a_buffer[i], val);                         \
-    }                                                            \
+#define DOUBLE_INTRINSICS_TEST(Name, Lanes)                                  \
+  TEST(LLVM, VecDouble_##Name##Lane##Lanes##Test) {                          \
+    KernelScope kernel_scope;                                                \
+    Placeholder a(BufHandle("A", {1}, kDouble));                             \
+    Placeholder b(BufHandle("B", {1}, kDouble));                             \
+    float val = 0.5f;                                                        \
+    std::vector<double> a_buffer(Lanes, val);                                \
+    std::vector<double> b_buffer(Lanes, val);                                \
+    auto store = b.store(                                                    \
+        {Ramp::make(0, 1, Lanes)}, Name(a.load({Ramp::make(0, 1, Lanes)}))); \
+    LLVMCodeGen cg(store, {a, b});                                           \
+    std::vector<void*> args({a_buffer.data(), b_buffer.data()});             \
+    ASSERT_EQ(cg.value<int>(args), 0);                                       \
+    for (int i = 0; i < Lanes; i++) {                                        \
+      ASSERT_FLOAT_EQ(a_buffer[i], val);                                     \
+    }                                                                        \
   } // namespace jit
 DOUBLE_INTRINSICS_TEST(erf, 2)
 DOUBLE_INTRINSICS_TEST(erfc, 2)
@@ -758,16 +737,13 @@ TEST(LLVM, ElemwiseLog10Float) {
   std::vector<float> a_buffer(N, 10.0f);
   std::vector<float> b_buffer(N, 2.0f);
 
-  auto mask = Broadcast::make(IntImm::make(1), 4);
   VarHandle i("i", kInt);
   auto expr = For::make(
       i,
       0,
       N / 4,
-      b.storeWithMask(
-          {Ramp::make(i * 4, 1, 4)},
-          log10(a.loadWithMask({Ramp::make(i * 4, 1, 4)}, mask)),
-          mask));
+      b.store(
+          {Ramp::make(i * 4, 1, 4)}, log10(a.load({Ramp::make(i * 4, 1, 4)}))));
 
   LLVMCodeGen cg(expr, {a, b});
 
@@ -788,16 +764,13 @@ TEST(LLVM, ElemwiseLog1pFloat) {
   std::vector<float> a_buffer(N, expf(3.0f) - 1);
   std::vector<float> b_buffer(N, 42.0f);
 
-  auto mask = Broadcast::make(IntImm::make(1), 4);
   VarHandle i("i", kInt);
   auto expr = For::make(
       i,
       0,
       N / 4,
-      b.storeWithMask(
-          {Ramp::make(i * 4, 1, 4)},
-          log1p(a.loadWithMask({Ramp::make(i * 4, 1, 4)}, mask)),
-          mask));
+      b.store(
+          {Ramp::make(i * 4, 1, 4)}, log1p(a.load({Ramp::make(i * 4, 1, 4)}))));
 
   LLVMCodeGen cg(expr, {a, b});
 
