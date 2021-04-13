@@ -156,6 +156,7 @@ def get_class_properties(cls, self_name):
 
     return properties
 
+
 def get_jit_class_def(cls, self_name):
     # Get defs for each method within the current class independently
     # TODO: proper overriding analysis when implementing class inheritance
