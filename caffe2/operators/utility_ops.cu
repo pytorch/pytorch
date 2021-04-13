@@ -70,6 +70,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       N, X.data<float>(), scratch_.mutable_data<bool>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   bool result = false;
   {
@@ -251,6 +252,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
         indices.template data<Index>(),
         data,
         M);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     // when only one input exists to update data buffer,
     // avoid copying pointers to device array to prevent
@@ -270,6 +272,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
         indices.template data<Index>(),
         data,
         M);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -315,6 +318,7 @@ void ScatterAssignOp<CUDAContext>::DoScatterAssign(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(data, idxs, slicesData, N, K, block_size);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(ScatterAssign, ScatterAssignOp<CUDAContext>);
@@ -341,6 +345,8 @@ bool RangeOp<CUDAContext>::DoRunOnDevice(
       0,
       context_.cuda_stream()>>>(
       N, output->template mutable_data<T>(), start, step);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

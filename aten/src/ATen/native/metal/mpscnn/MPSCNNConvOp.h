@@ -1,4 +1,5 @@
-#import <ATen/native/metal/MetalConvolution.h>
+#import <ATen/native/metal/MetalConvParams.h>
+#import <ATen/native/metal/MetalNeuronType.h>
 #import <ATen/native/metal/mpscnn/MPSCNNOp.h>
 #import <Foundation/Foundation.h>
 

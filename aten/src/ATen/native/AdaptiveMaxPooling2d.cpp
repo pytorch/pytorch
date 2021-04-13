@@ -346,11 +346,10 @@ Tensor& adaptive_max_pool2d_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> adaptive_max_pool2d_out_cpu(
+std::tuple<Tensor&, Tensor&> adaptive_max_pool2d_out_cpu(const Tensor& input,
+  IntArrayRef output_size,
   Tensor& output,
-  Tensor& indices,
-  const Tensor& input,
-  IntArrayRef output_size)
+  Tensor& indices)
 {
   adaptive_max_pool2d_out_cpu_template(
     output,
@@ -374,11 +373,10 @@ std::tuple<Tensor, Tensor> adaptive_max_pool2d_cpu(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& adaptive_max_pool2d_backward_out_cpu(
-  Tensor& gradInput,
-  const Tensor& gradOutput_,
+Tensor& adaptive_max_pool2d_backward_out_cpu(const Tensor& gradOutput_,
   const Tensor& input,
-  const Tensor& indices)
+  const Tensor& indices,
+  Tensor& gradInput)
 {
   adaptive_max_pool2d_backward_out_cpu_template(
     gradInput,

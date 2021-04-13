@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/DimVector.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
 #include <sstream>
@@ -9,8 +10,12 @@ namespace at {
 
 // Infers the size of a dim with size -1, if it exists. Also checks that new
 // shape is compatible with the number of elements.
-inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
-  auto res = shape.vec();
+//
+// templated to handle std::vector<int64_t> and DimVector use cases, see
+// below
+//
+template <typename ResultVec>
+inline void infer_size_impl(IntArrayRef shape, int64_t numel, ResultVec &res) {
   int64_t newsize = 1;
   auto infer_dim = c10::optional<int64_t>();
   for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
@@ -41,12 +46,24 @@ inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
                "value and is ambiguous");
       res[*infer_dim] = numel / newsize;
     }
-    return res;
+    return;
   }
 
   std::ostringstream ss;
   ss << "shape '" << shape << "' is invalid for input of size " << numel;
   throw std::runtime_error(ss.str());
+}
+
+inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
+  auto res = shape.vec();
+  infer_size_impl(shape, numel, res);
+  return res;
+}
+
+inline at::DimVector infer_size_dv(IntArrayRef shape, int64_t numel) {
+  auto res = at::DimVector(shape);
+  infer_size_impl(shape, numel, res);
+  return res;
 }
 
 }

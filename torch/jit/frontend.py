@@ -483,6 +483,9 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
+        if stmt.orelse:
+            raise NotSupportedError(r, "else branches of for loops aren't supported")
+
         return For(
             r, [build_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
@@ -614,6 +617,8 @@ class ExprBuilder(Builder):
             return FalseLiteral(r)
         elif expr.id == "None":
             return NoneLiteral(r)
+        elif expr.id == "Ellipsis":
+            return Dots(r)
         return Var(Ident(r, expr.id))
 
     @staticmethod
@@ -625,6 +630,8 @@ class ExprBuilder(Builder):
             return FalseLiteral(r)
         elif expr.value is None:
             return NoneLiteral(r)
+        elif expr.value == Ellipsis:
+            return Dots(r)
         else:
             raise ValueError("Name constant value unsupported: " + str(expr.value))
 
@@ -772,8 +779,11 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Dict(ctx, expr):
-        return DictLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
-                           [build_expr(ctx, e) for e in expr.keys], [build_expr(ctx, e) for e in expr.values])
+        range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        if expr.keys and not expr.keys[0]:
+            raise NotSupportedError(range, "Dict expansion (e.g. `{**dict}`) is not supported")
+        return DictLiteral(range, [build_expr(ctx, e) for e in expr.keys],
+                           [build_expr(ctx, e) for e in expr.values])
 
     @staticmethod
     def build_Num(ctx, expr):
@@ -788,7 +798,7 @@ class ExprBuilder(Builder):
             # NB: this check has to happen before the int check because bool is
             # a subclass of int
             return ExprBuilder.build_NameConstant(ctx, expr)
-        if isinstance(value, (int, float)):
+        if isinstance(value, (int, float, complex)):
             return ExprBuilder.build_Num(ctx, expr)
         elif isinstance(value, str):
             return ExprBuilder.build_Str(ctx, expr)

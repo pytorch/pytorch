@@ -19,8 +19,11 @@ class Embedding(Module):
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
-        padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
-                                         (initialized to zeros) whenever it encounters the index.
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
+                                     therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
+                                     i.e. it remains as a fixed "pad". For a newly constructed Embedding,
+                                     the embedding vector at :attr:`padding_idx` will default to all zeros,
+                                     but can be updated to another value to be used as the padding vector.
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
         norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
@@ -41,14 +44,6 @@ class Embedding(Module):
         Keep in mind that only a limited number of optimizers support
         sparse gradients: currently it's :class:`optim.SGD` (`CUDA` and `CPU`),
         :class:`optim.SparseAdam` (`CUDA` and `CPU`) and :class:`optim.Adagrad` (`CPU`)
-
-    .. note::
-        With :attr:`padding_idx` set, the embedding vector at
-        :attr:`padding_idx` is initialized to all zeros. However, note that this
-        vector can be modified afterwards, e.g., using a customized
-        initialization method, and thus changing the vector used to pad the
-        output. The gradient for this vector from :class:`~torch.nn.Embedding`
-        is always zero.
 
     .. note::
         When :attr:`max_norm` is not ``None``, :class:`Embedding`'s forward method will modify the
@@ -93,6 +88,22 @@ class Embedding(Module):
                  [ 0.1535, -2.0309,  0.9315],
                  [ 0.0000,  0.0000,  0.0000],
                  [-0.1655,  0.9897,  0.0635]]])
+
+        >>> # example of changing `pad` vector
+        >>> padding_idx = 0
+        >>> embedding = nn.Embedding(3, 3, padding_idx=padding_idx)
+        >>> embedding.weight
+        Parameter containing:
+        tensor([[ 0.0000,  0.0000,  0.0000],
+                [-0.7895, -0.7089, -0.0364],
+                [ 0.6778,  0.5803,  0.2678]], requires_grad=True)
+        >>> with torch.no_grad():
+        ...     embedding.weight[padding_idx] = torch.ones(3)
+        >>> embedding.weight
+        Parameter containing:
+        tensor([[ 1.0000,  1.0000,  1.0000],
+                [-0.7895, -0.7089, -0.0364],
+                [ 0.6778,  0.5803,  0.2678]], requires_grad=True)
     """
     __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
                      'norm_type', 'scale_grad_by_freq', 'sparse']
@@ -123,13 +134,13 @@ class Embedding(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+            self.weight = Parameter(torch.empty(num_embeddings, embedding_dim))
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
             self.weight = Parameter(_weight)
-            self._fill_padding_idx_with_zero()
+
         self.sparse = sparse
 
     def reset_parameters(self) -> None:
@@ -171,7 +182,9 @@ class Embedding(Module):
                 First dimension is being passed to Embedding as ``num_embeddings``, second as ``embedding_dim``.
             freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
-            padding_idx (int, optional): See module initialization documentation.
+            padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
+                                         therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
+                                         i.e. it remains as a fixed "pad".
             max_norm (float, optional): See module initialization documentation.
             norm_type (float, optional): See module initialization documentation. Default ``2``.
             scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
@@ -218,7 +231,7 @@ class EmbeddingBag(Module):
 
     EmbeddingBag also supports per-sample weights as an argument to the forward
     pass. This scales the output of the Embedding before performing a weighted
-    reduction as specified by ``mode``. If :attr:`per_sample_weights`` is passed, the
+    reduction as specified by ``mode``. If :attr:`per_sample_weights` is passed, the
     only supported ``mode`` is ``"sum"``, which computes a weighted sum according to
     :attr:`per_sample_weights`.
 
@@ -245,34 +258,6 @@ class EmbeddingBag(Module):
     Attributes:
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
                          initialized from :math:`\mathcal{N}(0, 1)`.
-
-    Inputs: :attr:`input` (IntTensor or LongTensor), :attr:`offsets` (IntTensor or LongTensor, optional), and
-        :attr:`per_index_weights` (Tensor, optional)
-
-        - :attr:`input` and :attr:`offsets` have to be of the same type, either int or long
-
-        - If :attr:`input` is 2D of shape `(B, N)`,
-
-          it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
-          this will return ``B`` values aggregated in a way depending on the :attr:`mode`.
-          :attr:`offsets` is ignored and required to be ``None`` in this case.
-
-        - If :attr:`input` is 1D of shape `(N)`,
-
-          it will be treated as a concatenation of multiple bags (sequences).
-          :attr:`offsets` is required to be a 1D tensor containing the
-          starting index positions of each bag in :attr:`input`. Therefore,
-          for :attr:`offsets` of shape `(B)`, :attr:`input` will be viewed as
-          having ``B`` bags. Empty bags (i.e., having 0-length) will have
-          returned vectors filled by zeros.
-
-        per_sample_weights (Tensor, optional): a tensor of float / double weights, or None
-            to indicate all weights should be taken to be ``1``. If specified, :attr:`per_sample_weights`
-            must have exactly the same shape as input and is treated as having the same
-            :attr:`offsets`, if those are not ``None``. Only supported for ``mode='sum'``.
-
-
-    Output shape: `(B, embedding_dim)`
 
     Examples::
 
@@ -309,7 +294,7 @@ class EmbeddingBag(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+            self.weight = Parameter(torch.empty(num_embeddings, embedding_dim))
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
@@ -323,6 +308,36 @@ class EmbeddingBag(Module):
         init.normal_(self.weight)
 
     def forward(self, input: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None) -> Tensor:
+        """Forward pass of EmbeddingBag.
+
+        Args:
+            input (Tensor): Tensor containing bags of indices into the embedding matrix.
+            offsets (Tensor, optional): Only used when :attr:`input` is 1D. :attr:`offsets` determines
+                the starting index position of each bag (sequence) in :attr:`input`.
+            per_sample_weights (Tensor, optional): a tensor of float / double weights, or None
+                to indicate all weights should be taken to be ``1``. If specified, :attr:`per_sample_weights`
+                must have exactly the same shape as input and is treated as having the same
+                :attr:`offsets`, if those are not ``None``. Only supported for ``mode='sum'``.
+
+        Returns:
+            Tensor output shape of `(B, embedding_dim)`.
+
+        .. note::
+
+            A few notes about ``input`` and ``offsets``:
+
+            - :attr:`input` and :attr:`offsets` have to be of the same type, either int or long
+
+            - If :attr:`input` is 2D of shape `(B, N)`, it will be treated as ``B`` bags (sequences)
+              each of fixed length ``N``, and this will return ``B`` values aggregated in a way
+              depending on the :attr:`mode`. :attr:`offsets` is ignored and required to be ``None`` in this case.
+
+            - If :attr:`input` is 1D of shape `(N)`, it will be treated as a concatenation of
+              multiple bags (sequences).  :attr:`offsets` is required to be a 1D tensor containing the
+              starting index positions of each bag in :attr:`input`. Therefore, for :attr:`offsets` of shape `(B)`,
+              :attr:`input` will be viewed as having ``B`` bags. Empty bags (i.e., having 0-length) will have
+              returned vectors filled by zeros.
+        """
         return F.embedding_bag(input, self.weight, offsets,
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse,

@@ -107,13 +107,13 @@ Tensor& relu_quantized_cpu_(Tensor& qx) {
   return qx;
 }
 
-Tensor& leaky_relu_out_quantized_cpu(Tensor& result, const Tensor& self,
-                                 Scalar negval) {
+Tensor& leaky_relu_out_quantized_cpu(const Tensor& self,
+                                 const Scalar& negval, Tensor& result) {
   qrelu_leaky_stub(self.device().type(), result, self, negval);
   return result;
 }
 
-Tensor leaky_relu_quantized_cpu(const Tensor& self, Scalar negval) {
+Tensor leaky_relu_quantized_cpu(const Tensor& self, const Scalar& negval) {
   const auto qx = self.contiguous(self.suggest_memory_format());
   auto qy = at::_empty_affine_quantized(qx.sizes(),
       at::device(kCPU).dtype(self.scalar_type()),
@@ -124,7 +124,7 @@ Tensor leaky_relu_quantized_cpu(const Tensor& self, Scalar negval) {
   return qy;
 }
 
-Tensor& leaky_relu_quantized_cpu_(Tensor& self, Scalar negval) {
+Tensor& leaky_relu_quantized_cpu_(Tensor& self, const Scalar& negval) {
   qrelu_leaky_stub(self.device().type(), self, self, negval);
   return self;
 }
@@ -172,7 +172,7 @@ class QRelu6 final {
 
 class QLeakyRelu final {
  public:
-  static Tensor run(Tensor self, Scalar negative_slope, bool inplace, double output_scale, int64_t output_zero_point) {
+  static Tensor run(Tensor self, const Scalar& negative_slope, bool inplace, double output_scale, int64_t output_zero_point) {
     // inplace argument is ignored now, TODO:support inplace
     if (inplace) {
       TORCH_WARN("inplace=True is not supported for quantized::leaky_relu yet");

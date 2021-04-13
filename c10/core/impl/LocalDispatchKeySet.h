@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/DispatchKeySet.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Flags.h>
 
 // TLS management for DispatchKeySet (the "local" DispatchKeySet(s))
@@ -25,19 +26,24 @@ namespace impl {
 
 // POD version of LocalDispatchKeySet.  Declared here just so that
 // we can put it in the guards.
+// This struct encapsulates special handling for TLS initialization
+// in set_included()/included() API so that they reflect the truth.
+// If you want to create PODLocalDispatchKeySet with non-zero state,
+// use set_included() instead of default constructor.
 struct C10_API PODLocalDispatchKeySet {
   uint64_t included_;
   uint64_t excluded_;
 
+  // See Note [TLS Initialization]
   DispatchKeySet included() const {
-    return DispatchKeySet(DispatchKeySet::RAW, included_);
+    return DispatchKeySet(DispatchKeySet::RAW, included_) ^ c10::default_included_set;
   }
   DispatchKeySet excluded() const {
     return DispatchKeySet(DispatchKeySet::RAW, excluded_);
   }
 
   void set_included(DispatchKeySet x) {
-    included_ = x.raw_repr();
+    included_ = (x ^ c10::default_included_set).raw_repr();
   }
   void set_excluded(DispatchKeySet x) {
     excluded_ = x.raw_repr();
@@ -53,23 +59,18 @@ struct C10_API LocalDispatchKeySet {
 };
 
 // thread_local variables cannot be C10_API on Windows.
-#ifdef _MSC_VER
+// Inlining this seems to break AutoNonVariableTypeGuard on Android.
+#if defined(_MSC_VER) || defined(C10_ANDROID)
 C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
-#else // _MSC_VER
-/// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
-/// thread_local is not supported.
-#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
+#else // defined(_MSC_VER) || defined(C10_ANDROID)
   extern C10_API thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
-#else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-  extern C10_API PODLocalDispatchKeySet raw_local_dispatch_key_set;
-#endif
 
 inline C10_API LocalDispatchKeySet tls_local_dispatch_key_set() {
   // Don't let people fiddle with the thread_local directly just
   // because they include this header.
   return raw_local_dispatch_key_set;
 }
-#endif // _MSC_VER
+#endif // defined(_MSC_VER) || defined(C10_ANDROID)
 
 // Internal, use ThreadLocalStateGuard
 C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
@@ -125,5 +126,7 @@ C10_API bool tls_is_dispatch_key_excluded(DispatchKey x);
 C10_API void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state);
 C10_API bool tls_is_dispatch_key_included(DispatchKey x);
 C10_API void tls_set_dispatch_key_included(DispatchKey x, bool desired_state);
+C10_API bool tls_is_dispatch_keyset_excluded(DispatchKeySet ks);
+C10_API bool tls_is_dispatch_keyset_included(DispatchKeySet ks);
 
 }} // namespace c10::impl
