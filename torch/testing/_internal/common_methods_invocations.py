@@ -17,7 +17,7 @@ from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and)
+     integral_types_and, all_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
@@ -1112,6 +1112,30 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           low=None, high=None,
                                           requires_grad=requires_grad),))
     return inputs
+
+def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
+    def get_tensor_input(size):
+        return make_tensor(size, device, dtype, requires_grad=requires_grad)
+
+    inputs = []
+    inputs.append(SampleInput(get_tensor_input((S, M, S)), args=(3,)))
+    inputs.append(SampleInput(get_tensor_input((S, M, S)), args=(3, 1)))
+    inputs.append(SampleInput(get_tensor_input((S, M, S)), args=(3, -2)))
+    inputs.append(SampleInput(get_tensor_input((S, M, S)), args=(3, 1, True)))
+    inputs.append(SampleInput(get_tensor_input((S, M, S)), args=(3, -2, True)))
+    inputs.append(SampleInput(get_tensor_input((S, M, S)), args=(3, 1, True, True)))
+    inputs.append(SampleInput(get_tensor_input((S, M, S)), args=(3, -2, True, True)))
+
+    inputs.append(SampleInput(get_tensor_input(()), args=(1,)))
+    inputs.append(SampleInput(get_tensor_input(()), args=(1, 0)))
+    inputs.append(SampleInput(get_tensor_input(()), args=(1, -1)))
+    inputs.append(SampleInput(get_tensor_input(()), args=(1, 0, True)))
+    inputs.append(SampleInput(get_tensor_input(()), args=(1, -1, True)))
+    inputs.append(SampleInput(get_tensor_input(()), args=(1, 0, True, True)))
+    inputs.append(SampleInput(get_tensor_input(()), args=(1, -1, True, True)))
+
+    return inputs
+
 
 def sample_inputs_outer(op_info, device, dtype, requires_grad, **kwargs):
     inputs = []
@@ -3504,6 +3528,14 @@ op_db: List[OpInfo] = [
            op=torch.minimum,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('topk',
+           dtypes=all_types(),
+           dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+           sample_inputs_func=sample_inputs_topk,
+           skips=(
+               # Topk is not raising a warning when the out is resized
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('mode',
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -4866,14 +4898,6 @@ def method_tests():
         ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
         ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
         ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
-        ('topk', (S, M, S), (3,)),
-        ('topk', (S, M, S), (3, 1), 'dim', (), [1]),
-        ('topk', (S, M, S), (3, 1, True), 'dim_desc', (), [1]),
-        ('topk', (S, M, S), (3, 1, True, True), 'dim_desc_sort', (), [1]),
-        ('topk', (), (1,), 'scalar'),
-        ('topk', (), (1, 0), 'dim_scalar', (), [1]),
-        ('topk', (), (1, 0, True), 'dim_desc_scalar', (), [1]),
-        ('topk', (), (1, 0, True, True), 'dim_desc_sort_scalar', (), [1]),
         ('where', (M, M), (mask_not_all_zeros((M, M)), (M, M)), '', (True,)),
         ('where', (M, 1, M), (mask_not_all_zeros((M, M)), (M, M, 1)), 'broadcast_all', (True,)),
         ('where', (), (bernoulli_scalar(), ()), 'scalar', (True,)),
