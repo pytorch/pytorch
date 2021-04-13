@@ -1,3 +1,4 @@
+import logging
 import torch
 from torch import Tensor
 from ._functions import SyncBatchNorm as sync_batch_norm
@@ -608,9 +609,6 @@ class SyncBatchNorm(_BatchNorm):
     ) -> None:
         super(SyncBatchNorm, self).__init__(num_features, eps, momentum, affine, track_running_stats)
         self.process_group = process_group
-        # gpu_size is set through DistributedDataParallel initialization. This is to ensure that SyncBatchNorm is used
-        # under supported condition (single GPU per process)
-        self.ddp_gpu_size = None
 
     def _check_input_dim(self, input):
         if input.dim() < 2:
@@ -624,7 +622,8 @@ class SyncBatchNorm(_BatchNorm):
     def _specify_ddp_gpu_num(self, gpu_size):
         if gpu_size > 1:
             raise ValueError('SyncBatchNorm is only supported for DDP with single GPU per process')
-        self.ddp_gpu_size = gpu_size
+        logging.warning("WARNING: Since DDP single-process-multiple-device mode is retired, "
+                        "no longer need to call method `_specify_ddp_gpu_num`. The input arg `gpu_size` is ignored.")
 
     def forward(self, input: Tensor) -> Tensor:
         # currently only GPU input is supported
@@ -684,9 +683,6 @@ class SyncBatchNorm(_BatchNorm):
                 input, running_mean, running_var, self.weight, self.bias,
                 bn_training, exponential_average_factor, self.eps)
         else:
-            if not self.ddp_gpu_size:
-                raise AttributeError('SyncBatchNorm is only supported within torch.nn.parallel.DistributedDataParallel')
-
             assert bn_training
             return sync_batch_norm.apply(
                 input, self.weight, self.bias, running_mean, running_var,
