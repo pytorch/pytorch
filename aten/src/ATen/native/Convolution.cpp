@@ -427,7 +427,7 @@ auto ConvParams::use_cudnn_depthwise(
                          input.scalar_type() == kHalf && // only for FP16
                          weight.scalar_type() == kHalf &&
                          is_depthwise(input, weight) &&
-                         input.ndimension() == 4 &&
+                         input.ndimension() == 4 &&   // TODO: 5-D contiguous depthwise is not supported yet, need benchmarks
                          weight.size(2) == weight.size(3) && // only square kernels
                          input.size(2) >= 7 && // min width/height 7
                          !is_dilated() && // no dilation supported
@@ -813,8 +813,10 @@ at::Tensor _convolution(
     weight = view4d(weight);
   }
 
-  at::MemoryFormat cudnn_memory_format = cudnn_conv_use_channels_last(input, weight) ?
-      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  at::MemoryFormat cudnn_memory_format = at::MemoryFormat::Contiguous;
+  if (cudnn_conv_use_channels_last(input, weight)) {
+    cudnn_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  }
 
   Tensor output;
   if (params.is_depthwise(input, weight)) {
