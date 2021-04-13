@@ -40,12 +40,6 @@ from .internal import (
 from .constants import DEFAULT_SHUTDOWN_TIMEOUT, UNSET_RPC_TIMEOUT
 
 logger = logging.getLogger(__name__)
-import sys
-out_hdlr = logging.StreamHandler(sys.stdout)
-out_hdlr.setFormatter(logging.Formatter('p%(process)s {%(pathname)s:%(lineno)d} - %(message)s'))
-out_hdlr.setLevel(logging.INFO)
-logger.addHandler(out_hdlr)
-logger.setLevel(logging.INFO)
 
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
 # make sure there is no references to any RRef in the application code and
@@ -209,7 +203,7 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
         # perform all_gather using all workers by incrementing global id
         with _all_gather_dict_lock:
             global _all_gather_sequence_id
-            sequence_id = _all_gather_sequence_id
+            sequence_id = str(_all_gather_sequence_id)
             _all_gather_sequence_id += 1
 
     # Phase 1: Followers send it's object to the leader
