@@ -202,6 +202,32 @@ class TORCH_API LoopNest {
 
   void reorderAxis(For* a, For* b);
 
+  // Reorder the given list of loops according to the permutation specified.
+  // Here permutation[i] represents the location of the loop i in the result.
+  //
+  // For example, consider the following code:
+  //   for p
+  //     for q
+  //       for r
+  //         for s
+  //           A[p,q,r,s] =
+  //
+  // reorder({p, q, r, s}, {2, 3, 0, 1}) will return the list of loops in the
+  // following form:
+  //    for r
+  //      for s
+  //        for p
+  //          for q
+  //            A[p,q,r,s] =
+  static std::vector<For*> reorder(
+      const std::vector<For*>& loops,
+      const std::vector<size_t>& permutation);
+
+  // Returns true if the given loops are perfectly nested, i.e., every loop
+  // (except the innermost) should have exactly one statement in its body
+  // and that statement must be the next inner loop.
+  static bool areLoopsPerfectlyNested(const std::vector<For*>& loops);
+
   static void unroll(For* f, Stmt** unrolled);
   static void normalize(For* f, For** normalized);
   static bool flatten(const std::vector<For*>& f, For** flattened);

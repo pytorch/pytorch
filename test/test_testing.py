@@ -436,9 +436,9 @@ class TestTesting(TestCase):
 
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
-        def check(size, low, high, requires_grad, discontiguous):
+        def check(size, low, high, requires_grad, noncontiguous):
             t = make_tensor(size, device, dtype, low=low, high=high,
-                            requires_grad=requires_grad, discontiguous=discontiguous)
+                            requires_grad=requires_grad, noncontiguous=noncontiguous)
 
             self.assertEqual(t.shape, size)
             self.assertEqual(t.device, torch.device(device))
@@ -456,7 +456,7 @@ class TestTesting(TestCase):
                 self.assertFalse(t.requires_grad)
 
             if t.numel() > 1:
-                self.assertEqual(t.is_contiguous(), not discontiguous)
+                self.assertEqual(t.is_contiguous(), not noncontiguous)
             else:
                 self.assertTrue(t.is_contiguous())
 
