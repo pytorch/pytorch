@@ -201,7 +201,6 @@ void RegisterizerAnalysis::visit(const For* v) {
   // now we need to see which accesses we can hoist out of the for loop, their
   // costs should be multiplied by the loop extent.
   for (auto& pair : currentScope_->openAccesses()) {
-    const Buf* buf = pair.first;
     if (pair.second.empty()) {
       continue;
     }
