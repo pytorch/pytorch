@@ -39,12 +39,10 @@ class TORCH_API Tensor : KernelScopedObject {
     return stmt_;
   }
 
-  template <typename... Ts>
-  inline ExprHandle operator()(const Ts&... ts);
   template <typename T>
-  inline ExprHandle call(const std::vector<T>& args);
+  inline ExprHandle load(const std::vector<T>& args);
   template <typename... Ts>
-  inline ExprHandle call(const Ts&... ts);
+  inline ExprHandle load(const Ts&... ts);
 
  private:
   Stmt* constructStmt(
@@ -248,19 +246,13 @@ TORCH_API Tensor* Reduce(
     const std::vector<DimArg>& reduce_args);
 
 template <typename... Ts>
-inline ExprHandle Tensor::operator()(const Ts&... ts) {
-  std::vector<ExprHandle> params({ExprHandle(ts)...});
-  return Load::make(BufHandle(this->buf()), params);
-}
-
-template <typename... Ts>
-inline ExprHandle Tensor::call(const Ts&... ts) {
+inline ExprHandle Tensor::load(const Ts&... ts) {
   std::vector<ExprHandle> params({ExprHandle(ts)...});
   return Load::make(BufHandle(this->buf()), params);
 }
 
 template <typename T>
-inline ExprHandle Tensor::call(const std::vector<T>& args) {
+inline ExprHandle Tensor::load(const std::vector<T>& args) {
   std::vector<ExprHandle> params(args.begin(), args.end());
   return Load::make(BufHandle(this->buf()), params);
 }

@@ -172,7 +172,7 @@ Tensor* Reduce(
       name,
       dim_args,
       reducer,
-      [&](ParameterList& p) { return tensor->call(p); },
+      [&](ParameterList& p) { return tensor->load(p); },
       reduce_args);
 }
 

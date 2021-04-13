@@ -2720,7 +2720,7 @@ TEST(MemDependency, MemDependencyCheckerComputeAPI) {
       "d",
       {{4, "m"}, {5, "n"}, {6, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c->call(m, n, k) + 1;
+        return c->load(m, n, k) + 1;
       });
 
   LoopNest l({d}, {c, d});
@@ -2767,7 +2767,7 @@ TEST(MemDependency, MemDependencyCheckerComputeInline) {
       "d",
       {{4, "m"}, {5, "n"}, {6, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c->call(m, n, k) + 1;
+        return c->load(m, n, k) + 1;
       });
 
   LoopNest l({d}, {c, d});
