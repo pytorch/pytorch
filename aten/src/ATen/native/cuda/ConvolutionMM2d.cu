@@ -4,18 +4,17 @@
 namespace at {
 namespace native {
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias,
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(const Tensor& grad_output,
     const Tensor& self,
     const Tensor& weight,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
     const Tensor& finput,
-    const Tensor& fgrad_input) {
+    const Tensor& fgrad_input,
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias) {
   if (grad_weight.defined()) {
     grad_weight.resize_(weight.sizes());
     grad_weight.zero_();
@@ -56,10 +55,18 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cuda(
     grad_bias = at::empty({0}, grad_output.options());
   }
 
-  return native::slow_conv2d_backward_out_cuda(grad_input, grad_weight, grad_bias,
-                                               grad_output, self, weight,
-                                               kernel_size, stride, padding,
-                                               finput, fgrad_input);
+  return native::slow_conv2d_backward_out_cuda(
+      grad_output,
+      self,
+      weight,
+      kernel_size,
+      stride,
+      padding,
+      finput,
+      fgrad_input,
+      grad_input,
+      grad_weight,
+      grad_bias);
 }
 
 } // namespace native

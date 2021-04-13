@@ -115,7 +115,12 @@ using steady_clock_time_point =
 
 std::chrono::milliseconds getRemainingTime(
     steady_clock_time_point startTime,
-    const std::chrono::milliseconds& timeout) {
+    const std::chrono::milliseconds& timeout,
+    bool waitAllRanks) {
+  if (waitAllRanks) {
+    // See Note in monitoredBarrier
+    return timeout;
+  }
   auto elapsedTime = std::chrono::steady_clock::now() - startTime;
   auto remainingMillis = timeout -
       std::chrono::duration_cast<std::chrono::milliseconds>(elapsedTime);
@@ -2718,7 +2723,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
   return work;
 }
 
-void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
+void ProcessGroupGloo::monitoredBarrier(
+    const BarrierOptions& opts,
+    bool waitAllRanks) {
   // Use default timeout if no timeout was specified.
   auto monitoredBarrierTimeout =
       (opts.timeout == kUnsetTimeout) ? this->options_->timeout : opts.timeout;
@@ -2738,7 +2745,7 @@ void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
   auto startTime = std::chrono::steady_clock::now();
   auto worldSize = this->getSize();
   // Holds mapping of rank to pair of recv/send work.
-  std::unordered_map<
+  std::map<
       int,
       std::tuple<
           c10::intrusive_ptr<ProcessGroup::Work>,
@@ -2756,17 +2763,28 @@ void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
 
   // Wait for send/recv from all ranks
   for (auto& work : works) {
-    // Compute the remaining time for every call to wait() instead of using
-    // the whole timeout every call. Error out if no time remains.
+    bool rankResponded = false;
     try {
-      auto remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
-      checkRemainingTime(
+      // Note: if waitAllRanks=false, we recompute the time remaining in barrier
+      // and use this recomputed time in wait(). However, if waitAllRanks=true,
+      // we use the original timeout, since if we use up the entire timeout
+      // waiting for response from rank n, then we won't have any timeout left to
+      // query ranks beginning with n + 1.
+      auto remainingTime =
+          getRemainingTime(startTime, monitoredBarrierTimeout, waitAllRanks);
+      if (!waitAllRanks) {
+        checkRemainingTime(
           monitoredBarrierTimeout, remainingTime, processedRanks, rank);
+      }
       std::get<0>(work.second)->wait(remainingTime);
-      remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
+      remainingTime =
+          getRemainingTime(startTime, monitoredBarrierTimeout, waitAllRanks);
+      if (!waitAllRanks) {
       checkRemainingTime(
           monitoredBarrierTimeout, remainingTime, processedRanks, rank);
+      }
       std::get<1>(work.second)->wait(remainingTime);
+      rankResponded = true;
     } catch (const std::exception& e) {
       const std::string error = c10::str(
           "Rank ",
@@ -2774,18 +2792,45 @@ void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
           " failed to pass monitoredBarrier in ",
           monitoredBarrierTimeout.count(),
           " ms");
-      logAndThrow(
+      if (waitAllRanks) {
+        LOG(ERROR) << error;
+      } else {
+        logAndThrow(
           error, c10::str(error, "\n Original exception: \n", e.what()));
+      }
     }
-    processedRanks.push_back(work.first);
+    if (rankResponded) {
+      processedRanks.push_back(work.first);
+    }
   }
 
-  auto remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
+  // If we are collecting all failed ranks, check if we need to throw if some
+  // ranks have not responded.
+  if (waitAllRanks && processedRanks.size() != size_) {
+    std::vector<int> failedRanks;
+    for (int i = 1; i < size_; ++i) {
+      if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
+          processedRanks.end()) {
+        failedRanks.push_back(i);
+      }
+    }
+
+    if (!failedRanks.empty()) {
+      const std::string ranksStr = c10::Join(", ", failedRanks);
+      const std::string error = c10::str(
+          "Ranks ",
+          ranksStr,
+          " failed to pass monitoredBarrier in ",
+          monitoredBarrierTimeout.count(),
+          " ms");
+      logAndThrow(error, error);
+    }
+  }
+
+  auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - startTime);
   LOG(INFO) << "All ranks passed monitoredBarrier in "
-            << (remainingTime.count() > 0
-                    ? (monitoredBarrierTimeout - remainingTime)
-                    : monitoredBarrierTimeout)
-                   .count()
+            << elapsedTime.count()
             << " ms.";
 }
 

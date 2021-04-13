@@ -188,26 +188,22 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
       module,
       "GradBucket",
       R"(
-This class mainly passes a list of gradient tensors
-(returned by :meth:`~torch.distributed.GradBucket.get_tensors`)
-to DDP communication hook,
-where each tensor in the list refers to the replica on each device.
-Since DDP communication hook only supports single process single device mode at this time,
-only exactly one tensor is stored in this bucket.
-This tensor is actually a flattened 1D tensor,
-which can be further decomposed into a list of per-parameter tensors within this bucket
+This class mainly passes a flattened gradient tensor
+(returned by :meth:`~torch.distributed.GradBucket.get_tensor`)
+to DDP communication hook.
+This tensor can be further decomposed into a list of per-parameter tensors within this bucket
 (returned by :meth:`~torch.distributed.GradBucket.get_per_parameter_tensors`)
 to apply layer-wise operations.
 )")
       .def(
           py::init<
               size_t,
-              const std::vector<Tensor>&,
+              const Tensor&,
               const std::vector<size_t>&,
               const std::vector<size_t>&,
               const std::vector<c10::IntArrayRef>&>(),
           py::arg("index"),
-          py::arg("tensors"),
+          py::arg("tensor"),
           py::arg("offsets"),
           py::arg("lengths"),
           py::arg("sizes_list"))
@@ -224,14 +220,13 @@ Returns:
     All the gradients are bucketized.
 )")
       .def(
-          "get_tensors",
-          &::c10d::GradBucket::getTensors,
+          "get_tensor",
+          &::c10d::GradBucket::getTensor,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
-    A list of ``torch.Tensor``. Each tensor in the list refers to the replica on each device.
-    Since DDP communication hook only supports single process single device mode at this time,
-    only exactly one tensor is stored in this bucket.
+    A flattened 1D ``torch.Tensor``,
+    which can be further decomposed into a list of per-parameter tensors within this bucket.
 )")
       .def(
           "get_per_parameter_tensors",
@@ -254,10 +249,9 @@ Returns:
           "set_tensor",
           &::c10d::GradBucket::setTensor,
           py::arg("tensor"),
-          py::arg("i"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
-Replaces the ith tensor in the bucket with the input tensor.
+Replaces the tensor in the bucket with the input tensor.
 )");
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
@@ -355,6 +349,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "_set_comm_hook_name",
           &::c10d::Logger::set_comm_hook,
           py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_uneven_input_join",
+          &::c10d::Logger::set_uneven_input_join,
           py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
@@ -1079,11 +1077,14 @@ Arguments:
           .def(
               "monitored_barrier",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::chrono::milliseconds& timeout) {
+                 const std::chrono::milliseconds& timeout,
+                 bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                return self->monitoredBarrier(opts);
+                return self->monitoredBarrier(opts, waitAllRanks);
               },
+              py::arg("timeout") = ::c10d::kUnsetTimeout,
+              py::arg("wait_all_ranks") = false,
               py::call_guard<py::gil_scoped_release>());
 
   // base ProcessGroup::Options binding
@@ -1448,6 +1449,7 @@ Example::
           "avg_backward_compute_comm_overlap_time",
           &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time)
       .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook)
+      .def_readwrite("join_uneven_inputs", &c10::DDPLoggingData::join_uneven_inputs)
       .def_readwrite(
           "forward_compute_time", &c10::DDPLoggingData::forward_compute_time)
       .def_readwrite(
@@ -1466,13 +1468,6 @@ Example::
       py::arg("bucket_size"),
       py::arg("expect_sparse_gradient") = std::vector<bool>(),
       py::arg("tensor_indices") = std::vector<int64_t>(),
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_verify_replicas_within_process",
-      &::c10d::verify_replicas_within_process,
-      py::arg("replicas"),
-      py::arg("expect_sparse_gradient"),
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
