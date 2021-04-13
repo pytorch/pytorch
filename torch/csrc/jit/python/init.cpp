@@ -212,8 +212,11 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& graph,
              bool lowprecision_cast,
              int opset_version) {
-            ScalarTypeAnalysisForONNX(graph, lowprecision_cast, opset_version);
-          })
+            return ScalarTypeAnalysisForONNX(graph, lowprecision_cast, opset_version);
+          },
+          py::arg("graph"),
+          py::arg("lowprecision_cast") = true,
+          py::arg("opset_version"))
       .def(
           "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def(
