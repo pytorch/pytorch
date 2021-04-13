@@ -160,6 +160,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.result_type,
         torch.scalar_tensor,
         torch.sparse_coo_tensor,
+        torch.sparse_csr_tensor,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -216,6 +217,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._make_subclass,
         Tensor.stride,
         Tensor.unflatten,
+        Tensor.to_sparse_csr,
         Tensor._reduce_ex_internal,
     }
 
@@ -936,6 +938,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.is_mkldnn.__get__: lambda self: -1,
         Tensor.is_quantized.__get__: lambda self: -1,
         Tensor.is_sparse.__get__: lambda self: -1,
+        Tensor.is_sparse_csr.__get__: lambda self: -1,
         Tensor.is_vulkan.__get__: lambda self: -1,
         Tensor.layout.__get__: lambda self: -1,
         Tensor.name.__get__: lambda self: -1,
@@ -955,6 +958,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._indices: lambda self: -1,
         Tensor._is_view: lambda self: -1,
         Tensor._nnz: lambda self: -1,
+        Tensor.crow_indices: lambda self: -1,
+        Tensor.col_indices: lambda self: -1,
         Tensor._update_names: lambda self, names, inplace: -1,
         Tensor._values: lambda self: -1,
         Tensor.align_as: lambda self, other: -1,

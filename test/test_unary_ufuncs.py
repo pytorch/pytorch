@@ -315,7 +315,7 @@ class TestUnaryUfuncs(TestCase):
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on a range of tensors, including empty tensors, scalar tensors,
     #   1D tensors and a large 2D tensor with interesting and extremal values
-    #   and discontiguities.
+    #   and noncontiguities.
     @suppress_warnings
     @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
@@ -352,7 +352,7 @@ class TestUnaryUfuncs(TestCase):
 
         self._test_reference_numerics(dtype, op, tensors, equal_nan)
 
-    # Tests for testing (dis)contiguity consistency
+    # Tests for testing (non)contiguity consistency
 
     @ops(unary_ufuncs)
     def test_contig_vs_every_other(self, device, dtype, op):
@@ -593,7 +593,7 @@ class TestUnaryUfuncs(TestCase):
         input = make_tensor((50, 50), device, dtype)
         outputs = (
             (torch.empty_like(input), torch.empty_like(input, dtype=torch.int)),
-            (torch.empty_like(input).transpose(0, 1), make_tensor((50, 50), device, torch.int, discontiguous=True)),
+            (torch.empty_like(input).transpose(0, 1), make_tensor((50, 50), device, torch.int, noncontiguous=True)),
         )
         for mantissa, exponent in outputs:
             torch.frexp(input, out=(mantissa, exponent))
@@ -1047,7 +1047,7 @@ class TestUnaryUfuncs(TestCase):
             (vec1, vec1),  # for large number, it should approach 0.5
             (vec1, 0.5 * vec1),  # test for considerable ratio
             (vec1, 2.0 * vec1),
-            (vec1[::2, :], vec1[::2, :]),  # contiguous/discontiguous tests
+            (vec1[::2, :], vec1[::2, :]),  # contiguous/noncontiguous tests
             (vec1[::2, :], vec1[:vec1.shape[0] // 2, :]),
             (vec1[:vec1.shape[0] // 2, :], vec1[::2, :]),
         ]
@@ -1596,7 +1596,7 @@ def _generate_gamma_input(dtype, device, test_poles=True):
 
 # this class contains information needed to generate tests for torch math functions
 # the generated tests compare torch implementation with the reference numpy/scipy implementation,
-# and also check proper behavior for contiguous/discontiguous/inplace outputs.
+# and also check proper behavior for contiguous/noncontiguous/inplace outputs.
 class _TorchMathTestMeta(object):
     def __init__(self,
                  opstr,
