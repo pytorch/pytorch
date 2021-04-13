@@ -1405,6 +1405,32 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4).to(torch.int32)
         self.run_test(FloatingPoint(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_prim_min(self):
+        @torch.jit.script
+        def list_append(boxes: List[torch.Tensor]):
+            temp = []
+            for i, b in enumerate(boxes):  # enumerate is creating a prim::min op in torch graph
+                temp.append(torch.full_like(b[:, 1], i))
+            return temp[0]
+
+        class Min(torch.nn.Module):
+            def forward(self, x):
+                boxes = [x, x, x]
+                return list_append(boxes)
+
+        x = torch.rand(5, 5)
+        self.run_test(Min(), (x,))
+
+        class M(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                i = 3
+                return min(x[i], i)
+
+        x = torch.arange(6, dtype=torch.int64)
+        self.run_test(M(), (x,))
+
     def test_arithmetic(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x):
