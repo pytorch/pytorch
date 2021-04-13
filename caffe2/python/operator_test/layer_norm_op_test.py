@@ -344,7 +344,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
             expected_norm, expected_mean, expected_std = \
                 _layer_norm_with_affine_ref(axis, eps, X, gamma, beta)
             actual_norm, actual_mean, actual_std = jit_layer_norm(
-                torch.Tensor(X), torch.tensor(gamma), torch.tensor(beta),
+                torch.tensor(X), torch.tensor(gamma), torch.tensor(beta),
                 axis, eps, elementwise_affine)
         else:
             expected_norm, expected_mean, expected_std = _layer_norm_ref(
