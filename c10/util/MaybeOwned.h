@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/in_place.h>
 
@@ -44,7 +45,7 @@ class MaybeOwned final {
   // chains of borrowing by default! (Note you could get that behavior
   // with MaybeOwned<T>::borrowed(*rhs) if you wanted it.)
   MaybeOwned(const MaybeOwned& rhs) : isBorrowed_(rhs.isBorrowed_) {
-    if (rhs.isBorrowed_) {
+    if (C10_LIKELY(rhs.isBorrowed_)) {
       borrow_ = rhs.borrow_;
     } else {
       new (&own_) T(rhs.own_);
@@ -52,7 +53,7 @@ class MaybeOwned final {
   }
 
   MaybeOwned& operator=(const MaybeOwned& rhs) {
-    if (!isBorrowed_) {
+    if (C10_UNLIKELY(!isBorrowed_)) {
       if (rhs.isBorrowed_) {
         own_.~T();
         borrow_ = rhs.borrow_;
@@ -61,7 +62,7 @@ class MaybeOwned final {
         own_ = rhs.own_;
       }
     } else {
-      if (rhs.isBorrowed_) {
+      if (C10_LIKELY(rhs.isBorrowed_)) {
         borrow_ = rhs.borrow_;
       } else {
         new (&own_) T(rhs.own_);
@@ -74,7 +75,7 @@ class MaybeOwned final {
 
   MaybeOwned(MaybeOwned&& rhs) noexcept(std::is_nothrow_move_constructible<T>::value)
   : isBorrowed_(rhs.isBorrowed_) {
-    if (rhs.isBorrowed_) {
+    if (C10_LIKELY(rhs.isBorrowed_)) {
       borrow_ = rhs.borrow_;
     } else {
       new (&own_) T(std::move(rhs.own_));
@@ -82,7 +83,7 @@ class MaybeOwned final {
   }
 
   MaybeOwned& operator=(MaybeOwned&& rhs) noexcept(std::is_nothrow_move_assignable<T>::value) {
-    if (!isBorrowed_) {
+    if (C10_UNLIKELY(!isBorrowed_)) {
       if (rhs.isBorrowed_) {
           own_.~T();
           borrow_ = rhs.borrow_;
@@ -91,7 +92,7 @@ class MaybeOwned final {
         own_ = std::move(rhs.own_);
       }
     } else {
-      if (rhs.isBorrowed_) {
+      if (C10_LIKELY(rhs.isBorrowed_)) {
         borrow_ = rhs.borrow_;
       } else {
         new (&own_) T(std::move(rhs.own_));
@@ -116,7 +117,7 @@ class MaybeOwned final {
   }
 
   ~MaybeOwned() {
-    if (!isBorrowed_) {
+    if (C10_UNLIKELY(!isBorrowed_)) {
       own_.~T();
     }
   }
@@ -125,14 +126,14 @@ class MaybeOwned final {
     if (isBorrowed_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(borrow_ != nullptr);
     }
-    return isBorrowed_ ? *borrow_ : own_;
+    return C10_LIKELY(isBorrowed_) ? *borrow_ : own_;
   }
 
   const T* operator->() const {
     if (isBorrowed_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(borrow_ != nullptr);
     }
-    return isBorrowed_ ? borrow_ : &own_;
+    return C10_LIKELY(isBorrowed_) ? borrow_ : &own_;
   }
 
   // If borrowed, copy the underlying T. If owned, move from
