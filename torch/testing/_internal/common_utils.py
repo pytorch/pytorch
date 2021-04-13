@@ -2074,14 +2074,6 @@ class BytesIOContext(io.BytesIO):
         pass
 
 
-def has_complex_inputs_or_outputs(fn, inputs):
-    from torch.autograd.gradcheck import _as_tuple, has_complex_inputs_or_outputs
-
-    tupled_inputs = _as_tuple(inputs)
-    func_out = fn(*tupled_inputs)
-    return has_complex_inputs_or_outputs(tupled_inputs, func_out)
-
-
 def gradcheck(fn, inputs, **kwargs):
     # Wrapper around gradcheck that enables certain keys by default.
     # Use this testing-internal gradcheck instead of autograd.gradcheck so that new features like vmap and
