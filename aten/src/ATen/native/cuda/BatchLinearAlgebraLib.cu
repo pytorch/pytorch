@@ -108,6 +108,12 @@ void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool u
 
 template <typename scalar_t>
 inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
+// AMD ROCm backend is implemented via rewriting all CUDA calls to HIP
+// rocBLAS does not implement BLAS-like extensions of cuBLAS, they're in rocSOLVER
+// rocSOLVER is currently not used in ATen, therefore we raise an error in this case
+#ifndef CUDART_VERSION
+  TORCH_CHECK(false, "torch.linalg.lstsq: Batched version is supported only with cuBLAS backend.")
+#else
   auto trans = CUBLAS_OP_N;
   auto m = cuda_int_cast(A.size(-2), "m");
   auto n = cuda_int_cast(A.size(-1), "n");
@@ -147,6 +153,7 @@ inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
 
   // negative info indicates that an argument to gelsBatched call is invalid
   TORCH_INTERNAL_ASSERT(info == 0);
+#endif
 }
 
 // This is a type dispatching helper function for 'apply_gels_batched'

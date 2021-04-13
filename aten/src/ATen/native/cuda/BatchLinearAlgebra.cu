@@ -2676,7 +2676,11 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_val
 
   // gels_batched_cublas is faster than gels_magma for a.size(-2) <= 128
   if (a.size(-2) <= 128) {
+#ifdef CUDART_VERSION
     gels_batched_cublas(a, b, infos);
+#else
+    gels_magma(a, b, infos);
+#endif // CUDART_VERSION
   } else {
 #ifndef USE_MAGMA
     gels_batched_cublas(a, b, infos);
