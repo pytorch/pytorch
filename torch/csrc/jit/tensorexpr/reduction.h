@@ -109,8 +109,8 @@ class TORCH_API Reducer {
       ExprHandle body,
       const std::vector<const Expr*>& output_args,
       const std::vector<const Var*>& reduce_args) {
-    ExprHandle accum = ExprHandle(
-        new Load(body.dtype(), accumulator, output_args, new IntImm(1)));
+    ExprHandle accum =
+        ExprHandle(new Load(body.dtype(), accumulator, output_args));
     auto e = interaction(accum, body);
     return e.node();
   }

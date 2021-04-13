@@ -111,26 +111,10 @@ class Placeholder {
 
   inline ExprHandle load(const std::vector<ExprHandle>& args) const;
 
-  inline ExprHandle loadWithMask(
-      const std::vector<ExprHandle>& args,
-      const ExprHandle& mask) const {
-    return ExprHandle(
-        new Load(data(), ExprHandleVectorToExprVector(args), mask.node()));
-  }
-
   inline Store* store(
       const std::vector<ExprHandle>& args,
       const ExprHandle& val) const {
-    return new Store(
-        data(), ExprHandleVectorToExprVector(args), val.node(), new IntImm(1));
-  }
-
-  inline Store* storeWithMask(
-      const std::vector<ExprHandle>& args,
-      const ExprHandle& val,
-      const ExprHandle& mask) const {
-    return new Store(
-        data(), ExprHandleVectorToExprVector(args), val.node(), mask.node());
+    return new Store(data(), ExprHandleVectorToExprVector(args), val.node());
   }
 
  private:
@@ -284,15 +268,13 @@ inline ExprHandle Tensor::call(const std::vector<T>& args) {
 template <typename... Ts>
 inline ExprHandle Placeholder::load(const Ts&... ts) const {
   std::vector<ExprHandle> params({ExprHandle(ts)...});
-  return ExprHandle(
-      new Load(data(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+  return ExprHandle(new Load(data(), ExprHandleVectorToExprVector(params)));
 }
 
 template <typename T>
 inline ExprHandle Placeholder::load(const std::vector<T>& args) const {
   std::vector<ExprHandle> params(args.begin(), args.end());
-  return ExprHandle(
-      new Load(data(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+  return ExprHandle(new Load(data(), ExprHandleVectorToExprVector(params)));
 }
 
 inline ExprHandle Placeholder::load(const std::vector<ExprHandle>& args) const {

@@ -2373,9 +2373,9 @@ void LoopNestReorderTestHelper(
   for (auto* l : loops) {
     // Add an increment at each layer of the loop which counts the number of
     // times the loop executes.
-    Load* load = new Load(extra.data(), {new IntImm(j)}, new IntImm(1));
+    Load* load = new Load(extra.data(), {new IntImm(j)});
     Add* add = new Add(load, new IntImm(1));
-    Stmt* store = new Store(extra.data(), {new IntImm(j)}, add, new IntImm(1));
+    Stmt* store = new Store(extra.data(), {new IntImm(j)}, add);
     if (prepend) {
       l->body()->prepend_stmt(store);
     }
@@ -2967,7 +2967,7 @@ TEST(LoopNest, NormalizeOnNestedOuterLoop) {
       R"IR(
         # CHECK: for (int x = 0; x < 50; x++) {
         # CHECK:   for (int y = 10; y < 100; y++) {
-        # CHECK:     A[x + 50] = ((B[y]) + (A[x + 50])) + 2 * y;
+        # CHECK:     A[x + 50] = ((A[x + 50]) + (B[y])) + 2 * y;
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
@@ -3002,7 +3002,7 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
       R"IR(
         # CHECK: for (int x = 50; x < 100; x++) {
         # CHECK:   for (int y = 0; y < 90; y++) {
-        # CHECK:     A[x] = (((B[y + 10]) + (A[x])) + 2 * y) + 20;
+        # CHECK:     A[x] = (((B[y + 10]) + 2 * y) + (A[x])) + 20;
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
@@ -3527,7 +3527,7 @@ TEST(LoopNest, CacheReadsInternal) {
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[2, 11]
 #CHECK: A_local[j_1 + 11 * i_2] =
-#CHECK: B[10 * i_1 + j_2] = (A_local[j_2]) + (A_local[j_2 + 12]);
+#CHECK: B[10 * i_1 + j_2] = (A_local[j_2 + 12]) + (A_local[j_2]);
       )IR");
 
   std::vector<int> b_data(200, 0);
@@ -3575,7 +3575,7 @@ TEST(LoopNest, CacheReadsInner) {
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[5, 2]
 #CHECK: A_local[2 * i_2 + j_2] =
-#CHECK: B[10 * i_1 + j_1] = (A_local[8]) + (A_local[1]);
+#CHECK: B[10 * i_1 + j_1] = (A_local[1]) + (A_local[8]);
       )IR");
 
   std::vector<int> b_data(200, 0);
@@ -3850,12 +3850,10 @@ TEST(LoopNest, InlineFromLoad) {
   constexpr int N = 1024;
   BufHandle a("A", {N}, kInt);
   BufHandle b("B", {N}, kInt);
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto store_a = For::make(i, 0, N, Store::make(a, {i}, i, mask));
-  auto store_b =
-      For::make(j, 0, N, Store::make(b, {j}, Load::make(a, {j}, mask), mask));
+  auto store_a = For::make(i, 0, N, Store::make(a, {i}, i));
+  auto store_b = For::make(j, 0, N, Store::make(b, {j}, Load::make(a, {j})));
   LoopNest l(Block::make({store_a, store_b}), {b.node()});
 
   l.computeInline(a.node());

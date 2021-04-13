@@ -90,10 +90,7 @@ class IndexFlattener : public IRMutator {
       return v;
     }
     return new Load(
-        v->dtype(),
-        v->buf(),
-        {flatten_index(v->buf()->dims(), v->indices())},
-        v->mask());
+        v->dtype(), v->buf(), {flatten_index(v->buf()->dims(), v->indices())});
   }
 
   Stmt* mutate(const Store* v) override {
@@ -103,10 +100,7 @@ class IndexFlattener : public IRMutator {
       return (Stmt*)v;
     }
     return new Store(
-        v->buf(),
-        {flatten_index(v->buf()->dims(), v->indices())},
-        new_value,
-        v->mask());
+        v->buf(), {flatten_index(v->buf()->dims(), v->indices())}, new_value);
   }
 };
 
@@ -276,13 +270,9 @@ class Vectorizer : public IRMutator {
   const Expr* mutate(const Load* v) override {
     Dtype dtype(v->dtype().scalar_type(), lanes_);
     const Buf* buf = v->buf();
-    std::vector<const Expr*> inputs = {v->flat_index(), v->mask()};
+    std::vector<const Expr*> inputs = {v->flat_index()};
     return try_vectorize(v, inputs, [&]() {
-      return Load::make(
-          dtype,
-          BufHandle(buf),
-          {ExprHandle(inputs[0])},
-          ExprHandle(inputs[1]));
+      return Load::make(dtype, BufHandle(buf), {ExprHandle(inputs[0])});
     });
   }
 
@@ -331,13 +321,10 @@ class Vectorizer : public IRMutator {
 
   Stmt* mutate(const Store* v) override {
     const Buf* buf = v->buf();
-    std::vector<const Expr*> inputs = {v->flat_index(), v->value(), v->mask()};
+    std::vector<const Expr*> inputs = {v->flat_index(), v->value()};
     return try_vectorize(v, inputs, [&]() {
       return Store::make(
-          BufHandle(buf),
-          {ExprHandle(inputs[0])},
-          ExprHandle(inputs[1]),
-          ExprHandle(inputs[2]));
+          BufHandle(buf), {ExprHandle(inputs[0])}, ExprHandle(inputs[1]));
     });
   }
 
@@ -1941,7 +1928,7 @@ class LoopComputeAtRewriter : public IRMutator {
       new_indices[i] =
           IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i]));
     }
-    return new Load(v->dtype(), new_buf_, new_indices, v->mask());
+    return new Load(v->dtype(), new_buf_, new_indices);
   }
 };
 
@@ -1996,7 +1983,7 @@ class CacheReplacer : public IRMutator {
       newIndices.push_back(sub);
     }
 
-    return new Load(cache_, newIndices, v->mask());
+    return new Load(cache_, newIndices);
   }
 
   Stmt* mutate(const Store* v) override {
@@ -2017,7 +2004,7 @@ class CacheReplacer : public IRMutator {
       newIndices.push_back(sub);
     }
 
-    return new Store(cache_, newIndices, newValue, v->mask());
+    return new Store(cache_, newIndices, newValue);
   }
 
   const Buf* buf_;
@@ -2111,10 +2098,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
     // Init cache to 0.
     Stmt* tmp_init = new Store(
-        tmp_buf,
-        new_loop_vars_expr,
-        getImmediateByType(tmp_buf->dtype(), 0),
-        new IntImm(1));
+        tmp_buf, new_loop_vars_expr, getImmediateByType(tmp_buf->dtype(), 0));
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
       tmp_init =
@@ -2129,10 +2113,9 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
         tmp_params,
         reduceOp->reducer()(
             producer,
-            ExprHandle(new Load(tmp_buf, new_loop_vars_expr, new IntImm(1))),
+            ExprHandle(new Load(tmp_buf, new_loop_vars_expr)),
             tmp_params,
-            {}),
-        new IntImm(1));
+            {}));
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
       tmp_store =
@@ -2146,11 +2129,8 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
   if (hasReads) {
     // Fill the cache with values from the consumer.
-    Stmt* tmp_store = new Store(
-        tmp_buf,
-        new_loop_vars_expr,
-        new Load(producer, tmp_params, new IntImm(1)),
-        new IntImm(1));
+    Stmt* tmp_store =
+        new Store(tmp_buf, new_loop_vars_expr, new Load(producer, tmp_params));
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
       tmp_store =
@@ -2162,11 +2142,8 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
   if (hasWrites) {
     // sync the cache back to the producer buf.
-    Stmt* tmp_store = new Store(
-        producer,
-        tmp_params,
-        new Load(tmp_buf, new_loop_vars_expr, new IntImm(1)),
-        new IntImm(1));
+    Stmt* tmp_store =
+        new Store(producer, tmp_params, new Load(tmp_buf, new_loop_vars_expr));
 
     for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
       tmp_store =
@@ -2345,10 +2322,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // Construct the temp statement
   Stmt* bd = new Store(
-      temp_buf,
-      temp_indices,
-      Substitute(st->value(), rewrite_indices_map),
-      st->mask());
+      temp_buf, temp_indices, Substitute(st->value(), rewrite_indices_map));
 
   // Construct the loop nest for the temp computation
   for (size_t i = 0; i < dims.size(); i++) {
@@ -2407,8 +2381,7 @@ class RfactorStoreRewriter : public IRMutator {
       return IRMutator::mutate(v);
     }
 
-    const Expr* mask_new = v->mask()->accept_mutator(this);
-    return new Load(new_buf_, new_indices_, mask_new);
+    return new Load(new_buf_, new_indices_);
   }
 
   const Expr* mutate(const ReduceOp* v) override {
@@ -2443,8 +2416,7 @@ class RfactorStoreRewriter : public IRMutator {
     }
 
     const Expr* new_value = v->value()->accept_mutator(this);
-    const Expr* mask_new = v->mask()->accept_mutator(this);
-    return new Store(new_buf_, new_indices_, new_value, mask_new);
+    return new Store(new_buf_, new_indices_, new_value);
   }
 
  private:
@@ -2542,22 +2514,19 @@ bool LoopNest::rfactor(Stmt* st, For* outer_reduction_for, Buf** rfac_buf_ptr) {
   auto rfac_buf_indices = orig_buf_indices;
   rfac_buf_indices.emplace_back(reduction_var);
 
-  const Expr* final_reduce_load =
-      new Load(rfac_buf, rfac_buf_indices, new IntImm(1));
+  const Expr* final_reduce_load = new Load(rfac_buf, rfac_buf_indices);
   outer_reduction_for->body()->insert_stmt_after(
       new Store(
           orig_buf,
           orig_buf_indices,
           reduce_op->reducer()(
-              orig_buf, final_reduce_load, orig_buf_indices, {reduction_var}),
-          new IntImm(1)),
+              orig_buf, final_reduce_load, orig_buf_indices, {reduction_var})),
       first_reduction_loop);
 
   // Insert an initialization store for the temp buffer:
   //   T[a,b,c] = init
   outer_reduction_for->body()->insert_stmt_before(
-      new Store(rfac_buf, rfac_buf_indices, rfac_init, new IntImm(1)),
-      first_reduction_loop);
+      new Store(rfac_buf, rfac_buf_indices, rfac_init), first_reduction_loop);
   return true;
 }
 

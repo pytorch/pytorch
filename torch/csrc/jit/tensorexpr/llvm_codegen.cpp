@@ -1117,14 +1117,7 @@ void LLVMCodeGenImpl::visit(const Load* v) {
     v->flat_index()->accept(this);
     auto idx = this->value_;
 
-    auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
-    if (maskimm && maskimm->value() == 1) {
-      value_ = emitUnmaskedLoad(base, idx);
-    } else {
-      v->mask()->accept(this);
-      auto mask = this->value_;
-      value_ = emitMaskedLoad(base, idx, mask);
-    }
+    value_ = emitUnmaskedLoad(base, idx);
     return;
   }
 
@@ -1143,18 +1136,11 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   }
 
   // Detect whether the vector mask is all true
-  bool unmasked_load = false;
-  auto* mask_broadcast = dynamic_cast<const Broadcast*>(v->mask());
-  if (mask_broadcast) {
-    auto* broadcast_imm = dynamic_cast<const IntImm*>(mask_broadcast->value());
-    if (broadcast_imm && broadcast_imm->value() == 1) {
-      unmasked_load = true;
-    }
-  }
+  bool unmasked_load = true;
 
   // Handle the case where the load is contiguous and unmasked efficiently
   auto* idx_ramp = dynamic_cast<const Ramp*>(v->flat_index());
-  if (unmasked_load && idx_ramp) {
+  if (idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
       v->base_handle()->accept(this);
@@ -1179,19 +1165,12 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   auto base = this->value_;
   v->flat_index()->accept(this);
   auto idx = this->value_;
-  v->mask()->accept(this);
-  auto mask = this->value_;
 
   llvm::Value* load = llvm::UndefValue::get(loadType);
   for (int i = 0; i < v->dtype().lanes(); ++i) {
     auto sub_idx = irb_.CreateExtractElement(idx, i);
     llvm::Value* sub_load = nullptr;
-    if (unmasked_load) {
-      sub_load = emitUnmaskedLoad(base, sub_idx);
-    } else {
-      auto sub_mask = irb_.CreateExtractElement(mask, i);
-      sub_load = emitMaskedLoad(base, sub_idx, sub_mask);
-    }
+    sub_load = emitUnmaskedLoad(base, sub_idx);
     load = irb_.CreateInsertElement(load, sub_load, i);
   }
 
@@ -1433,28 +1412,10 @@ void LLVMCodeGenImpl::visit(const Store* v) {
     v->value()->accept(this);
     auto val = this->value_;
 
-    auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
-    if (maskimm && maskimm->value() == 1) {
-      emitUnmaskedStore(base, idx, val);
-    } else {
-      v->mask()->accept(this);
-      auto mask = this->value_;
-
-      emitMaskedStore(base, idx, mask, val);
-    }
+    emitUnmaskedStore(base, idx, val);
 
     value_ = llvm::ConstantInt::get(IntTy_, 0);
     return;
-  }
-
-  // Detect whether the vector mask is all true
-  bool unmasked_store = false;
-  auto* mask_broadcast = dynamic_cast<const Broadcast*>(v->mask());
-  if (mask_broadcast) {
-    auto* broadcast_imm = dynamic_cast<const IntImm*>(mask_broadcast->value());
-    if (broadcast_imm && broadcast_imm->value() == 1) {
-      unmasked_store = true;
-    }
   }
 
   v->base_handle()->accept(this);
@@ -1464,7 +1425,7 @@ void LLVMCodeGenImpl::visit(const Store* v) {
 
   // Handle the case where the store is contiguous and unmasked efficiently
   auto* idx_ramp = dynamic_cast<const Ramp*>(v->flat_index());
-  if (unmasked_store && idx_ramp) {
+  if (idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
       idx_ramp->base()->accept(this);
@@ -1486,19 +1447,12 @@ void LLVMCodeGenImpl::visit(const Store* v) {
 
   v->flat_index()->accept(this);
   auto idx = this->value_;
-  v->mask()->accept(this);
-  auto mask = this->value_;
 
   // Fallback to a scalar implementation
   for (int i = 0; i < v->value()->dtype().lanes(); ++i) {
     auto sub_idx = irb_.CreateExtractElement(idx, i);
     auto sub_val = irb_.CreateExtractElement(val, i);
-    if (unmasked_store) {
-      emitUnmaskedStore(base, sub_idx, sub_val);
-    } else {
-      auto sub_mask = irb_.CreateExtractElement(mask, i);
-      emitMaskedStore(base, sub_idx, sub_mask, sub_val);
-    }
+    emitUnmaskedStore(base, sub_idx, sub_val);
   }
 
   value_ = llvm::ConstantInt::get(IntTy_, 0);
