@@ -126,6 +126,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.is_shared`,None
    ":meth:`Tensor.is_signed`, :func:`torch.is_signed`",None
    :attr:`Tensor.is_sparse`,None
+   :attr:`Tensor.is_sparse_csr`,None
    :func:`torch.is_tensor`,None
    :meth:`Tensor.item`,None
    ":meth:`Tensor.kthvalue`, :func:`torch.kthvalue`",:ref:`removes_dimensions-doc`

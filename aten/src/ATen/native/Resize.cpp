@@ -85,7 +85,7 @@ const Tensor& resize_as_(
         !optional_memory_format.has_value(),
         "Unsupported memory format for sparse tensor resize_as_ :",
         optional_memory_format.value());
-    return native::resize_as_sparse_(self, the_template);
+    return at::native::resize_as_sparse_(self, the_template);
   }
   const Tensor& result = self.resize_(the_template.sizes());
   if (optional_memory_format.has_value()) {
