@@ -8,7 +8,7 @@ import torch.distributed as dist
 from . import default_hooks as default
 
 
-def _orthogonalize(matrix, epsilon=1e-8):
+def _orthogonalize(matrix, epsilon=0):
     """
     Applies Gram-Schmidt procedure to orthogonalize a given 2D tensor.
     If epsilon is 0, this is equivalent to `torch.qr(matrix, out=(matrix, _))`,
@@ -23,7 +23,15 @@ def _orthogonalize(matrix, epsilon=1e-8):
         if epsilon == 0:
             # Note that col ** 2 can underflow/overflow if we use FP16.
             # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
-            col /= torch.norm(col)
+            try:
+                col /= torch.norm(col)
+            except ZeroDivisionError:
+                logging.error(
+                    "The matrix to be orthogonalized has at least a column of all 0s. Please set a small value such as 1e-8 "
+                    "as `orthogonalization_epsilon` in PowerSGD state."
+                )
+                # Recover the values from NaNs to 0s.
+                col.fill_(0.0)
         else:
             col /= torch.norm(col) + epsilon
         # Project it on the rest and remove it.
@@ -97,6 +105,8 @@ class PowerSGDState(object):
 
     Compression statistics are logged every ``compression_stats_logging_frequency`` iterations once PowerSGD compression starts.
 
+    4. ``orthogonalization_epsilon`` can be a very small value (e.g., 1e-8) added to every normalized matrix column in orthogonalization step, to prevent div-by-zero error if any column has all 0s. If this can already be prevented (e.g., by batch normalization), an epsilon of 0 is recommended for accuracy.
+
     .. warning ::
         If error feedback or warm-up is enabled, the minimum value of ``start_powerSGD_iter`` allowed in DDP is 2.
         This is because there is another internal optimization that rebuilds buckets at iteration 1 in DDP,
@@ -105,11 +115,13 @@ class PowerSGDState(object):
 
     __slots__ = [
         "process_group",
-        # The three fields below are the hyperparameters that should be tuned by the user.
+        # The fields below are the hyperparameters that often need to be tuned by the user.
         "matrix_approximation_rank",
         "start_powerSGD_iter",
+        # The fields below are the hyperparameters that seldom need be tuned by the user.
         "min_compression_rate",
-        # The two fields below are the binary hyperparameters recommended to be turned on for performance.
+        "orthogonalization_epsilon",
+        # The fields below are the binary hyperparameters recommended to be turned on for performance and accuracy.
         "use_error_feedback",
         "warm_start",
         # The fields below are internal state.
@@ -133,16 +145,18 @@ class PowerSGDState(object):
         min_compression_rate=2,
         use_error_feedback=True,
         warm_start=True,
+        orthogonalization_epsilon=0,
         random_seed=0,
         compression_stats_logging_frequency=10_000,
     ):
         logging.info(
             "PowerSGD config: matrix_approximation_rank = {}; start_powerSGD_iter = {}; "
-            "min_compression_rate = {}; use_error_feedback = {}; warm_start = {}; "
+            "min_compression_rate = {}; orthogonalization_epsilon = {}; use_error_feedback = {}; warm_start = {}; "
             "random_seed = {}; compression_stats_logging_frequency = {}".format(
                 matrix_approximation_rank,
                 start_powerSGD_iter,
                 min_compression_rate,
+                orthogonalization_epsilon,
                 use_error_feedback,
                 warm_start,
                 random_seed,
@@ -185,6 +199,8 @@ class PowerSGDState(object):
         # this can also accelerate training.
         # However, this is at the cost of extra memory.
         self.warm_start = warm_start
+        # Can use a very small value to prevent div-by-zero error caused by orthogonalization of vanishing gradients.
+        self.orthogonalization_epsilon = orthogonalization_epsilon
         # The purpose of this RNG is to generate different random seeds for initializing Q across iterations,
         # but in the same order for all the DDP replicas.
         # Different random seeds across iterations indicate different 'projections' of the gradients at different SGD steps.
@@ -419,7 +435,7 @@ def powerSGD_hook(
     # The exception is the first iteration when PowerSGD is applied.
     if not need_randomize_qs:
         for q in qs:
-            _orthogonalize(q)
+            _orthogonalize(q, state.orthogonalization_epsilon)
     else:
         with torch.random.fork_rng(devices=[]):
             # Fork this RNG to avoid changing the seed globally and affecting the random sampling anywhere else in the training.
@@ -436,7 +452,7 @@ def powerSGD_hook(
                         dtype=dtype,
                     )
                 )
-                _orthogonalize(q)
+                _orthogonalize(q, state.orthogonalization_epsilon)
 
     # Compute Ps.
     for tensor, q, p in zip(tensors_to_compress, qs, ps):
@@ -470,7 +486,7 @@ def powerSGD_hook(
     def compute_qs(fut):
         state.p_memory_dict[bucket_index] = fut.value()[0]
         for p in ps:
-            _orthogonalize(p)
+            _orthogonalize(p, state.orthogonalization_epsilon)
 
         # Compute Qs.
         for tensor, p, q in zip(tensors_to_compress, ps, qs):
@@ -666,7 +682,7 @@ def batched_powerSGD_hook(
         state.q_memory_dict[bucket_index] = create_low_rank_tensor(
             fill_random_values=True, rng=state.rng
         )
-    _orthogonalize(state.q_memory_dict[bucket_index], 0)
+    _orthogonalize(state.q_memory_dict[bucket_index])
 
     torch.matmul(
         matrix, state.q_memory_dict[bucket_index], out=state.p_memory_dict[bucket_index]
@@ -677,7 +693,7 @@ def batched_powerSGD_hook(
 
     def compute_q(fut):
         state.p_memory_dict[bucket_index] = fut.value()[0]
-        _orthogonalize(state.p_memory_dict[bucket_index], 0)
+        _orthogonalize(state.p_memory_dict[bucket_index])
 
         torch.matmul(
             matrix.t(),
