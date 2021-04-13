@@ -1405,7 +1405,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4).to(torch.int32)
         self.run_test(FloatingPoint(), x)
 
-    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(12)
     def test_prim_min(self):
         @torch.jit.script
         def list_append(boxes: List[torch.Tensor]):
