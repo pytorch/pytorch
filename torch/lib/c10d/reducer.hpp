@@ -443,12 +443,6 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<bool>& expect_sparse_gradient = {},
     const std::vector<int64_t>& tensor_indices = {});
 
-// Verify model replicas in this process are the same with respect to no. of
-// params, requires grad, and matching dtype/size/layout.
-void verify_replicas_within_process(
-    std::vector<std::vector<at::Tensor>> model_replicas,
-    std::vector<std::vector<bool>> expect_sparse_gradients);
-
 // Verify models across all processes are the same as model on rank 0 with
 // respect to no. of params and matching dtype/size/layout.
 void verify_replica0_across_processes(
