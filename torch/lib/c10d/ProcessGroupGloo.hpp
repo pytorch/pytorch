@@ -93,42 +93,42 @@ class ProcessGroupGloo : public ProcessGroup {
   };
 
   // Wrap c10d store as Gloo store
-class GlooStore : public ::gloo::rendezvous::Store {
- public:
-  GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
+  class GlooStore : public ::gloo::rendezvous::Store {
+   public:
+    GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
 
-  void setUint(const std::string& key, const std::vector<uint8_t>& value) {
-    store_->set(key, value);
-  }
+    void setUint(const std::string& key, const std::vector<uint8_t>& value) {
+      store_->set(key, value);
+    }
 
-  void set(const std::string& key, const std::vector<char>& value) override {
-    std::vector<uint8_t> tmp(value.begin(), value.end());
-    store_->set(key, tmp);
-  }
+    void set(const std::string& key, const std::vector<char>& value) override {
+      std::vector<uint8_t> tmp(value.begin(), value.end());
+      store_->set(key, tmp);
+    }
 
-  std::vector<uint8_t> getUint(const std::string& key) {
-    auto value = store_->get(key);
-    return value;
-  }
+    std::vector<uint8_t> getUint(const std::string& key) {
+      auto value = store_->get(key);
+      return value;
+    }
 
-  std::vector<char> get(const std::string& key) override {
-    auto value = store_->get(key);
-    return std::vector<char>(value.begin(), value.end());
-  }
+    std::vector<char> get(const std::string& key) override {
+      auto value = store_->get(key);
+      return std::vector<char>(value.begin(), value.end());
+    }
 
-  void wait(const std::vector<std::string>& keys) override {
-    store_->wait(keys, Store::kDefaultTimeout);
-  }
+    void wait(const std::vector<std::string>& keys) override {
+      store_->wait(keys, Store::kDefaultTimeout);
+    }
 
-  void wait(
+    void wait(
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override {
-    store_->wait(keys, timeout);
-  }
+      store_->wait(keys, timeout);
+    }
 
- protected:
-  c10::intrusive_ptr<::c10d::Store> store_;
-};
+  protected:
+   c10::intrusive_ptr<::c10d::Store> store_;
+  };
 
   // For send and recv operations there is no need to pass them to the
   // thread pool as they are entirely completed by the device thread.
