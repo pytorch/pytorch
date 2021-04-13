@@ -3,6 +3,7 @@
 import argparse
 import array
 import os
+import fnmatch
 import sys
 import subprocess
 from tools.codegen.code_template import CodeTemplate
@@ -18,8 +19,13 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
     print("hFilePath:{} cppFilePath:{} srcDirPath:{} glslcPath:{} tmpDirPath:{}".format(
         hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath))
 
-    cmd = "find " + srcDirPath + " -name \"*.glsl\""
-    vexs = os.popen(cmd).read().split('\n')
+    vexs = []
+    pattern = "*.glsl"
+    for root, dirs, files in os.walk(srcDirPath):
+        for name in files:
+            if fnmatch.fnmatch(name, pattern):
+                vexs.append(os.path.join(root, name))
+
     templateSrcPaths = []
     for f in vexs:
         if len(f) > 1:

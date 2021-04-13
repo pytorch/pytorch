@@ -911,16 +911,26 @@ private:
         max_lookups = detailv3::min_lookups - 1;
     }
 
-    template<typename U>
-    uint64_t hash_object(const U & key)
+    uint64_t hash_object(const FindKey & key)
     {
         return static_cast<Hasher &>(*this)(key);
     }
-    template<typename U>
-    uint64_t hash_object(const U & key) const
+
+    uint64_t hash_object(const FindKey & key) const
     {
         return static_cast<const Hasher &>(*this)(key);
     }
+
+    uint64_t hash_object(const value_type & value)
+    {
+        return static_cast<Hasher &>(*this)(value.first);
+    }
+
+    uint64_t hash_object(const value_type & value) const
+    {
+        return static_cast<const Hasher &>(*this)(value.first);
+    }
+
     template<typename L, typename R>
     bool compares_equal(const L & lhs, const R & rhs)
     {
