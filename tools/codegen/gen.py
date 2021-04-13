@@ -10,8 +10,15 @@ import json
 from dataclasses import dataclass
 
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.model import *
-from tools.codegen.api.types import *
+from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
+                                 Location, NativeFunction,
+                                 NativeFunctionsGroup, OperatorName,
+                                 OptionalType, SchemaKind, SelfArgument,
+                                 TensorOptionsArguments, Type, Variant,
+                                 assert_never, is_cuda_dispatch_key,
+                                 is_generic_dispatch_key)
+from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
+                                     DispatcherSignature, NativeSignature)
 from tools.codegen.api import cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
@@ -19,8 +26,10 @@ import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import *
-from tools.codegen.context import *
+from tools.codegen.utils import Target, concatMap, context, mapMaybe
+from tools.codegen.context import (method_with_native_function,
+                                   native_function_manager,
+                                   with_native_function)
 import tools.codegen.dest as dest
 
 try:
@@ -857,9 +866,11 @@ def main() -> None:
     dispatch_keys = [
         DispatchKey.CPU,
         DispatchKey.SparseCPU,
+        DispatchKey.SparseCsrCPU,
         DispatchKey.MkldnnCPU,
         DispatchKey.CUDA,
         DispatchKey.SparseCUDA,
+        DispatchKey.SparseCsrCUDA,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
         DispatchKey.CompositeImplicitAutograd,
