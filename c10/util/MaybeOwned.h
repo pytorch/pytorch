@@ -38,8 +38,39 @@ class MaybeOwned final {
 
  public:
   explicit MaybeOwned(): isBorrowed_(true), borrow_(nullptr) {}
-  MaybeOwned(const MaybeOwned&) = delete;
-  MaybeOwned& operator=(const MaybeOwned&) = delete;
+
+  // Copying a borrow yields another borrow of the original, as with a
+  // T*. Copying an owned T yields another owned T for safety: no
+  // chains of borrowing by default! (Note you could get that behavior
+  // with MaybeOwned<T>::borrowed(*rhs) if you wanted it.)
+  MaybeOwned(const MaybeOwned& rhs) : isBorrowed_(rhs.isBorrowed_) {
+    if (rhs.isBorrowed_) {
+      borrow_ = rhs.borrow_;
+    } else {
+      new (&own_) T(rhs.own_);
+    }
+  }
+
+  MaybeOwned& operator=(const MaybeOwned& rhs) {
+    if (!isBorrowed_) {
+      if (rhs.isBorrowed_) {
+        own_.~T();
+        borrow_ = rhs.borrow_;
+        isBorrowed_ = true;
+      } else {
+        own_ = rhs.own_;
+      }
+    } else {
+      if (rhs.isBorrowed_) {
+        borrow_ = rhs.borrow_;
+      } else {
+        new (&own_) T(rhs.own_);
+        isBorrowed_ = false;
+      }
+    }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isBorrowed_ == rhs.isBorrowed_);
+    return *this;
+  }
 
   MaybeOwned(MaybeOwned&& rhs) noexcept(std::is_nothrow_move_constructible<T>::value)
   : isBorrowed_(rhs.isBorrowed_) {
