@@ -289,9 +289,6 @@ class GlooStore : public ::gloo::rendezvous::Store {
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  //todo: name _getStore
-  // return shared pointer
-  // cast to shared pointer in gloo store -> convert raw pointer into shared pointer
   GlooStore* getStore() {
       return dynamic_cast<ProcessGroupGloo::GlooStore*>(store_.get());
   }
@@ -305,7 +302,7 @@ class GlooStore : public ::gloo::rendezvous::Store {
       bool waitAllRanks = false) override;
 
  protected:
-  std::unique_ptr<::gloo::rendezvous::Store> store_; //this used to be a unique_ptr
+  std::unique_ptr<::gloo::rendezvous::Store> store_;
   const c10::intrusive_ptr<Options> options_;
 
   // Every Gloo context represents a set of connections to its peers.
