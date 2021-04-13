@@ -3,7 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
-#include <c10/util/llvmMathExtras.h>
+#include <ATen/native/cpu/utils.h>
 
 namespace at {
 namespace native {
@@ -77,18 +77,6 @@ inline void check_gradout_shape_nll_loss2d(
       grad_output.sizes(),
       " target: ",
       target.sizes());
-}
-
-
-static int64_t ceil_log2(int64_t x) {
-  if (x <= 2) {
-    return 1;
-  }
-
-  auto ux = static_cast<uint64_t>(x);
-  // Last set bit is floor(log2(x)), floor + 1 is ceil
-  // except when x is an exact powers of 2, so subtract 1 first
-  return static_cast<int64_t>(llvm::findLastSet(ux - 1)) + 1;
 }
 
 
@@ -167,7 +155,7 @@ static void nll_loss2d_forward_out_frame(
   scalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
   scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
   const int64_t level_power =
-      std::max(int64_t(4), ceil_log2(numiter) / cascade_sum_num_levels);
+      std::max(int64_t(4), utils::CeilLog2(numiter) / cascade_sum_num_levels);
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
