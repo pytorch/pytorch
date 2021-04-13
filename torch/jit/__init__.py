@@ -49,6 +49,17 @@ from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized
 
 from torch.jit._freeze import freeze, optimize_frozen_module
 
+__all__ = [
+    'script', 'trace', 'script_if_tracing', 'is_scripting', 'trace_module', 'fork',
+    'wait', 'export', 'freeze', '_overload', '_overload_method', '_unwrap_optional',
+    'Attribute', 'ScriptWarning', 'CompilationUnit', 'interface',
+    'ScriptModule', 'ScriptFunction', 'RecursiveScriptModule',
+    'TracedModule', 'TracerWarning', 'TracingCheckError', 'is_tracing', 'ONNXTracedModule',
+    'TopLevelTracedModule',
+    'save', 'load', 'ignore', 'unused', 'isinstance', 'annotate', 'export_opnames',
+    'Future', 'Final'
+]
+
 # For backwards compatibility
 _fork = fork
 _wait = wait
