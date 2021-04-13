@@ -4651,6 +4651,11 @@ add_docstr_all('is_sparse',
 Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
 """)
 
+add_docstr_all('is_sparse_csr',
+               r"""
+Is ``True`` if the Tensor uses sparse CSR storage layout, ``False`` otherwise.
+""")
+
 add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.
@@ -4710,4 +4715,40 @@ as_subclass(cls) -> Tensor
 Makes a ``cls`` instance with the same data pointer as ``self``. Changes
 in the output mirror changes in ``self``, and the output stays attached
 to the autograd graph. ``cls`` must be a subclass of ``Tensor``.
+""")
+
+add_docstr_all('crow_indices',
+               r"""
+crow_indices() -> IntTensor
+
+Returns the tensor containing the compressed row indices of the :attr:`self`
+tensor when :attr:`self` is a sparse CSR tensor of layout ``sparse_csr``.
+The ``crow_indices`` tensor is strictly of shape (:attr:`self`.size(0) + 1)
+and of type ``int32`` or ``int64``. When using MKL routines such as sparse
+matrix multiplication, it is necessary to use ``int32`` indexing in order
+to avoid downcasting and potentially losing information.
+
+Example::
+    >>> csr = torch.eye(5,5).to_sparse_csr()
+    >>> csr.crow_indices()
+    tensor([0, 1, 2, 3, 4, 5], dtype=torch.int32)
+
+""")
+
+add_docstr_all('col_indices',
+               r"""
+col_indices() -> IntTensor
+
+Returns the tensor containing the column indices of the :attr:`self`
+tensor when :attr:`self` is a sparse CSR tensor of layout ``sparse_csr``.
+The ``col_indices`` tensor is strictly of shape (:attr:`self`.nnz())
+and of type ``int32`` or ``int64``.  When using MKL routines such as sparse
+matrix multiplication, it is necessary to use ``int32`` indexing in order
+to avoid downcasting and potentially losing information.
+
+Example::
+    >>> csr = torch.eye(5,5).to_sparse_csr()
+    >>> csr.col_indices()
+    tensor([0, 1, 2, 3, 4], dtype=torch.int32)
+
 """)
