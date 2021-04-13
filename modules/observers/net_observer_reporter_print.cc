@@ -5,6 +5,8 @@
 #include "caffe2/core/init.h"
 #include "observers/observer_config.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 const std::string NetObserverReporterPrint::IDENTIFIER = "Caffe2Observer ";
@@ -97,7 +99,7 @@ static std::string get_tensor_shapes(PerformanceInformation p) {
   std::stringstream shape_stream;
   if (!p.tensor_shapes.empty()) {
     shape_stream << "[";
-    for (int i = 0; i < p.tensor_shapes.size(); i++) {
+    for (const auto i : c10::irange(p.tensor_shapes.size())) {
       shape_stream << "[";
       for (int j = 0; j < p.tensor_shapes[i].dims_size(); j++) {
         shape_stream << p.tensor_shapes[i].dims(j) << ", ";
@@ -117,7 +119,7 @@ static std::string get_op_args(PerformanceInformation p) {
   if (!p.args.empty()) {
     std::stringstream args;
     args << "[";
-    for (int i = 0; i < p.args.size(); i++) {
+    for (const auto i : c10::irange(p.args.size())) {
       args << "{" << p.args[i].name() << ": ";
       if (p.args[i].has_i()) {
         args << p.args[i].i();

@@ -38,6 +38,14 @@ void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, eps);
 }
 
+double AdagradOptions::get_lr() const {
+  return lr();
+}
+
+void AdagradOptions::set_lr(const double lr) {
+  this->lr(lr);
+}
+
 bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
             torch::equal(lhs.sum(), rhs.sum());

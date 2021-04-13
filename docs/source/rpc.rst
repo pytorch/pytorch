@@ -254,6 +254,20 @@ details.
 
     rpc/rref
 
+.. _remote_module:
+
+RemoteModule
+------------
+
+``RemoteModule`` is an easy way to create an nn.Module remotely on a different
+process. The actual module resides on a remote host, but the local host has a
+handle to this module and invoke this module similar to a regular nn.Module.
+The invocation however incurs RPC calls to the remote end and can be performed
+asynchronously if needed via additional APIs supported by RemoteModule.
+
+.. autoclass:: torch.distributed.nn.api.remote_module.RemoteModule
+    :members: remote_parameters, get_module_rref
+
 
 Distributed Autograd Framework
 ------------------------------

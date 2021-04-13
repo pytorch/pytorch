@@ -1129,4 +1129,3 @@ JNIEXPORT void JNI_OnUnload(JavaVM* vm, void* reserved);
 #define JNI_ABORT       2           /* free buffer w/o copying back */
 
 #endif  /* JNI_H_ */
-

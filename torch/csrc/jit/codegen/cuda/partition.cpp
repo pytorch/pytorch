@@ -20,7 +20,7 @@ static c10::optional<c10::Device> getDevice(const Value* value) {
     // not tensor type, return false as the op is not outputing scalar.
     return c10::nullopt;
   }
-  return value->type()->expect<TensorType>()->device();
+  return value->type()->expectRef<TensorType>().device();
 }
 
 static c10::optional<c10::Device> getDevice(const Node* node) {

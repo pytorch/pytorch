@@ -18,19 +18,49 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 
 RegisterOperators const reg({
     Operator(
-        "cuda::current_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
+        "cuda::current_stream.device(Device? device) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
-          auto idx = uint16_t(pop(stack).toInt());
-          auto s = c10::cuda::getCurrentCUDAStream(idx);
+          auto device = pop(stack).toOptional<c10::Device>();
+          c10::DeviceIndex device_index = device.has_value()
+              ? device->index()
+              : c10::cuda::current_device();
+          auto s = c10::cuda::getCurrentCUDAStream(device_index);
           auto st = make_custom_class<torch::jit::CUDAStream>(s);
           push(stack, IValue(st));
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "cuda::default_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
+        "cuda::current_stream.int(int? val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
-          auto idx = uint16_t(pop(stack).toInt());
-          auto s = c10::cuda::getDefaultCUDAStream(idx);
+          auto idx = pop(stack).toOptional<int64_t>();
+          c10::DeviceIndex device_index = idx.has_value()
+              ? static_cast<c10::DeviceIndex>(idx.value())
+              : c10::cuda::current_device();
+          auto s = c10::cuda::getCurrentCUDAStream(device_index);
+          auto st = make_custom_class<torch::jit::CUDAStream>(s);
+          push(stack, IValue(st));
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "cuda::default_stream.device(Device? device) -> __torch__.torch.classes.cuda.Stream",
+        [](Stack* stack) {
+          auto device = pop(stack).toOptional<c10::Device>();
+          c10::DeviceIndex device_index = device.has_value()
+              ? device->index()
+              : c10::cuda::current_device();
+          auto s = c10::cuda::getDefaultCUDAStream(device_index);
+          auto st = make_custom_class<torch::jit::CUDAStream>(s);
+          push(stack, IValue(st));
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "cuda::default_stream.int(int? val) -> __torch__.torch.classes.cuda.Stream",
+        [](Stack* stack) {
+          auto idx = pop(stack).toOptional<int64_t>();
+          c10::DeviceIndex device_index = idx.has_value()
+              ? static_cast<c10::DeviceIndex>(idx.value())
+              : c10::cuda::current_device();
+          auto s = c10::cuda::getDefaultCUDAStream(device_index);
           auto st = make_custom_class<torch::jit::CUDAStream>(s);
           push(stack, IValue(st));
         },
@@ -67,6 +97,15 @@ RegisterOperators const reg({
         [](Stack* stack) {
           auto v = pop(stack);
           auto s = v.toCustomClass<torch::jit::CUDAStream>();
+          auto stream_device_idx = static_cast<int64_t>(s->device_index());
+          auto cur_device_idx =
+              static_cast<int64_t>(c10::cuda::current_device());
+          // If the stream is not on the current device, change the
+          // device to the device of the stream.
+          if (cur_device_idx != stream_device_idx) {
+            c10::cuda::set_device(
+                static_cast<c10::DeviceIndex>(stream_device_idx));
+          }
           // To set the current CUDA stream using
           // c10::cuda::setCurrentCUDAStream, the jit::CUDAStream object needs
           // to be converted to c10::cuda::CUDAStream. Since the latter cannot

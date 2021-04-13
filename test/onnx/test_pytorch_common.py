@@ -8,7 +8,7 @@ import torch.autograd.function as function
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(-1, pytorch_test_dir)
 
-from torch.testing._internal.common_utils import *  # noqa: F401
+from torch.testing._internal.common_utils import *  # noqa: F401,F403
 
 torch.set_default_tensor_type('torch.FloatTensor')
 
@@ -78,6 +78,7 @@ def disableScriptTest():
             return func(self)
         return wrapper
     return script_dec
+
 
 # skips tests for opset_versions listed in unsupported_opset_versions.
 # if the caffe2 test cannot be run for a specific version, add this wrapper

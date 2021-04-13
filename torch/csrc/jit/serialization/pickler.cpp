@@ -49,6 +49,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushTuple(ivalue);
   } else if (ivalue.isDouble()) {
     pushDouble(ivalue.toDouble());
+  } else if (ivalue.isComplexDouble()) {
+    pushComplexDouble(ivalue);
   } else if (ivalue.isInt()) {
     pushInt(ivalue.toInt());
   } else if (ivalue.isBool()) {
@@ -464,6 +466,14 @@ void Pickler::pushDouble(double value) {
   // Python pickle format is big endian, swap.
   push<double>(swapDouble(value));
 }
+void Pickler::pushComplexDouble(const IValue& value) {
+  c10::complex<double> d = value.toComplexDouble();
+  pushGlobal("builtins", "complex");
+  pushIValue(d.real());
+  pushIValue(d.imag());
+  push<PickleOpCode>(PickleOpCode::TUPLE2);
+  push<PickleOpCode>(PickleOpCode::REDUCE);
+}
 
 void Pickler::pushLong(const std::string& data) {
   uint64_t size = data.size();
@@ -603,7 +613,7 @@ WriteableTensorData getWriteableTensorData(
   result.tensor_ = tensor;
   result.size_ = tensor.storage().nbytes();
   // TODO HIP support
-  if (tensor.storage().device_type() == DeviceType::CUDA && to_cpu) {
+  if (tensor.storage().device_type() != DeviceType::CPU && to_cpu) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.

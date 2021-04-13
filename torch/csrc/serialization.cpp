@@ -120,8 +120,8 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
     ssize_t r = doPartialRead(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;
-      AT_ASSERTM(err != 0, "read(): impossible! r < 0, but no errno was set");
-      AT_ASSERTM(err != EAGAIN, "read(): non-blocking fd ", fildes,
+      TORCH_INTERNAL_ASSERT(err != 0, "read(): impossible! r < 0, but no errno was set");
+      TORCH_INTERNAL_ASSERT(err != EAGAIN, "read(): non-blocking fd ", fildes,
                                 " read EAGAIN; cowardly refusing to spin-wait");
       if (err == EINTR) {
         continue;
@@ -152,8 +152,8 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
     ssize_t r = doPartialWrite(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;
-      AT_ASSERTM(err != 0, "write(): impossible! r < 0, but no errno was set");
-      AT_ASSERTM(err != EAGAIN, "write(): non-blocking fd ", fildes,
+      TORCH_INTERNAL_ASSERT(err != 0, "write(): impossible! r < 0, but no errno was set");
+      TORCH_INTERNAL_ASSERT(err != EAGAIN, "write(): non-blocking fd ", fildes,
                                 " read EAGAIN; cowardly refusing to spin-wait");
       if (err == EINTR) {
         continue;

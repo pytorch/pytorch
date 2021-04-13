@@ -1,3 +1,4 @@
+#include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -21,7 +22,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {

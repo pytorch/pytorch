@@ -89,6 +89,7 @@ bool WeightedSampleOp<float, CUDAContext>::RunOnDevice() {
         unif_samples_data,
         out_idx_data,
         out_val_data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     /* out_idx = */ Output(0, {0}, at::dtype<int>());
     if (OutputSize() == 2) {
