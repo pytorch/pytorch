@@ -95,6 +95,7 @@ class WorkerSpec:
         if isinstance(self.entrypoint, str):
             return os.path.basename(self.entrypoint)
         else:
+            assert self.entrypoint is not None
             return self.entrypoint.__qualname__
 
 
