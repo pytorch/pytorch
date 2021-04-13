@@ -18,7 +18,7 @@ class TestIndexing(TestCase):
     def test_index(self, device):
 
         def consec(size, start=1):
-            sequence = torch.ones(int(torch.Tensor(size).prod(0))).cumsum(0)
+            sequence = torch.ones(torch.tensor(size).prod(0)).cumsum(0)
             sequence.add_(start - 1)
             return sequence.view(*size)
 
@@ -36,10 +36,10 @@ class TestIndexing(TestCase):
         self.assertEqual(reference[:], consec((3, 3, 3)), atol=0, rtol=0)
 
         # indexing with Ellipsis
-        self.assertEqual(reference[..., 2], torch.Tensor([[3, 6, 9],
-                                                          [12, 15, 18],
-                                                          [21, 24, 27]]), atol=0, rtol=0)
-        self.assertEqual(reference[0, ..., 2], torch.Tensor([3, 6, 9]), atol=0, rtol=0)
+        self.assertEqual(reference[..., 2], torch.tensor([[3., 6., 9.],
+                                                          [12., 15., 18.],
+                                                          [21., 24., 27.]]), atol=0, rtol=0)
+        self.assertEqual(reference[0, ..., 2], torch.tensor([3., 6., 9.]), atol=0, rtol=0)
         self.assertEqual(reference[..., 2], reference[:, :, 2], atol=0, rtol=0)
         self.assertEqual(reference[0, ..., 2], reference[0, :, 2], atol=0, rtol=0)
         self.assertEqual(reference[0, 2, ...], reference[0, 2], atol=0, rtol=0)
@@ -1049,8 +1049,8 @@ class TestIndexing(TestCase):
             self.assertEqual(actual, expected, atol=0, rtol=0)
 
         for shape in [(3, 2), (2, 3, 5), (2, 4, 0), (2, 3, 1, 4)]:
-            for discontiguous in [True, False]:
-                t = make_tensor(shape, device=device, dtype=dtype, discontiguous=discontiguous)
+            for noncontiguous in [True, False]:
+                t = make_tensor(shape, device=device, dtype=dtype, noncontiguous=noncontiguous)
                 for dim in list(range(t.ndim)) + [None]:
                     if dim is None:
                         indices = torch.argsort(t.view(-1))
