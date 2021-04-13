@@ -11,6 +11,7 @@ std::string fromVec(const std::vector<char>& vec) {
 }
 
 FaultyProcessGroupAgent::FaultyProcessGroupAgent(
+    const c10::intrusive_ptr<::c10d::Store>& store,
     std::string workerName,
     c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
@@ -19,6 +20,7 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
     const std::unordered_map<std::string, float>& messageTypesToDelay,
     int failNumSends)
     : ProcessGroupAgent(
+          store,
           std::move(workerName),
           std::move(pg),
           numSendRecvThreads,
@@ -59,7 +61,8 @@ std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
 std::shared_ptr<JitFuture> FaultyProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
   if (!shouldFailMessage(message.type())) {

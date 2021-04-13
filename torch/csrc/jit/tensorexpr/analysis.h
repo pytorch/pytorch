@@ -33,7 +33,7 @@ class HasRand : public IRVisitor {
 template <typename Node>
 class NodeFinder : public IRVisitor {
  public:
-  virtual void visit(const Node* v) override {
+  void visit(const Node* v) override {
     nodes.push_back((Node*)v);
     IRVisitor::visit(v);
   }
@@ -55,7 +55,7 @@ class NodeFinder : public IRVisitor {
 
 class VarFinder : public IRVisitor {
  public:
-  virtual void visit(const Var* v) override {
+  void visit(const Var* v) override {
     vars_.insert(v);
     IRVisitor::visit(v);
   }
@@ -189,6 +189,7 @@ class CreateBufferMap : public IRVisitor {
   }
   std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

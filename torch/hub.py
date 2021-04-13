@@ -1,5 +1,6 @@
 import errno
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -111,6 +112,16 @@ def _parse_repo_info(github):
     repo_owner, repo_name = repo_info.split('/')
     return repo_owner, repo_name, branch
 
+def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
+    # Use urlopen to avoid depending on local git.
+    url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/branches'
+    with urlopen(url) as r:
+        response = json.loads(r.read().decode(r.headers.get_content_charset('utf-8')))
+    for br in response:
+        if br['name'] == branch or br['commit']['sha'].startswith(branch):
+            return
+    raise ValueError(f'Cannot find {branch} in https://github.com/{repo_owner}/{repo_name}. '
+                     'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
 
 def _get_cache_or_reload(github, force_reload, verbose=True):
     # Setup hub_dir to save downloaded files
@@ -119,6 +130,7 @@ def _get_cache_or_reload(github, force_reload, verbose=True):
         os.makedirs(hub_dir)
     # Parse github repo information
     repo_owner, repo_name, branch = _parse_repo_info(github)
+
     # Github allows branch name with slash '/',
     # this causes confusion with path on both Linux and Windows.
     # Backslash is not allowed in Github branch name so no need to
@@ -136,6 +148,9 @@ def _get_cache_or_reload(github, force_reload, verbose=True):
         if verbose:
             sys.stderr.write('Using cache found in {}\n'.format(repo_dir))
     else:
+        # Validate the tag/branch is from the original repo instead of a forked repo
+        _validate_not_a_forked_repo(repo_owner, repo_name, branch)
+
         cached_file = os.path.join(hub_dir, normalized_br + '.zip')
         _remove_if_exists(cached_file)
 

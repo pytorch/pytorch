@@ -17,15 +17,17 @@ def optimize_for_mobile(
         script_module,
         optimization_blocklist: Set[MobileOptimizerType] = None,
         preserved_methods: List[AnyStr] = None,
-        backend: str = 'CPU'):
+        backend: str = 'CPU',
+        methods_to_optimize: List[AnyStr] = None):
     """
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
         optimization_blocklist: A set with type of MobileOptimizerType. When set is not passed,
             optimization method will run all the optimizer pass; otherwise, optimizer
             method will run the optimization pass that is not included inside optimization_blocklist.
-        perserved_methods: A list of methods that needed to be preserved when freeze_module pass is invoked
+        preserved_methods: A list of methods that needed to be preserved when freeze_module pass is invoked
         backend: Device type to use for running the result model ('CPU'(default), 'Vulkan' or 'Metal').
+        methods_to_optimize: List of functions to optimize, CPU only, forward is optimized if it exists
     Returns:
         A new optimized torch script module
     """
@@ -39,14 +41,18 @@ def optimize_for_mobile(
     if preserved_methods is None:
         preserved_methods = []
 
+    if methods_to_optimize is None:
+        methods_to_optimize = []
+
     # Convert potential byte arrays into strings (if there is any) to pass type checking
     # Here we use a new name as assigning it back to preserved_methods will invoke
     # mypy errors (i.e. List[AnyStr] = List[str])
     preserved_methods_str: List[str] = [str(method) for method in preserved_methods]
+    methods_to_optimize_str: List[str] = [str(method) for method in methods_to_optimize]
 
-    bundled_inputs_methods = ['get_all_bundled_inputs', 'get_num_bundled_inputs', 'run_on_bundled_input']
-    if all([hasattr(script_module, method) for method in bundled_inputs_methods]):
-        preserved_methods_str = list(set(preserved_methods_str + bundled_inputs_methods))
+    bundled_inputs_attributes = _get_bundled_inputs_preserved_attributes(script_module, preserved_methods_str)
+    if all([hasattr(script_module, method) for method in bundled_inputs_attributes]):
+        preserved_methods_str = list(set(preserved_methods_str + bundled_inputs_attributes))
 
     non_exist_methods = []
     for method in preserved_methods_str:
@@ -62,7 +68,8 @@ def optimize_for_mobile(
         optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(
             script_module._c,
             optimization_blocklist,
-            preserved_methods_str)
+            preserved_methods_str,
+            methods_to_optimize_str)
     elif backend == 'vulkan':
         optimized_cpp_module = torch._C._jit_pass_vulkan_optimize_for_mobile(script_module._c, preserved_methods_str)
     elif backend == 'metal':
@@ -87,9 +94,9 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
 
     lint_list = []
 
-    if not hasattr(script_module, "_generate_bundled_inputs"):
-        lint_list.append({"name": LintCode.BUNDLED_INPUT.name, "message": "No bundled input, please add bundled inputs before "
-                          "saving the module using torch.utils.bundled_inputs.augment_model_with_bundled_inputs."})
+    if not hasattr(script_module, "_generate_bundled_inputs_for_forward"):
+        lint_list.append({"name": LintCode.BUNDLED_INPUT.name, "message": "No bundled input for forward, please add bundled inputs "
+                          "before saving the module using torch.utils.bundled_inputs.augment_model_with_bundled_inputs."})
 
     for name, param in script_module.named_parameters():
         if param.requires_grad:
@@ -109,3 +116,24 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
                               "operator.".format(op_name)})
 
     return lint_list
+
+def _get_bundled_inputs_preserved_attributes(script_module: torch.jit.ScriptModule, preserved_methods: List[str]) -> List[str]:
+
+    bundled_inputs_attributes = []
+    # Has bundled inputs for forward
+    if hasattr(script_module, 'get_all_bundled_inputs'):
+        bundled_inputs_attributes.append('get_all_bundled_inputs')
+        bundled_inputs_attributes.append('get_num_bundled_inputs')
+        bundled_inputs_attributes.append('run_on_bundled_input')
+
+    # Bundled inputs in module after the change that introduced bundled inputs for multiple functions
+    if hasattr(script_module, 'get_bundled_inputs_functions_and_info'):
+        bundled_inputs_attributes.append('get_bundled_inputs_functions_and_info')
+        all_info = script_module.get_bundled_inputs_functions_and_info()
+        for function_name in all_info:
+            if function_name not in preserved_methods:
+                bundled_inputs_attributes.append(function_name)
+            bundled_inputs_attributes.append("get_all_bundled_inputs_for_" + function_name)
+            bundled_inputs_attributes.append("_bundled_inputs_deflated_" + function_name)
+
+    return bundled_inputs_attributes

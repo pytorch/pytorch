@@ -17,6 +17,7 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/python_compat.h>
+#include <exception>
 
 namespace torch {
 namespace distributed {
@@ -45,9 +46,9 @@ IValue toPyIValue(const Message& message) {
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       // Need GIL to destruct the py::object returned by deserialize()
       py::gil_scoped_acquire acquire;
-      return jit::toIValue(
-          pythonRpcHandler.deserialize(resp.serializedPyObj()),
-          PyObjectType::get());
+      py::object value = pythonRpcHandler.deserialize(resp.serializedPyObj());
+      pythonRpcHandler.handleException(value);
+      return jit::toIValue(value, PyObjectType::get());
     }
     default: {
       TORCH_CHECK(false, "Unrecognized response message type ", msgType);
@@ -138,36 +139,47 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
     const std::shared_ptr<JitFuture>& messageJitFuture,
     bool hasValue) {
   if (hasValue) {
-    c10::intrusive_ptr<JitFuture> pyJitFuture =
-        c10::make_intrusive<JitFuture>(PyObjectType::get());
+    auto child = messageJitFuture->createInstance(PyObjectType::get());
     std::weak_ptr<JitFuture> wp = messageJitFuture;
     messageJitFuture->addCallback(
-        at::wrapPropagateTLSState<void>([pyJitFuture, wp]() {
+        at::wrapPropagateTLSState<void>([wp, child]() {
           auto future = wp.lock();
           if (future->hasError()) {
-            pyJitFuture->setError(future->exception_ptr());
+            child->setError(future->exception_ptr());
           } else {
-            pyJitFuture->markCompleted(
-                toPyIValue(*future->value().toCustomClass<Message>()));
+            const Message& message = *future->value().toCustomClass<Message>();
+            std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs;
+            dataPtrs.reserve(message.tensors().size());
+            for (const auto& tensor : message.tensors()) {
+              dataPtrs.emplace_back(tensor.storage().data_ptr());
+            }
+
+            // toPyIValue might throw and we need to record the appropriate
+            // exception.
+            IValue ivalue;
+            try {
+              ivalue = toPyIValue(message);
+            } catch (std::exception& e) {
+              child->setErrorIfNeeded(std::current_exception());
+              return;
+            }
+
+            child->markCompletedWithDataPtrs(ivalue, std::move(dataPtrs));
           }
         }));
-
-    return pyJitFuture;
+    return child;
   } else {
-    c10::intrusive_ptr<JitFuture> pyJitFuture =
-        c10::make_intrusive<JitFuture>(NoneType::get());
     std::weak_ptr<JitFuture> wp = messageJitFuture;
-    messageJitFuture->addCallback(
-        at::wrapPropagateTLSState<void>([wp, pyJitFuture]() {
+    return messageJitFuture->then(
+        at::wrapPropagateTLSState<IValue>([wp]() {
           auto future = wp.lock();
           if (future->hasError()) {
-            pyJitFuture->setError(future->exception_ptr());
+            std::rethrow_exception(future->exception_ptr());
           } else {
-            pyJitFuture->markCompleted(IValue());
+            return IValue();
           }
-        }));
-
-    return pyJitFuture;
+        }),
+        NoneType::get());
   }
 }
 

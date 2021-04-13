@@ -21,9 +21,32 @@
 #define device_sqrt std::sqrt
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
-#define MAX(X, Y) ::max(X,Y)
-#define MIN(X, Y) ::min(X,Y)
+template <typename scalar_t>
+inline C10_DEVICE scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
+#if defined(__HIPCC__)
+  // TODO: remove this special case for HIP when issue is fixed:
+  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+  scalar_t max = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::max(a, b));
 #else
+  scalar_t max = at::_isnan(b) ? b : std::max(a, b);
+#endif
+  return max;
+}
+template <typename scalar_t>
+inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
+#if defined(__HIPCC__)
+  // TODO: remove this special case for HIP when issue is fixed:
+  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+  scalar_t min = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::min(a, b));
+#else
+  scalar_t min = at::_isnan(b) ? b : std::min(a, b);
+#endif
+  return min;
+}
+#define MAX(X, Y) max_propagate_nan(X,Y)
+#define MIN(X, Y) min_propagate_nan(X,Y)
+#else
+#include <ATen/native/cpu/zmath.h>
 #define MAX(X, Y) max_impl(X,Y)
 #define MIN(X, Y) min_impl(X,Y)
 #endif

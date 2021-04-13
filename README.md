@@ -8,17 +8,36 @@ PyTorch is a Python package that provides two high-level features:
 
 You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
 
-- [More about PyTorch](#more-about-pytorch)
+<!-- toc -->
+
+- [More About PyTorch](#more-about-pytorch)
+  - [A GPU-Ready Tensor Library](#a-gpu-ready-tensor-library)
+  - [Dynamic Neural Networks: Tape-Based Autograd](#dynamic-neural-networks-tape-based-autograd)
+  - [Python First](#python-first)
+  - [Imperative Experiences](#imperative-experiences)
+  - [Fast and Lean](#fast-and-lean)
+  - [Extensions Without Pain](#extensions-without-pain)
 - [Installation](#installation)
   - [Binaries](#binaries)
+    - [NVIDIA Jetson Platforms](#nvidia-jetson-platforms)
   - [From Source](#from-source)
+    - [Install Dependencies](#install-dependencies)
+    - [Get the PyTorch Source](#get-the-pytorch-source)
+    - [Install PyTorch](#install-pytorch)
+      - [Adjust Build Options (Optional)](#adjust-build-options-optional)
   - [Docker Image](#docker-image)
+    - [Using pre-built images](#using-pre-built-images)
+    - [Building the image yourself](#building-the-image-yourself)
   - [Building the Documentation](#building-the-documentation)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
+- [Resources](#resources)
 - [Communication](#communication)
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
+- [License](#license)
+
+<!-- tocstop -->
 
 | System | 3.6 | 3.7 | 3.8 |
 | :---: | :---: | :---: | :--: |
@@ -165,6 +184,12 @@ Other potentially useful environment variables may be found in `setup.py`.
 
 If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to install PyTorch for Jetson Nano are [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
+If you want to compile with ROCm support, install
+- [AMD ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html) 4.0 and above installation
+- ROCm is currently supported only for Linux system.
+
+If you want to disable ROCm support, export environment variable `USE_ROCM=0`.
+Other potentially useful environment variables may be found in `setup.py`.
 
 #### Install Dependencies
 
@@ -175,7 +200,7 @@ conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_ex
 
 On Linux
 ```bash
-# Add LAPACK support for the GPU if needed
+# CUDA only: Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 ```
 
@@ -208,6 +233,11 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py install
 ```
 
+Note that if you are compiling for ROCm, you must run this command first:
+```bash
+python tools/amd_build/build_amd.py
+```
+
 Note that if you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
 
 ```plaintext
@@ -234,9 +264,17 @@ Each CUDA version only supports one particular XCode version. The following comb
 
 On Windows
 
+Choose Correct Visual Studio Version.
+
+Visual Studio upgrades are very often. Sometimes, there're regressions in some new versions.
+It'd best to use the same Visual Studio Version as [PyTorch CI's](https://github.com/pytorch/pytorch/blob/a1bd7918cc5a06cbef6c5178259bf0a7b5ab1ce3/.circleci/scripts/vs_install.ps1#L4).
+You can use Visual Studio Enterprise, Professional or Community though PyTorch CI uses Visual Studio BuildTools.
+
 Build with CPU
 
-It's fairly easy to build with CPU. Visual Studio 2019 version 16.7.6 (MSVC toolchain version 14.27) or higher is recommended.
+It's fairly easy to build with CPU.
+
+Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the buliding environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configuraions for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
 
 Build with CUDA
 

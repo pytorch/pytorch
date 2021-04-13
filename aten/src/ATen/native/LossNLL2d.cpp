@@ -153,7 +153,7 @@ static void nll_loss2d_forward_out_frame(
   for (int64_t b = 0; b < batch_size; b++) {
     for (int64_t elem = 0; elem < map_size; elem++) {
       const int64_t cur_target = target_data[b * map_size + elem];
-      
+
       if (cur_target == ignore_index) {
         continue;
       }
@@ -284,7 +284,7 @@ static void nll_loss2d_backward_out_frame(
     for (int64_t b = start; b < end; b++) {
       for (int64_t elem = 0; elem < map_size; elem++) {
         const int64_t cur_target = target_data[b * map_size + elem];
-        
+
         if (cur_target == ignore_index) {
           continue;
         }
@@ -344,14 +344,15 @@ void nll_loss2d_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_cpu(
-    Tensor& output,
-    Tensor& total_weight,
-    const Tensor& self,
-    const Tensor& target,
-    const Tensor& weight,
+std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_cpu(const Tensor& self,
+    const Tensor& target, const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
-    int64_t ignore_index) {
+    int64_t ignore_index,
+    Tensor& output,
+    Tensor& total_weight) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   nll_loss2d_forward_out_cpu_template(
       output, total_weight, self, target, weight, reduction, ignore_index);
   return std::tuple<Tensor&, Tensor&>(output, total_weight);
@@ -359,26 +360,29 @@ std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_cpu(
 
 std::tuple<Tensor, Tensor> nll_loss2d_forward_cpu(
     const Tensor& self,
-    const Tensor& target,
-    const Tensor& weight,
+    const Tensor& target, const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   auto output = at::empty({0}, self.options());
   auto total_weight = at::empty({0}, self.options());
-  nll_loss2d_forward_out_cpu(
-      output, total_weight, self, target, weight, reduction, ignore_index);
+  at::native::nll_loss2d_forward_out_cpu(
+      self, target, weight, reduction, ignore_index, output, total_weight);
   return std::make_tuple(output, total_weight);
 }
 
-Tensor& nll_loss2d_backward_out_cpu(
-    Tensor& grad_input,
-    const Tensor& grad_output,
+Tensor& nll_loss2d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& self,
-    const Tensor& target,
-    const Tensor& weight,
+    const Tensor& target, const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
-    const Tensor& total_weight) {
+    const Tensor& total_weight,
+    Tensor& grad_input) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   nll_loss2d_backward_out_cpu_template(
       grad_input,
       grad_output,
@@ -394,30 +398,38 @@ Tensor& nll_loss2d_backward_out_cpu(
 Tensor nll_loss2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& self,
-    const Tensor& target,
-    const Tensor& weight,
+    const Tensor& target, const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   auto grad_input = at::zeros_like(self);
-  nll_loss2d_backward_out_cpu(
-      grad_input,
+  at::native::nll_loss2d_backward_out_cpu(
       grad_output,
       self,
       target,
       weight,
       reduction,
       ignore_index,
-      total_weight);
+      total_weight,
+      grad_input);
   return grad_input;
 }
 
-Tensor & nll_loss2d_out(Tensor & output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+Tensor & nll_loss2d_out(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   Tensor total_weight = at::empty({0}, self.options());
   return std::get<0>(at::nll_loss2d_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
 }
 
-Tensor nll_loss2d(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+Tensor nll_loss2d(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   return std::get<0>(at::nll_loss2d_forward(self, target, weight, reduction, ignore_index));
 }
 

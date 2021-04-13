@@ -72,7 +72,7 @@ Value* tryConvertToType(
     if (convertibleToList(value->type(), unwrapOptional(concrete_type))) {
       auto unpacked = createTupleUnpack(value);
       auto elem_type =
-          unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
+          unwrapOptional(concrete_type)->expectRef<ListType>().getElementType();
       value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
     }
 
@@ -101,11 +101,14 @@ Value* tryConvertToType(
     bool value_isa_tensor = value->type()->isSubtypeOf(TensorType::get());
     bool value_equals_number = *value->type() == *NumberType::get();
     bool concrete_float = *concrete_type == *FloatType::get();
+    bool concrete_complex = *concrete_type == *ComplexType::get();
     bool concrete_int = *concrete_type == *IntType::get();
     bool concrete_number = *concrete_type == *NumberType::get();
     if (value_isa_tensor) {
       if (concrete_float) {
         value = graph.insert(aten::FloatImplicit, {value}, {}, loc);
+      } else if (concrete_complex) {
+        value = graph.insert(aten::ComplexImplicit, {value}, {}, loc);
       } else if (concrete_int) {
         value = graph.insert(aten::IntImplicit, {value}, {}, loc);
       } else if (concrete_number) {
@@ -114,6 +117,8 @@ Value* tryConvertToType(
     } else if (value_equals_number) {
       if (concrete_float) {
         value = graph.insert(aten::Float, {value}, {}, loc);
+      } else if (concrete_complex) {
+        value = graph.insert(aten::Complex, {value}, {}, loc);
       } else if (concrete_int) {
         value = graph.insert(aten::Int, {value}, {}, loc);
       }
@@ -275,7 +280,7 @@ static bool varargsCanBeUsedAsList(
 
   // matching varargs of typevar list nyi
   bool typevar_list = argument_is_list &&
-      arg.type()->cast<ListType>()->getElementType()->cast<VarType>();
+      arg.type()->castRaw<ListType>()->getElementType()->cast<VarType>();
 
   // it must not be a broadcasting list like int[3],
   // otherwise a single int is a valid input
@@ -340,8 +345,9 @@ static c10::optional<MatchedSchema> tryMatchSchema(
         // The actual cannot already be a list
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
-          auto formal_type =
-              unwrapOptional(arg.type())->expect<ListType>()->getElementType();
+          auto formal_type = unwrapOptional(arg.type())
+                                 ->expectRef<ListType>()
+                                 .getElementType();
 
           Value* list = tryCreateList(
               formal_type,

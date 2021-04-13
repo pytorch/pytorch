@@ -36,6 +36,7 @@ def fuse_known_modules(mod_list, additional_fuser_method_mapping=None):
     conv, bn
     conv, bn, relu
     conv, relu
+    linear, bn
     linear, relu
     For these sequences, the first element in the output module list performs
     the fused operation. The rest of the elements are set to nn.Identity()

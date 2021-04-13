@@ -1,8 +1,8 @@
 #pragma once
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <vector>
 
 namespace torch {
 namespace jit {

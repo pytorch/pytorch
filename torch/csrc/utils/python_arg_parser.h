@@ -56,7 +56,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/python_dimname.h>
 #include <torch/csrc/tensor/python_tensor.h>
-#include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -91,6 +90,7 @@ struct PythonArgs;
 template<int N>
 struct ParsedArgs {
   ParsedArgs() : args() { }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   PyObject* args[N];
 };
 
@@ -111,8 +111,10 @@ struct PythonArgParser {
 
 private:
   [[noreturn]]
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   void print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
   void check_deprecated(const FunctionSignature & signature);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   PythonArgs raw_parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;
@@ -124,6 +126,7 @@ private:
 struct PYBIND11_EXPORT FunctionSignature {
   explicit FunctionSignature(const std::string& fmt, int index);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   bool parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
 
   std::string toString() const;
@@ -157,7 +160,7 @@ struct PythonArgs {
   inline at::Tensor tensor(int i);
   inline c10::optional<at::Tensor> optionalTensor(int i);
   inline at::Scalar scalar(int i);
-  inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
+  inline at::Scalar scalarWithDefault(int i, const at::Scalar& default_scalar);
   inline std::vector<at::Scalar> scalarlist(int i);
   inline std::vector<at::Tensor> tensorlist(int i);
   inline torch::List<c10::optional<at::Tensor>> list_of_optional_tensors(int i);
@@ -229,6 +232,7 @@ struct FunctionParameter {
   // having this as a raw PyObject * will presumably leak it, but these are only held by static objects
   // anyway, and Py_Finalize can already be called when this is destructed.
   PyObject *python_name;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::SmallVector<PyObject *, 5> numpy_python_names;
   at::Scalar default_scalar;
   std::vector<int64_t> default_intlist;
@@ -237,6 +241,7 @@ struct FunctionParameter {
     bool default_bool;
     int64_t default_int;
     double default_double;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     double default_complex[2]; // see Scalar
     at::ScalarType default_scalartype;
     at::Layout default_layout;
@@ -294,6 +299,7 @@ inline std::vector<at::Scalar> PythonArgs::scalarlist(int i) {
   if (!args[i]) return std::vector<at::Scalar>();
   auto tuple = six::isTuple(args[i]);
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
   std::vector<at::Scalar> res(size);
   for (int idx = 0; idx < size; idx++) {
@@ -303,7 +309,7 @@ inline std::vector<at::Scalar> PythonArgs::scalarlist(int i) {
   return res;
 }
 
-inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {
+inline at::Scalar PythonArgs::scalarWithDefault(int i, const at::Scalar& default_scalar) {
   if (!args[i]) return default_scalar;
   return scalar_slow(i);
 }
@@ -317,6 +323,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   if (!args[i]) return std::vector<at::Tensor>();
   auto tuple = six::isTuple(args[i]);
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
   std::vector<at::Tensor> res(size);
   for (int idx = 0; idx < size; idx++) {
@@ -332,6 +339,7 @@ inline torch::List<c10::optional<at::Tensor>> PythonArgs::list_of_optional_tenso
   if (!args[i]) return torch::List<c10::optional<at::Tensor>>();
   auto tuple = six::isTuple(args[i]);
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
   torch::List<c10::optional<at::Tensor>> res;
   res.reserve(size);
@@ -350,6 +358,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   if (!args[i]) return res;
   auto tuple = six::isTuple(args[i]);
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
   if (size != N) {
     throw TypeError("expected tuple of %d elements but got %d", N, (int)size);
@@ -375,6 +384,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
     return std::vector<int64_t>(size, THPUtils_unpackIndex(arg));
   }
   auto tuple = PyTuple_Check(arg);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<int64_t> res(size);
   for (int idx = 0; idx < size; idx++) {
@@ -410,6 +420,7 @@ inline c10::OptionalArray<int64_t> PythonArgs::intlistOptional(int i) {
 inline std::vector<double> PythonArgs::getDoublelist(int i) {
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<double> res(size);
   for (int idx = 0; idx < size; idx++) {
@@ -519,6 +530,7 @@ inline at::Dimname PythonArgs::dimname(int i) {
 
 inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
   auto tuple = PyTuple_Check(arg);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<at::Dimname> res;
   res.reserve(size);
@@ -625,6 +637,7 @@ inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
 }
 
 inline c10::complex<double> PythonArgs::toComplex(int i) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   c10::complex<double> default_value = *const_cast<c10::complex<double> *>(
     reinterpret_cast<const c10::complex<double> *>(signature.params[i].default_complex));
   if (!args[i]) return default_value;
@@ -742,6 +755,9 @@ auto handle_torch_function_getter(THPVariable* self, const std::string& property
 
 // Used for setters of Tensor properties.
 auto handle_torch_function_setter(THPVariable* self, const std::string& property_name, PyObject* value) -> int;
+
+// Used for __getitem__ and __setitem__
+auto handle_torch_function_indexing(PyObject* self, PyObject* index, PyObject* val=nullptr) -> PyObject*;
 
 /*
  * Check if the input obj is Tensor type, including its subclass, or overloaded
