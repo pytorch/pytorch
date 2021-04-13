@@ -461,7 +461,8 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
 _TORCH_TEST_DEVICES = os.environ.get('TORCH_TEST_DEVICES', None)
 if _TORCH_TEST_DEVICES:
     for path in _TORCH_TEST_DEVICES.split(':'):
-        mod = runpy.run_path(path, init_globals=globals())
+        # runpy (a stdlib module) lacks annotations
+        mod = runpy.run_path(path, init_globals=globals())  # type: ignore[func-returns-value]
         device_type_test_bases.append(mod['TEST_CLASS'])
 
 
