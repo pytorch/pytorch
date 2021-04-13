@@ -2005,15 +2005,24 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_instance_norm(self):
         max_sides = (4, 5)
-        shape_list = ([2, 2, 2, 2], [8, 8, 8, 8], [11, 11, 11, 11], [1, 4, 224, 224, 160])
+        shape_list = ([2, 2, 2, 2], [8, 8, 8, 8], [11, 11, 11, 11])
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
         channels_last_list = (True, False)
         affine_list = (True, False)
         combined = [shape_list, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
-        test_cases = itertools.product(*combined)
-
+        test_cases_product = itertools.product(*combined)
+        test_cases = list(test_case for test_case in test_cases_product)
+        # add just one test case to test overflow
+        test_cases.append([
+            [1, 4, 224, 224, 160],  # shape,
+            torch.qint8,  # torch_type
+            0.1,  # scale
+            0,  # zero_point
+            False,   # channels_last
+            True,  # affine
+        ])
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
