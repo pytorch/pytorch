@@ -410,8 +410,7 @@ script::Module optimizeForMobile(
   }
 
   if (!optimization_blocklist.count(
-          MobileOptimizerType::HOIST_CONV_PACKED_PARAMS) &&
-      optimize_forward) {
+          MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)) {
     // freeze again in case it was not done in previous optional passes
     cloned_module = freeze_module(cloned_module, preserved_list);
     HoistConvPackedParams(cloned_module);

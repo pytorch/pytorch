@@ -54,10 +54,10 @@ class TestOptimizer(TestCase):
         class MyTestModule(torch.nn.Module):
             def __init__(self):
                 super(MyTestModule, self).__init__()
-                self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)))
-                self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))))
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.conv_weight = torch.nn.Parameter(torch.rand(conv_weight_shape))
+                self.conv_bias = torch.nn.Parameter(torch.rand((conv_bias_shape)))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -142,8 +142,8 @@ class TestOptimizer(TestCase):
         class MyMobileOptimizedTagTest(torch.nn.Module):
             def __init__(self):
                 super(MyMobileOptimizedTagTest, self).__init__()
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
 
             def forward(self, x):
                 o = F.linear(x, self.linear_weight, self.linear_bias)
@@ -159,8 +159,8 @@ class TestOptimizer(TestCase):
         class MyPreserveMethodsTest(torch.nn.Module):
             def __init__(self):
                 super(MyPreserveMethodsTest, self).__init__()
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
 
             def forward(self, x):
                 o = F.linear(x, self.linear_weight, self.linear_bias)
@@ -441,6 +441,11 @@ class TestOptimizer(TestCase):
                 self.child = Child()
                 # TODO: test nn.Sequential after #42039 is fixed
                 self.dequant = torch.quantization.DeQuantStub()
+                self.quant2 = torch.quantization.QuantStub()
+                self.conv2 = nn.Conv2d(1, 1, 1)
+                self.child2 = Child()
+                # TODO: test nn.Sequential after #42039 is fixed
+                self.dequant2 = torch.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -449,18 +454,26 @@ class TestOptimizer(TestCase):
                 x = self.dequant(x)
                 return x
 
+            @torch.jit.export
+            def foo(self, x):
+                x = self.quant2(x)
+                x = self.conv2(x)
+                x = self.child2(x)
+                x = self.dequant2(x)
+                return x
+
             def fuse_model(self):
                 pass
 
         with override_quantized_engine('qnnpack'):
-            def _quant_script_and_optimize(model):
+            def _quant_script_and_optimize(model, methods_to_optimize=[]):
                 model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
                 model.fuse_model()
                 torch.quantization.prepare(model, inplace=True)
                 model(torch.randn(4, 1, 4, 4))
                 torch.quantization.convert(model, inplace=True)
                 model = torch.jit.script(model)
-                model_optim = optimize_for_mobile(model)
+                model_optim = optimize_for_mobile(model,methods_to_optimize=methods_to_optimize, optimization_blocklist={MobileOptimizerType.INSERT_FOLD_PREPACK_OPS})
                 return model, model_optim
 
             # basic case
@@ -479,17 +492,22 @@ class TestOptimizer(TestCase):
 
             # generic case
 
-            m, m_optim = _quant_script_and_optimize(Parent())
+            m, m_optim = _quant_script_and_optimize(Parent(), ['foo'])
             FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
                        .check_count("__torch__.torch.classes.quantized.Conv2dPackedParamsBase = prim::Constant", 2, exactly=True) \
                        .run(m_optim.graph)
             self.assertFalse(hasattr(m_optim, "conv1"))
             self.assertFalse(hasattr(m_optim, "child"))
+            self.assertFalse(hasattr(m_optim, "conv2"))
+            self.assertFalse(hasattr(m_optim, "child2"))
 
             data = torch.randn(4, 1, 4, 4)
             m_res = m(data)
             m_optim_res = m_optim(data)
+            m_foo_res = m.foo(data)
+            m_foo_optim_res = m_optim.foo(data)
             torch.testing.assert_allclose(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+            torch.testing.assert_allclose(m_foo_res, m_foo_optim_res, rtol=1e-2, atol=1e-3)
 
     @unittest.skipUnless(HAS_TORCHVISION, "Needs torchvision")
     def test_mobilenet_optimize_for_mobile(self):
