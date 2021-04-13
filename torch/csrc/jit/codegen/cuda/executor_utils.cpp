@@ -322,7 +322,7 @@ NvrtcFunction nvrtcCompile(
     if (val <= 4 && val >= 0) {
       jit_opt_level = static_cast<uint32_t>(val);
       options.push_back(CU_JIT_OPTIMIZATION_LEVEL);
-      option_vals.emplace_back(&jit_opt_level);
+      option_vals.emplace_back((void*)jit_opt_level);
     } else {
       TORCH_WARN_ONCE(
           "acceptable range for PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL is between 0 and 4, but received ",
