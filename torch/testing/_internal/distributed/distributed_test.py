@@ -456,7 +456,9 @@ class DistributedTest:
 
         def _init_full_group_test(self, **kwargs):
             group = list(range(0, dist.get_world_size()))
+            print("DBG: before calling dist.new_group in _init_full_group_test")
             group_id = dist.new_group(**kwargs)
+            print("DBG: after calling dist.new_group in _init_full_group_test")
             rank = dist.get_rank()
             return (group, group_id, rank)
 
@@ -601,7 +603,9 @@ class DistributedTest:
 
         # Test destroy full groups
         def test_destroy_full_group(self):
+            print("DBG: before calling _init_full_group_test in test_destroy_full_group")
             _, group_id, _ = self._init_full_group_test()
+            print("DBG: after calling _init_full_group_test in test_destroy_full_group")
             self._barrier()
             dist.destroy_process_group(group_id)
 
