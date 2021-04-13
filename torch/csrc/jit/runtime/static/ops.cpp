@@ -9,6 +9,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -77,7 +78,7 @@ at::Tensor& flatten_copy_out(
 
   std::vector<int64_t> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
-  for (int64_t i = 0; i < start_dim; i++) {
+  for (const auto i : c10::irange(start_dim)) {
     shape.push_back(self.sizes()[i]);
   }
   shape.push_back(slice_numel);
@@ -105,6 +106,11 @@ namespace torch {
 namespace jit {
 
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
+
+bool opIsRegistered(const c10::Symbol& op_name) {
+  const std::string name(op_name.toQualString());
+  return SROperatorRegistry()->Has(name);
+}
 
 bool canRunOutOfPlace(Node* n) {
   auto op_name = std::string(n->kind().toQualString());
@@ -302,7 +308,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::_cat_out_cpu(out_t, in0_tl, in1_i);
+    at::native::_cat_out_cpu(in0_tl, in1_i, out_t);
   };
 });
 
@@ -335,7 +341,7 @@ REGISTER_OPERATOR_FUNCTOR(
             p_node->Output(0) = create_empty_from(in0_t);
           }
           auto& out_t = p_node->Output(0).toTensor();
-          at::native::leaky_relu_out(out_t, in0_t, in1_s);
+          at::native::leaky_relu_out(in0_t, in1_s, out_t);
         };
       } else {
         return [](ProcessedNode* p_node) {
@@ -345,7 +351,7 @@ REGISTER_OPERATOR_FUNCTOR(
             p_node->Output(0) = create_empty_from(in0_t);
           }
           auto& out_t = p_node->Output(0).toTensor();
-          at::native::leaky_relu_out(out_t, in0_t, in1_s);
+          at::native::leaky_relu_out(in0_t, in1_s, out_t);
         };
       }
     });
@@ -512,7 +518,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       at::native::threshold_out(in0_t, 0, 0, out_t);
     } else {
-      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
@@ -530,7 +536,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       at::native::tanh_out(in0_t, out_t);
     } else {
-      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
@@ -551,7 +557,7 @@ REGISTER_OPERATOR_FUNCTOR(
           fastResizeToZero(out_t);
           at::native::sigmoid_out(in0_t, out_t);
         } else {
-          at::native::resize_as_(out_t, in0_t, c10::nullopt);
+          at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
           (*te)(
               out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
         }
@@ -578,7 +584,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       at::native::logit_out(in0_t, in1_d, out_t);
     } else {
-      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
@@ -591,7 +597,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    at::native::resize_as_(out_t, in0_t, c10::nullopt);
+    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
     at::native::copy_(out_t, in0_t, false);
   };
 });
@@ -646,7 +652,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
-        return at::native::embedding_bag_byte_rowwise_offsets_out(
+        return at::native::embedding_bag_4bit_rowwise_offsets_out(
             out_t,
             weight,
             indices,

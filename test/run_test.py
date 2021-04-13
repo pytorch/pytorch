@@ -2,7 +2,7 @@
 
 import argparse
 import copy
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 import modulefinder
 import os
@@ -22,7 +22,7 @@ from typing_extensions import TypedDict
 
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    from tools.stats_utils.s3_stat_parser import (get_test_stats_summaries_for_job, HAVE_BOTO3)
+    from tools.stats_utils.s3_stat_parser import (get_previous_reports_for_branch, Report, HAVE_BOTO3)
 except ImportError:
     print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
     HAVE_BOTO3 = False
@@ -47,7 +47,6 @@ TESTS = [
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
-    'test_dataset',
     'test_datapipe',
     'distributed/test_data_parallel',
     'distributed/test_distributed_fork',
@@ -113,7 +112,6 @@ TESTS = [
     'distributed/rpc/test_faulty_agent',
     'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
-    'test_jit_py3',
     'test_determination',
     'test_futures',
     'test_fx',
@@ -374,36 +372,7 @@ def get_stripped_CI_job() -> str:
     return job
 
 
-# This function returns a list of S3 test time reports. This function can run into errors if HAVE_BOTO3 = False
-# or the S3 bucket is somehow unavailable. Even though this function goes through ten nightly commits' reports
-# to find a non-empty report, it is still conceivable (though highly unlikely) for this function to return no reports.
-def get_test_time_reports_from_S3() -> List[Dict[str, Any]]:
-    commit_date_ts = subprocess.check_output(
-        ['git', 'show', '-s', '--format=%ct', 'HEAD'],
-        encoding="ascii").strip()
-    commit_date = datetime.fromtimestamp(int(commit_date_ts))
-    day_before_commit = str(commit_date - timedelta(days=1)).split(' ')[0]
-    # something like git rev-list --before="2021-03-04" --max-count=10 --remotes="*origin/nightly"
-    nightly_commits = subprocess.check_output(
-        ["git", "rev-list", f"--before={day_before_commit}", "--max-count=10", "--remotes=*origin/nightly"],
-        encoding="ascii").splitlines()
-
-    stripped_job = get_stripped_CI_job()
-    reports = []
-    commit_index = 0
-    while len(reports) == 0 and commit_index < len(nightly_commits):
-        nightly_commit = nightly_commits[commit_index]
-        print(f'Grabbing reports from nightly commit: {nightly_commit}')
-        summaries = get_test_stats_summaries_for_job(sha=nightly_commit, job_prefix=stripped_job)
-        for job_name, summary in summaries.items():
-            reports.append(summary[0])
-            if len(summary) > 1:
-                print(f'Warning: multiple summary object found for {nightly_commit}/{job_name}')
-        commit_index += 1
-    return reports
-
-
-def calculate_job_times(reports: List[Dict[str, Any]]) -> Dict[str, float]:
+def calculate_job_times(reports: List[Report]) -> Dict[str, float]:
     # an entry will be like ("test_file_name" -> (current_avg, # values))
     jobs_to_times: Dict[str, Tuple[float, int]] = dict()
     for report in reports:
@@ -430,7 +399,8 @@ def calculate_job_times(reports: List[Dict[str, Any]]) -> Dict[str, float]:
 
 def pull_job_times_from_S3() -> Dict[str, float]:
     if HAVE_BOTO3:
-        s3_reports = get_test_time_reports_from_S3()
+        ci_job_prefix = get_stripped_CI_job()
+        s3_reports: List[Report] = get_previous_reports_for_branch('origin/nightly', ci_job_prefix)
     else:
         print('Uh oh, boto3 is not found. Either it is not installed or we failed to import s3_stat_parser.')
         print('If not installed, please install boto3 for automatic sharding and test categorization.')
@@ -1045,7 +1015,8 @@ def export_S3_test_times(test_times_filename: str, test_times: Dict[str, float])
         print(f'Overwriting existent file: {test_times_filename}')
     with open(test_times_filename, 'w+') as file:
         job_times_json = get_job_times_json(test_times)
-        json.dump(job_times_json, file)
+        json.dump(job_times_json, file, indent='    ', separators=(',', ': '))
+        file.write('\n')
 
 def main():
     options = parse_args()

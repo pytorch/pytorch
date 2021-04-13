@@ -12,13 +12,6 @@ namespace c10 {
 
 namespace impl {
 
-// Some keys are ALWAYS considered for inclusion by default, so they are
-// included in the set here.  (const appears to be sufficient for
-// always_included to get inlined, constexpr not necessary)
-// Note DispatchKey::Autograd used to be in this set and it now has been
-// moved to TensorImpl constructor.
-const DispatchKeySet always_included{DispatchKey::BackendSelect};
-
 // Take a DispatchKeySet for a Tensor and determine what the actual dispatch
 // DispatchKey should be, taking into account TLS, and skipping backends which
 // fall through.
@@ -49,7 +42,7 @@ static inline DispatchKeySet computeDispatchKeySet(
   // it's a bit troublesome, because fastpath TLS access requires the type of
   // the TLS in question to be zero-initialized, so you don't actually win
   // anyting in that case.
-  return (((ks | local.included_ | always_included) - local.excluded_) & key_mask);
+  return (((ks | local.included_) - local.excluded_) & key_mask);
 }
 
 }
