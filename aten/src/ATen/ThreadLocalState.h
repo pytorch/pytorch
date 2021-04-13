@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/InferenceMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
@@ -37,6 +38,9 @@ class TORCH_API ThreadLocalState {
   bool keep_grad_mode_ = true;
   bool grad_mode_enabled_;
 #endif
+
+  // TLS for InferenceMode
+  bool inference_mode_enabled_;
 
   // Whether pre-sampling RecordFunction optimization was enabled
   bool bumped_record_all_functions_ = false;
