@@ -1,14 +1,11 @@
 import os
 import sys
-import tempfile
-import random
-from textwrap import dedent
 
 import torch
-from torch.testing._internal.jit_utils import JitTestCase, execWrapper
+from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS
 from collections import namedtuple
-from typing import NamedTuple, List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -387,7 +384,7 @@ class TestTyping(JitTestCase):
 
         def test_single_starred_lhs(self):
             with self.assertRaisesRegex(RuntimeError, 'A Starred expression may only appear on the lhs within the presence'
-                                                    ' of another non-starred expression'):
+                                                      ' of another non-starred expression'):
                 cu = torch.jit.CompilationUnit('''
                 def single_starred_lhs(x):
                     a = (x, x, x)
@@ -485,6 +482,43 @@ class TestTyping(JitTestCase):
         def other_fn(x=None):
             # type: (Optional[int]) -> int
             return torch.jit._unwrap_optional(x)
+
+
+        @torch.jit.script
+        def fn(x):
+            # type: (int) -> int
+            return other_fn(x)
+
+        self.assertEqual(fn(2), 2)
+
+        @torch.jit.script
+        def unify_to_optional(x):
+            # type: (bool) -> Optional[int]
+            if x:
+                a = None
+            else:
+                a = 2
+            return a
+
+        self.assertEqual(unify_to_optional(True), None)
+        self.assertEqual(unify_to_optional(False), 2)
+
+        @torch.jit.script
+        def opt_list(x):
+            # type: (Optional[List[float]]) -> int
+            return 2
+
+        @torch.jit.script
+        def broadcast_opt_list(x):
+            # type: (Optional[BroadcastingList2[float]]) -> int
+            return 2
+
+        @torch.jit.script
+        def opt_list_tuple_caller(x):
+            # type: (Tuple[float, float]) -> int
+            return opt_list(x) + broadcast_opt_list(x)
+
+        self.assertEqual(opt_list_tuple_caller((2., 3.)), 4)
 
     def test_optional_tuple(self):
         def fn(x=None):
