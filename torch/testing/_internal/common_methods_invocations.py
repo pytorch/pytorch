@@ -1098,7 +1098,7 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
 def _generate_reduction_inputs(device, dtype, requires_grad):
     yield make_tensor((), device, dtype, requires_grad=requires_grad)
     yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
-    yield make_tensor((2, 3), device, dtype, requires_grad=requires_grad, discontiguous=True)
+    yield make_tensor((2, 3), device, dtype, requires_grad=requires_grad, noncontiguous=True)
     yield make_tensor((3, 2, 1, 2, 2), device, dtype, requires_grad=requires_grad)
 
 # Generates a subset of possible dim and keepdim kwargs for a tensor
