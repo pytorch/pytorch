@@ -74,6 +74,8 @@ class DispatchKey(Enum):
     MkldnnCPU = auto()
     SparseCPU = auto()
     SparseCUDA = auto()
+    SparseCsrCPU = auto()
+    SparseCsrCUDA = auto()
     SparseHIP = auto()
     SparseXPU = auto()
     NestedTensor = auto()
@@ -269,8 +271,6 @@ class NativeFunction:
 
         use_const_ref_for_mutable_tensors = e.pop('use_const_ref_for_mutable_tensors', False)
         assert isinstance(use_const_ref_for_mutable_tensors, bool)
-        if "resize" in str(func.name):
-            assert use_const_ref_for_mutable_tensors, "oh no " + func
 
         variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
@@ -746,7 +746,6 @@ class Annotation:
     # we can conveniently assume it is canonically ordered
     alias_set: Tuple[str, ...]
     is_write: bool
-    is_const_ref_write: bool
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
@@ -754,17 +753,14 @@ class Annotation:
         assert m is not None, f'unrecognized alias annotation {ann}'
         alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
-        is_const_ref_write = m.group(3) == '!'
-        r = Annotation(alias_set=alias_set, is_write=is_write,
-                       is_const_ref_write=is_const_ref_write)
+        r = Annotation(alias_set=alias_set, is_write=is_write)
         assert str(r) == ann, f'{r} != {ann}'
         return r
 
     def __str__(self) -> str:
         alias_set = '|'.join(self.alias_set)
         is_write = '!' if self.is_write else ''
-        is_const_ref_write = '!' if self.is_const_ref_write else ''
-        return f'{alias_set}{is_write}{is_const_ref_write}'
+        return f'{alias_set}{is_write}'
 
 # The base class for the type system.  This is also loosely modeled
 # off of jit_type.h, but we've simplified the hierarchy to focus
@@ -1107,22 +1103,6 @@ class Arguments:
             ret.append(self.tensor_options)
         ret.extend(self.post_tensor_options_kwarg_only)
         return ret
-
-    # NB: contains out args.
-    @property
-    def tensor_args(self) -> Sequence[Union[Argument, SelfArgument]]:
-        ret: List[Union[Argument, SelfArgument]] = []
-        candidates: List[Union[Argument, SelfArgument]] = []
-        candidates.extend(self.positional)
-        candidates.extend(self.pre_tensor_options_kwarg_only)
-        candidates.extend(self.post_tensor_options_kwarg_only)
-        candidates.extend(self.out)
-        for arg in candidates:
-            a = arg.argument if isinstance(arg, SelfArgument) else arg
-            if a.type.is_tensor_like():
-                ret.append(arg)
-        return ret
-
 
     def signature(self, *, strip_default: bool = False) -> 'Arguments':
         # dataclasses.replace could be used here, but it is less

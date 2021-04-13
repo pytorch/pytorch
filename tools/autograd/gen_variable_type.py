@@ -22,6 +22,7 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
+from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, declare_returned_variables,
     tie_return_values, get_return_value, type_wrapper_name,
@@ -87,7 +88,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
     'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d',
-    'reflection_pad1d_backward', 'reflection_pad2d_backward',
+    'reflection_pad1d_backward', 'reflection_pad2d_backward', 'symeig',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d', 'take', 'put_',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
@@ -201,10 +202,6 @@ std::shared_ptr<${op}> grad_fn;
 SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
 auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
 (void)_any_requires_grad;
-""")
-
-SETUP_ASSERT_NO_INFERENCE_TENSOR = CodeTemplate("""\
-assert_no_inference_tensor( ${tensor_args} );
 """)
 
 SETUP_DERIVATIVE = CodeTemplate("""\
@@ -342,6 +339,7 @@ def gen_variable_type_shard(
         'wrapper_registrations': wrapper_registrations,
     })
 
+@with_native_function_with_differentiability_info
 def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     assert dispatch_strategy(fn) == 'use_derived'
     f = fn.func
@@ -664,15 +662,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         return [SETUP_ANY_REQUIRES_GRAD.substitute(
             args_with_derivatives=[arg.name for arg in args_with_derivatives]), ]
 
-    def emit_assert_no_inference_tensor() -> List[str]:
-        tensor_arg_names = []
-        for arg in f.func.arguments.tensor_args:
-            a = arg.argument if isinstance(arg, SelfArgument) else arg
-            tensor_arg_names.append(a.name)
-        return [SETUP_ASSERT_NO_INFERENCE_TENSOR.substitute(
-            tensor_args=tensor_arg_names
-        )]
-
     def emit_check_inplace() -> List[str]:
         if not inplace:
             return []
@@ -684,13 +673,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     body.extend(unpack_args_stats)
     if requires_derivative:
         body.extend(emit_any_requires_grad())
-        body.extend(emit_assert_no_inference_tensor())
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables(f))
 
-    with native_function_manager(f):
-        body.append(emit_call(f, unpacked_bindings))
+    body.append(emit_call(f, unpacked_bindings))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
