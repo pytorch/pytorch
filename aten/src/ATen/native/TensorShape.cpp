@@ -734,11 +734,10 @@ Tensor expand(const Tensor& self, IntArrayRef size, bool implicit) {
            "must be greater or equal to the number of dimensions in the tensor (",
            self.dim(), ")");
 
-  std::vector<int64_t> expandedSizes;
-  std::vector<int64_t> expandedStrides;
-  std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self.sizes(), self.strides(), size);
+  auto expandedSizesAndStrides = inferExpandGeometry_dimvector(self.sizes(), self.strides(), size);
 
-  auto result = self.as_strided(expandedSizes, expandedStrides);
+  auto result = self.as_strided(
+      std::get<0>(expandedSizesAndStrides), std::get<1>(expandedSizesAndStrides));
   namedinference::propagate_names_for_expand(result, self);
   return result;
 }
@@ -1310,7 +1309,10 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
 std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
   auto result = at::native::split(self, split_size, dim);
   for (auto& t : result) {
-    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
+    // TODO(Ailing): do we need to set version_counter here?
+    if (!t.unsafeGetTensorImpl()->is_inference_tensor()) {
+      t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
+    }
   }
   return result;
 }
@@ -1339,7 +1341,10 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
 std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   auto result = at::native::split_with_sizes(self, split_sizes, dim);
   for (auto& t : result) {
-    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
+    // TODO(Ailing): do we need to set version_counter here?
+    if (!t.unsafeGetTensorImpl()->is_inference_tensor()) {
+      t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
+    }
   }
   return result;
 }
