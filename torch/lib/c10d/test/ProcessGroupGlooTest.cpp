@@ -584,16 +584,14 @@ void testRecv(const std::string& path) {
 void testSetGet(const std::string& path) {
   const auto size = 2;
   auto tests = CollectiveTest::initialize(path, size);
-
   constexpr uint64_t tag = 0x1337;
+
   // test that get() gets the same value as the one that was set()
   std::vector<uint8_t> testVector = {1, 1, 1, 1};
-  for (auto selfRank = 0; selfRank < size ; selfRank++) {
-    auto store = tests[selfRank].getProcessGroup().getStore();
-    store.set("testKey", testVector);
-  }
-
-  std::vector<uint8_t> value = store.get("testKey", -1);
+  auto store1 = tests[0].getProcessGroup().getStore();
+  store1->setUint("testKey", testVector);
+  auto store2 = tests[1].getProcessGroup().getStore();
+  std::vector<uint8_t> value = store2->getUint("testKey");
   EXPECT_TRUE(value == testVector);
 }
 
