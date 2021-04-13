@@ -152,41 +152,6 @@ static void setRequiresGradOnDiffGraph(Node* dnode) {
           gi[i]->debugName());
     }
   }
-
-  // We also need to put requires_grad on outputs within subgraph, so autodiff
-  // can  set df_input_vjps and DifferentiableGraphOp can set `requires_grad=`
-  // properly
-  auto go = dnode->g(attr::Subgraph)->outputs();
-  for (size_t i = 0; i < go.size(); i++) {
-    auto ty = go[i]->type()->cast<TensorType>();
-    if (ty) {
-      auto n = go[i]->node();
-      auto dno = dnode->outputs().at(i);
-      auto dno_use0 = dno->uses().at(0);
-      GRAPH_DEBUG("found first user of ", i, " as ", *dno_use0.user);
-      if (n->kind() == prim::profile) {
-        GRAPH_DEBUG(
-            "setting output ", i, " to type ", *n->ty(attr::profiled_type));
-        go[i]->setType(n->ty(attr::profiled_type));
-      } else if (dno_use0.user->kind() == prim::profile) {
-        GRAPH_DEBUG(
-            "setting output ",
-            i,
-            " to type ",
-            *dno_use0.user->ty(attr::profiled_type));
-        go[i]->setType(dno_use0.user->ty(attr::profiled_type));
-      } else if (dno_use0.user->kind() == prim::DifferentiableGraph) {
-        Value* o =
-            dno_use0.user->g(attr::Subgraph)->inputs().at(dno_use0.offset);
-        auto nn = o->uses().at(0).user;
-        if (nn->kind() == prim::profile) {
-          GRAPH_DEBUG(
-              "setting output ", i, " to type ", *nn->ty(attr::profiled_type));
-          go[i]->setType(nn->ty(attr::profiled_type));
-        }
-      }
-    }
-  }
 }
 
 bool guardDifferentiableGraph(Node* dnode) {
