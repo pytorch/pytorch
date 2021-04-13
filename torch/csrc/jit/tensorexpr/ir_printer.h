@@ -83,6 +83,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   }
   void emitIndent();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   int indent_ = 0;
 
  private:
