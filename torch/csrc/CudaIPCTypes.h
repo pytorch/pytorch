@@ -1,5 +1,6 @@
 #pragma once
 #ifdef USE_CUDA
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
@@ -8,10 +9,9 @@
 #include <c10/util/Logging.h>
 #include <cuda_runtime_api.h>
 #include <cstddef>
-
 namespace torch {
 
-bool CudaIPCCollect();
+TORCH_CUDA_CU_API bool CudaIPCCollect();
 
 struct CudaIPCReceivedData final {
   explicit CudaIPCReceivedData(std::shared_ptr<void> shared_ptr)
@@ -47,7 +47,7 @@ struct CudaIPCSentData final {
   }
 };
 
-at::DataPtr GetNewRefCountedSentData(void* data, at::Device device);
+TORCH_CUDA_CU_API at::DataPtr GetNewRefCountedSentData(void* data, at::Device device);
 
 namespace {
 
@@ -63,6 +63,7 @@ constexpr int64_t CUDA_IPC_MAXIMUM_EVENTS_TO_USE = 1000;
 struct CudaIPCSentDataLimbo final {
   ~CudaIPCSentDataLimbo();
   bool collect();
+  void clear_shared_blocks();
   void add(std::unique_ptr<CudaIPCSentData> shared_block);
   uint64_t size() {
     return shared_blocks_.size();

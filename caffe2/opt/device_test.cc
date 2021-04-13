@@ -60,10 +60,10 @@ TEST(DeviceTest, InsertCopies) {
         return c2_annot->getDeviceType() == caffe2::PROTO_OPENCL;
       },
       [](NNGraph& g) {
-        return g.createNode(nom::util::make_unique<GenericOperator>());
+        return g.createNode(std::make_unique<GenericOperator>());
       },
       [](NNGraph& g) {
-        return g.createNode(nom::util::make_unique<GenericOperator>());
+        return g.createNode(std::make_unique<GenericOperator>());
       });
 
   auto proto = caffe2::convertToCaffe2Proto(nn, net);

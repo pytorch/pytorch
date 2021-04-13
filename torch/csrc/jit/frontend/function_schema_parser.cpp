@@ -173,6 +173,8 @@ struct SchemaParser {
         auto text = tok.text();
         if ("float" == text) {
           return static_cast<int64_t>(at::kFloat);
+        } else if ("complex" == text) {
+          return static_cast<int64_t>(at::kComplexFloat);
         } else if ("long" == text) {
           return static_cast<int64_t>(at::kLong);
         } else if ("strided" == text) {
@@ -191,7 +193,12 @@ struct SchemaParser {
           n = "-" + L.expect(TK_NUMBER).text();
         else
           n = L.expect(TK_NUMBER).text();
-        if (kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
+
+        if (kind == TypeKind::ComplexType || n.find('j') != std::string::npos) {
+          auto imag = c10::stod(n.substr(0, n.size() - 1));
+          return c10::complex<double>(0, imag);
+        } else if (
+            kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
             n.find('e') != std::string::npos) {
           return c10::stod(n);
         } else {
@@ -205,6 +212,8 @@ struct SchemaParser {
       const SourceRange& range,
       const std::vector<IValue>& vs) {
     switch (kind) {
+      case TypeKind::ComplexType:
+        return fmap(vs, [](const IValue& v) { return v.toComplexDouble(); });
       case TypeKind::FloatType:
         return fmap(vs, [](const IValue& v) { return v.toDouble(); });
       case TypeKind::IntType:
@@ -213,7 +222,7 @@ struct SchemaParser {
         return fmap(vs, [](const IValue& v) { return v.toBool(); });
       default:
         throw ErrorReport(range)
-            << "lists are only supported for float or int types";
+            << "lists are only supported for float, int and complex types";
     }
   }
   IValue parseConstantList(TypeKind kind) {
@@ -248,6 +257,7 @@ struct SchemaParser {
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
+      case TypeKind::ComplexType:
         return parseSingleConstant(arg_type->kind());
         break;
       case TypeKind::DeviceObjType: {
@@ -257,7 +267,7 @@ struct SchemaParser {
         break;
       }
       case TypeKind::ListType: {
-        auto elem_kind = arg_type->cast<ListType>()->getElementType();
+        auto elem_kind = arg_type->castRaw<ListType>()->getElementType();
         if (L.cur().kind == TK_IDENT) {
           return parseTensorDefault(range);
         } else if (arg_N && L.cur().kind != '[') {

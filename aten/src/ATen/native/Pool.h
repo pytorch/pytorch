@@ -46,6 +46,24 @@ static inline T pooling_output_shape(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
 }
 
+inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
+    int64_t inputSize, int64_t kernelSize, int64_t stride, int64_t dilation) {
+  // NOTE: with strides, the output shape is ceil(inputSize/stride)
+  auto total_padding = dilation * (kernelSize - 1);
+
+  // Prefer symmetric padding if possible
+  if (stride > 2 && (total_padding % 2 == 1)) {
+    // The floor in the output size calculation gives us a little wiggle room
+    auto wiggle_room = inputSize % stride - 1;
+    if (wiggle_room > 0) {
+      --total_padding;
+    }
+  }
+
+  auto left = total_padding / 2;
+  return {left, total_padding - left};
+}
+
 
 // AveragePool2d/DilatedMaxPool2d (forward)
 static inline void
@@ -68,7 +86,7 @@ pool2d_shape_check(
   TORCH_CHECK(dilationH > 0 && dilationW > 0,
               "dilation should be greater than zero, but got ",
               "dilationH: ", dilationH, " dilationW: ", dilationW);
-  
+
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
   if (memory_format == at::MemoryFormat::ChannelsLast){
     // Expect tensor in NHWC format and allow 0-dim only for N.
@@ -81,7 +99,7 @@ pool2d_shape_check(
       "Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got:",
       input.sizes());
   }
-  
+
   TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
               "pad should be smaller than or equal to half of kernel size, but got ",
               "padW = ", padW, ", padH = ", padH, ", kW = ", kW, ", kH = ", kH);

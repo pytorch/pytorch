@@ -1,6 +1,9 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#ifdef FBCODE_CAFFE2
+#include <folly/synchronization/SanitizeThread.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -17,11 +20,6 @@ C10_DEFINE_bool(
     "of throwing an exception.");
 
 namespace c10 {
-namespace enforce_detail {
-/* implicit */ EnforceFailMessage::EnforceFailMessage(std::string&& msg) {
-  msg_ = new std::string(std::move(msg));
-}
-} // namespace enforce_detail
 
 namespace {
 std::function<string(void)>* GetFetchStackTrace() {
@@ -49,6 +47,15 @@ void ThrowEnforceNotMet(
   throw e;
 }
 
+void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const char* msg,
+    const void* caller) {
+  ThrowEnforceNotMet(file, line, condition, std::string(msg), caller);
+}
+
 void ThrowEnforceFiniteNotMet(
     const char* file,
     const int line,
@@ -59,6 +66,15 @@ void ThrowEnforceFiniteNotMet(
       file, line, condition, msg, (*GetFetchStackTrace())(), caller);
 }
 
+void ThrowEnforceFiniteNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const char* msg,
+    const void* caller) {
+
+  ThrowEnforceFiniteNotMet(file, line, condition, std::string(msg), caller);
+}
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
 Error::Error(SourceLocation source_location, std::string msg)
@@ -70,6 +86,7 @@ Error::Error(SourceLocation source_location, std::string msg)
               (*GetFetchStackTrace())())) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
+using DDPUsageLoggerType = std::function<void(const c10::DDPLoggingData&)>;
 
 namespace {
 bool IsAPIUsageDebugMode() {
@@ -87,6 +104,11 @@ APIUsageLoggerType* GetAPIUsageLogger() {
       IsAPIUsageDebugMode() ? &APIUsageDebug : [](const string&) {};
   return &func;
 };
+
+DDPUsageLoggerType* GetDDPUsageLogger() {
+  static DDPUsageLoggerType func = [](const c10::DDPLoggingData&) {};
+  return &func;
+};
 } // namespace
 
 void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
@@ -94,9 +116,21 @@ void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
   *GetAPIUsageLogger() = logger;
 }
 
+void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger) {
+  TORCH_CHECK(logger);
+  *GetDDPUsageLogger() = logger;
+}
+
 void LogAPIUsage(const std::string& event) try {
   if (auto logger = GetAPIUsageLogger())
     (*logger)(event);
+} catch (std::bad_function_call&) {
+  // static destructor race
+}
+
+void LogPyTorchDDPUsage(const c10::DDPLoggingData& ddpData) try {
+  if (auto logger = GetDDPUsageLogger())
+    (*logger)(ddpData);
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -182,6 +216,10 @@ bool InitCaffeLogging(int* argc, char** argv) {
 }
 
 void UpdateLoggingLevelsFromFlags() {
+#ifdef FBCODE_CAFFE2
+  // TODO(T82645998): Fix data race exposed by TSAN.
+  folly::annotate_ignore_thread_sanitizer_guard g(__FILE__, __LINE__);
+#endif
   // If caffe2_log_level is set and is lower than the min log level by glog,
   // we will transfer the caffe2_log_level setting to glog to override that.
   FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);

@@ -198,6 +198,44 @@
         root: /Users/distiller/project
         paths: final_pkgs
 
+    - store_artifacts:
+        path: /Users/distiller/project/final_pkgs
+
+  binary_macos_arm64_build:
+    <<: *binary_mac_params
+    macos:
+      xcode: "12.3.0"
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - checkout
+    - run:
+        <<: *binary_checkout
+    - run:
+        <<: *binary_populate_env
+    - brew_update
+    - run:
+        <<: *binary_install_miniconda
+
+    - run:
+        name: Build
+        no_output_timeout: "90m"
+        command: |
+          # Do not set -u here; there is some problem with CircleCI
+          # variable expansion with PROMPT_COMMAND
+          set -ex -o pipefail
+          export CROSS_COMPILE_ARM64=1
+          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
+          cat "$script"
+          source "$script"
+
+    - persist_to_workspace:
+        root: /Users/distiller/project
+        paths: final_pkgs
+
+    - store_artifacts:
+        path: /Users/distiller/project/final_pkgs
+
+
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
@@ -270,6 +308,8 @@
     - persist_to_workspace:
         root: "C:/w"
         paths: final_pkgs
+    - store_artifacts:
+        path: C:/w/final_pkgs
 
   binary_windows_test:
     <<: *binary_windows_params
@@ -352,4 +392,3 @@
           command: |
               ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}" \
               scripts/release/anaconda-prune/run.sh
-

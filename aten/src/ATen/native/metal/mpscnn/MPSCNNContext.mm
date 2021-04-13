@@ -1,7 +1,8 @@
 #import <ATen/native/metal/MetalShaders.h>
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 
-#include <torch/script.h>
+#include <c10/util/Exception.h>
+
 #include <mutex>
 
 #if C10_IOS
@@ -22,7 +23,7 @@
     instance = [[MPSCNNContext alloc] init];
     instance->_device = MTLCreateSystemDefaultDevice();
     instance->_library = [instance.device
-        newLibraryWithSource:[NSString stringWithUTF8String:METAL_SHADERS]
+        newLibraryWithSource:[NSString stringWithUTF8String:PT_METAL_SHADERS]
                      options:nil
                        error:nil];
     instance->_commandQueue = [instance.device newCommandQueue];
@@ -69,17 +70,17 @@
 }
 
 - (id<MTLComputePipelineState>)pipelineState:(NSString*)kernel {
-  TORCH_CHECK(_library, "Failed to load kernels");
+  TORCH_CHECK(_library, "Failed to load Metal shaders");
   std::lock_guard<std::mutex> g(_pipelineCacheMutex);
   id<MTLComputePipelineState> state = _pipelineCache[kernel];
   if (state) {
     return state;
   }
   id<MTLFunction> func = [_library newFunctionWithName:kernel];
-  TORCH_CHECK(func != nil, "Failed to load the kernel function", kernel);
+  TORCH_CHECK(func, "Failed to load the Metal Shader function: ", kernel);
   NSError* errors;
   state = [_device newComputePipelineStateWithFunction:func error:&errors];
-  TORCH_CHECK(state != nil, errors.localizedDescription.UTF8String);
+  TORCH_CHECK(state, errors.localizedDescription.UTF8String);
   _pipelineCache[kernel] = state;
   return state;
 }
@@ -87,7 +88,7 @@
 - (id<MTLComputePipelineState>)specializedPipelineState:(NSString*)kernel
                                               Constants:(NSArray<NSNumber*>*)
                                                             constants {
-  TORCH_CHECK(_library, "Failed to load kernels");
+  TORCH_CHECK(_library, "Failed to load Metal shaders");
   std::string kernelStr = std::string([kernel UTF8String]);
   for (auto i = 0; i < constants.count; ++i) {
     kernelStr += "_" + std::string([constants[i] stringValue].UTF8String);
@@ -126,10 +127,9 @@
   id<MTLFunction> func = [_library newFunctionWithName:kernel
                                         constantValues:constantValues
                                                  error:&errors];
-  TORCH_CHECK(
-      func, "Couldn't get function: ", errors.localizedDescription.UTF8String);
+  TORCH_CHECK(func, errors.localizedDescription.UTF8String);
   state = [_device newComputePipelineStateWithFunction:func error:&errors];
-  TORCH_CHECK(state != nil, errors.localizedDescription.UTF8String);
+  TORCH_CHECK(state, errors.localizedDescription.UTF8String);
   kernel = [NSString stringWithCString:kernelStr.c_str()
                               encoding:NSUTF8StringEncoding];
   _pipelineCache[kernel] = state;

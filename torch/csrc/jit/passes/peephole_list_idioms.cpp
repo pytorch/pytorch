@@ -129,14 +129,15 @@ struct ListLenRefiner {
       std::unordered_set<Value*>& mutated_lists)
       : graph_(std::move(graph)), mutated_lists_(mutated_lists) {}
 
-  void run() {
+  bool run() {
     std::unordered_set<Value*> li_with_len_use;
     collectListsToRefine(graph_->block(), li_with_len_use);
     if (lists_to_refine_.size() == 0) {
-      return;
+      return false;
     }
     ListRefinement refinements;
     RefineListLens(graph_->block(), refinements);
+    return changed_;
   }
 
   // we only need to analyze lists that have multiple uses of len(), and we can
@@ -193,6 +194,7 @@ struct ListLenRefiner {
       }
       if (n->kind() == aten::len) {
         if (auto maybe_len = tryFindRefinement(n->inputs().at(0))) {
+          changed_ = true;
           WithInsertPoint guard(n);
           n->output()->replaceAllUsesWith(
               graph_->insertConstant(static_cast<int64_t>(*maybe_len)));
@@ -305,6 +307,7 @@ struct ListLenRefiner {
   // A map from Boolean Value * -> associated refinements
   std::unordered_map<Value*, BoolRefinements> info_;
   std::unordered_set<Block*> throwing_blocks_;
+  bool changed_ = false;
 };
 
 // This pass only does optimizations on lists which aren't mutated,
@@ -315,12 +318,16 @@ struct PeepholeOptimizeListIdiomsImpl {
       std::shared_ptr<Graph> graph,
       bool refine_list_len)
       : graph_(std::move(graph)),
-        aliasDb_(torch::make_unique<AliasDb>(graph_)) {
+        aliasDb_(torch::make_unique<AliasDb>(graph_)),
+        refine_list_len_(refine_list_len) {}
+
+  bool run() {
     collectMutatedLists(graph_->block());
-    run(graph_->block());
-    if (refine_list_len) {
-      ListLenRefiner(graph_, mutated_lists_).run();
+    bool changed = runBlock(graph_->block());
+    if (refine_list_len_) {
+      changed |= ListLenRefiner(graph_, mutated_lists_).run();
     }
+    return changed;
   }
 
  private:
@@ -344,10 +351,11 @@ struct PeepholeOptimizeListIdiomsImpl {
     }
   }
 
-  void run(Block* block) {
+  bool runBlock(Block* block) {
+    bool changed = false;
     for (Node* node : block->nodes()) {
       for (Block* b : node->blocks()) {
-        run(b);
+        changed |= runBlock(b);
       }
 
       // only optimizing list ops
@@ -368,6 +376,7 @@ struct PeepholeOptimizeListIdiomsImpl {
           WithInsertPoint guard(node);
           node->output()->replaceAllUsesWith(graph_->insertConstant(
               static_cast<int64_t>(first_input->node()->inputs().size())));
+          changed = true;
         }
       } else if (node->kind() == aten::__getitem__) {
         auto list_creation_node = first_input->node();
@@ -377,6 +386,7 @@ struct PeepholeOptimizeListIdiomsImpl {
             if (auto norm_index = normalizeIndex(index->toInt(), list_size)) {
               node->output()->replaceAllUsesWith(
                   list_creation_node->inputs().at(*norm_index));
+              changed = true;
             }
           }
         }
@@ -390,6 +400,7 @@ struct PeepholeOptimizeListIdiomsImpl {
           for (size_t i = 0; i < node->outputs().size(); ++i) {
             node->output(i)->replaceAllUsesWith(
                 list_creation_node->inputs().at(i));
+            changed = true;
           }
         }
       } else if (node->kind() == aten::add) {
@@ -419,19 +430,23 @@ struct PeepholeOptimizeListIdiomsImpl {
         if (mutated_lists_.count(node->output())) {
           mutated_lists_.insert(list_construct->output());
         }
+        changed = true;
       }
     }
+    return changed;
   }
 
   std::unordered_set<Value*> mutated_lists_;
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
+  bool refine_list_len_;
 };
 
-void PeepholeOptimizeListIdioms(
+bool PeepholeOptimizeListIdioms(
     const std::shared_ptr<Graph>& graph,
     bool refine_list_len) {
   PeepholeOptimizeListIdiomsImpl opt(graph, refine_list_len);
+  return opt.run();
 }
 
 } // namespace jit

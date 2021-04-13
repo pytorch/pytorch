@@ -6,38 +6,10 @@
 namespace at {
 namespace meta {
 
-static std::array<int64_t, 3> upsample_nearest1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
-  TORCH_CHECK(
-      output_size.size() == 1,
-      "It is expected output_size equals to 1, but got size ",
-      output_size.size());
-
-  TORCH_CHECK(
-      input_size.size() == 3,
-      "It is expected input_size equals to 3, but got size ",
-      input_size.size());
-
-  int64_t output_width = output_size[0];
-
-  int64_t nbatch = input_size[0];
-  int64_t channels = input_size[1];
-  int64_t input_width = input_size[2];
-
-  TORCH_CHECK(
-      input_width > 0 && output_width > 0,
-      "Input and output sizes should be greater than 0, but got input (W: ",
-      input_width,
-      ") and output (W: ",
-      output_width,
-      ")");
-
-  return {nbatch, channels, output_width};
-}
-
 TORCH_META_FUNC(upsample_nearest1d) (
   const Tensor& input, IntArrayRef output_size, c10::optional<double> scales
 ) {
-  auto full_output_size = upsample_nearest1d_common_check(input.sizes(), output_size);
+  auto full_output_size = native::upsample_1d_common_check(input.sizes(), output_size);
 
   // Allow for empty batch size but not other dimensions
   TORCH_CHECK(
@@ -51,7 +23,7 @@ TORCH_META_FUNC(upsample_nearest1d) (
 TORCH_META_FUNC(upsample_nearest1d_backward) (
   const Tensor& grad_output, IntArrayRef output_size, IntArrayRef input_size, c10::optional<double> scales
 ) {
-  auto full_output_size = upsample_nearest1d_common_check(input_size, output_size);
+  auto full_output_size = native::upsample_1d_common_check(input_size, output_size);
 
   check_dim_size(grad_output, 3, 0, full_output_size[0]);
   check_dim_size(grad_output, 3, 1, full_output_size[1]);
@@ -69,7 +41,7 @@ TORCH_IMPL_FUNC(upsample_nearest1d_out_cpu) (
     const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales,
-    Tensor& output
+    const Tensor& output
 ) {
   upsample_nearest1d_kernel(kCPU, output, input, scales);
 }
@@ -79,7 +51,7 @@ TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_cpu) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     c10::optional<double> scales,
-    Tensor& grad_input
+    const Tensor& grad_input
 ) {
   grad_input.zero_();
   upsample_nearest1d_backward_kernel(kCPU, grad_input, grad_output, scales);

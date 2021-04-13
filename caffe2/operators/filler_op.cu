@@ -32,6 +32,8 @@ bool RangeFillOp<float, CUDAContext>::Fill(Tensor* output) {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, output->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -53,6 +55,8 @@ bool DiagonalFillOp<CUDAContext>::FillWithType(Tensor* output) {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(num_diagonal_elements, step_size, value, data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

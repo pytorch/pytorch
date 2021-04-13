@@ -364,7 +364,7 @@ class Vec256<ComplexDbl> {
   }
 
   Vec256<ComplexDbl> sqrt() const {
-    return map(std::sqrt);  
+    return map(std::sqrt);
   }
 
   Vec256<ComplexDbl> reciprocal() const {
@@ -594,4 +594,3 @@ Vec256<ComplexDbl> inline minimum(
 } // namespace
 } // namespace vec256
 } // namespace at
-

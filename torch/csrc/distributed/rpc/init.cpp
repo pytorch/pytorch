@@ -120,7 +120,10 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
           .def(
-              "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
+              "join",
+              &RpcAgent::join,
+              py::call_guard<py::gil_scoped_release>(),
+              py::arg("shutdown") = false)
           .def(
               "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
           .def(
@@ -263,9 +266,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_sync",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::RPC_SYNC);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::RPC_SYNC, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch an ``rpc_sync`` using
@@ -279,6 +284,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>>
                   >>> rpc.rpc_sync(rref.owner(), run, args=(rref, func_name, args, kwargs))
 
+                  Args:
+                      timeout (float, optional): Timeout for ``rref.rpc_sync()``.
+                          If the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this argument
+                          is not provided, the default RPC timeout will be used.
+
                   Example::
                       >>> from torch.distributed import rpc
                       >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
@@ -287,9 +298,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_async",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::RPC_ASYNC);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::RPC_ASYNC, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch an ``rpc_async`` using
@@ -303,6 +316,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>>
                   >>> rpc.rpc_async(rref.owner(), run, args=(rref, func_name, args, kwargs))
 
+                  Args:
+                      timeout (float, optional): Timeout for ``rref.rpc_async()``.
+                          If the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this argument
+                          is not provided, the default RPC timeout will be used.
+
                   Example::
                       >>> from torch.distributed import rpc
                       >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
@@ -311,9 +330,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "remote",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::REMOTE);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::REMOTE, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch a ``remote`` using
@@ -326,6 +347,16 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>>   return getattr(rref.local_value(), func_name)(*args, **kwargs)
                   >>>
                   >>> rpc.remote(rref.owner(), run, args=(rref, func_name, args, kwargs))
+
+                  Args:
+                      timeout (float, optional): Timeout for ``rref.remote()``. If
+                          the creation of this :class:`~torch.distributed.rpc.RRef`
+                          is not successfully completed within the timeout, then the
+                          next time there is an attempt to use the RRef
+                          (such as ``to_here``), a timeout will be raised. If not
+                          provided, the default RPC timeout will be used. Please see
+                          ``rpc.remote()`` for specific timeout semantics for
+                          :class:`~torch.distributed.rpc.RRef`.
 
                   Example::
                       >>> from torch.distributed import rpc
@@ -373,13 +404,30 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               // Intentionally not releasing GIL, as most accesses just
               // retrieve cached type py::object
               &PyRRef::getRRefType,
+              py::arg("timeout") = kUnsetRpcTimeout,
+              py::arg("blocking") = true,
               R"(
-                  Returns the type of the data object referenced by this
-                  ``RRef``. On the owner, this is same as
-                  ``type(rref.local_value())``. On a user, this will trigger an
-                  RPC to fetch the ``type`` object from the owner. After this
-                  function is run once, the ``type`` object is cached by the
-                  ``RRef``, and subsequent invocations no longer trigger RPC.
+                  If ``blocking=True``, returns the type of the data object
+                  referenced by this ``RRef``. On the owner, this is same as
+                  ``type(rref.local_value())``. Otherwise, returns a future to
+                  this result. On a user, this will trigger an RPC to fetch the
+                  ``type`` object from the owner. After this function is run
+                  once, the ``type`` object is cached by the ``RRef``, and
+                  subsequent invocations no longer trigger RPC. Note that this is
+                  true regardless of the ``blocking`` argument of subsequent
+                  calls.
+
+                  Args:
+                    rref (torch.distributed.rpc.RRef): The RRef to get type of.
+                    timeout (float, optional): Timeout, in seconds for
+                          ``_get_type``. If the call does not complete within
+                          this timeframe, an exception indicating so will be
+                          raised. If this argument is not provided, the default
+                          RPC timeout will be used.
+                    blocking (bool, optional): Whether to synchronously wait on
+                          the RPC triggered by the first call and return the
+                          type. If ``False``, will return a future. Default is
+                          ``True``.
               )")
           .def(
               "_get_future",
@@ -494,11 +542,13 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       py::cast(kDefaultNumSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
-      .def(py::init([](std::string workerName,
+      .def(py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                       std::string workerName,
                        const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
         return std::make_unique<ProcessGroupAgent>(
+            store,
             std::move(workerName),
             pg,
             numSendRecvThreads,
@@ -528,7 +578,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "join",
           &ProcessGroupAgent::join,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          py::arg("shutdown") = false)
       .def(
           "shutdown",
           &ProcessGroupAgent::shutdown,
@@ -601,7 +652,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "join",
           &TensorPipeAgent::join,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          py::arg("shutdown") = false)
       .def(
           "shutdown",
           &TensorPipeAgent::shutdown,
@@ -705,26 +757,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
          std::vector<torch::Tensor>& tensors,
          const float rpcTimeoutSeconds,
          const bool isAsyncExecution) {
-        return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcPythonUdf(
-                dst,
-                pickledPythonUDF,
-                tensors,
-                rpcTimeoutSeconds,
-                isAsyncExecution),
-            /* unwrap_func */ [](const py::object& value) {
-              py::gil_scoped_release release;
-              auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-              // This will unwrap RemoteException and raise the contained
-              // server-side Python exception on client side. A caveat here is
-              // that the exception must be raise in the client thread calling
-              // the pybind "wait" API, so that it can be correctly shown to
-              // user. A wrong way is to raise it in RPC server thread, where
-              // the exception would be swallowed in the ThreadPool task, and
-              // also no pybind handling code can help shown the Python
-              // exception.
-              pythonRpcHandler.handleException(value);
-            });
+        return std::make_shared<jit::PythonFutureWrapper>(pyRpcPythonUdf(
+            dst,
+            pickledPythonUDF,
+            tensors,
+            rpcTimeoutSeconds,
+            isAsyncExecution));
       },
       py::call_guard<py::gil_scoped_release>());
 

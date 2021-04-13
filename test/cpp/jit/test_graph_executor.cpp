@@ -44,7 +44,7 @@ TEST(GraphExecutorTest, runAsync_executor) {
         r2 = torch.jit.fork(torch.mm, torch.rand(100,100),torch.rand(100,100))
         return r1.wait() + r2.wait()
   demo = DemoModule()
-  torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pth')
+  torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pt')
   */
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);

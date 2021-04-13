@@ -194,7 +194,7 @@ void reflection_pad1d_out_template(
 
   Tensor input = input_.contiguous();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "reflection_pad1d_out_template", [&] {
       reflection_pad1d_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -245,7 +245,7 @@ void reflection_pad1d_backward_out_template(
   dim3 block_size(output_w > 256 ? 256 : output_w);
   dim3 grid_size((int) ::ceil(output_w / 256.0), nplane, nbatch);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     grad_input.scalar_type(), "reflection_pad1d_backward_out_template", [&] {
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -322,7 +322,7 @@ void reflection_pad2d_out_template(
   dim3 grid_size(
     (int) std::ceil(output_plane_size/256.0), nplane, nbatch);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "reflection_pad2d_out_template", [&] {
       reflection_pad2d_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -383,7 +383,7 @@ void reflection_pad2d_backward_out_template(
   dim3 grid_size(
     (int) std::ceil(output_plane_size/256.0), nplane, nbatch);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "reflection_pad2d_backward_out_template", [&] {
       reflection_pad2d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -398,8 +398,8 @@ void reflection_pad2d_backward_out_template(
 } // namespace
 
 
-Tensor& reflection_pad1d_out_cuda(
-    Tensor& output, const Tensor& input, IntArrayRef padding) {
+Tensor& reflection_pad1d_out_cuda(const Tensor& input, IntArrayRef padding,
+    Tensor& output) {
   reflection_pad1d_out_template(output, input, padding);
   return output;
 }
@@ -410,10 +410,10 @@ Tensor reflection_pad1d_cuda(const Tensor& input, IntArrayRef padding) {
   return output;
 }
 
-Tensor& reflection_pad1d_backward_out_cuda(
-    Tensor& grad_input, const Tensor& grad_output,
+Tensor& reflection_pad1d_backward_out_cuda(const Tensor& grad_output,
     const Tensor& input,
-    IntArrayRef padding) {
+    IntArrayRef padding,
+    Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("reflection_pad1d_backward_out_cuda");
@@ -437,8 +437,8 @@ Tensor reflection_pad1d_backward_cuda(
   return grad_input;
 }
 
-Tensor& reflection_pad2d_out_cuda(
-    Tensor& output, const Tensor& input, IntArrayRef padding) {
+Tensor& reflection_pad2d_out_cuda(const Tensor& input, IntArrayRef padding,
+    Tensor& output) {
   reflection_pad2d_out_template(output, input, padding);
   return output;
 }
@@ -449,10 +449,10 @@ Tensor reflection_pad2d_cuda(const Tensor& input, IntArrayRef padding) {
   return output;
 }
 
-Tensor& reflection_pad2d_backward_out_cuda(
-    Tensor& grad_input, const Tensor& grad_output,
+Tensor& reflection_pad2d_backward_out_cuda(const Tensor& grad_output,
     const Tensor& input,
-    IntArrayRef padding) {
+    IntArrayRef padding,
+    Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("reflection_pad2d_backward_out_cuda");

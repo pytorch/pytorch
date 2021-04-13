@@ -1,3 +1,4 @@
+#include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -9,6 +10,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
@@ -21,8 +23,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include "ATen/core/interned_strings.h"
-#include "jit/passes/peephole_list_idioms.h"
 
 namespace torch {
 namespace jit {

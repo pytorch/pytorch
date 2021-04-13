@@ -193,7 +193,7 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   } else {
     TORCH_CHECK(new_state_size == total_size, "RNG state is wrong size");
   }
-  
+
   uint64_t input_seed;
   auto new_rng_state = new_state.data<uint8_t>();
   memcpy(&input_seed, new_rng_state + states_size, seed_size);
@@ -300,6 +300,8 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
 std::pair<uint64_t, uint64_t> CUDAGeneratorImpl::philox_engine_inputs(uint64_t increment) {
   at::cuda::assertNotCapturing("Refactor this op to use CUDAGeneratorImpl::philox_cuda_state. "
                                "Cannot call CUDAGeneratorImpl::philox_engine_inputs");
+  // rounds increment up to the nearest multiple of 4
+  increment = ((increment + 3) / 4) * 4;
   // see Note [Why enforce RNG offset % 4 == 0?]
   TORCH_INTERNAL_ASSERT(this->philox_offset_per_thread_ % 4 == 0);
   uint64_t offset = this->philox_offset_per_thread_;

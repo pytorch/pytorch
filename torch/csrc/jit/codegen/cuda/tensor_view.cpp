@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/compute_at.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
@@ -35,9 +36,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
   TORCH_CHECK(
       tensor_type->dim().has_value(), "Requires static rank for Tensor");
 
-  for (decltype(tensor_type->dim().value()) i = 0;
-       i < tensor_type->dim().value();
-       i++) {
+  for (const auto i : c10::irange(tensor_type->dim().value())) {
     if (tensor_type->sizes()[i].has_value() &&
         tensor_type->sizes()[i].value() == 1) {
       // If size is known to be 1, assuem it needs to be broadcasted.
@@ -57,7 +56,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
   // we iterate through stride_index_, which goes from fastest changing
   // dimension to slowest, instead of iterating through sizes. This allows
   // easier contiguity check;
-  for (size_t i = 0; i < tensor_type->dim().value(); i++) {
+  for (const auto i : c10::irange(tensor_type->dim().value())) {
     // if we don't have contiguous dimension at current stride index, don't
     // bother;
     const auto& stride_property_i = tensor_type->stride_properties()[i];
@@ -425,7 +424,7 @@ TensorView* TensorView::cache_before() {
     size_t i = 0;
     auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
     std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
-    for (auto dom : no_reduction_root_domain) {
+    for (const auto& dom : no_reduction_root_domain) {
       new_root_domain[i++] = dom->clone();
     }
     consumer->setDomain(new TensorDomain(
@@ -488,7 +487,7 @@ TensorView* TensorView::cache_after() {
   size_t i = 0;
   auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
   std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
-  for (auto dom : no_reduction_root_domain) {
+  for (const auto& dom : no_reduction_root_domain) {
     new_root_domain[i++] = dom->clone();
   }
 
@@ -526,7 +525,7 @@ TensorView* TensorView::cache_after() {
     consumer->setComputeAt(this_ca_view, rel_ca_pos);
   } else {
     // Check users of this TV for computeAt for cache_after on inputs
-    for (auto expr : fusion()->unordered_uses(consumer)) {
+    for (const auto& expr : fusion()->unordered_uses(consumer)) {
       for (TensorView* output :
            ir_utils::filterByType<TensorView>(expr->outputs())) {
         if (output->hasComputeAt()) {
