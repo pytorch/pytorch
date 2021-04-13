@@ -1003,7 +1003,7 @@ class DeviceCachingAllocator {
   void process_events()
   {
     if (C10_UNLIKELY(insert_events_deferred_until_no_capture.size() > 0)) {
-      for (const auto block : insert_events_deferred_until_no_capture) {
+      for (auto* block : insert_events_deferred_until_no_capture) {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
         insert_events(block);
       }
