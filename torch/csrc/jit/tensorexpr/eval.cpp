@@ -618,8 +618,6 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
     flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
-    v->mask()->accept(this);
-    std::vector<int> mask = value().as_vec<int>();
     ScalarType v_sdtype = v->dtype().scalar_type();
     switch (v_sdtype) {
 #define TYPE_CASE(Type, Name)                   \
@@ -627,9 +625,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     Type* ptr##Name = static_cast<Type*>(ptr);  \
     std::vector<Type> v(index.size());          \
     for (size_t i = 0; i < index.size(); i++) { \
-      if (mask[i]) {                            \
-        v[i] = ptr##Name[index[i]];             \
-      }                                         \
+      v[i] = ptr##Name[index[i]];               \
     }                                           \
     value_ = Value(v);                          \
   } break;
@@ -652,12 +648,6 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     const Expr* flat_idx = flatten_index(v->buf()->dims(), v->indices());
     flat_idx->accept(this);
     std::vector<int> index = value().as_vec<int>();
-    v->mask()->accept(this);
-    std::vector<int> mask = value().as_vec<int>();
-    if (index.size() != mask.size()) {
-      throw malformed_input("mask size mismatch in Store", v);
-    }
-
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
 
     switch (v_sdtype) {
@@ -670,9 +660,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }                                                           \
     Type* ptr##Name = static_cast<Type*>(ptr);                  \
     for (size_t i = 0; i < index.size(); i++) {                 \
-      if (mask[i]) {                                            \
-        ptr##Name[index[i]] = value[i];                         \
-      }                                                         \
+      ptr##Name[index[i]] = value[i];                           \
     }                                                           \
   } break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
