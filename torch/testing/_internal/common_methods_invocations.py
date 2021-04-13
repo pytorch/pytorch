@@ -2142,6 +2142,13 @@ def sample_inputs_masked_select(op_info, device, dtype, requires_grad, **kwargs)
 
     return samples
 
+def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
+    samples = (
+        SampleInput(make_tensor((S, S), device, dtype, requires_grad=requires_grad)),
+        SampleInput(make_tensor((S, S, S), device, dtype, requires_grad=requires_grad)),
+    )
+
+    return samples
 
 def sample_inputs_polar(op_info, device, dtype, requires_grad, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
@@ -3467,6 +3474,11 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_select),
+    OpInfo('matrix_exp',
+           dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           sample_inputs_func=sample_inputs_matrix_exp,
+           supports_out=False),
     OpInfo('max',
            op=torch.max,
            variant_test_name='binary',
@@ -4734,8 +4746,6 @@ def method_tests():
         ('matmul', (S, S, M, M), ((S, S, M, S),), "4d_4d", (True,)),
         ('matmul', (S, S, M, M), ((M,),), "4d_1d", (True,)),
         ('matmul', (M,), ((S, S, M, S),), "1d_4d", (True,)),
-        ('matrix_exp', (S, S), NO_ARGS, "single_matrix"),
-        ('matrix_exp', (S, S, S), NO_ARGS, "batch_of_matrices"),
         ('mvlgamma', torch.empty(S,).uniform_(0.5, 1), [1], "p=1"),
         ('mvlgamma', torch.empty(S,).uniform_(1, 2), [2], "p=2"),
         ('mvlgamma', torch.empty(S, S).uniform_(1.5, 3), [3], "p=3"),
