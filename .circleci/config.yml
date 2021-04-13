@@ -7166,24 +7166,12 @@ workflows:
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_asan_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - "docker-pytorch-linux-xenial-py3-clang5-asan"
           build_environment: "pytorch-linux-xenial-py3-clang5-asan-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_py3_clang5_asan_test1
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - pytorch_linux_xenial_py3_clang5_asan_build
           build_environment: "pytorch-linux-xenial-py3-clang5-asan-test1"
@@ -7191,12 +7179,6 @@ workflows:
           resource_class: large
       - pytorch_linux_test:
           name: pytorch_linux_xenial_py3_clang5_asan_test2
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - pytorch_linux_xenial_py3_clang5_asan_build
           build_environment: "pytorch-linux-xenial-py3-clang5-asan-test2"
@@ -7204,24 +7186,12 @@ workflows:
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang7_onnx_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - "docker-pytorch-linux-xenial-py3-clang7-onnx"
           build_environment: "pytorch-linux-xenial-py3-clang7-onnx-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-onnx"
       - pytorch_linux_test:
           name: pytorch_linux_xenial_py3_clang7_onnx_ort_test1
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - pytorch_linux_xenial_py3_clang7_onnx_build
           build_environment: "pytorch-linux-xenial-py3-clang7-onnx-ort_test1"
@@ -7231,12 +7201,6 @@ workflows:
           name: pytorch_linux_xenial_py3_clang7_onnx_ort_test2
           requires:
             - pytorch_linux_xenial_py3_clang7_onnx_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: "pytorch-linux-xenial-py3-clang7-onnx-ort_test2"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang7-onnx"
           resource_class: large
@@ -7376,24 +7340,12 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
       - pytorch_linux_build:
           name: pytorch_linux_bionic_py3_6_clang9_noarch_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - "docker-pytorch-linux-bionic-py3.6-clang9"
           build_environment: "pytorch-linux-bionic-py3.6-clang9-noarch-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
       - pytorch_linux_test:
           name: pytorch_linux_bionic_py3_6_clang9_noarch_test
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - pytorch_linux_bionic_py3_6_clang9_noarch_build
           build_environment: "pytorch-linux-bionic-py3.6-clang9-noarch-test"
@@ -7401,24 +7353,12 @@ workflows:
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_xla_linux_bionic_py3_6_clang9_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - "docker-pytorch-linux-bionic-py3.6-clang9"
           build_environment: "pytorch-xla-linux-bionic-py3.6-clang9-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
       - pytorch_linux_test:
           name: pytorch_xla_linux_bionic_py3_6_clang9_test
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - pytorch_xla_linux_bionic_py3_6_clang9_build
           build_environment: "pytorch-xla-linux-bionic-py3.6-clang9-test"
@@ -7426,24 +7366,12 @@ workflows:
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_vulkan_linux_bionic_py3_6_clang9_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - "docker-pytorch-linux-bionic-py3.6-clang9"
           build_environment: "pytorch-vulkan-linux-bionic-py3.6-clang9-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
       - pytorch_linux_test:
           name: pytorch_vulkan_linux_bionic_py3_6_clang9_test
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - pytorch_vulkan_linux_bionic_py3_6_clang9_build
           build_environment: "pytorch-vulkan-linux-bionic-py3.6-clang9-test"
@@ -7451,24 +7379,12 @@ workflows:
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_bionic_py3_8_gcc9_coverage_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - "docker-pytorch-linux-bionic-py3.8-gcc9"
           build_environment: "pytorch-linux-bionic-py3.8-gcc9-coverage-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9"
       - pytorch_linux_test:
           name: pytorch_linux_bionic_py3_8_gcc9_coverage_test1
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - pytorch_linux_bionic_py3_8_gcc9_coverage_build
           build_environment: "pytorch-linux-bionic-py3.8-gcc9-coverage-test1"
@@ -7476,12 +7392,6 @@ workflows:
           resource_class: large
       - pytorch_linux_test:
           name: pytorch_linux_bionic_py3_8_gcc9_coverage_test2
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - pytorch_linux_bionic_py3_8_gcc9_coverage_build
           build_environment: "pytorch-linux-bionic-py3.8-gcc9-coverage-test2"
@@ -7489,12 +7399,6 @@ workflows:
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_bionic_rocm3_9_py3_6_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - "docker-pytorch-linux-bionic-rocm3.9-py3.6"
           build_environment: "pytorch-linux-bionic-rocm3.9-py3.6-build"
@@ -7502,48 +7406,18 @@ workflows:
           resource_class: xlarge
       - pytorch_macos_10_15_py3_build:
           name: pytorch_macos_10_15_py3_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
       - pytorch_macos_10_13_py3_build:
           name: pytorch_macos_10_13_py3_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
       - pytorch_macos_10_13_py3_test:
           name: pytorch_macos_10_13_py3_test
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - pytorch_macos_10_13_py3_build
       - pytorch_macos_10_13_py3_lite_interpreter_build_test:
           name: pytorch_macos_10_13_py3_lite_interpreter_build_test
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           requires:
             - pytorch_macos_10_13_py3_build
       - pytorch_linux_build:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build"
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
           requires:
@@ -7616,47 +7490,23 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
       - pytorch_ios_build:
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: pytorch-ios-12.0.0-x86_64_build
           ios_arch: x86_64
           ios_platform: SIMULATOR
           name: pytorch_ios_12_0_0_x86_64_build
       - pytorch_ios_build:
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: pytorch-ios-12.0.0-x86_64_lite_interpreter_build
           ios_arch: x86_64
           ios_platform: SIMULATOR
           lite_interpreter: "1"
           name: pytorch_ios_12_0_0_x86_64_lite_interpreter_build
       - pytorch_ios_build:
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: pytorch-ios-12.0.0-arm64_build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
           name: pytorch_ios_12_0_0_arm64_build
       - pytorch_ios_build:
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: pytorch-ios-12.0.0-arm64_metal_build
           context: org-member
           ios_arch: arm64
@@ -7664,12 +7514,6 @@ workflows:
           name: pytorch_ios_12_0_0_arm64_metal_build
           use_metal: "1"
       - pytorch_ios_build:
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: pytorch-ios-12.0.0-arm64_lite_interpreter_build
           context: org-member
           ios_arch: arm64
@@ -7677,12 +7521,6 @@ workflows:
           lite_interpreter: "1"
           name: pytorch_ios_12_0_0_arm64_lite_interpreter_build
       - pytorch_ios_build:
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: pytorch-ios-12.0.0-arm64_custom_build
           context: org-member
           ios_arch: arm64
@@ -7690,12 +7528,6 @@ workflows:
           name: pytorch_ios_12_0_0_arm64_custom_build
           op_list: mobilenetv2.yaml
       - pytorch_linux_build:
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: pytorch-linux-xenial-py3-clang5-mobile-build
           build_only: "1"
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan
@@ -7704,24 +7536,12 @@ workflows:
             - docker-pytorch-linux-xenial-py3-clang5-asan
       - pytorch_linux_build:
           build_environment: pytorch-linux-xenial-py3-clang5-mobile-custom-build-dynamic
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_only: "1"
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
           name: pytorch_linux_xenial_py3_clang5_mobile_custom_build_dynamic
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       - pytorch_linux_build:
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: pytorch-linux-xenial-py3-clang5-mobile-custom-build-static
           build_only: "1"
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
@@ -7743,12 +7563,6 @@ workflows:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       - pytorch_linux_test:
           build_environment: pytorch-linux-xenial-py3.6-gcc5.4-jit_legacy-test
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4
           name: pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
           requires:
@@ -7764,12 +7578,6 @@ workflows:
           use_cuda_docker_runtime: "1"
       - pytorch_linux_bazel_build:
           build_environment: pytorch-linux-xenial-py3.6-gcc7-bazel-build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7
           name: pytorch_bazel_build
           requires:
@@ -7777,12 +7585,6 @@ workflows:
           resource_class: large
       - pytorch_linux_bazel_test:
           build_environment: pytorch-linux-xenial-py3.6-gcc7-bazel-test
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7
           name: pytorch_bazel_test
           requires:
