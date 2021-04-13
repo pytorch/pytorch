@@ -96,7 +96,9 @@ void testHelper(const std::string& prefix = "") {
                                    &sem2,
                                    &clientStores,
                                    i,
-                                   &expectedCounterRes] {
+                                   &expectedCounterRes,
+                                   &numIterations,
+                                   &numThreads] {
       for (auto j = 0; j < numIterations; j++) {
         clientStores[i]->add("counter", 1);
       }
