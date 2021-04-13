@@ -337,6 +337,10 @@ struct C10_API TensorOptions {
     return layout_ == c10::Layout::Sparse;
   }
 
+  bool is_sparse_csr() const {
+    return layout_ == c10::Layout::SparseCsr;
+  }
+
   // For compatibility with legacy tensor.type() comparisons
   bool type_equal(const TensorOptions& other) const {
     return computeDispatchKey() == other.computeDispatchKey() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
@@ -660,6 +664,15 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
           default:
             TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for mkldnn layout: ", device_.type());
         }
+      case Layout::SparseCsr:
+        switch(device_.type()) {
+          case DeviceType::CPU:
+            return DispatchKey::SparseCsrCPU;
+          case DeviceType::CUDA:
+            return DispatchKey::SparseCsrCUDA;
+          default:
+            AT_ERROR("Unsupported device type for sparse CSR layout: ", device_.type());
+        }
       default:
         TORCH_CHECK(false, "Unsupported layout: ", layout_);
     }
@@ -671,6 +684,8 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     case DispatchKey::SparseCUDA:
     case DispatchKey::SparseHIP:
     case DispatchKey::SparseXPU:
+    case DispatchKey::SparseCsrCPU:
+    case DispatchKey::SparseCsrCUDA:
       return Layout::Sparse;
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
