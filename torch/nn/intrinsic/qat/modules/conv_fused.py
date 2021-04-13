@@ -191,8 +191,10 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
+        # The ignore is because _FLOAT_MODULE is a TypeVar here where the bound
+        # has no __name__ (code is fine though)
         assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
-            cls._FLOAT_MODULE.__name__
+            cls._FLOAT_MODULE.__name__  # type: ignore
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert mod.qconfig, 'Input float module must have a valid qconfig'
         qconfig = mod.qconfig

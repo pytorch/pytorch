@@ -20,7 +20,7 @@ from torch.distributed.elastic.agent.server.api import (
     WorkerState,
 )
 from torch.distributed.elastic.metrics.api import prof
-from torch.distributed.elastic.multiprocessing import start_processes
+from torch.distributed.elastic.multiprocessing import start_processes, PContext
 
 
 log = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ class LocalElasticAgent(SimpleElasticAgent):
     ):
         super().__init__(spec, exit_barrier_timeout)
         self._start_method = start_method
-        self._pcontext = None
+        self._pcontext : Optional[PContext] = None
         rdzv_run_id = spec.rdzv_handler.get_run_id()
         self._log_dir = self._make_log_dir(log_dir, rdzv_run_id)
 
@@ -161,6 +161,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         shutil.rmtree(attempt_log_dir, ignore_errors=True)
         os.makedirs(attempt_log_dir)
 
+        assert spec.entrypoint is not None
         self._pcontext = start_processes(
             name=spec.role,
             entrypoint=spec.entrypoint,
@@ -184,6 +185,7 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _monitor_workers(self, worker_group: WorkerGroup) -> RunResult:
         role = worker_group.spec.role
         worker_pids = {w.id for w in worker_group.workers}
+        assert self._pcontext is not None
         pc_pids = set(self._pcontext.pids().values())
         if worker_pids != pc_pids:
             log.error(

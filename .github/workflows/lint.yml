@@ -293,7 +293,7 @@ jobs:
         run: |
           set -eux
           pip install -r requirements.txt
-          pip install mypy==0.770
+          pip install mypy==0.812
       - name: Run autogen
         run: |
           set -eux

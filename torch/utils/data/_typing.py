@@ -86,14 +86,15 @@ def _decompose_type(t, to_list=True):
             ts = [t.__bound__]
         else:
             # For T_co, __constraints__ is ()
-            ts = t.__constraints__
+            ts = list(t.__constraints__)
     elif hasattr(t, '__origin__') and t.__origin__ == Union:
         ts = t.__args__
     else:
         if not to_list:
             return None
         ts = [t]
-    ts = list(TYPE2ABC.get(_t, _t) for _t in ts)
+    # Ignored: Generator has incompatible item type "object"; expected "Type[Any]"
+    ts = list(TYPE2ABC.get(_t, _t) for _t in ts)  # type: ignore[misc]
     return ts
 
 
