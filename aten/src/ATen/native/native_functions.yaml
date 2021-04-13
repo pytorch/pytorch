@@ -4009,6 +4009,7 @@
     CompositeExplicitAutograd: resize_as_
 
 - func: resize_as_sparse_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
+  use_const_ref_for_mutable_tensors: True
   variants: function
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
