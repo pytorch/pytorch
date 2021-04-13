@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/serialization/type_name_uniquer.h>
 #include <torch/csrc/onnx/onnx.h>
 
 #include <ostream>
@@ -52,6 +54,42 @@ TORCH_API std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto);
 
 TORCH_API void check_onnx_proto(const std::string& proto_string);
+
+// Serializer for both oldsyle and unified format TS serialization
+class ScriptModuleSerializer {
+ public:
+  explicit ScriptModuleSerializer(
+      caffe2::serialize::PyTorchStreamWriter& export_writer)
+      : writer_(export_writer) {}
+
+  void writeFiles(const std::string& code_dir);
+  void serialize(
+      const Module& module,
+      const ExtraFilesMap& extra_files,
+      bool bytecode_format,
+      bool save_mobile_debug_info);
+
+  ~ScriptModuleSerializer() = default;
+
+ private:
+  void convertNamedType(const c10::NamedTypePtr& class_type);
+  void convertTypes(const at::NamedTypePtr& root_type);
+  void writeExtraFiles(const Module& module, const ExtraFilesMap& extra_files);
+  void writeMobileMetadata(
+      const Module& module,
+      const ExtraFilesMap& extra_files);
+  void writeByteCode(const Module& module, bool save_mobile_debug_info);
+  void writeArchive(const IValue& value, const std::string& archive_name);
+
+  caffe2::serialize::PyTorchStreamWriter& writer_;
+  std::vector<at::IValue> constant_table_;
+  std::unordered_set<c10::NamedTypePtr> converted_types_;
+  PrintDepsTable class_deps_;
+  TypeNameUniquer type_name_uniquer_;
+  // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
+  // created
+  OrderedDict<std::string, PythonPrint> file_streams_;
+};
 
 // For testing purposes
 TORCH_API std::string pretty_print_onnx(
