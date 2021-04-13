@@ -4,14 +4,15 @@ set -eou pipefail
 
 DISTRIBUTION=$(. /etc/os-release;echo $ID$VERSION_ID) \
 DRIVER_FN="NVIDIA-Linux-x86_64-460.39.run"
+YUM_REPO_URL="https://nvidia.github.io/nvidia-docker/${DISTRIBUTION}/nvidia-docker.repo"
 
 install_nvidia_docker2_amzn2() {
     (
         set -x
-        curl -fsL \
-            "https://nvidia.github.io/nvidia-docker/${DISTRIBUTION}/nvidia-docker.repo" | \
-            sudo tee /etc/yum.repos.d/nvidia-docker.repo
-        sudo yum makecache && yum install -y nvidia-docker2
+        # Needed for yum-config-manager
+        sudo yum install -y yum-utils
+        sudo yum-config-manager --add-repo "${YUM_REPO_URL}"
+        sudo yum install -y nvidia-docker2
         sudo systemctl restart docker
     )
 }
