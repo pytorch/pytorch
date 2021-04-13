@@ -2722,7 +2722,7 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
-           supports_inplace_autograd=False,,
+           supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_addmm),
     OpInfo('addmm',
            variant_test_name='non_fusible_nodes',
