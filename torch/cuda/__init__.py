@@ -25,6 +25,17 @@ try:
 except ImportError:
     _cudart = None
 
+__all__ = [
+    'can_device_access_peer', 'current_blas_handle', 'current_device',
+    'current_stream', 'default_stream', 'device', 'device_count', 'device_of',
+    'get_arch_list', 'get_device_capability', 'get_device_name', 'get_device_properties',
+    'get_gencode_flags', 'init', 'ipc_collect', 'is_available', 'is_initialized',
+    'set_device', 'stream', 'synchronize', 'get_rng_state', 'get_rng_state_all',
+    'set_rng_state', 'set_rng_state_all', 'manual_seed', 'manual_seed_all',
+    'seed', 'seed_all', 'initial_seed',
+    'sparse', 'profiler', 'nvtx', 'amp'
+]
+
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
