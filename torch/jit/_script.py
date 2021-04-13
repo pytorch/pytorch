@@ -61,7 +61,7 @@ Attribute.__doc__ = """
     subclasses.
 
     Though TorchScript can infer correct type for most Python expressions, there are some cases where
-    type infernece can be wrong, including:
+    type inference can be wrong, including:
     - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`s
     - Optional types like `Optional[T]` but assigned a valid value of type `T`, TorchScript would assume
     it is type `T` rather than `Optional[T]`
@@ -222,7 +222,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 # For each user-defined class that subclasses ScriptModule, this meta-class:
 # (1) finds all the methods annotated with @script_method in a ScriptModule and
 #     removes them from the class attributes
-# (2) puts a wrapper around the class's __init__ method to recusively compile
+# (2) puts a wrapper around the class's __init__ method to recursively compile
 #     all of the script_methods with the module after the original __init__ has
 #     run. This has to occur after the user-defined __init__ so that submodules and
 #     parameters are initialized _before_ the script compiler resolve references to
@@ -326,17 +326,17 @@ class ConstMap:
 if _enabled:
     # this is a Python 'non-data descriptor' that causes the first access
     # to ScriptModule's forward to lookup the forward method and stash
-    # it in the objects dict. Due to the standard rules for attribute lookup
+    # it in the objects dict. Due to the standard rules for attribute lookup,
     # subsequent lookups will just directly return the previously looked up method.
     # This is necessary because nn.Module defines forward as a method. If we
-    # did nothing __getattr__ would not be called. Instead we'd get nn.Module.forward
+    # did nothing, __getattr__ would not be called. Instead we'd get nn.Module.forward
     # which always throws an exception.
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):  # type: ignore
         r"""
         A wrapper around C++ ``torch::jit::Module``. ``ScriptModule``\s
         contain methods, attributes, parameters, and
-        constants. These can be accessed the same as on a normal ``nn.Module``.
+        constants. These can be accessed the same way as on a normal ``nn.Module``.
         """
         __jit_unused_properties__ = ['code', 'code_with_constants', 'graph', 'inlined_graph', 'original_name']
 
@@ -352,7 +352,7 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if "_actual_script_module" not in self.__dict__:
-                # Unwrap torch.jit.Attribute into a regular setattr + recording
+                # Unwrap torch.jit.Attribute into a regular setattr + record
                 # the provided type in __annotations__.
                 #
                 # This ensures that if we use the attr again in `__init__`, it
@@ -405,7 +405,7 @@ if _enabled:
         submodules. Like normal modules, each individual module in a ``ScriptModule`` can
         have submodules, parameters, and methods. In ``nn.Module``\s methods are implemented
         as Python functions, but in ``ScriptModule``\s methods are implemented as
-        TorchScript functions,  a statically-typed subset of Python that contains all
+        TorchScript functions, a statically-typed subset of Python that contains all
         of PyTorch's built-in Tensor operations. This difference allows your
         ``ScriptModule``\s code to run without the need for a Python interpreter.
 
@@ -438,7 +438,7 @@ if _enabled:
             Construct a RecursiveScriptModule that's ready for use. PyTorch
             code should use this to construct a RecursiveScriptModule instead
             of instead of calling `__init__` directly, as it makes sure the
-            object is properly finalized (and in the future we may take
+            object is properly finalized (and in the future, we may take
             control of how the RecursiveScriptModule instance is created).
 
             Args:
@@ -663,7 +663,7 @@ if _enabled:
 
         # Python magic methods do method lookups on an object's class type, instead of looking up
         # the method defines on the class instance. In order to continue to expose the magic methods
-        # of builtin-containers (ModuleList, Sequential, ModuleDict) to python we
+        # of builtin-containers (ModuleList, Sequential, ModuleDict) to Python, we
         # define magic methods here as a shim to the correct attribute.
         def forward_magic_method(self, method_name, *args, **kwargs):
             self_method = getattr(self, method_name)
@@ -686,7 +686,7 @@ if _enabled:
             return self.forward_magic_method("__contains__", key)
 
         # dir is defined by the base nn.Module, so instead of throwing if
-        # it is not overriden, we call into the nn.Module __dir__ method
+        # it is not overridden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
             if self_method.__func__ == _get_function_from_type(  # type: ignore
@@ -695,9 +695,9 @@ if _enabled:
                 return super(RecursiveScriptModule, self).__dir__()
             return self_method()
 
-        # to resolve bool(value), python looks if __bool__ is defined then __iter__
-        # is defined then returns true for classes. because __iter__() on this
-        # class throws if it isn't overriden, we define __bool__ to preserve default behavior
+        # to resolve bool(value), Python looks if __bool__ is defined then __iter__
+        # is defined then returns true for classes. Since __iter__() on this
+        # class throws if it isn't overridden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
             if self_method.__func__ == _get_function_from_type(  # type: ignore
@@ -821,8 +821,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
 
     new_obj_dict = {}
 
-    for name in obj.__dict__:
-        sub_module = obj.__dict__.get(name)
+    for name, sub_module in obj.__dict__.items():
         if name == '_modules':
             for k, v in sub_module.items():
                 sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
@@ -882,7 +881,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                     r = y
                 return r
 
-            print(type(foo))  # torch.jit.ScriptFuncion
+            print(type(foo))  # torch.jit.ScriptFunction
 
             # See the compiled graph as Python code
             print(foo.code)
@@ -1145,8 +1144,8 @@ def interface(obj):
 
     qualified_name = _qualified_name(obj)
     rcb = _jit_internal.createResolutionCallbackFromFrame(1)
-    # if this type is a `nn.Module` subclass, generate an module interface type
-    # instead of a class interface type, an module interface type only compile
+    # if this type is a `nn.Module` subclass, generate a module interface type
+    # instead of a class interface type; a module interface type only compiles
     # the user provided methods as part of the interface
     ast = get_jit_class_def(obj, obj.__name__)
     mangled_classname = torch._C._jit_script_interface_compile(
