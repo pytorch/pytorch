@@ -312,10 +312,11 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
-    auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
+    auto p_cpu = p_.to(kCPU);
+    c10::MaybeOwned<Tensor> p = expand_inplace(self, p_cpu);
     auto iter = TensorIteratorConfig()
         .add_output(self)
-        .add_input(p)
+        .add_input(*p)
         .check_all_same_dtype(false)
         .build();
     if (p_.scalar_type() == kDouble) {
