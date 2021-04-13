@@ -2458,7 +2458,7 @@ bool LoopNest::rfactor(Stmt* st, For* outer_reduction_for, Buf** rfac_buf_ptr) {
   //   X[*indexes] = ReduceOp(X[*indexes] + T[*indexes + {reduction_var}],
   //                          reduce_axis={reduction_var})
   Block* b = outer_reduction_for->body();
-  TORCH_INTERNAL_ASSERT (b->nstmts() == 1);
+  TORCH_INTERNAL_ASSERT(b->nstmts() == 1);
   Stmt* first_reduction_loop = b->stmts().front();
   auto rfac_buf_indices = orig_buf_indices;
   rfac_buf_indices.emplace_back(reduction_var);
