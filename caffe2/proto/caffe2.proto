@@ -527,4 +527,7 @@ message SerializationOptions {
   // serializing a blob, the first entry whose blob_name_pattern matches the
   // blob name will be used.
   repeated BlobSerializationOptions options = 1;
+
+  // An options string to pass to the DB via the DB::SetOptions() call.
+  optional bytes db_options = 2;
 }

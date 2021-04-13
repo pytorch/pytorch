@@ -165,6 +165,9 @@ bool SaveOpImpl::RunOnDevice() {
       " (while trying to open ",
       full_db_name_,
       ")");
+  if (!options_.db_options().empty()) {
+    out_db->SetOptions(options_.db_options());
+  }
 
   BlobSerializerBase::SerializationAcceptor acceptor =
       [&](const std::string& blobName, const std::string& data) {
