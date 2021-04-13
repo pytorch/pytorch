@@ -588,22 +588,48 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
+def sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad, **kwargs):
+    for_inplace_variant = kwargs.get('for_inplace_variant', False)
+    tests_list = [
+        ((S, M), (S, S), (S, M)),
+    ]
+    tests_require_resizing = [
+        ((1,), (S, S), (S, M)),
+        ((), (S, S), (S, M))
+    ]
+    test_cases = [*tests_list] if for_inplace_variant else [*tests_list, *tests_require_resizing]  # type: ignore
+    inputs = tuple(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
+                               args=(make_tensor(shape_b, device, dtype,
+                                                 requires_grad=requires_grad),
+                                     make_tensor(shape_c, device, dtype,
+                                                 requires_grad=requires_grad)))
+                   for shape_a, shape_b, shape_c in test_cases)
+    return inputs
+
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
-    input = SampleInput(
-        make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(
-            make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=False)))
+    for_inplace_variant = kwargs.get('for_inplace_variant', False)
+    tests_list = [
+        ((S, M), (S, S), (S, M), dict(beta=0.2, alpha=0.6)),
+    ]
+    tests_require_resizing = [
+        ((1,), (S, S), (S, M), dict(beta=0.2, alpha=0.6)),
+        ((), (S, S), (S, M), dict(beta=0.2, alpha=0.6))
+    ]
+    test_cases = [*tests_list] if for_inplace_variant else [*tests_list, *tests_require_resizing]  # type: ignore
+    inputs = list(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
+                              args=(make_tensor(shape_b, device, dtype,
+                                                requires_grad=requires_grad),
+                                    make_tensor(shape_c, device, dtype,
+                                                requires_grad=requires_grad)),
+                              kwargs=kwargs)
+                  for shape_a, shape_b, shape_c, kwargs in test_cases)
     if dtype.is_complex:
-        another_input = SampleInput(
-            make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(
-                make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-                make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=False)),
-            kwargs=dict(beta=1 + 2j, alpha=2 + 3j))
-        return (input, another_input)
-    else:
-        return (input, )
+        another_input = SampleInput(make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+                                    args=(make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+                                          make_tensor((S, S), device, dtype, requires_grad=False)),
+                                    kwargs=dict(beta=1 + 2j, alpha=2 + 3j))
+        inputs.append(another_input)
+    return tuple(inputs)
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     for_inplace_variant = kwargs.get('for_inplace_variant', False)
@@ -2644,21 +2670,22 @@ op_db: List[OpInfo] = [
                                 device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                    )),
     OpInfo('addmm',
-           dtypes=floating_types(),
+           variant_test_name='without_non_fusible_nodes',
+           dtypes=floating_types_and(torch.float16),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           # BFloat16 support on CUDA requires CUDA 11 and SM53
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                           *[torch.bfloat16] if CUDA11OrLater else []),
-           dtypesIfROCM=floating_types_and(torch.half),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
-           autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
-           skips=(
-               # Skips unsupported bfloat16 check because above support check
-               #   doesn't work on all platforms
-               SkipInfo('TestOpInfo', 'test_unsupported_dtypes', dtypes=(torch.bfloat16,)),
-               # TODO: remove redundant method_tests() entries
-               SkipInfo('TestOpInfo', 'test_duplicate_method_tests')),
+           supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_addmm),
+    OpInfo('addmm',
+           variant_test_name='non_fusible_nodes',
+           dtypes=floating_types_and(torch.float16),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           assert_autodiffed=True,
+           supports_inplace_autograd=False,
+           autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
+           sample_inputs_func=sample_inputs_addmm_non_fusible_nodes),
     OpInfo('addmv',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
@@ -4706,12 +4733,6 @@ def method_tests():
         ('logcumsumexp', (S, S, S), (1,), 'dim1', (), [0]),
         ('logcumsumexp', (), (0,), 'dim0_scalar', (), [0]),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
-        ('addmm', (S, M), ((S, S), (S, M)), '', (True, ['aten::add', 'aten::mm'])),
-        ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs', (True, ['aten::add', 'aten::mm'])),
-        ('addmm', (S, M), ((S, S), (S, M)), 'coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs_coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs', (True, ['aten::add', 'aten::mm'])),
-        ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs_coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('addbmm', (S, M), ((S, S, S), (S, S, M)),),
         ('addbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs'),
         ('addbmm', (S, M), ((S, S, S), (S, S, M)), 'coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
