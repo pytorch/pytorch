@@ -1,0 +1,16 @@
+name: Reserve Github Actions Runner
+
+on:
+  workflow-dispatch:
+    inputs:
+      runnerType: "linux.2xlarge"
+
+jobs:
+  reserve-runner:
+    runs-on: ${{ inputs.runnerType }}
+    steps:
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@18c3652e863e41474701cc45349bfc24a902636e #v3.5
+        timeout-minutes: 120 # 2 hours
+        with:
+          limit-access-to-actor: true
