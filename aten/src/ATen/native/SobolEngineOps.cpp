@@ -126,19 +126,28 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
   TORCH_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
 
-  /// First row of `sobolstate` is 1
-  sobolstate.select(0, 0).fill_(1);
-
   /// Use a tensor accessor for `sobolstate`
   auto ss_a = sobolstate.accessor<int64_t, 2>();
-  for (int64_t d = 0; d < dimension; ++d) {
+
+  /// First row of `sobolstate` is all 1s
+  for (int64_t m = 0; m < MAXBIT; ++m) {
+    ss_a[0][m] = 1;
+  }
+
+  /// Remaining rows of sobolstate (row 2 through dim, indexed by [1:dim])
+  for (int64_t d = 1; d < dimension; ++d) {
     int64_t p = poly[d];
     int64_t m = bit_length(p) - 1;
 
+    // First m elements of row d comes from initsobolstate
     for (int64_t i = 0; i < m; ++i) {
       ss_a[d][i] = initsobolstate[d][i];
     }
 
+    // Fill in remaining elements of v as in Section 2 (top of pg. 90) of:
+    // P. Bratley and B. L. Fox. Algorithm 659: Implementing sobol's
+    // quasirandom sequence generator. ACM Trans.
+    // Math. Softw., 14(1):88-100, Mar. 1988.
     for (int64_t j = m; j < MAXBIT; ++j) {
       int64_t newv = ss_a[d][j - m];
       int64_t pow2 = 1;
@@ -152,7 +161,18 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
     }
   }
 
-  Tensor pow2s = at::pow(2, at::native::arange((MAXBIT - 1), -1, -1, sobolstate.options()));
+  /// Multiply each column of sobolstate by power of 2:
+  /// sobolstate * [2^(maxbit-1), 2^(maxbit-2),..., 2, 1]
+  Tensor pow2s = at::pow(
+      2,
+      at::native::arange(
+          (MAXBIT - 1),
+          -1,
+          -1,
+          optTypeMetaToScalarType(sobolstate.options().dtype_opt()),
+          sobolstate.options().layout_opt(),
+          sobolstate.options().device_opt(),
+          sobolstate.options().pinned_memory_opt()));
   sobolstate.mul_(pow2s);
   return sobolstate;
 }

@@ -160,7 +160,9 @@ class TORCH_API RpcAgent {
   virtual std::shared_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
-      const float rpcTimeoutSeconds = kUnsetRpcTimeout) = 0;
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout,
+      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
+          {}) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
   // receieved. The duration between consecutive sends is increased over
@@ -205,7 +207,7 @@ class TORCH_API RpcAgent {
 
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
-  virtual void join() = 0;
+  virtual void join(bool shutdown = false) = 0;
 
   // Synchronize the this process with other ``RpcAgent`` processes. Block until
   // all ``RpcAgent``s reach this method and send all pending messages.
@@ -258,6 +260,10 @@ class TORCH_API RpcAgent {
 
   // Get the type resolver
   std::shared_ptr<TypeResolver> getTypeResolver();
+
+  // Retrieves the device map for the provided destination worker.
+  virtual std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> getDeviceMap(
+      const WorkerInfo& dest);
 
  protected:
   const WorkerInfo workerInfo_;

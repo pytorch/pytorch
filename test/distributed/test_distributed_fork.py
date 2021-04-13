@@ -5,21 +5,24 @@ from functools import wraps
 import torch
 import torch.cuda
 import torch.distributed as dist
+
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 from torch.testing._internal.common_utils import TestCase, find_free_port, run_tests
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.distributed.distributed_test import (
     DistributedTest, TestDistBackend
 )
 
+torch.backends.cuda.matmul.allow_tf32 = False
+
 CPP_EXTENSIONS_WARNING = """
 Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
 but it could not be found. Install ninja with `pip install ninja`
 or `conda install ninja`.
 """
-
-if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
 
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
@@ -48,6 +51,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         def setUp(self):
             super().setUp()
             self._fork_processes()
+            torch.backends.cudnn.flags(allow_tf32=False).__enter__()
 
 
 elif BACKEND == "mpi":

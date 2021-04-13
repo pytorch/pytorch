@@ -30,7 +30,7 @@ def rosenbrock(tensor):
 
 def drosenbrock(tensor):
     x, y = tensor
-    return torch.Tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
+    return torch.tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
 
 class TestOptim(TestCase):
@@ -40,7 +40,7 @@ class TestOptim(TestCase):
                                 sparse_only=False):
         if scheduler_constructors is None:
             scheduler_constructors = []
-        params_t = torch.Tensor([1.5, 1.5])
+        params_t = torch.tensor([1.5, 1.5])
 
         params = Variable(params_t, requires_grad=True)
         optimizer = constructor([params])
@@ -52,7 +52,7 @@ class TestOptim(TestCase):
             params_c = Variable(params_t.clone(), requires_grad=True)
             optimizer_c = constructor([params_c])
 
-        solution = torch.Tensor([1, 1])
+        solution = torch.tensor([1, 1])
         initial_dist = params.data.dist(solution)
 
         def eval(params, sparse_grad, w):
@@ -66,11 +66,11 @@ class TestOptim(TestCase):
             if w:
                 i = torch.LongTensor([[0, 0]])
                 x = grad[0]
-                v = torch.Tensor([x / 4., x - x / 4.])
+                v = torch.tensor([x / 4., x - x / 4.])
             else:
                 i = torch.LongTensor([[1, 1]])
                 y = grad[1]
-                v = torch.Tensor([y - y / 4., y / 4.])
+                v = torch.tensor([y - y / 4., y / 4.])
             x = sparse.DoubleTensor(i, v, torch.Size([2])).to(dtype=v.dtype)
             with torch.no_grad():
                 if sparse_grad:
@@ -305,7 +305,6 @@ class TestOptim(TestCase):
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
             )
 
-    @skipIfRocm
     def test_multi_tensor_optimizers(self):
         if not torch.cuda.is_available():
             return
@@ -340,15 +339,15 @@ class TestOptim(TestCase):
         for optimizers, params in optimizer_pairs_with_flags:
             res = []
             for opt in optimizers:
-                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]], 
+                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]],
                                       dtype=torch.float64, device=device, requires_grad=True)
                 bias = torch.tensor([-0.1085, -0.2979, 0.6892], dtype=torch.float64, device=device, requires_grad=True)
-                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]], 
+                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]],
                                        dtype=torch.float64, device=device, requires_grad=True)
                 bias2 = torch.tensor([-0.0711], dtype=torch.float64, device=device, requires_grad=True)
                 input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
 
-                model = torch.nn.Sequential(torch.nn.Linear(2, 3), 
+                model = torch.nn.Sequential(torch.nn.Linear(2, 3),
                                             torch.nn.Sigmoid(),
                                             torch.nn.Linear(3, 1),
                                             torch.nn.Sigmoid())
@@ -363,7 +362,7 @@ class TestOptim(TestCase):
 
                 optimizer = opt(model.parameters(), **params)
 
-                for _ in range(kIterations): 
+                for _ in range(kIterations):
                     optimizer.zero_grad()
                     output = model(input)
                     loss = output.sum()
@@ -378,7 +377,6 @@ class TestOptim(TestCase):
 
             for p1, p2 in zip(res[0], res[1]):
                 self.assertEqual(p1, p2)
-
 
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
@@ -616,7 +614,7 @@ class TestOptim(TestCase):
         opt2 = optim.LBFGS(params, 0.01, tolerance_grad=-inf)
 
         def closure():
-            return torch.Tensor([10])
+            return torch.tensor([10])
 
         res1 = opt1.step(closure)
         res2 = opt2.step(closure)
@@ -633,6 +631,26 @@ class TestOptim(TestCase):
             optim.SGD([param, param], lr=0.1)
             self.assertEqual(len(w), 1)
             self.assertIn('a parameter group with duplicate parameters', str(w[0].message))
+
+    def test_no_grad_for_all_params(self):
+        param = torch.randn(5, 5, requires_grad=False)
+
+        optimizer_list = [
+            optim.Adadelta,
+            optim.AdamW,
+            optim.Adam,
+            optim.Adagrad,
+            optim.Adamax,
+            optim.RMSprop,
+            optim.SGD,
+            optim.SparseAdam,
+            optim.ASGD,
+        ]
+        for optim_ctr in optimizer_list:
+            opt = optim_ctr([param, param], lr=0.1)
+            # make sure step can still run even if
+            # all params have no grad
+            opt.step()
 
 
 class SchedulerTestNet(torch.nn.Module):
@@ -689,7 +707,7 @@ class TestLRScheduler(TestCase):
 
     def test_no_cyclic_references(self):
         import gc
-        param = Variable(torch.Tensor(10), requires_grad=True)
+        param = Variable(torch.empty(10), requires_grad=True)
         optim = SGD([param], lr=0.5)
         scheduler = LambdaLR(optim, lambda epoch: 1.0)
         del scheduler

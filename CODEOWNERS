@@ -8,8 +8,12 @@
 
 # Not there to strictly require the approval, but to be tagged as a reviewer
 # on the PRs to push them into a high priority inbox.
-/torch/csrc/autograd/ @albanD
-/torch/autograd/ @albanD
+/torch/csrc/autograd/ @albanD @soulitzer
+/torch/autograd/ @albanD @soulitzer
+/tools/autograd/ @albanD @soulitzer
+/torch/nn/ @albanD @jbschlosser
+/test/test_public_bindings.py @albanD
+/aten/src/ATen/native/native_functions.yaml @ezyang
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
@@ -18,12 +22,20 @@
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/lib/c10d/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
-/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
+/torch/lib/c10d/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang
+/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang
+/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @SciPioneer @mingzhe09088 @H-Huang
 
 # Distributed tests
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma
-/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @SciPioneer @H-Huang
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @SciPioneer @H-Huang
+
+# ONNX Export
+/torch/csrc/jit/passes/onnx.h @bowenbao @neginraoof @spandantiwari
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @neginraoof @spandantiwari
+/torch/csrc/jit/passes/onnx/ @bowenbao @neginraoof @spandantiwari
+/torch/onnx/ @bowenbao @neginraoof @spandantiwari
+/test/onnx/ @bowenbao @neginraoof @spandantiwari

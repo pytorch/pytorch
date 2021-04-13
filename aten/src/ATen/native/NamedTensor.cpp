@@ -3,6 +3,8 @@
 
 #include <ATen/NamedTensorUtils.h>
 
+#include <c10/util/irange.h>
+
 #include <bitset>
 
 namespace at { namespace native {
@@ -143,7 +145,7 @@ static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_tw
 
 static int64_t countUnset(std::bitset<kMaxNamedTensorDim> set, int64_t up_to_idx) {
   int64_t result = 0;
-  for (auto i = 0; i < up_to_idx; ++i) {
+  for (const auto i : c10::irange(up_to_idx)) {
     if (!set.test(i)) result++;
   }
   return result;
@@ -188,7 +190,7 @@ Tensor align_to(const Tensor& tensor, DimnameList order, int64_t ellipsis_idx) {
   // appears in the jth element of tensor.
   std::vector<int64_t> tensor_idx_for(order.size(), not_found);
 
-  for (auto order_idx = 0U; order_idx < order.size(); ++order_idx) {
+  for (const auto order_idx : c10::irange(order.size())) {
     const auto name = order[order_idx];
     TORCH_CHECK(name.isBasic(),
         "align_to: the desired order of dimensions cannot contain a None name, got ",
@@ -233,7 +235,7 @@ Tensor align_to(const Tensor& tensor, DimnameList order, int64_t ellipsis_idx) {
   }
 
   // Fill in the ellipsis dimensions
-  for (auto tensor_idx = 0U; tensor_idx < tensor_dim; ++tensor_idx) {
+  for (const auto tensor_idx : c10::irange(tensor_dim)) {
     if (order_has_tensor_name.test(tensor_idx)) {
       continue;
     }
@@ -259,7 +261,7 @@ Tensor align_to(const Tensor& tensor, DimnameList names) {
   std::vector<int64_t> new_sizes(names.size(), 1);
   std::vector<int64_t> new_strides(names.size(), 0);
 
-  for (auto idx = 0U; idx < tensor_names.size(); ++idx) {
+  for (const auto idx : c10::irange(tensor_names.size())) {
     const auto& dim = tensor_names[idx];
     TORCH_CHECK(dim.isBasic(),
         "align_to: All input dims must be named. Found unnamed dim at index ",
@@ -308,19 +310,19 @@ std::vector<Tensor> align_tensors(TensorList tensors) {
 Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
   reportNYIDimnameOverload("gather");
 }
-Tensor& gather_out(Tensor& result, const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
+Tensor& gather_out(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad, Tensor& result) {
   reportNYIDimnameOverload("gather");
 }
-Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
   reportNYIDimnameOverload("index_add");
 }
-Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
   reportNYIDimnameOverload("index_add");
 }
-Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   return at::index_fill(self, dimname_to_position(self, dim), index, source);
 }
-Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   return self.index_fill_(dimname_to_position(self, dim), index, source);
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
@@ -335,7 +337,7 @@ Tensor index_copy(const Tensor& self, Dimname dim, const Tensor& index, const Te
 Tensor& index_copy_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("index_copy");
 }
-Tensor& index_select_out(Tensor& out, const Tensor& self, Dimname dim, const Tensor& index) {
+Tensor& index_select_out(const Tensor& self, Dimname dim, const Tensor& index, Tensor& out) {
   reportNYIDimnameOverload("index_select");
 }
 Tensor index_select(const Tensor& self, Dimname dim, const Tensor& index) {
@@ -347,10 +349,10 @@ Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Tenso
 Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   reportNYIDimnameOverload("scatter");
 }
 Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
@@ -359,7 +361,13 @@ Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const T
 Tensor& scatter_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter_add");
 }
-std::tuple<Tensor&, Tensor&> sort_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim, bool keepdim) {
+std::tuple<Tensor&, Tensor&> sort_out(const Tensor& self, c10::optional<bool> stable, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {
+  reportNYIDimnameOverload("sort");
+}
+std::tuple<Tensor&, Tensor&> sort_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {
+  reportNYIDimnameOverload("sort");
+}
+std::tuple<Tensor, Tensor> sort(const Tensor& self, c10::optional<bool> stable, Dimname dim, bool keepdim) {
   reportNYIDimnameOverload("sort");
 }
 std::tuple<Tensor, Tensor> sort(const Tensor& self, Dimname dim, bool keepdim) {

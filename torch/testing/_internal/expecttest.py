@@ -230,7 +230,7 @@ class TestCase(unittest.TestCase):
                     lineno = EDIT_HISTORY.adjust_lineno(fn, lineno)
                     new, delta = replace_string_literal(old, lineno, actual)
 
-                    assert old != new, "Failed to substitute string at {}:{}".format(fn, lineno)
+                    assert old != new, f"Failed to substitute string at {fn}:{lineno}; did you use triple quotes?"
 
                     # Only write the backup file the first time we hit the
                     # file
@@ -247,10 +247,7 @@ class TestCase(unittest.TestCase):
             help_text = ("To accept the new output, re-run test with "
                          "envvar EXPECTTEST_ACCEPT=1 (we recommend "
                          "staging/committing your changes before doing this)")
-            if hasattr(self, "assertMultiLineEqual"):
-                self.assertMultiLineEqual(expect, actual, msg=help_text)
-            else:
-                self.assertEqual(expect, actual, msg=help_text)
+            self.assertMultiLineEqualMaybeCppStack(expect, actual, msg=help_text)
 
     def assertExpectedRaisesInline(self, exc_type, callable, expect, *args, **kwargs):
         """
@@ -261,10 +258,21 @@ class TestCase(unittest.TestCase):
         try:
             callable(*args, **kwargs)
         except exc_type as e:
-            self.assertExpectedInline(str(e), expect)
+            self.assertExpectedInline(str(e), expect, skip=1)
             return
         # Don't put this in the try block; the AssertionError will catch it
         self.fail(msg="Did not raise when expected to")
+
+    def assertMultiLineEqualMaybeCppStack(self, expect, actual, *args, **kwargs):
+        self.assertGreaterEqual(len(actual), len(expect), *args, **kwargs)
+        if hasattr(self, "assertMultiLineEqual"):
+            self.assertMultiLineEqual(expect, actual[:len(expect)], *args, **kwargs)
+        else:
+            self.assertEqual(expect, actual[:len(expect)], *args, **kwargs)
+        if len(actual) > len(expect):
+            cpp_stacktrace_header = "\nException raised from"
+            end_header = len(expect) + len(cpp_stacktrace_header)
+            self.assertEqual(actual[len(expect): end_header], cpp_stacktrace_header)
 
 
 if __name__ == "__main__":

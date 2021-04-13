@@ -15,7 +15,7 @@ import caffe2.python.models.shufflenet as shufflenet
 from caffe2.python.modeling.initializers import Initializer, PseudoFP16Initializer
 import caffe2.python.predictor.predictor_exporter as pred_exp
 import caffe2.python.predictor.predictor_py_utils as pred_utils
-from caffe2.python.predictor_constants import predictor_constants as predictor_constants
+from caffe2.python.predictor_constants import predictor_constants
 
 '''
 Parallelized multi-GPU distributed trainer for Resne(X)t & Shufflenet.

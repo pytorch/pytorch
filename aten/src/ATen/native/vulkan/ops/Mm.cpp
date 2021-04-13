@@ -23,22 +23,42 @@ vTensor pack_weights(
   const IntArrayRef w_sizes = weight.sizes();
   const float* const src_weight_ptr = weight.data_ptr<float>();
 
+  /* Source */
+  const int64_t src_kw_sz = w_sizes[Layout::Parameter::width];
+  const int64_t src_kh_sz = w_sizes[Layout::Parameter::height];
+
+  /* Destination */
+  const int64_t dst_kw_sz = div_up(src_kw_sz, INT64_C(2));
+  const int64_t dst_kh_sz = div_up(src_kh_sz, INT64_C(2));
+  const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
+
   vTensor v_weight{
       context,
       &pool,
-      w_sizes,
+      {
+        4,
+        dst_kh_sz,
+        dst_kw_sz,
+      },
       weight.options(),
   };
 
-  {
-    using Future = vTensor::Future<void, vTensor::Access::Write>;
-    Future v_weight_future = v_weight.host<void, vTensor::Access::Write>(command_buffer);
-    Future::Payload v_weight_payload = v_weight_future.wait();
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>(command_buffer);
+  Future::Payload v_weight_payload = v_weight_future.wait();
 
-    memcpy(
-        v_weight_payload.get(),
-        src_weight_ptr,
-        std::min(weight.nbytes(), v_weight.nbytes()));
+  float* const dst_weight_ptr = v_weight_payload.get();
+  memset(dst_weight_ptr, 0, v_weight.nbytes());
+
+  for (int64_t src_h = 0; src_h < src_kh_sz; ++src_h) {
+    for (int64_t src_w = 0; src_w < src_kw_sz; ++src_w) {
+      int64_t dst_plane = 2*(src_h%2) + (src_w%2);
+      int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
+      memcpy(
+          dst_weight_ptr + dst_plane * dst_plane_sz + dst_index,
+          src_weight_ptr + src_h * src_kw_sz + src_w,
+          sizeof(float));
+    }
   }
 
   return v_weight;
@@ -55,38 +75,77 @@ vTensor pack_biases(
   api::Context* const context = api::context();
   api::Command::Buffer& command_buffer = context->command().pool.stream();
 
-  vTensor v_bias{
-      context,
-      &pool,
-      {
-          weight_arg.size(Layout::Parameter::width),
-      },
-      weight_arg.options(),
-  };
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  if (bias_arg) {
+    const Tensor bias = bias_arg->contiguous();
+    const IntArrayRef b_sizes = bias.sizes();
+    const float* const src_bias_ptr = bias.data_ptr<float>();
 
-  {
-    using Future = vTensor::Future<void, vTensor::Access::Write>;
-    Future v_bias_future = v_bias.host<void, vTensor::Access::Write>(command_buffer);
-    Future::Payload v_bias_payload = v_bias_future.wait();
-
-    if (bias_arg) {
-      memcpy(
-          v_bias_payload.get(),
-          bias_arg->contiguous().data_ptr<float>(),
-          std::min(bias_arg->nbytes(), v_bias.nbytes()));
+    /* Source */
+    int64_t src_kw_sz, src_kh_sz;
+    if (bias.sizes().size() == 2) {
+      src_kw_sz = b_sizes[Layout::Parameter::width];
+      src_kh_sz = b_sizes[Layout::Parameter::height];
     }
     else {
-      memset(
-          v_bias_payload.get(),
-          // 2's complement integers and IEEE-754 floating point numbers both
-          // have identical bit representations for 0, so can use memset which
-          // only accepts uint8_t parameter.
-          0,
-          v_bias.nbytes());
+      src_kw_sz = b_sizes[Layout::Parameter::height];
+      src_kh_sz = 1;
     }
-  }
 
-  return v_bias;
+    /* Destination */
+    const int64_t dst_kw_sz = div_up(src_kw_sz, INT64_C(2));
+    const int64_t dst_kh_sz = div_up(src_kh_sz, INT64_C(2));
+    const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
+
+    vTensor v_bias{
+        context,
+        &pool,
+        {
+          4,
+          dst_kh_sz,
+          dst_kw_sz,
+        },
+        bias_arg->options(),
+    };
+
+    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
+    Future::Payload v_bias_payload = v_bias_future.wait();
+
+    float* const dst_bias_ptr = v_bias_payload.get();
+    memset(dst_bias_ptr, 0, v_bias.nbytes());
+
+    for (int64_t src_h = 0; src_h < src_kh_sz; ++src_h) {
+      for (int64_t src_w = 0; src_w < src_kw_sz; ++src_w) {
+        int64_t dst_plane = 2*(src_h%2) + (src_w%2);
+        int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
+        memcpy(
+            dst_bias_ptr + dst_plane * dst_plane_sz + dst_index,
+            src_bias_ptr + src_h * src_kw_sz + src_w,
+            sizeof(float));
+      }
+    }
+
+    return v_bias;
+  }
+  else {
+    vTensor v_bias{
+        api::context(),
+        &pool,
+        {1},
+        weight_arg.options(),
+    };
+    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
+    Future::Payload v_bias_payload = v_bias_future.wait();
+    memset(
+        v_bias_payload.get(),
+        // 2's complement integers and IEEE-754 floating point numbers both
+        // have identical bit representations for 0, so can use memset which
+        // only accepts uint8_t parameter.
+        0,
+        v_bias.nbytes());
+
+    return v_bias;
+  }
 }
 
 bool available(
@@ -97,13 +156,13 @@ bool available(
          (2 == weight.ndimension()) &&
          (weight.size(Layout::Parameter::height) > 0) &&
          (weight.size(Layout::Parameter::width) > 0) &&
-         ((c10::DeviceType::CPU == weight.device().type()) ||
+         ((weight.device().is_cpu()) ||
           (c10::DeviceType::Vulkan == weight.device().type())) &&
          (kFloat == weight.scalar_type()) &&
          !weight.requires_grad() &&
          // Bias
          ((bias && bias->defined()) ? ((bias->ndimension() > 0) &&
-                                       ((c10::DeviceType::CPU == bias->device().type()) ||
+                                       ((bias->device().is_cpu()) ||
                                         (c10::DeviceType::Vulkan == bias->device().type())) &&
                                        (kFloat == bias->scalar_type()) &&
                                        ((bias->ndimension() > 1) ?
@@ -132,8 +191,8 @@ Tensor addmm(
     const Tensor& bias,
     const Tensor& input,
     const Tensor& weight,
-    const Scalar beta,
-    const Scalar alpha) {
+    const Scalar& beta,
+    const Scalar& alpha) {
   return LinearOpContext::create(
       api::context()->resource().pool,
       weight,
@@ -146,80 +205,13 @@ Tensor addmm(
 Tensor mm(
     const Tensor& mat1_arg,
     const Tensor& mat2_arg) {
-  api::Context* const context = api::context();
-
-  const Tensor mat1 = mat1_arg.is_vulkan() ? mat1_arg : mat1_arg.vulkan();
-  const vTensor& v_mat1 = convert(mat1);
-
-  const Tensor mat2 = mat2_arg.is_vulkan() ? mat2_arg : mat2_arg.vulkan();
-  const vTensor& v_mat2 = convert(mat2);
-
-  const auto v_mat1_sizes = v_mat1.sizes();
-  const auto v_mat2_sizes = v_mat2.sizes();
-
-  TORCH_CHECK(
-      v_mat1_sizes[Layout::Parameter::width] ==
-          v_mat2_sizes[Layout::Parameter::height],
-      "Incompatible matrix dimensions!");
-
-  vTensor v_output{
-      context,
-      {
-          v_mat1_sizes[Layout::Parameter::height],
-          v_mat2_sizes[Layout::Parameter::width],
-      },
-      mat1.options(),
-  };
-
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    if C10_LIKELY(v_mat1.has_image() && v_mat2.has_image()) {
-      const struct Block final {
-        uvec3 extents;
-        int32_t K;
-      } block {
-        v_output.extents(),
-        safe_downcast<int32_t>(v_mat1_sizes[Layout::Parameter::width]),
-      };
-
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(mm),
-          v_output.extents(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_mat1.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_mat2.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
-
-  return convert(v_output);
+  return LinearOpContext::create(
+      api::context()->resource().pool,
+      mat2_arg,
+      c10::optional<Tensor>()).run(
+          mat1_arg,
+          1.0f,
+          1.0f);
 }
 
 #ifdef USE_VULKAN_API
@@ -281,71 +273,126 @@ Tensor LinearOpContext::run(
       "combination with the provided weight and bias tensors are unsupported by "
       "Vulkan impl.");
 
-  vTensor v_output{
+  c10::SmallVector<int64_t, 4u> output_sizes{
+      v_input.sizes()[Layout::Parameter::height],
+      unpacked_.weight.sizes()[Layout::Parameter::width],
+  };
+
+  vTensor v_output {
       context,
       {
-          v_input.sizes()[Layout::Parameter::height],
-          packed_.v_weight.sizes()[Layout::Parameter::width],
+        v_input.sizes()[Layout::Parameter::height],
+        unpacked_.weight.sizes()[Layout::Parameter::width],
       },
       input.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
+
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if C10_LIKELY(
-        v_output.has_image() &&
-        v_input.has_image() &&
+    if (v_input.has_image() &&
         packed_.v_weight.has_image() &&
         packed_.v_bias.has_image()) {
-      const struct Block final {
-        uvec3 extents;
-        int32_t K;
-        vec2 multiplier;
-      } block {
-          v_output.extents(),
-          safe_downcast<int32_t>(v_input.sizes()[Layout::Parameter::width]),
-          {
-            alpha,
-            beta,
-          },
-      };
+      if (unpacked_.bias && unpacked_.bias->defined()) {
+        const struct {
+          uvec3 size;
+          int32_t K;
+          vec2 multiplier;
+        } block {
+            v_output.extents(),
+            safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+            {
+              alpha,
+              beta,
+            },
+        };
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(addmm),
-          v_output.extents(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_input.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          packed_.v_weight.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          packed_.v_bias.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+        context->dispatch(
+            command_buffer,
+            {
+                VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            },
+            VK_KERNEL(addmm),
+            {
+              div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
+              div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
+              1,
+            },
+            {8, 8, 1},
+            // Write-only access bypasses synchronization but inserts appropriate
+            // barriers if necessary.
+            v_output.image(
+                command_buffer,
+                vTensor::Stage::Compute,
+                vTensor::Access::Write),
+            // Read-only access is implied on const tensors and triggers an async
+            // synchronization if necessary.
+            v_input.image(
+                command_buffer,
+                vTensor::Stage::Compute),
+            // Read-only access is implied on const tensors and triggers an async
+            // synchronization if necessary.
+            packed_.v_weight.image(
+                command_buffer,
+                vTensor::Stage::Compute),
+            // Read-only access is implied on const tensors and triggers an async
+            // synchronization if necessary.
+            packed_.v_bias.image(
+                command_buffer,
+                vTensor::Stage::Compute),
+            // Object lifetime is managed by the resource pool.
+            // It is OK not to keep track of the handle.
+            context->resource().pool.uniform(block).object);
+      }
+      else {
+        const struct {
+          uvec3 size;
+          int32_t K;
+        } block_no_bias {
+            v_output.extents(),
+            safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+        };
+
+        context->dispatch(
+            command_buffer,
+            {
+                VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            },
+            VK_KERNEL(mm),
+            {
+              div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
+              div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
+              1,
+            },
+            {8, 8, 1},
+            // Write-only access bypasses synchronization but inserts appropriate
+            // barriers if necessary.
+            v_output.image(
+                command_buffer,
+                vTensor::Stage::Compute,
+                vTensor::Access::Write),
+            // Read-only access is implied on const tensors and triggers an async
+            // synchronization if necessary.
+            v_input.image(
+                command_buffer,
+                vTensor::Stage::Compute),
+            // Read-only access is implied on const tensors and triggers an async
+            // synchronization if necessary.
+            packed_.v_weight.image(
+                command_buffer,
+                vTensor::Stage::Compute),
+            // Object lifetime is managed by the resource pool.
+            // It is OK not to keep track of the handle.
+            context->resource().pool.uniform(block_no_bias).object);
+      }
     }
     else {
       TORCH_CHECK(false, "Not implemented!");

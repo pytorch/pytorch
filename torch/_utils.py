@@ -1,6 +1,5 @@
 import torch
-import torch._six
-from typing import Optional, List, DefaultDict
+from typing import Optional, List, DefaultDict, Any
 import warnings
 from collections import defaultdict
 import sys
@@ -175,6 +174,12 @@ def _rebuild_sparse_tensor(layout, data):
 
 
 def _rebuild_xla_tensor(data, dtype, device, requires_grad):
+    tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
+    tensor.requires_grad = requires_grad
+    return tensor
+
+
+def _rebuild_mlc_tensor(data, dtype, device, requires_grad):
     tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
     tensor.requires_grad = requires_grad
     return tensor
@@ -458,8 +463,17 @@ def _get_devices_properties(device_ids):
     # all device properties
     return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]
 
+def get_current_device_index() -> int:
+    r"""Checks if there are CUDA devices available and
+    returns the device index of the current default CUDA device.
+    Returns -1 in case there are no CUDA devices available.
+    Arguments: ``None``
+    """
+    if torch.cuda.device_count() > 0:
+        return torch.cuda.current_device()
+    return -1
 
-def _get_device_index(device, optional=False, allow_cpu=False) -> int:
+def _get_device_index(device: Any, optional: bool = False, allow_cpu: bool = False) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
 
@@ -477,8 +491,7 @@ def _get_device_index(device, optional=False, allow_cpu=False) -> int:
     """
     if isinstance(device, str):
         device = torch.device(device)
-    device_idx: Optional[int]
-    device_idx = None
+    device_idx: Optional[int] = None
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == 'cpu':
             raise ValueError('Expected a non cpu device, but got: {}'.format(device))
@@ -487,7 +500,15 @@ def _get_device_index(device, optional=False, allow_cpu=False) -> int:
         device_idx = device
     if device_idx is None:
         if optional:
-            device_idx = _get_current_device_index()
+            # The eager API _get_current_device_index uses `lambda` functions which are
+            # not supported in JIT and hence not scriptable. The JIT equivalent API to get
+            # the current device index is `get_current_device_index()` which can
+            # be scripted. We use is_scripting to check the mode we are in and call the
+            # appropriate API.
+            if torch.jit.is_scripting():
+                device_idx = get_current_device_index()
+            else:
+                device_idx = _get_current_device_index()
         else:
             raise ValueError('Expected a torch.device with a specified index '
                              'or an integer, but got:{}'.format(device))

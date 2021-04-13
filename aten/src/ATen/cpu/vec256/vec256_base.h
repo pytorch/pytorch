@@ -21,8 +21,6 @@
 #include <bitset>
 
 #include <ATen/cpu/vec256/intrinsics.h>
-#include <ATen/Utils.h>
-#include <ATen/native/Copy.h>
 #include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
