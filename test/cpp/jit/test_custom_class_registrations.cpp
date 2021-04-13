@@ -115,6 +115,41 @@ struct PickleTester : torch::CustomClassHolder {
 at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
   return torch::zeros({instance->vals.back(), 4});
 }
+struct AtomicTensorIter : torch::CustomClassHolder {
+ public:
+  explicit AtomicTensorIter(int64_t init)
+      : tensor_ctr_(torch::full({1}, init)) {}
+
+  const at::Tensor& increment() {
+    switch (tensor_ctr_.device().type()) {
+      case at::DeviceType::CPU: {
+        int64_t* tensor_ctr_data = tensor_ctr_.data_ptr<int64_t>();
+        tensor_ctr_data[0] += 1;
+        return tensor_ctr_;
+      }
+      default: {
+        throw std::logic_error(
+            "Unsupported device type by AtomicTensorIter: " +
+            tensor_ctr_.device().str());
+      }
+    }
+  }
+
+ private:
+  at::Tensor tensor_ctr_;
+};
+
+at::Tensor increment_atomic_tensor_iter(const c10::intrusive_ptr<AtomicTensorIter>& instance) {
+  return instance->increment();
+}
+
+
+static auto atomicTensorIter =
+    torch::class_<AtomicTensorIter>("fb", "AtomicTensorIter")
+        .def(torch::init<int64_t>())
+        .def("increment", &AtomicTensorIter::increment);
+
+
 
 struct ElementwiseInterpreter : torch::CustomClassHolder {
   using InstructionType = std::tuple<
@@ -398,6 +433,10 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       take_an_instance);
   // test that schema inference is ok too
   m.def("take_an_instance_inferred", take_an_instance);
+
+  m.def(
+      "increment_atomic_tensor_iter(__torch__.torch.classes.fb.AtomicTensorIter x) -> Tensor Y",
+      increment_atomic_tensor_iter);
 
   m.class_<ElementwiseInterpreter>("_ElementwiseInterpreter")
       .def(torch::init<>())

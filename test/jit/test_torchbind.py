@@ -329,7 +329,22 @@ class TestTorchbind(JitTestCase):
                 return torch.ops._TorchScriptTesting.take_an_instance(self.f)
 
         traced = torch.jit.trace(TryTracing(), ())
+        print(traced.graph)
         self.assertEqual(torch.zeros(4, 4), traced())
+
+    def test_dper_tracing(self):
+
+        class AtomicIter(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pt_iterator: torch.classes.fb.AtomicTensorIter = torch.classes.fb.AtomicTensorIter(0)
+
+            def forward(self) -> torch.Tensor:
+                return torch.ops._TorchScriptTesting.increment_atomic_tensor_iter(self.pt_iterator)
+
+        i = AtomicIter()
+        traced = torch.jit.trace(i, example_inputs=[])
+        print(traced.graph)
 
     def test_torchbind_pass_wrong_type(self):
         with self.assertRaisesRegex(RuntimeError, 'missing attribute capsule'):
