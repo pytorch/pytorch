@@ -46,7 +46,7 @@ def allocate_jacobians_with_outputs(output_tensors: Tuple, dtype=None, device=No
     for t in output_tensors:
         if is_float_or_complex_tensor(t):
             if numel_input is None:
-                out.append(t.new_zeros((t.nelement(),), **options))
+                out.append(t.new_zeros((t.numel(),), **options))
             else:
                 out.append(t.new_zeros((numel_input, t.numel()), **options))
     return tuple(out)
@@ -180,9 +180,6 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
 def compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
     # Performs finite differencing by perturbing `entry` in-place by `v` and
     # returns the gradient of each of the outputs wrt to x at idx.
-    if isinstance(v, torch.Tensor) and v.layout != torch.sparse_coo:
-        v = v.reshape(entry.shape)
-
     orig = entry.clone()
     entry.copy_(orig - v)
     outa = fn()
@@ -279,7 +276,7 @@ def prepped_input(input: torch.Tensor, maybe_perturbed_input: Optional[torch.Ten
 def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, eps, idx=None) -> None:
     # Check that the returned outputs don't have different dtype or shape when you
     # perturb the input
-    on_index = "on index {idx}" if idx is not None else " "
+    on_index = "on index {idx} " if idx is not None else ""
     assert output1.shape == output2.shape, \
         (f"Expected `func` to return outputs with the same shape"
          f" when inputs are perturbed {on_index}by {eps}, but got:"
@@ -311,6 +308,8 @@ def get_numerical_jacobian_wrt_specific_input(fn, input, input_idx, inputs, outp
         nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, idx=idx, eps=eps)
 
         def jvp_fn(delta):
+            if isinstance(delta, torch.Tensor) and delta.layout != torch.sparse_coo:
+                delta = delta.reshape(x.shape)
             return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, eps, nbhd_checks_fn)
 
         jacobian_cols[d_idx] = compute_numerical_jacobian_cols(jvp_fn, eps, x.is_complex(), grad_out)
@@ -340,6 +339,8 @@ def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, input, inputs,
     nbhd_checks_fn = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, eps=eps)
 
     def jvp_fn(delta):
+        if isinstance(delta, torch.Tensor) and delta.layout != torch.sparse_coo:
+            delta = delta.reshape(input_to_perturb.shape)
         return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, eps, nbhd_checks_fn)
 
     jacobian_cols = compute_numerical_jacobian_cols(jvp_fn, u * eps, input.is_complex(), grad_out)
@@ -1158,9 +1159,9 @@ def gradgradcheck(
         check_undefined_grad (bool, optional): if True, check if undefined output grads
             are supported and treated as zeros
         check_batched_grad (bool, optional): if True, check if we can compute
-            batched gradients using prototype
+            batched gradients using prototype vmap support. Defaults to False.
         fast_mode (bool, optional): if True, run a faster implementation of gradgradcheck that
-            no longer computes the entire jacobian.vmap support. Defaults to False.
+            no longer computes the entire jacobian.
 
     Returns:
         True if all differences satisfy allclose condition
