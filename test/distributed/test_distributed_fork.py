@@ -5,6 +5,8 @@ from functools import wraps
 import torch
 import torch.cuda
 import torch.distributed as dist
+import unittest
+from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)

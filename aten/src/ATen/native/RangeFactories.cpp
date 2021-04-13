@@ -112,7 +112,7 @@ Tensor& logspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<i
   return result;
 }
 
-Tensor& range_cpu_out(Tensor& result, const Scalar& start, const Scalar& end, const Scalar& step) {
+Tensor& range_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "range_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();

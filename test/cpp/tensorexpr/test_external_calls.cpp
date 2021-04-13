@@ -437,5 +437,73 @@ TEST(ExternalCall, ComputeInterop) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
+TEST(ExternalCall, Inlining) {
+  // This test verifies that Tensors using external calls can be used by and
+  // can use Tensors built with Compute API.
+  KernelScope kernel_scope;
+
+  BufHandle MatmulResultBuf("MatmulResult", {8, 8}, kFloat);
+
+  Tensor* A = Compute(
+      "A", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return FloatImm::make(5.0f);
+      });
+  Tensor* B = Compute(
+      "B", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return FloatImm::make(4.0f);
+      });
+  Tensor* MatmulResult = new Tensor(
+      MatmulResultBuf.node(),
+      ExternalCall::make(
+          MatmulResultBuf,
+          "nnc_aten_matmul",
+          {BufHandle(A->buf()), BufHandle(B->buf())},
+          {}));
+  Tensor* Result = Compute(
+      "Result",
+      {{8, "i"}, {8, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        return MatmulResult->call(i, j) + FloatImm::make(3.0f);
+      });
+
+  Stmt* root_stmt =
+      new Block({A->stmt(), B->stmt(), MatmulResult->stmt(), Result->stmt()});
+  LoopNest l(root_stmt, {Result->buf()});
+
+  // Inlining should not inline anything here since all Bufs are either
+  // defined or used in ExternalCalls
+  l.inlineIntermediateBufs(false);
+
+  l.prepareForCodegen();
+  l.simplify();
+
+  auto options = at::TensorOptions()
+                     .dtype(at::kFloat)
+                     .layout(at::kStrided)
+                     .device(at::kCPU)
+                     .requires_grad(false);
+  at::Tensor a = at::ones({8, 8}, options) * 5.f;
+  at::Tensor b = at::ones({8, 8}, options) * 4.f;
+  at::Tensor t = at::matmul(a, b);
+  at::Tensor ref = t + 3.f;
+
+  at::Tensor nnc_result;
+  std::vector<float> result_buf(8 * 8);
+
+#ifdef TORCH_ENABLE_LLVM
+  LLVMCodeGen llvm_codegen(l.root_stmt(), {Result});
+
+  llvm_codegen.call({result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {8, 8}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+  SimpleIREvaluator ir_eval(l.root_stmt(), {Result});
+
+  ir_eval.call({result_buf});
+  nnc_result = at::from_blob(result_buf.data(), {8, 8}, options);
+  ASSERT_TRUE(at::allclose(nnc_result, ref));
+}
+
 } // namespace jit
 } // namespace torch

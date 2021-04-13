@@ -30,7 +30,7 @@
 #include <utility>
 
 #include <ATen/Config.h>
-#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
+#include <ATen/core/op_registration/adaption.h>
 #include <torch/library.h>
 $extra_cuda_headers
 $legacy_th_headers

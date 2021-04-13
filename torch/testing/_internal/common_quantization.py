@@ -27,7 +27,7 @@ try:
         prepare_qat_fx,
         convert_fx,
     )
-    from torch.quantization.ns.ns_types import NSSingleResultValuesType
+    from torch.quantization.ns.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
     from torch.fx import GraphModule
     HAS_FX = True
@@ -611,7 +611,7 @@ class QuantizationTestCase(TestCase):
 
         def assert_types_for_matched_subgraph_pairs(
             self,
-            matched_subgraph_pairs: Dict[str, Tuple[Tuple[Node, Node], Tuple[Node, Node]]],
+            matched_subgraph_pairs: Dict[str, Tuple[NSSubgraph, NSSubgraph]],
             expected_types: Dict[str, Tuple[Tuple[Callable, Callable], Tuple[Callable, Callable]]],
             gm_a: GraphModule,
             gm_b: GraphModule,
@@ -646,14 +646,12 @@ class QuantizationTestCase(TestCase):
                 expected_types_a, expected_types_b = v
                 exp_type_start_a, exp_type_end_a = expected_types_a
                 exp_type_start_b, exp_type_end_b = expected_types_b
-                nodes_a, nodes_b = matched_subgraph_pairs[k]
-                node_start_a, node_end_a = nodes_a
-                node_start_b, node_end_b = nodes_b
+                subgraph_a, subgraph_b = matched_subgraph_pairs[k]
 
-                act_type_start_a = _get_underlying_op_type(node_start_a, gm_a)
-                act_type_start_b = _get_underlying_op_type(node_start_b, gm_b)
-                act_type_end_a = _get_underlying_op_type(node_end_a, gm_a)
-                act_type_end_b = _get_underlying_op_type(node_end_b, gm_b)
+                act_type_start_a = _get_underlying_op_type(subgraph_a.start_node, gm_a)
+                act_type_start_b = _get_underlying_op_type(subgraph_b.start_node, gm_b)
+                act_type_end_a = _get_underlying_op_type(subgraph_a.end_node, gm_a)
+                act_type_end_b = _get_underlying_op_type(subgraph_b.end_node, gm_b)
                 types_match = (exp_type_start_a is act_type_start_a) and \
                     (exp_type_end_a is act_type_end_a) and \
                     (exp_type_start_b is act_type_start_b) and \
@@ -692,10 +690,20 @@ class QuantizationTestCase(TestCase):
                             len(layer_data_1['values']),
                             f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same number of seen Tensors.")
                         for idx in range(len(layer_data_0['values'])):
-                            self.assertTrue(
-                                layer_data_0['values'][idx].shape ==
-                                layer_data_1['values'][idx].shape,
-                                f"Layer {layer_name}, {model_name_0} and {model_name_1} have a shape mismatch at idx {idx}.")
+                            values_0 = layer_data_0['values'][idx]
+                            values_1 = layer_data_1['values'][idx]
+                            if isinstance(values_0, torch.Tensor):
+                                self.assertTrue(
+                                    values_0.shape == values_1.shape,
+                                    f"Layer {layer_name}, {model_name_0} and {model_name_1} have a shape mismatch at idx {idx}.")
+                            else:
+                                assert isinstance(values_0, tuple), \
+                                    f"unhandled type {type(values_0)}"
+                                assert len(values_0) == 2
+                                assert len(values_0[1]) == 2
+                                assert values_0[0].shape == values_1[0].shape
+                                assert values_0[1][0].shape == values_1[1][0].shape
+                                assert values_0[1][1].shape == values_1[1][1].shape
 
                         # verify that ref_node_name is valid
                         ref_node_name_0 = layer_data_0['ref_node_name']

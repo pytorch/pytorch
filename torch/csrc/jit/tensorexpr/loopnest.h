@@ -25,14 +25,16 @@ class Dtype;
 class TORCH_API LoopNest {
  public:
   // A constructor for building a LoopNest from a list of Tensors
-  LoopNest(const std::vector<Tensor*>& output_tensors);
   LoopNest(
       const std::vector<Tensor*>& output_tensors,
       const std::vector<Tensor*>& tensors_to_compute);
 
+  // A convenience constructor for the case when all tensors are output tensors
+  LoopNest(const std::vector<Tensor*>& output_tensors);
+
   // A constructor for building a LoopNest from an Stmt and a list of output
   // buffers.
-  LoopNest(Stmt* stmt, const std::unordered_set<const Buf*>& output_bufs);
+  LoopNest(Stmt* stmt, std::unordered_set<const Buf*> output_bufs);
 
   // A constructor for building a LoopNest from another loopnest. It clones the
   // other loopnest's stmt.
@@ -169,6 +171,35 @@ class TORCH_API LoopNest {
   // S7:      B[i] = B[i] +
   static std::vector<For*> distributeLoopOverInnerLoops(For* loop);
 
+  // This method performs loop fusion.
+  // For example, consider the following code.
+  //
+  // S1:  for m
+  // S2:    A[m] = 0
+  // S3:    for j
+  // S4:      A[m] = A[m] +
+  // S5:  for n
+  // S5:    B[n] = A[n]
+  // S6:    for k
+  // S7:      B[n] = B[n] +
+  //
+  // fuseLoops({S1, S5}), will return the following loop:
+  // S1:  for m
+  // S2:    A[m] = 0
+  // S3:    for j
+  // S4:      A[m] = A[m] +
+  // S5:    B[m] = A[m]
+  // S6:    for k
+  // S7:      B[m] = B[m] +
+  //
+  // Loop fusion is done only when all the conditions below are satisfied.
+  //  * All the loops have the same parent.
+  //  * There are no statements between these loops in their parent body.
+  //  * The start bounds are the same for all loops.
+  //  * The stop bounds are the same for all loops.
+  //  * Fusing the loops does not violate or add any dependencies.
+  static For* fuseLoops(const std::vector<For*>& loops);
+
   void reorderAxis(For* a, For* b);
 
   static void unroll(For* f, Stmt** unrolled);
@@ -180,8 +211,10 @@ class TORCH_API LoopNest {
 
   // LoopOptions are propagated to tail.
   void sliceHead(For* f, int factor, For** head, For** tail);
+  void sliceHead(For* f, int factor);
   // LoopOptions are propagated to head.
   void sliceTail(For* f, int factor, For** head, For** tail);
+  void sliceTail(For* f, int factor);
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);

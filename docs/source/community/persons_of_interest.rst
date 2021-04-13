@@ -179,6 +179,3 @@ TorchAudio
 ~~~~~~~~~~
 
 - Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
-
-
-
