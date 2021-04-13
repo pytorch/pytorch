@@ -915,6 +915,10 @@ filegroup(
         "caffe2/onnx/onnx_exporter.cc",
         "caffe2/onnx/onnxifi_graph_info.cc",
         "caffe2/onnx/onnxifi_init.cc",
+        "third_party/optimizer/onnxoptimizer/optimize.cc"
+		    "third_party/optimizer/onnxoptimizer/pass.cc"
+		    "third_party/optimizer/onnxoptimizer/pass_registry.cc"
+		    "third_party/optimizer/onnxoptimizer/pass_manager.cc"
     ],
 )
 
@@ -1645,6 +1649,7 @@ cc_library(
         "caffe2/utils/*.h",
         "caffe2/utils/math/*.h",
         "caffe2/utils/threadpool/*.h",
+        "third_party/optimizer/*.h"
         "modules/**/*.h",
     ]) + if_cuda(glob([
         "caffe2/**/*.cuh",
@@ -1728,6 +1733,7 @@ cc_library(
         "@foxi",
         "@gloo",
         "@onnx",
+        "@optimizer",
         "@fmt",
     ] + if_cuda(
         [
