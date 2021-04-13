@@ -482,6 +482,7 @@ class DistributedDataParallel(Module):
         self._module_copies = [self.module]
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
+        # Verify model equivalence.
         dist._verify_model_across_ranks(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
@@ -560,7 +561,6 @@ class DistributedDataParallel(Module):
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
-        # Verify model equivalence.
         self._ddp_init_helper(parameters, expect_sparse_gradient)
 
     def _build_params_for_reducer(self):
