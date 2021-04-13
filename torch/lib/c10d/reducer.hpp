@@ -417,11 +417,15 @@ class Reducer {
   int divFactor_;
 
  private:
+  // reset counting for buckets before backward starts
   void reset_bucket_counting();
+  // search unused parameters beore backward starts
   void search_unused_parameters(
       const std::vector<torch::autograd::Variable>& outputs);
   void set_divide_factor();
+  // kick off all reduce for the ready bucket
   void all_reduce_bucket(Bucket& bucket);
+  // kick off all reduce to local used map, it can help find global unused parameters
   void all_reduce_local_used_map();
 
   // comm_hook_ is used to access the DDP communication hook if registered.

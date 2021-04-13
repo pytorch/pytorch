@@ -491,27 +491,40 @@ void Reducer::all_reduce_local_used_map() {
         // Note [local_used_maps_ -> local_used_maps_dev copying]
         // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         // We do async H2D to avoid the blocking overhead. The async copy and
-        // allreduce respect the current stream, so will be sequenced correctly.
+        // allreduce respect the current stream, so will be sequenced
+        // correctly.
         //
-        // Correct sequencing with respect to host operations is also essential.
-        // The H2D copy_ is stream ordered, while the host's changes to
-        // local_used_maps_ are host ordered. If a large backlog of cuda-stream
-        // work pushes the copy_ far into the future, and if no blocking calls
-        // occur between now and finalize_backward()** such that
-        // finalize_backward() re-zeroes local_used_maps_ on the host before the
-        // stream executes the copy_, copy_ will read those zeros instead of the
-        // values we thought we told it to read here.
-        // Copying local_used_maps_[i] to a pinned temporary (which the pinned
-        // caching allocator should supply asynchronously) avoids this nasty,
-        // rare race condition.
+        // Correct sequencing with respect to host operations is also
+        // essential. The H2D copy_ is stream ordered, while the host's
+        // changes to local_used_maps_ are host ordered. If a large backlog of
+        // cuda-stream work pushes the copy_ far into the future, and if no
+        // blocking calls occur between now and finalize_backward()** such
+        // that finalize_backward() re-zeroes local_used_maps_ on the host
+        // before the stream executes the copy_, copy_ will read those zeros
+        // instead of the values we thought we told it to read here. Copying
+        // local_used_maps_[i] to a pinned temporary (which the pinned caching
+        // allocator should supply asynchronously) avoids this nasty, rare
+        // race condition.
         //
-        // ** In the hoped-for case where all params are used, DDP itself won't
-        // do any blocking work between now and the re-zeroing, so the danger is
-        // real.
-        auto local_used_maps_tmp = local_used_maps_[i].pin_memory();
-        // Defensively ensures a deep copy to a pinned temporary
+        // ** In the hoped-for case where all params are used, DDP itself
+        // won't do any blocking work between now and the re-zeroing, so the
+        // danger is real.
+        //
+        // Defensively ensures local_used_maps_tmp is distinct from
+        // local_used_maps_[i]
+        auto local_used_maps_tmp = at::native::empty_like(
+            local_used_maps_[i],
+            optTypeMetaToScalarType(local_used_maps_[i].options().dtype_opt()),
+            local_used_maps_[i].options().layout_opt(),
+            local_used_maps_[i].options().device_opt(),
+            true /* pinned_memory */);
+        // Paranoid asserts here because in some workloads, the pinned
+        // allocator behaves in a way we don't understand, and may be bugged.
+        // See https://github.com/pytorch/pytorch/pull/54474
+        TORCH_INTERNAL_ASSERT(local_used_maps_tmp.is_pinned());
         TORCH_INTERNAL_ASSERT(
-            local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr())
+            local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr());
+        local_used_maps_tmp.copy_(local_used_maps_[i]);
         local_used_maps_dev_[i].copy_(local_used_maps_tmp, true);
       } else {
         local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
@@ -645,7 +658,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
   } else {
     GradBucket grad_bucket(
         next_bucket_,
-        tensors,
+        tensors[0],
         // Since currently we do not support single-process multiple-device
         // mode, we can assume only one replica in the bucket.
         bucket.replicas[0].offsets,
@@ -945,6 +958,12 @@ void Reducer::reset_bucket_counting() {
   }
 }
 
+// Traverse the autograd graph starting at the specified output.
+// All parameters for which we have a pointer to their gradient accumulation
+// functions, but don't show up in the autograd graph will be marked ready for
+// for reduction as soon as the first autograd hook is called. This is not
+// done immediately because the model output may be ignored, and we only
+// want to start performing reductions on `torch.autograd.backward()`.
 void Reducer::search_unused_parameters(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::unordered_set<torch::autograd::Node*> seen;
@@ -1000,12 +1019,7 @@ void Reducer::search_unused_parameters(
         "has flow control causing later iterations to have unused parameters.");
   }
 }
-// Traverse the autograd graph starting at the specified output.
-// All parameters for which we have a pointer to their gradient accumulation
-// functions, but don't show up in the autograd graph will be marked ready for
-// for reduction as soon as the first autograd hook is called. This is not
-// done immediately because the model output may be ignored, and we only
-// want to start performing reductions on `torch.autograd.backward()`.
+
 void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
