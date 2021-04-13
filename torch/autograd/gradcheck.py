@@ -336,7 +336,7 @@ def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, input, inputs,
         return compute_numerical_gradient(wrapped_fn, input_to_perturb, delta, eps, nbhd_checks_fn)
 
     jacobian_cols = compute_numerical_jacobian_cols(jvp_fn, ur * eps, input.is_complex(), ui * eps)
-    jacobians = allocate_jacobians_with_outputs(outputs, dtype=input.dtype, device=input.device)
+    jacobians = allocate_jacobians_with_outputs(outputs, dtype=input.dtype)
 
     for i, jacobian in enumerate(jacobians):
         jacobian.copy_(jacobian_cols[i])
@@ -349,7 +349,7 @@ def get_fast_numerical_jacobians(fn, inputs, inp_indices, outputs, all_ur, all_u
         jacobian_cols = get_fast_numerical_jacobian_wrt_specific_input(fn, inp_idx, inp, inputs, outputs, ur, ui, eps)
         jacobian_scalars: List[torch.Tensor] = []
         for v, Ju in zip(all_v, jacobian_cols):
-            jacobian_scalars.append(dot(v, Ju.to(v.device)))
+            jacobian_scalars.append(dot(v, Ju))
         reduced_jacobians.append(jacobian_scalars)
     return reduced_jacobians
 
@@ -448,7 +448,7 @@ def get_fast_analytical_jacobians(inputs, outputs, nondet_tol, check_grad_dtypes
                 ti = tv.select(-1, 1)
                 jacobian_scalars.append(tr.dot(ur) + 1j * ti.dot(ui))
             else:  # R -> R
-                jacobian_scalars.append(dot(vJ, ur.to(vJ.device)))
+                jacobian_scalars.append(dot(vJ, ur))
         reduced_jacobians.append(jacobian_scalars)
     return reduced_jacobians
 
@@ -833,30 +833,14 @@ def slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
 
 
 def dot(u, v):
-    if v.is_complex() and not u.is_complex():
-        return v.dot(u.to(dtype=v.dtype))
-    elif u.is_complex() and not v.is_complex():
-        return u.dot(v.to(dtype=u.dtype))
-    elif u.is_complex() and v.is_complex():
-        return u.to(dtype=torch.complex128).dot(v.to(dtype=torch.complex128))
-    else:
-        return u.to(dtype=torch.float64).dot(v.to(dtype=torch.float64))
+    return (u * v).sum()
 
 
-def all_close(a, b, rtol, atol):
-    if a.is_complex() and not b.is_complex():
-        if not torch.allclose(a, b.to(a.dtype), rtol, atol):
-            return False
-    elif b.is_complex() and not a.is_complex():
-        if not torch.allclose(a.to(b.dtype), b, rtol, atol):
-            return False
-    elif a.is_complex() and b.is_complex():
-        if not torch.allclose(a.to(dtype=torch.complex128), b.to(dtype=torch.complex128), rtol, atol):
-            return False
-    else:
-        if not torch.allclose(a.to(dtype=torch.float64), b.to(dtype=torch.float64), rtol, atol):
-            return False
-    return True
+def allclose_with_type_promotion(a, b, rtol, atol):
+    promoted_type = torch.promote_types(a.dtype, b.dtype)
+    a = a.to(dtype=promoted_type)
+    b = b.to(dtype=promoted_type)
+    return torch.allclose(a, b, rtol, atol)
 
 
 def rand_vec_from_tensors(tensors, generator, always_float64=False):
@@ -946,10 +930,11 @@ def check_analytical_numerical_equal(all_analytical, all_numerical, complex_indi
     for i, (all_numerical_for_input_i, inp) in enumerate(zip(all_numerical, inp_tensors)):
         for j, n in enumerate(all_numerical_for_input_i):
             a = all_analytical[j][i]
+            n = n.to(device=a.device)
             # TODO: Update adjusted atol
-            if not all_close(a, n.to(a.device), rtol, adjusted_atol(atol, all_ur[i], all_v[j])):
+            if not allclose_with_type_promotion(a, n.to(a.device), rtol, adjusted_atol(atol, all_ur[i], all_v[j])):
                 jacobians_str = slow_mode_jacobian_message(func, tupled_inputs, outputs, i, j, rtol, atol)
-                raise GradcheckError(get_notallclose_msg(a, n, i, j, complex_indices, inp.is_complex()) + jacobians_str)
+                raise GradcheckError(get_notallclose_msg(a, n, j, i, complex_indices, inp.is_complex()) + jacobians_str)
 
 
 def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
