@@ -154,7 +154,7 @@ def _equalize_attributes(a: torch.Tensor, b: torch.Tensor) -> Tuple[torch.Tensor
     return a, b
 
 
-_Trace = namedtuple("Trace", ("total", "abs", "rel", "idx", "diff", "a", "b"))
+_Trace = namedtuple("_Trace", ("total", "abs", "rel", "idx", "diff", "a", "b"))
 
 
 def _trace_mismatches(a: torch.Tensor, b: torch.Tensor, mismatches: torch.Tensor) -> _Trace:

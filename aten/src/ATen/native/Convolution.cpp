@@ -147,6 +147,7 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
          (input.size(1) == groups) &&
          (weight.ndimension() == 4 ) &&
          (weight.size(0) % input.size(1) == 0) &&
+         (weight.size(1) == 1) &&
          (weight.size(2) == 3) &&
          (weight.size(3) == 3) &&
          (input.device().is_cpu()) &&
