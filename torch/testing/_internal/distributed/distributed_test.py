@@ -3623,7 +3623,8 @@ class DistributedTest:
                 ddp_logging_data = model_DDP.get_ddp_logging_data()
                 if (idx > 0 and (idx < 10 or idx % 2 != 0)):
                     self.assertGreaterEqual(ddp_logging_data.forward_compute_time, 1)
-                    self.assertGreaterEqual(ddp_logging_data.backward_compute_comm_overlap_time, 1)
+                    self.assertGreaterEqual(ddp_logging_data.backward_compute_time, 1)
+                    self.assertGreaterEqual(ddp_logging_data.backward_comm_time, 1)
                     self.assertGreaterEqual(
                         ddp_logging_data.backward_compute_time,
                         ddp_logging_data.backward_compute_comm_overlap_time)
@@ -3694,7 +3695,8 @@ class DistributedTest:
             # It is hard to test accurate latency, but it can test whether the latency is
             # a valid value and in the expected range.
             self.assertGreaterEqual(ddp_logging_data.avg_forward_compute_time, 1)
-            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_comm_overlap_time, 1)
+            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_time, 1)
+            self.assertGreaterEqual(ddp_logging_data.avg_backward_comm_time, 1)
             self.assertGreaterEqual(
                 ddp_logging_data.avg_backward_compute_time,
                 ddp_logging_data.avg_backward_compute_comm_overlap_time)
