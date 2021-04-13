@@ -11,8 +11,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/BFloat16-math.h>
-#include <c10/util/Half-math.h>
+#include <c10/util/copysign.h>
 
 namespace at {
 namespace native {
@@ -52,8 +51,7 @@ void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Sc
     auto max_vec = Vec256<scalar_t>(max_scalar);
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t {
-        scalar_t x = a + alpha * b;
-        return std::min(max_scalar, std::max(min_scalar, x));
+        return std::min(max_scalar, std::max(min_scalar, static_cast<scalar_t>(a + alpha * b)));
       },
       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
         auto add_clamp_res = vec256::fmadd(b, alpha_vec, a);
@@ -64,7 +62,7 @@ void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Sc
     });
 }
 
-void atan2_kernel(TensorIterator& iter) {
+void atan2_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atan2_cpu", [&]() {
     cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
     return std::atan2(a, b);
@@ -184,7 +182,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
                 floordiv += scalar_t(1.0);
               }
             } else {
-              floordiv = std::copysign(scalar_t(0), a / b);
+              floordiv = c10::copysign(scalar_t(0), a / b);
             }
             return floordiv;
           },
@@ -928,11 +926,11 @@ void heaviside_kernel(TensorIterator& iter) {
   });
 }
 
-void copysign_kernel(TensorIterator& iter) {
+void copysign_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "copysign_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t b) -> scalar_t {
-        return std::copysign(a, b);
+        return c10::copysign(a, b);
       },
       [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
         return a.copysign(b);

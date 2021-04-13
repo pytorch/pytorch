@@ -57,7 +57,8 @@ private:
   float32x4x2_t values;
 public:
   using value_type = float;
-  static constexpr int size() {
+  using size_type = int;
+  static constexpr size_type size() {
     return 8;
   }
   Vec256() {}
@@ -319,7 +320,7 @@ public:
     __at_align32__ float tmp_exp[size()];
     store(tmp);
     exp.store(tmp_exp);
-    for (int i = 0; i < size(); i++) {
+    for (int64_t i = 0; i < size(); i++) {
       tmp[i] = std::atan2(tmp[i], tmp_exp[i]);
     }
     return loadu(tmp);
@@ -329,7 +330,7 @@ public:
     __at_align32__ float tmp_sign[size()];
     store(tmp);
     sign.store(tmp_sign);
-    for (int64_t i = 0; i < size(); i++) {
+    for (size_type i = 0; i < size(); i++) {
       tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
     }
     return loadu(tmp);
