@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 _init_counter = 0
 _init_counter_lock = threading.Lock()
+_barrier_workers = threading.Lock()
 
 def is_available():
     return hasattr(torch._C, "_rpc_init")
@@ -198,16 +199,22 @@ if is_available():
     def barrier(worker_names=None):
         r"""
         Synchronizes local and remote RPC processes.
-        
+
         This will block until all local and remote RPC processes specified under worker_names
-        reach this method and wait for all outstanding work to complete.
+        reach this method to wait for all outstanding work to complete.
 
         Args: 
-            worker_names (set[String], optional): The set of workers to synchronize. If ``None``, will be
-            set to all workers. Default is ``None``.
+            worker_names (List[str], optional): The set of workers to synchronize. If ``None``, the
+            set will be all workers. Default is ``None``.
 
         """
-        api._all_gather(None, worker_names)
+        # When specifying worker_names, only allow one barrier for that group of workers
+        if worker_names:
+            with _barrier_workers:
+                api._all_gather(None, set(worker_names))
+        else:
+            api._all_gather(None)
+
 
     def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
         type_mapping = {

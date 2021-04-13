@@ -1036,14 +1036,32 @@ class RpcTest(RpcAgentTestFixture):
                 rpc.api._all_gather(SlowPickleClass(0.5))
 
     @dist_init
-    def test_barrier(self):
+    def test_rpc_barrier_all(self):
+        info = rpc.get_worker_info()
+        all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
+        names = [worker.name for worker in all_worker_info]
+        rpc.barrier(names)
+
+    @dist_init
+    def test_rpc_barrier_subset(self):
         info = rpc.get_worker_info()
         all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
         if info.id % 2:
-            names = set([worker.name for worker in all_worker_info if worker.id % 2])
+            names = ([worker.name for worker in all_worker_info if worker.id % 2])
             rpc.barrier(names)
         else:
-            names = set([worker.name for worker in all_worker_info if not worker.id % 2])
+            names = ([worker.name for worker in all_worker_info if not worker.id % 2])
+            rpc.barrier(names)
+
+    @dist_init
+    def test_rpc_barrier_partial_subset(self):
+        info = rpc.get_worker_info()
+        all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
+        if info.id % 2:
+            names = ([worker.name for worker in all_worker_info if worker.id % 2])
+            rpc.barrier(names)
+        elif info.id == 0:
+            names = ([worker.name for worker in all_worker_info if worker.id == 0])
             rpc.barrier(names)
 
     @dist_init
