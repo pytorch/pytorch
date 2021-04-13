@@ -87,7 +87,7 @@ class ScriptModuleSerializer {
       const std::string& archive_name,
       const std::string& archive_dir,
       const std::string& tensor_dir,
-      uint64_t next_tensor_id);
+      uint64_t next_tensor_id = 0);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
   std::vector<at::IValue> constant_table_;
