@@ -72,11 +72,6 @@ std::unordered_map<const Var*, const Buf*> getAllBufs(Stmt* s) {
   std::unordered_map<const Var*, const Buf*> varToBuf;
 
   auto bufs = NodeFinder<const Buf>::find(s);
-  auto calls = NodeFinder<FunctionCall>::find(s);
-  for (auto* c : calls) {
-    bufs.push_back(c->tensor()->buf());
-  }
-
   for (auto* b : bufs) {
     varToBuf[b->base_handle()] = b;
   }

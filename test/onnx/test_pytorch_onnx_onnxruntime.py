@@ -972,6 +972,18 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(3, 3).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
 
+    def test_hardsigmoid(self):
+        model = torch.nn.Hardsigmoid()
+
+        x = torch.rand(3, 3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+        # corner cases
+        x = torch.tensor(3).to(dtype=torch.float32)
+        self.run_test(model, x)
+        x = torch.tensor(-3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
@@ -5392,7 +5404,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_det(self):
         class Det(torch.nn.Module):
             def forward(self, x):
-                return torch.det(x)
+                return torch.linalg.det(x)
 
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
