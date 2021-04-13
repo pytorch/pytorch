@@ -95,7 +95,7 @@ class PackageExporter:
             f: The location to export to. Can be a  string/Path object containing a filename,
                 or a Binary I/O object.
             importer: If a single Importer is passed, use that to search for modules.
-                If a sequence of importers are passsed, an Orderedporter will be constructed out of them.
+                If a sequence of importers are passsed, an OrderedImporter will be constructed out of them.
             verbose: Print information about dependency resolution to stdout.
                 Useful for tracking down why certain files get included.
         """

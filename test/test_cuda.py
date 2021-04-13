@@ -1483,10 +1483,10 @@ class TestCuda(TestCase):
     @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
-        self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
+        self._spawn_method(test_method, torch.tensor([1., -1., 1.]))
+        self._spawn_method(test_method, torch.tensor([1., inf, 1.]))
+        self._spawn_method(test_method, torch.tensor([1., -inf, 1.]))
+        self._spawn_method(test_method, torch.tensor([1., 1., nan]))
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -1693,8 +1693,6 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 2)
         self.assertEqual(torch.cuda.current_stream(), default_stream)
 
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_streaming_backwards_multiple_streams(self):
 
         class StreamModel(torch.nn.Module):
@@ -1730,8 +1728,6 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 5)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_streaming_backwards_device_transfer(self):
         # This function must run with non-default current streams on all devices, otherwise it's meaningless.
         # The intention is to test that to()'s backward (CopyBackward) interacts properly with the
@@ -2336,8 +2332,6 @@ torch.cuda.synchronize()
                 self.assertTrue(torch.allclose(c, s, atol=1e-7))
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_grad_scaling_multigpu(self):
         # Same as above, but runs some of the models on device 1.
         # GradScaler should transparently handle losses and gradients on multiple devices.
@@ -2678,6 +2672,12 @@ torch.cuda.synchronize()
     def test_autocast_nn_fp32(self):
         for op, args in self.autocast_lists.nn_fp32:
             self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_linalg_fp16(self):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
+            for op, args in self.autocast_lists.linalg_fp16:
+                self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._linalg)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_fp16(self):
