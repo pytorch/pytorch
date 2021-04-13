@@ -22,6 +22,21 @@ class TestCustomOperators(TestCase):
         output = ops.custom.op2("abc", "abc")
         self.assertEqual(output, 0)
 
+    def test_calling_custom_op_module(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            def forward(self):
+                assert self.name == "inner_mod_name"
+                return 0;
+    
+        mod = Mod("inner_mod_name")
+        output = ops.custom.op2(mod, torch.ones(5))
+        print(output)
+        print("\n\n good! \n\n")
+
     def test_calling_custom_op(self):
         output = ops.custom.op(torch.ones(5), 2.0, 3)
         self.assertEqual(type(output), list)
@@ -90,4 +105,5 @@ class TestCustomOperators(TestCase):
 
 
 if __name__ == "__main__":
+    print("TESTINGGGGG")
     run_tests()

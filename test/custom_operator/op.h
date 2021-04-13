@@ -22,3 +22,6 @@ CUSTOM_OP_API torch::List<torch::Tensor> custom_op(
     int64_t repeat);
 
 CUSTOM_OP_API int64_t custom_op2(std::string s1, std::string s2);
+
+// CUSTOM_OP_API torch::Tensor custom_op3(c10::intrusive_ptr<torch::jit::Module> my_module, torch::Tensor testData);
+CUSTOM_OP_API torch::Tensor custom_op3(torch::jit::Module my_module, torch::Tensor testData);

@@ -21,6 +21,12 @@ int64_t custom_op2(std::string s1, std::string s2) {
   return s1.compare(s2);
 }
 
+
+// torch::Tensor custom_op3(c10::intrusive_ptr<torch::jit::Module> my_module, torch::Tensor testData) {
+torch::Tensor custom_op3(torch::jit::Module my_module, torch::Tensor testData) {
+  return testData.clone();
+}
+
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,
@@ -64,6 +70,7 @@ torch::Tensor custom_op_with_autograd(
 TORCH_LIBRARY_FRAGMENT(custom, m) {
     m.def("op", custom_op);
     m.def("op2", custom_op2);
+    m.def("op3", custom_op3);
     m.def("op_with_defaults(Tensor tensor, float scalar = 1, int repeat = 1) -> Tensor[]", custom_op);
     m.def("op_with_autograd(Tensor var1, int mul, Tensor var2, Tensor? var3=None) -> Tensor", custom_op_with_autograd);
 }
