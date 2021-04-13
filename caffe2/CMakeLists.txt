@@ -1162,18 +1162,6 @@ if(USE_DISTRIBUTED)
     target_compile_definitions(torch_cpu PRIVATE
       USE_TENSORPIPE
     )
-    # This is needed for torch/csrc/distributed/rpc/macros.h to work
-    # in libtorch_distributed_sources source files, e.g., rref_impl.cpp.
-    # See tools/build_variables.bzl
-    if(USE_CUDA)
-      target_compile_definitions(torch_cpu PUBLIC USE_CUDA)
-    endif()
-    if(USE_ROCM)
-      target_compile_definitions(torch_cpu PRIVATE
-        USE_ROCM
-        __HIP_PLATFORM_HCC__
-      )
-    endif()
   endif()
 endif()
 

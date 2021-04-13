@@ -4,13 +4,17 @@ import json
 import logging
 import os
 import sys
-from threading import Event
-from threading import Lock
 import time
 import unittest
+import warnings
+
+
 from collections import namedtuple
 from functools import partial
+from threading import Event
+from threading import Lock
 from unittest import mock
+
 
 import torch
 import torch.nn as nn
@@ -4032,7 +4036,9 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
         self.assertIsInstance(rpc.api._get_current_rpc_agent(), rpc.ProcessGroupAgent)
 
     def test_logs_deprecation_warning(self):
-        with self.assertLogs("torch.distributed.rpc", logging.WARNING) as cm:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+
             rpc.init_rpc(
                 name=worker_name(self.rank),
                 rank=self.rank,
@@ -4040,10 +4046,14 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
                 backend=rpc.BackendType.PROCESS_GROUP,
                 rpc_backend_options=self.rpc_backend_options,
             )
-        self.assertIn(
-            "It is recommended to migrate to the TENSORPIPE backend.",
-            "\n".join(cm.output),
-        )
+
+            self.assertEqual(1, len(w))
+            self.assertIn(
+                "It is recommended to migrate to the TENSORPIPE backend.",
+                str(w[-1].message),
+            )
+
+            rpc.shutdown()
 
     def test_single_threaded_rref_owner(self):
         # We need a process group in order to perform a barrier at the end.
