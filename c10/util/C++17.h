@@ -12,16 +12,16 @@
 #include <c10/macros/Macros.h>
 
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
-  __GNUC__ < 5
-#error "You're trying to build PyTorch with a too old version of GCC. We need GCC 5 or later."
+  __GNUC__ < 7
+#error "You're trying to build PyTorch with a too old version of GCC. We need GCC 7 or later."
 #endif
 
-#if defined(__clang__) && __clang_major__ < 4
-#error "You're trying to build PyTorch with a too old version of Clang. We need Clang 4 or later."
+#if defined(__clang__) && __clang_major__ < 6
+#error "You're trying to build PyTorch with a too old version of Clang. We need Clang 6 or later."
 #endif
 
-#if (defined(_MSC_VER) && (!defined(_MSVC_LANG) || _MSVC_LANG < 201402L)) || (!defined(_MSC_VER) && __cplusplus < 201402L)
-#error You need C++14 to compile PyTorch
+#if __cplusplus < 201703L
+#error You need C++17 to compile PyTorch
 #endif
 
 #if defined(_WIN32) && (defined(min) || defined(max))
