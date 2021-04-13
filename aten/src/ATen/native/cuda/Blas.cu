@@ -6,7 +6,7 @@ namespace at { namespace native {
 
 TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta_, const Scalar& alpha_, const Tensor& result) {
   Tensor self_ = self;
-  if (self.numel()==1 && self.dim()<=1) {
+  if (self.numel()==1) {
     self_ = self.expand({mat.size(0)});
   }
   auto betaval = beta_.toComplexDouble();

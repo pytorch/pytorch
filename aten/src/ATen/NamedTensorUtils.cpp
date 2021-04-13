@@ -379,7 +379,6 @@ std::vector<Dimname> propagate_names_for_addmv(
   }
   auto mv_outnames = compute_matmul_outnames(mat.names(), vec.names());
   return unify_from_right(mv_outnames, bias.names());
-//  propagate_names(result, add_outnames);
 }
 
 void propagate_names_for_addmm(

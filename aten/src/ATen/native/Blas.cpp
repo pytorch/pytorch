@@ -19,10 +19,7 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
   TORCH_CHECK(result.dim() == 1 && result.sizes()[0] == mat.sizes()[0], "output of addmv operation should be 1D with ",
   "size equal to mat.size(0), yet got output size ", result.sizes(), " and mat.size(0) ", mat.size(0));
 }
-
-
 }
-
 
 namespace native {
 
@@ -44,7 +41,7 @@ constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
 
 TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta_, const Scalar& alpha_, const Tensor& result) {
   Tensor self_ = self;
-  if (self.numel()==1 && self.dim()<=1) {
+  if (self.numel()==1) {
     self_ = self.expand({mat.size(0)});
   }
   auto betaval = beta_.toComplexDouble();
