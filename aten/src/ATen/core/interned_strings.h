@@ -329,6 +329,12 @@ namespace c10 {
   _(aten, special_expm1)             \
   _(aten, exp2)                      \
   _(aten, special_exp2)              \
+  _(aten, log1p)                     \
+  _(aten, special_log1p)             \
+  _(aten, round)                     \
+  _(aten, special_round)             \
+  _(aten, sinc)                      \
+  _(aten, special_sinc)              \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \

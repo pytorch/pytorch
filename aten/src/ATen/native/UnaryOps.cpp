@@ -366,6 +366,10 @@ Tensor& log1p_out(const Tensor& self, Tensor& result) { return unary_op_impl_flo
 Tensor log1p(const Tensor& self) { return unary_op_impl_float(self, log1p_stub); }
 Tensor& log1p_(Tensor& self) { return unary_op_impl_(self, at::log1p_out); }
 
+// special_log1p, alias for log1p
+Tensor& special_log1p_out(const Tensor& self, Tensor& result) { return at::log1p_out(result, self); }
+Tensor special_log1p(const Tensor& self) { return self.log1p(); }
+
 Tensor& log2_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, log2_stub); }
 Tensor log2(const Tensor& self) { return unary_op_impl_float(self, log2_stub); }
 Tensor& log2_(Tensor& self) { return unary_op_impl_(self, at::log2_out); }
@@ -373,6 +377,10 @@ Tensor& log2_(Tensor& self) { return unary_op_impl_(self, at::log2_out); }
 Tensor& round_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, round_stub); }
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
+
+// special_round, alias for round
+Tensor& special_round_out(const Tensor& self, Tensor& result) { return at::round_out(result, self); }
+Tensor special_round(const Tensor& self) { return self.round(); }
 
 Tensor& digamma_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, digamma_stub); }
 Tensor digamma(const Tensor& self) { return unary_op_impl_float(self, digamma_stub); }
@@ -415,6 +423,10 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
 CREATE_UNARY_TORCH_IMPL_FUNC(cosh)
 CREATE_UNARY_TORCH_IMPL_FUNC(acosh)
+
+// special_sinc, alias for sinc
+Tensor& special_sinc_out(const Tensor& self, Tensor& result) { return at::sinc_out(result, self); }
+Tensor special_sinc(const Tensor& self) { return self.sinc(); }
 
 // arccosh, alias for acosh
 Tensor& arccosh_out(const Tensor& self, Tensor& result) { return at::acosh_out(result, self); }

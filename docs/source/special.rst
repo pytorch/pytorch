@@ -27,3 +27,6 @@ Functions
 .. autofunction:: exp2
 .. autofunction:: gammaln
 .. autofunction:: logit
+.. autofunction:: log1p
+.. autofunction:: round
+.. autofunction:: sinc

@@ -149,4 +149,52 @@ inline Tensor& expm1_out(Tensor& result, const Tensor& self) {
   return torch::special_expm1_out(result, self);
 }
 
+/// Computes the sinc of input, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.sinc.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::sinc(t);
+/// ```
+inline Tensor sinc(const Tensor& self) {
+  return torch::special_sinc(self);
+}
+
+inline Tensor& sinc_out(Tensor& result, const Tensor& self) {
+  return torch::special_sinc_out(result, self);
+}
+
+/// Rounds the elements of the input
+/// See https://pytorch.org/docs/master/special.html#torch.special.round.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::round(t);
+/// ```
+inline Tensor round(const Tensor& self) {
+  return torch::special_round(self);
+}
+
+inline Tensor& round_out(Tensor& result, const Tensor& self) {
+  return torch::special_round_out(result, self);
+}
+
+/// Computes log(1 + x) of the input, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.log1p.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::log1p(t);
+/// ```
+inline Tensor log1p(const Tensor& self) {
+  return torch::special_log1p(self);
+}
+
+inline Tensor& log1p_out(Tensor& result, const Tensor& self) {
+  return torch::special_log1p_out(result, self);
+}
+
 }} // torch::special

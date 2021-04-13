@@ -424,7 +424,6 @@ _(aten, linear) \
 _(aten, linspace) \
 _(aten, log) \
 _(aten, log10) \
-_(aten, log1p) \
 _(aten, log2) \
 _(aten, log_normal) \
 _(aten, log_sigmoid) \
@@ -607,7 +606,6 @@ _(aten, rnn_relu_cell) \
 _(aten, rnn_tanh) \
 _(aten, rnn_tanh_cell) \
 _(aten, rot90) \
-_(aten, round) \
 _(aten, rrelu) \
 _(aten, rrelu_with_noise) \
 _(aten, rrelu_with_noise_backward) \
@@ -624,7 +622,6 @@ _(aten, signbit) \
 _(aten, silu) \
 _(aten, sgn) \
 _(aten, sin) \
-_(aten, sinc) \
 _(aten, sinh) \
 _(aten, size) \
 _(aten, sizes) \

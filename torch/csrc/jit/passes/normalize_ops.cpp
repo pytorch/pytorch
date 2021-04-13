@@ -94,6 +94,9 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_exp2, aten::exp2},
       {aten::special_expm1, aten::expm1},
       {aten::special_logit, aten::logit},
+      {aten::special_round, aten::round},
+      {aten::special_log1p, aten::log1p},
+      {aten::special_sinc, aten::sinc},
       {aten::orgqr, aten::linalg_householder_product},
       {aten::special_gammaln, aten::lgamma}};
   return alias_map;

@@ -8400,6 +8400,30 @@
   python_module: special
   variants: function
 
+- func: special_sinc(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_round(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_round.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_log1p(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
 ## Functions related to the fast Fourier transform and the torch.fft namespace
 # Note [FFT namespace binding]
 # Functions in the fft python module should have their names start with
