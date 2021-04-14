@@ -3,8 +3,7 @@ import contextlib
 import functools
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type, TypeVar, Union
-
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type, TypeVar
 
 import torch
 from torch import Tensor
@@ -101,7 +100,7 @@ def _check_attributes_equal(
     Args:
         a (Tensor): First tensor.
         b (Tensor): Second tensor.
-        check_device (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` are on the same
+        check_device (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` live in the same
             :attr:`~torch.Tensor.device` memory.
         check_dtype (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
             :attr:`~torch.Tensor.dtype`.
@@ -132,7 +131,7 @@ def _equalize_attributes(a: Tensor, b: Tensor) -> Tuple[Tensor, Tensor]:
     """Equalizes some attributes of two tensors for value comparison.
 
     If :attr:`a` and :attr:`b`
-    - are on the same memory :attr:`~torch.Tensor.device`, they are moved CPU memory, and
+    - do not live in the same memory :attr:`~torch.Tensor.device`, they are moved CPU memory, and
     - do not have the same :attr:`~torch.Tensor.dtype`, they are copied to the :class:`~torch.dtype` returned by
         :func:`torch.promote_types`.
 
@@ -156,7 +155,7 @@ def _equalize_attributes(a: Tensor, b: Tensor) -> Tuple[Tensor, Tensor]:
 
 
 _Trace = namedtuple(
-    "Trace",
+    "_Trace",
     (
         "total_elements",
         "total_mismatches",
@@ -169,26 +168,28 @@ _Trace = namedtuple(
 )
 
 
-def _trace_mismatches(a: torch.Tensor, b: torch.Tensor, mismatches: torch.Tensor) -> _Trace:
-    """Traces mismatches and returns the found information.
-
-    The returned named tuple has the following fields:
-    - total_elements (int): Total number of values.
-    - total_mismatches (int): Total number of mismatches.
-    - mismatch_ratio (float): Quotient of total mismatches and total elements.
-    - max_abs_diff (Union[int, float]): Greatest absolute difference of :attr:`a` and :attr:`b`.
-    - max_abs_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
-    - max_rel_diff (Union[int, float]): Greatest relative difference of :attr:`a` and :attr:`b`.
-    - max_rel_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
-
-    For ``max_abs_diff`` and ``max_rel_diff`` the returned type depends on the :attr:`~torch.Tensor.dtype` of
-    :attr:`a` and :attr:`b`.
+def _trace_mismatches(a: Tensor, b: Tensor, mismatches: Tensor) -> _Trace:
+    """Traces mismatches.
 
     Args:
         a (Tensor): First tensor.
         b (Tensor): Second tensor.
         mismatches (Tensor): Boolean mask of the same shape as :attr:`a` and :attr:`b` that indicates the
             location of mismatches.
+
+    Returns:
+        (NamedTuple): Mismatch diagnostics with the following fields:
+
+            - total_elements (int): Total number of values.
+            - total_mismatches (int): Total number of mismatches.
+            - mismatch_ratio (float): Quotient of total mismatches and total elements.
+            - max_abs_diff (Union[int, float]): Greatest absolute difference of :attr:`a` and :attr:`b`.
+            - max_abs_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
+            - max_rel_diff (Union[int, float]): Greatest relative difference of :attr:`a` and :attr:`b`.
+            - max_rel_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
+
+            The returned type of ``max_abs_diff`` and ``max_rel_diff`` depends on the :attr:`~torch.Tensor.dtype` of
+            :attr:`a` and :attr:`b`.
     """
     total_elements = mismatches.numel()
     total_mismatches = torch.sum(mismatches).item()
@@ -536,8 +537,8 @@ def assert_equal(
     Args:
         a (Any): First input.
         b (Any): Second input.
-        check_device (bool): If ``True`` (default), asserts that tensors are the same :attr:`~torch.Tensor.device`
-            memory. If this check is disabled **and** they are not the same memory :attr:`~torch.Tensor.device`,
+        check_device (bool): If ``True`` (default), asserts that tensors live in the same :attr:`~torch.Tensor.device`
+            memory. If this check is disabled **and** they do not live in the same memory :attr:`~torch.Tensor.device`,
             they are moved CPU memory before their values are compared.
         check_dtype (bool): If ``True`` (default), asserts that tensors have the same :attr:`~torch.Tensor.dtype`. If
             this check is disabled they do not have the same :attr:`~torch.Tensor.dtype`, they are copied to the
@@ -549,7 +550,7 @@ def assert_equal(
         UsageError: If any tensor is complex, quantized, or sparse. This is a temporary restriction and
             will be relaxed in the future.
         AssertionError: If any corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
-        AssertionError: If :attr:`check_device`, but any corresponding tensors is not on the same
+        AssertionError: If :attr:`check_device`, but any corresponding tensors do not live in the same
             :attr:`~torch.Tensor.device` memory.
         AssertionError: If :attr:`check_dtype`, but any corresponding tensors do not have the same
             :attr:`~torch.Tensor.dtype`.
@@ -610,8 +611,8 @@ def assert_close(
         atol (Optional[float]): Absolute tolerance. If specified :attr:`rtol` must also be specified. If omitted,
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
         equal_nan (bool): If ``True``, two ``NaN`` values will be considered equal.
-        check_device (bool): If ``True`` (default), asserts that tensors are on the same :attr:`~torch.Tensor.device`
-            memory. If this check is disabled **and** they are not on the same memory :attr:`~torch.Tensor.device`,
+        check_device (bool): If ``True`` (default), asserts that tensors live in the same :attr:`~torch.Tensor.device`
+            memory. If this check is disabled **and** they do not live in the same memory :attr:`~torch.Tensor.device`,
             they are moved CPU memory before their values are compared.
         check_dtype (bool): If ``True`` (default), asserts that tensors have the same :attr:`~torch.Tensor.dtype`. If
             this check is disabled they do not have the same :attr:`~torch.Tensor.dtype`, they are copied to the
@@ -623,7 +624,7 @@ def assert_close(
         UsageError: If any tensor is complex, quantized, or sparse. This is a temporary restriction and
             will be relaxed in the future.
         AssertionError: If any corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
-        AssertionError: If :attr:`check_device`, but any corresponding tensors is not on the same
+        AssertionError: If :attr:`check_device`, but any corresponding tensors do not live in the same
             :attr:`~torch.Tensor.device` memory.
         AssertionError: If :attr:`check_dtype`, but any corresponding tensors do not have the same
             :attr:`~torch.Tensor.dtype`.
