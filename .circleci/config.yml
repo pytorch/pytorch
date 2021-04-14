@@ -7897,9 +7897,6 @@ workflows:
                 - /release\/.*/
           build_environment: libtorch-ios-12.0.0-nightly-x86_64-build
           context: org-member
-          filters:
-            branches:
-              only: nightly
           ios_arch: x86_64
           ios_platform: SIMULATOR
           name: pytorch_ios_12_0_0_nightly_x86_64_build
@@ -7912,9 +7909,6 @@ workflows:
                 - /release\/.*/
           build_environment: libtorch-ios-12.0.0-nightly-arm64-build
           context: org-member
-          filters:
-            branches:
-              only: nightly
           ios_arch: arm64
           ios_platform: OS
           name: pytorch_ios_12_0_0_nightly_arm64_build
@@ -7927,9 +7921,6 @@ workflows:
                 - /release\/.*/
           build_environment: libtorch-ios-12.0.0-nightly-binary-build-upload
           context: org-member
-          filters:
-            branches:
-              only: nightly
           requires:
             - pytorch_ios_12_0_0_nightly_x86_64_build
             - pytorch_ios_12_0_0_nightly_arm64_build
@@ -7942,9 +7933,6 @@ workflows:
                 - /release\/.*/
           build_environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-          filters:
-            branches:
-              only: nightly
           name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
@@ -7957,9 +7945,6 @@ workflows:
                 - /release\/.*/
           build_environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-          filters:
-            branches:
-              only: nightly
           name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
@@ -7972,9 +7957,6 @@ workflows:
                 - /release\/.*/
           build_environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v7a
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-          filters:
-            branches:
-              only: nightly
           name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
@@ -7987,9 +7969,6 @@ workflows:
                 - /release\/.*/
           build_environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-          filters:
-            branches:
-              only: nightly
           name: nightly_pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
           requires:
             - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
