@@ -30,6 +30,7 @@ from torch.fx.experimental.normalize import NormalizeOperators
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 from torch.fx.operator_schemas import _torchscript_type_to_python_type, normalize_function
+from torch.fx.passes.shape_prop import extract_tensor_metadata
 
 try:
     from torchvision.models import resnet18
@@ -46,7 +47,6 @@ def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> Graph
         root if isinstance(root, torch.nn.Module) else torch.nn.Module(),
         RewritingTracer().trace(root),
     )
-
 
 class TestFXExperimental(JitTestCase):
     def test_serialize_graph(self):
@@ -79,19 +79,14 @@ class TestFXExperimental(JitTestCase):
         # Fix for now to add type/shape to output
         for node in traced.graph.nodes:
             if node.op == "output":
-                node.meta['shape'] = a.shape
-                node.meta['dtype'] = a.dtype
-                node.meta['is_quantized'] = a.is_quantized
+                node.meta['tensor_meta'] = extract_tensor_metadata(a)
         for mod in module_with_submodules.modules():
             if isinstance(mod, GraphModule):
                 for node in mod.graph.nodes:
-                    node.meta['shape'] = a.shape
-                    node.meta['dtype'] = a.dtype
-                    node.meta['is_quantized'] = a.is_quantized
+                    node.meta['tensor_meta'] = extract_tensor_metadata(a)
         for node in module_with_submodules.graph.nodes:
-            node.meta['shape'] = a.shape
-            node.meta['dtype'] = a.dtype
-            node.meta['is_quantized'] = a.is_quantized
+            node.meta['tensor_meta'] = extract_tensor_metadata(a)
+
 
         weights1 = {}
         weights2 = {}
