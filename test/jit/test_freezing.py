@@ -1828,6 +1828,26 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(mod_eager(inp), frozen_mod(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @skipIfNoTorchVision
+    def test_conv_hardswish(self):
+        with set_default_dtype(torch.float):
+            activations = [
+                torch.nn.Hardswish,
+                torch.nn.Hardsigmoid,
+                torch.nn.ReLU6,
+            ]
+
+            model = torchvision.models.resnet18()
+            for activation in activations:
+                sub_model = torch.nn.Sequential(model.conv1, activation())
+                sub_model.eval()
+                mod = torch.jit.freeze(torch.jit.script(sub_model))
+                N, C, H, W, = 10, 3, 224, 224
+                inp = torch.randn(N, C, H, W)
+                self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                self.assertTrue(torch.allclose(sub_model(inp), mod(inp)))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_hardswish_hardsigmoid(self):
         with set_default_dtype(torch.float):
             op_map = {

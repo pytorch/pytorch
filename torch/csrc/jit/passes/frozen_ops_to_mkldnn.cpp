@@ -29,6 +29,7 @@
 #include <c10/util/StringUtil.h>
 
 #if AT_MKLDNN_ENABLED()
+#include <ATen/CPUFunctions.h>
 #include <dnnl_types.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ideep.hpp>
@@ -215,8 +216,16 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   }
 }
 
-// aten_op is a sequence of aten ops that implement a required operation
-// given input output tensors
+// This is a factory function that creates an Operation that that takes
+// MKLDNN tensors and unpacks them into 1D contiguous tensors that we can
+// run aten operations on. The precondition for using this function is that the
+// aten operations in `aten_op` should be an identity for zero inputs. In other
+// words, this should: `aten_op(0) = 0` The reason for this precondition has to
+// do with blocked formats MKLDNN uses to lay tensor elements (nChw8c, nChw16c,
+// etc). It splits the channel dimension into chunks of 8/16 makes it the
+// innermost dimension. Whenever the channel dim isn't divisible by 8/16 the
+// innermost dimension is padded with 0s. The precondition, `aten_op(0) == 0`
+// allows us to avoid any special casing of padded elements.
 Operation createUnaryOp(
     std::function<void(at::Tensor output, at::Tensor input)> aten_op,
     bool inplace = false) {
@@ -226,17 +235,19 @@ Operation createUnaryOp(
     // we cast `a` to an `ideep::tensor`, so we can get at its descriptor
     // which we then use to set up `out` tensor w/ the same props as a
     auto a_it = at::native::itensor_from_mkldnn(a);
-    auto raw_data = a_it.get_data_handle();
-    auto topt = a.options().layout(c10::kStrided);
+    auto mkldnn_raw_data = a_it.get_data_handle();
+    auto a_options_with_strided = a.options().layout(c10::kStrided);
     // we also wrap `a` storage into an aten tensor
-    auto t = at::from_blob(raw_data, {a.numel()}, topt);
+    auto in_aten =
+        at::from_blob(mkldnn_raw_data, {a.numel()}, a_options_with_strided);
 
-    auto out_raw_data = raw_data;
+    auto out_raw_data = mkldnn_raw_data;
     auto out = a;
     if (!inplace) {
       // `a_it.get_desc()` will allocate a tensor
       // of the right physical size.
       auto it_empty = ideep::tensor(a_it.get_desc());
+      TORCH_INTERNAL_ASSERT(it_empty.get_desc() == a_it.get_desc());
       out = at::native::new_with_itensor_mkldnn(
           std::move(it_empty),
           optTypeMetaToScalarType(a.options().dtype_opt()),
@@ -251,8 +262,9 @@ Operation createUnaryOp(
     TORCH_INTERNAL_ASSERT(
         a_it.get_desc().get_size() % elementSize(a.scalar_type()) == 0);
     auto nelem = a_it.get_desc().get_size() / elementSize(a.scalar_type());
-    auto out_aten = at::from_blob(out_raw_data, {nelem}, topt);
-    aten_op(out_aten, t);
+    auto out_aten =
+        at::from_blob(out_raw_data, {nelem}, a_options_with_strided);
+    aten_op(out_aten, in_aten);
     push(stack, out);
   };
 }
@@ -291,12 +303,14 @@ Operation BroadOp(const Node* node) {
   };
 }
 
+// any op added to this registry needs to meet
+// the precondition: `aten_op(0) == 0`
 const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSwish_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
-              at::hardswish_out(output, input);
+              at::cpu::hardswish_out(output, input);
             },
             true),
         AliasAnalysisKind::FROM_SCHEMA),
@@ -304,7 +318,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
         "prim::MKLDNNHardSigmoid_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
-              at::hardsigmoid_out(output, input);
+              at::cpu::hardsigmoid_out(output, input);
             },
             true),
         AliasAnalysisKind::FROM_SCHEMA),
@@ -312,7 +326,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
         "prim::MKLDNNRelu6_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
-              at::hardtanh_out(output, input, 0.f, 6.f);
+              at::cpu::hardtanh_out(output, input, 0.f, 6.f);
             },
             true),
         AliasAnalysisKind::FROM_SCHEMA),
@@ -320,7 +334,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
         "prim::MKLDNNHardSwish(Tensor a) -> Tensor",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
-              at::hardswish_out(output, input);
+              at::cpu::hardswish_out(output, input);
             },
             false),
         AliasAnalysisKind::FROM_SCHEMA),
@@ -328,7 +342,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
         "prim::MKLDNNHardSigmoid(Tensor a) -> Tensor",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
-              at::hardsigmoid_out(output, input);
+              at::cpu::hardsigmoid_out(output, input);
             },
             false),
         AliasAnalysisKind::FROM_SCHEMA),
@@ -336,7 +350,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
         "prim::MKLDNNRelu6(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
-              at::hardtanh_out(output, input, 0.f, 6.f);
+              at::cpu::hardtanh_out(output, input, 0.f, 6.f);
             },
             false),
         AliasAnalysisKind::FROM_SCHEMA),
@@ -560,23 +574,26 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       body_node->replaceInput(1, node->outputs().at(1));
     }
 
-    auto true_pred = [](Node*) { return true; };
-    auto no_pad = [](Node* n) {
-      return !n->namedInput("padding")->type()->cast<StringType>();
-    };
-    const static std::
-        map<c10::Symbol, std::pair<std::function<bool(Node*)>, c10::Symbol>>
-            aten_to_mkldnn_ops = {
-                {aten::hardswish, {true_pred, prim::MKLDNNHardSwish}},
-                {aten::hardsigmoid, {true_pred, prim::MKLDNNHardSigmoid}},
-                {aten::relu6, {true_pred, prim::MKLDNNRelu6}},
-                {aten::conv2d, {no_pad, Symbol::prim("mkldnn_convolution")}},
-                {aten::conv3d, {no_pad, Symbol::prim("mkldnn_convolution")}},
-            };
+    if (body_node->kind() == aten::hardswish) {
+      body_node->replaceWithNewSymbol(prim::MKLDNNHardSwish);
+      body_node->destroy();
+    }
 
-    for (auto rp : aten_to_mkldnn_ops) {
-      if (rp.first == body_node->kind() && rp.second.first(body_node)) {
-        body_node->replaceWithNewSymbol(rp.second.second);
+    if (body_node->kind() == aten::hardsigmoid) {
+      body_node->replaceWithNewSymbol(prim::MKLDNNHardSigmoid);
+      body_node->destroy();
+    }
+
+    if (body_node->kind() == aten::relu6) {
+      body_node->replaceWithNewSymbol(prim::MKLDNNRelu6);
+      body_node->destroy();
+    }
+
+    if (body_node->kind() == aten::conv2d ||
+        body_node->kind() == aten::conv3d) {
+      // this node doesnt handle string padding yet...
+      if (!body_node->namedInput("padding")->type()->cast<StringType>()) {
+        body_node->replaceWithNewSymbol(Symbol::prim("mkldnn_convolution"));
         body_node->destroy();
       }
     }
