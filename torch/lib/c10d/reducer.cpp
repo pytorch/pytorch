@@ -985,9 +985,6 @@ void Reducer::search_unused_parameters(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
-  // Reset unused parameter accounting.
-  has_marked_unused_parameters_ = false;
-  unused_parameters_.clear();
   // If find_unused_parameters_ is false, we assume that autograd hooks for ALL
   // variables will be called, and we don't have to search the autograd graph
   // for presence of these hooks.
@@ -1094,7 +1091,6 @@ void Reducer::copy_bucket_to_grad(
 }
 
 std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
-  // TORCH_INTERNAL_ASSERT(ddp_debug_level_ != DistributedDebugLevel::OFF);
   std::vector<std::string> unMarkedParamNames;
   for (const auto& it : param_names_) {
     if (perIterationReadyParams_.find(it.first) ==
