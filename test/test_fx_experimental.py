@@ -26,6 +26,7 @@ from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.fx.passes.shape_prop import extract_tensor_metadata
 
 try:
     from torchvision.models import resnet18
@@ -42,7 +43,6 @@ def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> Graph
         root if isinstance(root, torch.nn.Module) else torch.nn.Module(),
         RewritingTracer().trace(root),
     )
-
 
 class TestFXExperimental(JitTestCase):
     def test_serialize_graph(self):
@@ -75,16 +75,14 @@ class TestFXExperimental(JitTestCase):
         # Fix for now to add type/shape to output
         for node in traced.graph.nodes:
             if node.op == "output":
-                node.meta['shape'] = a.shape
-                node.meta['dtype'] = a.dtype
+                node.meta['tensor_meta'] = extract_tensor_metadata(a)
         for mod in module_with_submodules.modules():
             if isinstance(mod, GraphModule):
                 for node in mod.graph.nodes:
-                    node.meta['shape'] = a.shape
-                    node.meta['dtype'] = a.dtype
+                    node.meta['tensor_meta'] = extract_tensor_metadata(a)
         for node in module_with_submodules.graph.nodes:
-            node.meta['shape'] = a.shape
-            node.meta['dtype'] = a.dtype
+            node.meta['tensor_meta'] = extract_tensor_metadata(a)
+
 
         weights1 = {}
         weights2 = {}
@@ -122,9 +120,9 @@ class TestFXExperimental(JitTestCase):
         )
         result = graph_manipulation.serialize_tensor_quantization(q_tensor)
         result2 = graph_manipulation.serialize_tensor_quantization(q_tensor_channel)
-        assert result["q_scheme"] == "torch.per_tensor_affine"
+        assert result["qscheme"] == "torch.per_tensor_affine"
         assert result["q_scale"] == 1.0
-        assert result2["q_scheme"] == "torch.per_channel_affine"
+        assert result2["qscheme"] == "torch.per_channel_affine"
         assert len(result2["q_per_channel_scales"]) == 2
 
     def test_find_single_partition(self):
@@ -1094,7 +1092,7 @@ class {test_classname}(torch.nn.Module):
                 self.rhs = rhs
 
             def forward(self, a, b, c, d, e):
-                s = torch.Tensor((0))
+                s = torch.tensor([])
                 matmuls = []
 
                 # For some reason using a list comprehension or for-loop for this
