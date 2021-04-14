@@ -477,13 +477,18 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_extract_weights_conv_fun(self):
-        # TODO(future PR): add conv1d, needs a quantization fix
         class M(torch.nn.Module):
-            def __init__(self, weight2d, weight3d, bias):
+            def __init__(self, weight1d, weight2d, weight3d, bias1d, bias2d, bias3d):
                 super().__init__()
+                self.weight1d = torch.nn.Parameter(weight1d)
                 self.weight2d = torch.nn.Parameter(weight2d)
                 self.weight3d = torch.nn.Parameter(weight3d)
-                self.bias = torch.nn.Parameter(bias)
+                self.bias1d = torch.nn.Parameter(bias1d)
+                self.bias2d = torch.nn.Parameter(bias2d)
+                self.bias3d = torch.nn.Parameter(bias3d)
+                self.stride1d = 1
+                self.padding1d = 0
+                self.dilation1d = 1
                 self.stride2d = (1, 1)
                 self.padding2d = (0, 0)
                 self.dilation2d = (1, 1)
@@ -493,19 +498,25 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 self.dilation3d = (1, 1, 1)
 
             def forward(self, x):
+                x = F.conv1d(
+                    x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
+                    self.dilation1d, self.groups)
                 x = F.conv2d(
-                    x, self.weight2d, self.bias, self.stride2d, self.padding2d,
+                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
                     self.dilation2d, self.groups)
                 x = F.conv3d(
-                    x, self.weight3d, self.bias, self.stride3d, self.padding3d,
+                    x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
                     self.dilation3d, self.groups)
                 return x
 
+        w1d = torch.randn(1, 1, 1)
         w2d = torch.randn(1, 1, 1, 1)
         w3d = torch.randn(1, 1, 1, 1, 1)
-        b = torch.randn(1)
-        m = M(w2d, w3d, b).eval()
-        self._test_extract_weights(m, results_len=2)
+        b1d = torch.randn(1)
+        b2d = torch.randn(1)
+        b3d = torch.randn(1)
+        m = M(w1d, w2d, w3d, b1d, b2d, b3d).eval()
+        self._test_extract_weights(m, results_len=3)
 
     @skipIfNoFBGEMM
     def test_match_activations_mod(self):

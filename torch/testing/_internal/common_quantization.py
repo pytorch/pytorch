@@ -685,25 +685,38 @@ class QuantizationTestCase(TestCase):
                         self.assertTrue(
                             layer_data_0['type'] == layer_data_0['type'],
                             f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same type.")
+
                         self.assertTrue(
                             len(layer_data_0['values']) ==
                             len(layer_data_1['values']),
                             f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same number of seen Tensors.")
-                        for idx in range(len(layer_data_0['values'])):
-                            values_0 = layer_data_0['values'][idx]
-                            values_1 = layer_data_1['values'][idx]
-                            if isinstance(values_0, torch.Tensor):
-                                self.assertTrue(
-                                    values_0.shape == values_1.shape,
-                                    f"Layer {layer_name}, {model_name_0} and {model_name_1} have a shape mismatch at idx {idx}.")
-                            else:
-                                assert isinstance(values_0, tuple), \
-                                    f"unhandled type {type(values_0)}"
-                                assert len(values_0) == 2
-                                assert len(values_0[1]) == 2
-                                assert values_0[0].shape == values_1[0].shape
-                                assert values_0[1][0].shape == values_1[1][0].shape
-                                assert values_0[1][1].shape == values_1[1][1].shape
+
+                        # F.conv1d weight has rank 3, and toq.conv1d unpacked weight
+                        # has rank 4. For now, skip the length check for conv1d only.
+                        is_weight_functional_conv1d = (
+                            result_type == NSSingleResultValuesType.WEIGHT.value and
+                            (
+                                'conv1d' in layer_data_0['prev_node_target_type'] or
+                                'conv1d' in layer_data_1['prev_node_target_type']
+                            )
+                        )
+                        if not is_weight_functional_conv1d:
+                            for idx in range(len(layer_data_0['values'])):
+                                values_0 = layer_data_0['values'][idx]
+                                values_1 = layer_data_1['values'][idx]
+                                if isinstance(values_0, torch.Tensor):
+                                    self.assertTrue(
+                                        values_0.shape == values_1.shape,
+                                        f"Layer {layer_name}, {model_name_0} and {model_name_1} " +
+                                        f"have a shape mismatch at idx {idx}.")
+                                else:
+                                    assert isinstance(values_0, tuple), \
+                                        f"unhandled type {type(values_0)}"
+                                    assert len(values_0) == 2
+                                    assert len(values_0[1]) == 2
+                                    assert values_0[0].shape == values_1[0].shape
+                                    assert values_0[1][0].shape == values_1[1][0].shape
+                                    assert values_0[1][1].shape == values_1[1][1].shape
 
                         # verify that ref_node_name is valid
                         ref_node_name_0 = layer_data_0['ref_node_name']
