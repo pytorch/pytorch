@@ -76,7 +76,7 @@ def run_ort(ort_sess, input):
     input, _ = torch.jit._flatten(input_copy)
     inputs = [to_numpy(inp) for inp in input]
 
-    ort_inputs = dict((ort_input.name, inputs[i]) for i, ort_input in enumerate(ort_sess.get_inputs()))
+    ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
     return inline_flatten_list(ort_outs, [])
 
@@ -8426,11 +8426,15 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_to_device(self):
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> Update code according to comments.
         class M_ToDevice(torch.nn.Module):
             def forward(self, x, y):
                 return x.to(y.device), y
 
         class M_ToDeviceDtype(torch.nn.Module):
+<<<<<<< HEAD
             def forward(self, x, y):
                 return x.to(y.device, dtype=torch.long), y
 =======
@@ -8438,16 +8442,25 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return x.to(y.device)
 >>>>>>> Add support for calling tensor.to(tensor.device).
+=======
+            def forward(self, x, y):
+                return x.to(y.device, dtype=torch.long), y
+>>>>>>> Update code according to comments.
 
         x = torch.randn(6)
         y = torch.randn(6)
 
+<<<<<<< HEAD
 <<<<<<< HEAD
         self.run_test(M_ToDevice(), (x, y))
         self.run_test(M_ToDeviceDtype(), (x, y))
 =======
         self.run_test(M(), (x, y))
 >>>>>>> Add support for calling tensor.to(tensor.device).
+=======
+        self.run_test(M_ToDevice(), (x, y))
+        self.run_test(M_ToDeviceDtype(), (x, y))
+>>>>>>> Update code according to comments.
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
