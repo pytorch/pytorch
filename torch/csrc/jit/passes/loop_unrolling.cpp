@@ -182,6 +182,7 @@ void unroll(Node* loop) {
     repeatBody(body, *const_len, dest);
     loop->eraseBlock(0);
     inlineBody(loop);
+    return;
   }
 
   WithInsertPoint insert_point_guard{loop};
