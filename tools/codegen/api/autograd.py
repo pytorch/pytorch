@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import re
-from typing import Optional, Sequence, List, Tuple
+from typing import Optional, Sequence, List, Tuple, Match
 
 from tools.codegen.api import cpp
 from tools.codegen.api.types import Binding
@@ -36,6 +36,9 @@ class Derivative:
     #         here: `mul_tensor_backward(grad, self, other_scalar_type)`
     formula: str
 
+    # The formula string before input argument replacement
+    original_formula: str
+
     # Names of the arguments for which this formula calculates derivatives.
     var_names: Tuple[str, ...]
 
@@ -44,6 +47,29 @@ class Derivative:
 
     # Saved outputs that are referenced by the formula.
     saved_outputs: Tuple[SavedAttribute, ...]
+
+# Represents a forward formula that calculates forward derivatives
+# for one tensor.
+@dataclass(frozen=True)
+class ForwardDerivative:
+    # The formula string (legit C++ expression).
+    # Note that special keywords such as "linear" or "element_wise" have been
+    # replaced by the automatically generated formula.
+    formula: str
+
+    # Name of the output argument for which this formula calculates forward
+    # derivatives
+    var_name: str
+
+    # Type of the output argument for which this formula calculates forward
+    # derivatives
+    var_type: Type
+
+    # Inputs for which the forward derivatives are required for this formula
+    required_inputs_fw_grad: Optional[Tuple[str, ...]]
+
+    # Inputs for which the primal is required for this formula
+    required_inputs_primal: Optional[Tuple[str, ...]]
 
 # Represents differentiability info for a NativeFunction.
 @dataclass(frozen=True)
@@ -72,7 +98,12 @@ class DifferentiabilityInfo:
     op: Optional[str]
 
     # The derivatives formulae for this function.
+    # Note that the length of this sequence is the number of differentiable inputs
     derivatives: Sequence[Derivative]
+
+    # The forward derivatives formulae for this function.
+    # Note that the length of this sequence is the number of differentiable outputs
+    forward_derivatives: Sequence[ForwardDerivative]
 
     # The union of 'saved_inputs' of all 'derivatives'.
     all_saved_inputs: Sequence[SavedAttribute]
@@ -143,6 +174,7 @@ class DifferentiableOutput:
 class NativeFunctionWithDifferentiabilityInfo:
     func: NativeFunction
     info: Optional[DifferentiabilityInfo]
+    fw_derivatives: Sequence[ForwardDerivative]
 
 # TODO: Update comment below since it is out of date.
 def dispatch_strategy(fn: NativeFunctionWithDifferentiabilityInfo) -> str:
@@ -224,9 +256,36 @@ def match_differentiability_info(
                             "Calling '.strides()' in the 'self' derivative formula of an "
                             f"in-place function is not supported: {f.func}")
 
+        # For functions that have a single def for out-of-place and inplace (like abs())
+        if info and info.forward_derivatives and is_exact_match:
+            forward_derivatives = info.forward_derivatives
+
+            if f.func.kind() == SchemaKind.inplace:
+                assert len(info.forward_derivatives) == 1  # Only single output inplace should exist
+                fw_info = info.forward_derivatives[0]
+
+                if re.search(IDENT_REGEX.format("self"), fw_info.formula):
+                    raise RuntimeError(f'The formula for "{f.func.name}" is using the original value of self that is being '
+                                       'modified inplace. This would lead to wrong forward gradients. Please use "result" in '
+                                       'the formula only.')
+
+                # replace "result" from the formula by self
+                def repl(m: Match[str]) -> str:
+                    return f'{m.group(1)}self{m.group(2)}'
+
+                forward_derivatives = [ForwardDerivative(
+                    formula=re.sub(IDENT_REGEX.format("result"), repl, fw_info.formula),
+                    var_name="self",
+                    var_type=fw_info.var_type,
+                    required_inputs_fw_grad=fw_info.required_inputs_fw_grad,
+                    required_inputs_primal=fw_info.required_inputs_primal,), ]
+        else:
+            forward_derivatives = []
+
         result.append(NativeFunctionWithDifferentiabilityInfo(
             func=f,
             info=info,
+            fw_derivatives=forward_derivatives
         ))
 
     return result
