@@ -331,6 +331,7 @@
   variants: function, method
   dispatch:
     SparseCPU, SparseCUDA: add_sparse
+    SparseCsrCPU: add_sparse_csr
     MkldnnCPU: mkldnn_add
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
@@ -338,6 +339,7 @@
   structured_delegate: add.out
   dispatch:
     SparseCPU, SparseCUDA: add_sparse_
+    SparseCsrCPU: add_sparse_csr_
     MkldnnCPU: mkldnn_add_
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -347,6 +349,7 @@
     CPU, CUDA: add_out
     SparseCPU: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
+    SparseCsrCPU: add_out_sparse_csr_cpu
     MkldnnCPU: mkldnn_add_out
 
 - func: _add_relu.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
@@ -388,6 +391,7 @@
 - func: addmv.out(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: addmv_out
+
 
 - func: _addmv_impl_(Tensor(a!) self, Tensor self2, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   dispatch:
@@ -2552,13 +2556,14 @@
   dispatch:
     CPU: mm_cpu
     CUDA: mm_cuda
-    SparseCPU, SparseCUDA: _sparse_mm
+    SparseCPU, SparseCUDA, SparseCsrCPU: _sparse_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: mm_cpu_out
     CUDA: mm_out_cuda
     SparseCPU, SparseCUDA: _sparse_mm_out
+    SparseCsrCPU: _sparse_csr_mm_out
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
 
@@ -2639,7 +2644,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: mv
-    SparseCPU, SparseCUDA: mv_sparse
+    SparseCPU, SparseCUDA, SparseCsrCPU: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -4002,6 +4007,12 @@
   dispatch:
     CompositeExplicitAutograd: resize_as_
 
+- func: resize_as_sparse_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
+  variants: function
+  dispatch:
+    SparseCPU, SparseCUDA: resize_as_sparse_
+    SparseCsrCPU: resize_as_sparse_csr_
+
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   variants: method, function
   dispatch:
@@ -4089,6 +4100,7 @@
     CUDA: addmm_out_cuda
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
+    SparseCsrCPU: addmm_out_sparse_csr_dense_cpu
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -4097,6 +4109,7 @@
     CUDA: addmm_cuda
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
+    SparseCsrCPU: addmm_sparse_csr_dense_cpu
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
@@ -4216,9 +4229,13 @@
 # the view relation is not tracked by autograd, but the version counter is still
 # shared. In other words, their outputs are non-differentiable views of the
 # sparse tensor.
-
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
+
+- func: sparse_csr_tensor.crow_col_value_size(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+
+- func: sparse_csr_tensor.crow_col_value(Tensor crow_indices, Tensor col_indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+
 - func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
 
 - func: sparse_coo_tensor.indices(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -4256,7 +4273,7 @@
 - func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_to_dense
+    SparseCPU, SparseCUDA, SparseCsrCPU: sparse_to_dense
     MkldnnCPU: mkldnn_to_dense
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
@@ -4291,6 +4308,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _nnz_sparse
+    SparseCsrCPU: _nnz_sparse_csr
   device_guard: False
 
 # NOTE: [ coalesce autograd ]
@@ -4343,6 +4361,19 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: values_sparse
+    SparseCsrCPU: values_sparse_csr
+  device_guard: False
+
+- func: crow_indices(Tensor(a) self) -> Tensor(a)
+  variants: method
+  dispatch:
+    SparseCsrCPU: crow_indices_sparse_csr
+  device_guard: False
+
+- func: col_indices(Tensor(a) self) -> Tensor(a)
+  variants: method
+  dispatch:
+    SparseCsrCPU: col_indices_sparse_csr
   device_guard: False
 
 - func: hspmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
@@ -7511,6 +7542,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d.output(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  structured: True
   dispatch:
     CPU: fractional_max_pool2d_out_cpu
     CUDA: fractional_max_pool2d_out_cuda
@@ -7518,9 +7550,7 @@
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples) -> (Tensor, Tensor)
   python_module: nn
-  dispatch:
-    CPU: fractional_max_pool2d_cpu
-    CUDA: fractional_max_pool2d_cuda
+  structured_delegate: fractional_max_pool2d.output
 
 - func: fractional_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -7662,15 +7692,16 @@
 
 - func: reflection_pad1d.out(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU, QuantizedCPU: reflection_pad1d_out_cpu
     CUDA: reflection_pad1d_out_cuda
 
 - func: reflection_pad1d(Tensor self, int[2] padding) -> Tensor
   python_module: nn
+  structured_delegate: reflection_pad1d.out
   dispatch:
-    CPU, QuantizedCPU: reflection_pad1d_cpu
-    CUDA: reflection_pad1d_cuda
+    QuantizedCPU: reflection_pad1d_cpu
 
 - func: reflection_pad1d_backward.grad_input(Tensor grad_output, Tensor self, int[2] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -7710,27 +7741,25 @@
 
 - func: replication_pad1d.out(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: replication_pad1d_out_cpu
     CUDA: replication_pad1d_out_cuda
 
 - func: replication_pad1d(Tensor self, int[2] padding) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: replication_pad1d_cpu
-    CUDA: replication_pad1d_cuda
+  structured_delegate: replication_pad1d.out
 
 - func: replication_pad1d_backward.grad_input(Tensor grad_output, Tensor self, int[2] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: replication_pad1d_backward_out_cpu
     CUDA: replication_pad1d_backward_out_cuda
 
 - func: replication_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: replication_pad1d_backward_cpu
-    CUDA: replication_pad1d_backward_cuda
+  structured_delegate: replication_pad1d_backward.grad_input
 
 - func: replication_pad2d.out(Tensor self, int[4] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -7758,15 +7787,14 @@
 
 - func: replication_pad3d.out(Tensor self, int[6] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: replication_pad3d_out_cpu
     CUDA: replication_pad3d_out_cuda
 
 - func: replication_pad3d(Tensor self, int[6] padding) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: replication_pad3d_cpu
-    CUDA: replication_pad3d_cuda
+  structured_delegate: replication_pad3d.out
 
 - func: replication_pad3d_backward.grad_input(Tensor grad_output, Tensor self, int[6] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
