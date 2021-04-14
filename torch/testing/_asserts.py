@@ -101,7 +101,7 @@ def _check_attributes_equal(
     Args:
         a (Tensor): First tensor.
         b (Tensor): Second tensor.
-        check_device (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` live in the same
+        check_device (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` are on the same
             :attr:`~torch.Tensor.device` memory.
         check_dtype (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
             :attr:`~torch.Tensor.dtype`.
@@ -132,7 +132,7 @@ def _equalize_attributes(a: Tensor, b: Tensor) -> Tuple[Tensor, Tensor]:
     """Equalizes some attributes of two tensors for value comparison.
 
     If :attr:`a` and :attr:`b`
-    - do not live in the same memory :attr:`~torch.Tensor.device`, they are moved CPU memory, and
+    - are on the same memory :attr:`~torch.Tensor.device`, they are moved CPU memory, and
     - do not have the same :attr:`~torch.Tensor.dtype`, they are copied to the :class:`~torch.dtype` returned by
         :func:`torch.promote_types`.
 
@@ -553,8 +553,8 @@ def assert_equal(
     Args:
         a (Any): First input.
         b (Any): Second input.
-        check_device (bool): If ``True`` (default), asserts that tensors live in the same :attr:`~torch.Tensor.device`
-            memory. If this check is disabled **and** they do not live in the same memory :attr:`~torch.Tensor.device`,
+        check_device (bool): If ``True`` (default), asserts that tensors are the same :attr:`~torch.Tensor.device`
+            memory. If this check is disabled **and** they are not the same memory :attr:`~torch.Tensor.device`,
             they are moved CPU memory before their values are compared.
         check_dtype (bool): If ``True`` (default), asserts that tensors have the same :attr:`~torch.Tensor.dtype`. If
             this check is disabled they do not have the same :attr:`~torch.Tensor.dtype`, they are copied to the
@@ -569,7 +569,7 @@ def assert_equal(
         UsageError: If any tensor is complex, quantized, or sparse. This is a temporary restriction and
             will be relaxed in the future.
         AssertionError: If any corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
-        AssertionError: If :attr:`check_device`, but any corresponding tensors do not live in the same
+        AssertionError: If :attr:`check_device`, but any corresponding tensors is not on the same
             :attr:`~torch.Tensor.device` memory.
         AssertionError: If :attr:`check_dtype`, but any corresponding tensors do not have the same
             :attr:`~torch.Tensor.dtype`.
@@ -644,8 +644,8 @@ def assert_close(
         atol (Optional[float]): Absolute tolerance. If specified :attr:`rtol` must also be specified. If omitted,
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
         equal_nan (bool): If ``True``, two ``NaN`` values will be considered equal.
-        check_device (bool): If ``True`` (default), asserts that tensors live in the same :attr:`~torch.Tensor.device`
-            memory. If this check is disabled **and** they do not live in the same memory :attr:`~torch.Tensor.device`,
+        check_device (bool): If ``True`` (default), asserts that tensors are on the same :attr:`~torch.Tensor.device`
+            memory. If this check is disabled **and** they are not on the same memory :attr:`~torch.Tensor.device`,
             they are moved CPU memory before their values are compared.
         check_dtype (bool): If ``True`` (default), asserts that tensors have the same :attr:`~torch.Tensor.dtype`. If
             this check is disabled they do not have the same :attr:`~torch.Tensor.dtype`, they are copied to the
@@ -660,7 +660,7 @@ def assert_close(
         UsageError: If any tensor is complex, quantized, or sparse. This is a temporary restriction and
             will be relaxed in the future.
         AssertionError: If any corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
-        AssertionError: If :attr:`check_device`, but any corresponding tensors do not live in the same
+        AssertionError: If :attr:`check_device`, but any corresponding tensors is not on the same
             :attr:`~torch.Tensor.device` memory.
         AssertionError: If :attr:`check_dtype`, but any corresponding tensors do not have the same
             :attr:`~torch.Tensor.dtype`.
