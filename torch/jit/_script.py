@@ -1098,7 +1098,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         )
 
     qualified_name = _qualified_name(obj)
-
     if inspect.isclass(obj):
         # If this type is a `nn.Module` subclass, they probably meant to pass
         # an instance instead of a Module
@@ -1148,6 +1147,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         fn.__doc__ = obj.__doc__
         _set_jit_function_cache(obj, fn)
         return fn
+
 
 # overloads are registered in _jit_internal and compiled here so that _overload
 # can be used in nn/functional.py without an import cycle
