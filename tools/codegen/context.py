@@ -1,5 +1,5 @@
-from tools.codegen.utils import *
-from tools.codegen.model import *
+from tools.codegen.utils import S, T, context
+from tools.codegen.model import NativeFunction, NativeFunctionsGroup
 import tools.codegen.local as local
 
 import functools

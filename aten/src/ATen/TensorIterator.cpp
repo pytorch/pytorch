@@ -1283,7 +1283,7 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
   TORCH_INTERNAL_ASSERT(t.defined());
   if (!op.tensor->defined()) {
     op.tensor = c10::MaybeOwned<Tensor>::borrowed(t);
-    op.current_dtype = op.target_dtype;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op.target_dtype == t.scalar_type());
   } else if (op.will_resize) {
     if (op.original_tensor->defined()) {
       // OK, so this is pretty weird.  To understand how we can end up in
@@ -1324,12 +1324,7 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
       // for the is_meta_ test.
       TORCH_INTERNAL_ASSERT(op.original_tensor->is_same(t));
       TORCH_INTERNAL_ASSERT(!op.tensor->is_same(t));
-      // fastpath CPU to skip a dispatcher trip
-      if (op.tensor->is_cpu()) {
-        at::native::resize_output_cpu(*op.tensor, sizes);
-      } else {
-        at::native::resize_output(*op.tensor, sizes);
-      }
+      at::native::resize_output(*op.tensor, sizes);
       if (!strides.empty()) {
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
         op.tensor->as_strided_(sizes, strides);
@@ -1338,6 +1333,10 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
       }
     }
   }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      op.tensor->is_same(t) || op.current_dtype == op.tensor->scalar_type());
+// For simplicity, just always update the cached current_type.
+  op.current_dtype = op.tensor->scalar_type();
 }
 
 // This is the "traditional" implementation of set_output.  On TensorIterator
@@ -1355,12 +1354,7 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
       }
       op.current_dtype = op.target_dtype;
   } else if (op.will_resize) {
-      // fastpath CPU to skip a dispatcher trip
-      if (op.tensor->is_cpu()) {
-        at::native::resize_output_cpu(*op.tensor, sizes);
-      } else {
-        at::native::resize_output(*op.tensor, sizes);
-      }
+      at::native::resize_output(*op.tensor, sizes);
       if (!strides.empty()) {
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
         op.tensor->as_strided_(sizes, strides);
