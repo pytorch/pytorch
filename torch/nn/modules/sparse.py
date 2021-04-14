@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from typing import Optional
 
 import torch
@@ -255,9 +256,13 @@ class EmbeddingBag(Module):
                                  supported when ``mode="max"``.
         include_last_offset (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
                                       is equivalent to the size of `indices`. This matches the CSR format.
-        padding_idx (int, optional): If given, indicates which indices in :attr:`input` represent padding. When
-                                     a :attr:`padding_idx` is encountered in :attr:`input` during a reduction,
-                                     it is skipped. This allows each bag to be a different logical size.
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
+                                     gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
+                                     during training, i.e. it remains as a fixed “pad”. For a newly constructed
+                                     EmbeddingBag, the embedding vector at :attr:`padding_idx` will default to all
+                                     zeros, but can be updated to another value to be used as the padding vector.
+                                     Note that the embedding vector at :attr:`padding_idx` is excluded from the
+                                     reduction.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
