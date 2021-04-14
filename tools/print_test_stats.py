@@ -919,9 +919,9 @@ if __name__ == '__main__':
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():
         for suite_name, test_suite in test_filename.test_suites.items():
+            total_time += test_suite.total_time
             if test_suite.total_time >= args.class_print_threshold:
                 test_suite.print_report(args.longest_of_class)
-                total_time += test_suite.total_time
                 longest_tests.extend(test_suite.test_cases.values())
     longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
 
@@ -933,8 +933,11 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"error encountered when uploading to s3: {e}")
 
-    print(f"Total runtime is {datetime.timedelta(seconds=int(total_time))}")
-    print(f"{len(longest_tests)} longest tests of entire run:")
+    print(f"Total runtime is {datetime.timedelta(seconds=total_time)}")
+    print(
+        f"{len(longest_tests)} longest tests of entire run"
+        f" (ignoring suites totaling less than {args.class_print_threshold} seconds):"
+    )
     for test_case in reversed(longest_tests):
         print(f"    {test_case.class_name}.{test_case.name}  time: {test_case.time:.2f} seconds")
 
