@@ -53,6 +53,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
         'torch.nn.Linear': set([
             nn.Linear,
             nnq.Linear,
+            nniq.LinearReLU,
             nnqat.Linear,
             nnqd.Linear,
         ]),
@@ -153,6 +154,7 @@ def get_reversed_fusions() -> Set[Tuple[NSFusionType, int]]:
         ((nn.ReLU, nn.Conv1d), 0),
         ((nn.ReLU, nn.Conv2d), 0),
         ((nn.ReLU, nn.Conv3d), 0),
+        ((nn.ReLU, nn.Linear), 0),
         # linear-relu fp16 emulation:
         # fp16_to_fp32 -> linear -> relu -> fp32_to_fp16
         ((("to", torch.float16), F.relu, F.linear, "dequantize"), 1),
