@@ -591,7 +591,6 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
               1,
               newValues_ptr + i * blockSize,
               1);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
         }
       } else {
         ++i;
