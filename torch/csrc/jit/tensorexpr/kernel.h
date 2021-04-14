@@ -19,6 +19,9 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   return sizes;
 }
 
+// Returns true if the TE fuser supports this conv2d.
+bool conv2dIsSupported(const Node* node);
+
 class TORCH_API TensorExprKernel {
  public:
   explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
@@ -211,6 +214,7 @@ class TORCH_API TensorExprKernel {
   bool use_fallback_{false};
   bool hasRandom_{false};
   bool hasBroadcast_{false};
+  bool hasHalf_{false};
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
       known_sizes_;
 };

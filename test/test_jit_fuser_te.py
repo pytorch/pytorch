@@ -74,6 +74,10 @@ class TestTEFuser(JitTestCase):
         self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
         torch._C._jit_set_te_must_use_llvm_cpu(False)
 
+        # TODO: CPU fuser currently is disabled when multithreading.
+        self.old_num_threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         self.int_dtypes = [
             torch.int8,
@@ -100,6 +104,7 @@ class TestTEFuser(JitTestCase):
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        torch.set_num_threads(self.old_num_threads)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -1866,6 +1871,28 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(script.graph_for(a, s))
         script = self.checkScript(eager_st, (s, b))
         self.assertAllFused(script.graph_for(s, b))
+
+    def test_conv2d_depthwise(self):
+        def eager(input, weight, bias):
+            return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=72)
+
+        input = torch.rand((1, 72, 56, 56), dtype=torch.float)
+        weight = torch.rand((72, 1, 3, 3), dtype=torch.float)
+        bias = torch.rand((72), dtype=torch.float)
+
+        script = self.checkScript(eager, (input, weight, bias))
+        self.assertAllFused(script.graph_for(input, weight, bias))
+
+    def test_conv2d(self):
+        def eager(input, weight, bias):
+            return torch.conv2d(input, weight, bias, stride=1, padding=1, groups=1)
+
+        input = torch.rand((1, 64, 56, 56), dtype=torch.float)
+        weight = torch.rand((64, 64, 3, 3), dtype=torch.float)
+        bias = torch.rand((64), dtype=torch.float)
+
+        script = self.checkScript(eager, (input, weight, bias))
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
 
 if __name__ == '__main__':
     run_tests()
