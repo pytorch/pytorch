@@ -3,7 +3,9 @@ from typing import List, Union, Set, Any
 from tools.codegen.context import with_native_function
 from tools.codegen.utils import concatMap
 from tools.codegen.model import (NativeFunction, NativeFunctionsGroup,
+                                 ExternalBackendFunction, ExternalBackendFunctionsGroup,
                                  is_structured_dispatch_key)
+from tools.codegen.api.types import DispatcherSignature, NativeSignature
 import tools.codegen.api.meta as meta
 import tools.codegen.api.native as native
 import tools.codegen.api.structured as structured
