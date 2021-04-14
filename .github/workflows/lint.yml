@@ -69,6 +69,20 @@ jobs:
         run: |
           (! git grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
 
+  python2-setup-compat:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 2.x
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+      - name: Attempt to run setup.py
+        run: |
+          python2 setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
+
   toc:
     runs-on: ubuntu-18.04
     # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
