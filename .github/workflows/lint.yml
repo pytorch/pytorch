@@ -22,7 +22,15 @@ jobs:
       - name: Ensure consistent CircleCI YAML config
         run: cd .circleci && ./ensure-consistency.py
       - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
-        run: .github/scripts/ensure_consistent_workflows.py
+        run: |
+          pip install ruamel.yaml==0.17.4
+          echo "Please locally run .github/scripts/regenerate_cancel_redundant_workflow.py and commit if this step fails."
+          .github/scripts/regenerate_cancel_redundant_workflow.py
+          set -eux
+          CHANGES=$(git status --porcelain)
+          echo "$CHANGES"
+          git diff
+          [ -z "$CHANGES" ]
       - name: Lint native_functions.yaml
         run: |
           pip install ruamel.yaml==0.17.4
