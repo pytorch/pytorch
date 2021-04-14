@@ -42,7 +42,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 from fx.named_tup import MyNamedTup
 
 try:
-    from torchvision import models
+    from torchvision import models as torchvision_models
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
@@ -1219,14 +1219,14 @@ class TestFX(JitTestCase):
 
     @skipIfNoTorchVision
     def test_interpreter_noop_resnet18(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
         transformed = torch.fx.Transformer(symbolic_trace(rn18)).transform()
         inp = torch.randn(5, 3, 224, 224)
         self.assertEqual(transformed(inp), rn18(inp))
 
     @skipIfNoTorchVision
     def test_interpreter_gc_values(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
         interp = Interpreter(symbolic_trace(rn18))
         inp = torch.rand(5, 3, 224, 224)
         out = interp.run(inp)
@@ -1416,7 +1416,7 @@ class TestFX(JitTestCase):
 
     @skipIfNoTorchVision
     def test_replace_uses(self):
-        rn18 = resnet18()
+        rn18 = torchvision_models.resnet18()
 
         class LowerReluTracer(torch.fx.Tracer):
             def is_leaf_module(self, m : torch.nn.Module, qualname : str):
@@ -2252,8 +2252,9 @@ class TestFX(JitTestCase):
 
 
         import torch
-        from torchvision.models.resnet import resnet18
-        rn = resnet18()
+        # from torchvision.models.resnet import resnet18
+        rn = torchvision_models.resnet18()
+        print('imported the model', rn)
 
         try:
             sys.setprofile(trace_func)
@@ -2601,28 +2602,18 @@ class TestVisionTracing(JitTestCase):
                 out_transform = self.output_transform.get(name, lambda x: x)
                 graph : torch.fx.GraphModule = symbolic_trace(model)
                 script = torch.jit.script(graph)
+
                 a = out_transform(model(x))
                 b = out_transform(graph(x))
                 c = out_transform(script(x))
                 self.assertEqual(a, b)
                 self.assertEqual(a, c)
 
-                quantizer = Quantizer(graph)
-                for _ in range(10):
-                    quantizer.observe((x,))
-                qgraph = quantizer.quantize()
-                qgraph.graph.lint()
-                qgraph_script = torch.jit.script(qgraph)
-                d = out_transform(qgraph(x))
-                e = out_transform(qgraph_script(x))
-                torch.testing.assert_allclose(a, d)
-                self.assertEqual(d, e)
-
         return run_test
 
     @classmethod
     def generate_classification_tests(cls):
-        for k, v in models.__dict__.items():
+        for k, v in torchvision_models.__dict__.items():
             if callable(v) and k[0].lower() == k[0] and k[0] != "_":
                 x = torch.rand(1, 3, 299, 299) if k in ['inception_v3'] else torch.rand(1, 3, 224, 224)
                 model = v(num_classes=50)
@@ -2632,7 +2623,7 @@ class TestVisionTracing(JitTestCase):
 
     @classmethod
     def generate_segmentation_tests(cls):
-        for k, v in models.segmentation.__dict__.items():
+        for k, v in torchvision_models.segmentation.__dict__.items():
             if callable(v) and k[0].lower() == k[0] and k[0] != "_":
                 x = torch.rand(1, 3, 32, 32)
                 model = v(num_classes=10, pretrained_backbone=False)
@@ -2642,7 +2633,7 @@ class TestVisionTracing(JitTestCase):
 
     @classmethod
     def generate_detection_tests(cls):
-        for k, v in models.detection.__dict__.items():
+        for k, v in torchvision_models.detection.__dict__.items():
             if callable(v) and k[0].lower() == k[0] and k[0] != "_":
                 x = [torch.rand(3, 300, 300)]
                 model = v(num_classes=10, pretrained_backbone=False)
@@ -2652,7 +2643,7 @@ class TestVisionTracing(JitTestCase):
 
     @classmethod
     def generate_video_tests(cls):
-        for k, v in models.video.__dict__.items():
+        for k, v in torchvision_models.video.__dict__.items():
             if callable(v) and k[0].lower() == k[0] and k[0] != "_":
                 x = torch.rand(1, 3, 4, 112, 112)
                 model = v(num_classes=50)
@@ -2660,6 +2651,7 @@ class TestVisionTracing(JitTestCase):
                 model_test = cls.generate_test_fn(k, model, x)
                 setattr(cls, test_name, model_test)
 
+    # @skipIfNoTorchVision
     @classmethod
     def generate_tests(cls):
         cls.generate_classification_tests()
@@ -2667,7 +2659,8 @@ class TestVisionTracing(JitTestCase):
         cls.generate_segmentation_tests()
         cls.generate_video_tests()
 
-TestVisionTracing.generate_tests()
+if HAS_TORCHVISION:
+    TestVisionTracing.generate_tests()
 
 if __name__ == '__main__':
     run_tests()
