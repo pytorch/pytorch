@@ -1113,6 +1113,56 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           requires_grad=requires_grad),))
     return inputs
 
+# Generates input tensors for testing reduction ops
+def _generate_reduction_inputs(device, dtype, requires_grad):
+    yield make_tensor((), device, dtype, requires_grad=requires_grad)
+    yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
+    yield make_tensor((2, 3), device, dtype, requires_grad=requires_grad, noncontiguous=True)
+    yield make_tensor((3, 2, 1, 2, 2), device, dtype, requires_grad=requires_grad)
+
+# Generates a subset of possible dim and keepdim kwargs for a tensor
+# with ndim dims appropriate for testing. If supports_multiple_dims
+# is True (default) then dim kwarg can be a list of dims.
+def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
+    for keepdim in [True, False]:
+        # Always test reducing inner and outer most dimensions
+        yield {'dim': 0, 'keepdim': keepdim}
+        yield {'dim': -1, 'keepdim': keepdim}
+
+        # Also reduce middle dimension
+        if ndim > 2:
+            yield {'dim': ndim // 2, 'keepdim': keepdim}
+
+        if supports_multiple_dims:
+            # Always test reducing all dims
+            yield {'dim': tuple(range(ndim)), 'keepdim': keepdim}
+
+            # Test reducing both first and last dimensions
+            if ndim > 1:
+                yield {'dim': (0, ndim - 1), 'keepdim': keepdim}
+
+            # Test reducing every other dimension starting with the second
+            if ndim > 3:
+                yield {'dim': tuple(range(1, ndim, 2)), 'keepdim': keepdim}
+
+# Wraps sample_inputs_reduction function to provide the additional supports_multiple_dims args
+def sample_inputs_reduction_wrapper(supports_multiple_dims):
+    # Generates sample inputs for reduction ops that contain the input tensor
+    # and dim and keepdim kwargs. If a reduction op needs to test additional
+    # args/kwargs then create a separate sample_inputs function
+    def fn(op_info, device, dtype, requires_grad):
+        inputs = []
+
+        for t in _generate_reduction_inputs(device, dtype, requires_grad):
+            # Add case without dim and keepdim kwargs
+            inputs.append(SampleInput(t))
+            for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
+                inputs.append(SampleInput(t, kwargs=kwargs))
+
+        return inputs
+
+    return fn
+
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
         return make_tensor(size, device, dtype, requires_grad=requires_grad)
@@ -1135,7 +1185,6 @@ def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     inputs.append(SampleInput(get_tensor_input(()), args=(1, -1, True, True)))
 
     return inputs
-
 
 def sample_inputs_outer(op_info, device, dtype, requires_grad, **kwargs):
     inputs = []
@@ -3583,6 +3632,10 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
+    OpInfo('sum',
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     OpInfo('maximum',
            op=torch.maximum,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -4710,14 +4763,6 @@ def method_tests():
         ('nanmedian', (), NO_ARGS, 'scalar'),
         ('nanmedian', (), (0,), 'scalar_dim', (), [0]),
         ('nanmedian', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('sum', (S, S, S), NO_ARGS),
-        ('sum', (S, S, S), (1,), 'dim', (), [0]),
-        ('sum', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
-        ('sum', (), NO_ARGS, 'scalar'),
-        ('sum', (), (0,), 'scalar_dim', (), [0]),
-        ('sum', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('sum', (S, S, S), ([1, 2],), 'multi_dim'),
-        ('sum', (S, S, S), ([1, 2], True,), 'multi_dim_keepdim'),
         ('nansum', (S, S, S), NO_ARGS),
         ('nansum', (S, S, S), (1,), 'dim', (), [0]),
         ('nansum', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
