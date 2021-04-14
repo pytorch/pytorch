@@ -8,7 +8,7 @@
 
 #ifndef C10_MOBILE
 #include "onnx/checker.h"
-#include "third_party/optimizer/onnxoptimizer/optimize.h"
+#include "optimizer/onnxoptimizer/optimize.h"
 #endif
 
 #include "google/protobuf/io/coded_stream.h"
