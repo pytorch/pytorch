@@ -17,11 +17,13 @@ void SizesAndStrides::resizeSlowPath(const size_t newSize, const size_t oldSize)
         C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * sizeof(inlineStorage_[0]));
     // CANNOT USE freeOutOfLineStorage() HERE! outOfLineStorage_
     // HAS BEEN OVERWRITTEN!
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     free(tempStorage);
   } else {
     if (isInline()) {
       // CANNOT USE allocateOutOfLineStorage(newSize) HERE! WOULD
       // OVERWRITE inlineStorage_!
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       int64_t* tempStorage = static_cast<int64_t *>(malloc(storageBytes(newSize)));
       TORCH_CHECK(tempStorage, "Could not allocate memory to change Tensor SizesAndStrides!");
       const auto bytesToCopy = oldSize * sizeof(inlineStorage_[0]);
