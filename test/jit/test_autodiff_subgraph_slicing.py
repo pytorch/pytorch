@@ -50,27 +50,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 
-    def test_requires_grad(self):
-
-        class Mod(torch.jit.ScriptModule):
-            def __init__(self):
-                super(Mod, self).__init__()
-                self.var = torch.autograd.Variable(torch.randn(2), requires_grad=True)
-
-            @torch.jit.script_method
-            def forward(self, input: torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
-                var_lst = [self.var]
-                var = torch.cat(var_lst)
-                output = var + input
-                return output, var_lst
-
-        mod = Mod()
-        for i in range(2):
-            input = torch.randn((2,))
-            output, var_lst = mod.forward(input)
-            loss = torch.cat(var_lst).sum()
-            loss.backward()
-
     def test_simple_merge(self):
         # o --> o
         def fn(x, y, z):
