@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
+#include <ATen/Parallel.h>
+#include <ATen/core/interned_strings.h>
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
@@ -438,7 +440,9 @@ class TensorExprFuser {
       bool disable_shape_checks)
       : graph_(std::move(graph)),
         min_group_size_(min_group_size),
-        disable_shape_checks_(disable_shape_checks) {}
+        disable_shape_checks_(disable_shape_checks) {
+    parseTENotFuseOption();
+  }
 
   // Builds up expressions that compute shapes of all intermediates (and
   // outputs) of the fusion group, based on the sizes of inputs. You should run
@@ -851,7 +855,8 @@ class TensorExprFuser {
       return false;
     }
     if (device->is_cpu()) {
-      return canFuseOnCPU();
+      // CPU fusion is only supported for single-thread.
+      return canFuseOnCPU() && at::get_num_threads() == 1;
     } else if (device->is_cuda()) {
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
@@ -1004,6 +1009,8 @@ class TensorExprFuser {
   bool canHandle(Node* node) {
     REQ(disable_shape_checks_ || allShapesAreKnown(node));
     REQ(isFusableOnDevice(node));
+    REQ(operators_not_to_fuse.find(node->kind()) ==
+        operators_not_to_fuse.end());
 
     for (Value* input : node->inputs()) {
       if (auto const& tt = input->type()->cast<TensorType>()) {
@@ -1167,9 +1174,32 @@ class TensorExprFuser {
     }
   }
 
+  // This function parses the option provided by the environment variable
+  // "PYTORCH_TENSOREXPR_DONT_FUSE".
+  // This variable allows users to disable fusion on a list of specified
+  // operators that are separated by ':'. e.g.,
+  // 'PYTORCH_TENSOREXPR_DONT_FUSE="clamp:mul:add"' disables fusion on
+  // aten::clamp, aten::mul and aten::add.
+  void parseTENotFuseOption() {
+    const char* option = std::getenv("PYTORCH_TENSOREXPR_DONT_FUSE");
+    std::stringstream in_ss;
+    if (option) {
+      in_ss << option;
+    }
+
+    std::string line;
+    while (std::getline(in_ss, line, ':')) {
+      if (line.size() == 0) {
+        continue;
+      }
+      operators_not_to_fuse.insert(c10::Symbol::aten(line));
+    }
+  }
+
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
 
+  std::set<NodeKind> operators_not_to_fuse;
   // Minimal size of a fusion group
   size_t min_group_size_;
   // If true, shapes are ignored

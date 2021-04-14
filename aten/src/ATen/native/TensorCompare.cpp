@@ -247,9 +247,9 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(condition.scalar_type() == ScalarType::Byte || condition.scalar_type() == ScalarType::Bool,
               "Expected condition to have ScalarType Byte, but got ScalarType ",
               toString(condition.scalar_type()));
-  Tensor b_condition, b_self, b_other;
+  c10::MaybeOwned<Tensor> b_condition, b_self, b_other;
   std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self, other, "where");
-  return at::_s_where(b_condition, b_self, b_other);
+  return at::_s_where(*b_condition, *b_self, *b_other);
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {

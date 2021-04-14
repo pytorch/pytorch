@@ -1,6 +1,7 @@
 #include <ATen/native/sparse/SparseTensorMath.h>
 
 #include <c10/util/irange.h>
+#include <c10/util/MaybeOwned.h>
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
@@ -812,6 +813,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
   // r_ = alpha * sparse * dense
   scalar_t cast_alpha = alpha.to<scalar_t>();
   scalar_t cast_beta = beta.to<scalar_t>();
+
   if (cast_beta == 0) {
     r.zero_();
   } else if (cast_beta == 1) {
@@ -910,9 +912,8 @@ Tensor& addmm_out_sparse_dense_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return s_addmm_out_sparse_dense_cpu(result, b_self, mat1, mat2, beta, alpha);
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_out_sparse_dense_cpu(result, *b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor s_addmm_sparse_dense_cpu(
@@ -934,9 +935,8 @@ Tensor addmm_sparse_dense_cpu(
     const Scalar& beta,
     const Scalar& alpha
 ) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return s_addmm_sparse_dense_cpu(b_self, mat1, mat2, beta, alpha);
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_sparse_dense_cpu(*b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor& s_addmm_sparse_dense_cpu_(
@@ -976,8 +976,7 @@ Tensor _sparse_mm(
 // we can redispatch to addmm_out; this is NOT an implementation of
 // the sparse masking version of mm
 SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
-  const Tensor& dense
-,
+  const Tensor& dense,
   SparseTensor& result) {
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
@@ -1595,6 +1594,7 @@ Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor&
           Tensor sparse_indices = indices_dim1_dim2.slice(1, mat_el_begin_idx, mat_el_end_idx);
           Tensor sparse_values = values.slice(0, mat_el_begin_idx, mat_el_end_idx);
           int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
+
 
           s_addmm_out_sparse_dense_worker<scalar_t>(
             sparse_nnz,
