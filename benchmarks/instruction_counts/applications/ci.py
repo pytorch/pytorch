@@ -3,8 +3,7 @@ import argparse
 import hashlib
 import json
 import time
-from typing import Dict, List, Optional, Union
-import uuid
+from typing import Dict, List, Union
 
 from core.expand import materialize
 from definitions.standard import BENCHMARKS
@@ -66,7 +65,6 @@ def main(argv: List[str]) -> None:
         grouped_results[key]["counts"].extend(r.instructions)
 
     final_results = {
-        "run_id": str(uuid.uuid4()),
         "version": version,
         "md5": md5.hexdigest(),
         "start_time": t0,
@@ -74,11 +72,12 @@ def main(argv: List[str]) -> None:
         "values": grouped_results,
     }
 
-    if args.destination is None:
+    if args.destination:
+        with open(args.destination, "wt") as f:
+            json.dump(final_results, f)
+
+    if in_debug_mode:
         result_str = json.dumps(final_results)
         print(f"{result_str[:30]} ... {result_str[-30:]}\n")
         import pdb
         pdb.set_trace()
-    else:
-        with open(args.destination, "wt") as f:
-            json.dump(final_results, f)
