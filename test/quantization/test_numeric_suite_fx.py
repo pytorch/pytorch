@@ -518,6 +518,17 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self._test_extract_weights(m, results_len=3)
 
     @skipIfNoFBGEMM
+    def test_extract_weights_dynamic(self):
+        # TODO(future PR): add Linear-ReLU, after #55393 is fixed.
+        m = nn.Sequential(nn.Linear(1, 1)).eval()
+        qconfig_dict = {
+            'object_type': [
+                (nn.Linear, default_dynamic_qconfig),
+            ],
+        }
+        self._test_extract_weights(m, results_len=1, qconfig_dict=qconfig_dict)
+
+    @skipIfNoFBGEMM
     def test_match_activations_mod(self):
         m = nn.Sequential(
             torch.quantization.QuantStub(),
