@@ -1405,6 +1405,32 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4).to(torch.int32)
         self.run_test(FloatingPoint(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_prim_min(self):
+        @torch.jit.script
+        def list_append(boxes: List[torch.Tensor]):
+            temp = []
+            for i, b in enumerate(boxes):  # enumerate is creating a prim::min op in torch graph
+                temp.append(torch.full_like(b[:, 1], i))
+            return temp[0]
+
+        class Min(torch.nn.Module):
+            def forward(self, x):
+                boxes = [x, x, x]
+                return list_append(boxes)
+
+        x = torch.rand(5, 5)
+        self.run_test(Min(), (x,))
+
+        class M(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                i = 3
+                return min(x[i], i)
+
+        x = torch.arange(6, dtype=torch.int64)
+        self.run_test(M(), (x,))
+
     def test_arithmetic(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x):
@@ -4906,6 +4932,20 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(4, 2, 4, requires_grad=True)
         self.run_test(UnfoldModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # MatMul long inputs is added in ONNX opset 9.
+    def test_mv(self):
+        class MatmulModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.mv(input, other)
+
+        x = torch.randn(4, 5, requires_grad=True)
+        y = torch.randn(5, requires_grad=True)
+        self.run_test(MatmulModel(), (x, y))
+
+        x = torch.randint(10, (4, 5))
+        y = torch.randint(10, (5, ))
+        self.run_test(MatmulModel(), (x, y))
 
     def test_prelu(self):
         class PReluModel(torch.nn.Module):
