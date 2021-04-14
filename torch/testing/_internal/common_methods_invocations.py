@@ -634,6 +634,33 @@ def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
         sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha)))
     return tuple(sample_inputs)
 
+def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
+    test_cases = [((S, M), (S, S, S), (S, S, M), 1, 1),
+                  ((1,), (S, S, S), (S, S, M), 1, 1),
+                  ((S, M), (S, S, S), (S, S, M), 0.6, 0.2),
+                  ((1,), (S, S, S), (S, S, M), 0.6, 0.2),
+                  ((), (S, S, S), (S, S, M), 1, 1),
+                  ((), (S, S, S), (S, S, M), 0.6, 0.2),
+                  ]
+    sample_inputs = []
+    for input_args in test_cases:
+        args = (make_tensor(input_args[0], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor(input_args[1], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                make_tensor(input_args[2], device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad))
+        alpha, beta = input_args[3], input_args[4]
+        sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha)))
+        if dtype.is_complex:
+            sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]),
+                                             kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j))))
+
+    return tuple(sample_inputs)
+
 def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = [((S, S), (S, S), (S, S)),
                   ((S, S), (S, 1), (1, S)),
@@ -2797,6 +2824,21 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out', dtypes=(torch.float32,)),
            ),
            sample_inputs_func=sample_inputs_addmv),
+    OpInfo('addbmm',
+           dtypes=floating_types(),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
+                                           *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfROCM=floating_types_and(torch.half),
+           skips=(
+               # addbmm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+               # https://github.com/pytorch/pytorch/issues/55907
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),),
+           sample_inputs_func=sample_inputs_addbmm),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
@@ -4794,14 +4836,6 @@ def method_tests():
         ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs_coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs', (True, ['aten::add', 'aten::mm'])),
         ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs_coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addbmm', (S, M), ((S, S, S), (S, S, M)),),
-        ('addbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs'),
-        ('addbmm', (S, M), ((S, S, S), (S, S, M)), 'coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs_coef', (),
-         (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs'),
-        ('addbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs_coef', (), (), (), ident,
-         {'beta': 0.2, 'alpha': 0.6}),
         ('baddbmm', (S, S, M), ((S, S, S), (S, S, M)),),
         ('baddbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs'),
         ('baddbmm', (S, S, M), ((S, S, S), (S, S, M)), 'coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
