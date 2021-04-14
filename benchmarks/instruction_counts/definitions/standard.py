@@ -12,11 +12,10 @@ Parser notes:
           or `// @YOUR_LABEL` (C++).
 """
 
-from core.api import GroupedModules, GroupedStmts, GroupedVariants, TimerArgs
+from core.api import GroupedModules, GroupedStmts, GroupedVariants
 from core.types import FlatIntermediateDefinition
 from core.utils import flatten, parse_stmts
 from definitions.setup import Setup
-from torch.utils.benchmark.utils.timer import Language
 
 
 BENCHMARKS: FlatIntermediateDefinition = flatten({
