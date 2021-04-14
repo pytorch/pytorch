@@ -258,44 +258,23 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
         ),
     },
 
-    "InferenceMode": {
-        "Functional": TimerArgs(
-            "torch::Tensor y = x * x;",
-            """
+    "InferenceMode": GroupedVariants(
+        # In general, the mixed input scenario is less common so its
+        # perf can be less important than pure inference tensor inputs.
+        cpp_block=r"""
+            // @Setup
+            auto s = torch::ones({3, 3});  // Normal Tensor
             c10::InferenceMode guard;
-            auto x = torch::ones({3, 3});
-            """,
-            language=Language.CPP,
-        ),
+            auto x = torch::ones({3, 3});  // Inference Tensor
 
-        "View": TimerArgs(
-            "torch::Tensor y = x.view({9});",
-            """
-            c10::InferenceMode guard;
-            auto x = torch::ones({3, 3});
-            """,
-            language=Language.CPP,
-        ),
+            // @View
+            torch::Tensor y = x.view({9});
 
-        "Inplace": TimerArgs(
-            "torch::Tensor y = x.mul_(x);",
-            """
-            c10::InferenceMode guard;
-            auto x = torch::ones({3, 3});
-            """,
-            language=Language.CPP,
-        ),
+            // @Inplace
+            torch::Tensor y = x.mul_(x);
 
-        # Mixed inputs scenario isn't the main use case of InferenceMode
-        # so this one is less important.
-        "Mixed": TimerArgs(
-            "torch::Tensor y = x + s;",
-            """
-            auto s = torch::ones({3, 3});
-            c10::InferenceMode guard;
-            auto x = torch::ones({3, 3});
-            """,
-            language=Language.CPP,
-        ),
-    },
+            // @Mixed
+            torch::Tensor y = x + s;
+        """
+    ),
 })
