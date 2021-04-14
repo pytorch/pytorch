@@ -767,11 +767,15 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.InstanceNorm3d)
 @register_quant_pattern(torch.nn.LayerNorm)
 @register_quant_pattern(torch.nn.SiLU)
+@register_quant_pattern(torch.nn.GELU)
+@register_quant_pattern(torch.nn.Softmax)
 @register_quant_pattern(torch.nn.functional.hardswish)
 @register_quant_pattern(torch.nn.functional.instance_norm)
 @register_quant_pattern(torch.nn.functional.layer_norm)
 @register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.silu)
+@register_quant_pattern(torch.nn.functional.gelu)
+@register_quant_pattern(torch.nn.functional.softmax)
 class DefaultNodeQuantizeHandler(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
@@ -814,11 +818,15 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             torch.nn.InstanceNorm3d: int8_dtypes,
             torch.nn.LayerNorm: all_dtypes,
             torch.nn.SiLU: fp16_dtypes,
+            torch.nn.GELU: all_dtypes,
+            torch.nn.Softmax: all_dtypes,
             torch.nn.functional.hardswish: int8_dtypes,
             torch.nn.functional.instance_norm: int8_dtypes,
             torch.nn.functional.layer_norm: all_dtypes,
             torch.nn.functional.leaky_relu: int8_dtypes,
             torch.nn.functional.silu: fp16_dtypes,
+            torch.nn.functional.gelu: all_dtypes,
+            torch.nn.functional.softmax: all_dtypes,
         }
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)

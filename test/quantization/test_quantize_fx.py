@@ -3066,28 +3066,43 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quantized_module, torch.ops.quantized.instance_norm,
                 skip_op_arg_for_functional=True)
 
-    def test_silu(self):
+    def _test_default_node_quant_handler_ops(self, module, functional):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, mod, func):
                 super().__init__()
-                self.silu = torch.nn.SiLU()
+                self.module = mod()
+                self.functional = func
 
             def forward(self, x):
-                x = self.silu(x)
-                x = torch.nn.functional.silu(x)
+                x = self.module(x)
+                x = self.functional(x)
                 return x
 
-        data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
+        data = torch.randn((2, 2, 2, 2), dtype=torch.float16)
         quant_type = QuantType.STATIC
         qconfig_dict = {
             "": float16_static_qconfig
         }
+        m = M(module, functional).eval()
+        m_prep = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        m_quant = torch.quantization.quantize_fx.convert_fx(m_prep)
+        self.assertEqual(m_quant(data),m(data.float()), rtol=1e-3, atol=1e-4)
+
         node_occurrence = {
             ns.call_method("to"): 3
         }
-        m = self.checkGraphModeFxOp(
-            M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
+        m_quant_2 = self.checkGraphModeFxOp(
+            M(module, functional), (data.float(),), quant_type, custom_qconfig_dict=qconfig_dict,
             expected_node_occurrence=node_occurrence)
+
+    def test_gelu(self):
+        self._test_default_node_quant_handler_ops(torch.nn.GELU, torch.nn.functional.gelu)
+
+    def test_softmax(self):
+        self._test_default_node_quant_handler_ops(torch.nn.Softmax, torch.nn.functional.softmax)
+
+    def test_silu(self):
+        self._test_default_node_quant_handler_ops(torch.nn.SiLU, torch.nn.functional.silu)
 
     @skipIfNoFBGEMM
     def test_clamp(self):
