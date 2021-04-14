@@ -2,8 +2,6 @@ import collections
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.fx.symbolic_trace import Tracer
@@ -13,15 +11,8 @@ from torch.quantization.ns.graph_matcher import (
     get_type_a_related_to_b,
 )
 
-from .ns.utils import (
-    getattr_from_fqn,
-)
-
 from .ns.weight_utils import (
-    get_conv_mod_weight,
-    get_linear_mod_weight,
-    get_lstm_mod_weights,
-    get_linear_fun_weight,
+    extract_weight_from_node,
 )
 
 from .ns.graph_passes import (
@@ -31,9 +22,10 @@ from .ns.graph_passes import (
 
 from .ns.ns_types import (
     NSSingleResultValuesType,
+    NSResultsType,
 )
 
-from typing import Dict, Tuple, Callable, List, Any
+from typing import Dict, Tuple, Callable, List
 
 RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 
@@ -102,44 +94,6 @@ prev_node_name={self.prev_node_name}, ref_node_name={self.ref_node_name},
 results_type={self.results_type}, index_within_arg={self.index_within_arg})"""
 
 
-# TODO(future PR): see if we can use typing_extensions's TypedDict instead
-# to properly type the various keys
-# {
-#   'logger_name_1': {
-#     'model_name_a': {
-#       # one of NSSingleResultValuesType
-#       'type': 'weight',
-#       # the values of type specified above
-#       'values': [torch.tensor(...), ...],
-#       # name of the node directly before the logger
-#       'prev_node_name': 'linear1',
-#       # type of the underlying function or module
-#       'prev_node_target_type': torch.nn.functional.linear  # or torch.nn.Linear, etc
-#       # name of the node responsible for adding this logger
-#       # Note: this may differ from prev_node_name if we are logging inputs
-#       'ref_node_name': 'linear1',
-#       # index of this node within the arg of the input/output node
-#       # for example, in cat([x1, x2, x3], dim=0), x2 would have index_within_arg == 1
-#       'index_within_arg': 0,
-#     },
-#   },
-# }
-NSSingleResultType = Dict[str, Any]
-
-# {
-#   'layer_name_1': {  # subgraph name
-#     'node_output': {  # results type (node_output, node_input, weight)
-#       'model_name_a':  # model name
-#          [NSSingleResultType, ...],  # results, ordered by index_within_arg
-#       'model_name_b':
-#          [NSSingleResultType, ...],
-#     },
-#   },
-# }
-#
-NSResultsType = Dict[str, Dict[str, Dict[str, List[NSSingleResultType]]]]
-
-
 class NSTracer(Tracer):
     """
     Just like a regular tracer, but treats observers and fake_quantize
@@ -164,64 +118,13 @@ def _extract_weights_one_model(
         get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
     for node, ref_name in nodes_and_names_to_instrument:
-
         res_type = NSSingleResultValuesType.WEIGHT.value
         if ref_name not in results:
             results[ref_name] = {res_type: {}}
-
-        if node.op == 'call_function':
-
-            # linear
-            # TODO(future PR): other function types
-            related_to_linear = node.target in (F.linear,) or \
-                (node.target, F.linear) in type_a_related_to_b
-
-            if related_to_linear:
-                weight = get_linear_fun_weight(node, model)
-                results[ref_name][res_type][model_name] = [{
-                    'type': res_type,
-                    'values': [weight],
-                    'prev_node_name': node.name,
-                    'prev_node_target_type': str(node.target),
-                    'ref_node_name': node.name,
-                    'index_within_arg': 0,
-                }]
-
-        else:  # call_module
-            # for call_module, we need to look up the modules to do the type check
-            assert isinstance(node.target, str)
-            mod = getattr_from_fqn(model, node.target)
-
-            # check that A is one the modules we need
-            # assume B is related (this is done by graph matcher)
-            # TODO(future PR): 1d and 3d convs
-            related_to_conv1d_mod = isinstance(mod, nn.Conv1d) or \
-                (type(mod), nn.Conv1d) in type_a_related_to_b
-            related_to_conv2d_mod = isinstance(mod, nn.Conv2d) or \
-                (type(mod), nn.Conv2d) in type_a_related_to_b
-            related_to_conv3d_mod = isinstance(mod, nn.Conv3d) or \
-                (type(mod), nn.Conv3d) in type_a_related_to_b
-            related_to_linear_mod = isinstance(mod, nn.Linear) or \
-                (type(mod), nn.Linear) in type_a_related_to_b
-            related_to_lstm_mod = isinstance(mod, nn.LSTM) or \
-                (type(mod), nn.LSTM) in type_a_related_to_b
-
-            # TODO(future PR): other module types
-            if related_to_conv1d_mod or related_to_conv2d_mod or related_to_conv3d_mod:
-                weights = [get_conv_mod_weight(mod)]
-            elif related_to_lstm_mod:
-                weights = get_lstm_mod_weights(mod)
-            else:
-                assert related_to_linear_mod, f"module type {type(mod)} not handled yet"
-                weights = [get_linear_mod_weight(mod)]
-            results[ref_name][res_type][model_name] = [{
-                'type': res_type,
-                'values': weights,
-                'prev_node_name': node.name,
-                'prev_node_target_type': str(type(mod)),
-                'ref_node_name': node.name,
-                'index_within_arg': 0,
-            }]
+        extracted_weight = \
+            extract_weight_from_node(node, model, type_a_related_to_b)
+        if extracted_weight:
+            results[ref_name][res_type][model_name] = [extracted_weight]
 
 
 def _extract_weights_impl(
