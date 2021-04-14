@@ -4,7 +4,8 @@ from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
                                  assert_never)
 
 from tools.codegen.api.types import (ArgName, BaseCType, Binding,
-                                     ConstRefCType, CType, OptionalCType)
+                                     ConstRefCType, OptionalCType, CType,
+                                     tensorT, scalarT, intArrayRefT, dimnameListT)
 from tools.codegen.api import cpp
 
 from typing import Union, List

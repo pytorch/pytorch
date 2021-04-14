@@ -13,7 +13,7 @@ from tools.codegen.model import (DispatchKey, NativeFunction,
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      CppSignature, CppSignatureGroup,
                                      DispatcherSignature, Expr, MutRefCType,
-                                     NativeSignature)
+                                     NativeSignature, tensorT)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
