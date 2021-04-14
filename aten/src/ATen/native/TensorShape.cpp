@@ -737,7 +737,7 @@ Tensor expand(const Tensor& self, IntArrayRef size, bool implicit) {
   auto expandedSizesAndStrides = inferExpandGeometry_dimvector(self.sizes(), self.strides(), size);
 
   auto result = self.as_strided(
-      std::get<0>(expandedSizesAndStrides), std::get<1>(expandedSizesAndStrides));
+      expandedSizesAndStrides.sizes, expandedSizesAndStrides.strides);
   namedinference::propagate_names_for_expand(result, self);
   return result;
 }
