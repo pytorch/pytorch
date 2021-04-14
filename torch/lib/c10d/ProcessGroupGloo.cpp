@@ -2726,7 +2726,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
 void ProcessGroupGloo::monitoredBarrier(
     const BarrierOptions& opts,
     bool waitAllRanks) {
-      C10_LOG_API_USAGE_ONCE("torch.distributed.monitored_barrier");
   // Use default timeout if no timeout was specified.
   auto monitoredBarrierTimeout =
       (opts.timeout == kUnsetTimeout) ? this->options_->timeout : opts.timeout;
