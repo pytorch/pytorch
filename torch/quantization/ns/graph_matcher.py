@@ -66,6 +66,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
         'torch.nn.Linear': set([
             nn.Linear,
             nnq.Linear,
+            nni.LinearReLU,
             nniq.LinearReLU,
             nnqat.Linear,
             nnqd.Linear,
