@@ -81,7 +81,7 @@ jobs:
         uses: actions/checkout@v2
       - name: Attempt to run setup.py
         run: |
-          python setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
+          python2 setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
 
   toc:
     runs-on: ubuntu-18.04
