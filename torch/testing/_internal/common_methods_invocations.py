@@ -4270,8 +4270,14 @@ op_db: List[OpInfo] = [
                    aliases=('special.expit', ),
                    ref=reference_sigmoid if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 1e-2,
+                                                  torch.complex64: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
                    skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/56012
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                device_type='cuda', dtypes=[torch.complex64]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                device_type='cuda', dtypes=[torch.complex64]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
