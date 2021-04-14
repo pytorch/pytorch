@@ -41,7 +41,8 @@
   - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
   - [Why no leak detection?](#why-no-leak-detection)
 - [Caffe2 notes](#caffe2-notes)
-- [CI failure tips](#ci-failure-tips)
+- [CI tips](#ci-tips)
+  - [CI was all gree, why was my PR reverted?](#ci-was-all-green-why-was-my-pr-reverted)
   - [Which commit is used in CI?](#which-commit-is-used-in-ci)
 
 <!-- tocstop -->
@@ -1191,7 +1192,7 @@ are Caffe2/PyTorch specific. Here they are:
   PyTorch-specific. Don't put Caffe2 code in them without extra
   coordination.
 
-## CI failure tips
+## CI tips
 
 Once you submit a PR or push a new commit to a branch that is in
 an active PR, CI jobs will be run automatically. Some of these may
@@ -1230,6 +1231,31 @@ following steps:
 For certain Windows failures, it may be useful to have a full [Remote
 Desktop](https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/remote-desktop-clients) connection. See detailed instructions [here](https://github.com/pytorch/pytorch/wiki/Debugging-Windows-with-Remote-Desktop-or-CDB-(CLI-windbg)-on-CircleCI)
 for how to set that up after rerunning the job.
+
+### CI was all green, why was my PR reverted? 
+
+Our CI job covers a variety of build options, such as OS, build systems,
+python version, CUDA version, etc. It generally expensive to run all of 
+them on every single PR. Therefore, only a selective set of CI jobs were
+ran on PRs.
+
+- In fact, many of the CI jobs on PR only have build stage configured,
+  even fewer CI configuration were actually used to run test cases.
+
+However, running fewer CI jobs on PRs means there's a possibility that 
+PRs with all-green CI signals can still fail the full set of test on `master`.
+
+Therefore, we provide a way to trigger a more comprehensive set of CI jobs
+on PRs via Github label - the `ci/all` label. In order to use it.
+
+1. Follow the normal procedure to submit a PR.
+
+2. Once PR is created, normal CI jobs will be triggered on your PR. Please wait
+   for these default set of CI jobs to all passed.
+
+3. Once your PR show all green in the CI signal section. please add `ci/all`
+   through the label section on Github. You should see additional CI jobs being
+   triggered in the signal hub on your PR page.
 
 ### Which commit is used in CI?
 
