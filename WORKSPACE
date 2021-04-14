@@ -66,6 +66,12 @@ new_local_repository(
     path = "third_party/foxi",
 )
 
+new_local_repository(
+    name = "optimizer",
+    build_file = "//third_party:optimizer.BUILD",
+    path = "third_party/optimizer",
+)
+
 local_repository(
     name = "com_google_protobuf",
     path = "third_party/protobuf",
