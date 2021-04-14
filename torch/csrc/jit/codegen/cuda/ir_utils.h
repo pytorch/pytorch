@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 #include <iterator>
@@ -126,6 +127,13 @@ auto filterByType(const ContainerType& inputs) {
 std::vector<int> normalizeOld2New(
     const std::unordered_map<int, int>& old2new_in,
     size_t ndims);
+
+// Replace all uses of reference with substitute in expr. Return the Expr.
+// Warning: Invalidates provided Expr.
+// Warning: Removes connection of reference through provided Expr.
+// Warning: Creates new Expr connecting substitue.
+// Reference is found through direct pointer comparison.
+Expr* replaceValInExpr(Expr* expr, Val* reference, Val* substitute);
 
 } // namespace ir_utils
 } // namespace cuda

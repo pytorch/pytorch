@@ -356,21 +356,6 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return pos;
   }
 
-  // In Cache Before, for the origin expr of the original tensor,
-  // we create a new operation where the original tensor is replaced
-  // with the new cache tensor. This function creates a new expr
-  // given the consumer, the output of the expression.
-  void createExprConsumer(Expr* expr, TensorView* consumer);
-
-  // In Cache After, for all the uses of the original tensor, we create
-  // a new operation where the original tensor is replaced with the new
-  // cache tensor. This function creates a new expr given a producer,
-  // an input for the expression.
-  void createExprProducer(
-      Expr* expr,
-      TensorView* current,
-      TensorView* producer);
-
   //! A helper function to maintain the consistency of welford output
   //! schedules when doing rfactor on welford ops.
   TensorView* welfordRfactorHelper(

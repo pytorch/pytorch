@@ -637,12 +637,11 @@ std::vector<TensorView*> TensorView::duplicate() {
       producer->setDomain(
           TransformReplay::fullSelfReplay(producer->domain(), this->domain()));
 
-      createExprConsumer(definition(), producer);
-      createExprProducer(expr, this, producer);
+      ir_utils::replaceValInExpr(definition(), this, producer);
+      ir_utils::replaceValInExpr(expr, this, producer);
 
       // Set ComputeAt position for this duplicate TV
       producer->setComputeAt(getComputeAtPosition());
-
       duplicates.push_back(producer);
     }
     ++count;
@@ -747,9 +746,8 @@ TensorView* TensorView::cache_before() {
 
   // Get inputs for origin expression
   auto expr_inputs = definition()->inputs();
-  auto def_expr = definition();
   // Expr* producer_definition =
-  createExprConsumer(def_expr, producer);
+  ir_utils::replaceValInExpr(definition(), this, producer);
 
   // Expr* producer_uses =
   new UnaryOp(UnaryOpType::Set, consumer, producer);
@@ -912,7 +910,7 @@ TensorView* TensorView::cache_after() {
 
   // Expr* consumer_uses =
   for (auto expr : fusion()->unordered_uses(this)) {
-    createExprProducer(expr, this, consumer);
+    ir_utils::replaceValInExpr(expr, this, consumer);
   }
 
   // Expr* consumer_definition =
@@ -955,208 +953,6 @@ void TensorView::setMemoryType(MemoryType mt) {
         mt == MemoryType::Global,
         "Tried to set an input or output to the fusion to a non-global memory type.");
   }
-}
-
-namespace {
-
-// Create New Expr given consumer - [output of the expression]
-struct CreateExprConsumer : public OptInDispatch {
- public:
-  static void create(Expr* expr, TensorView* consumer) {
-    CreateExprConsumer cec(consumer);
-    cec.handle(expr);
-  }
-
- private:
-  explicit CreateExprConsumer(TensorView* consumer) : consumer_(consumer) {}
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
-  void handle(UnaryOp* unary_expr) final {
-    new UnaryOp(unary_expr->getUnaryOpType(), consumer_, unary_expr->in());
-  }
-
-  void handle(BinaryOp* binary_expr) final {
-    new BinaryOp(
-        binary_expr->getBinaryOpType(),
-        consumer_,
-        binary_expr->lhs(),
-        binary_expr->rhs());
-  }
-
-  void handle(TernaryOp* ternary_expr) final {
-    new TernaryOp(
-        ternary_expr->getTernaryOpType(),
-        consumer_,
-        ternary_expr->in1(),
-        ternary_expr->in2(),
-        ternary_expr->in3());
-  }
-
-  void handle(ReductionOp* reduction_expr) final {
-    new ReductionOp(
-        reduction_expr->getReductionOpType(),
-        reduction_expr->init(),
-        consumer_,
-        reduction_expr->in());
-  }
-
-  void handle(BroadcastOp* broadcast_expr) final {
-    new BroadcastOp(
-        consumer_,
-        broadcast_expr->in(),
-        broadcast_expr->getBroadcastDimFlags());
-  }
-
-  void handle(TransposeOp* transpose_expr) final {
-    new TransposeOp(consumer_, transpose_expr->in(), transpose_expr->new2old());
-  }
-
- private:
-  TensorView* consumer_ = nullptr;
-};
-
-// Create New Expr given producer - [an input for the expression]
-struct CreateExprProducer : public OptInDispatch {
- public:
-  static void create(Expr* expr, TensorView* current, TensorView* producer) {
-    CreateExprProducer cep(current, producer);
-    cep.handle(expr);
-  }
-
- private:
-  explicit CreateExprProducer(TensorView* current, TensorView* producer)
-      : current_(current), producer_(producer) {}
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
-  void handle(UnaryOp* unary_expr) final {
-    new UnaryOp(unary_expr->getUnaryOpType(), unary_expr->out(), producer_);
-  }
-
-  void handle(BinaryOp* binary_expr) final {
-    const bool lhs_match = binary_expr->lhs()->sameAs(current_);
-    const bool rhs_match = binary_expr->rhs()->sameAs(current_);
-
-    if (lhs_match && rhs_match) {
-      new BinaryOp(
-          binary_expr->getBinaryOpType(),
-          binary_expr->out(),
-          producer_,
-          producer_);
-    } else if (lhs_match) {
-      new BinaryOp(
-          binary_expr->getBinaryOpType(),
-          binary_expr->out(),
-          producer_,
-          binary_expr->rhs());
-    } else {
-      new BinaryOp(
-          binary_expr->getBinaryOpType(),
-          binary_expr->out(),
-          binary_expr->lhs(),
-          producer_);
-    }
-  }
-
-  void handle(TernaryOp* ternary_expr) final {
-    const bool in1_match = ternary_expr->in1()->sameAs(current_);
-    const bool in2_match = ternary_expr->in2()->sameAs(current_);
-    const bool in3_match = ternary_expr->in3()->sameAs(current_);
-
-    if (in1_match && in2_match && in3_match) {
-      new TernaryOp(
-          ternary_expr->getTernaryOpType(),
-          ternary_expr->out(),
-          producer_,
-          producer_,
-          producer_);
-    } else if (in1_match && in2_match) {
-      new TernaryOp(
-          ternary_expr->getTernaryOpType(),
-          ternary_expr->out(),
-          producer_,
-          producer_,
-          ternary_expr->in3());
-    } else if (in2_match && in3_match) {
-      new TernaryOp(
-          ternary_expr->getTernaryOpType(),
-          ternary_expr->out(),
-          ternary_expr->in1(),
-          producer_,
-          producer_);
-    } else if (in1_match) {
-      new TernaryOp(
-          ternary_expr->getTernaryOpType(),
-          ternary_expr->out(),
-          producer_,
-          ternary_expr->in2(),
-          ternary_expr->in3());
-    } else if (in2_match) {
-      new TernaryOp(
-          ternary_expr->getTernaryOpType(),
-          ternary_expr->out(),
-          ternary_expr->in1(),
-          producer_,
-          ternary_expr->in3());
-    } else {
-      new TernaryOp(
-          ternary_expr->getTernaryOpType(),
-          ternary_expr->out(),
-          ternary_expr->in1(),
-          ternary_expr->in2(),
-          producer_);
-    }
-  }
-
-  void handle(ReductionOp* reduction_expr) final {
-    new ReductionOp(
-        reduction_expr->getReductionOpType(),
-        reduction_expr->init(),
-        reduction_expr->out(),
-        producer_);
-  }
-
-  void handle(BroadcastOp* broadcast_expr) final {
-    new BroadcastOp(
-        broadcast_expr->out(),
-        producer_,
-        broadcast_expr->getBroadcastDimFlags());
-  }
-
-  void handle(TransposeOp* transpose_expr) final {
-    new TransposeOp(
-        transpose_expr->out(), producer_, transpose_expr->new2old());
-  }
-
- private:
-  TensorView* current_ = nullptr;
-  TensorView* producer_ = nullptr;
-};
-
-} // namespace
-
-// In Cache Before, for the definition expr of the original tensor,
-// we create a new operation where the original tensor is replaced
-// with the new cache tensor. This function creates a new expr
-// given the consumer, the output of the expression.
-void TensorView::createExprConsumer(Expr* expr, TensorView* consumer) {
-  CreateExprConsumer::create(expr, consumer);
-}
-
-// In Cache After, for all the uses of the original tensor, we create
-// a new operation where the original tensor is replaced with the new
-// cache tensor. This function creates a new expr given a producer,
-// an input for the expression.
-void TensorView::createExprProducer(
-    Expr* expr,
-    TensorView* current,
-    TensorView* producer) {
-  CreateExprProducer::create(expr, current, producer);
 }
 
 TensorViewBuilder& TensorViewBuilder::ndims(size_t ndims) {

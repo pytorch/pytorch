@@ -1,3 +1,5 @@
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 
 #include <set>
@@ -102,6 +104,118 @@ std::vector<int> normalizeOld2New(
       });
 
   return new2old;
+}
+
+namespace ValReplacement {
+// Create New Expr given producer - [an input for the expression]
+// Creates a new Expr substituting current with producer
+// TODO: Support Welford operation
+struct SubstituteInExpr : public OptInDispatch {
+ public:
+  static Expr* subsitute(Expr* expr, Val* reference, Val* substitute) {
+    TORCH_INTERNAL_ASSERT(
+        expr != nullptr && reference != nullptr && substitute != nullptr,
+        "Nullptr arg found.");
+    SubstituteInExpr sie(reference, substitute);
+    sie.handle(expr);
+    TORCH_INTERNAL_ASSERT(
+        sie.expr_ != nullptr,
+        "Substitution failed of ",
+        reference,
+        " with ",
+        substitute);
+    return sie.expr_;
+  }
+
+ private:
+  explicit SubstituteInExpr(Val* reference, Val* substitute)
+      : reference_(reference), substitute_(substitute) {}
+
+  void handle(Expr* expr) final {
+    OptInDispatch::handle(expr);
+  }
+
+  void handle(UnaryOp* unary_expr) final {
+    auto in =
+        reference_->sameAs(unary_expr->in()) ? substitute_ : unary_expr->in();
+    auto out =
+        reference_->sameAs(unary_expr->out()) ? substitute_ : unary_expr->out();
+    expr_ = new UnaryOp(unary_expr->getUnaryOpType(), out, in);
+  }
+
+  void handle(BinaryOp* binary_expr) final {
+    auto lhs = reference_->sameAs(binary_expr->lhs()) ? substitute_
+                                                      : binary_expr->lhs();
+    auto rhs = reference_->sameAs(binary_expr->rhs()) ? substitute_
+                                                      : binary_expr->rhs();
+    auto out = reference_->sameAs(binary_expr->out()) ? substitute_
+                                                      : binary_expr->out();
+
+    expr_ = new BinaryOp(binary_expr->getBinaryOpType(), out, lhs, rhs);
+  }
+
+  void handle(TernaryOp* ternary_expr) final {
+    auto in1 = reference_->sameAs(ternary_expr->in1()) ? substitute_
+                                                       : ternary_expr->in1();
+    auto in2 = reference_->sameAs(ternary_expr->in2()) ? substitute_
+                                                       : ternary_expr->in2();
+    auto in3 = reference_->sameAs(ternary_expr->in3()) ? substitute_
+                                                       : ternary_expr->in3();
+    auto out = reference_->sameAs(ternary_expr->out()) ? substitute_
+                                                       : ternary_expr->out();
+    expr_ = new TernaryOp(ternary_expr->getTernaryOpType(), out, in1, in2, in3);
+  }
+
+  void handle(ReductionOp* reduction_expr) final {
+    auto init = reference_->sameAs(reduction_expr->init())
+        ? substitute_
+        : reduction_expr->init();
+    auto out = reference_->sameAs(reduction_expr->out())
+        ? substitute_
+        : reduction_expr->out();
+    auto in = reference_->sameAs(reduction_expr->in()) ? substitute_
+                                                       : reduction_expr->in();
+
+    expr_ =
+        new ReductionOp(reduction_expr->getReductionOpType(), init, out, in);
+  }
+
+  void handle(BroadcastOp* broadcast_expr) final {
+    auto out = reference_->sameAs(broadcast_expr->out())
+        ? substitute_
+        : broadcast_expr->out();
+    auto in = reference_->sameAs(broadcast_expr->in()) ? substitute_
+                                                       : broadcast_expr->in();
+
+    expr_ = new BroadcastOp(out, in, broadcast_expr->getBroadcastDimFlags());
+  }
+
+  void handle(TransposeOp* transpose_expr) final {
+    TORCH_INTERNAL_ASSERT(
+        substitute_->isA<TensorView>(),
+        "All args to transpose must be tensor view, but received a non-TensorView for replacement: ",
+        substitute_);
+    auto out = reference_->sameAs(transpose_expr->out())
+        ? substitute_->as<TensorView>()
+        : transpose_expr->out();
+    auto in = reference_->sameAs(transpose_expr->in())
+        ? substitute_->as<TensorView>()
+        : transpose_expr->in();
+    expr_ = new TransposeOp(out, in, transpose_expr->new2old());
+  }
+
+ private:
+  Val* reference_ = nullptr;
+  Val* substitute_ = nullptr;
+  Expr* expr_ = nullptr;
+};
+
+} // namespace ValReplacement
+
+Expr* replaceValInExpr(Expr* expr, Val* reference, Val* substitute) {
+  FusionGuard fg(expr->fusion());
+  return ValReplacement::SubstituteInExpr::subsitute(
+      expr, reference, substitute);
 }
 
 } // namespace ir_utils
