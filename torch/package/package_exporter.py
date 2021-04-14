@@ -354,7 +354,8 @@ node [shape=box];
         module object, and then using its `__file__` attribute to find the source code.
 
         Args:
-            module (Union[str, types.ModuleType]): e.g. `my_package.my_subpackage`, code will be saved to provide code for this package.
+            module (Union[str, types.ModuleType]): e.g. `my_package.my_subpackage`, code will be saved to provide code
+                for this package.
             dependencies (bool, optional): If True, we scan the source for dependencies.
         """
         if isinstance(module, str):
