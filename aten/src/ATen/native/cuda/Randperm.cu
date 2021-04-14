@@ -81,8 +81,6 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         keys.data_ptr<uint8_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
-      std::cout << "keys_tmp:" << keys_tmp << std::endl;
-      std::cout << "result:" << result << std::endl;
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   } else if (bits <= 16) {
@@ -96,8 +94,6 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         keys.data_ptr<int16_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
-      std::cout << "keys_tmp:" << keys_tmp << std::endl;
-      std::cout << "result:" << result << std::endl;
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   } else if (bits <= 32) {
@@ -111,8 +107,6 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
         keys.data_ptr<int>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
         n, false, 0, bits);
-      std::cout << "keys_tmp:" << keys_tmp << std::endl;
-      std::cout << "result:" << result << std::endl;
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   } else {
@@ -129,6 +123,8 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
       std::cout << "keys_tmp:" << keys_tmp << std::endl;
       std::cout << "result:" << result << std::endl;
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
+      std::cout << "keys_tmp after postprocess:" << keys_tmp << std::endl;
+      std::cout << "result after postprocess:" << result << std::endl;
     });
   }
 
