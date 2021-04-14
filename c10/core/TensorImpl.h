@@ -252,9 +252,9 @@ struct C10_API VariableVersion {
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
   // leaves it in a persistently undefined state. See
   // https://cplusplus.github.io/LWG/issue2334.
-  VariableVersion(uint32_t version = 0)
+  VariableVersion(uint32_t version)
       : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
-  VariableVersion(Disabled) {}
+  VariableVersion(Disabled=DISABLED) {}
 
   bool enabled() const {
     return version_counter_;
@@ -588,6 +588,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         key_set_.has(DispatchKey::SparseCUDA) ||
         key_set_.has(DispatchKey::SparseHIP) ||
         key_set_.has(DispatchKey::SparseXPU);
+  }
+
+  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR format.
+  bool is_sparse_csr() const {
+    return key_set_.has(DispatchKey::SparseCsrCPU) ||
+           key_set_.has(DispatchKey::SparseCsrCUDA);
   }
 
   bool is_quantized() const {

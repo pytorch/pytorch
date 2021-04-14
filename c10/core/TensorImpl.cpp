@@ -69,7 +69,6 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     : storage_(std::move(storage)),
-      version_counter_(VariableVersion(VariableVersion::DISABLED)),
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
@@ -78,7 +77,7 @@ TensorImpl::TensorImpl(
   init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference_tensor()) {
-    version_counter_ = VariableVersion();
+    version_counter_ = VariableVersion(/*version=*/0);
   }
 }
 
@@ -88,7 +87,6 @@ TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta data_type,
 TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::TypeMeta data_type,
                        c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
-      version_counter_(VariableVersion(VariableVersion::DISABLED)),
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
@@ -119,7 +117,7 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
 
   // Inference tensor doesn't have version counter.
   if (!is_inference_tensor()) {
-    version_counter_ = VariableVersion();
+    version_counter_ = VariableVersion(/*version=*/0);
   }
 
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
