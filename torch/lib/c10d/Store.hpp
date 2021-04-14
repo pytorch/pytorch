@@ -55,6 +55,22 @@ class Store : public torch::CustomClassHolder {
 
   virtual void setTimeout(const std::chrono::milliseconds& timeout);
 
+  // watchKey() takes two arguments: key and callback function. The callback
+  // should be run whenever the key is changed (create, update, or delete). The
+  // callback function takes two parameters: currentValue and newValue, which
+  // are optional depending on how the key is changed. These key updates should
+  // trigger the callback as follows:
+  // CREATE: callback(c10::nullopt, newValue) // null currentValue
+  // UPDATE: callback(currentValue, newValue)
+  // DELETE: callback(currentValue, c10::nullopt) // null newValue
+  virtual void watchKey(
+      const std::string& /* unused */,
+      std::function<void(
+          c10::optional<std::string>,
+          c10::optional<std::string>)> /* unused */) {
+    TORCH_INTERNAL_ASSERT(false, "watchKey only implemented for TCPStore.");
+  }
+
  protected:
   std::chrono::milliseconds timeout_;
 };
