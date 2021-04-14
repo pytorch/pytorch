@@ -125,12 +125,14 @@ void TCPStoreWorkerDaemon::callbackHandler(int socket) {
   std::vector<uint8_t> newValueVec = tcputil::recvVector<uint8_t>(socket);
   c10::optional<std::string> currentValue;
   if (watchResponse == WatchResponseType::KEY_CREATED) {
+    assert(currentValueVec.empty());
     currentValue = c10::nullopt;
   } else {
     currentValue = std::string(currentValueVec.begin(), currentValueVec.end());
   }
   c10::optional<std::string> newValue;
   if (watchResponse == WatchResponseType::KEY_DELETED) {
+    assert(newValueVec.empty());
     newValue = c10::nullopt;
   } else {
     newValue = std::string(newValueVec.begin(), newValueVec.end());

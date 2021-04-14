@@ -21,7 +21,7 @@ enum class WatchResponseType : uint8_t {
 };
 
 // Abstract base class to handle thread state for TCPStoreMasterDaemon and
-// TCPStoreWorkerDaemon Contains the windows/unix implementations to signal a
+// TCPStoreWorkerDaemon. Contains the windows/unix implementations to signal a
 // shutdown sequence for the thread
 class BackgroundThread {
  public:

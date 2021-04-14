@@ -12,7 +12,7 @@
 std::condition_variable cv;
 std::mutex cvMutex;
 constexpr int64_t kShortStoreTimeoutMillis = 100;
-constexpr int64_t kStoreCallbackTimeout = 1000;
+constexpr int64_t kStoreCallbackTimeoutMillis = 3000;
 constexpr int defaultTimeout = 20;
 
 c10::intrusive_ptr<c10d::TCPStore> _createServer(
@@ -261,7 +261,7 @@ void _setCallback(
 void _waitFinish() {
   std::unique_lock<std::mutex> lk(cvMutex);
   cv.wait_for(
-      lk, std::chrono::duration<int, std::milli>(kStoreCallbackTimeout));
+      lk, std::chrono::duration<int, std::milli>(kStoreCallbackTimeoutMillis));
 }
 
 TEST(TCPStoreTest, testKeyUpdate) {
