@@ -577,8 +577,7 @@ class DistributedDataParallel(Module):
                     # parameters through _former_parameters.
                     for param_name, param in module.named_parameters(recurse=False)
                     if param.requires_grad
-                    and f"{module_name}.{param_name}"
-                    not in self.parameters_to_ignore
+                    and f"{module_name}.{param_name}" not in self.parameters_to_ignore
                 ]
             ]
             for replica in self._module_copies
