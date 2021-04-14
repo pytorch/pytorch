@@ -49,7 +49,7 @@ from torch.quantization._numeric_suite_fx import (
 class LinearReluFunctional(nn.Module):
     def __init__(self):
         super().__init__()
-        self.w1 = nn.Parameter(torch.Tensor(4, 4))
+        self.w1 = nn.Parameter(torch.empty(4, 4))
         self.b1 = nn.Parameter(torch.zeros(4))
         torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
 
@@ -82,7 +82,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w = nn.Parameter(torch.Tensor(1, 4))
+                self.w = nn.Parameter(torch.empty(1, 4))
                 self.b = nn.Parameter(torch.zeros(1))
                 torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
@@ -232,7 +232,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_nodes_with_equal_types_do_not_get_matched(self):
         # verifies that by default, nodes with equivalent types do not get matched.
         # This is important for user defined types, for which we do not know
@@ -265,12 +265,15 @@ class TestFXGraphMatcher(QuantizationTestCase):
         results = get_matching_subgraph_pairs(mp, mq)
 
         # Conv2 should not be matched because we disabled quantization for it,
-        # so its type is the same in mp and mq. sigmoid and relu should not be
-        # matched because they use the same function in mp and mq.
+        # so its type is the same in mp and mq. sigmoid should not be
+        # matched because they use the same function in mp and mq. relu should
+        # be matched because it is in the allowlist of functions with same
+        # signature across dtypes.
         expected_types = {
             'base_op_torch.nn.Conv2d_0':
                 ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
             'base_op_torch.mul_0': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
+            'base_op_torch.relu_0': ((F.relu, F.relu), (F.relu, F.relu)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -323,7 +326,6 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
                 len(results) == results_len,
                 f"expected len {results_len}, got len {len(results)}")
             self.assert_ns_compare_dict_valid(results)
-            return results
 
     def _test_match_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
@@ -426,6 +428,12 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 # conv3d - relu
                 self.conv3d_1 = nn.Conv3d(1, 1, 1)
                 self.relu_2 = nn.ReLU()
+                # linear
+                self.linear_0 = nn.Linear(1, 1)
+                # linear - relu
+                self.linear_1 = nn.Linear(1, 1)
+                self.relu_3 = nn.ReLU()
+
 
             def forward(self, x):
                 x = self.conv1d_0(x)
@@ -439,17 +447,21 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 x = self.conv3d_0(x)
                 x = self.conv3d_1(x)
                 x = self.relu_2(x)
+                x = x.reshape(1, 1)
+                x = self.linear_0(x)
+                x = self.linear_1(x)
+                x = self.relu_3(x)
                 return x
 
         m = M().eval()
-        self._test_extract_weights(m, results_len=6)
+        self._test_extract_weights(m, results_len=8)
 
     @skipIfNoFBGEMM
-    def test_extract_weights_fun(self):
+    def test_extract_weights_linear_fun(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w = nn.Parameter(torch.Tensor(4, 4))
+                self.w = nn.Parameter(torch.empty(4, 4))
                 self.b = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
 
@@ -461,6 +473,72 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
         m = M().eval()
         self._test_extract_weights(m, results_len=2)
+
+    @skipIfNoFBGEMM
+    def test_extract_weights_conv_fun(self):
+        class M(torch.nn.Module):
+            def __init__(self, weight1d, weight2d, weight3d, bias1d, bias2d, bias3d):
+                super().__init__()
+                self.weight1d = torch.nn.Parameter(weight1d)
+                self.weight2d = torch.nn.Parameter(weight2d)
+                self.weight3d = torch.nn.Parameter(weight3d)
+                self.bias1d = torch.nn.Parameter(bias1d)
+                self.bias2d = torch.nn.Parameter(bias2d)
+                self.bias3d = torch.nn.Parameter(bias3d)
+                self.stride1d = 1
+                self.padding1d = 0
+                self.dilation1d = 1
+                self.stride2d = (1, 1)
+                self.padding2d = (0, 0)
+                self.dilation2d = (1, 1)
+                self.groups = 1
+                self.stride3d = (1, 1, 1)
+                self.padding3d = (0, 0, 0)
+                self.dilation3d = (1, 1, 1)
+
+            def forward(self, x):
+                x = F.conv1d(
+                    x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
+                    self.dilation1d, self.groups)
+                x = F.conv1d(
+                    x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
+                    self.dilation1d, self.groups)
+                x = F.relu(x)
+                x = F.conv2d(
+                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
+                    self.dilation2d, self.groups)
+                x = F.conv2d(
+                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
+                    self.dilation2d, self.groups)
+                x = F.relu(x)
+                x = F.conv3d(
+                    x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
+                    self.dilation3d, self.groups)
+                x = F.conv3d(
+                    x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
+                    self.dilation3d, self.groups)
+                x = F.relu(x)
+                return x
+
+        w1d = torch.randn(1, 1, 1)
+        w2d = torch.randn(1, 1, 1, 1)
+        w3d = torch.randn(1, 1, 1, 1, 1)
+        b1d = torch.randn(1)
+        b2d = torch.randn(1)
+        b3d = torch.randn(1)
+        m = M(w1d, w2d, w3d, b1d, b2d, b3d).eval()
+        self._test_extract_weights(m, results_len=6)
+
+    @skipIfNoFBGEMM
+    def test_extract_weights_dynamic(self):
+        # TODO(future PR): add Linear-ReLU, after #55393 is fixed.
+        m = nn.Sequential(nn.Linear(1, 1)).eval()
+        qconfig_dict = {
+            'object_type': [
+                (nn.Linear, default_dynamic_qconfig),
+            ],
+        }
+        self._test_extract_weights(m, results_len=1, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
     def test_match_activations_mod(self):
@@ -482,9 +560,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w1 = nn.Parameter(torch.Tensor(4, 4))
+                self.w1 = nn.Parameter(torch.empty(4, 4))
                 self.b1 = nn.Parameter(torch.zeros(4))
-                self.w2 = nn.Parameter(torch.Tensor(4, 4))
+                self.w2 = nn.Parameter(torch.empty(4, 4))
                 self.b2 = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
                 torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
@@ -518,9 +596,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w1 = nn.Parameter(torch.Tensor(4, 4))
+                self.w1 = nn.Parameter(torch.empty(4, 4))
                 self.b1 = nn.Parameter(torch.zeros(4))
-                self.w2 = nn.Parameter(torch.Tensor(4, 4))
+                self.w2 = nn.Parameter(torch.empty(4, 4))
                 self.b2 = nn.Parameter(torch.zeros(4))
                 torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
                 torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
@@ -582,6 +660,27 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m, (torch.randn(1, 1, 4, 4),),
             results_len=2,
             should_log_inputs=True)
+
+    @skipIfNoFBGEMM
+    def test_ops_with_same_fp32_and_int8_signature(self):
+        """
+        Verifies that we can match pairs of ops which have the same aten
+        signature for fp32 and int8 tensors.
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.max_pool_2d = nn.MaxPool2d(2)
+
+            def forward(self, x):
+                x = self.max_pool_2d(x)
+                x = F.relu(x)
+                return x
+
+        m = M().eval()
+        self._test_match_activations(
+            m, (torch.randn(1, 1, 2, 2),),
+            results_len=2)
 
     @skipIfNoFBGEMM
     def test_linear_fp16_weights(self):
