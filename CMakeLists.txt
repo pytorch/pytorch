@@ -196,6 +196,7 @@ cmake_dependent_option(
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
+option(USE_KINETO_UPDATED "Use experimental Kineto profiling library. May not compile without changes from upstream Kineto." OFF)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
