@@ -1054,8 +1054,8 @@ class TestFX(JitTestCase):
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
             if node.op == 'output':
-                output_shape = node.args[0].meta['shape']
-                output_stride = node.args[0].meta['stride']
+                output_shape = node.args[0].meta['tensor_meta'].shape
+                output_stride = node.args[0].meta['tensor_meta'].stride
         self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
                                        'call_module', 'output']))
 
@@ -1078,7 +1078,7 @@ class TestFX(JitTestCase):
         x = torch.randn(5, 5, 224, 224)
         shape_prop.ShapeProp(traced).propagate(x)
 
-        assert(all(node.meta['memory_format'] is torch.contiguous_format
+        assert(all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
                    for node in traced.graph.nodes))
 
         x_channels_last = x.contiguous(memory_format=torch.channels_last)
@@ -1089,7 +1089,7 @@ class TestFX(JitTestCase):
             # unfortunately. The best we can do is just check that the placeholder
             # node is channels-last
             if node.op in {'placeholder'}:
-                self.assertEqual(node.meta['memory_format'], torch.channels_last)
+                self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last)
 
 
     def test_shape_prop_layout_3d(self):
@@ -1105,7 +1105,7 @@ class TestFX(JitTestCase):
         traced_3d = symbolic_trace(test_mod_3d)
         x_3d = torch.randn(5, 5, 224, 224, 15)
         shape_prop.ShapeProp(traced_3d).propagate(x_3d)
-        assert(all(node.meta['memory_format'] is torch.contiguous_format
+        assert(all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
                    for node in traced_3d.graph.nodes))
 
         x_channels_last_3d = x_3d.contiguous(memory_format=torch.channels_last_3d)
@@ -1116,7 +1116,7 @@ class TestFX(JitTestCase):
             # unfortunately. The best we can do is just check that the placeholder
             # node is channels-last
             if node.op in {'placeholder'}:
-                self.assertEqual(node.meta['memory_format'], torch.channels_last_3d)
+                self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last_3d)
 
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
