@@ -62,18 +62,14 @@ class PackageExporter:
     in order to perform custom modifications to it.
 
     The importer for packages ensures that code in the module can only be loaded from
-    within the package, except for modules explicitly listed as external using :method:`extern_module`.
+    within the package, except for modules explicitly listed as external using :meth:`extern`.
     The file `extern_modules` in the zip archive lists all the modules that a package externally depends on.
     This prevents "implicit" dependencies where the package runs locally because it is importing
     a locally-installed package, but then fails when the package is copied to another machine.
 
-
-    Dependencies
-    ------------
-
     When source code is added to the package, the exporter optionally can scan it
     for further code dependencies (`dependencies=True`). It looks for import statements,
-    resolves relative references to qualified module names, and calls :method:`require_module`
+    resolves relative references to qualified module names, and calls :meth:`require_module`
     on each it finds, recursively resolving dependencies.
     """
 
@@ -140,7 +136,7 @@ class PackageExporter:
             file_or_directory (str): the path to a file or directory of code. When a directory, all python files in the directory
                 are recursively copied using :meth:`save_source_file`. If a file is named "/__init__.py" the code is treated
                 as a package.
-            dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
+            dependencies (bool, optional): If True, we scan the source for dependencies.
         """
         path = Path(file_or_directory)
         if path.is_dir():
@@ -229,7 +225,7 @@ class PackageExporter:
             src (str): The python source code to save for this package
             is_package (bool, optional): If True, this module is treated as a package. Packages are allowed to have submodules
                 (e.g. my_package.my_subpackage.my_subsubpackage), and resources can be saved inside them. Defaults to False.
-            dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
+            dependencies (bool, optional): If True, we scan the source for dependencies.
             orig_file_name (str, optional): If present, used in logging to identifying where the source came from. Defaults to None.
         """
         self.provided[module_name] = True
@@ -331,7 +327,7 @@ node [shape=box];
         """This is called by dependencies resolution when it finds that something in the package
         depends on the module and it is not already present. It then decides how to provide that module.
         The default resolution rules will mark the module as extern if it is part of the standard library,
-        and call `save_module` otherwise. Clients can subclass this object
+        and call :meth:`save_module` otherwise. Clients can subclass this object
         and override this method to provide other behavior, such as automatically mocking out a whole class
         of modules"""
 
@@ -356,9 +352,10 @@ node [shape=box];
     def save_module(self, module_name: str, dependencies=True):
         """Save the code for `module_name` into the package. Code for the module is resolved using the `importers` path to find the
         module object, and then using its `__file__` attribute to find the source code.
+
         Args:
             module_name (str): e.g. `my_package.my_subpackage`, code will be saved to provide code for this package.
-            dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
+            dependencies (bool, optional): If True, we scan the source for dependencies.
         """
         module = self._import_module(module_name)
         source = self._get_source_of_module(module)
@@ -387,7 +384,7 @@ node [shape=box];
             package (str): The name of module package this resource should go it (e.g. "my_package.my_subpackage")
             resource (str): A unique name for the resource, used to indentify it to load.
             obj (Any): The object to save, must be picklable.
-            dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
+            dependencies (bool, optional): If True, we scan the source for dependencies.
         """
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
@@ -483,7 +480,7 @@ node [shape=box];
         allow_empty: bool = True,
     ):
         """Include `module` in the list of external modules the package can import.
-        This will prevent dependency discover from saving
+        This will prevent dependency discovery from saving
         it in the package. The importer will load an external module directly from the standard import system.
         Code for extern modules must also exist in the process loading the package.
 
@@ -505,7 +502,7 @@ node [shape=box];
 
     def deny(self, include: "GlobPattern", *, exclude: "GlobPattern" = ()):
         """Blocklist modules who names match the given glob patterns from the list of modules the package can import.
-        If a dependency on any matching packages is found, an error is thrown.
+        If a dependency on any matching packages is found, a :class:`DeniedModuleError` is thrown.
 
         Args:
             include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
@@ -521,7 +518,7 @@ node [shape=box];
         """Add `module_name` to the list of external modules, regardless of whether it is
         required by other modules.
 
-        Prefer using `extern` to only mark modules extern if they are actually required by the packaged code.
+        Prefer using :meth:`extern` to only mark modules extern if they are actually required by the packaged code.
         """
         if module_name not in self.extern_modules:
             self.extern_modules.append(module_name)
@@ -583,8 +580,8 @@ node [shape=box];
         self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))
 
     def close(self):
-        """Write the package to the filesystem. Any calls after close are now invalid.
-        It is preferable to use resource guard syntax instead:
+        """Write the package to the filesystem. Any calls after :meth:`close` are now invalid.
+        It is preferable to use resource guard syntax instead::
 
             with PackageExporter("file.zip") as e:
                 ...
