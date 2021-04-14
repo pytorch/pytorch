@@ -33,7 +33,6 @@ header_template_rule(
     out = "c10/macros/cmake_macros.h",
     substitutions = {
         "cmakedefine": "define",
-        "#define FEATURE_TORCH_MOBILE": "/* #undef FEATURE_TORCH_MOBILE */",
         "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
     },
 )
