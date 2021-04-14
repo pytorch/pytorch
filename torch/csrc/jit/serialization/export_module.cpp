@@ -30,6 +30,8 @@
 namespace torch {
 namespace jit {
 
+static constexpr const char* kArchiveNameConstants = "constants";
+
 char const* toString(OpCode op);
 
 namespace {
@@ -237,7 +239,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   auto codeTable = Table(
       {{"instructions", Tup(instructions)},
        {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
+       {kArchiveNameConstants, Tup(constants)},
        {"types", Tup(types)},
        {"register_size", register_size}});
 
@@ -396,7 +398,8 @@ class ScriptModuleSerializer {
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
-    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    writeArchive(
+        kArchiveNameConstants, c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
       writeByteCode(module, save_mobile_debug_info);
       writeMobileMetadata(module, extra_files);
@@ -422,15 +425,39 @@ class ScriptModuleSerializer {
           return type_name_uniquer_.getUniqueName(t);
         },
         &memoizedClassTypes);
+    if (use_tensors_archive_table_ && !tensors_archive_table_.empty()) {
+      data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
+    }
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
     size_t i = 0;
     std::string prefix = archive_name + "/";
+
+    // Store all tensors from constant archive to tensors_archive_table_
+    // In the future, if other tensors would like to adapt to the storage
+    // format {archive_name}/{index}, just expand the if statement here.
+    if (archive_name == kArchiveNameConstants) {
+      const auto tensor_from_jit = data_pickle.tensorData();
+      for (size_t tensor_index = 0; tensor_index < tensor_from_jit.size();
+           tensor_index++) {
+        tensors_archive_table_[tensor_from_jit[tensor_index]] =
+            std::make_pair(kArchiveNameConstants, tensor_index);
+      }
+    }
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
-      writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+      if (use_tensors_archive_table_) {
+        const auto found = tensors_archive_table_.find(td);
+        if (found == tensors_archive_table_.end()) {
+          writer_.writeRecord(
+              fname, writable_td.data(), writable_td.sizeInBytes());
+        }
+      } else {
+        writer_.writeRecord(
+            fname, writable_td.data(), writable_td.sizeInBytes());
+      }
     }
     std::string fname = archive_name + ".pkl";
     writer_.writeRecord(fname, data.data(), data.size());
@@ -527,6 +554,7 @@ class ScriptModuleSerializer {
   }
 
   void writeByteCode(const Module& module, bool save_mobile_debug_info) {
+    use_tensors_archive_table_ = true;
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -578,6 +606,8 @@ class ScriptModuleSerializer {
 
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
+  bool use_tensors_archive_table_ = false;
+  TensorIndexMap tensors_archive_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
   TypeNameUniquer type_name_uniquer_;
