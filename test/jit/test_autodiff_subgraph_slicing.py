@@ -71,25 +71,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             loss = torch.cat(var_lst).sum()
             loss.backward()
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Simple Executor doesn't support gradients")
-    def test_prune_grad(self):
-        @torch.jit.script
-        def t(input, bias):
-            return torch.nn.functional.relu(input + bias)
-        input = torch.randn(2, 8, requires_grad=True)
-        bias = torch.randn(8, requires_grad=False)    # bias does NOT require grad
-        NUM_PROFILED_RUNS = 1
-        with num_profiled_runs(NUM_PROFILED_RUNS):
-            WARMUP = 3    # 2 runs to reach backward + 1 to optimize it
-            for x in range(WARMUP):
-                o = t(input, bias)
-                o.sum().backward()
-
-            fwd_plan = list(t.get_debug_state().execution_plans.values())[0]
-            bwd_graph = list(fwd_plan.code.grad_executor_states()[0].execution_plans.values())[0].graph
-            tup = next(bwd_graph.outputs())
-            self.assertEqual(len(list(tup.node().inputs())), 1)
-
     def test_simple_merge(self):
         # o --> o
         def fn(x, y, z):

@@ -129,31 +129,6 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
-// `prim::RequiresGradCheck` guarantees that requires_grad properties
-// of input tensors will match the profiled, otherwise a fallback path
-// will be triggered. This allow us to prune off gradients in backward
-// graph for inputs that don't need gradients. We transfer requires_grad
-// properties from inputs to the `prim::DifferentiableGraph` onto inputs to the
-// differentiable graph. Autodiff will inspect these properties and prune
-// off gradients that aren't required
-// `requires_grad` properties from `dnode->outputs()` will also be transferred
-static void setRequiresGradOnDiffGraph(Node* dnode) {
-  auto gi = dnode->g(attr::Subgraph)->inputs();
-  for (size_t i = 0; i < dnode->inputs().size(); i++) {
-    if (auto ty = dnode->input(i)->type()->cast<TensorType>()) {
-      auto gi_ty = gi[i]->type()->expect<TensorType>();
-      gi[i]->setType(gi_ty->withRequiresGrad(ty->requires_grad()));
-      GRAPH_DEBUG(
-          "Setting ",
-          *gi_ty->withRequiresGrad(ty->requires_grad()),
-          " on ",
-          gi[i],
-          " ",
-          gi[i]->debugName());
-    }
-  }
-}
-
 bool guardDifferentiableGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   bool all_inputs_seen = true;
@@ -187,7 +162,6 @@ bool guardDifferentiableGraph(Node* dnode) {
     }
   }
   if (all_inputs_seen) {
-    setRequiresGradOnDiffGraph(dnode);
     // we may have seen both true and false for requires_grad. In this case
     // we guard with true here and the other case is in the fallback. This
     // will give us trouble when we get "alternating patterns" of gradients
