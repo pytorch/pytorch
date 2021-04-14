@@ -142,7 +142,9 @@ class TCPStore : public Store {
 
   bool deleteKey(const std::string& key) override;
 
-  // callback function takes arguments (string oldValue, string newValue)
+  // callback function will be given arguments (optiona<string> oldValue,
+  // optional<string> newValue)
+  // NOTE: calling other TCPStore APIs inside the callback is NOT threadsafe
   void watchKey(
       const std::string& key,
       std::function<
