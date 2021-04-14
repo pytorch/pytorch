@@ -260,8 +260,7 @@ for p in args.paths:
         # this 'top level path p' is a standard directory containing modules,
         # not a module itself
         # each 'mod' could be a dir containing __init__.py or .py file
-        # NB: sorted to make sure this is deterministic
-        for mod in sorted(path.glob("*")):
+        for mod in path.glob("*"):
             f.compile_path(mod, mod)
     else:
         f.compile_path(path, path)
