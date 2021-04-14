@@ -1319,7 +1319,9 @@ class TestTEFuser(JitTestCase):
         dtypes = [
             torch.bool,
             torch.int,
-            torch.float16,
+            # TODO: vectorized float16 conversions expose an internal compile
+            # error in LLVM <= 9.0.  See #56090.
+            # torch.float16
             torch.float32,
             torch.float64,
         ]
