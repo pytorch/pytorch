@@ -54,7 +54,7 @@ std::ostream& operator<<(std::ostream& out, Instruction inst) {
   return out;
 }
 
-static constexpr char* strOpCode[] = {
+static constexpr const char* strOpCode[] = {
 #define STR_OP(x, _) #x,
     FORALL_OPCODES(STR_OP)
 #undef STR_OP
