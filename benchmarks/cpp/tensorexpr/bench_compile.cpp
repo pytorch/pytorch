@@ -17,24 +17,24 @@ static void BM_CompileSwish(benchmark::State& state) {
       return te::Max::make(A.load(i), 0.f, false);
     });
     te::Tensor* min6 = te::Compute("min6", {{n, "n"}}, [&](const te::VarHandle& i) {
-      return te::Min::make(relu->call(i), 6.f, false);
+      return te::Min::make(relu->load(i), 6.f, false);
     });
     te::Tensor* plus3 = te::Compute("plus3", {{n, "n"}}, [&](const te::VarHandle& i) {
-      return min6->call(i) + 3.f;
+      return min6->load(i) + 3.f;
     });
     te::Tensor* times = te::Compute("times", {{n, "n"}}, [&](const te::VarHandle& i) {
-      return A.load(i) * plus3->call(i);
+      return A.load(i) * plus3->load(i);
     });
     te::Tensor* sixth = te::Compute("sixth", {{n, "n"}}, [&](const te::VarHandle& i) {
-      return times->call(i) * 1.f / 6.f;
+      return times->load(i) * 1.f / 6.f;
     });
-    te::LoopNest nest({sixth}, {relu, min6, plus3, times});
+    te::LoopNest nest({sixth}, {relu, min6, plus3, times, sixth});
     for (auto tensor : {relu, min6, plus3, times}) {
       nest.computeInline(tensor->buf());
     }
     nest.prepareForCodegen();
     te::Stmt* s = te::IRSimplifier::simplify(nest.root_stmt());
-    te::LLVMCodeGen cg(s, {A, sixth});
+    te::LLVMCodeGen cg(s, {A, sixth, n});
   }
 }
 
@@ -47,16 +47,16 @@ static void BM_CompileSwishLLVMOnly(benchmark::State& state) {
     return te::Max::make(A.load(i), 0.f, false);
   });
   te::Tensor* min6 = te::Compute("min6", {{n, "n"}}, [&](const te::VarHandle& i) {
-    return te::Min::make(relu->call(i), 6.f, false);
+    return te::Min::make(relu->load(i), 6.f, false);
   });
   te::Tensor* plus3 = te::Compute("plus3", {{n, "n"}}, [&](const te::VarHandle& i) {
-    return min6->call(i) + 3.f;
+    return min6->load(i) + 3.f;
   });
   te::Tensor* times = te::Compute("times", {{n, "n"}}, [&](const te::VarHandle& i) {
-    return A.load(i) * plus3->call(i);
+    return A.load(i) * plus3->load(i);
   });
   te::Tensor* sixth = te::Compute("sixth", {{n, "n"}}, [&](const te::VarHandle& i) {
-    return times->call(i) * 1.f / 6.f;
+    return times->load(i) * 1.f / 6.f;
   });
   te::LoopNest nest({sixth}, {relu, min6, plus3, times, sixth});
   for (auto tensor : {relu, min6, plus3, times}) {
@@ -65,7 +65,7 @@ static void BM_CompileSwishLLVMOnly(benchmark::State& state) {
   nest.prepareForCodegen();
   te::Stmt* s = te::IRSimplifier::simplify(nest.root_stmt());
   for (auto _ : state) {
-    te::LLVMCodeGen cg(s, {A, sixth});
+    te::LLVMCodeGen cg(s, {A, sixth, n});
   }
 }
 

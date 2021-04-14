@@ -15,7 +15,7 @@ import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import \
     (IterDataPipe, RandomSampler, DataLoader,
-     argument_validation, runtime_validation_enabled, runtime_validation)
+     argument_validation, runtime_validation_disabled, runtime_validation)
 
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, TypeVar, Set, Union
 
@@ -794,7 +794,7 @@ class TestTyping(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
                 list(d for d in dp)
 
-            with runtime_validation_enabled(False):
+            with runtime_validation_disabled():
                 self.assertEqual(list(d for d in dp), ds)
 
 

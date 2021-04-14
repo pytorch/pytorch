@@ -137,3 +137,113 @@ class TestComplex(JitTestCase):
         loaded = self.getExportImportCopy(ComplexModule())
         self.assertEqual(loaded(2, 3), 2 + cmath.infj)
         self.assertEqual(loaded(3, 4), 4 + cmath.nanj)
+
+    def test_complex_constructor(self):
+        # Test all scalar types
+        def fn_int(real: int, img: int):
+            return complex(real, img)
+
+        self.checkScript(fn_int, (0, 0, ))
+        self.checkScript(fn_int, (-1234, 0, ))
+        self.checkScript(fn_int, (0, -1256, ))
+        self.checkScript(fn_int, (-167, -1256, ))
+
+        def fn_float(real: float, img: float):
+            return complex(real, img)
+
+        self.checkScript(fn_float, (0.0, 0.0, ))
+        self.checkScript(fn_float, (-1234.78, 0, ))
+        self.checkScript(fn_float, (0, 56.18, ))
+        self.checkScript(fn_float, (-1.9, -19.8, ))
+
+        def fn_bool(real: bool, img: bool):
+            return complex(real, img)
+
+        self.checkScript(fn_bool, (True, True, ))
+        self.checkScript(fn_bool, (False, False, ))
+        self.checkScript(fn_bool, (False, True, ))
+        self.checkScript(fn_bool, (True, False, ))
+
+        def fn_bool_int(real: bool, img: int):
+            return complex(real, img)
+
+        self.checkScript(fn_bool_int, (True, 0, ))
+        self.checkScript(fn_bool_int, (False, 0, ))
+        self.checkScript(fn_bool_int, (False, -1, ))
+        self.checkScript(fn_bool_int, (True, 3, ))
+
+        def fn_int_bool(real: int, img: bool):
+            return complex(real, img)
+
+        self.checkScript(fn_int_bool, (0, True, ))
+        self.checkScript(fn_int_bool, (0, False, ))
+        self.checkScript(fn_int_bool, (-3, True, ))
+        self.checkScript(fn_int_bool, (6, False, ))
+
+        def fn_bool_float(real: bool, img: float):
+            return complex(real, img)
+
+        self.checkScript(fn_bool_float, (True, 0.0, ))
+        self.checkScript(fn_bool_float, (False, 0.0, ))
+        self.checkScript(fn_bool_float, (False, -1.0, ))
+        self.checkScript(fn_bool_float, (True, 3.0, ))
+
+        def fn_float_bool(real: float, img: bool):
+            return complex(real, img)
+
+        self.checkScript(fn_float_bool, (0.0, True, ))
+        self.checkScript(fn_float_bool, (0.0, False, ))
+        self.checkScript(fn_float_bool, (-3.0, True, ))
+        self.checkScript(fn_float_bool, (6.0, False, ))
+
+        def fn_float_int(real: float, img: int):
+            return complex(real, img)
+
+        self.checkScript(fn_float_int, (0.0, 1, ))
+        self.checkScript(fn_float_int, (0.0, -1, ))
+        self.checkScript(fn_float_int, (1.8, -3, ))
+        self.checkScript(fn_float_int, (2.7, 8, ))
+
+        def fn_int_float(real: int, img: float):
+            return complex(real, img)
+
+        self.checkScript(fn_int_float, (1, 0.0, ))
+        self.checkScript(fn_int_float, (-1, 1.7, ))
+        self.checkScript(fn_int_float, (-3, 0.0, ))
+        self.checkScript(fn_int_float, (2, -8.9, ))
+
+    def test_torch_complex_constructor_with_tensor(self):
+        tensors = ([torch.rand(1), torch.randint(-5, 5, (1, )), torch.tensor([False])])
+
+        def fn_tensor_float(real, img: float):
+            return complex(real, img)
+
+        def fn_tensor_int(real, img: int):
+            return complex(real, img)
+
+        def fn_tensor_bool(real, img: bool):
+            return complex(real, img)
+
+        def fn_float_tensor(real: float, img):
+            return complex(real, img)
+
+        def fn_int_tensor(real: int, img):
+            return complex(real, img)
+
+        def fn_bool_tensor(real: bool, img):
+            return complex(real, img)
+
+        for tensor in tensors:
+            self.checkScript(fn_tensor_float, (tensor, 1.2))
+            self.checkScript(fn_tensor_int, (tensor, 3))
+            self.checkScript(fn_tensor_bool, (tensor, True))
+
+            self.checkScript(fn_float_tensor, (1.2, tensor))
+            self.checkScript(fn_int_tensor, (3, tensor))
+            self.checkScript(fn_bool_tensor, (True, tensor))
+
+        def fn_tensor_tensor(real, img):
+            return complex(real, img) + complex(2)
+
+        for x, y in product(tensors, tensors):
+            self.checkScript(fn_tensor_tensor, (x, y, ))

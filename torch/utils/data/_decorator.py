@@ -135,13 +135,13 @@ def argument_validation(f):
 _runtime_validation_enabled: bool = True
 
 
-class runtime_validation_enabled(object):
+class runtime_validation_disabled(object):
     prev: bool
 
-    def __init__(self, enabled=True) -> None:
+    def __init__(self) -> None:
         global _runtime_validation_enabled
         self.prev = _runtime_validation_enabled
-        _runtime_validation_enabled = enabled
+        _runtime_validation_enabled = False
 
     def __enter__(self) -> None:
         pass
