@@ -99,7 +99,7 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
         self.assertIsInstance(make_np(0.1), np.ndarray)
 
     def test_pytorch_autograd_np(self):
-        x = torch.autograd.Variable(torch.Tensor(1))
+        x = torch.autograd.Variable(torch.empty(1))
         self.assertIsInstance(make_np(x), np.ndarray)
 
     def test_pytorch_write(self):
@@ -226,6 +226,7 @@ class TestTensorBoardWriter(BaseTestCase):
             )
             writer.add_scalar('data/scalar_systemtime', 0.1, n_iter)
             writer.add_scalar('data/scalar_customtime', 0.2, n_iter, walltime=n_iter)
+            writer.add_scalar('data/new_style', 0.2, n_iter, new_style=True)
             writer.add_scalars('data/scalar_group', {
                 "xsinx": n_iter * np.sin(n_iter),
                 "xcosx": n_iter * np.cos(n_iter),
@@ -288,8 +289,8 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
 class TestTensorBoardEmbedding(BaseTestCase):
     def test_embedding(self):
         w = self.createSummaryWriter()
-        all_features = torch.Tensor([[1, 2, 3], [5, 4, 1], [3, 7, 7]])
-        all_labels = torch.Tensor([33, 44, 55])
+        all_features = torch.tensor([[1., 2., 3.], [5., 4., 1.], [3., 7., 7.]])
+        all_labels = torch.tensor([33., 44., 55.])
         all_images = torch.zeros(3, 3, 5, 5)
 
         w.add_embedding(all_features,
@@ -308,8 +309,8 @@ class TestTensorBoardEmbedding(BaseTestCase):
 
     def test_embedding_64(self):
         w = self.createSummaryWriter()
-        all_features = torch.Tensor([[1, 2, 3], [5, 4, 1], [3, 7, 7]])
-        all_labels = torch.Tensor([33, 44, 55])
+        all_features = torch.tensor([[1., 2., 3.], [5., 4., 1.], [3., 7., 7.]])
+        all_labels = torch.tensor([33., 44., 55.])
         all_images = torch.zeros((3, 3, 5, 5), dtype=torch.float64)
 
         w.add_embedding(all_features,
@@ -482,6 +483,10 @@ class TestTensorBoardSummary(BaseTestCase):
         f = np.array([[[0, 2, 3], [0, 3, 1], [0, 1, 2], [1, 3, 2]]], dtype=int)
         mesh = summary.mesh('my_mesh', vertices=v, colors=c, faces=f, config_dict=None)
         self.assertTrue(compare_proto(mesh, self))
+
+    def test_scalar_new_style(self):
+        scalar = summary.scalar('test_scalar', 1.0, new_style=True)
+        self.assertTrue(compare_proto(scalar, self))
 
 def remove_whitespace(string):
     return string.replace(' ', '').replace('\t', '').replace('\n', '')

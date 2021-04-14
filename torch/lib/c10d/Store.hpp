@@ -51,9 +51,9 @@ class Store : public torch::CustomClassHolder {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) = 0;
 
-  const std::chrono::milliseconds& getTimeout() const noexcept;
+  virtual const std::chrono::milliseconds& getTimeout() const noexcept;
 
-  void setTimeout(const std::chrono::milliseconds& timeout);
+  virtual void setTimeout(const std::chrono::milliseconds& timeout);
 
  protected:
   std::chrono::milliseconds timeout_;

@@ -16,11 +16,9 @@ namespace metal {
 
 using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
-static inline bool broadCastFirstInput(
-    const Tensor& input1,
-    const Tensor& input2) {
-  if ((input2.sizes()[2] > 1 && input1.sizes()[2] == 1) ||
-      (input2.sizes()[3] > 1 && input1.sizes()[3] == 1)) {
+static inline bool broadCastFirstInput(MPSImage* X1, MPSImage* X2) {
+  if ((X2.height > 1 && X1.height == 1) ||
+      (X2.width > 1 && X1.width == 1)) {
     return true;
   }
   return false;
@@ -33,8 +31,10 @@ Tensor binaryElementwiseShaderKernel(
     NSString* nonarrayKernel) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
+  TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
+              X1.featureChannels == X2.featureChannels)
   std::vector<int64_t> outputSize = input1.sizes().vec();
-  if (broadCastFirstInput(input1, input2)) {
+  if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes().vec();
   }
   MetalTensorImplStorage mt{outputSize};
@@ -69,8 +69,10 @@ Tensor& binaryElementwiseShaderKernel_(
     NSString* nonarrayKernel) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
+  TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
+              X1.featureChannels == X2.featureChannels)
   std::vector<int64_t> outputSize = input1.sizes().vec();
-  if (broadCastFirstInput(input1, input2)) {
+  if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes().vec();
   }
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
@@ -104,8 +106,10 @@ Tensor binaryElementwiseMPSCNNKernel(
     const Tensor& input2) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
+  TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
+              X1.featureChannels == X2.featureChannels)
   std::vector<int64_t> outputSize = input1.sizes().vec();
-  if (broadCastFirstInput(input1, input2)) {
+  if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes().vec();
   }
   MetalTensorImplStorage mt{outputSize};
@@ -116,12 +120,10 @@ Tensor binaryElementwiseMPSCNNKernel(
   mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
   MPSImage* Y = mt.texture()->image();
   T* kernel = [[T alloc] initWithDevice:[MPSCNNContext sharedInstance].device];
-  kernel.primaryStrideInPixelsY = (NSUInteger)(input1.sizes()[2] == 1 ? 0 : 1);
-  kernel.primaryStrideInPixelsX = (NSUInteger)(input1.sizes()[3] == 1 ? 0 : 1);
-  kernel.secondaryStrideInPixelsY =
-      (NSUInteger)(input2.sizes()[2] == 1 ? 0 : 1);
-  kernel.secondaryStrideInPixelsX =
-      (NSUInteger)(input2.sizes()[3] == 1 ? 0 : 1);
+  kernel.primaryStrideInPixelsY = X1.height == 1 ? 0 : 1;
+  kernel.primaryStrideInPixelsX = X1.width == 1 ? 0 : 1;
+  kernel.secondaryStrideInPixelsY = X2.height == 1 ? 0 : 1;
+  kernel.secondaryStrideInPixelsX = X2.width == 1 ? 0 : 1;
   [kernel encodeToCommandBuffer:cb1.buffer
                    primaryImage:X1
                  secondaryImage:X2
@@ -134,8 +136,10 @@ template <typename T>
 Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
+  TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
+              X1.featureChannels == X2.featureChannels)
   std::vector<int64_t> outputSize = input1.sizes().vec();
-  if (broadCastFirstInput(input1, input2)) {
+  if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes().vec();
   }
   MetalTensorImplStorage mt{outputSize};
@@ -146,12 +150,10 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
   MPSImage* Y = mt.texture()->image();
   T* kernel = [[T alloc] initWithDevice:[MPSCNNContext sharedInstance].device];
-  kernel.primaryStrideInPixelsY = (NSUInteger)(input1.sizes()[2] == 1 ? 0 : 1);
-  kernel.primaryStrideInPixelsX = (NSUInteger)(input1.sizes()[3] == 1 ? 0 : 1);
-  kernel.secondaryStrideInPixelsY =
-      (NSUInteger)(input2.sizes()[2] == 1 ? 0 : 1);
-  kernel.secondaryStrideInPixelsX =
-      (NSUInteger)(input2.sizes()[3] == 1 ? 0 : 1);
+  kernel.primaryStrideInPixelsY = X1.height == 1 ? 0 : 1;
+  kernel.primaryStrideInPixelsX = X1.width == 1 ? 0 : 1;
+  kernel.secondaryStrideInPixelsY = X2.height == 1 ? 0 : 1;
+  kernel.secondaryStrideInPixelsX = X2.width == 1 ? 0 : 1;
   [kernel encodeToCommandBuffer:cb1.buffer
                    primaryImage:X1
                  secondaryImage:X2
@@ -162,46 +164,50 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   return input1;
 }
 
-Tensor add_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
+Tensor add_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNAdd>(input1, input2_);
   } else {
-    // TODO: support broadcast in shader functions for iOS 10 users
-    TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
-    TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
     return binaryElementwiseShaderKernel(
         input1, input2_, @"elementwise_add", @"elementwise_add_nonarray");
   }
 }
 
-Tensor& add__Tensor(Tensor& input1, const Tensor& input2, Scalar alpha) {
+Tensor& add__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNAdd>(input1, input2_);
   } else {
-    // TODO: support broadcast in for iOS 10 users
-    TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
-    TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
     return binaryElementwiseShaderKernel_(
         input1, input2_, @"elementwise_add", @"elementwise_add_nonarray");
   }
 }
 
-Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
+Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNSubtract>(input1, input2_);
   } else {
-    // TODO: support non-broadcast for iOS 10 users
-    TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
     return binaryElementwiseShaderKernel(
+        input1, input2_, @"elementwise_sub", @"elementwise_sub_nonarray");
+  }
+}
+
+Tensor& sub__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
+  TORCH_CHECK(input1.is_metal());
+  TORCH_CHECK(input1.dim() == input2.dim());
+  auto input2_ = input2.is_metal() ? input2 : input2.metal();
+  if (@available(iOS 11.3, *)) {
+    return binaryElementwiseMPSCNNKernel_<MPSCNNSubtract>(input1, input2_);
+  } else {
+    return binaryElementwiseShaderKernel_(
         input1, input2_, @"elementwise_sub", @"elementwise_sub_nonarray");
   }
 }
@@ -213,10 +219,44 @@ Tensor mul_Tensor(const Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNMultiply>(input1, input2_);
   } else {
-    // TODO: support non-broadcast for iOS 10 users
-    TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
     return binaryElementwiseShaderKernel(
         input1, input2_, @"elementwise_mul", @"elementwise_mul_nonarray");
+  }
+}
+
+Tensor& mul__Tensor(Tensor& input1, const Tensor& input2) {
+  TORCH_CHECK(input1.is_metal());
+  TORCH_CHECK(input1.dim() == input2.dim());
+  auto input2_ = input2.is_metal() ? input2 : input2.metal();
+  if (@available(iOS 11.3, *)) {
+    return binaryElementwiseMPSCNNKernel_<MPSCNNMultiply>(input1, input2_);
+  } else {
+    return binaryElementwiseShaderKernel_(
+        input1, input2_, @"elementwise_mul", @"elementwise_mul_nonarray");
+  }
+}
+
+Tensor div_Tensor(const Tensor& input1, const Tensor& input2) {
+  TORCH_CHECK(input1.is_metal());
+  TORCH_CHECK(input1.dim() == input2.dim());
+  auto input2_ = input2.is_metal() ? input2 : input2.metal();
+  if (@available(iOS 11.3, *)) {
+    return binaryElementwiseMPSCNNKernel<MPSCNNDivide>(input1, input2_);
+  } else {
+    return binaryElementwiseShaderKernel(
+        input1, input2_, @"elementwise_div", @"elementwise_div_nonarray");
+  }
+}
+
+Tensor& div__Tensor(Tensor& input1, const Tensor& input2) {
+  TORCH_CHECK(input1.is_metal());
+  TORCH_CHECK(input1.dim() == input2.dim());
+  auto input2_ = input2.is_metal() ? input2 : input2.metal();
+  if (@available(iOS 11.3, *)) {
+    return binaryElementwiseMPSCNNKernel_<MPSCNNDivide>(input1, input2_);
+  } else {
+    return binaryElementwiseShaderKernel_(
+        input1, input2_, @"elementwise_div", @"elementwise_div_nonarray");
   }
 }
 
@@ -224,7 +264,11 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl("add.Tensor", TORCH_FN(add_Tensor));
   m.impl("add_.Tensor", TORCH_FN(add__Tensor));
   m.impl("mul.Tensor", TORCH_FN(mul_Tensor));
+  m.impl("mul_.Tensor", TORCH_FN(mul__Tensor));
   m.impl("sub.Tensor", TORCH_FN(sub_Tensor));
+  m.impl("sub_.Tensor", TORCH_FN(sub__Tensor));
+  m.impl("div.Tensor", TORCH_FN(div_Tensor));
+  m.impl("div_.Tensor", TORCH_FN(div__Tensor));
 };
 
 }

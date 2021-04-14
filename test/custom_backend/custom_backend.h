@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/api/module.h>
 
 namespace torch {
 namespace custom_backend {
@@ -11,6 +12,10 @@ class CustomBackend : public torch::jit::PyTorchBackendInterface {
   // Constructor.
   explicit CustomBackend() {}
   virtual ~CustomBackend() = default;
+
+  bool is_available() override {
+    return true;
+  }
 
   c10::impl::GenericDict compile(
       c10::IValue processed,

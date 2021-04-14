@@ -15,7 +15,7 @@
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
-  auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch.tensor"));
+  auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch._tensor"));
   if (!tensor_module)
     return nullptr;
 
@@ -177,7 +177,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_prepare_profiler", prepareProfiler);
 #endif
 
-  m.def("kineto_available", kinetoAvailable);
+  m.def("kineto_available", []() {
+#ifdef USE_KINETO
+    return true;
+#else
+    return false;
+#endif
+  });
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
   py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")

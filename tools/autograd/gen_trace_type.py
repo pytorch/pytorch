@@ -1,13 +1,14 @@
 import itertools
 from typing import Optional, List, Sequence, Union
 
-from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api.types import CppSignatureGroup, DispatcherSignature
+from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.utils import mapMaybe
 from tools.codegen.gen import parse_native_yaml, FileManager
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
+                                 TensorOptionsArguments)
 
 # Note [Manual Backend kernels]
 # For these ops, we want to manually register to dispatch key Backend and
@@ -403,7 +404,7 @@ def gen_trace_type_shard(
     fm: FileManager, native_functions: Sequence[NativeFunction], suffix: str
 ) -> None:
     fm.write_with_template('TraceType%s.cpp' % suffix, 'TraceType.cpp', lambda: {
-        'generated_comment': '@' + f'generated from {fm.template_dir}/TraceType.cpp',
+        'generated_comment': f'@generated from {fm.template_dir}/TraceType.cpp',
         'trace_method_definitions': list(mapMaybe(method_definition, native_functions)),
         'trace_wrapper_registrations': list(mapMaybe(method_registration, native_functions)),
     })

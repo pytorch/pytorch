@@ -45,7 +45,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest
+    deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest, expectedFailureMeta
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -377,14 +377,14 @@ class TestNN(NNTestCase):
         class Layer(nn.Module):
             def __init__(self):
                 super(Layer, self).__init__()
-                self.layer_dummy_param = Parameter(torch.Tensor(3, 5))
+                self.layer_dummy_param = Parameter(torch.empty(3, 5))
                 self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
 
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
                 self.l1 = Layer()
-                self.dummy_param = Parameter(torch.Tensor(3, 5))
+                self.dummy_param = Parameter(torch.empty(3, 5))
                 self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
 
         l = Layer()
@@ -469,7 +469,7 @@ class TestNN(NNTestCase):
             self.assertTrue(isinstance(output, torch.Tensor))
             self.assertTrue(h_module is module)
             self.assertEqual(input[0], torch.ones(5, 5))
-            self.assertEqual(output, torch.Tensor(5, 5).fill_(1 / (1 + 1 / math.e)))
+            self.assertEqual(output, torch.empty(5, 5).fill_(1 / (1 + 1 / math.e)))
             counter['forwards'] += inc
 
         def bw_hook(inc, h_module, grad_input, grad_output):
@@ -888,6 +888,108 @@ class TestNN(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
 
+    def test_Conv1d_module_same_padding(self):
+        # Compare module against functional: without strides/dilation, asymmetric padding
+        x = torch.rand(1, 1, 20)
+        module = nn.Conv1d(in_channels=1, out_channels=1, kernel_size=10,
+                           padding='same')
+        expect = F.conv1d(x, module.weight, module.bias, padding='same')
+        self.assertEqual(expect, module(x))
+
+        # Test dilation, symmetric padding
+        module = nn.Conv1d(in_channels=1, out_channels=1, kernel_size=10,
+                           padding='same', dilation=2)
+        expect = F.conv1d(x, module.weight, module.bias, padding='same', dilation=2)
+        self.assertEqual(expect, module(x))
+
+        # Test non-zero padding_mode, requiring explicit padding
+        module = nn.Conv1d(in_channels=1, out_channels=1, kernel_size=10,
+                           padding='same', padding_mode='replicate')
+        x_padded = F.pad(x, [4, 5], mode='replicate')
+        expect = F.conv1d(x_padded, module.weight, module.bias, padding='valid')
+        self.assertEqual(expect, module(x))
+        self.assertEqual(x.size(), expect.size())
+
+        # Test connstruction with invalid padding string raises
+        with self.assertRaisesRegex(ValueError, 'Invalid padding string'):
+            module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, padding='foo')
+
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=2)
+
+    def test_Conv2d_module_same_padding(self):
+        # Compare module against functional:
+        # without strides/dilation, both symmetric and asymmetric padding
+        x = torch.rand(1, 1, 9, 20)
+        module = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=(5, 10),
+                           padding='same')
+        expect = F.conv2d(x, module.weight, module.bias, padding='same')
+        self.assertEqual(expect, module(x))
+
+        # with dilation, symmetric padding
+        module = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=(3, 4),
+                           padding='same', dilation=(1, 2))
+        expect = F.conv2d(x, module.weight, module.bias, padding='same', dilation=(1, 2))
+        self.assertEqual(expect, module(x))
+
+        # Test non-zero padding_mode, requiring explicit padding
+        module = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=(3, 4),
+                           padding='same', padding_mode='reflect')
+        x_padded = F.pad(x, [1, 2, 1, 1], mode='reflect')
+        expect = F.conv2d(x_padded, module.weight, module.bias, padding='valid')
+        self.assertEqual(expect, module(x))
+        self.assertEqual(x.size(), expect.size())
+
+        # Test connstruction with invalid padding string raises
+        with self.assertRaisesRegex(ValueError, 'Invalid padding string'):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='foo')
+
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=2)
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(1, 3))
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(4, 1))
+
+    def test_Conv3d_module_same_padding(self):
+        # Compare module against functional:
+        x = torch.rand(1, 1, 4, 4, 4)
+        # without dilation, both symmetric and asymmetric padding
+        module = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=(2, 3, 4),
+                           padding='same')
+        expect = F.conv3d(x, module.weight, module.bias, padding='same')
+        self.assertEqual(expect, module(x))
+
+        # with dilation, both symmetric and asymmetric padding
+        module = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=(2, 3, 4),
+                           padding='same', dilation=(3, 2, 1))
+        expect = F.conv3d(x, module.weight, module.bias, padding='same', dilation=(3, 2, 1))
+        self.assertEqual(expect, module(x))
+
+        # Test non-zero padding_mode, requiring explicit padding
+        module = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=(2, 3, 4),
+                           padding='same', padding_mode='circular')
+        x_padded = F.pad(x, [1, 2, 1, 1, 0, 1], mode='circular')
+        expect = F.conv3d(x_padded, module.weight, module.bias, padding='valid')
+        self.assertEqual(expect, module(x))
+        self.assertEqual(x.size(), expect.size())
+
+        # Test connstruction with invalid padding string raises
+        with self.assertRaisesRegex(ValueError, 'Invalid padding string'):
+            module = nn.Conv3d(in_channels=3, out_channels=33, kernel_size=10, padding='foo')
+
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=2)
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(1, 1, 3))
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(1, 4, 1))
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(5, 1, 1))
+
     def _test_alpha_dropout(self, cls, input):
         mean = input.mean()
         std = input.std()
@@ -985,8 +1087,8 @@ class TestNN(NNTestCase):
     def test_dir(self):
         linear = nn.Linear(2, 2)
         linear._test_submodule = nn.Linear(2, 2)
-        linear._test_parameter = Parameter(torch.Tensor(2, 2))
-        linear.register_buffer('_test_buffer', torch.Tensor(2, 2))
+        linear._test_parameter = Parameter(torch.empty(2, 2))
+        linear.register_buffer('_test_buffer', torch.empty(2, 2))
         keys = dir(linear)
         self.assertIn('_test_submodule', keys)
         self.assertIn('_test_parameter', keys)
@@ -2033,14 +2135,14 @@ class TestNN(NNTestCase):
         # Remove first parametrization.
         # Check that the model is still parametrized and so is the second parameter
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
-        self.assertTrue(parametrize.is_parametrized(model))  # Still parametrized
+        self.assertTrue(parametrize.is_parametrized(model))             # Still parametrized
         self.assertFalse(parametrize.is_parametrized(model, "weight"))  # Parametrization removed
-        self.assertTrue(parametrize.is_parametrized(model, "bias"))  # Still parametrized
-        self.assertEqual(model.bias[0].item(), 0.)   # Still parametrized
-        self.assertEqual(model.bias[-1].item(), 0.)  # Still parametrized
-        self.assertNotEqual(model.weight, initial_model.weight)  # Has been updated
-        self.assertEqual(id(model.weight), initial_weight_id)  # Keeps the same id
-        self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happened
+        self.assertTrue(parametrize.is_parametrized(model, "bias"))     # Still parametrized
+        self.assertEqual(model.bias[0].item(), 0.)                      # Still parametrized
+        self.assertEqual(model.bias[-1].item(), 0.)                     # Still parametrized
+        self.assertNotEqual(model.weight, initial_model.weight)         # Has been updated
+        self.assertEqual(id(model.weight), initial_weight_id)           # Keeps the same id
+        self.assertEqual(len(list(model.parameters())), 2)              # Nothing weird has happened
         # Should not throw
         (model.weight.T @ model.bias).sum().backward()
         with torch.no_grad():
@@ -2050,19 +2152,30 @@ class TestNN(NNTestCase):
         # Remove the second parametrization.
         # Check that the module is not parametrized
         parametrize.remove_parametrizations(model, "bias", leave_parametrized=False)
-        self.assertFalse(parametrize.is_parametrized(model))  # Still parametrized
-        self.assertNotEqual(model.bias, initial_model.bias)  # Has been updated
-        self.assertNotEqual(model.bias[0].item(), 0.)   # Still parametrized
-        self.assertNotEqual(model.bias[-1].item(), 0.)  # Still parametrized
-        self.assertEqual(id(model.bias), initial_bias_id)
-        self.assertFalse(hasattr(model, "parametrizations"))
-        self.assertEqual(model.__class__, nn.Linear)
-        self.assertEqual(len(list(model.parameters())), 2)
+        self.assertFalse(parametrize.is_parametrized(model))  # Not parametrized
+        self.assertNotEqual(model.bias, initial_model.bias)   # Has been updated
+        self.assertNotEqual(model.bias[0].item(), 0.)         # Not parametrized
+        self.assertNotEqual(model.bias[-1].item(), 0.)        # Not parametrized
+        self.assertEqual(id(model.bias), initial_bias_id)     # Keeps the same id
+        self.assertFalse(hasattr(model, "parametrizations"))  # Not parametrized the module
+        self.assertEqual(model.__class__, nn.Linear)          # Resores the previous class
+        self.assertEqual(len(list(model.parameters())), 2)    # Nothing weird has happeed
         # Should not throw
         (model.weight.T @ model.bias).sum().backward()
         with torch.no_grad():
             for p in model.parameters():
                 p.add_(- p.grad, alpha=0.01)
+
+        # Test leave_parametrized=True
+        for _ in range(2):
+            parametrize.register_parametrization(model, "weight", Skew())
+            parametrize.register_parametrization(model, "weight", Orthogonal())
+            parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
+            # Should not throw
+            (model.weight.T @ model.bias).sum().backward()
+            with torch.no_grad():
+                for p in model.parameters():
+                    p.add_(- p.grad, alpha=0.01)
 
     def test_register_and_remove_buffer_parametrization(self):
         r"""Test that it is possible to add and remove parametrizations on buffers"""
@@ -2830,7 +2943,7 @@ class TestNN(NNTestCase):
         r"""Check Ln structured pruning by hand.
         """
         m = nn.Conv2d(3, 1, 2)
-        m.weight.data = torch.Tensor(
+        m.weight.data = torch.tensor(
             [[[[1., 2.], [1., 2.5]],
              [[0.5, 1.], [0.1, 0.1]],
              [[-3., -5.], [0.1, -1.]]]]
@@ -2853,12 +2966,12 @@ class TestNN(NNTestCase):
         r"""Check Ln structured pruning by hand.
         """
         m = nn.Conv2d(3, 1, 2)
-        m.weight.data = torch.Tensor(
+        m.weight.data = torch.tensor(
             [[[[1., 2.], [1., 2.5]],
              [[0.5, 1.], [0.1, 0.1]],
              [[-3., -5.], [0.1, -1.]]]]
         )
-        importance_scores = torch.Tensor(
+        importance_scores = torch.tensor(
             [[[[10., 1.], [10., 1.]],
              [[30., 3.], [30., 3.]],
              [[-20., -2.], [-20., -2.]]]]
@@ -3633,6 +3746,13 @@ class TestNN(NNTestCase):
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
         self.assertEqual(F.threshold(x, 0, 99), expected)
 
+    def test_threshold_bfloat16(self):
+        x = torch.randn(100)
+        for threshold in [0, -0.5, 0.5, float('inf'), float('-inf'), float('nan')]:
+            expected = F.threshold(x, threshold, 0).bfloat16().float()
+            res_bf16 = F.threshold(x.bfloat16(), threshold, 0).float()
+            self.assertEqual(res_bf16, expected)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_embedding_max_norm_unsorted_repeating_indices(self):
         def create_embedding(device):
@@ -3693,7 +3813,7 @@ class TestNN(NNTestCase):
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
 
     def test_embedding_from_pretrained(self):
-        a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
+        a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
         embedding = nn.Embedding.from_pretrained(a)
         self.assertEqual(a, embedding.weight.data)
 
@@ -3701,14 +3821,32 @@ class TestNN(NNTestCase):
         output = embedding(input)
         self.assertEqual(a, output)
 
+    def test_embedding_bag_from_pretrained(self):
+        a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+        embedding = nn.EmbeddingBag.from_pretrained(a)
+        self.assertEqual(a, embedding.weight)
+
+        input = torch.tensor([0, 1], dtype=torch.long)
+        output = embedding(input, torch.arange(input.size(0)))
+        self.assertEqual(a, output)
+
     def test_embedding_from_pretrained_padding_idx(self):
         padding_idx = 2
+        padding_vec = torch.ones(3) * 7
         embeddings = torch.rand(4, 3, requires_grad=True)
+        with torch.no_grad():
+            embeddings[padding_idx] = padding_vec
         embedding_nn = nn.Embedding.from_pretrained(embeddings, padding_idx=padding_idx)
-        self.assertEqual(embedding_nn.weight[padding_idx].sum(), 0)
+        self.assertEqual(embedding_nn.weight[padding_idx], padding_vec)
+
+    def test_embedding_bag_from_pretrained_padding_idx(self):
+        padding_idx = 2
+        embeddings = torch.rand(4, 3, requires_grad=True)
+        embedding_nn = nn.EmbeddingBag.from_pretrained(embeddings, padding_idx=padding_idx)
+        self.assertEqual(embedding_nn.weight, embeddings)
 
     def test_embedding_from_pretrained_options(self):
-        a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
+        a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
         opts = {
             "max_norm": 2.,
             "norm_type": .5,
@@ -3744,6 +3882,50 @@ class TestNN(NNTestCase):
 
         self.assertEqual(res_old, res_F)
 
+    def test_embedding_bag_functional(self):
+        a = torch.tensor([
+            [1, 3, 2],
+            [0, 2, 1]
+        ], dtype=torch.long)
+        embeddings = torch.rand(4, 3, requires_grad=True)
+
+        embed_old = torch.nn.EmbeddingBag(4, 3)
+        embed_old.weight = torch.nn.Parameter(embeddings)
+        res_old = embed_old(a)
+
+        res_F = F.embedding_bag(a, embeddings)
+        self.assertEqual(res_old, res_F)
+
+        embed_old = torch.nn.EmbeddingBag(4, 3)
+        embed_old = embed_old.from_pretrained(embeddings, padding_idx=2)
+        res_old = embed_old(a)
+        res_F = F.embedding_bag(a, embeddings, padding_idx=2)
+
+        self.assertEqual(res_old, res_F)
+
+    # Make sure that error is thrown if padding_idx is out of bounds
+    def test_embedding_bag_padding_idx_error(self):
+        a = torch.tensor([
+            [1, 3, 2],
+            [0, 2, 1]
+        ], dtype=torch.long)
+        num_embeddings = 4
+        num_features = 3
+        embeddings = torch.rand(num_embeddings, num_features, requires_grad=True)
+
+        functional_err_msg = r'padding_idx must be within the number of embeddings'
+        module_err_msg = r'padding_idx must be within num_embeddings'
+
+        for padding_idx in range(-(num_embeddings + 2), (num_embeddings + 2)):
+            if (padding_idx < -num_embeddings) or (padding_idx >= num_embeddings):
+                with self.assertRaisesRegex(RuntimeError, functional_err_msg):
+                    F.embedding_bag(a, embeddings, padding_idx=padding_idx)
+                with self.assertRaisesRegex(AssertionError, module_err_msg):
+                    torch.nn.EmbeddingBag(num_embeddings, num_features, padding_idx=padding_idx)
+            else:
+                F.embedding_bag(a, embeddings, padding_idx=padding_idx)
+                torch.nn.EmbeddingBag(num_embeddings, num_features, padding_idx=padding_idx)
+
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
                          ' with instruction set support avx2 or newer.')
@@ -3764,7 +3946,7 @@ class TestNN(NNTestCase):
         torch.testing.assert_allclose(expected_output, actual_output.cpu(), atol=1e-3, rtol=1e-3)
 
     def test_embeddingbag_from_pretrained(self):
-        a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
+        a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
         embeddingbag = nn.EmbeddingBag.from_pretrained(a)
         self.assertEqual(a, embeddingbag.weight.data)
 
@@ -3773,7 +3955,7 @@ class TestNN(NNTestCase):
         self.assertEqual(a.mean(0, keepdim=True), output)
 
     def test_embeddingbag_from_pretrained_options(self):
-        a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
+        a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
         opts = {
             "max_norm": 2.,
             "norm_type": .5,
@@ -4266,6 +4448,8 @@ class TestNN(NNTestCase):
         self.assertEqual(out, ref_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     def test_broadcast_double_backwards_gpu(self):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True),
                    torch.randn(4, 4, device='cuda', requires_grad=True),
@@ -4365,15 +4549,23 @@ class TestNN(NNTestCase):
             'block.conv1.bias': torch.arange(1, 4),
             'bn.running_mean': torch.randn(2),
         })
-        incompatible_keys = net.load_state_dict(state_dict)
-        self.assertEqual(len(incompatible_keys.missing_keys), 0)
-        self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
-        self.assertNotIn('Incompatible', str(incompatible_keys))
-        self.assertNotIn('Incompatible', repr(incompatible_keys))
-        self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
-        self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
+        # Also test if a DDP state_dict can be loaded from a local model.
+        ddp_state_dict = net.state_dict()
+        ddp_state_dict.update({
+            'module.linear1.weight': torch.ones(5, 5),
+            'module.block.conv1.bias': torch.arange(1, 4),
+            'module.bn.running_mean': torch.randn(2),
+        })
+        torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(ddp_state_dict, 'module.')
+        for sd in [state_dict, ddp_state_dict]:
+            incompatible_keys = net.load_state_dict(sd)
+            self.assertEqual(len(incompatible_keys.missing_keys), 0)
+            self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
+            self.assertNotIn('Incompatible', str(incompatible_keys))
+            self.assertEqual(net.linear1.weight, sd['linear1.weight'])
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(net.block.conv1.bias, sd['block.conv1.bias'])
+            self.assertEqual(net.bn.running_mean, sd['bn.running_mean'])
 
         state_dict = net.state_dict()
         state_dict.update({'extra': torch.ones(5)})
@@ -4383,7 +4575,6 @@ class TestNN(NNTestCase):
         self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
         self.assertIn('extra', incompatible_keys.unexpected_keys)
         self.assertIn('Incompatible', str(incompatible_keys))
-        self.assertIn('Incompatible', repr(incompatible_keys))
 
         state_dict = net.state_dict()
         state_dict.update({'extra.param': torch.ones(5)})
@@ -4422,9 +4613,9 @@ class TestNN(NNTestCase):
             'nonexistent_key': torch.rand(3)
         }
         net.load_state_dict(state_dict, strict=False)
-        self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
+        self.assertEqual(net.linear1.weight, state_dict['linear1.weight'])
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
+        self.assertEqualIgnoreType(net.block.conv1.bias, state_dict['block.conv1.bias'])
         self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
         new_state_dict = net.state_dict()
         del old_state_dict['linear1.weight']
@@ -4593,6 +4784,35 @@ class TestNN(NNTestCase):
         self.assertIn('buf', l.state_dict())
         self.assertEqual(l.state_dict()['buf'], buf)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_thnn_conv_strided_padded_dilated(self):
+        for convfn, dims, transposed in (
+                (torch.nn.functional.conv2d, 2, False),
+                (torch.nn.functional.conv_transpose2d, 2, True),
+                (torch.nn.functional.conv3d, 3, False),
+                (torch.nn.functional.conv_transpose3d, 3, True)):
+            for stride, padding, dilation in (
+                    (2, 0, 1), (1, 1, 1), (2, 1, 1), (1, 0, 2)):
+                kwargs = {"stride": stride, "padding": padding, "dilation": dilation}
+                inp_shape = (1, 2) + dims * (4,)
+                weight_shape = (2, 2) + dims * (1,)
+                inputs = torch.randn(inp_shape, dtype=torch.double, device="cuda", requires_grad=True)
+                weight = torch.randn(weight_shape, dtype=torch.double, device="cuda", requires_grad=True)
+                bias = torch.randn(2, dtype=torch.double, device="cuda", requires_grad=True)
+                with torch.backends.cudnn.flags(enabled=False):
+                    res = convfn(inputs, weight, bias, **kwargs)
+                res_cpu = convfn(inputs.cpu(), weight.cpu(), bias.cpu(), **kwargs)
+                self.assertEqual(res, res_cpu)
+                with torch.backends.cudnn.flags(enabled=False):
+                    torch.autograd.gradcheck(
+                        lambda x, w, b: convfn(x, w, b, **kwargs),
+                        (inputs, weight, bias)
+                    )
+                    torch.autograd.gradcheck(
+                        lambda x, w, b: convfn(x, w, b, **kwargs),
+                        (inputs.cpu(), weight.cpu(), bias.cpu())
+                    )
+
     def test_Conv2d_inconsistent_types(self):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float)
         weights = torch.randn(1, 1, 3, 3, dtype=torch.double)
@@ -4625,8 +4845,7 @@ class TestNN(NNTestCase):
                 gradcheck(F.conv2d, (input, mod.weight))
 
     def test_Conv2d_OneDNN(self):
-        def run_once():
-            group_val = 24
+        def run_once(group_val=24, dilation=1):
             ifm = torch.ones([1, group_val, 6, 6], dtype=torch.float32)
             weights = torch.ones([group_val, 1, 3, 3], dtype=torch.float32)
             op = torch.nn.Conv2d(
@@ -4635,7 +4854,7 @@ class TestNN(NNTestCase):
                 kernel_size=[3, 3],
                 stride=[2, 2],
                 padding=[1, 1],
-                dilation=[1, 1],
+                dilation=[dilation, dilation],
                 groups=group_val,
                 bias=False,
                 padding_mode='zeros'
@@ -4647,13 +4866,15 @@ class TestNN(NNTestCase):
             res.backward(grad_in)
             return op.weight.grad
 
-        with torch.backends.mkldnn.flags(enabled=False):
-            without_onednn = run_once()
+        for gorup_val in (24, 48, 23, 25):
+            for dilation in (1, 2):
+                with torch.backends.mkldnn.flags(enabled=False):
+                    without_onednn = run_once(gorup_val, dilation)
 
-        with torch.backends.mkldnn.flags(enabled=True):
-            with_onednn = run_once()
+                with torch.backends.mkldnn.flags(enabled=True):
+                    with_onednn = run_once(gorup_val, dilation)
 
-        self.assertEqual(without_onednn, with_onednn)
+                self.assertEqual(without_onednn, with_onednn)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -4993,6 +5214,7 @@ class TestNN(NNTestCase):
     # the number of groups == number of input channels
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @tf32_on_and_off(0.01)
     def test_Conv2d_depthwise_naive_groups_cuda(self, dtype=torch.float):
         for depth_multiplier in [1, 2]:
             m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
@@ -5033,6 +5255,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @tf32_on_and_off(0.001)
     def test_Conv3d_depthwise_naive_groups_cuda(self, dtype=torch.float):
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
@@ -5125,6 +5348,23 @@ class TestNN(NNTestCase):
                     hx = cell(input, hx)
 
                 hx.sum().backward()
+
+    def test_RNN_cell_forward_input_size(self):
+        input = torch.randn(3, 11)
+        hx = torch.randn(3, 20)
+        for module in (nn.RNNCell, nn.GRUCell):
+            cell = module(10, 20)
+            self.assertRaises(Exception, lambda: cell(input, hx))
+
+    def test_RNN_cell_forward_hidden_size(self):
+        input = torch.randn(3, 10)
+        hx = torch.randn(3, 21)
+        cell_shared_param = (10, 20)
+        for cell in (nn.RNNCell(*cell_shared_param, nonlinearity="relu"),
+                     nn.RNNCell(*cell_shared_param, nonlinearity="tanh"),
+                     nn.GRUCell(*cell_shared_param)):
+            self.assertRaises(Exception, lambda: cell(input, hx))
+
 
     def _test_loss_equal_input_target_shape(self, cast):
         # Tests losses whose inputs should have the same size.
@@ -5276,6 +5516,22 @@ class TestNN(NNTestCase):
             grad_gpu, = torch.autograd.grad(res_gpu, log_probs, grad_out.cuda())
         self.assertEqual(res_cpu, res_gpu, atol=1e-4, rtol=0)
         self.assertEqual(grad_cpu, grad_gpu, atol=1e-4, rtol=0)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_critical_target_len(self):
+        # cudnn has an unexpected problem with target length 256, see issue #53505
+        N = 1
+        S = 256
+        C = 10
+        T = 500
+        target = torch.randint(low=1, high=C, size=(S,), dtype=torch.int)
+        input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.int)
+        target_lengths = torch.tensor(S, dtype=torch.int)
+        inp = torch.randn(T, N, C, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
+        with cudnn.flags(enabled=True):
+            res_gpu = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+        res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
+        self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
@@ -5540,6 +5796,22 @@ class TestNN(NNTestCase):
 
             (hx + cx).sum().backward()
 
+    def test_LSTM_cell_forward_input_size(self):
+        input = torch.randn(3, 11)
+        hx = torch.randn(3, 20)
+        cx = torch.randn(3, 20)
+        lstm = nn.LSTMCell(10, 20)
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+
+    def test_LSTM_cell_forward_hidden_size(self):
+        input = torch.randn(3, 10)
+        hx = torch.randn(3, 21)
+        cx = torch.randn(3, 20)
+        lstm = nn.LSTMCell(10, 20)
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+        self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
+
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_pack_sequence_batch_sizes_throw(self):
         with self.assertRaisesRegex(ValueError, r"batch_sizes should always be on CPU"):
@@ -5560,26 +5832,30 @@ class TestNN(NNTestCase):
         bsz = 8
         seq_length = 35
         tgt_length = 15
+        for batch_first, src_size, tgt_size in zip((True, False),
+                                                   [(bsz, seq_length, d_model),
+                                                    (seq_length, bsz, d_model)],
+                                                   [(bsz, tgt_length, d_model),
+                                                    (tgt_length, bsz, d_model)]):
+            transformer = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
+                                         dim_feedforward, dropout, batch_first=batch_first)
+            src = torch.randn(src_size)
+            src_mask = transformer.generate_square_subsequent_mask(seq_length).double()
+            tgt = torch.randn(tgt_size)
+            tgt_mask = transformer.generate_square_subsequent_mask(tgt_length).double()
+            memory_mask = torch.randn(tgt_length, seq_length).double()
+            src_key_padding_mask = torch.rand(bsz, seq_length) >= 0.5
+            tgt_key_padding_mask = torch.rand(bsz, tgt_length) >= 0.5
+            memory_key_padding_mask = torch.rand(bsz, seq_length) >= 0.5
 
-        transformer = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
-                                     dim_feedforward, dropout)
-        src = torch.randn(seq_length, bsz, d_model)
-        src_mask = transformer.generate_square_subsequent_mask(seq_length).double()
-        tgt = torch.randn(tgt_length, bsz, d_model)
-        tgt_mask = transformer.generate_square_subsequent_mask(tgt_length).double()
-        memory_mask = torch.randn(tgt_length, seq_length).double()
-        src_key_padding_mask = torch.rand(bsz, seq_length) >= 0.5
-        tgt_key_padding_mask = torch.rand(bsz, tgt_length) >= 0.5
-        memory_key_padding_mask = torch.rand(bsz, seq_length) >= 0.5
-
-        output = transformer(src, tgt,
-                             src_mask=src_mask,
-                             tgt_mask=tgt_mask,
-                             memory_mask=memory_mask,
-                             src_key_padding_mask=src_key_padding_mask,
-                             tgt_key_padding_mask=tgt_key_padding_mask,
-                             memory_key_padding_mask=memory_key_padding_mask)
-        output.sum().backward()
+            output = transformer(src, tgt,
+                                 src_mask=src_mask,
+                                 tgt_mask=tgt_mask,
+                                 memory_mask=memory_mask,
+                                 src_key_padding_mask=src_key_padding_mask,
+                                 tgt_key_padding_mask=tgt_key_padding_mask,
+                                 memory_key_padding_mask=memory_key_padding_mask)
+            output.sum().backward()
 
     def test_transformerencoderlayer(self):
         # this is a deterministic test for TransformerEncoderLayer
@@ -5589,112 +5865,117 @@ class TestNN(NNTestCase):
         dropout = 0.0
         bsz = 2
 
-        model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout)
+        for batch_first in (False, True):
+            def perm_fn(x):
+                return x.transpose(1, 0) if batch_first else x
 
-        # set constant weights of the model
-        for idx, p in enumerate(model.parameters()):
-            x = p.data
-            sz = x.view(-1).size(0)
-            shape = x.shape
-            x = torch.cos(torch.arange(0, sz).float().view(shape))
-            p.data.copy_(x)
+            model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout,
+                                               batch_first=batch_first)
 
-        # deterministic input
-        encoder_input = torch.Tensor([[[20, 30, 40, 50]]])
-        result = model(encoder_input)
-        ref_output = torch.Tensor([[[2.258703, 0.127985, -0.697881, 0.170862]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
-        # 0 values are NOT masked. This shouldn't mask anything.
-        mask = torch.Tensor([[0]]) == 1
-        result = model(encoder_input, src_key_padding_mask=mask)
-        result = result.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
-        # 1 values are masked. Since there is only 1 input embedding this
-        # will result in nan.
-        mask = torch.Tensor([[1]]) == 1
-        result = model(encoder_input, src_key_padding_mask=mask)
-        result = result.detach().numpy()
-        self.assertTrue(np.isnan(result).all())
+            # set constant weights of the model
+            for idx, p in enumerate(model.parameters()):
+                x = p.data
+                sz = x.view(-1).size(0)
+                shape = x.shape
+                x = torch.cos(torch.arange(0, sz).float().view(shape))
+                p.data.copy_(x)
 
-        # deterministic input
-        encoder_input = torch.Tensor([[[1, 2, 3, 4]],
-                                      [[5, 6, 7, 8]]])
-        result = model(encoder_input)
-        ref_output = torch.Tensor([[[2.272644, 0.119035, -0.691669, 0.153486]],
-                                   [[2.272644, 0.119035, -0.691669, 0.153486]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
-        # all 0 which is no masking
-        mask = torch.Tensor([[0, 0]]) == 1
-        result = model(encoder_input, src_key_padding_mask=mask)
-        result = result.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
-        mask = torch.Tensor([[1, 0]]) == 1
-        result = model(encoder_input, src_key_padding_mask=mask)
-        ref_output = torch.Tensor([[[2.301516, 0.092249, -0.679101, 0.103088]],
-                                   [[2.301516, 0.092249, -0.679101, 0.103088]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # deterministic input
+            encoder_input = torch.tensor([[[20., 30., 40., 50.]]])
+            result = model(encoder_input)
+            ref_output = torch.tensor([[[2.258703, 0.127985, -0.697881, 0.170862]]])
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # 0 values are NOT masked. This shouldn't mask anything.
+            mask = torch.tensor([[0]]) == 1
+            result = model(encoder_input, src_key_padding_mask=mask)
+            result = result.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # 1 values are masked. Since there is only 1 input embedding this
+            # will result in nan.
+            mask = torch.tensor([[1]]) == 1
+            result = model(encoder_input, src_key_padding_mask=mask)
+            result = result.detach().numpy()
+            self.assertTrue(np.isnan(result).all())
 
-        # deterministic input
-        encoder_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
-                                       [0.5387, 0.1655, 0.3565, 0.0471]],
-                                      [[0.8335, 0.2799, 0.5031, 0.2947],
-                                       [0.1402, 0.0318, 0.7636, 0.1346]],
-                                      [[0.6333, 0.9344, 0.1376, 0.9938],
-                                       [0.8924, 0.2872, 0.6692, 0.2944]],
-                                      [[0.9897, 0.6915, 0.3154, 0.1733],
-                                       [0.8645, 0.3513, 0.3064, 0.0767]],
-                                      [[0.8117, 0.2366, 0.4838, 0.7881],
-                                       [0.3718, 0.4945, 0.9511, 0.0864]]])
-        result = model(encoder_input)
-        ref_output = torch.Tensor([[[2.428589, 0.020835, -0.602055, -0.085249],
-                                    [2.427987, 0.021213, -0.602496, -0.084103]],
-                                   [[2.424689, 0.019155, -0.604793, -0.085672],
-                                    [2.413863, 0.022211, -0.612486, -0.072490]],
-                                   [[2.433774, 0.021598, -0.598343, -0.087548],
-                                    [2.425104, 0.019748, -0.604515, -0.084839]],
-                                   [[2.436185, 0.022682, -0.596625, -0.087261],
-                                    [2.433556, 0.021891, -0.598509, -0.086832]],
-                                   [[2.416246, 0.017512, -0.610712, -0.082961],
-                                    [2.422901, 0.024187, -0.606178, -0.074929]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
-        # all 0
-        mask = torch.zeros([2, 5]) == 1
-        result = model(encoder_input, src_key_padding_mask=mask)
-        result = result.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
-        mask[0, 1] = 1
-        mask[1, 3] = 1
-        mask[1, 4] = 1
-        result = model(encoder_input, src_key_padding_mask=mask)
-        ref_output = torch.Tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
-                                    [2.428811, 0.021445, -0.601912, -0.084252]],
-                                   [[2.425009, 0.019155, -0.604566, -0.085899],
-                                    [2.415408, 0.02249 , -0.611415, -0.073]],
-                                   [[2.434199, 0.021682, -0.598039, -0.087699],
-                                    [2.42598, 0.019941, -0.603896, -0.085091]],
-                                   [[2.436457, 0.022736, -0.59643 , -0.08736],
-                                    [2.434021, 0.022093, -0.598179, -0.08679]],
-                                   [[2.416531, 0.017498, -0.610513, -0.083181],
-                                    [2.4242, 0.024653, -0.605266, -0.074959]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # deterministic input
+            encoder_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]],
+                                                  [[5., 6., 7., 8.]]]))
+            result = model(encoder_input)
+            ref_output = perm_fn(torch.tensor([[[2.272644, 0.119035, -0.691669, 0.153486]],
+                                               [[2.272644, 0.119035, -0.691669, 0.153486]]]))
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # all 0 which is no masking
+            mask = torch.tensor([[0, 0]]) == 1
+            result = model(encoder_input, src_key_padding_mask=mask)
+            result = result.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            mask = torch.tensor([[1, 0]]) == 1
+            result = model(encoder_input, src_key_padding_mask=mask)
+            ref_output = perm_fn(torch.tensor([[[2.301516, 0.092249, -0.679101, 0.103088]],
+                                               [[2.301516, 0.092249, -0.679101, 0.103088]]]))
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+            # deterministic input
+            encoder_input = perm_fn(torch.tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                                   [0.5387, 0.1655, 0.3565, 0.0471]],
+                                                  [[0.8335, 0.2799, 0.5031, 0.2947],
+                                                   [0.1402, 0.0318, 0.7636, 0.1346]],
+                                                  [[0.6333, 0.9344, 0.1376, 0.9938],
+                                                   [0.8924, 0.2872, 0.6692, 0.2944]],
+                                                  [[0.9897, 0.6915, 0.3154, 0.1733],
+                                                   [0.8645, 0.3513, 0.3064, 0.0767]],
+                                                  [[0.8117, 0.2366, 0.4838, 0.7881],
+                                                   [0.3718, 0.4945, 0.9511, 0.0864]]]))
+            result = model(encoder_input)
+            ref_output = perm_fn(torch.tensor([[[2.428589, 0.020835, -0.602055, -0.085249],
+                                                [2.427987, 0.021213, -0.602496, -0.084103]],
+                                               [[2.424689, 0.019155, -0.604793, -0.085672],
+                                                [2.413863, 0.022211, -0.612486, -0.072490]],
+                                               [[2.433774, 0.021598, -0.598343, -0.087548],
+                                                [2.425104, 0.019748, -0.604515, -0.084839]],
+                                               [[2.436185, 0.022682, -0.596625, -0.087261],
+                                                [2.433556, 0.021891, -0.598509, -0.086832]],
+                                               [[2.416246, 0.017512, -0.610712, -0.082961],
+                                                [2.422901, 0.024187, -0.606178, -0.074929]]]))
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # all 0
+            mask = torch.zeros([2, 5]) == 1
+            result = model(encoder_input, src_key_padding_mask=mask)
+            result = result.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            mask[0, 1] = 1
+            mask[1, 3] = 1
+            mask[1, 4] = 1
+            result = model(encoder_input, src_key_padding_mask=mask)
+            ref_output = perm_fn(torch.tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
+                                                [2.428811, 0.021445, -0.601912, -0.084252]],
+                                               [[2.425009, 0.019155, -0.604566, -0.085899],
+                                                [2.415408, 0.02249 , -0.611415, -0.073]],
+                                               [[2.434199, 0.021682, -0.598039, -0.087699],
+                                                [2.42598, 0.019941, -0.603896, -0.085091]],
+                                               [[2.436457, 0.022736, -0.59643 , -0.08736],
+                                                [2.434021, 0.022093, -0.598179, -0.08679]],
+                                               [[2.416531, 0.017498, -0.610513, -0.083181],
+                                                [2.4242, 0.024653, -0.605266, -0.074959]]]))
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
     def test_transformerencoderlayer_gelu(self):
         # this is a deterministic test for TransformerEncoderLayer with gelu activation
@@ -5705,56 +5986,61 @@ class TestNN(NNTestCase):
         bsz = 2
         activation = "gelu"
 
-        model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
+        for batch_first in (True, False):
+            def perm_fn(x):
+                return x.transpose(1, 0) if batch_first else x
 
-        # set constant weights of the model
-        for idx, p in enumerate(model.parameters()):
-            x = p.data
-            sz = x.view(-1).size(0)
-            shape = x.shape
-            x = torch.cos(torch.arange(0, sz).float().view(shape))
-            p.data.copy_(x)
+            model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation,
+                                               batch_first=batch_first)
 
-        # deterministic input
-        encoder_input = torch.Tensor([[[20, 30, 40, 50]]])
-        result = model(encoder_input)
-        ref_output = torch.Tensor([[[2.249815, 0.131006, -0.702199, 0.177868]]])
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+            # set constant weights of the model
+            for idx, p in enumerate(model.parameters()):
+                x = p.data
+                sz = x.view(-1).size(0)
+                shape = x.shape
+                x = torch.cos(torch.arange(0, sz).float().view(shape))
+                p.data.copy_(x)
 
-        # deterministic input
-        encoder_input = torch.Tensor([[[1, 2, 3, 4]],
-                                      [[5, 6, 7, 8]]])
-        result = model(encoder_input)
-        ref_output = torch.Tensor([[[2.264103, 0.121417, -0.696012, 0.159724]],
-                                   [[2.264103, 0.121417, -0.696012, 0.159724]]])
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+            # deterministic input
+            encoder_input = torch.tensor([[[20., 30., 40., 50.]]])
+            result = model(encoder_input)
+            ref_output = torch.tensor([[[2.249815, 0.131006, -0.702199, 0.177868]]])
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output)
 
-        # deterministic input
-        encoder_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
-                                       [0.5387, 0.1655, 0.3565, 0.0471]],
-                                      [[0.8335, 0.2799, 0.5031, 0.2947],
-                                       [0.1402, 0.0318, 0.7636, 0.1346]],
-                                      [[0.6333, 0.9344, 0.1376, 0.9938],
-                                       [0.8924, 0.2872, 0.6692, 0.2944]],
-                                      [[0.9897, 0.6915, 0.3154, 0.1733],
-                                       [0.8645, 0.3513, 0.3064, 0.0767]],
-                                      [[0.8117, 0.2366, 0.4838, 0.7881],
-                                       [0.3718, 0.4945, 0.9511, 0.0864]]])
-        result = model(encoder_input)
-        ref_output = torch.Tensor([[[2.42163188, 0.03227153, -0.60714219, -0.05908082],
-                                    [2.42151276, 0.03302179, -0.60722523, -0.05762651]],
-                                   [[2.41926761, 0.02974034, -0.60879519, -0.0621269],
-                                    [2.41626395, 0.03539356, -0.61087842, -0.04978623]],
-                                   [[2.42382808, 0.03218872, -0.6055963, -0.06073591],
-                                    [2.41983477, 0.03085259, -0.60840145, -0.06046414]],
-                                   [[2.42500749, 0.03328855, -0.60476388, -0.0595334],
-                                    [2.4237977, 0.03290575, -0.60561789, -0.05940082]],
-                                   [[2.41383916, 0.02686345, -0.61256377, -0.06380707],
-                                    [2.42000277, 0.03800944, -0.60824798, -0.04754947]]])
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+            # deterministic input
+            encoder_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]],
+                                                  [[5., 6., 7., 8.]]]))
+            result = model(encoder_input)
+            ref_output = perm_fn(torch.tensor([[[2.264103, 0.121417, -0.696012, 0.159724]],
+                                               [[2.264103, 0.121417, -0.696012, 0.159724]]]))
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output)
+
+            # deterministic input
+            encoder_input = perm_fn(torch.tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                                  [0.5387, 0.1655, 0.3565, 0.0471]],
+                                                  [[0.8335, 0.2799, 0.5031, 0.2947],
+                                                  [0.1402, 0.0318, 0.7636, 0.1346]],
+                                                  [[0.6333, 0.9344, 0.1376, 0.9938],
+                                                  [0.8924, 0.2872, 0.6692, 0.2944]],
+                                                  [[0.9897, 0.6915, 0.3154, 0.1733],
+                                                  [0.8645, 0.3513, 0.3064, 0.0767]],
+                                                  [[0.8117, 0.2366, 0.4838, 0.7881],
+                                                  [0.3718, 0.4945, 0.9511, 0.0864]]]))
+            result = model(encoder_input)
+            ref_output = perm_fn(torch.tensor([[[2.42163188, 0.03227153, -0.60714219, -0.05908082],
+                                                [2.42151276, 0.03302179, -0.60722523, -0.05762651]],
+                                               [[2.41926761, 0.02974034, -0.60879519, -0.0621269],
+                                                [2.41626395, 0.03539356, -0.61087842, -0.04978623]],
+                                               [[2.42382808, 0.03218872, -0.6055963, -0.06073591],
+                                                [2.41983477, 0.03085259, -0.60840145, -0.06046414]],
+                                               [[2.42500749, 0.03328855, -0.60476388, -0.0595334],
+                                                [2.4237977, 0.03290575, -0.60561789, -0.05940082]],
+                                               [[2.41383916, 0.02686345, -0.61256377, -0.06380707],
+                                                [2.42000277, 0.03800944, -0.60824798, -0.04754947]]]))
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output)
 
     def test_transformerdecoderlayer(self):
         # this is a deterministic test for TransformerDecoderLayer
@@ -5766,139 +6052,144 @@ class TestNN(NNTestCase):
         seq_length = 5
         tgt_length = 3
 
-        model = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout)
+        for batch_first in (False, True):
+            def perm_fn(x):
+                return x.transpose(1, 0) if batch_first else x
 
-        # set constant weights of the model
-        for idx, p in enumerate(model.parameters()):
-            x = p.data
-            sz = x.view(-1).size(0)
-            shape = x.shape
-            x = torch.cos(torch.arange(0, sz).float().view(shape))
-            p.data.copy_(x)
+            model = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout,
+                                               batch_first=batch_first)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[20, 30, 40, 50]]])
-        memory_input = torch.Tensor([[[60, 70, 80, 90]]])
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[2.314351, 0.094805, -0.671322, 0.101977]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # set constant weights of the model
+            for idx, p in enumerate(model.parameters()):
+                x = p.data
+                sz = x.view(-1).size(0)
+                shape = x.shape
+                x = torch.cos(torch.arange(0, sz).float().view(shape))
+                p.data.copy_(x)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[9, 10, 11, 12]],
-                                     [[11, 12, 13, 14]]])
-        memory_input = torch.Tensor([[[1, 2, 3, 4]]])
-        result = model(decoder_input, memory_input)
-        result = result.detach().numpy()
-        ref_output = torch.Tensor([[[2.422245, 0.051716, -0.606338, -0.024756]],
-                                   [[2.422245, 0.051716, -0.606338, -0.024756]]])
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # deterministic input
+            decoder_input = torch.tensor([[[20., 30., 40., 50.]]])
+            memory_input = torch.tensor([[[60., 70., 80., 90.]]])
+            result = model(decoder_input, memory_input)
+            ref_output = torch.tensor([[[2.314351, 0.094805, -0.671322, 0.101977]]])
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[1, 2, 3, 4]],
-                                      [[5, 6, 7, 8]]])
-        memory_input = torch.Tensor([[[9, 10, 11, 12]],
-                                     [[11, 12, 13, 14]]])
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[2.343536, 0.085561, -0.654954, 0.074991]],
-                                   [[2.343536, 0.085561, -0.654954, 0.074991]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[9., 10., 11., 12.]],
+                                                  [[11., 12., 13., 14.]]]))
+            memory_input = torch.tensor([[[1., 2., 3., 4.]]])
+            result = model(decoder_input, memory_input)
+            result = result.detach().numpy()
+            ref_output = perm_fn(torch.tensor([[[2.422245, 0.051716, -0.606338, -0.024756]],
+                                               [[2.422245, 0.051716, -0.606338, -0.024756]]]))
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
-                                       [0.2678, 0.3677, 0.4459, 0.7166]],
-                                      [[0.8100, 0.3716, 0.4096, 0.1976],
-                                       [0.6958, 0.8844, 0.6081, 0.8315]],
-                                      [[0.0494, 0.9343, 0.5955, 0.3830],
-                                       [0.5404, 0.3464, 0.9378, 0.6200]]])
-        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
-                                      [0.5387, 0.1655, 0.3565, 0.0471]],
-                                     [[0.8335, 0.2799, 0.5031, 0.2947],
-                                      [0.1402, 0.0318, 0.7636, 0.1346]],
-                                     [[0.6333, 0.9344, 0.1376, 0.9938],
-                                      [0.8924, 0.2872, 0.6692, 0.2944]],
-                                     [[0.9897, 0.6915, 0.3154, 0.1733],
-                                      [0.8645, 0.3513, 0.3064, 0.0767]],
-                                     [[0.8117, 0.2366, 0.4838, 0.7881],
-                                      [0.3718, 0.4945, 0.9511, 0.0864]]])
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
-                                    [2.431935, 0.028907, -0.599809, -0.072488]],
-                                   [[2.428457, 0.027053, -0.602275, -0.073462],
-                                    [2.431970, 0.029387, -0.599789, -0.071621]],
-                                   [[2.431934, 0.028196, -0.599802, -0.073809],
-                                    [2.432306, 0.028858, -0.599542, -0.072846]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]],
+                                                  [[5., 6., 7., 8.]]]))
+            memory_input = perm_fn(torch.tensor([[[9., 10., 11., 12.]],
+                                                 [[11., 12., 13., 14.]]]))
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.343536, 0.085561, -0.654954, 0.074991]],
+                                               [[2.343536, 0.085561, -0.654954, 0.074991]]]))
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
-        # key_padding_mask
-        key_padding_mask = torch.zeros(2, 3) == 1
-        result = model(decoder_input, memory_input, tgt_key_padding_mask=key_padding_mask)
-        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
-                                    [2.431935, 0.028907, -0.599809, -0.072488]],
-                                   [[2.428457, 0.027053, -0.602275, -0.073462],
-                                    [2.431970, 0.029387, -0.599789, -0.071621]],
-                                   [[2.431934, 0.028196, -0.599802, -0.073809],
-                                    [2.432306, 0.028858, -0.599542, -0.072846]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                                   [0.2678, 0.3677, 0.4459, 0.7166]],
+                                                  [[0.8100, 0.3716, 0.4096, 0.1976],
+                                                   [0.6958, 0.8844, 0.6081, 0.8315]],
+                                                  [[0.0494, 0.9343, 0.5955, 0.3830],
+                                                   [0.5404, 0.3464, 0.9378, 0.6200]]]))
+            memory_input = perm_fn(torch.tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                                  [0.5387, 0.1655, 0.3565, 0.0471]],
+                                                 [[0.8335, 0.2799, 0.5031, 0.2947],
+                                                  [0.1402, 0.0318, 0.7636, 0.1346]],
+                                                 [[0.6333, 0.9344, 0.1376, 0.9938],
+                                                  [0.8924, 0.2872, 0.6692, 0.2944]],
+                                                 [[0.9897, 0.6915, 0.3154, 0.1733],
+                                                  [0.8645, 0.3513, 0.3064, 0.0767]],
+                                                 [[0.8117, 0.2366, 0.4838, 0.7881],
+                                                  [0.3718, 0.4945, 0.9511, 0.0864]]]))
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                                [2.431935, 0.028907, -0.599809, -0.072488]],
+                                               [[2.428457, 0.027053, -0.602275, -0.073462],
+                                                [2.431970, 0.029387, -0.599789, -0.071621]],
+                                               [[2.431934, 0.028196, -0.599802, -0.073809],
+                                                [2.432306, 0.028858, -0.599542, -0.072846]]]))
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
-        # key_padding_mask
-        key_padding_mask[0, 2] = 1
-        key_padding_mask[1, 1] = 1
-        key_padding_mask[1, 2] = 1
-        result = model(decoder_input, memory_input, tgt_key_padding_mask=key_padding_mask)
-        ref_output = torch.Tensor([[[2.430025, 0.027643, -0.601164, -0.073476],
-                                    [2.4323, 0.029375, -0.599553, -0.071881]],
-                                   [[2.428523, 0.026838, -0.602226, -0.07391],
-                                    [2.432634, 0.029842, -0.599318, -0.071253]],
-                                   [[2.432278, 0.028152, -0.599555, -0.074139],
-                                    [2.432659, 0.029244, -0.599294, -0.072382]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # key_padding_mask
+            key_padding_mask = torch.zeros(2, 3) == 1
+            result = model(decoder_input, memory_input, tgt_key_padding_mask=key_padding_mask)
+            ref_output = perm_fn(torch.tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                                [2.431935, 0.028907, -0.599809, -0.072488]],
+                                               [[2.428457, 0.027053, -0.602275, -0.073462],
+                                                [2.431970, 0.029387, -0.599789, -0.071621]],
+                                               [[2.431934, 0.028196, -0.599802, -0.073809],
+                                                [2.432306, 0.028858, -0.599542, -0.072846]]]))
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
-        # memory_key_padding_mask
-        key_padding_mask = torch.zeros(2, 5) == 1
-        result = model(decoder_input, memory_input, memory_key_padding_mask=key_padding_mask)
-        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
-                                    [2.431935, 0.028907, -0.599809, -0.072488]],
-                                   [[2.428457, 0.027053, -0.602275, -0.073462],
-                                    [2.431970, 0.029387, -0.599789, -0.071621]],
-                                   [[2.431934, 0.028196, -0.599802, -0.073809],
-                                    [2.432306, 0.028858, -0.599542, -0.072846]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # key_padding_mask
+            key_padding_mask[0, 2] = 1
+            key_padding_mask[1, 1] = 1
+            key_padding_mask[1, 2] = 1
+            result = model(decoder_input, memory_input, tgt_key_padding_mask=key_padding_mask)
+            ref_output = perm_fn(torch.tensor([[[2.430025, 0.027643, -0.601164, -0.073476],
+                                                [2.4323, 0.029375, -0.599553, -0.071881]],
+                                               [[2.428523, 0.026838, -0.602226, -0.07391],
+                                                [2.432634, 0.029842, -0.599318, -0.071253]],
+                                               [[2.432278, 0.028152, -0.599555, -0.074139],
+                                                [2.432659, 0.029244, -0.599294, -0.072382]]]))
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
-        # memory_key_padding_mask
-        key_padding_mask[0, 4] = 1
-        key_padding_mask[1, 3] = 1
-        key_padding_mask[1, 4] = 1
-        result = model(decoder_input, memory_input, memory_key_padding_mask=key_padding_mask)
-        ref_output = torch.Tensor([[[2.429757, 0.027358, -0.601351, -0.073816],
-                                    [2.432692, 0.028583, -0.599263, -0.073634]],
-                                   [[2.428247, 0.02662, -0.602419, -0.074123],
-                                    [2.432657, 0.029055, -0.599293, -0.072732]],
-                                   [[2.431515, 0.027687, -0.600096, -0.074459],
-                                    [2.433075, 0.028543, -0.598987, -0.073985]]])
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+            # memory_key_padding_mask
+            key_padding_mask = torch.zeros(2, 5) == 1
+            result = model(decoder_input, memory_input, memory_key_padding_mask=key_padding_mask)
+            ref_output = perm_fn(torch.tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                                [2.431935, 0.028907, -0.599809, -0.072488]],
+                                               [[2.428457, 0.027053, -0.602275, -0.073462],
+                                                [2.431970, 0.029387, -0.599789, -0.071621]],
+                                               [[2.431934, 0.028196, -0.599802, -0.073809],
+                                                [2.432306, 0.028858, -0.599542, -0.072846]]]))
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+            # memory_key_padding_mask
+            key_padding_mask[0, 4] = 1
+            key_padding_mask[1, 3] = 1
+            key_padding_mask[1, 4] = 1
+            result = model(decoder_input, memory_input, memory_key_padding_mask=key_padding_mask)
+            ref_output = perm_fn(torch.tensor([[[2.429757, 0.027358, -0.601351, -0.073816],
+                                                [2.432692, 0.028583, -0.599263, -0.073634]],
+                                               [[2.428247, 0.02662, -0.602419, -0.074123],
+                                                [2.432657, 0.029055, -0.599293, -0.072732]],
+                                               [[2.431515, 0.027687, -0.600096, -0.074459],
+                                                [2.433075, 0.028543, -0.598987, -0.073985]]]))
+            result = result.detach().numpy()
+            ref_output = ref_output.detach().numpy()
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
     def test_transformerdecoderlayer_gelu(self):
         # this is a deterministic test for TransformerDecoderLayer with gelu activation
@@ -5911,74 +6202,79 @@ class TestNN(NNTestCase):
         tgt_length = 3
         activation = "gelu"
 
-        model = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
+        for batch_first in (True, False):
+            def perm_fn(x):
+                return x.transpose(1, 0) if batch_first else x
 
-        # set constant weights of the model
-        for idx, p in enumerate(model.parameters()):
-            x = p.data
-            sz = x.view(-1).size(0)
-            shape = x.shape
-            x = torch.cos(torch.arange(0, sz).float().view(shape))
-            p.data.copy_(x)
+            model = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation,
+                                               batch_first=batch_first)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[20, 30, 40, 50]]])
-        memory_input = torch.Tensor([[[60, 70, 80, 90]]])
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[2.306435, 0.095946, -0.675796, 0.10687]]])
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+            # set constant weights of the model
+            for idx, p in enumerate(model.parameters()):
+                x = p.data
+                sz = x.view(-1).size(0)
+                shape = x.shape
+                x = torch.cos(torch.arange(0, sz).float().view(shape))
+                p.data.copy_(x)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[9, 10, 11, 12]],
-                                     [[11, 12, 13, 14]]])
-        memory_input = torch.Tensor([[[1, 2, 3, 4]]])
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[2.415448, 0.054389, -0.610932, -0.0156613]],
-                                   [[2.415448, 0.054389, -0.610932, -0.0156613]]])
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+            # deterministic input
+            decoder_input = torch.tensor([[[20., 30., 40., 50.]]])
+            memory_input = torch.tensor([[[60., 70., 80., 90.]]])
+            result = model(decoder_input, memory_input)
+            ref_output = torch.tensor([[[2.306435, 0.095946, -0.675796, 0.10687]]])
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[1, 2, 3, 4]],
-                                      [[5, 6, 7, 8]]])
-        memory_input = torch.Tensor([[[9, 10, 11, 12]],
-                                     [[11, 12, 13, 14]]])
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[2.338531, 0.087709, -0.65776, 0.080646]],
-                                   [[2.338531, 0.087709, -0.65776, 0.080646]]])
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[9., 10., 11., 12.]],
+                                                  [[11., 12., 13., 14.]]]))
+            memory_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]]]))
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.415448, 0.054389, -0.610932, -0.0156613]],
+                                               [[2.415448, 0.054389, -0.610932, -0.0156613]]]))
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
-                                       [0.2678, 0.3677, 0.4459, 0.7166]],
-                                      [[0.8100, 0.3716, 0.4096, 0.1976],
-                                       [0.6958, 0.8844, 0.6081, 0.8315]],
-                                      [[0.0494, 0.9343, 0.5955, 0.3830],
-                                       [0.5404, 0.3464, 0.9378, 0.6200]]])
-        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
-                                      [0.5387, 0.1655, 0.3565, 0.0471]],
-                                     [[0.8335, 0.2799, 0.5031, 0.2947],
-                                      [0.1402, 0.0318, 0.7636, 0.1346]],
-                                     [[0.6333, 0.9344, 0.1376, 0.9938],
-                                      [0.8924, 0.2872, 0.6692, 0.2944]],
-                                     [[0.9897, 0.6915, 0.3154, 0.1733],
-                                      [0.8645, 0.3513, 0.3064, 0.0767]],
-                                     [[0.8117, 0.2366, 0.4838, 0.7881],
-                                      [0.3718, 0.4945, 0.9511, 0.0864]]])
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[2.42049104, 0.03443088, -0.60793706, -0.05436271],
-                                    [2.42210631, 0.03546578, -0.60679895, -0.05357488]],
-                                   [[2.41907674, 0.0336104, -0.60892977, -0.05490462],
-                                    [2.42216881, 0.03586554, -0.6067524, -0.05289126]],
-                                   [[2.42205716, 0.03488046, -0.60683681, -0.05460596],
-                                    [2.42240309, 0.0354595, -0.60659063, -0.05378816]]])
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]],
+                                                  [[5., 6., 7., 8.]]]))
+            memory_input = perm_fn(torch.tensor([[[9., 10., 11., 12.]],
+                                                 [[11., 12., 13., 14.]]]))
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.338531, 0.087709, -0.65776, 0.080646]],
+                                               [[2.338531, 0.087709, -0.65776, 0.080646]]]))
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output)
+
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                                   [0.2678, 0.3677, 0.4459, 0.7166]],
+                                                  [[0.8100, 0.3716, 0.4096, 0.1976],
+                                                   [0.6958, 0.8844, 0.6081, 0.8315]],
+                                                  [[0.0494, 0.9343, 0.5955, 0.3830],
+                                                   [0.5404, 0.3464, 0.9378, 0.6200]]]))
+            memory_input = perm_fn(torch.tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                                  [0.5387, 0.1655, 0.3565, 0.0471]],
+                                                 [[0.8335, 0.2799, 0.5031, 0.2947],
+                                                  [0.1402, 0.0318, 0.7636, 0.1346]],
+                                                 [[0.6333, 0.9344, 0.1376, 0.9938],
+                                                  [0.8924, 0.2872, 0.6692, 0.2944]],
+                                                 [[0.9897, 0.6915, 0.3154, 0.1733],
+                                                  [0.8645, 0.3513, 0.3064, 0.0767]],
+                                                 [[0.8117, 0.2366, 0.4838, 0.7881],
+                                                  [0.3718, 0.4945, 0.9511, 0.0864]]]))
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.42049104, 0.03443088, -0.60793706, -0.05436271],
+                                                [2.42210631, 0.03546578, -0.60679895, -0.05357488]],
+                                               [[2.41907674, 0.0336104, -0.60892977, -0.05490462],
+                                                [2.42216881, 0.03586554, -0.6067524, -0.05289126]],
+                                               [[2.42205716, 0.03488046, -0.60683681, -0.05460596],
+                                                [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]))
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output)
 
     def test_transformerencoder(self):
-        def get_a_test_layer(use_cuda, activation):
+        def get_a_test_layer(use_cuda, activation, batch_first=False):
             d_model = 4
             nhead = 2
             dim_feedforward = 16
@@ -5990,7 +6286,8 @@ class TestNN(NNTestCase):
                 nhead,
                 dim_feedforward=dim_feedforward,
                 dropout=dropout,
-                activation=activation).to(device)
+                activation=activation,
+                batch_first=batch_first).to(device)
 
             with torch.no_grad():
                 # set constant weights of the model
@@ -6008,135 +6305,136 @@ class TestNN(NNTestCase):
         use_cuda = torch.cuda.is_available()
         device = torch.device("cuda" if use_cuda else "cpu")
 
-        encoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation)
+        for batch_first in (True, False):
+            def perm_fn(x):
+                return x.transpose(1, 0) if batch_first else x
 
-        model = nn.TransformerEncoder(encoder_layer, 1).to(device)
+            encoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation,
+                                             batch_first=batch_first)
 
-        # deterministic input
-        encoder_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
-                                       [0.5387, 0.1655, 0.3565, 0.0471]],
-                                      [[0.8335, 0.2799, 0.5031, 0.2947],
-                                       [0.1402, 0.0318, 0.7636, 0.1346]],
-                                      [[0.6333, 0.9344, 0.1376, 0.9938],
-                                       [0.8924, 0.2872, 0.6692, 0.2944]],
-                                      [[0.9897, 0.6915, 0.3154, 0.1733],
-                                       [0.8645, 0.3513, 0.3064, 0.0767]],
-                                      [[0.8117, 0.2366, 0.4838, 0.7881],
-                                       [0.3718, 0.4945, 0.9511, 0.0864]]]
-                                     ).to(device)
-        result = model(encoder_input)
-        ref_output = torch.Tensor([[[2.428589, 0.020835, -0.602055, -0.085249],
-                                    [2.427987, 0.021213, -0.602496, -0.084103]],
-                                   [[2.424689, 0.019155, -0.604793, -0.085672],
-                                    [2.413863, 0.022211, -0.612486, -0.072490]],
-                                   [[2.433774, 0.021598, -0.598343, -0.087548],
-                                    [2.425104, 0.019748, -0.604515, -0.084839]],
-                                   [[2.436185, 0.022682, -0.596625, -0.087261],
-                                    [2.433556, 0.021891, -0.598509, -0.086832]],
-                                   [[2.416246, 0.017512, -0.610712, -0.082961],
-                                    [2.422901, 0.024187, -0.606178, -0.074929]]]
-                                  ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            model = nn.TransformerEncoder(encoder_layer, 1).to(device)
 
-        # all 0
-        mask = torch.zeros([2, 5]).to(device) == 1
-        result = model(encoder_input, src_key_padding_mask=mask)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
-        mask[0, 1] = 1
-        mask[1, 3] = 1
-        mask[1, 4] = 1
-        result = model(encoder_input, src_key_padding_mask=mask)
-        ref_output = torch.Tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
-                                    [2.428811, 0.021445, -0.601912, -0.084252]],
-                                   [[2.425009, 0.019155, -0.604566, -0.085899],
-                                    [2.415408, 0.02249, -0.611415, -0.073]],
-                                   [[2.434199, 0.021682, -0.598039, -0.087699],
-                                    [2.42598, 0.019941, -0.603896, -0.085091]],
-                                   [[2.436457, 0.022736, -0.59643, -0.08736],
-                                    [2.434021, 0.022093, -0.598179, -0.08679]],
-                                   [[2.416531, 0.017498, -0.610513, -0.083181],
-                                    [2.4242, 0.024653, -0.605266, -0.074959]]]
-                                  ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # deterministic input
+            encoder_input = perm_fn(torch.tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                                   [0.5387, 0.1655, 0.3565, 0.0471]],
+                                                  [[0.8335, 0.2799, 0.5031, 0.2947],
+                                                   [0.1402, 0.0318, 0.7636, 0.1346]],
+                                                  [[0.6333, 0.9344, 0.1376, 0.9938],
+                                                   [0.8924, 0.2872, 0.6692, 0.2944]],
+                                                  [[0.9897, 0.6915, 0.3154, 0.1733],
+                                                   [0.8645, 0.3513, 0.3064, 0.0767]],
+                                                  [[0.8117, 0.2366, 0.4838, 0.7881],
+                                                   [0.3718, 0.4945, 0.9511, 0.0864]]]
+                                                 )).to(device)
+            result = model(encoder_input)
+            ref_output = perm_fn(torch.tensor([[[2.428589, 0.020835, -0.602055, -0.085249],
+                                                [2.427987, 0.021213, -0.602496, -0.084103]],
+                                               [[2.424689, 0.019155, -0.604793, -0.085672],
+                                                [2.413863, 0.022211, -0.612486, -0.072490]],
+                                               [[2.433774, 0.021598, -0.598343, -0.087548],
+                                                [2.425104, 0.019748, -0.604515, -0.084839]],
+                                               [[2.436185, 0.022682, -0.596625, -0.087261],
+                                                [2.433556, 0.021891, -0.598509, -0.086832]],
+                                               [[2.416246, 0.017512, -0.610712, -0.082961],
+                                                [2.422901, 0.024187, -0.606178, -0.074929]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        # test case 2, multiple layers no norm
-        model = nn.TransformerEncoder(encoder_layer, 2).to(device)
-        result = model(encoder_input, src_key_padding_mask=mask)
-        ref_output = torch.Tensor(
-            [[[2.419051, 0.017446, -0.608738, -0.085003],
-              [2.419102, 0.017452, -0.608703, -0.085026]],
-             [[2.419043, 0.017445, -0.608744, -0.084999],
-              [2.419052, 0.017446, -0.608738, -0.085004]],
-             [[2.419067, 0.017448, -0.608727, -0.085010],
-              [2.419098, 0.017452, -0.608706, -0.085024]],
-             [[2.419072, 0.017449, -0.608724, -0.085012],
-              [2.419119, 0.017455, -0.608691, -0.085034]],
-             [[2.419019, 0.017442, -0.608761, -0.084989],
-              [2.419075, 0.017449, -0.608722, -0.085014]]]
-        ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # all 0
+            mask = torch.zeros([2, 5]).to(device) == 1
+            result = model(encoder_input, src_key_padding_mask=mask)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            mask[0, 1] = 1
+            mask[1, 3] = 1
+            mask[1, 4] = 1
+            result = model(encoder_input, src_key_padding_mask=mask)
+            ref_output = perm_fn(torch.tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
+                                                [2.428811, 0.021445, -0.601912, -0.084252]],
+                                               [[2.425009, 0.019155, -0.604566, -0.085899],
+                                                [2.415408, 0.02249, -0.611415, -0.073]],
+                                               [[2.434199, 0.021682, -0.598039, -0.087699],
+                                                [2.42598, 0.019941, -0.603896, -0.085091]],
+                                               [[2.436457, 0.022736, -0.59643, -0.08736],
+                                                [2.434021, 0.022093, -0.598179, -0.08679]],
+                                               [[2.416531, 0.017498, -0.610513, -0.083181],
+                                                [2.4242, 0.024653, -0.605266, -0.074959]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        model = nn.TransformerEncoder(encoder_layer, 6).to(device)
-        result = model(encoder_input, src_key_padding_mask=mask)
-        ref_output = torch.Tensor(
-            [[[2.419101, 0.017453, -0.608703, -0.085025],
-              [2.419101, 0.017453, -0.608704, -0.085025]],
-             [[2.419101, 0.017453, -0.608703, -0.085025],
-              [2.419101, 0.017453, -0.608704, -0.085025]],
-             [[2.419101, 0.017453, -0.608703, -0.085025],
-              [2.419101, 0.017453, -0.608704, -0.085025]],
-             [[2.419101, 0.017453, -0.608703, -0.085025],
-              [2.419101, 0.017453, -0.608704, -0.085025]],
-             [[2.419101, 0.017453, -0.608703, -0.085025],
-              [2.419101, 0.017453, -0.608704, -0.085025]]]
-        ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # test case 2, multiple layers no norm
+            model = nn.TransformerEncoder(encoder_layer, 2).to(device)
+            result = model(encoder_input, src_key_padding_mask=mask)
+            ref_output = perm_fn(torch.tensor([[[2.419051, 0.017446, -0.608738, -0.085003],
+                                                [2.419102, 0.017452, -0.608703, -0.085026]],
+                                               [[2.419043, 0.017445, -0.608744, -0.084999],
+                                                [2.419052, 0.017446, -0.608738, -0.085004]],
+                                               [[2.419067, 0.017448, -0.608727, -0.085010],
+                                                [2.419098, 0.017452, -0.608706, -0.085024]],
+                                               [[2.419072, 0.017449, -0.608724, -0.085012],
+                                                [2.419119, 0.017455, -0.608691, -0.085034]],
+                                               [[2.419019, 0.017442, -0.608761, -0.084989],
+                                                [2.419075, 0.017449, -0.608722, -0.085014]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        # test case 3, multiple layers with norm
-        # d_model = 4
-        norm = nn.LayerNorm(4)
-        model = nn.TransformerEncoder(encoder_layer, 2, norm=norm).to(device)
-        result = model(encoder_input, src_key_padding_mask=mask)
-        ref_output = torch.Tensor(
-            [[[1.695949, -0.357635, -0.893077, -0.445238],
-              [1.695955, -0.357639, -0.893050, -0.445266]],
-             [[1.695948, -0.357634, -0.893082, -0.445233],
-              [1.695950, -0.357635, -0.893077, -0.445238]],
-             [[1.695951, -0.357636, -0.893069, -0.445246],
-              [1.695955, -0.357639, -0.893052, -0.445264]],
-             [[1.695952, -0.357636, -0.893066, -0.445249],
-              [1.695957, -0.357641, -0.893041, -0.445276]],
-             [[1.695946, -0.357632, -0.893095, -0.445220],
-              [1.695952, -0.357637, -0.893065, -0.445251]]]
-        ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            model = nn.TransformerEncoder(encoder_layer, 6).to(device)
+            result = model(encoder_input, src_key_padding_mask=mask)
+            ref_output = perm_fn(torch.tensor([[[2.419101, 0.017453, -0.608703, -0.085025],
+                                                [2.419101, 0.017453, -0.608704, -0.085025]],
+                                               [[2.419101, 0.017453, -0.608703, -0.085025],
+                                                [2.419101, 0.017453, -0.608704, -0.085025]],
+                                               [[2.419101, 0.017453, -0.608703, -0.085025],
+                                                [2.419101, 0.017453, -0.608704, -0.085025]],
+                                               [[2.419101, 0.017453, -0.608703, -0.085025],
+                                                [2.419101, 0.017453, -0.608704, -0.085025]],
+                                               [[2.419101, 0.017453, -0.608703, -0.085025],
+                                                [2.419101, 0.017453, -0.608704, -0.085025]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        model = nn.TransformerEncoder(encoder_layer, 6, norm=norm).to(device)
-        result = model(encoder_input, src_key_padding_mask=mask)
-        ref_output = torch.Tensor(
-            [[[1.695955, -0.357639, -0.893051, -0.445265],
-              [1.695955, -0.357639, -0.893051, -0.445265]],
-             [[1.695955, -0.357639, -0.893051, -0.445265],
-              [1.695955, -0.357639, -0.893051, -0.445265]],
-             [[1.695955, -0.357639, -0.893051, -0.445265],
-              [1.695955, -0.357639, -0.893051, -0.445265]],
-             [[1.695955, -0.357639, -0.893051, -0.445265],
-              [1.695955, -0.357639, -0.893051, -0.445265]],
-             [[1.695955, -0.357639, -0.893051, -0.445265],
-              [1.695955, -0.357639, -0.893051, -0.445265]]]
-        ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # test case 3, multiple layers with norm
+            # d_model = 4
+            norm = nn.LayerNorm(4)
+            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm).to(device)
+            result = model(encoder_input, src_key_padding_mask=mask)
+            ref_output = perm_fn(torch.tensor([[[1.695949, -0.357635, -0.893077, -0.445238],
+                                                [1.695955, -0.357639, -0.893050, -0.445266]],
+                                               [[1.695948, -0.357634, -0.893082, -0.445233],
+                                                [1.695950, -0.357635, -0.893077, -0.445238]],
+                                               [[1.695951, -0.357636, -0.893069, -0.445246],
+                                                [1.695955, -0.357639, -0.893052, -0.445264]],
+                                               [[1.695952, -0.357636, -0.893066, -0.445249],
+                                                [1.695957, -0.357641, -0.893041, -0.445276]],
+                                               [[1.695946, -0.357632, -0.893095, -0.445220],
+                                                [1.695952, -0.357637, -0.893065, -0.445251]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+            model = nn.TransformerEncoder(encoder_layer, 6, norm=norm).to(device)
+            result = model(encoder_input, src_key_padding_mask=mask)
+            ref_output = perm_fn(torch.tensor([[[1.695955, -0.357639, -0.893051, -0.445265],
+                                                [1.695955, -0.357639, -0.893051, -0.445265]],
+                                               [[1.695955, -0.357639, -0.893051, -0.445265],
+                                                [1.695955, -0.357639, -0.893051, -0.445265]],
+                                               [[1.695955, -0.357639, -0.893051, -0.445265],
+                                                [1.695955, -0.357639, -0.893051, -0.445265]],
+                                               [[1.695955, -0.357639, -0.893051, -0.445265],
+                                                [1.695955, -0.357639, -0.893051, -0.445265]],
+                                               [[1.695955, -0.357639, -0.893051, -0.445265],
+                                                [1.695955, -0.357639, -0.893051, -0.445265]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
 
     def test_transformerdecoder(self):
-        def get_a_test_layer(use_cuda, activation):
+        def get_a_test_layer(use_cuda, activation, batch_first=False):
             d_model = 4
             nhead = 2
             dim_feedforward = 16
@@ -6148,7 +6446,8 @@ class TestNN(NNTestCase):
                 nhead,
                 dim_feedforward=dim_feedforward,
                 dropout=dropout,
-                activation=activation).to(device)
+                activation=activation,
+                batch_first=batch_first).to(device)
 
             with torch.no_grad():
                 # set constant weights of the model
@@ -6162,307 +6461,301 @@ class TestNN(NNTestCase):
             return layer
 
         # this is a deterministic test for TransformerDecoder
-        activation = "relu"
-        use_cuda = torch.cuda.is_available()
-        device = torch.device("cuda" if use_cuda else "cpu")
+        for batch_first in (False, True):
+            def perm_fn(x):
+                return x.transpose(1, 0) if batch_first else x
+            activation = "relu"
+            use_cuda = torch.cuda.is_available()
+            device = torch.device("cuda" if use_cuda else "cpu")
 
-        decoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation)
+            decoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation,
+                                             batch_first=batch_first)
 
-        model = nn.TransformerDecoder(decoder_layer, 1).to(device)
+            model = nn.TransformerDecoder(decoder_layer, 1).to(device)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[20, 30, 40, 50]]]).to(device)
-        memory_input = torch.Tensor([[[60, 70, 80, 90]]]).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor(
-            [[[2.314351, 0.094805, -0.671322, 0.101977]]]).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # deterministic input
+            decoder_input = torch.tensor([[[20., 30., 40., 50.]]]).to(device)
+            memory_input = torch.tensor([[[60., 70., 80., 90.]]]).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = torch.tensor(
+                [[[2.314351, 0.094805, -0.671322, 0.101977]]]).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-3)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[9, 10, 11, 12]],
-                                     [[11, 12, 13, 14]]]).to(device)
-        memory_input = torch.Tensor([[[1, 2, 3, 4]]]).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor(
-            [[[2.422245, 0.051716, -0.606338, -0.024756]],
-             [[2.422245, 0.051716, -0.606338, -0.024756]]]
-        ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[9., 10., 11., 12.]],
+                                                  [[11., 12., 13., 14.]]])).to(device)
+            memory_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]]])).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.422245, 0.051716, -0.606338, -0.024756]],
+                                               [[2.422245, 0.051716, -0.606338, -0.024756]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-4)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[1, 2, 3, 4]],
-                                      [[5, 6, 7, 8]]]).to(device)
-        memory_input = torch.Tensor([[[9, 10, 11, 12]],
-                                     [[11, 12, 13, 14]]]).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor(
-            [[[2.343536, 0.085561, -0.654954, 0.074991]],
-             [[2.343536, 0.085561, -0.654954, 0.074991]]]
-        ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]],
+                                                  [[5., 6., 7., 8.]]])).to(device)
+            memory_input = perm_fn(torch.tensor([[[9., 10., 11., 12.]],
+                                                 [[11., 12., 13., 14.]]])).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.343536, 0.085561, -0.654954, 0.074991]],
+                                               [[2.343536, 0.085561, -0.654954, 0.074991]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-4)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
-                                       [0.2678, 0.3677, 0.4459, 0.7166]],
-                                      [[0.8100, 0.3716, 0.4096, 0.1976],
-                                       [0.6958, 0.8844, 0.6081, 0.8315]],
-                                      [[0.0494, 0.9343, 0.5955, 0.3830],
-                                       [0.5404, 0.3464, 0.9378, 0.6200]]]
-                                     ).to(device)
-        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
-                                      [0.5387, 0.1655, 0.3565, 0.0471]],
-                                     [[0.8335, 0.2799, 0.5031, 0.2947],
-                                      [0.1402, 0.0318, 0.7636, 0.1346]],
-                                     [[0.6333, 0.9344, 0.1376, 0.9938],
-                                      [0.8924, 0.2872, 0.6692, 0.2944]],
-                                     [[0.9897, 0.6915, 0.3154, 0.1733],
-                                      [0.8645, 0.3513, 0.3064, 0.0767]],
-                                     [[0.8117, 0.2366, 0.4838, 0.7881],
-                                      [0.3718, 0.4945, 0.9511, 0.0864]]]
-                                    ).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
-                                    [2.431935, 0.028907, -0.599809, -0.072488]],
-                                   [[2.428457, 0.027053, -0.602275, -0.073462],
-                                    [2.431970, 0.029387, -0.599789, -0.071621]],
-                                   [[2.431934, 0.028196, -0.599802, -0.073809],
-                                    [2.432306, 0.028858, -0.599542, -0.072846]]]
-                                  ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                                   [0.2678, 0.3677, 0.4459, 0.7166]],
+                                                  [[0.8100, 0.3716, 0.4096, 0.1976],
+                                                   [0.6958, 0.8844, 0.6081, 0.8315]],
+                                                  [[0.0494, 0.9343, 0.5955, 0.3830],
+                                                   [0.5404, 0.3464, 0.9378, 0.6200]]]
+                                                 )).to(device)
+            memory_input = perm_fn(torch.tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                                  [0.5387, 0.1655, 0.3565, 0.0471]],
+                                                 [[0.8335, 0.2799, 0.5031, 0.2947],
+                                                  [0.1402, 0.0318, 0.7636, 0.1346]],
+                                                 [[0.6333, 0.9344, 0.1376, 0.9938],
+                                                  [0.8924, 0.2872, 0.6692, 0.2944]],
+                                                 [[0.9897, 0.6915, 0.3154, 0.1733],
+                                                  [0.8645, 0.3513, 0.3064, 0.0767]],
+                                                 [[0.8117, 0.2366, 0.4838, 0.7881],
+                                                  [0.3718, 0.4945, 0.9511, 0.0864]]]
+                                                )).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                                [2.431935, 0.028907, -0.599809, -0.072488]],
+                                               [[2.428457, 0.027053, -0.602275, -0.073462],
+                                                [2.431970, 0.029387, -0.599789, -0.071621]],
+                                               [[2.431934, 0.028196, -0.599802, -0.073809],
+                                                [2.432306, 0.028858, -0.599542, -0.072846]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        # key_padding_mask
-        key_padding_mask = torch.zeros(2, 3).to(device) == 1
-        result = model(decoder_input,
-                       memory_input,
-                       tgt_key_padding_mask=key_padding_mask)
-        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
-                                    [2.431935, 0.028907, -0.599809, -0.072488]],
-                                   [[2.428457, 0.027053, -0.602275, -0.073462],
-                                    [2.431970, 0.029387, -0.599789, -0.071621]],
-                                   [[2.431934, 0.028196, -0.599802, -0.073809],
-                                    [2.432306, 0.028858, -0.599542, -0.072846]]]
-                                  ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # key_padding_mask
+            key_padding_mask = torch.zeros(2, 3).to(device) == 1
+            result = model(decoder_input, memory_input,
+                           tgt_key_padding_mask=key_padding_mask)
+            ref_output = perm_fn(torch.tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                                [2.431935, 0.028907, -0.599809, -0.072488]],
+                                               [[2.428457, 0.027053, -0.602275, -0.073462],
+                                                [2.431970, 0.029387, -0.599789, -0.071621]],
+                                               [[2.431934, 0.028196, -0.599802, -0.073809],
+                                                [2.432306, 0.028858, -0.599542, -0.072846]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        # key_padding_mask
-        key_padding_mask[0, 2] = 1
-        key_padding_mask[1, 1] = 1
-        key_padding_mask[1, 2] = 1
-        result = model(decoder_input,
-                       memory_input,
-                       tgt_key_padding_mask=key_padding_mask)
-        ref_output = torch.Tensor([[[2.430025, 0.027643, -0.601164, -0.073476],
-                                    [2.4323, 0.029375, -0.599553, -0.071881]],
-                                   [[2.428523, 0.026838, -0.602226, -0.07391],
-                                    [2.432634, 0.029842, -0.599318, -0.071253]],
-                                   [[2.432278, 0.028152, -0.599555, -0.074139],
-                                    [2.432659, 0.029244, -0.599294, -0.072382]]]
-                                  ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # key_padding_mask
+            key_padding_mask[0, 2] = 1
+            key_padding_mask[1, 1] = 1
+            key_padding_mask[1, 2] = 1
+            result = model(decoder_input, memory_input,
+                           tgt_key_padding_mask=key_padding_mask)
+            ref_output = perm_fn(torch.tensor([[[2.430025, 0.027643, -0.601164, -0.073476],
+                                                [2.4323, 0.029375, -0.599553, -0.071881]],
+                                               [[2.428523, 0.026838, -0.602226, -0.07391],
+                                                [2.432634, 0.029842, -0.599318, -0.071253]],
+                                               [[2.432278, 0.028152, -0.599555, -0.074139],
+                                                [2.432659, 0.029244, -0.599294, -0.072382]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        # memory_key_padding_mask
-        key_padding_mask = torch.zeros(2, 5).to(device) == 1
-        result = model(decoder_input,
-                       memory_input,
-                       memory_key_padding_mask=key_padding_mask)
-        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
-                                    [2.431935, 0.028907, -0.599809, -0.072488]],
-                                   [[2.428457, 0.027053, -0.602275, -0.073462],
-                                    [2.431970, 0.029387, -0.599789, -0.071621]],
-                                   [[2.431934, 0.028196, -0.599802, -0.073809],
-                                    [2.432306, 0.028858, -0.599542, -0.072846]]]
-                                  ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # memory_key_padding_mask
+            key_padding_mask = torch.zeros(2, 5).to(device) == 1
+            result = model(decoder_input, memory_input,
+                           memory_key_padding_mask=key_padding_mask)
+            ref_output = perm_fn(torch.tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                                [2.431935, 0.028907, -0.599809, -0.072488]],
+                                               [[2.428457, 0.027053, -0.602275, -0.073462],
+                                                [2.431970, 0.029387, -0.599789, -0.071621]],
+                                               [[2.431934, 0.028196, -0.599802, -0.073809],
+                                                [2.432306, 0.028858, -0.599542, -0.072846]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        # memory_key_padding_mask
-        key_padding_mask[0, 4] = 1
-        key_padding_mask[1, 3] = 1
-        key_padding_mask[1, 4] = 1
-        result = model(decoder_input,
-                       memory_input,
-                       memory_key_padding_mask=key_padding_mask)
-        ref_output = torch.Tensor([[[2.429757, 0.027358, -0.601351, -0.073816],
-                                    [2.432692, 0.028583, -0.599263, -0.073634]],
-                                   [[2.428247, 0.02662, -0.602419, -0.074123],
-                                    [2.432657, 0.029055, -0.599293, -0.072732]],
-                                   [[2.431515, 0.027687, -0.600096, -0.074459],
-                                    [2.433075, 0.028543, -0.598987, -0.073985]]]
-                                  ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # memory_key_padding_mask
+            key_padding_mask[0, 4] = 1
+            key_padding_mask[1, 3] = 1
+            key_padding_mask[1, 4] = 1
+            result = model(decoder_input,
+                           memory_input,
+                           memory_key_padding_mask=key_padding_mask)
+            ref_output = perm_fn(torch.tensor([[[2.429757, 0.027358, -0.601351, -0.073816],
+                                                [2.432692, 0.028583, -0.599263, -0.073634]],
+                                               [[2.428247, 0.02662, -0.602419, -0.074123],
+                                                [2.432657, 0.029055, -0.599293, -0.072732]],
+                                               [[2.431515, 0.027687, -0.600096, -0.074459],
+                                                [2.433075, 0.028543, -0.598987, -0.073985]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        # multiple layers no norm
-        model = nn.TransformerDecoder(decoder_layer, 2).to(device)
+            # multiple layers no norm
+            model = nn.TransformerDecoder(decoder_layer, 2).to(device)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[20, 30, 40, 50]]]).to(device)
-        memory_input = torch.Tensor([[[60, 70, 80, 90]]]).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor(
-            [[[2.31316, 0.0950293, -0.671995, 0.102802]]]).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # deterministic input
+            decoder_input = torch.tensor([[[20., 30., 40., 50.]]]).to(device)
+            memory_input = torch.tensor([[[60., 70., 80., 90.]]]).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = torch.tensor(
+                [[[2.31316, 0.0950293, -0.671995, 0.102802]]]).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-3)
 
-        # multiple layers no norm
-        model = nn.TransformerDecoder(decoder_layer, 6).to(device)
+            # multiple layers no norm
+            model = nn.TransformerDecoder(decoder_layer, 6).to(device)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
-                                      [0.2678, 0.3677, 0.4459, 0.7166]],
-                                     [[0.8100, 0.3716, 0.4096, 0.1976],
-                                      [0.6958, 0.8844, 0.6081, 0.8315]],
-                                     [[0.0494, 0.9343, 0.5955, 0.3830],
-                                      [0.5404, 0.3464, 0.9378, 0.6200]]]
-                                     ).to(device)
-        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
-                                      [0.5387, 0.1655, 0.3565, 0.0471]],
-                                     [[0.8335, 0.2799, 0.5031, 0.2947],
-                                      [0.1402, 0.0318, 0.7636, 0.1346]],
-                                     [[0.6333, 0.9344, 0.1376, 0.9938],
-                                      [0.8924, 0.2872, 0.6692, 0.2944]],
-                                     [[0.9897, 0.6915, 0.3154, 0.1733],
-                                      [0.8645, 0.3513, 0.3064, 0.0767]],
-                                     [[0.8117, 0.2366, 0.4838, 0.7881],
-                                      [0.3718, 0.4945, 0.9511, 0.0864]]]
-                                    ).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor(
-            [[[2.42794, 0.026164, -0.60263, -0.0747591],
-              [2.43113, 0.0279516, -0.600376, -0.0736896]],
-             [[2.42794, 0.026164, -0.60263, -0.0747591],
-              [2.43113, 0.0279516, -0.600376, -0.0736896]],
-             [[2.42794, 0.026164, -0.60263, -0.0747591],
-              [2.43113, 0.0279516, -0.600376, -0.0736896]]]
-        ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                                   [0.2678, 0.3677, 0.4459, 0.7166]],
+                                                  [[0.8100, 0.3716, 0.4096, 0.1976],
+                                                   [0.6958, 0.8844, 0.6081, 0.8315]],
+                                                  [[0.0494, 0.9343, 0.5955, 0.3830],
+                                                   [0.5404, 0.3464, 0.9378, 0.6200]]]
+                                                 )).to(device)
+            memory_input = perm_fn(torch.tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                                  [0.5387, 0.1655, 0.3565, 0.0471]],
+                                                 [[0.8335, 0.2799, 0.5031, 0.2947],
+                                                  [0.1402, 0.0318, 0.7636, 0.1346]],
+                                                 [[0.6333, 0.9344, 0.1376, 0.9938],
+                                                  [0.8924, 0.2872, 0.6692, 0.2944]],
+                                                 [[0.9897, 0.6915, 0.3154, 0.1733],
+                                                  [0.8645, 0.3513, 0.3064, 0.0767]],
+                                                 [[0.8117, 0.2366, 0.4838, 0.7881],
+                                                  [0.3718, 0.4945, 0.9511, 0.0864]]]
+                                                )).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.42794, 0.026164, -0.60263, -0.0747591],
+                                                [2.43113, 0.0279516, -0.600376, -0.0736896]],
+                                               [[2.42794, 0.026164, -0.60263, -0.0747591],
+                                                [2.43113, 0.0279516, -0.600376, -0.0736896]],
+                                               [[2.42794, 0.026164, -0.60263, -0.0747591],
+                                                [2.43113, 0.0279516, -0.600376, -0.0736896]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        # multiple layers with norm
-        # d_model = 4
-        norm = nn.LayerNorm(4)
-        model = nn.TransformerDecoder(decoder_layer, 2, norm=norm).to(device)
+            # multiple layers with norm
+            # d_model = 4
+            norm = nn.LayerNorm(4)
+            model = nn.TransformerDecoder(decoder_layer, 2, norm=norm).to(device)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[20, 30, 40, 50]]]).to(device)
-        memory_input = torch.Tensor([[[60, 70, 80, 90]]]).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor(
-            [[[1.66166, -0.326986, -1.01466, -0.320017]]]).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # deterministic input
+            decoder_input = torch.tensor([[[20., 30., 40., 50.]]]).to(device)
+            memory_input = torch.tensor([[[60., 70., 80., 90.]]]).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = torch.tensor(
+                [[[1.66166, -0.326986, -1.01466, -0.320017]]]).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-3)
 
-        # multiple layers with norm
-        model = nn.TransformerDecoder(decoder_layer, 6, norm=norm).to(device)
+            # multiple layers with norm
+            model = nn.TransformerDecoder(decoder_layer, 6, norm=norm).to(device)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
-                                       [0.2678, 0.3677, 0.4459, 0.7166]],
-                                      [[0.8100, 0.3716, 0.4096, 0.1976],
-                                       [0.6958, 0.8844, 0.6081, 0.8315]],
-                                      [[0.0494, 0.9343, 0.5955, 0.3830],
-                                       [0.5404, 0.3464, 0.9378, 0.6200]]]
-                                     ).to(device)
-        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
-                                      [0.5387, 0.1655, 0.3565, 0.0471]],
-                                     [[0.8335, 0.2799, 0.5031, 0.2947],
-                                      [0.1402, 0.0318, 0.7636, 0.1346]],
-                                     [[0.6333, 0.9344, 0.1376, 0.9938],
-                                      [0.8924, 0.2872, 0.6692, 0.2944]],
-                                     [[0.9897, 0.6915, 0.3154, 0.1733],
-                                      [0.8645, 0.3513, 0.3064, 0.0767]],
-                                     [[0.8117, 0.2366, 0.4838, 0.7881],
-                                      [0.3718, 0.4945, 0.9511, 0.0864]]]
-                                    ).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor(
-            [[[1.69559, -0.357291, -0.894741, -0.443553],
-              [1.69571, -0.357363, -0.894154, -0.444196]],
-             [[1.69559, -0.357291, -0.894741, -0.443553],
-              [1.69571, -0.357363, -0.894154, -0.444196]],
-             [[1.69559, -0.357291, -0.894741, -0.443553],
-              [1.69571, -0.357363, -0.894154, -0.444196]]]
-        ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                                   [0.2678, 0.3677, 0.4459, 0.7166]],
+                                                  [[0.8100, 0.3716, 0.4096, 0.1976],
+                                                   [0.6958, 0.8844, 0.6081, 0.8315]],
+                                                  [[0.0494, 0.9343, 0.5955, 0.3830],
+                                                   [0.5404, 0.3464, 0.9378, 0.6200]]]
+                                                 )).to(device)
+            memory_input = perm_fn(torch.tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                                  [0.5387, 0.1655, 0.3565, 0.0471]],
+                                                 [[0.8335, 0.2799, 0.5031, 0.2947],
+                                                  [0.1402, 0.0318, 0.7636, 0.1346]],
+                                                 [[0.6333, 0.9344, 0.1376, 0.9938],
+                                                  [0.8924, 0.2872, 0.6692, 0.2944]],
+                                                 [[0.9897, 0.6915, 0.3154, 0.1733],
+                                                  [0.8645, 0.3513, 0.3064, 0.0767]],
+                                                 [[0.8117, 0.2366, 0.4838, 0.7881],
+                                                  [0.3718, 0.4945, 0.9511, 0.0864]]]
+                                                )).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[1.69559, -0.357291, -0.894741, -0.443553],
+                                                [1.69571, -0.357363, -0.894154, -0.444196]],
+                                               [[1.69559, -0.357291, -0.894741, -0.443553],
+                                                [1.69571, -0.357363, -0.894154, -0.444196]],
+                                               [[1.69559, -0.357291, -0.894741, -0.443553],
+                                                [1.69571, -0.357363, -0.894154, -0.444196]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
-        # gelu activation test cases
-        activation = "gelu"
-        use_cuda = torch.cuda.is_available()
-        device = torch.device("cuda" if use_cuda else "cpu")
+            # gelu activation test cases
+            activation = "gelu"
+            use_cuda = torch.cuda.is_available()
+            device = torch.device("cuda" if use_cuda else "cpu")
 
-        decoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation)
+            decoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation,
+                                             batch_first=batch_first)
 
-        model = nn.TransformerDecoder(decoder_layer, 1).to(device)
+            model = nn.TransformerDecoder(decoder_layer, 1).to(device)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[20, 30, 40, 50]]]).to(device)
-        memory_input = torch.Tensor([[[60, 70, 80, 90]]]).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[2.306435, 0.095946, -0.675796, 0.10687]]]
-                                  ).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+            # deterministic input
+            decoder_input = torch.tensor([[[20., 30., 40., 50.]]]).to(device)
+            memory_input = torch.tensor([[[60., 70., 80., 90.]]]).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = torch.tensor([[[2.306435, 0.095946, -0.675796, 0.10687]]]).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-3)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[9, 10, 11, 12]],
-                                      [[11, 12, 13, 14]]]).to(device)
-        memory_input = torch.Tensor([[[1, 2, 3, 4]]]).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor(
-            [[[2.415448, 0.054389, -0.610932, -0.0156613]],
-             [[2.415448, 0.054389, -0.610932, -0.0156613]]]).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[9., 10., 11., 12.]],
+                                                  [[11., 12., 13., 14.]]])).to(device)
+            memory_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]]])).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.415448, 0.054389, -0.610932, -0.0156613]],
+                                               [[2.415448, 0.054389, -0.610932, -0.0156613]]])).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-4)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[1, 2, 3, 4]],
-                                      [[5, 6, 7, 8]]]).to(device)
-        memory_input = torch.Tensor([[[9, 10, 11, 12]],
-                                     [[11, 12, 13, 14]]]).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor(
-            [[[2.338531, 0.087709, -0.65776, 0.080646]],
-             [[2.338531, 0.087709, -0.65776, 0.080646]]]).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]],
+                                                  [[5., 6., 7., 8.]]])).to(device)
+            memory_input = perm_fn(torch.tensor([[[9., 10., 11., 12.]],
+                                                 [[11., 12., 13., 14.]]])).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.338531, 0.087709, -0.65776, 0.080646]],
+                                               [[2.338531, 0.087709, -0.65776, 0.080646]]])).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-4)
 
-        # deterministic input
-        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
-                                       [0.2678, 0.3677, 0.4459, 0.7166]],
-                                      [[0.8100, 0.3716, 0.4096, 0.1976],
-                                       [0.6958, 0.8844, 0.6081, 0.8315]],
-                                      [[0.0494, 0.9343, 0.5955, 0.3830],
-                                       [0.5404, 0.3464, 0.9378, 0.6200]]]
-                                     ).to(device)
-        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
-                                      [0.5387, 0.1655, 0.3565, 0.0471]],
-                                     [[0.8335, 0.2799, 0.5031, 0.2947],
-                                      [0.1402, 0.0318, 0.7636, 0.1346]],
-                                     [[0.6333, 0.9344, 0.1376, 0.9938],
-                                      [0.8924, 0.2872, 0.6692, 0.2944]],
-                                     [[0.9897, 0.6915, 0.3154, 0.1733],
-                                      [0.8645, 0.3513, 0.3064, 0.0767]],
-                                     [[0.8117, 0.2366, 0.4838, 0.7881],
-                                      [0.3718, 0.4945, 0.9511, 0.0864]]]
-                                    ).to(device)
-        result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor(
-            [[[2.42049104, 0.03443088, -0.60793706, -0.05436271],
-              [2.42210631, 0.03546578, -0.60679895, -0.05357488]],
-             [[2.41907674, 0.0336104, -0.60892977, -0.05490462],
-              [2.42216881, 0.03586554, -0.6067524, -0.05289126]],
-             [[2.42205716, 0.03488046, -0.60683681, -0.05460596],
-              [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]).to(device)
-        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        torch.testing.assert_allclose(result, ref_output)
-
+            # deterministic input
+            decoder_input = perm_fn(torch.tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                                   [0.2678, 0.3677, 0.4459, 0.7166]],
+                                                  [[0.8100, 0.3716, 0.4096, 0.1976],
+                                                   [0.6958, 0.8844, 0.6081, 0.8315]],
+                                                  [[0.0494, 0.9343, 0.5955, 0.3830],
+                                                   [0.5404, 0.3464, 0.9378, 0.6200]]]
+                                                 )).to(device)
+            memory_input = perm_fn(torch.tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                                  [0.5387, 0.1655, 0.3565, 0.0471]],
+                                                 [[0.8335, 0.2799, 0.5031, 0.2947],
+                                                  [0.1402, 0.0318, 0.7636, 0.1346]],
+                                                 [[0.6333, 0.9344, 0.1376, 0.9938],
+                                                  [0.8924, 0.2872, 0.6692, 0.2944]],
+                                                 [[0.9897, 0.6915, 0.3154, 0.1733],
+                                                  [0.8645, 0.3513, 0.3064, 0.0767]],
+                                                 [[0.8117, 0.2366, 0.4838, 0.7881],
+                                                  [0.3718, 0.4945, 0.9511, 0.0864]]]
+                                                )).to(device)
+            result = model(decoder_input, memory_input)
+            ref_output = perm_fn(torch.tensor([[[2.42049104, 0.03443088, -0.60793706, -0.05436271],
+                                                [2.42210631, 0.03546578, -0.60679895, -0.05357488]],
+                                               [[2.41907674, 0.0336104, -0.60892977, -0.05490462],
+                                                [2.42216881, 0.03586554, -0.6067524, -0.05289126]],
+                                               [[2.42205716, 0.03488046, -0.60683681, -0.05460596],
+                                                [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]
+                                              )).to(device)
+            self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+            torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
     def test_cudnn_rnn_dropout_states_device(self):
@@ -7192,18 +7485,11 @@ class TestNN(NNTestCase):
                               bidirectional=bidirectional,
                               batch_first=batch_first,
                               proj_size=proj_size).to(dtype)
-            # LSTM with projections is not supported with MIOpen
-            if TEST_WITH_ROCM and dtype == torch.float:
-                with self.assertRaisesRegex(RuntimeError,
-                                            "LSTM with projections is not supported with MIOpen"):
-                    outputs_gpu = forward_backward(
-                        True, rnn_gpu, input_val, grad_output, rnn.all_weights,
-                        hx_val, grad_hy, cx_val, grad_cy)
-            else:
-                outputs_gpu = forward_backward(
-                    True, rnn_gpu, input_val, grad_output, rnn.all_weights,
-                    hx_val, grad_hy, cx_val, grad_cy)
-                compare_cpu_gpu(outputs_cpu, outputs_gpu)
+
+            outputs_gpu = forward_backward(
+                True, rnn_gpu, input_val, grad_output, rnn.all_weights,
+                hx_val, grad_hy, cx_val, grad_cy)
+            compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
@@ -8319,6 +8605,7 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(NotImplementedError, "affine_grid only supports 4D and 5D sizes"):
             F.affine_grid(theta, torch.Size([1, 1, 2, 2, 2, 2]), align_corners=False)
 
+    @skipIfRocm
     def test_grid_sample(self):
         def test(N, C, H, W, mode, padding_mode, align_corners):
             def test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners):
@@ -8794,11 +9081,11 @@ class TestNN(NNTestCase):
         # test known input on CPU
         input = torch.arange(1., 7).view(1, 2, 3)
         output = F.affine_grid(input, torch.Size([1, 1, 2, 2]), align_corners=True)
-        groundtruth = torch.Tensor(
-            [[[0, -3], [2, 5]], [[4, 7], [6, 15]]]).view(1, 2, 2, 2)
+        groundtruth = torch.tensor(
+            [[[0., -3.], [2., 5.]], [[4., 7.], [6., 15.]]]).view(1, 2, 2, 2)
         self.assertEqual(output, groundtruth)
         output = F.affine_grid(input, torch.Size([1, 1, 2, 2]), align_corners=False)
-        groundtruth = torch.Tensor(
+        groundtruth = torch.tensor(
             [[[1.5, 1.5], [2.5, 5.5]], [[3.5, 6.5], [4.5, 10.5]]]).view(1, 2, 2, 2)
         self.assertEqual(output, groundtruth)
 
@@ -8842,14 +9129,14 @@ class TestNN(NNTestCase):
         # test known input on CPU
         input = torch.arange(1., 13).view(1, 3, 4)
         output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=True)
-        groundtruth = torch.Tensor(
-            [[[[[-2, -10, -18], [0, 0, 0]], [[2, 2, 2], [4, 12, 20]]],
-              [[[4, 4, 4], [6, 14, 22]], [[8, 16, 24], [10, 26, 42]]]]]).view(1, 2, 2, 2, 3)
+        groundtruth = torch.tensor(
+            [[[[[-2., -10., -18.], [0., 0., 0.]], [[2., 2., 2.], [4., 12., 20.]]],
+              [[[4., 4., 4.], [6., 14., 22.]], [[8., 16., 24.], [10., 26., 42.]]]]]).view(1, 2, 2, 2, 3)
         self.assertEqual(output, groundtruth)
         output = F.affine_grid(input, torch.Size([1, 1, 2, 2, 2]), align_corners=False)
-        groundtruth = torch.Tensor(
-            [[[[[1, -1, -3], [2, 4, 6]], [[3, 5, 7], [4, 10, 16]]],
-              [[[4, 6, 8], [5, 11, 17]], [[6, 12, 18], [7, 17, 27]]]]]).view(1, 2, 2, 2, 3)
+        groundtruth = torch.tensor(
+            [[[[[1., -1., -3.], [2., 4., 6.]], [[3., 5., 7.], [4., 10., 16.]]],
+              [[[4., 6., 8.], [5., 11., 17.]], [[6., 12., 18.], [7., 17., 27.]]]]]).view(1, 2, 2, 2, 3)
         self.assertEqual(output, groundtruth)
 
         for align_corners in (True, False):
@@ -9015,53 +9302,77 @@ class TestNN(NNTestCase):
     def test_upsamplingNearest2d(self):
         for memory_format in [torch.contiguous_format, torch.channels_last]:
             m = nn.Upsample(size=4, mode='nearest')
-            in_t = torch.ones(1, 1, 2, 2).contiguous(memory_format=memory_format)
-            in_uint8_t = torch.ones(1, 1, 2, 2, dtype=torch.uint8).contiguous(memory_format=memory_format)
+            in_t = torch.ones(1, 2, 2, 2).contiguous(memory_format=memory_format)
+            in_uint8_t = torch.ones(1, 2, 2, 2, dtype=torch.uint8).contiguous(memory_format=memory_format)
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
                 out_uint8_t = m(in_uint8_t)
-            self.assertEqual(torch.ones(1, 1, 4, 4).contiguous(memory_format=memory_format), out_t.data)
-            self.assertEqual(torch.ones(1, 1, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
+            self.assertEqual(torch.ones(1, 2, 4, 4), out_t)
+            self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8), out_uint8_t)
+            # Assert that memory format is carried through to the output
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
             # test forward when input's height is not same as width
             m = nn.Upsample(size=(4, 2), mode='nearest')
-            in_t = torch.ones(1, 1, 2, 1).contiguous(memory_format=memory_format)
+            in_t = torch.ones(1, 2, 2, 1).contiguous(memory_format=memory_format)
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
-            self.assertEqual(torch.ones(1, 1, 4, 2).contiguous(memory_format=memory_format), out_t.data)
+            self.assertEqual(torch.ones(1, 2, 4, 2), out_t)
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
             # test backward when input's height is not same as width
-            input = torch.ones(1, 1, 2, 1, requires_grad=True).contiguous(memory_format=memory_format)
+            input = torch.ones(1, 2, 2, 1, requires_grad=True).contiguous(memory_format=memory_format)
             gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
             gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
 
-            input = torch.randn(1, 1, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
+            input = torch.randn(1, 2, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
             self.assertEqual(
                 F.interpolate(input, 4, mode='nearest'),
                 F.interpolate(input, scale_factor=2, mode='nearest'))
             gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
             gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
+            # Assert that cpu and cuda handle channels_last memory format in the same way
+            # https://github.com/pytorch/pytorch/issues/54590
+            if torch.cuda.is_available():
+                a = torch.ones(2, 2, 3, 4, requires_grad=True).contiguous(memory_format=torch.channels_last)
+                # make the data asymmetric; ensure that cuda/cpu handle channels_last appropriately.
+                a[1][1][2][2] = a[1][1][2][3] = 0
+
+                out_cpu = torch.nn.functional.interpolate(a, scale_factor=2, mode='nearest')
+                out_cuda = torch.nn.functional.interpolate(a.to('cuda'), scale_factor=2, mode='nearest')
+                self.assertEqual(out_cpu, out_cuda.to('cpu'))
+
+                gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a])
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a])
+
+                gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
+
     def test_upsamplingBilinear2d(self):
         for align_corners in [True, False]:
             kwargs = dict(mode='bilinear', align_corners=align_corners)
 
-            # test float scale factor up & downsampling
-            for scale_factor in [0.5, 1.5, 2]:
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                in_t = torch.ones(1, 1, 2, 2)
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                with warnings.catch_warnings(record=True) as w:
-                    out_t = m(in_t)
-                self.assertEqual(torch.ones(1, 1, out_size, out_size), out_t.data)
+            for memory_format in [torch.contiguous_format, torch.channels_last]:
 
-                input = torch.randn(1, 1, 2, 2, requires_grad=True)
-                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                # test float scale factor up & downsampling
+                for scale_factor in [0.5, 1.5, 2]:
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                    in_t = torch.ones(1, 2, 2, 2).contiguous(memory_format=memory_format)
+                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    with warnings.catch_warnings(record=True) as w:
+                        out_t = m(in_t)
+                    self.assertEqual(torch.ones(1, 2, out_size, out_size), out_t.data)
+                    # Assert that memory format is carried through to the output
+                    self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+
+                    input = torch.randn(1, 2, 2, 2, requires_grad=True)
+                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingBicubic2d(self):
         # test output against known input: align_corners=False result must match opencv
         in_t = torch.arange(8.).view(1, 2, 2, 2)
-        expected_out_t = torch.Tensor(
+        expected_out_t = torch.tensor(
             [[[[-0.31641, 0.01562, 0.56250, 0.89453],
               [0.34766, 0.67969, 1.22656, 1.55859],
               [1.44141, 1.77344, 2.32031, 2.65234],
@@ -9098,7 +9409,7 @@ class TestNN(NNTestCase):
     def test_upsampling_not_recompute_scale_factor(self):
         # test output against known input: result must match opencv
         in_t = torch.arange(8.).view(1, 2, 2, 2)
-        expected_out_t = torch.Tensor(
+        expected_out_t = torch.tensor(
             [[[[-0.32725, -0.08843, 0.37933, 0.79744],
               [0.15039, 0.38921, 0.85697, 1.27508],
               [1.08591, 1.32473, 1.79249, 2.21060],
@@ -9110,7 +9421,7 @@ class TestNN(NNTestCase):
               [5.92213, 6.16095, 6.62871, 7.04682]]]])
         if IS_PPC:
             # Both OpenCV and PyTorch give a slightly different result on PPC
-            expected_out_t = torch.Tensor(
+            expected_out_t = torch.tensor(
                 [[[[-0.32725, -0.08843, 0.37933, 0.79744],
                   [0.15039, 0.38921, 0.85697, 1.27508],
                   [1.08591, 1.32473, 1.79249, 2.21060],
@@ -9154,36 +9465,58 @@ class TestNN(NNTestCase):
     def test_upsamplingNearest3d(self):
         for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
             m = nn.Upsample(size=4, mode='nearest')
-            in_t = torch.ones(1, 1, 2, 2, 2).contiguous(memory_format=memory_format)
-            in_uint8_t = torch.ones(1, 1, 2, 2, 2, dtype=torch.uint8).contiguous(memory_format=memory_format)
+            in_t = torch.ones(1, 2, 2, 2, 2).contiguous(memory_format=memory_format)
+            in_uint8_t = torch.ones(1, 2, 2, 2, 2, dtype=torch.uint8).contiguous(memory_format=memory_format)
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
                 out_uint8_t = m(in_uint8_t)
-            self.assertEqual(torch.ones(1, 1, 4, 4, 4).contiguous(memory_format=memory_format), out_t.data)
-            self.assertEqual(torch.ones(1, 1, 4, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
+            self.assertEqual(torch.ones(1, 2, 4, 4, 4), out_t)
+            self.assertEqual(torch.ones(1, 2, 4, 4, 4, dtype=torch.uint8), out_uint8_t)
+            # Assert that memory format is carried through to the output
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
-            input = torch.randn(1, 1, 2, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
+            input = torch.randn(1, 2, 2, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
             gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
+
+            # Assert that cpu and cuda handle channels_last memory format in the same way
+            # https://github.com/pytorch/pytorch/issues/54590
+            if torch.cuda.is_available():
+                a = torch.ones(2, 2, 2, 3, 4, requires_grad=True).contiguous(memory_format=torch.channels_last_3d)
+                # make the data asymmetric; ensure that cuda/cpu handle channels_last appropriately.
+                a[1][1][1][2][2] = a[1][1][1][2][3] = 0
+
+                out_cpu = torch.nn.functional.interpolate(a, scale_factor=2, mode='nearest')
+                out_cuda = torch.nn.functional.interpolate(a.to('cuda'), scale_factor=2, mode='nearest')
+                self.assertEqual(out_cpu, out_cuda.to('cpu'))
+
+                gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a])
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a])
+
+                gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
 
     def test_upsamplingTrilinear3d(self):
         for align_corners in [True, False]:
             kwargs = dict(mode='trilinear', align_corners=align_corners)
 
-            # test float scale factor up & downsampling
-            for scale_factor in [0.5, 1.5, 2]:
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                in_t = torch.ones(1, 1, 2, 2, 2)
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                with warnings.catch_warnings(record=True) as w:
-                    out_t = m(in_t)
-                self.assertEqual(torch.ones(1, 1, out_size, out_size, out_size), out_t.data)
+            for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
+                # test float scale factor up & downsampling
+                for scale_factor in [0.5, 1.5, 2]:
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                    in_t = torch.ones(1, 2, 2, 2, 2).contiguous(memory_format=memory_format)
+                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    with warnings.catch_warnings(record=True) as w:
+                        out_t = m(in_t)
+                    self.assertEqual(torch.ones(1, 2, out_size, out_size, out_size), out_t.data)
+                    # Assert that memory format is carried through to the output
+                    self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
-                input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
-                self.assertEqual(
-                    F.interpolate(input, (out_size, out_size, out_size), **kwargs),
-                    F.interpolate(input, scale_factor=scale_factor, **kwargs))
-                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                    input = torch.randn(1, 2, 2, 2, 2, requires_grad=True)
+                    self.assertEqual(
+                        F.interpolate(input, (out_size, out_size, out_size), **kwargs),
+                        F.interpolate(input, scale_factor=scale_factor, **kwargs))
+                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                    gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingTrilinear3d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
@@ -9937,6 +10270,15 @@ class TestNN(NNTestCase):
             grads2 = torch.autograd.grad(layer_norm(x).sum(), x, create_graph=True)[0]
 
             self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
+
+    def test_padding_list(self):
+        # Padding can be a list, or tuple (regression test for gh-54452)
+        x = torch.randn(4, 8, 32, 32)
+        net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=[3, 3])
+        y = net(x)
+
+        net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=(3, 3))
+        y = net(x)
 
 
 class TestNNInit(TestCase):
@@ -11333,6 +11675,235 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
+    def test_conv1d_same_padding(self, device):
+        # Test padding='same' outputs the correct shape
+        test_args = [
+            # in_size
+            range(50, 55),
+            # kernel_size
+            [1, 2, 3, 8],
+            # dilation
+            range(1, 4),
+            # stride
+            [1],
+        ]
+        for in_size, k_size, dilation, stride in itertools.product(*test_args):
+            x = torch.rand(1, 1, in_size, device=device)
+            y = torch.rand(1, 1, k_size, device=device)
+            z = F.conv1d(x, y, padding='same', dilation=dilation, stride=stride)
+            self.assertEqual(z.size(2), int(math.ceil(in_size / stride)))
+
+        # Compare F.conv1d padding='same' output against manual padding
+        # Without strides/dilation
+        x = torch.rand(1, 1, 12, device=device)
+        y = torch.rand(1, 1, 3, device=device)
+        expect = F.conv1d(x, y, padding=1)
+        actual = F.conv1d(x, y, padding='same')
+        self.assertEqual(expect, actual)
+
+        # With dilation
+        x = torch.rand(1, 1, 12, device=device)
+        y = torch.rand(1, 1, 4, device=device)
+        expect = F.conv1d(x, y, padding=3, dilation=2)
+        actual = F.conv1d(x, y, padding='same', dilation=2)
+        self.assertEqual(expect, actual)
+
+        # Dilation with asymmetric padding
+        expect = F.conv1d(x, y, padding=5, dilation=3)[..., 1:]
+        actual = F.conv1d(x, y, padding='same', dilation=3)
+        self.assertEqual(expect, actual)
+
+
+    def test_conv2d_same_padding(self, device):
+        # Compare F.conv2d padding='same' output against manual padding
+        # Without strides/dilation
+        x = torch.rand(1, 1, 10, 11, device=device)
+        y = torch.rand(1, 1, 4, 5, device=device)
+        expect = F.conv2d(x, y, padding=(2, 2))[..., 1:, :]
+        actual = F.conv2d(x, y, padding='same')
+        self.assertEqual(expect, actual)
+
+        # With dilation
+        y = torch.rand(1, 1, 3, 4, device=device)
+        expect = F.conv2d(x, y, padding=(2, 3), dilation=2)
+        actual = F.conv2d(x, y, padding='same', dilation=2)
+        self.assertEqual(expect, actual)
+
+        # Dilation with asymmetric padding
+        y = torch.rand(1, 1, 4, 4, device=device)
+        expect = F.conv2d(x, y, padding=5, dilation=3)[..., 1:, 1:]
+        actual = F.conv2d(x, y, padding='same', dilation=3)
+        self.assertEqual(expect, actual)
+
+    def test_conv3d_same_padding(self, device):
+        # Compare F.conv3d padding='same' output against manual padding
+        # Without strides/dilation
+        x = torch.rand(1, 1, 10, 11, 12, device=device)
+        y = torch.rand(1, 1, 1, 2, 5, device=device)
+        expect = F.conv3d(x, y, padding=(0, 1, 2))[..., :, 1:, :]
+        actual = F.conv3d(x, y, padding='same')
+        self.assertEqual(expect, actual)
+
+        # With dilation
+        expect = F.conv3d(x, y, padding=(0, 1, 4), dilation=2)
+        actual = F.conv3d(x, y, padding='same', dilation=2)
+        self.assertEqual(expect, actual)
+
+        # Dilation with asymmetric padding
+        y = torch.rand(1, 1, 4, 4, 4, device=device)
+        expect = F.conv3d(x, y, padding=5, dilation=3)[..., 1:, 1:, 1:]
+        actual = F.conv3d(x, y, padding='same', dilation=3)
+        self.assertEqual(expect, actual)
+
+    def test_conv1d_valid_padding(self, device):
+        # Test F.conv1d padding='valid' is the same as no padding
+        x = torch.rand(1, 1, 10, device=device)
+        y = torch.rand(1, 1, 4, device=device)
+        expect = F.conv1d(x, y)
+        actual = F.conv1d(x, y, padding='valid')
+        self.assertEqual(expect, actual)
+
+    def test_conv2d_valid_padding(self, device):
+        # Test F.conv2d padding='valid' is the same as no padding
+        x = torch.rand(1, 1, 1, 10, device=device)
+        y = torch.rand(1, 1, 1, 4, device=device)
+        expect = F.conv2d(x, y)
+        actual = F.conv2d(x, y, padding='valid')
+        self.assertEqual(expect, actual)
+
+    def test_conv3d_valid_padding(self, device):
+        # Test F.conv3d padding='valid' is the same as no padding
+        x = torch.rand(1, 1, 1, 1, 10, device=device)
+        y = torch.rand(1, 1, 1, 1, 4, device=device)
+        expect = F.conv3d(x, y)
+        actual = F.conv3d(x, y, padding='valid')
+        self.assertEqual(expect, actual)
+
+    def test_conv1d_same_padding_backward(self, device):
+        # Test F.conv1d gradients work with padding='same'
+        x = torch.rand(1, 1, 12, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 4, device=device, requires_grad=True)
+
+        # Symmetric padding
+        z = F.conv1d(x, y, padding=3, dilation=2)
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv1d(x, y, padding='same', dilation=2)
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+        x.grad, y.grad = None, None
+
+        # Asymmetric padding
+        z = F.conv1d(x, y, padding=2)[..., 1:]
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv1d(x, y, padding='same')
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+
+    def test_conv2d_same_padding_backward(self, device):
+        # Test F.conv2d gradients work with padding='same'
+        x = torch.rand(1, 1, 10, 11, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 4, 5, device=device, requires_grad=True)
+
+        # Symmetric padding
+        z = F.conv2d(x, y, padding=(3, 4), dilation=2)
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv2d(x, y, padding='same', dilation=2)
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+        x.grad, y.grad = None, None
+
+        # Asymmetric padding
+        y = torch.rand(1, 1, 4, 4, device=device, requires_grad=True)
+        z = F.conv2d(x, y, padding=2)[..., 1:, 1:]
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv1d(x, y, padding='same')
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+
+    def test_conv3d_same_padding_backward(self, device):
+        # Test F.conv3d gradients work with padding='same'
+        x = torch.rand(1, 1, 1, 11, 12, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 1, 2, 5, device=device, requires_grad=True)
+
+        # Symmetric padding
+        z = F.conv3d(x, y, padding=(0, 1, 4), dilation=2)
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv3d(x, y, padding='same', dilation=2)
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+        x.grad, y.grad = None, None
+
+        # Asymmetric padding
+        y = torch.rand(1, 1, 1, 4, 4, device=device, requires_grad=True)
+        z = F.conv3d(x, y, padding=2)[..., 1:, 1:]
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv3d(x, y, padding='same')
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+
+    def test_conv1d_valid_padding_backward(self, device):
+        # Test F.conv1d gradients work with padding='valid'
+        x = torch.rand(1, 1, 10, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 4, device=device, requires_grad=True)
+        F.conv1d(x, y, padding=0).sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        F.conv1d(x, y, padding='valid').sum().backward()
+        gx_actual, gy_actual = x.grad, y.grad
+        self.assertEqual(gx_expect, gx_actual)
+        self.assertEqual(gy_expect, gy_actual)
+
+    def test_conv2d_valid_padding_backward(self, device):
+        # Test F.conv2d gradients work with padding='valid'
+        x = torch.rand(1, 1, 1, 10, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 1, 4, device=device, requires_grad=True)
+        F.conv2d(x, y, padding=0).sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        F.conv2d(x, y, padding='valid').sum().backward()
+        gx_actual, gy_actual = x.grad, y.grad
+        self.assertEqual(gx_expect, gx_actual)
+        self.assertEqual(gy_expect, gy_actual)
+
+    def test_conv3d_valid_padding_backward(self, device):
+        # Test F.conv3d gradients work with padding='valid'
+        x = torch.rand(1, 1, 1, 1, 10, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 1, 1, 4, device=device, requires_grad=True)
+        F.conv3d(x, y, padding=0).sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        F.conv3d(x, y, padding='valid').sum().backward()
+        gx_actual, gy_actual = x.grad, y.grad
+        self.assertEqual(gx_expect, gx_actual)
+        self.assertEqual(gy_expect, gy_actual)
+
     def test_Dropout(self, device):
         input = torch.empty(1000)
         self._test_dropout(nn.Dropout, device, input)
@@ -12076,6 +12647,22 @@ class TestNNDeviceType(NNTestCase):
             helper((2, 3, 6, 6), mf)
 
     @onlyOnCPUAndCUDA
+    def test_adaptive_avg_pool3d_output_size_one(self, device):
+        x = torch.randn((2, 3, 6, 6, 6) , dtype=torch.float, device=device, requires_grad=True)
+
+        net = torch.nn.AdaptiveAvgPool3d(1)
+        out = net(x)
+        ref_out = x.contiguous().mean((-1, -2, -3)).view(out.shape)
+
+        out.sum().backward()    # make sure it doesn't crash
+
+        self.assertEqual(out, ref_out)
+        self.assertTrue(out.is_contiguous())
+        c = out.size(1)
+        self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
+
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
     def test_adaptive_pooling_no_suppot_input(self, device, dtype):
         for numel in (2, 3):
@@ -12285,15 +12872,6 @@ class TestNNDeviceType(NNTestCase):
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))
 
-        def fn_wrapper(device):
-            def padding_fn(weight):
-                inp = torch.tensor([[0, 1, 1, 2], [1, 1, 0, 2]], dtype=torch.long).to(device)
-                return torch.nn.functional.embedding(inp, weight, padding_idx=1)
-            return padding_fn
-
-        fn = fn_wrapper(device)
-        _assertGradAndGradgradChecks(self, fn, (weight, ))
-
     def test_embedding_scalar_weight_error(self, device):
         indices = torch.rand(2, 2, device=device).long()
         weight = torch.tensor(1.0, device=device)
@@ -12366,6 +12944,15 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[0][2].sum(), 0)
         self.assertEqual(output[1][1].sum(), 0)
 
+        # change padding vector
+        padding_vector = torch.ones(20, dtype=dtype, device=device)
+        embedding = nn.Embedding(10, 20, padding_idx=2, sparse=True).to(device, dtype)
+        with torch.no_grad():
+            embedding.weight[2] = padding_vector
+        input = torch.tensor([0, 2], dtype=torch.long).to(device)
+        output = embedding(input)
+        self.assertEqual(output[1], padding_vector)
+
         # out of bounds check for padding_idx
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=25)
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=-25)
@@ -12389,6 +12976,252 @@ class TestNNDeviceType(NNTestCase):
                 after = (embedding.weight + embedding.weight.grad)[padding_idx]
                 embedding.zero_grad()
                 self.assertEqual(after, pre)
+
+    # Check correctness of torch.nn.functional.embedding_bag forward and
+    # backward functions with padding_idx, given a 1D input separated into bags
+    # with an offset array. Compare against an equivalent 2D input that uses
+    # padding indices to fill in the gaps indicated by the offset array
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfCUDA(torch.half, torch.bfloat16)
+    def test_embedding_bag_1D_padding_idx(self, device, dtype):
+        num_features = 3
+        max_indices_per_bag = 10
+        num_bags = 10
+        num_words = 100
+
+        def gen_1D_indices_offsets(include_last_offset, allpad):
+            indices = []
+            offsets = []
+            cur_offset = 0
+
+            # Make one bag full and one bag empty, for extra coverage
+            empty_bag = random.randint(0, num_bags - 1)
+            full_bag = empty_bag
+            while full_bag == empty_bag:
+                full_bag = random.randint(0, num_bags - 1)
+
+            for bag in range(num_bags):
+                offsets.append(cur_offset)
+                if bag == full_bag:
+                    bag_size = max_indices_per_bag
+                elif bag == empty_bag:
+                    bag_size = 0
+                else:
+                    bag_size = random.randint(1, max_indices_per_bag - 1)
+                indices += [1 if allpad else random.randint(0, num_words - 1) for _ in range(bag_size)]
+                cur_offset += bag_size
+
+            # embedding_bag requires first entry of offsets to be 0
+            assert offsets[0] == 0
+
+            indices = torch.tensor(indices, device=device)
+
+            if include_last_offset:
+                offsets.append(indices.size(0))
+
+            offsets = torch.tensor(offsets, device=device)
+
+            return indices, offsets
+
+        # Convert a 1-D indices-offsets representation into 2-D. Fill any empty
+        # indices with padding_idx
+        def gen_2D_indices_from_1D(indices_1D, offsets, include_last_offset, padding_idx):
+            assert offsets[0] == 0
+            if include_last_offset:
+                offsets = offsets[:-1]
+            indices_2D = torch.empty(num_bags, max_indices_per_bag, device=device, dtype=torch.long)
+            for bag in range(num_bags):
+                # Determine the start and end position of the bag within indices_1D
+                start = offsets[bag]
+                end = len(indices_1D) if bag + 1 == num_bags else offsets[bag + 1]
+                end = min(len(indices_1D), end)
+
+                # Pull out the bag's indices from indices_1D, and fill any
+                # remaining space with padding indices
+                indices_in_bag = []
+                for item_pos in range(0, max_indices_per_bag):
+                    if (start + item_pos) < end:
+                        indices_in_bag.append(indices_1D[start + item_pos])
+                    else:
+                        indices_in_bag.append(padding_idx)
+                indices_2D[bag] = torch.tensor(indices_in_bag, device=device)
+
+            return indices_2D
+
+        test_cases = product(['max', 'mean', 'sum'], [False, True], [False, True], [False, True])
+
+        for mode, sparse, include_last_offset, allpad in test_cases:
+            # Max sparse and bfloat16 are not supported
+            if mode == 'max':
+                if sparse or (dtype == torch.bfloat16):
+                    continue
+            indices_1D, offsets = gen_1D_indices_offsets(include_last_offset, allpad)
+            for padding_idx_1D in list(set(indices_1D.tolist())) + [None]:
+                msg = (
+                    f"mode: '{mode}', sparse: {sparse}, include_last_offset: {include_last_offset}, "
+                    f"padding_idx_1D: {padding_idx_1D}")
+
+                # If 1D input does not use a padding index, we still need one for the 2D input,
+                # so we can add one dummy word to the weights to act as the padded word
+                padding_idx_2D = padding_idx_1D if padding_idx_1D is not None else num_words
+                num_words_with_padding = num_words if padding_idx_1D is not None else num_words + 1
+
+                indices_2D = gen_2D_indices_from_1D(
+                    indices_1D,
+                    offsets,
+                    include_last_offset,
+                    padding_idx_2D)
+
+                weights = torch.randn(
+                    num_words_with_padding,
+                    num_features,
+                    dtype=dtype,
+                    device=device,
+                    requires_grad=True)
+                weights_check = weights.clone().detach().requires_grad_(True)
+
+                bag = torch.nn.functional.embedding_bag(
+                    indices_1D,
+                    weights,
+                    offsets,
+                    padding_idx=padding_idx_1D,
+                    mode=mode,
+                    sparse=sparse,
+                    include_last_offset=include_last_offset)
+
+                bag_check = torch.nn.functional.embedding_bag(
+                    indices_2D,
+                    weights_check,
+                    padding_idx=padding_idx_2D,
+                    mode=mode,
+                    sparse=sparse)
+                self.assertEqual(bag, bag_check, msg=msg)
+
+                bag.sum().backward()
+                bag_check.sum().backward()
+
+                # Sometimes, half dtype gradients mismatch by a greater amount
+                # than other dtypes
+                if dtype in [torch.half, torch.bfloat16]:
+                    atol = 0.01
+                    rtol = 0.01
+                else:
+                    atol = None
+                    rtol = None
+                self.assertEqual(weights.grad, weights_check.grad, msg=msg, atol=atol, rtol=rtol)
+
+    # Check correctness of torch.nn.functional.embedding_bag forward and
+    # backward functions with padding_idx, given a 2D indices input. Compare
+    # against torch.nn.functional.embedding followed by a reduction.
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfCUDA(torch.half, torch.bfloat16)
+    def test_embedding_bag_2D_padding_idx(self, device, dtype):
+        # Use a Python implementation of embedding_bag with padding_idx support
+        # to check torch.nn.functional.embedding_bag correctness
+        def embedding_bag_check(indices, weights, mode, sparse, padding_idx):
+            assert padding_idx is not None
+            embedding = torch.nn.functional.embedding(
+                indices,
+                weights,
+                padding_idx=padding_idx,
+                sparse=sparse)
+
+            reduction_dim = indices.dim() - 1
+
+            if mode == 'sum' or mode == 'mean':
+                # We must avoid including elements at padding_idx in the
+                # sum/mean, so multiply those elements by 0, and multiply
+                # all other elements by 1
+                per_sample_weights = indices.ne(padding_idx).to(dtype).unsqueeze(-1)
+                res = embedding.mul(per_sample_weights).sum(dim=reduction_dim)
+
+                if mode == 'mean':
+                    weights_sum = per_sample_weights.sum(dim=reduction_dim)
+                    res = res.div(weights_sum)
+
+            elif mode == 'max':
+                # We must avoid allowing elements at padding_idx to be chosen
+                # as the max, so set those elements to negative infinity
+                res = embedding.masked_fill(
+                    indices.unsqueeze(-1) == padding_idx, -float('inf')
+                ).amax(dim=reduction_dim)
+
+            else:
+                raise RuntimeError(f"mode '{mode}' is not available")
+
+            # If a row is all padding, set its corresponding result row to 0.
+            # This is needed because the above mean and max mode
+            # implementations set these elements to nan and -inf, respectively
+            if mode in ['mean', 'max']:
+                res = res.masked_fill(
+                    indices.eq(padding_idx).all(dim=-1).unsqueeze(-1),
+                    0)
+
+            return res
+
+        num_features = 3
+        num_words = 10
+        indices_dim1 = 10
+
+        for mode, sparse, allpad, indices_dim0 in product(['max', 'mean', 'sum'], [False, True], [False, True], [1, 10]):
+            # Max sparse and bfloat16 are not supported
+            if mode == 'max':
+                if sparse or (dtype == torch.bfloat16):
+                    continue
+
+            if allpad:
+                indices = torch.empty(indices_dim0, indices_dim1, dtype=torch.long, device=device).fill_(1)
+            else:
+                indices = torch.randint(0, num_words, (indices_dim0, indices_dim1), device=device)
+
+                if indices_dim0 > 1:
+                    # Fill one row with duplicate index so we can test with a fully
+                    # padded row
+                    duplicate_row = random.randint(0, indices_dim0 - 1)
+                    indices[duplicate_row] = indices[duplicate_row][0]
+
+            for padding_idx in list(set(indices.flatten(0, -1).tolist())):
+                weights = torch.randn(num_words, num_features, dtype=dtype, device=device, requires_grad=True)
+                weights_check = weights.clone().detach().requires_grad_(True)
+
+                msg = (
+                    f"mode: '{mode}', sparse: {sparse}, padding_idx: {padding_idx}, "
+                    f"allpad: {allpad}, indices.size(): {indices.size()}")
+
+                # Check forward with a Python implementation of padding_idx embedding_bag
+                bag_check = embedding_bag_check(
+                    indices,
+                    weights_check,
+                    mode,
+                    sparse,
+                    padding_idx)
+                bag = torch.nn.functional.embedding_bag(
+                    indices,
+                    weights,
+                    padding_idx=padding_idx,
+                    mode=mode,
+                    sparse=sparse)
+
+                self.assertEqual(bag, bag_check, msg=msg)
+
+                bag_check.sum().backward()
+                grad_check = weights_check.grad
+
+                bag.sum().backward()
+                grad = weights.grad
+
+                # Sometimes, half dtype gradients mismatch by a greater amount
+                # than other dtypes
+                if dtype in [torch.half, torch.bfloat16]:
+                    atol = 0.01
+                    rtol = 0.01
+                else:
+                    atol = None
+                    rtol = None
+                self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
 
     # Test fails on Vg20
     @skipCUDAIfRocm
@@ -13050,6 +13883,19 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out_y, out_x.to(device), msg=test)
 
     @onlyCUDA
+    @largeTensorTest('6GB')
+    def test_pool3d_large_size_int64(self, device):
+        # See https://github.com/pytorch/pytorch/issues/52822
+        x = torch.randn(70, 32, 100, 100, 100, dtype=torch.half, device=device)
+        y = torch.nn.functional.max_pool3d(x, 5)
+        torch.cuda.synchronize()
+
+        ref_x = x.cpu().float()  # max_pool3d_cpu is not implemented for half
+        ref_y = torch.nn.functional.max_pool3d(ref_x, 5)
+
+        self.assertEqual(y, ref_y, exact_dtype=False)
+
+    @onlyCUDA
     def test_AvgPool3d_backward_after_cat_dim1_device(self, device):
         # x has to have batch_size 1 to test contiguous checks
         x = torch.randn(1, 3, 4, 4, 4, device=device, requires_grad=True)
@@ -13147,7 +13993,7 @@ class TestNNDeviceType(NNTestCase):
                 length = next_offset - offset
                 if length == 0:
                     bags.append(
-                        torch.Tensor([0] * weight.size(1)).to(
+                        torch.tensor([0] * weight.size(1)).to(
                             dtype=embeddings.dtype, device=embeddings.device
                         )
                     )
@@ -13168,7 +14014,7 @@ class TestNNDeviceType(NNTestCase):
                 length = next_offset - offset
                 if length == 0:
                     bags.append(
-                        torch.Tensor([0] * weight.size(1)).to(
+                        torch.tensor([0] * weight.size(1)).to(
                             dtype=embeddings.dtype, device=embeddings.device
                         )
                     )
@@ -14050,7 +14896,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
 
     def test_empty_dropout(self, device):
-        x = torch.Tensor([]).to(device)
+        x = torch.tensor([]).to(device)
         out = torch.nn.functional.dropout(x)
         self.assertEqual(out.size(), x.size())
 
@@ -14137,16 +14983,10 @@ class TestNNDeviceType(NNTestCase):
             [False, [2, 1, 3, 2, 10, 5, 3]],
         ]
 
-        rocm_error_msg = "LSTM with projections is not supported with MIOpen"
         for enforce_sorted, seq_lens, in tests:
             for use_default_hiddens in (True, False):
                 for proj_size in [0, 2]:
-                    # LSTM with projections is not supported with MIOpen
-                    if device != 'cpu' and dtype == torch.float32 and TEST_WITH_ROCM and proj_size > 0:
-                        with self.assertRaisesRegex(RuntimeError, rocm_error_msg):
-                            check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
-                    else:
-                        check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
+                    check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
 
     def _test_batchnorm_update_stats(self, device, dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
@@ -14255,7 +15095,13 @@ class TestNNDeviceType(NNTestCase):
             ref_out.backward(ref_grad)
 
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(input.grad.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(conv.weight.grad.is_contiguous(memory_format=torch.channels_last))
+
             self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(ref_input.grad.is_contiguous())
+            self.assertTrue(ref_conv.weight.grad.is_contiguous())
+
             self.assertEqual(out, ref_out, exact_dtype=False)
             self.assertEqual(conv.weight.grad, ref_conv.weight.grad, exact_dtype=False)
             self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
@@ -14265,6 +15111,54 @@ class TestNNDeviceType(NNTestCase):
         helper(2, 8, 4, 4, out_channels=8, kernel_size=3, groups=8)
         helper(1, 16, 56, 56, out_channels=16, kernel_size=3, groups=1)
         helper(1, 16, 56, 56, out_channels=16, kernel_size=3, groups=16)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfCudnnVersionLessThan(8005)
+    @dtypes(torch.half, torch.float)
+    def test_conv_cudnn_ndhwc(self, device, dtype):
+        def helper(n, c, d, h, w, out_channels, kernel_size, groups):
+            input = torch.randint(-2, 2, (n, c, d, h, w), dtype=dtype, device=device)\
+                .to(memory_format=torch.channels_last_3d)
+            input.requires_grad_()
+            conv = nn.Conv3d(c, out_channels, kernel_size, groups=groups)\
+                .to(device='cuda', dtype=dtype, memory_format=torch.channels_last_3d)
+            for p in conv.parameters():
+                p.data = torch.randint_like(p, -2, 2)
+
+            # use FP64 channels-first conv as reference
+            ref_input = input.detach().clone().contiguous().double().requires_grad_()
+            ref_conv = nn.Conv3d(c, out_channels, kernel_size, groups=groups)
+            # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
+            ref_conv.load_state_dict(conv.state_dict())
+            ref_conv = ref_conv.to(device='cuda', dtype=torch.double, memory_format=torch.contiguous_format)
+
+            out = conv(input)
+            ref_out = ref_conv(ref_input)
+
+            grad = torch.randint_like(out, -2, 2)
+            ref_grad = grad.detach().clone().double().contiguous()
+
+            out.backward(grad)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertTrue(input.grad.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertTrue(conv.weight.grad.is_contiguous(memory_format=torch.channels_last_3d))
+
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(ref_input.grad.is_contiguous())
+            self.assertTrue(ref_conv.weight.grad.is_contiguous())
+
+            self.assertEqual(out, ref_out, exact_dtype=False)
+            self.assertEqual(conv.weight.grad, ref_conv.weight.grad, exact_dtype=False)
+            self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
+            self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
+
+        helper(2, 8, 4, 4, 4, out_channels=4, kernel_size=3, groups=1)
+        helper(2, 8, 4, 4, 4, out_channels=8, kernel_size=3, groups=8)
+        helper(1, 16, 18, 18, 18, out_channels=16, kernel_size=3, groups=1)
+        helper(1, 16, 18, 18, 18, out_channels=16, kernel_size=3, groups=16)
 
     def _run_conv(self, layer, device, inp, grad, ref_conv, ref_input, ref_out,
                   input_format, weight_format, grad_format, output_format):
@@ -14478,6 +15372,108 @@ class TestNNDeviceType(NNTestCase):
             F.max_pool3d(x, kernel_size=(1, 1, 1)).sum().backward()
             self.assertTrue(torch.allclose(x.grad, torch.ones_like(x.grad)))
 
+    # Check that clip_grad_norm_ raises an error if the total norm of the
+    # parameters' gradients is non-finite
+    def test_clip_grad_norm_error_if_nonfinite(self, device):
+        norms_pos = [0.1, 1, 2, 3.5, inf]
+        norms_neg = [-0.1, -1, -2, -3.5]
+        norms_except_0 = norms_pos + norms_neg
+        norms_all = norms_except_0 + [0]
+
+        # Each entry in test_cases has the following values, in this order:
+        #
+        # grad_only_one_elem    If True, only one element of the parameter's
+        #                       gradient is set to the scalar grad, and the
+        #                       rest of the elements are 0. If False, all grad
+        #                       elements are equal to the scalar.
+        #
+        # prefix_finite_grad_param  If True, prefix a parameter that has a grad
+        #                           of 1.
+        #
+        # scalars           Scalars to use as the parameter's grad, through
+        #                   multiplication
+        #
+        # norms_nonfinite   Norm types that should produce nonfinite total norm
+        #
+        # norms_finite      Norm types that should produce finite total norm
+        test_cases = [
+            # Test errors from an infinite grad
+            (False, False, [inf, -inf], norms_except_0, [0]),
+            (False, True, [inf, -inf], norms_pos, norms_neg + [0]),
+            (True, False, [inf, -inf], norms_pos, norms_neg + [0]),
+            (True, True, [inf, -inf], norms_pos, norms_neg + [0]),
+
+            # Test errors from a NaN grad
+            (False, False, [nan], norms_except_0, [0]),
+            (False, True, [nan], norms_except_0, [0]),
+            (True, False, [nan], norms_except_0, [0]),
+            (True, True, [nan], norms_except_0, [0]),
+
+            # Test a grad that should never error
+            (False, False, [2e22, -2e22], [], norms_all),
+            (False, True, [2e22, -2e22], [], norms_all),
+            (True, False, [2e22, -2e22], [], norms_all),
+            (True, True, [2e22, -2e22], [], norms_all),
+
+            # Test a grad that will overflow to inf for only some norm orders
+            (False, False, [2e200, -2e200], [3.5, 2, -2, -3.5], [inf, 1, 0.1, 0, -1, -0.1]),
+            (False, True, [2e200, -2e200], [3.5, 2], norms_neg + [inf, 1, 0.1, 0]),
+            (True, False, [2e200, -2e200], [3.5, 2], norms_neg + [inf, 1, 0.1, 0]),
+            (True, True, [2e200, -2e200], [3.5, 2], norms_neg + [inf, 1, 0.1, 0]),
+        ]
+
+        def gen_parameters(scalar, grad_only_one_elem, prefix_finite_grad_param):
+            param = torch.ones(10, dtype=torch.float64, device=device, requires_grad=True)
+
+            if grad_only_one_elem:
+                param[1].mul(scalar).sum().backward()
+            else:
+                param.mul(scalar).sum().backward()
+
+            if prefix_finite_grad_param:
+                prefix_param = torch.ones(1, dtype=torch.float64, device=device, requires_grad=True)
+                prefix_param.mul(1).sum().backward()
+                parameters = [prefix_param, param]
+            else:
+                parameters = [param]
+
+            return parameters
+
+        def run_test_case(norm_type, error_if_nonfinite, scalar, grad_only_one_elem, prefix_finite_grad_param, is_norm_nonfinite):
+            msg = (
+                f'norm_type: {norm_type}, ',
+                f'error_if_nonfinite: {error_if_nonfinite}, '
+                f'scalar: {scalar}, '
+                f'grad_only_one_elem: {grad_only_one_elem}, '
+                f'prefix_finite_grad_param: {prefix_finite_grad_param}, '
+                f'is_norm_nonfinite: {is_norm_nonfinite}')
+
+            parameters = gen_parameters(scalar, grad_only_one_elem, prefix_finite_grad_param)
+
+            # Should only throw an error if the total norm is expected to be
+            # nonfinite and `error_if_nonfinite=True`
+            if is_norm_nonfinite and error_if_nonfinite:
+                error_msg = f'The total norm of order {float(norm_type)} for gradients'
+
+                grads_before = [p.grad.clone() for p in parameters]
+
+                with self.assertRaisesRegex(RuntimeError, error_msg, msg=msg):
+                    clip_grad_norm_(parameters, 1, norm_type=norm_type, error_if_nonfinite=True)
+
+                # Grad should not change if error is thrown
+                grads_after = [p.grad for p in parameters]
+                self.assertEqual(grads_before, grads_after, msg=msg)
+            else:
+                clip_grad_norm_(parameters, 1, norm_type=norm_type, error_if_nonfinite=error_if_nonfinite)
+
+        for grad_only_one_elem, prefix_finite_grad_param, scalars, norms_nonfinite, norms_finite in test_cases:
+            for error_if_nonfinite in [False, True]:
+                for norm_type, scalar in product(norms_nonfinite, scalars):
+                    run_test_case(norm_type, error_if_nonfinite, scalar, grad_only_one_elem, prefix_finite_grad_param, True)
+
+                for norm_type, scalar in product(norms_finite, scalars):
+                    run_test_case(norm_type, error_if_nonfinite, scalar, grad_only_one_elem, prefix_finite_grad_param, False)
+
     @onlyCUDA
     @deviceCountAtLeast(2)
     def test_clip_grad_norm_multi_device(self, devices):
@@ -14502,6 +15498,7 @@ class TestNNDeviceType(NNTestCase):
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
+    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_elu_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -14509,26 +15506,31 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.elu_(x)
 
+    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_hardswish_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.hardswish(x, inplace=True)
 
+    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_silu_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.silu(x, inplace=True)
 
+    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_softplus_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.softplus(x, out=x)
 
+    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_softshrink_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.softshrink(x, out=x)
 
+    @expectedFailureMeta  # https://github.com/pytorch/pytorch/issues/54897
     def test_leaky_relu_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
@@ -14663,7 +15665,7 @@ class TestModuleGlobalHooks(TestCase):
             self.assertTrue(isinstance(output, torch.Tensor))
             self.assertTrue(isinstance(h_module, module))
             self.assertEqual(input[0], torch.ones(5, 5))
-            self.assertEqual(output, torch.Tensor(5, 5).fill_(1 / (1 + 1 / math.e)))
+            self.assertEqual(output, torch.empty(5, 5).fill_(1 / (1 + 1 / math.e)))
             counter['forwards'] += inc
 
         def bw_hook(inc, h_module, grad_input, grad_output):
