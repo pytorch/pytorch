@@ -32,14 +32,18 @@ from .gen_inplace_or_view_type import (
     ASSIGN_RETURN_VALUE, gen_formals,
 )
 
-from tools.codegen.api.types import *
-from tools.codegen.api.autograd import *
+from tools.codegen.api.types import Binding, DispatcherSignature
+from tools.codegen.api.autograd import (
+    DifferentiableInput, NativeFunctionWithDifferentiabilityInfo,
+    SavedAttribute, dispatch_strategy, gen_differentiable_outputs,
+    is_differentiable)
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
+                                 SelfArgument, TensorOptionsArguments)
 from typing import Callable, List, Optional, Sequence, Union
 
 # We don't set or modify grad_fn on these methods. Generally, they return
