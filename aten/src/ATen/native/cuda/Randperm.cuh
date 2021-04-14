@@ -22,6 +22,8 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
   int island_size = 0;
   while ((keys[tid + ++island_size] & mask) == (keys[tid] & mask));
 
+  printf("tid = %d, island_size = %d\n", tid, island_size);
+
   // do random permutation inside each island.
   data += tid;
   auto seeds = at::cuda::philox::unpack(philox_args);
