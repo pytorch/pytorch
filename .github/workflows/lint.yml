@@ -23,6 +23,10 @@ jobs:
         run: cd .circleci && ./ensure-consistency.py
       - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
         run: .github/scripts/ensure_consistent_workflows.py
+      - name: Lint native_functions.yaml
+        run: |
+          pip install ruamel.yaml==0.17.4
+          .github/scripts/lint_native_functions.py
       - name: ShellCheck
         # https://github.com/koalaman/shellcheck/tree/v0.7.1#installing-a-pre-compiled-binary
         run: |
