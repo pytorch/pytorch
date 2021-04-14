@@ -60,7 +60,7 @@ def get_lstm_mod_weights(mod: nn.Module) -> List[torch.Tensor]:
 def get_conv_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
     # TODO(future PR): docblock
     # TODO(future PR): handle non standard weights (i.e. after reshape, etc)
-    if node.target in (F.conv2d, F.conv3d):
+    if node.target in (F.conv1d, F.conv2d, F.conv3d):
         # traverse backwards from the weight arg, accounting for any observers
         weight_arg_node = node.args[1]
         assert isinstance(weight_arg_node, Node)
@@ -70,7 +70,7 @@ def get_conv_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
         weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore
         return weight.detach()
     else:
-        assert node.target in (toq.conv2d, toq.conv3d)
+        assert node.target in (toq.conv1d, toq.conv2d, toq.conv3d)
         # qconv state is arg 1
         qconv_state_node = node.args[1]
         assert isinstance(qconv_state_node, Node)
@@ -138,6 +138,8 @@ def extract_weight_from_node(
         # TODO(future PR): other function types
         related_to_linear = node.target in (F.linear,) or \
             (node.target, F.linear) in type_a_related_to_b
+        related_to_conv1d = node.target in (F.conv1d,) or \
+            (node.target, F.conv1d) in type_a_related_to_b
         related_to_conv2d = node.target in (F.conv2d,) or \
             (node.target, F.conv2d) in type_a_related_to_b
         related_to_conv3d = node.target in (F.conv3d,) or \
@@ -153,7 +155,7 @@ def extract_weight_from_node(
                 'ref_node_name': node.name,
                 'index_within_arg': 0,
             }
-        elif (related_to_conv2d or related_to_conv3d):
+        elif (related_to_conv1d or related_to_conv2d or related_to_conv3d):
             weight = get_conv_fun_weight(node, gm)
             return {
                 'type': res_type,
