@@ -127,7 +127,7 @@ tasks.whenTaskAdded { task ->
 def addFolderToAarTask(taskName, aarPath, folderPath, folderPathInAar) {
   return tasks.register(taskName) {
     doLast {
-      addFolderToAar(taskName, aarPath, folderPath, folderPathInAar) 
+      addFolderToAar(taskName, aarPath, folderPath, folderPathInAar)
     }
   }
 }
