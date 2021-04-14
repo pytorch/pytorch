@@ -262,8 +262,8 @@ Operation createUnaryOp(
     TORCH_INTERNAL_ASSERT(
         a_it.get_desc().get_size() % elementSize(a.scalar_type()) == 0);
     auto nelem = a_it.get_desc().get_size() / elementSize(a.scalar_type());
-    auto out_aten =
-        at::from_blob(out_raw_data, {nelem}, a_options_with_strided);
+    auto out_aten = at::from_blob(
+        out_raw_data, {static_cast<int64_t>(nelem)}, a_options_with_strided);
     aten_op(out_aten, in_aten);
     push(stack, out);
   };
