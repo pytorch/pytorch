@@ -138,6 +138,10 @@ class BinaryOpRelu(torch.nn.Module):
         x = self.relu(x)
         return x
 
+@torch.fx.wrap
+def _user_func_with_complex_return_type(x):
+    return list(torch.split(x, 1, 1))
+
 class TestFuseFx(QuantizationTestCase):
     def test_fuse_conv_bn_relu(self):
         class M(torch.nn.Module):
@@ -291,6 +295,20 @@ class TestQuantizeFx(QuantizationTestCase):
         is_dynamic, ModuleClass, module_constructor_inputs,
         inputs, quantized_node, weight_prepack_op
         """
+        class Conv1d(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+                self.stride = 1
+                self.padding = 0
+                self.dilation = 1
+                self.groups = 1
+
+            def forward(self, x):
+                return F.conv1d(x, self.weight, None, self.stride, self.padding, self.dilation, self.groups)
+
+        conv1d_input = torch.rand(1, 3, 224)
+        conv1d_weight = torch.rand(3, 3, 3)
 
         class Conv2d(torch.nn.Module):
             def __init__(self, weight):
@@ -352,6 +370,14 @@ class TestQuantizeFx(QuantizationTestCase):
         linear_module_input = torch.rand(8, 5)
 
         tests = [
+            (
+                False,
+                Conv1d,
+                (conv1d_weight,),
+                (conv1d_input,),
+                ns.call_function(torch.ops.quantized.conv1d),
+                ns.call_function(torch.ops.quantized.conv1d_prepack),
+            ),
             (
                 False,
                 Conv2d,
@@ -1768,7 +1794,13 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = x.view(dims_list)
                 return x
 
-        for cls in (M1, M2):
+        class M3(torch.nn.Module):
+            def forward(self, x):
+                shape = x.shape
+                x = x.view(shape)
+                return x
+
+        for cls in (M1, M2, M3):
             m = cls().eval()
             m(torch.rand(4, 4, 4, 4))
             qconfig_dict = {'': torch.quantization.default_qconfig}
@@ -2056,6 +2088,34 @@ class TestQuantizeFx(QuantizationTestCase):
                 "mods1_1_scale_0", "mods1_1_zero_point_0"]:
             self.assertTrue(hasattr(m, attr_name))
 
+    def test_no_obs_between_unmatched_node_and_copy_node(self):
+        """
+        Verifies that an observer is not inserted between an unmatched
+        node and a node matched to CopyNodeQuantizeHandler.  This is done
+        because observers require activations to be Tensors, and there is
+        no guarantee that an output of an unmatched node is a Tensor.
+        """
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = _user_func_with_complex_return_type(x)
+                x1 = x[0] + 1
+                return x1, x[1]
+
+        m = M().eval()
+
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        # if an observer is inserted after _user_func_with_complex_return_type,
+        # the following call will fail
+        mp(torch.randn(4, 4, 4, 4))
+        mc = convert_fx(mp)
+        mc(torch.randn(4, 4, 4, 4))
+
     def test_fold_quant_dequant(self):
         """ Test that the sequence of quant-dequant nodes in the
             graph, get folded and we erase the extra dequant nodes.
@@ -2304,7 +2364,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # is unfused
                 linear_fun: 1,
                 # activation, weight, bias and output
-                ns.call_method("to"): 3 + int(use_bias)
+                ns.call_method("to"): 3 + int(use_bias),
+                # TODO: because CopyNode is not handled properly currently, there is
+                # a dequantize that is missing, will need to fix and
+                # remove (- int(not has relu))
+                ns.call_method("dequantize"): 3 + int(use_bias) - int(not has_relu)
             }
             self.checkGraphModeFxOp(
                 model, data, QuantType.DYNAMIC, linear_fun,
