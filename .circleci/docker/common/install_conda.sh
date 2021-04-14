@@ -113,7 +113,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     boto3==1.16.34 \
     coverage \
     hypothesis==4.53.2 \
-    mypy==0.770 \
+    mypy==0.812 \
     tb-nightly
 
   # Update scikit-learn to a python-3.8 compatible version
