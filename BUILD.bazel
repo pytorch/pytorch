@@ -1728,6 +1728,7 @@ cc_library(
         "@foxi",
         "@gloo",
         "@onnx",
+        "@optimizer",
         "@fmt",
     ] + if_cuda(
         [
@@ -1907,6 +1908,7 @@ cc_library(
         ":caffe2_headers",
         "@local_config_python//:python_headers",
         "@onnx",
+        "@optimizer",
     ],
     alwayslink = True,
 )
