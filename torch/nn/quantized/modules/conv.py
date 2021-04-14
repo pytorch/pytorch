@@ -549,7 +549,7 @@ class _ConvTransposeNd(_ConvNd):
         """
         # derived classes override cls._FLOAT_MODULE attribute
         msg = ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-              cls._FLOAT_MODULE.__name__
+              cls._FLOAT_MODULE.__name__  # type: ignore
         assert type(mod) == cls._FLOAT_MODULE, msg
         assert hasattr(mod, 'qconfig'), \
             'Input float module must have qconfig defined.'

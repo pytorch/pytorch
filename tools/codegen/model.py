@@ -5,8 +5,6 @@ from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequenc
 from enum import Enum, auto
 import itertools
 
-from tools.codegen.utils import *
-
 # A little trick from https://github.com/python/mypy/issues/6366
 # for getting mypy to do exhaustiveness checking
 # TODO: put this somewhere else, maybe
@@ -74,6 +72,8 @@ class DispatchKey(Enum):
     MkldnnCPU = auto()
     SparseCPU = auto()
     SparseCUDA = auto()
+    SparseCsrCPU = auto()
+    SparseCsrCUDA = auto()
     SparseHIP = auto()
     SparseXPU = auto()
     NestedTensor = auto()
