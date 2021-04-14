@@ -4,6 +4,7 @@ import numbers
 import typing
 import enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from torch._jit_internal import boolean_dispatched
 
 _manual_overrides : Dict[Callable, List[inspect.Signature]] = {}
 
@@ -133,3 +134,108 @@ def type_matches(signature_type : Any, argument_type : Any):
         return True
 
     return signature_type is argument_type
+
+def normalize_function(
+        target, args, kwargs : Dict[str, Any] = {}, arg_types : Optional[Tuple[Any]] = None,
+        kwarg_types : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    new_kwargs = None
+
+    if target in boolean_dispatched or target.__module__ == 'torch.nn.functional':
+        # if target.__module__ == 'torch.nn.functional':
+        #     import pdb; pdb.set_trace()
+        target_for_analysis = target
+        if target in boolean_dispatched:
+            # HACK: `boolean_dispatch` as used in `torch.nn.functional` makes it so that we have
+            # a 2-way dispatch based on a boolean value. Here we check that the `true` and `false`
+            # branches of the dispatch have exactly the same signature. If they do, use the `true`
+            # branch signature for analysis. Otherwise, leave this un-normalized
+            assert not isinstance(target, str)
+            dispatched = boolean_dispatched[target]
+            if_true, if_false = dispatched['if_true'], dispatched['if_false']
+            if inspect.signature(if_true).parameters != inspect.signature(if_false).parameters:
+                return None
+            target_for_analysis = if_true
+
+        assert callable(target_for_analysis)
+        sig = inspect.signature(inspect.unwrap(target_for_analysis))
+        new_kwargs = _args_kwargs_to_normalized_kwargs(sig, args, kwargs)
+    else:
+        assert callable(target)
+        torch_op_schemas = get_signature_for_torch_op(target)
+        matched_schemas = []
+        if torch_op_schemas:
+            # Iterate through all of the schema until we find one that matches
+            # If one matches, populate `new_kwargs` with the combined args/kwargs
+            # values. If none matches, `new_kwargs` will be None
+            for candidate_signature in torch_op_schemas:
+                try:
+                    candidate_signature.bind(*args, **kwargs)
+                    matched_schemas.append(candidate_signature)
+                except TypeError as e:
+                    continue
+
+            if len(matched_schemas) == 0:
+                # Did not match any schema. Cannot normalize
+                pass
+            elif len(matched_schemas) == 1:
+                # Matched exactly one schema, unambiguous
+                new_kwargs = _args_kwargs_to_normalized_kwargs(matched_schemas[0], args, kwargs)
+            else:
+                if arg_types is not None or kwarg_types is not None:
+                    for candidate_signature in torch_op_schemas:
+                        sig_matches = True
+                        try:
+                            arg_types = arg_types if arg_types else cast(Tuple[Any], ())
+                            kwarg_types = kwarg_types if kwarg_types else {}
+                            bound_types = candidate_signature.bind(*arg_types, **kwarg_types)
+                            for arg_name, arg_type in bound_types.arguments.items():
+                                param = candidate_signature.parameters[arg_name]
+                                sig_matches = sig_matches and type_matches(param.annotation, arg_type)
+                        except TypeError as e:
+                            sig_matches = False
+                        if sig_matches:
+                            new_kwargs = _args_kwargs_to_normalized_kwargs(candidate_signature, args, kwargs)
+                            break
+                else:
+                    # Matched more than one schema. In this situation, the caller must provide the types of
+                    # the arguments of the overload they expect.
+                    schema_printouts = '\n'.join(str(schema) for schema in matched_schemas)
+                    raise RuntimeError(f'Tried to normalize arguments to {torch.typename(target)} but '
+                                       f'the schema match was ambiguous! Please provide argument types to '
+                                       f'the normalize_arguments() call. Available schemas:\n{schema_printouts}')
+    return new_kwargs
+
+def _args_kwargs_to_normalized_kwargs(sig : inspect.Signature, args : Tuple[Any, ...],
+                                      kwargs : Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Given a call target, args, and kwargs, return the arguments normalized into
+    a single kwargs dict, or None if the type signature is not supported by
+    this normalization.
+
+    Args:
+
+        target (inspect.Signature): Signature object for the target
+        args (Tuple): Arguments that appear at the callsite for `target`
+        kwargs (Dict): Keyword arugments that appear at the callsite for `target`
+
+    Returns:
+
+        Optional[Dict]: Normalized kwargs for `target`, or `None` if this target is not
+            supported
+    """
+
+    # Don't currently support positional-only
+    # or varargs (*args, **kwargs) signatures
+    supported_parameter_types = {
+        inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
+    if any(p.kind not in supported_parameter_types for p in sig.parameters.values()):
+        return None
+
+    bound_args = sig.bind(*args, **kwargs)
+    bound_args.apply_defaults()
+
+    new_kwargs : Dict[str, Any] = {}
+    for param in sig.parameters:
+        new_kwargs[param] = bound_args.arguments[param]
+
+    return new_kwargs
