@@ -375,36 +375,23 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
   static BenchmarkCache<algo_t>& cache() { return fwd_algos; }
   static BenchmarkCache<size_t>& wsscache() { return fwd_wssizes; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
+  static perf_t findAlgorithm(const ConvolutionArgs& args) {
     int perf_count;
     perf_t perf_results;
-    if (!benchmark) {
-      MIOPEN_CHECK(miopenConvolutionForwardGetSolution(
-          args.handle,
-          args.idesc.desc(),
-          args.wdesc.desc(),
-          args.cdesc.desc(),
-          args.odesc.desc(),
-          1,        // just return the fastest
-          &perf_count,
-          &perf_results));
-    }
-    else {
-      size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
-      Workspace ws(max_ws_size);
-      MIOPEN_CHECK(miopenFindConvolutionForwardAlgorithm(
-          args.handle,
-          args.idesc.desc(), args.input.data_ptr(),
-          args.wdesc.desc(), args.weight.data_ptr(),
-          args.cdesc.desc(),
-          args.odesc.desc(), args.output.data_ptr(),
-          1,        // just return the fastest
-          &perf_count,
-          &perf_results,
-          ws.data,
-          ws.size,
-          false));
-    }
+    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
+    Workspace ws(max_ws_size);
+    MIOPEN_CHECK(miopenFindConvolutionForwardAlgorithm(
+        args.handle,
+        args.idesc.desc(), args.input.data_ptr(),
+        args.wdesc.desc(), args.weight.data_ptr(),
+        args.cdesc.desc(),
+        args.odesc.desc(), args.output.data_ptr(),
+        1,        // just return the fastest
+        &perf_count,
+        &perf_results,
+        ws.data,
+        ws.size,
+        false));
     return perf_results;
   }
 };
@@ -418,36 +405,23 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
   static BenchmarkCache<algo_t>& cache() { return bwd_data_algos; }
   static BenchmarkCache<size_t>& wsscache() { return bwd_data_wssizes; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
+  static perf_t findAlgorithm(const ConvolutionArgs& args) {
     int perf_count;
     perf_t perf_results;
-    if (!benchmark) {
-      MIOPEN_CHECK(miopenConvolutionBackwardDataGetSolution(
-          args.handle,
-          args.odesc.desc(),
-          args.wdesc.desc(),
-          args.cdesc.desc(),
-          args.idesc.desc(),
-          1,      // just return the fastest
-          &perf_count,
-          &perf_results));
-    }
-    else {
-      size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
-      Workspace ws(max_ws_size);
-      MIOPEN_CHECK(miopenFindConvolutionBackwardDataAlgorithm(
-          args.handle,
-          args.odesc.desc(), args.output.data_ptr(),
-          args.wdesc.desc(), args.weight.data_ptr(),
-          args.cdesc.desc(),
-          args.idesc.desc(), args.input.data_ptr(),
-          1,      // just return the fastest
-          &perf_count,
-          &perf_results,
-          ws.data,
-          ws.size,
-          false));
-    }
+    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
+    Workspace ws(max_ws_size);
+    MIOPEN_CHECK(miopenFindConvolutionBackwardDataAlgorithm(
+        args.handle,
+        args.odesc.desc(), args.output.data_ptr(),
+        args.wdesc.desc(), args.weight.data_ptr(),
+        args.cdesc.desc(),
+        args.idesc.desc(), args.input.data_ptr(),
+        1,      // just return the fastest
+        &perf_count,
+        &perf_results,
+        ws.data,
+        ws.size,
+        false));
     return perf_results;
   }
 };
@@ -461,36 +435,23 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
   static BenchmarkCache<algo_t>& cache() { return bwd_filter_algos; }
   static BenchmarkCache<size_t>& wsscache() { return bwd_filter_wssizes; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
+  static perf_t findAlgorithm(const ConvolutionArgs& args) {
     int perf_count;
     perf_t perf_results;
-    if (!benchmark) {
-      MIOPEN_CHECK(miopenConvolutionBackwardWeightsGetSolution(
-          args.handle,
-          args.odesc.desc(),
-          args.idesc.desc(),
-          args.cdesc.desc(),
-          args.wdesc.desc(),
-          1,      // just return the fastest
-          &perf_count,
-          &perf_results));
-    }
-    else {
-      size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
-      Workspace ws(max_ws_size);
-      MIOPEN_CHECK(miopenFindConvolutionBackwardWeightsAlgorithm(
-          args.handle,
-          args.odesc.desc(), args.output.data_ptr(),
-          args.idesc.desc(), args.input.data_ptr(),
-          args.cdesc.desc(),
-          args.wdesc.desc(), args.weight.data_ptr(),
-          1,      // just return the fastest
-          &perf_count,
-          &perf_results,
-          ws.data,
-          ws.size,
-          false));
-    }
+    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
+    Workspace ws(max_ws_size);
+    MIOPEN_CHECK(miopenFindConvolutionBackwardWeightsAlgorithm(
+        args.handle,
+        args.odesc.desc(), args.output.data_ptr(),
+        args.idesc.desc(), args.input.data_ptr(),
+        args.cdesc.desc(),
+        args.wdesc.desc(), args.weight.data_ptr(),
+        1,      // just return the fastest
+        &perf_count,
+        &perf_results,
+        ws.data,
+        ws.size,
+        false));
     return perf_results;
   }
 };
