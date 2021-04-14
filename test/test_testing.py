@@ -5,9 +5,7 @@ import itertools
 import math
 import random
 import re
-from typing import Any, Callable, Iterator, List, Tuple, Type
-
-import numpy as np
+from typing import Any, Callable, Iterator, List, Mapping, Sequence, Tuple, Type, TypeVar
 
 import torch
 
@@ -692,6 +690,9 @@ class TestFrameworkUtils(TestCase):
                 self.assertEqual(sorted_tests, sorted_shard_tests)
 
 
+T = TypeVar("T", torch.Tensor, Sequence[torch.Tensor], Mapping[Any, torch.Tensor])
+
+
 class TestAsserts(TestCase):
     def get_assert_fns(self) -> List[Callable]:
         """Gets assert functions to be tested.
@@ -701,16 +702,16 @@ class TestAsserts(TestCase):
         """
         return [torch.testing.assert_equal, torch.testing.assert_close]
 
-    def make_inputs(self, a: Any, b: Any) -> List[Tuple[Any, Any]]:
-        """Makes inputs for assert functions based on two examples.
+    def make_inputs(self, a: torch.Tensor, b: torch.Tensor) -> List[Tuple[T, T]]:
+        """Makes inputs for assert functions based on two example tensors.
 
         Args:
-            a (Any): First input.
-            b (Any): Second input.
+            a (torch.Tensor): First tensor.
+            b (torch.Tensor): Second tensor.
 
         Returns:
-            List[Tuple[Any, Any]]: Pair of example inputs, as well as the example inputs wrapped in sequences
-            (:class:`tuple`, :class:`list`), and mappings (:class:`dict`, :class:`~collections.OrderedDict`).
+            List[Tuple[T, T]]: Pairs of tensors, tensor sequences (:class:`tuple`, :class:`list`), and tensor mappings
+                (:class:`dict`, :class:`~collections.OrderedDict`)
         """
         return [
             (a, b),
@@ -721,7 +722,7 @@ class TestAsserts(TestCase):
         ]
 
     def assert_fns_with_inputs(self, a: torch.Tensor, b: torch.Tensor) -> Iterator[Callable]:
-        """Yields assert functions with with included positional inputs based on two examples.
+        """Yields assert functions with with included positional inputs based on two example tensors.
 
         .. note::
 
@@ -729,8 +730,8 @@ class TestAsserts(TestCase):
             that does not test for anything specific should iterate over this to maximize the coverage.
 
         Args:
-            a (Any): First input.
-            b (Any): Second input.
+            a (torch.Tensor): First tensor.
+            b (torch.Tensor): Second tensor.
 
         Yields:
             List[Callable]: Assert functions with predefined positional inputs.
@@ -944,20 +945,14 @@ class TestAsserts(TestCase):
         for inputs in self.make_inputs(a, b):
             torch.testing.assert_close(*inputs, rtol=0.0, atol=eps * 2)
 
-    def test_assert_close_nan(self, device):
-        a = torch.tensor(float("NaN"), device=device)
-        b = torch.tensor(float("NaN"), device=device)
+    @onlyCPU
+    def test_unknown_type(self, device):
+        a = torch.empty((), device=device)
+        b = {a.clone()}
 
-        for inputs in self.make_inputs(a, b):
-            with self.assertRaises(AssertionError):
-                torch.testing.assert_close(*inputs)
-
-    def test_assert_close_equal_nan(self, device):
-        a = torch.tensor(float("NaN"), device=device)
-        b = torch.tensor(float("NaN"), device=device)
-
-        for inputs in self.make_inputs(a, b):
-            torch.testing.assert_close(*inputs, equal_nan=True)
+        for fn in self.get_assert_fns():
+            with self.assertRaisesRegexs(UsageError, str(type(a)), str(type(b))):
+                fn(a, b)
 
     @onlyCPU
     def test_sequence_mismatching_len(self, device):
@@ -1000,33 +995,6 @@ class TestAsserts(TestCase):
         for fn in self.get_assert_fns():
             with self.assertRaisesRegex(AssertionError, r"key\s+'b'"):
                 fn(a, b)
-
-    @onlyCPU
-    def test_unknown_type(self, device):
-        a = torch.empty((), device=device)
-        b = {a.clone()}
-
-        for fn in self.get_assert_fns():
-            with self.assertRaisesRegexs(UsageError, str(type(a)), str(type(b))):
-                fn(a, b)
-
-    @onlyCPU
-    def test_scalars(self, device):
-        number = 1
-        array = np.array(number)
-        tensor = torch.tensor(number, device=device)
-
-        for a, b in itertools.permutations((number, array, tensor), 2):
-            for fn in self.assert_fns_with_inputs(a, b):
-                fn()
-
-    @onlyCPU
-    def test_numpy(self, device):
-        a = torch.rand(2, 2, device=device)
-        b = a.clone().numpy()
-
-        for fn in self.assert_fns_with_inputs(a, b):
-            fn()
 
 
 instantiate_device_type_tests(TestAsserts, globals())
