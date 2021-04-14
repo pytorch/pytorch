@@ -34,33 +34,33 @@ enum MessageType {
   PYTHON_RET = 0x03 | MessageTypeFlags::RESPONSE_TYPE,
 
   // messages for dist.remote on builtin operators and Python UDF
-  SCRIPT_REMOTE_CALL =
-      0x04 | MessageTypeFlags::REQUEST_TYPE, // A remote call on a builtin operator
+  SCRIPT_REMOTE_CALL = 0x04 |
+      MessageTypeFlags::REQUEST_TYPE, // A remote call on a builtin operator
   PYTHON_REMOTE_CALL =
       0x05 | MessageTypeFlags::REQUEST_TYPE, // A remote call on a Python UDF
   REMOTE_RET =
-      0x06 | MessageTypeFlags::RESPONSE_TYPE, // Response for remote calls for UDF,
-                                           // builtin, or script
+      0x06 | MessageTypeFlags::RESPONSE_TYPE, // Response for remote calls for
+                                              // UDF, builtin, or script
 
   // RRef related internal messages
   SCRIPT_RREF_FETCH_CALL =
       0x07 | MessageTypeFlags::REQUEST_TYPE, // A UserRRef<IValue> fetches value
-                                          // from owner
+                                             // from owner
   PYTHON_RREF_FETCH_CALL =
       0x08 | MessageTypeFlags::REQUEST_TYPE, // A UserRRef<py::object> fetches
-                                          // value from owner
-  SCRIPT_RREF_FETCH_RET =
-      0x09 | MessageTypeFlags::RESPONSE_TYPE, // An OwnerRRef sends ivalue to user
+                                             // value from owner
+  SCRIPT_RREF_FETCH_RET = 0x09 |
+      MessageTypeFlags::RESPONSE_TYPE, // An OwnerRRef sends ivalue to user
   PYTHON_RREF_FETCH_RET = 0x0a |
       MessageTypeFlags::RESPONSE_TYPE, // An OwnerRRef sends py::object to user
   RREF_USER_DELETE = 0x0b |
       MessageTypeFlags::REQUEST_TYPE, // A UserRRef tells the owner to deref
   RREF_FORK_REQUEST =
       0x0c | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells the owner
-                                           // about itself
+                                             // about itself
   RREF_CHILD_ACCEPT =
-      0x0d | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells parent that
-                                           // owner knows it
+      0x0d | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells parent
+                                             // that owner knows it
   RREF_ACK =
       0x0e | MessageTypeFlags::RESPONSE_TYPE, // ACK to internal RRef messages
 
