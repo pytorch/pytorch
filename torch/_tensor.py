@@ -584,7 +584,7 @@ class Tensor(torch._C._TensorBase):
             warnings.warn('Using len to get tensor shape might cause the trace to be incorrect. '
                           'Recommended usage would be tensor.shape[0]. '
                           'Passing a tensor of different shape might lead to errors or silently give '
-                          'incorrect results).', category=torch.jit.TracerWarning, stacklevel=2)
+                          'incorrect results.', category=torch.jit.TracerWarning, stacklevel=2)
         return self.shape[0]
 
     def __iter__(self):

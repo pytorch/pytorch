@@ -76,10 +76,6 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
            dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
            enable_onnx_checker=True, use_external_data_format=False):
-    import builtins
-    len_backup = builtins.len
-    # Get rid of patch
-    # builtins.len = lambda x : x.__len__()
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -96,7 +92,6 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
             custom_opsets=custom_opsets, enable_onnx_checker=enable_onnx_checker,
             use_external_data_format=use_external_data_format)
-    builtins.len = len_backup
 
 
 def _is_constant_tensor_list(node):
