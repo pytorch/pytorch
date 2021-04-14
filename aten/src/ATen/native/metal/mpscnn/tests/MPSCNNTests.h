@@ -53,4 +53,6 @@ bool test_chunk();
 bool test_chunk2();
 bool test_chunk3();
 
+bool test_roi_align();
+
 #endif
