@@ -193,6 +193,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.unify_type_list,
         torch.is_warn_always_enabled,
         torch.set_warn_always,
+        torch.vitals_enabled,
+        torch.set_vital,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
