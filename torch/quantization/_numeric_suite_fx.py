@@ -22,6 +22,7 @@ from .ns.weight_utils import (
     get_linear_mod_weight,
     get_lstm_mod_weights,
     get_linear_fun_weight,
+    get_conv_fun_weight,
 )
 
 from .ns.graph_passes import (
@@ -175,9 +176,23 @@ def _extract_weights_one_model(
             # TODO(future PR): other function types
             related_to_linear = node.target in (F.linear,) or \
                 (node.target, F.linear) in type_a_related_to_b
+            related_to_conv2d = node.target in (F.conv2d,) or \
+                (node.target, F.conv2d) in type_a_related_to_b
+            related_to_conv3d = node.target in (F.conv3d,) or \
+                (node.target, F.conv3d) in type_a_related_to_b
 
             if related_to_linear:
                 weight = get_linear_fun_weight(node, model)
+                results[ref_name][res_type][model_name] = [{
+                    'type': res_type,
+                    'values': [weight],
+                    'prev_node_name': node.name,
+                    'prev_node_target_type': str(node.target),
+                    'ref_node_name': node.name,
+                    'index_within_arg': 0,
+                }]
+            elif (related_to_conv2d or related_to_conv3d):
+                weight = get_conv_fun_weight(node, model)
                 results[ref_name][res_type][model_name] = [{
                     'type': res_type,
                     'values': [weight],
