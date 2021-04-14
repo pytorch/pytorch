@@ -30,11 +30,13 @@
 namespace torch {
 namespace jit {
 
-static constexpr const char* kArchiveNameConstants = "constants";
-
 char const* toString(OpCode op);
 
 namespace {
+
+static constexpr const char* kArchiveNameConstants = "constants";
+static constexpr uint64_t kMinProducedBytecodeVersion = 0x4L;
+static constexpr uint64_t kBytecodeVersionV4 = 0x4L;
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
@@ -112,7 +114,7 @@ std::string getModuleTypeName(const Module& module, const std::string& prefix) {
 std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     const Module& module,
     const Function& func,
-    bool save_mobile_debug_info) {
+    bool save_mobile_debug_info = false) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
@@ -386,8 +388,8 @@ class ScriptModuleSerializer {
   void serialize(
       const Module& module,
       const ExtraFilesMap& extra_files,
-      bool bytecode_format,
-      bool save_mobile_debug_info) {
+      at::optional<uint64_t> bytecode_version = at::optional<uint64_t>(),
+      bool save_mobile_debug_info = false) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
     // Serialize the model object
@@ -395,13 +397,16 @@ class ScriptModuleSerializer {
     // Then we serialize all code info.
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
-    // so loading the code does not depend on loading the data
+    // (constant archive) so loading the code does not depend on loading the
+    // data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
+
     writeArchive(
         kArchiveNameConstants, c10::ivalue::Tuple::create(ivalue_constants));
-    if (bytecode_format) {
-      writeByteCode(module, save_mobile_debug_info);
+    // Only generate bytecode when a valid bytecode_version is given.
+    if (bytecode_version.has_value()) {
+      writeByteCode(module, save_mobile_debug_info, bytecode_version.value());
       writeMobileMetadata(module, extra_files);
     }
 
@@ -459,9 +464,9 @@ class ScriptModuleSerializer {
             fname, writable_td.data(), writable_td.sizeInBytes());
       }
     }
+
     std::string fname = archive_name + ".pkl";
     writer_.writeRecord(fname, data.data(), data.size());
-
     // serialize all the captured run-time class types
     for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
       convertNamedType(wroteType);
@@ -553,21 +558,77 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(const Module& module, bool save_mobile_debug_info) {
+  void backPortByteCode(const uint64_t version) {
+    uint64_t backport_model_version = version - 1;
+    TORCH_CHECK(
+        kMinProducedBytecodeVersion <= backport_model_version &&
+            backport_model_version <=
+                caffe2::serialize::kProducedBytecodeVersion,
+        "Lite Interpreter can only produce bytecode between ",
+        kMinProducedBytecodeVersion,
+        " and ",
+        caffe2::serialize::kProducedBytecodeVersion,
+        ". But the request backport model version is ",
+        backport_model_version);
+
+    // From bytecode version v5 to v4
+    if (backport_model_version == kBytecodeVersionV4) {
+      use_tensors_archive_table_ = false;
+    }
+    // when support exporting more version, add else if statement here.
+  }
+
+  void writeByteCode(
+      const Module& module,
+      bool save_mobile_debug_info,
+      uint64_t bytecode_version = caffe2::serialize::kProducedBytecodeVersion) {
+    // Can only support generating model version within
+    // kMinProducedBytecodeVersion and kProducedBytecodeVersion. bytecode
+    // version difference chart is following: v4 - jit and mobile both write
+    // their own constant tensors, and tensor storage root key is the tensor
+    // index. Example: torch._utils._rebuild_tensor_v2(
+    //     pers.obj(('storage', torch.FloatStorage, '17', 'cpu', 22736),),
+    //     0,
+    //     (1, 464, 7, 7),
+    //     (22736, 49, 7, 1),
+    //     False,
+    //     collections.OrderedDict())
+    // v5 - the constant tensors from constant will be skipped, and the tensor
+    // meta data in bytecode.pkl will refered to the existing tensor path from
+    // jit Example: torch._utils._rebuild_tensor_v2(
+    //     pers.obj(('storage', torch.FloatStorage, 'constants/17', 'cpu',
+    //     22736),), 0, (1, 464, 7, 7), (22736, 49, 7, 1), False,
+    //     collections.OrderedDict())
+    TORCH_CHECK(
+        kMinProducedBytecodeVersion <= bytecode_version &&
+            bytecode_version <= caffe2::serialize::kProducedBytecodeVersion,
+        "Lite Interpreter can only produce bytecode version between ",
+        kMinProducedBytecodeVersion,
+        " and ",
+        caffe2::serialize::kProducedBytecodeVersion,
+        ". But the request model version is ",
+        bytecode_version);
+
     use_tensors_archive_table_ = true;
+    for (auto current_bytecode_version =
+             caffe2::serialize::kProducedBytecodeVersion;
+         current_bytecode_version > bytecode_version;
+         current_bytecode_version--) {
+      backPortByteCode(current_bytecode_version);
+    }
+
     std::vector<c10::IValue> elements;
-    elements.emplace_back(
-        static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+    elements.emplace_back(static_cast<int64_t>(bytecode_version));
     c10::optional<std::vector<c10::IValue>> debug_info_elements;
     if (save_mobile_debug_info) {
       debug_info_elements = std::vector<c10::IValue>();
-      debug_info_elements->emplace_back(
-          static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+      debug_info_elements->emplace_back(static_cast<int64_t>(bytecode_version));
     }
 
     moduleMethodsTuple(
         module, elements, debug_info_elements, save_mobile_debug_info);
     auto telements = Tup(std::move(elements));
+
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
@@ -617,11 +678,12 @@ class ScriptModuleSerializer {
   OrderedDict<std::string, PythonPrint> file_streams_;
 };
 
+// bytecode will be exported, if version is a valid and supported number.
 void ExportModule(
     const Module& module,
     std::ostream& out,
     const ExtraFilesMap& extra_files,
-    bool bytecode_format,
+    at::optional<uint64_t> bytecode_version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(
       [&](const void* buf, size_t nbytes) -> size_t {
@@ -629,35 +691,36 @@ void ExportModule(
         return !out ? 0 : nbytes;
       });
   serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+      module, extra_files, bytecode_version, save_mobile_debug_info);
 }
 
 void ExportModule(
     const Module& module,
     const std::string& filename,
     const ExtraFilesMap& extra_files,
-    bool bytecode_format,
+    at::optional<uint64_t> bytecode_version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(filename);
   serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+      module, extra_files, bytecode_version, save_mobile_debug_info);
 }
 
 void ExportModule(
     const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& extra_files,
-    bool bytecode_format,
+    at::optional<uint64_t> bytecode_version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+      module, extra_files, bytecode_version, save_mobile_debug_info);
 }
 
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   c10::optional<std::vector<c10::IValue>> debug_info_elements;
+
   moduleMethodsTuple(
       m, elements, debug_info_elements, false /* save_mobile_debug_info */);
   for (const auto& element : elements) {

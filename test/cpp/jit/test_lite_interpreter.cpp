@@ -453,7 +453,7 @@ TEST(LiteInterpreterTest, ModuleInfoBasic) {
   )JIT");
 
   std::stringstream ss;
-  m._save_for_mobile(ss, {}, true);
+  m._save_for_mobile(ss, {}, caffe2::serialize::kProducedBytecodeVersion, true);
   mobile::Module bc = _load_for_mobile(ss);
 
   std::unordered_set<std::string> module_debug_info_set;
@@ -511,7 +511,7 @@ TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
   )JIT");
 
   std::stringstream ss;
-  b._save_for_mobile(ss, {}, true);
+  b._save_for_mobile(ss, {}, caffe2::serialize::kProducedBytecodeVersion, true);
   mobile::Module bc = _load_for_mobile(ss);
 
   std::unordered_set<std::string> module_debug_info_set;
@@ -553,7 +553,8 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   )JIT");
 
   std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
+  c._save_for_mobile(ss, {}, caffe2::serialize::kProducedBytecodeVersion, true);
+
   mobile::Module bc = _load_for_mobile(ss);
 
   std::unordered_set<std::string> module_debug_info_set;
@@ -595,9 +596,8 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   )JIT");
 
   std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
+  c._save_for_mobile(ss, {}, caffe2::serialize::kProducedBytecodeVersion, true);
   mobile::Module bc = _load_for_mobile(ss);
-
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
@@ -660,7 +660,8 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   )JIT");
 
   std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
+  c._save_for_mobile(ss, {}, caffe2::serialize::kProducedBytecodeVersion, true);
+
   mobile::Module bc = _load_for_mobile(ss);
 
   std::unordered_set<std::string> module_debug_info_set;
@@ -703,7 +704,7 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   )JIT");
 
   std::stringstream ss;
-  b._save_for_mobile(ss, {}, true);
+  b._save_for_mobile(ss, {}, caffe2::serialize::kProducedBytecodeVersion, true);
   mobile::Module bc = _load_for_mobile(ss);
 
   std::unordered_set<std::string> module_debug_info_set;
