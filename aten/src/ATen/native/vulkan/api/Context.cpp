@@ -41,12 +41,11 @@ VkDevice create_device(
       &device_extension_properties_count,
       device_extension_properties.data()));
 
-  constexpr const char* const requested_device_extensions[]{
+  std::vector<const char*> requested_device_extensions;
   #ifdef VK_KHR_portability_subset
     // https://vulkan.lunarg.com/doc/view/1.2.162.0/mac/1.2-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pProperties-04451
-    VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
+    requested_device_extensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
   #endif
-  };
 
   std::vector<const char*> enabled_device_extensions;
 
