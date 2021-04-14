@@ -159,7 +159,7 @@ std::vector<c10::optional<Variable>> _wrap_outputs(const variable_list &input_va
     for (auto& var: outputs) {
       if (var.has_value()) {
         auto diff_view_meta = impl::get_view_autograd_meta(var.value());
-        if (diff_view_meta) {
+        if (diff_view_meta && diff_view_meta->has_bw_view()) {
           diff_view_meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
         }
       }

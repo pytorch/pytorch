@@ -13,6 +13,8 @@
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 // Constants for user tracepoints
@@ -88,7 +90,7 @@ bool BlobsQueue::blockingRead(
   DCHECK(canRead());
   auto& result = queue_[reader_ % queue_.size()];
   CAFFE_ENFORCE(inputs.size() >= result.size());
-  for (auto i = 0; i < result.size(); ++i) {
+  for (const auto i : c10::irange(result.size())) {
     auto bytes = BlobStat::sizeBytes(*result[i]);
     CAFFE_EVENT(stats_, queue_dequeued_bytes, bytes, i);
     using std::swap;
@@ -160,7 +162,7 @@ void BlobsQueue::doWrite(const std::vector<Blob*>& inputs) {
   auto& result = queue_[writer_ % queue_.size()];
   CAFFE_ENFORCE(inputs.size() >= result.size());
   const auto& name = name_.c_str();
-  for (auto i = 0; i < result.size(); ++i) {
+  for (const auto i : c10::irange(result.size())) {
     using std::swap;
     swap(*(inputs[i]), *(result[i]));
   }

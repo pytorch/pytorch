@@ -27,20 +27,14 @@ bool resize_output_check(Tensor& output, IntArrayRef shape) {
 
 bool resize_output(Tensor& output, IntArrayRef shape) {
   if (resize_output_check(output, shape)) {
-    output.resize_(shape);
-    return true;
-  } else {
-    return false;
-  }
-}
-
-// This is a performance escape hatch for resize_output.
-// It's CPU only and it skips the dispatcher.
-// Ideally, once external backends have access to meta functions
-// We can write one for resize_ and get rid of this.
-bool resize_output_cpu(Tensor& output, IntArrayRef shape) {
-  if (resize_output_check(output, shape)) {
-    at::native::resize_(output, shape);
+    // avoid a redispatch for cpu and cuda.
+    // TODO: when resize_cuda_ is re-written to be unified with resize_,
+    // we can provide the same benefit for cuda.
+    if (output.is_cpu()) {
+      at::native::resize_(output, shape);
+    } else {
+      output.resize_(shape);
+    }
     return true;
   } else {
     return false;
@@ -85,7 +79,7 @@ Tensor& resize_as_(
         !optional_memory_format.has_value(),
         "Unsupported memory format for sparse tensor resize_as_ :",
         optional_memory_format.value());
-    return native::resize_as_sparse_(self, the_template);
+    return at::native::resize_as_sparse_(self, the_template);
   }
   Tensor& result = self.resize_(the_template.sizes());
   if (optional_memory_format.has_value()) {
@@ -102,13 +96,12 @@ Tensor& resize_as_(
 Tensor& resize_(
     Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format,
-    bool resize_storage) {
+    c10::optional<MemoryFormat> optional_memory_format) {
   if (self.has_names()) {
     return resize_named_tensor_(self, size, optional_memory_format);
   }
   auto* self_ = self.unsafeGetTensorImpl();
-  resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt, resize_storage);
+  resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
@@ -119,21 +112,6 @@ Tensor& resize_(
     self_->empty_tensor_restride(memory_format);
   }
   return self;
-}
-
-Tensor& resize_(
-    Tensor& self,
-    IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
-  return resize_(self, size, optional_memory_format, /*resize_storage=*/true);
-}
-
-Tensor& resize_meta_(
-    Tensor& self,
-    IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
-  // meta tensors don't have storage, so don't resize them
-  return resize_(self, size, optional_memory_format, /*resize_storage=*/false);
 }
 
 } // namespace native
