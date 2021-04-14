@@ -32,14 +32,18 @@ from .gen_inplace_or_view_type import (
     ASSIGN_RETURN_VALUE, gen_formals,
 )
 
-from tools.codegen.api.types import *
-from tools.codegen.api.autograd import *
+from tools.codegen.api.types import Binding, DispatcherSignature
+from tools.codegen.api.autograd import (
+    DifferentiableInput, NativeFunctionWithDifferentiabilityInfo,
+    SavedAttribute, dispatch_strategy, gen_differentiable_outputs,
+    is_differentiable)
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
+                                 SelfArgument, TensorOptionsArguments)
 from typing import Callable, List, Optional, Sequence, Union
 
 # We don't set or modify grad_fn on these methods. Generally, they return
@@ -87,7 +91,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
     'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d',
-    'reflection_pad1d_backward', 'reflection_pad2d_backward',
+    'reflection_pad1d_backward', 'reflection_pad2d_backward', 'symeig',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d', 'take', 'put_',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
