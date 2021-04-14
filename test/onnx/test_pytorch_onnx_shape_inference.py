@@ -45,6 +45,7 @@ class TestONNXShapeInference(unittest.TestCase):
         constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
         self.run_test(g, constant_of_shape.node(), expect_tensor('Float', (1, 2, 3, 4)))
 
+    def test_constant_of_shape_static(self):
         # Test ConstantOfShape with input of prim::ListConstruct of static tensor
         rank = 4
         g = self.create_empty_graph()
@@ -54,6 +55,7 @@ class TestONNXShapeInference(unittest.TestCase):
         constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
         self.run_test(g, constant_of_shape.node(), expect_tensor('Float', (1, 2, 3, 4)))
 
+    def test_constant_of_shape_dynamic(self):
         # Test ConstantOfShape with input of prim::ListConstruct of dynamic tensor
         rank = 4
         g = self.create_empty_graph()
