@@ -239,6 +239,7 @@ class intrusive_ptr final {
     if (target_ != NullType::singleton() && detail::atomic_refcount_decrement(target_->refcount_) == 0) {
       // justification for const_cast: release_resources is basically a destructor
       // and a destructor always mutates the object, even for const objects.
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
       const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
 
       // See comment above about weakcount. As long as refcount>0,
@@ -560,6 +561,7 @@ class weak_intrusive_ptr final {
 
   void reset_() noexcept {
     if (target_ != NullType::singleton() && detail::atomic_weakcount_decrement(target_->weakcount_) == 0) {
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
       delete target_;
     }
     target_ = NullType::singleton();

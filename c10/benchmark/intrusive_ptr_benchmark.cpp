@@ -28,17 +28,21 @@ class Bar : public std::enable_shared_from_this<Bar> {
 static void BM_IntrusivePtrCtorDtor(benchmark::State& state) {
   intrusive_ptr<Foo> var = make_intrusive<Foo>(0);
   while (state.KeepRunning()) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     volatile intrusive_ptr<Foo> var2 = var;
   }
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(BM_IntrusivePtrCtorDtor);
 
 static void BM_SharedPtrCtorDtor(benchmark::State& state) {
   std::shared_ptr<Bar> var = std::make_shared<Bar>(0);
   while (state.KeepRunning()) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     volatile std::shared_ptr<Bar> var2 = var;
   }
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(BM_SharedPtrCtorDtor);
 
 static void BM_IntrusivePtrArray(benchmark::State& state) {
@@ -54,6 +58,7 @@ static void BM_IntrusivePtrArray(benchmark::State& state) {
     }
   }
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 BENCHMARK(BM_IntrusivePtrArray)->RangeMultiplier(2)->Range(16, 4096);
 
 static void BM_SharedPtrArray(benchmark::State& state) {
@@ -69,6 +74,7 @@ static void BM_SharedPtrArray(benchmark::State& state) {
     }
   }
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 BENCHMARK(BM_SharedPtrArray)->RangeMultiplier(2)->Range(16, 4096);
 } // namespace
 

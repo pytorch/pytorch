@@ -23,10 +23,12 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
 }
 
 // see TypeMeta::addTypeMetaData
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<uint16_t> TypeMeta::nextTypeIndex(NumScalarTypes);
 
 // fixed length array of TypeMetaData instances
 detail::TypeMetaData* TypeMeta::typeMetaDatas() {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   static detail::TypeMetaData instances[MaxTypeIndex + 1] = {
 #define SCALAR_TYPE_META(T, name)         \
     /* ScalarType::name */                \

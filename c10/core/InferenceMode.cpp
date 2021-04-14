@@ -2,6 +2,7 @@
 #include <stdexcept>
 
 namespace c10 {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool InferenceMode_enabled = false;
 
 // Invariant:
