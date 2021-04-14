@@ -22,24 +22,7 @@ jobs:
       - name: Ensure consistent CircleCI YAML config
         run: cd .circleci && ./ensure-consistency.py
       - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
-        run: |
-          import yaml
-          import subprocess
-          workflows = subprocess.check_output(['python', '.github/scripts/generate_workflow_names.py'],
-                                              encoding="ascii").splitlines()
-          with open('.github/workflows/cancel_redundant_workflows.yml') as f:
-              data = yaml.safe_load(f)
-              workflows_to_cancel = data[True]['workflow_run']['workflows']
-          missing = list(set(workflows) - set(workflows_to_cancel))
-          should_remove = list(set(workflows_to_cancel) - set(workflows))
-          if missing == [] and should_remove == []:
-              exit()
-          if missing:
-              print(f'Please add these to the cancel_redundant_workflow list: {missing}')
-          if should_remove:
-              print(f'Please remove these from the cancel_redundant_workflow list: {should_remove}')
-          raise RuntimeError('GHA workflows inconsistent with those listed in cancel_redundant_workflows.yml')
-        shell: python
+        run: .github/scripts/ensure_consistent_workflows.py
       - name: ShellCheck
         # https://github.com/koalaman/shellcheck/tree/v0.7.1#installing-a-pre-compiled-binary
         run: |
