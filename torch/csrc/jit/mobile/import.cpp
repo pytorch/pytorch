@@ -624,7 +624,7 @@ mobile::Module _load_for_mobile_impl(
     if (!observer) {
       return;
     }
-    if (error_message.size() == 0) {
+    if (error_message.empty()) {
       error_message = "Unknown exception";
     }
     observer->onFailLoadModel(
