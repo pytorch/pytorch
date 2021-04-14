@@ -95,8 +95,6 @@ static void nll_loss_out_frame(
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
-  scalar_t output_val = 0;
-  scalar_t total_weight_val = 0;
   int64_t num_ignored = 0;
 
   scalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
@@ -137,17 +135,15 @@ static void nll_loss_out_frame(
     }
   }
 
-  if (weight_data) {
-    for (int64_t level = 0; level < cascade_sum_num_levels; ++level) {
-      total_weight_val += weight_partial_sums[level];
-    }
-  } else {
-    total_weight_val = static_cast<scalar_t>(batch_size - num_ignored);
-  }
+  const scalar_t total_weight_val = !weight_data ?
+    static_cast<scalar_t>(batch_size - num_ignored) :
+    std::accumulate(std::begin(weight_partial_sums),
+                    std::end(weight_partial_sums),
+                    scalar_t{0});
 
-  for (int64_t level = 0; level < cascade_sum_num_levels; ++level) {
-    output_val += loss_partial_sums[level];
-  }
+  scalar_t output_val = std::accumulate(std::begin(loss_partial_sums),
+                                        std::end(loss_partial_sums),
+                                        scalar_t{0});
 
   if (reduction == Reduction::Mean &&
       (total_weight_val != 0 || input.numel() == 0)) {

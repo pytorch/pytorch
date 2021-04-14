@@ -199,19 +199,16 @@ static void nll_loss2d_forward_out_frame(
     }
   }
 
-  scalar_t total_weight_val = 0;
-  if (weight_data) {
-    for (int64_t level = 0; level < cascade_sum_num_levels; ++level) {
-      total_weight_val += weight_partial_sums[level];
-    }
-  } else {
-    total_weight_val = static_cast<scalar_t>(numiter - num_ignored);
-  }
 
-  scalar_t output_val = 0;
-  for (int64_t level = 0; level < cascade_sum_num_levels; ++level) {
-    output_val += loss_partial_sums[level];
-  }
+  const scalar_t total_weight_val = !weight_data ?
+    static_cast<scalar_t>(numiter - num_ignored) :
+    std::accumulate(std::begin(weight_partial_sums),
+                    std::end(weight_partial_sums),
+                    scalar_t{0});
+
+  scalar_t output_val = std::accumulate(std::begin(loss_partial_sums),
+                                        std::end(loss_partial_sums),
+                                        scalar_t{0});
 
   if (reduction == Reduction::Mean &&
       (total_weight_val != 0 || input.numel() == 0)) {
