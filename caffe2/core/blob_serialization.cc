@@ -10,6 +10,9 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/utils/proto_utils.h"
+#ifdef USE_FBGEMM
+#include "fbgemm/FbgemmConvert.h"
+#endif
 
 C10_DEFINE_int(
     caffe2_tensor_chunk_size,
@@ -388,7 +391,75 @@ void SerializeTensorData(const SerializeParams<at::Half>& params) {
       params.tensor_proto);
 }
 
+#ifdef USE_FBGEMM
+namespace {
+// Unfortunately we can't include folly/lang/Bits.h here,
+// so provide our own byte-swapping code.
+fbgemm::bfloat16 ByteSwap(fbgemm::bfloat16 n) {
+#ifdef _MSC_VER
+  return _byteswap_ushort(n);
+#else
+  return __builtin_bswap16(n);
+#endif
+}
+
+void ByteSwapArray(
+    const fbgemm::bfloat16* src,
+    fbgemm::bfloat16* dest,
+    size_t num_elements) {
+  // Note that we support src and dest pointing to the same location.
+  // We currently only use this function on big-endian machines, so it isn't
+  // worth trying to build a fancier SIMD version.
+  for (size_t n = 0; n < num_elements; ++n) {
+    dest[n] = ByteSwap(src[n]);
+  }
+}
+} // namespace
+#endif // USE_FBGEMM
+
 void SerializeTensorData(const SerializeParams<float>& params) {
+  // The FLOAT_BFLOAT16 option requests doing a conversion to bfloat16.  This
+  // reduces the serialized data size at the cost of some lost precision.
+  // We currently only support doing this when compiled with fbgemm.
+#ifdef USE_FBGEMM
+  if (params.options.float_format() ==
+      BlobSerializationOptions_FloatFormat_FLOAT_BFLOAT16) {
+    std::unique_ptr<float[]> tmp_buffer;
+    const float* src;
+    if (params.context.device() == CPU) {
+      src = params.input.data();
+    } else {
+      tmp_buffer.reset(new float[params.input.size()]);
+      params.context.CopyToCPU(
+          params.input.size(), params.input.data(), tmp_buffer.get());
+    }
+
+    params.SetDataFormat(TensorProto_SerializationFormat_FMT_BFLOAT16);
+    // TODO: it would be nice if we could use
+    // folly::resizeWithoutInitialization() here
+    params.tensor_proto.mutable_raw_data()->resize(
+        params.input.size() * sizeof(fbgemm::bfloat16));
+
+    Range<fbgemm::bfloat16*> dest(
+        reinterpret_cast<fbgemm::bfloat16*>(
+            &(*params.tensor_proto.mutable_raw_data())[0]),
+        params.input.size());
+
+    fbgemm::FloatToBfloat16_simd(src, dest.data(), params.input.size());
+
+    // Note: technically a platform can have different integer from floating
+    // point endianness, and we ideally should check floating point endianness
+    // here.  However, the fbgemm code doesn't appear to make this distinction,
+    // and at least in the Bfloat16ToFloat_ref() code it appears to assume that
+    // floating point and integer endianness are the same.
+    if (!kIsLittleEndian) {
+      ByteSwapArray(dest.data(), dest.data(), dest.size());
+    }
+    return;
+  }
+#endif
+
+  params.SetDataFormat(TensorProto_SerializationFormat_FMT_PROTOBUF);
   params.CopyToRepeatedField(params.tensor_proto.mutable_float_data());
 }
 
@@ -792,6 +863,48 @@ DESERIALIZE_IMPL(float, FMT_PROTOBUF) {
   params.CopyFromRepeatedField(params.tensor_proto.float_data());
 }
 
+DESERIALIZE_IMPL(float, FMT_BFLOAT16) {
+#ifdef USE_FBGEMM
+  CAFFE_ENFORCE_EQ(
+      params.dest.size() * sizeof(fbgemm::bfloat16),
+      params.tensor_proto.raw_data().size(),
+      "incorrect data size in serialized bfloat16 data");
+  auto raw_src = reinterpret_cast<const fbgemm::bfloat16*>(
+      params.tensor_proto.raw_data().data());
+
+  // If we are on a big-endian machine, byte-swap the serialized data.
+  const fbgemm::bfloat16* src;
+  std::unique_ptr<fbgemm::bfloat16[]> bswap_buffer;
+  if (kIsLittleEndian) {
+    src = raw_src;
+  } else {
+    bswap_buffer.reset(new fbgemm::bfloat16[params.dest.size()]);
+    ByteSwapArray(raw_src, bswap_buffer.get(), params.dest.size());
+    src = bswap_buffer.get();
+  }
+
+  // If we are on a non-CPU device, we need an intermediate CPU buffer for the
+  // bfloat16 to float conversion.
+  std::unique_ptr<float[]> tmp_buffer;
+  float* dest;
+  if (params.context.device() == CPU) {
+    dest = params.dest.data();
+  } else {
+    tmp_buffer.reset(new float[params.dest.size()]);
+    dest = tmp_buffer.get();
+  }
+
+  fbgemm::Bfloat16ToFloat_simd(src, dest, params.dest.size());
+  if (params.context.device() != CPU) {
+    params.context.CopyFromCPU(params.dest.size(), dest, params.dest.data());
+  }
+#else
+  // We cannot load serialized bfloat16 data without fbgemm.
+  CAFFE_ENFORCE(
+      false, "cannot perform bfloat16 to float conversion without fbgemm");
+#endif
+}
+
 DESERIALIZE_IMPL(double, FMT_PROTOBUF) {
   params.CopyFromRepeatedField(params.tensor_proto.double_data());
 }
@@ -825,6 +938,7 @@ void DeserializeTensorBody(
   DeserializeParams<T> params(dest, tensor_proto, context);
   switch (format) {
     DESERIALIZE_FORMAT_CASE(FMT_PROTOBUF);
+    DESERIALIZE_FORMAT_CASE(FMT_BFLOAT16);
   }
 
   // This can happen if the blob was serialized by a newer version of the code

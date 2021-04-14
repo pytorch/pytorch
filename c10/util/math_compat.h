@@ -6,6 +6,7 @@
 // Various hacks in this header allow the rest of the codebase to use
 // standard APIs.
 #if defined(__ANDROID__) && __ANDROID_API__ < 21 && defined(__GLIBCXX__)
+#include <stdexcept>
 
 namespace std {
   // Import double versions of these functions from the global namespace.
