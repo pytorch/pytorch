@@ -8,6 +8,7 @@ on:
       - clang-format
       - Lint
       - Test tools
+      - setup.py Python 2 compatability
 
 jobs:
   cancel:
