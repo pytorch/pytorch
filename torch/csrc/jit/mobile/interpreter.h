@@ -27,7 +27,6 @@ struct InterpreterState {
 
  private:
   std::shared_ptr<Code> code_;
-  size_t current_pc_;
   c10::IValue& reg(size_t reg);
   std::vector<c10::IValue> registers_;
 };
