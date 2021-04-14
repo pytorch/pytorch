@@ -2487,9 +2487,11 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     barrier within that timeout. Specifically, for non-zero ranks, will block
     until a send/recv is processed from rank 0. Rank 0 will block until all send
     /recv from other ranks are processed, and will report failures for ranks
-    that failed to respond in time.
+    that failed to respond in time. Note that if one rank does not reach the
+    monitored_barrier (for example due to a hang), all other ranks would fail
+    in monitored_barrier.
 
-    This collective will block the process corresponding to rank 0 until the
+    This collective will block all processes/ranks in the group, until the
     whole group exits the function successfully, making it useful for debugging
     and synchronizing. However, it can have a performance impact and should only
     be used for debugging or scenarios that require full synhcronization points
