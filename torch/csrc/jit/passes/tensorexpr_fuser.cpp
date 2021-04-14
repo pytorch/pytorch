@@ -997,6 +997,12 @@ class TensorExprFuser {
         return false;
       }
     }
+    if (node->kind() == aten::matmul) {
+      if (!tensorexpr::matmulIsSupported(node)) {
+        GRAPH_DEBUG("Shapes of matmul inputs are not supported");
+        return false;
+      }
+    }
     return true;
   }
 

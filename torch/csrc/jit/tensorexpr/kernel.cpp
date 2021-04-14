@@ -187,6 +187,26 @@ bool conv2dIsSupported(const torch::jit::Node* node) {
   return true;
 }
 
+// The fuser currently only supports matmul of 2D x 2D matrices
+bool matmulIsSupported(const torch::jit::Node* node) {
+  auto const& input0 = tensorSizes(node->input(0));
+  auto const& input1 = tensorSizes(node->input(1));
+
+  // Everything should be statically known.
+  if (!input0 || !input1) {
+    GRAPH_DEBUG("matmulIsSupported: Input shapes aren't static");
+    return false;
+  }
+
+  // Proper ndim for tensor inputs.
+  if (input0->size() != 2 || input1->size() != 2) {
+    GRAPH_DEBUG("matmulIsSupported: Unsupported input sizes");
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
