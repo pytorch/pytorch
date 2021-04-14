@@ -2342,7 +2342,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # is unfused
                 linear_fun: 1,
                 # activation, weight, bias and output
-                ns.call_method("to"): 3 + int(use_bias)
+                ns.call_method("to"): 3 + int(use_bias),
+                # TODO: because CopyNode is not handled properly currently, there is
+                # a dequantize that is missing, will need to fix and
+                # remove (- int(not has relu))
+                ns.call_method("dequantize"): 3 + int(use_bias) - int(not has_relu)
             }
             self.checkGraphModeFxOp(
                 model, data, QuantType.DYNAMIC, linear_fun,
