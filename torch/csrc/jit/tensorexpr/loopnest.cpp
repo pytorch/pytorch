@@ -1065,7 +1065,7 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
-    LoopNest::normalize(*tail, tail);
+    LoopNest::normalize(*tail);
   }
 }
 void LoopNest::sliceHead(For* f, int factor) {
@@ -1111,7 +1111,7 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
 
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
-    LoopNest::normalize(*head, head);
+    LoopNest::normalize(*head);
   }
 }
 void LoopNest::sliceTail(For* f, int factor) {
@@ -1663,35 +1663,26 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
-void LoopNest::normalize(For* f, For** normalized) {
+bool LoopNest::normalize(For* f) {
   if (!f) {
     throw malformed_input("normalize attempted on null loop");
-  }
-  Block* p = dynamic_cast<Block*>(f->get_parent());
-  if (!p) {
-    throw malformed_input("normalize attempted on loop with no parent");
   }
 
   if (f->start()->isConstant()) {
     int start_idx = immediateAs<int>(f->start());
     if (start_idx == 0) {
       // No need to normalize in this case.
-      *normalized = f;
-      return;
+      return false;
     }
   }
 
   auto for_body_normalized = Substitute(
-      Stmt::clone(f->body()),
+      f->body(),
       {{f->var(), (VarHandle(f->var()) + ExprHandle(f->start())).node()}});
-  *normalized = For::make(
-      VarHandle(f->var()),
-      ExprHandle(0),
-      ExprHandle(f->stop()) - ExprHandle(f->start()),
-      for_body_normalized,
-      f->loop_options());
-
-  p->replace_stmt(f, *normalized);
+  f->setBody(for_body_normalized);
+  f->setStop(new Sub(f->stop(), f->start()));
+  f->setStart(new IntImm(0));
+  return true;
 }
 
 // This function expects that there are 'num' loops perfectly nested within
@@ -1742,16 +1733,15 @@ bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
   // For the same reason, we can't store the normalized inner loops until after
   // the outer-most loop is normalized.
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* normalized;
   for (size_t i = 0; i < loops.size(); ++i) {
     size_t idx = loops.size() - i - 1;
-    LoopNest::normalize(loops[idx], &normalized);
+    LoopNest::normalize(loops[idx]);
   }
 
   // 'normalized' points to the outer-most loop in the normalized loopnest.
   // Collect all the normalized loops.
   // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-  auto normalized_loops = getLoopStmtsInLoopNest(normalized, loops.size());
+  auto normalized_loops = getLoopStmtsInLoopNest(loops.front(), loops.size());
 
   auto flat_var = new Var(
       normalized_loops[0]->var()->name_hint() + "_flat",
