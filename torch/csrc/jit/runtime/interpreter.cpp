@@ -1,10 +1,12 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include "NativeFunctions.h"
 
 #include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
+#include <cassert>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
@@ -477,6 +479,9 @@ struct CodeImpl {
   // map from unique of nodes to register in register table
   std::unordered_map<Value*, int> value_to_reg_;
 
+  // map from operator name to trailing unnecessary inputs
+  std::unordered_map<std::string, int> op_to_num_ignore_inputs;
+
   // running count of uses as we emit. When we reach use_count_[v] =
   // v.uses().size() we know it is the final use and we can move rather than
   // load.
@@ -509,6 +514,25 @@ struct CodeImpl {
     }
     n_inputs = graph_->inputs().size();
     // std::cout << *graph_ << "\n";
+    auto graph_nodes = graph_->nodes();
+    std::unordered_map<std::string, std::vector<int>> op_to_trailing_ignore;
+    for (auto node: graph_nodes) {
+      // TODO only do it for aten:: operators?
+      auto op = node->getOperator();
+      const auto& op_schema = op.schema();
+      const auto& op_args = op_schema.arguments();
+      auto node_inputs = node->inputs();
+      auto numIgnore = calculate_trailing_ignore(op_args, node_inputs);
+      auto it = op_to_trailing_ignore.insert(std::pair<std::string, std::vector<int>>(op.schema().name(), std::vector<int>()));
+      it.first->second.push_back(numIgnore);
+    }
+
+    for (auto & it : op_to_trailing_ignore) {
+      int min_ignore = *std::min_element(it.second.begin(), it.second.end());
+      op_to_num_ignore_inputs.insert(std::pair<std::string, int>(it.first, min_ignore));
+    }
+
+
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
     // we deferred the emission of bailout blocks so they appear at the end
@@ -518,6 +542,46 @@ struct CodeImpl {
 
   const std::vector<c10::IValue>& constant_table() const {
     return constant_table_;
+  }
+
+  int calculate_trailing_ignore(std::vector<Argument> schema_args, at::ArrayRef<Value*> actual_inputs) {
+    assert(schema_args.size() == actual_inputs.size());
+
+    auto num_args = schema_args.size();
+
+    // first construct boolean vector to mark if arg is necessary or unneccessary
+    std::vector<bool> necessary_mark;
+    necessary_mark.reserve(num_args);
+
+    for (size_t i = 0; i < num_args; i++){
+      // this means it is not default argument, so it is necessary
+      if (!schema_args.at(i).default_value().has_value()){
+        necessary_mark[i] = true;
+      } else {
+        auto schema_value = schema_args.at(i).default_value().value();
+        auto actual_value = toIValue(actual_inputs[i]);
+        if (schema_value == actual_value) {
+          necessary_mark[i] = true;
+        } else {
+          necessary_mark[i] = false;
+        }
+      }
+
+    }
+
+    // scan backwards to count how many trailing unnecessary args there are
+    // for example, [necessary, unneccessary, necessary, unneccessary, unneccessary] -> 2
+    int num_trailing_ignore = 0;
+    for (size_t i = num_args - 1; i > -1; i--){
+      if (!necessary_mark[i]) {
+        num_trailing_ignore += 1;
+      } else {
+        break;
+      }
+    }
+
+    return num_trailing_ignore;
+
   }
 
   void request_bailout(size_t index) {
@@ -635,10 +699,19 @@ struct CodeImpl {
   }
 
   void emitOperator(Node* node) {
-    emitLoadInputs(node->inputs());
+    // TODO: pass in variable to tell if it happening during mobile export
     const Operator& op = node->getOperator();
+
+    auto min_ignore = 0;
+    if (op_to_num_ignore_inputs.find(op.schema().name()) != op_to_num_ignore_inputs.end()) {
+      min_ignore = op_to_num_ignore_inputs[op.schema().name()];
+
+    }
+    at::ArrayRef<Value*> necessary_inputs = node->inputs().slice(0, node->inputs().size() - min_ignore);
+    emitLoadInputs(necessary_inputs);
+
     if (op.hasOperation() && op.schema().is_vararg()) {
-      insertInstruction(OPN, operator_table_.size(), node->inputs().size());
+      insertInstruction(OPN, operator_table_.size(), necessary_inputs.size());
     } else {
       insertInstruction(OP, operator_table_.size());
     }
