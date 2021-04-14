@@ -3,7 +3,8 @@ from tools.codegen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
     dispatch_strategy,
 )
-from tools.codegen.api.types import *
+from tools.codegen.api.types import (Binding, DispatcherSignature, CppSignatureGroup, CType,
+                                     BaseCType, OptionalCType, intT, boolT, intArrayRefT)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (
