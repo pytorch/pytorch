@@ -1,4 +1,5 @@
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, FunctionSchema, NativeFunction,
+                                 SelfArgument, TensorOptionsArguments, BaseTy)
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict
 from enum import Enum
@@ -69,6 +70,8 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.Storage: storageT,
     BaseTy.Stream: streamT,
 }
+
+# CTypes encode C++ type structure as needed for translation.
 
 @dataclass(frozen=True)
 class BaseCType:
@@ -219,10 +222,6 @@ CType = Union[
 # semantic type also keeps track that this represents a "pin_memory"; you can't
 # just use a random other boolean in a context where you need a "pin_memory"!
 #
-# NamedCTypes encode C++ type structure as needed for translation.  Right now we
-# track references and optional, but don't, for example, track ArrayRef.  If
-# you need trnsnlations that know about these types, beef up this data
-# structure.
 
 @dataclass(frozen=True)
 class NamedCType:
@@ -240,7 +239,7 @@ class NamedCType:
     def remove_const_ref(self) -> 'NamedCType':
         return NamedCType(self.name, self.type.remove_const_ref())
 
-    def with_name(self, name: str) -> 'CType':
+    def with_name(self, name: str) -> 'NamedCType':
         return NamedCType(name, self.type)
 
 # A binding represents any C++ binding site for a formal parameter.
