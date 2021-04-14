@@ -10,6 +10,7 @@
 #include <tensorpipe/tensorpipe.h>
 
 #include <torch/csrc/distributed/rpc/agent_utils.h>
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -135,16 +136,16 @@ constexpr int64_t kMultiplexedUvChannelPriority = 100;
 constexpr int64_t kBasicChannelPriority = 0;
 
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaIpcChannelPriority = 300;
+constexpr int64_t kCudaIpcChannelPriority = 301;
 #endif
 
 #if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaGdrChannelPriority = 200;
+constexpr int64_t kCudaGdrChannelPriority = 201;
 #endif
 
 #ifdef USE_CUDA_NOT_ROCM
-constexpr int64_t kCudaXthChannelPriority = 400;
-constexpr int64_t kCudaBasicChannelPriority = 100;
+constexpr int64_t kCudaXthChannelPriority = 401;
+constexpr int64_t kCudaBasicChannelPriority = 101;
 #endif
 
 std::unique_ptr<TransportRegistration> makeUvTransport() {
@@ -353,8 +354,19 @@ struct MultiStreamGuard {
   explicit MultiStreamGuard(
       const std::shared_ptr<LazyStreamContext>& /* unused */) {}
 #else
+  static inline std::vector<at::cuda::CUDAStream> toCUDAStreams(
+      const std::vector<c10::Stream>& streams) {
+    std::vector<at::cuda::CUDAStream> cudaStreams;
+    cudaStreams.reserve(streams.size());
+    std::transform(
+        streams.begin(),
+        streams.end(),
+        std::back_inserter(cudaStreams),
+        [](c10::Stream s) { return at::cuda::CUDAStream(s); });
+    return cudaStreams;
+  }
   explicit MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& ctx)
-      : guard(ctx->getReservedStreams()) {}
+      : guard(toCUDAStreams(ctx->getReservedStreams())) {}
 
  private:
   at::cuda::CUDAMultiStreamGuard guard;
@@ -606,6 +618,7 @@ void TensorPipeAgent::pipeRead(
     }
 
     auto ctx = createLazyStreamContext();
+
     TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage, ctx);
 
     pipe->read(
@@ -676,11 +689,40 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     Message&& responseMessage =
         std::move(*futureResponseMessage->value().toCustomClass<Message>());
     responseMessage.setId(messageId);
+
     std::vector<c10::DeviceIndex> devices;
     try {
       devices = getDevicesForRemote(pipe->getRemoteName(), responseMessage);
     } catch (const std::exception& e) {
       responseMessage = createExceptionResponse(e.what(), messageId);
+    }
+
+    auto ctxDevices = ctx->devices();
+    if (!ctxDevices.empty()) {
+      // FIXME: skipping this check when ctxDevices is empty to allow
+      // RRef.to_here().
+      for (const auto& tensor : responseMessage.tensors()) {
+        const auto device = tensor.device().index();
+        if (device != -1 && ctxDevices.find(device) == ctxDevices.end()) {
+          std::ostringstream oss;
+          std::copy(
+              ctxDevices.begin(),
+              ctxDevices.end(),
+              // interpreting c10::DeviceIndex as int32_t to avoid printing
+              // it as a char.
+              std::ostream_iterator<int32_t>(oss, ", "));
+          responseMessage = createExceptionResponse(
+              c10::str(
+                  "RPC detected that a user-function output tensor on device ",
+                  int32_t(device),
+                  ". This device is not one of the input tensor devices: ",
+                  oss.str(),
+                  "which is not yet supported. Please file a feature request "
+                  "issue in PyTorch GitHub repo."),
+              messageId);
+          break;
+        }
+      }
     }
 
     pipeWrite(
@@ -769,7 +811,10 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
-            futureResponseMessage = cb_->operator()(requestMessage);
+            // The `ctx` needs to be propagated to `process***Call` methods
+            // to synchronize CUDA streams there to make sure that we fetch
+            // the correct value from `to_here()` call.
+            futureResponseMessage = cb_->operator()(requestMessage, ctx);
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
                 std::make_shared<JitFuture>(at::AnyClassType::get());

@@ -20,8 +20,8 @@ Tensor addmm(
     const Tensor& bias,
     const Tensor& input,
     const Tensor& weight,
-    Scalar beta,
-    Scalar alpha) {
+    const Scalar& beta,
+    const Scalar& alpha) {
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(weight.device() == kCPU && weight.dim() == 2);
   TORCH_CHECK(bias.device() == kCPU);
@@ -31,7 +31,9 @@ Tensor addmm(
   auto weight_ = weight.t()
                      .view({weight.sizes()[1], weight.sizes()[0], 1, 1})
                      .contiguous();
-  MPSImage* X = imageFromTensor(input);
+  // Permute the input texture to become {N, C, 1, 1}
+  auto input_ = input.view({input.sizes()[0], input.sizes()[1], 1, 1});
+  MPSImage* X = imageFromTensor(input_);
   const int64_t N = X.numberOfImages;
   const int64_t oC = weight_.sizes()[0];
   const int64_t kH = X.height;
@@ -70,15 +72,16 @@ Tensor addmm(
   [fc setOffset:{.x = static_cast<NSInteger>(X.width / 2),
                  .y = static_cast<NSInteger>(X.height / 2),
                  .z = 0}];
-  std::vector<int64_t> outputSize = {N, oC, 1, 1};
+  std::vector<int64_t> textureSize = {N, oC, 1, 1};
   MetalTensorImplStorage mt{{N, oC}};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
-  mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
+  mt.texture()->allocateTemporaryTextureStorage(textureSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [fc encodeToCommandBuffer:commandBuffer.buffer
                 sourceImage:X
            destinationImage:Y];
-  auto output = makeTensor(std::move(mt), input.options());
+  // The output texture becomes {N, oC, 1, 1}. Make it {1, 1, N, oC}
+  auto output = makeTensor(std::move(mt), input.options()).view({N, oC});
   return output;
 }
 

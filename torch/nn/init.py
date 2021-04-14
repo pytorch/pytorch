@@ -80,12 +80,22 @@ def calculate_gain(nonlinearity, param=None):
     SELU              :math:`\frac{3}{4}`
     ================= ====================================================
 
+    .. warning::
+        In order to implement `Self-Normalizing Neural Networks`_ ,
+        you should use ``nonlinearity='linear'`` instead of ``nonlinearity='selu'``.
+        This gives the initial weights a variance of ``1 / N``,
+        which is necessary to induce a stable fixed point in the forward pass.
+        In contrast, the default gain for ``SELU`` sacrifices the normalisation
+        effect for more stable gradient flow in rectangular layers.
+
     Args:
         nonlinearity: the non-linear function (`nn.functional` name)
         param: optional parameter for the non-linear function
 
     Examples:
         >>> gain = nn.init.calculate_gain('leaky_relu', 0.2)  # leaky_relu with negative_slope=0.2
+
+    .. _Self-Normalizing Neural Networks: https://papers.nips.cc/paper/2017/hash/5d44ee6f2c3f71b73125876103c8f6c4-Abstract.html
     """
     linear_fns = ['linear', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d', 'conv_transpose2d', 'conv_transpose3d']
     if nonlinearity in linear_fns or nonlinearity == 'sigmoid':
@@ -274,7 +284,10 @@ def _calculate_fan_in_and_fan_out(tensor):
     num_output_fmaps = tensor.size(0)
     receptive_field_size = 1
     if tensor.dim() > 2:
-        receptive_field_size = tensor[0][0].numel()
+        # math.prod is not always available, accumulate the product manually
+        # we could use functools.reduce but that is not supported by TorchScript
+        for s in tensor.shape[2:]:
+            receptive_field_size *= s
     fan_in = num_input_fmaps * receptive_field_size
     fan_out = num_output_fmaps * receptive_field_size
 

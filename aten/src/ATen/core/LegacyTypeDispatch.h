@@ -43,6 +43,7 @@ namespace at {
 // trace).  To unify the two, we would first have to move profiling and tracing
 // out of VariableType.
 
+// TODO: rename this guard and make it internal for kernel implementation only
 struct TORCH_API AutoNonVariableTypeMode {
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
   // TODO: Eliminate this parameter entirely
@@ -56,4 +57,17 @@ struct TORCH_API AutoNonVariableTypeMode {
   c10::impl::ExcludeDispatchKeyGuard autograd_guard_;
 };
 
+// Note this guard is used in VariableType kernels for functional ops
+// as well as InplaceOrView kernels for inplace/view ops to enforce the
+// invariant:
+//   Once you are in VariableType/InplaceOrView kernel for an op,
+//   you never go back to a kernel on same dispatch key until
+//   you finish the current op.
+struct TORCH_API AutoDispatchBelowInplaceOrView {
+  AutoDispatchBelowInplaceOrView() :
+    dispatch_key_guard_(c10::autograd_dispatch_keyset_with_InplaceOrView) {
+  }
+  // disable Autograd & InplaceOrView dispatch keys
+  c10::impl::ExcludeDispatchKeyGuard dispatch_key_guard_;
+};
 } // namespace at

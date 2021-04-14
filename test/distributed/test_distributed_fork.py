@@ -5,6 +5,8 @@ from functools import wraps
 import torch
 import torch.cuda
 import torch.distributed as dist
+import unittest
+from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -15,6 +17,8 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.distributed.distributed_test import (
     DistributedTest, TestDistBackend
 )
+
+torch.backends.cuda.matmul.allow_tf32 = False
 
 CPP_EXTENSIONS_WARNING = """
 Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
@@ -44,11 +48,16 @@ def skip_if_no_ninja(func):
 
 if BACKEND == "gloo" or BACKEND == "nccl":
 
+    @unittest.skipIf(
+        TEST_WITH_TSAN,
+        "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+    )
     class TestDistBackendWithFork(TestDistBackend, DistributedTest._DistTestBase):
 
         def setUp(self):
             super().setUp()
             self._fork_processes()
+            torch.backends.cudnn.flags(allow_tf32=False).__enter__()
 
 
 elif BACKEND == "mpi":

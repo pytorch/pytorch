@@ -47,7 +47,7 @@ class TracerBase:
 
         # Optionally set stack trace on the created Node for debugging purposes
         if self.record_stack_traces:
-            user_frame = self.find_user_frame()
+            user_frame = self._find_user_frame()
             if user_frame:
                 walk_stack_gen = traceback.walk_stack(user_frame)
                 summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore
@@ -56,7 +56,7 @@ class TracerBase:
 
         return proxy
 
-    def find_user_frame(self):
+    def _find_user_frame(self):
         """
         Find the Python stack frame executing the user code during
         symbolic tracing.

@@ -1,10 +1,11 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/DispatchStub.h>
-#include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/TensorIterator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAMathCompat.h>
+#include <ATen/native/cuda/Loops.cuh>
 
 #include <type_traits>
 
@@ -46,7 +47,7 @@ struct MulFunctor<bool> {
 };
 
 
-void div_true_kernel_cuda(TensorIterator& iter) {
+void div_true_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
@@ -66,7 +67,7 @@ void div_true_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void div_trunc_kernel_cuda(TensorIterator& iter) {
+void div_trunc_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
   if (isIntegralType(dtype, /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_trunc_cuda", [&]() {
@@ -95,7 +96,7 @@ void div_trunc_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void div_floor_kernel_cuda(TensorIterator& iter) {
+void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   // See NOTE: [Floor Division in Python]
   const auto dtype = iter.common_dtype();
   if (dtype == kByte) {
@@ -141,7 +142,7 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
             floordiv += scalar_t(1.0);
           }
         } else {
-          floordiv = std::copysign(scalar_t(0), a * inv_b);
+          floordiv = c10::cuda::compat::copysign(scalar_t(0), a * inv_b);
         }
         return floordiv;
       });
@@ -162,7 +163,7 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
             floordiv += scalar_t(1.0);
           }
         } else {
-          floordiv = std::copysign(scalar_t(0), a / b);
+          floordiv = c10::cuda::compat::copysign(scalar_t(0), a / b);
         }
         return floordiv;
       });
@@ -170,7 +171,7 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void mul_kernel_cuda(TensorIterator& iter) {
+void mul_kernel_cuda(TensorIteratorBase& iter) {
   if (!isIntegralType(iter.common_dtype(), /*includeBool*/ true) &&
     (iter.is_cpu_scalar(1) || iter.is_cpu_scalar(2))) {
     //if common dtype is half the scalar constant can overflow in half precision, and yet the result can

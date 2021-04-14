@@ -7,6 +7,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch (distributed only)"
@@ -21,5 +22,6 @@ time python test/run_test.py --verbose -i distributed/test_jit_c10d
 time python test/run_test.py --verbose -i distributed/test_distributed_fork
 time python test/run_test.py --verbose -i distributed/test_c10d
 time python test/run_test.py --verbose -i distributed/test_c10d_spawn
-time python test/run_test.py --verbose -i distributed/rpc/test_tensorpipe_agent
+time python test/run_test.py --verbose -i distributed/rpc/cuda/test_process_group_agent
+time python test/run_test.py --verbose -i distributed/rpc/cuda/test_tensorpipe_agent
 assert_git_not_dirty
