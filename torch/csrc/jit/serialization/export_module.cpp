@@ -531,6 +531,8 @@ class ScriptModuleSerializer {
     // since we have not evaluated how this affect model size
     // and we have not build any utility to strip off debug info
     // when desired
+    // TODO: Build utility to strip off debug map. It should also do the
+    // same for debug_pkl files
     if (save_mobile_debug_info) {
       // Now get the debug-handles-to-inlined-cs-ptr-map
       // And serialize that in a separate archive

@@ -41,20 +41,20 @@ c10::IValue InlinedCallStackSerializer::serialize(
 
 c10::IValue InlinedCallStackSerializer::serialize_module_instance_info(
     const c10::optional<ModuleInstanceInfo>& m) {
-  if (m) {
-    const auto& m_val = m.value();
-    std::vector<c10::IValue> elements;
-    // Module instance info is serialized as
-    // {type name, instance name}
-    if (m_val.class_type()) {
-      elements = {
-          m_val.class_type()->name()->qualifiedName(), m_val.instance_name()};
-    } else {
-      elements = {"", m_val.instance_name()};
-    }
-    return c10::ivalue::Tuple::create(std::move(elements));
+  if (!m) {
+    return c10::IValue();
   }
-  return c10::IValue();
+  const auto& m_val = m.value();
+  std::vector<c10::IValue> elements;
+  // Module instance info is serialized as
+  // {type name, instance name}
+  if (m_val.class_type()) {
+    elements = {
+        m_val.class_type()->name()->qualifiedName(), m_val.instance_name()};
+  } else {
+    elements = {"", m_val.instance_name()};
+  }
+  return c10::ivalue::Tuple::create(std::move(elements));
 }
 
 std::vector<char> InlinedCallStackPickler::pickle(
@@ -190,7 +190,7 @@ ska::flat_hash_map<int64_t, DelegateDebugInfoType> InlinedCallStackUnpickler::
     const auto tup_elems = val.toTuple()->elements();
     TORCH_CHECK(
         tup_elems.size() == 3,
-        "Pickled map must have two elements: "
+        "Pickled map must have three elements: "
         "debug_handle, source_range_tag, IValue(inlined_call_stack)");
     int64_t debug_handle = tup_elems[0].toInt();
     int64_t source_range_tag = tup_elems[1].toInt();
