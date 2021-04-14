@@ -611,14 +611,15 @@ void fmax_kernel(TensorIterator& iter) {
           [](at::BFloat16 a, at::BFloat16 b) -> at::BFloat16 {
             return std::fmax(a, b);
           });
+    } else {
+      AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "fmax_cpu", [&]() {
+        cpu_kernel_vec(iter,
+          [](scalar_t a, scalar_t b) -> scalar_t {
+            return std::fmax(a, b);
+          },
+          [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::fmax(a, b); });
+      });
     }
-    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "fmax_cpu", [&]() {
-      cpu_kernel_vec(iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          return std::fmax(a, b);
-        },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::fmax(a, b); });
-    });
   } else {
     maximum_kernel(iter);
   }
