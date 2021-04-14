@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 
 #include <ATen/core/ivalue.h>
-#include <c10/util/ScopeGuard.h>
+#include <c10/util/ScopeExit.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/observer.h>
@@ -620,7 +620,7 @@ mobile::Module _load_for_mobile_impl(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
   std::string error_message;
-  c10::ScopeGuard guard([&]() {
+  c10::scope_exit guard = c10::make_scope_exit([&]() {
     if (!observer) {
       return;
     }
@@ -644,7 +644,7 @@ mobile::Module _load_for_mobile_impl(
     if (observer) {
       observer->onExitLoadModel(instance_key, copied_metadata);
     }
-    guard.disallow();
+    guard.release();
     return result;
   } catch (c10::Error& error) {
     error_message = error.what();
