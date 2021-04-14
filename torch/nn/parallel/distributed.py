@@ -10,6 +10,7 @@ from typing import NamedTuple
 import torch
 import torch.distributed as dist
 from torch.autograd import Variable, Function
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from . import comm
 
@@ -109,19 +110,20 @@ class _DDPUnevenInputsConfig(NamedTuple):
     ddp_join_enabled: bool
     ddp_join_divide_by_initial_world_size: bool
 
-# Add a DDPSink to queue call back of out-most backward/graph task,
+# Add a DDPSink to run various functions when backwards starts, such as
+# queueing call back of out-most backward/graph task,
 # this helps call back is fired after all gradients' calculation
 # is completed.
-class DDPSink(Function):
+class _DDPSink(Function):
     @staticmethod
-    def forward(ctx, input, reducer):
+    def forward(ctx, reducer, *inputs):
         ctx.reducer = reducer
-        return input
+        return inputs
 
     @staticmethod
-    def backward(ctx, input):
+    def backward(ctx, *grad_outputs):
         Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
-        return input, None
+        return None, *grad_outputs
 
 class DistributedDataParallel(Module):
     r"""Implements distributed data parallelism that is based on
@@ -824,7 +826,15 @@ class DistributedDataParallel(Module):
         # this feature is stable, we will add this sink for all cases. E.g.
         # This sink can help capture more accuracte backward start time as well.
         if self.static_graph:
-            output = DDPSink.apply(output, self.reducer)
+            # Need to grab list of tensors from user output in order to pass
+            # to custom autograd function.
+            output_tensor_list, treespec = tree_flatten(output)
+            passthrough_tensor_list = _DDPSink.apply(
+                self.reducer,
+                *output_tensor_list
+            )
+            # Reconstruct output data structure.
+            output = tree_unflatten(passthrough_tensor_list, treespec)
         return output
 
     def scatter(self, inputs, kwargs, device_ids):
