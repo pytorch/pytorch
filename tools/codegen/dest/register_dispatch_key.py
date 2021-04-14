@@ -9,7 +9,9 @@ from tools.codegen.model import (DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind,
                                  TensorOptionsArguments, assert_never,
                                  is_cuda_dispatch_key,
-                                 is_structured_dispatch_key)
+                                 is_structured_dispatch_key,
+                                 ExternalBackendFunction,
+                                 ExternalBackendFunctionsGroup)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      CppSignature, CppSignatureGroup,
                                      DispatcherSignature, Expr, MutRefCType,
