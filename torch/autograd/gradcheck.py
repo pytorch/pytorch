@@ -319,7 +319,7 @@ def get_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn):
 
 
 def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, inputs, outputs, u, eps,
-                                                   grad_out) -> Tuple[torch.Tensor, ...]:
+                                                   grad_out) -> List[torch.Tensor]:
     # If fast_mode=False, iter_tensor handles the below cases:
     # basically we want to prepare the input so that it can be modified in-place and do certain
     # operations that require the tensor to have strides
