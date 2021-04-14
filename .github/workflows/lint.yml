@@ -30,34 +30,41 @@ jobs:
           with open('.github/workflows/cancel_redundant_workflows.yml') as f:
                 data = yaml.safe_load(f)
                 workflows_to_cancel = data[True]['workflow_run']['workflows']
-          assert workflows.sort() == workflows_to_cancel.sort()
+          assert sorted(workflows) == sorted(workflows_to_cancel)
         shell: python
-      - name: Shellcheck Jenkins scripts
+      - name: ShellCheck
         # https://github.com/koalaman/shellcheck/tree/v0.7.1#installing-a-pre-compiled-binary
         run: |
+          set -x
           scversion="v0.7.1"
           wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
           sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
           rm -r "shellcheck-${scversion}"
           shellcheck --version
-          .jenkins/run-shellcheck.sh
+          EXTRACT_DIR=.shellcheck_generated
+          tools/extract_scripts.py --out=$EXTRACT_DIR
+          tools/run_shellcheck.sh .jenkins/pytorch $EXTRACT_DIR
       - name: Ensure correct trailing newlines
         run: |
-          (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
+          (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
         run: |
-          (! git grep -I -no ' $' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above files have trailing spaces; please remove them"; false))
+          (! git grep -In '[[:blank:]]$' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above lines have trailing spaces; please remove them"; false))
       - name: Ensure no tabs
         run: |
-          (! git grep -I -no $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
+          (! git grep -In $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above lines have tabs; please convert them to spaces"; false))
+      - name: Ensure no non-breaking spaces
+        run: |
+          (! git grep -In $'\u00a0' -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
       - name: Ensure canonical include
         run: |
-          (! git grep -I -no $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
+          (! git grep -In $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above lines have include with quotes; please convert them to #include <xxxx>"; false))
       # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
       - name: Ensure C++ source files are not executable
         run: |
+          # shellcheck disable=SC2016
           (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format|gradlew)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
       - name: C++ docs check
         run: |
@@ -66,7 +73,10 @@ jobs:
       - name: CUDA kernel launch check
         run: |
           set -eux
-          python torch/testing/check_kernel_launches.py |& tee ${GITHUB_WORKSPACE}/cuda_kernel_launch_checks.txt
+          python torch/testing/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
+      - name: Ensure no direct cub include
+        run: |
+          (! git grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
 
   toc:
     runs-on: ubuntu-18.04
@@ -105,17 +115,33 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
+        with:
+          fetch-depth: 2 # to allow us to use github.event.pull_request.head.sha
       - name: Prepare output dir with HEAD commit SHA
         run: |
           mkdir flake8-output
           cd flake8-output
-          echo ${{ github.event.pull_request.head.sha }} > commit-sha.txt
+          echo "$HEAD_SHA" > commit-sha.txt
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Run flake8
         run: |
           set -eux
+          pip install typing-extensions # for tools/translate_annotations.py
           pip install -r requirements-flake8.txt
           flake8 --version
-          flake8 | tee ${GITHUB_WORKSPACE}/flake8-output/warnings.txt
+          flake8 | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
+          cp flake8-output.txt flake8-output/annotations.json
+      - name: Translate annotations
+        if: github.event_name == 'pull_request'
+        run: |
+          tools/translate_annotations.py \
+            --file=flake8-output.txt \
+            --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
+            --commit="$HEAD_SHA" \
+            > flake8-output/annotations.json
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
@@ -123,7 +149,8 @@ jobs:
           path: flake8-output/
       - name: Fail if there were any warnings
         run: |
-          [ ! -s flake8-output/warnings.txt ]
+          cat flake8-output.txt
+          [ ! -s flake8-output.txt ]
 
   clang-tidy:
     if: github.event_name == 'pull_request'
@@ -137,12 +164,14 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          fetch-depth: 0 # deep clone, to allow us to use git merge-base
+          fetch-depth: 0 # to allow tools/clang_tidy.py to do its thing
       - name: Prepare output dir with HEAD commit SHA
         run: |
           mkdir clang-tidy-output
           cd clang-tidy-output
-          echo ${{ github.event.pull_request.head.sha }} > commit-sha.txt
+          echo "$HEAD_SHA" > commit-sha.txt
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Install dependencies
         run: |
           set -eux
@@ -165,9 +194,6 @@ jobs:
           set -eux
           git remote add upstream https://github.com/pytorch/pytorch
           git fetch upstream "$GITHUB_BASE_REF"
-          BASE_SHA=${{ github.event.pull_request.base.sha }}
-          HEAD_SHA=${{ github.event.pull_request.head.sha }}
-          MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
 
           if [[ ! -d build ]]; then
             git submodule update --init --recursive
@@ -199,7 +225,7 @@ jobs:
           python tools/clang_tidy.py                               \
             --verbose                                              \
             --paths torch/csrc/                                    \
-            --diff "$MERGE_BASE"                                   \
+            --diff "$BASE_SHA"                                   \
             -g"-torch/csrc/jit/passes/onnx/helper.cpp"             \
             -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp"\
             -g"-torch/csrc/jit/serialization/onnx.cpp"             \
@@ -216,9 +242,18 @@ jobs:
             -g"-torch/csrc/deploy/interpreter/interpreter.h"  \
             -g"-torch/csrc/deploy/interpreter/interpreter_impl.h"  \
             -g"-torch/csrc/deploy/interpreter/test_main.cpp"  \
-            "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output/warnings.txt
+            "$@" > "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
-          cat ${GITHUB_WORKSPACE}/clang-tidy-output/warnings.txt
+          cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+
+          tools/translate_annotations.py \
+            --file=clang-tidy-output.txt \
+            --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
+            --commit="$HEAD_SHA" \
+            > clang-tidy-output/annotations.json
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
@@ -258,7 +293,7 @@ jobs:
         run: |
           set -eux
           pip install -r requirements.txt
-          pip install mypy==0.770
+          pip install mypy==0.812
       - name: Run autogen
         run: |
           set -eux
