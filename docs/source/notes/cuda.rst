@@ -260,21 +260,6 @@ Use of a caching allocator can interfere with memory checking tools such as
 ``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
 
-The behavior of caching allocator can be controlled via environment variable
-``PYTORCH_CUDA_ALLOC_CONF``.
-The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2><value2>...``
-Available options:
-
-* ``max_split_size_mb`` prevents the allocator from splitting blocks larger
-  than this size (in MB). This can help prevent fragmentation and may allow
-  some borderline workloads to complete without running out of memory.
-  Performance cost can range from 'zero' to 'substatial' depending on
-  allocation patterns.  Default value is unlimited, i.e. all blocks can be
-  split. The :meth:`~torch.cuda.memory_stats` and
-  :meth:`~torch.cuda.memory_summary` methods are useful for tuning.  This
-  option should be used as a last resort for a workload that is aborting
-  due to 'out of memory' and showing a large amount of inactive split blocks.
-
 .. _cufft-plan-cache:
 
 cuFFT plan cache
