@@ -885,7 +885,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
    nbytes_read_write = 4 # this is number of bytes read + written by a kernel. Change this to fit your kernel.
 
    for i in range(10):
-       a=torch.Tensor(size).cuda().uniform_()
+       a=torch.empty(size).cuda().uniform_()
        torch.cuda.synchronize()
        start = time.time()
        # dry run to alloc
