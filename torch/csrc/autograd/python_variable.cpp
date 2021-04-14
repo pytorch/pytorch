@@ -194,15 +194,19 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   // can't assume that some other code has taken care of it.
   // NB: this will overreport _Py_RefTotal but based on inspection of object.c
   // there is no way to avoid this
-  _Py_NewReference((PyObject*)self);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(Py_REFCNT(self) == 1);
+  #ifdef Py_TRACE_REFS
+  _Py_AddToAllObjects(op, 1);
+  #endif
+  Py_INCREF(self);
 
   // Flip THPVariable to be non-owning
   // (near use-after-free miss here: fresh MaybeOwned is created breaking
   // reference on Tensor in struct BEFORE we overwrite the old one)
   self->cdata = MaybeOwned<Variable>::borrowed(tensor);
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(tensor.use_count() >= 1);
+  // NB: At this point, tensor *could* be dead (e.g., some other C++ thread
+  // decrefed it.)  At this point, it is probably waiting on the GIL to
+  // deallocate the Python object and will kill self, BUT NOT YET.
 
   return true;
 }
@@ -984,11 +988,9 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   PyObject_GC_Track(self);
   THPVariable_dealloc((THPVariable*)self);
 
-  // THPVariable is never HEAPTYPE
-  if (type->tp_flags & Py_TPFLAGS_HEAPTYPE) {
-    Py_DECREF(type);
-  }
-
+  // Python defined subclasses should always be on the heap
+  TORCH_INTERNAL_ASSERT(type->tp_flags & Py_TPFLAGS_HEAPTYPE);
+  Py_DECREF(type);
 }
 
 int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
