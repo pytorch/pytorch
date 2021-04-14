@@ -2,8 +2,16 @@ import os
 import shutil
 from glob import glob
 
-from .setup_helpers.cmake import USE_NINJA
+# the below two modules have a circular dependency issue, but
+# .setup_helpers.env only imports .setup_helpers.cmake after it has
+# already defined the items which .setup_helpers.cmake uses from
+# .setup_helpers.env, so it works if you import .setup_helpers.env first
+# here but not the other way around
+
+# isort: off
 from .setup_helpers.env import IS_64BIT, IS_WINDOWS, check_negative_env_flag
+from .setup_helpers.cmake import USE_NINJA
+# isort: on
 
 
 def _overlay_windows_vcvars(env):
