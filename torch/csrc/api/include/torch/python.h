@@ -141,7 +141,8 @@ py::class_<ModuleType, Extra...> add_module_bindings(
             return module.named_modules(std::move(prefix));
           },
           py::arg("memo") = py::none(),
-          py::arg("prefix") = std::string())
+          py::arg("prefix") = std::string(),
+          py::arg("remove_duplicate") = true)
       .def("children", [](ModuleType& module) { return module.children(); })
       .def("named_children",
           [](ModuleType& module) { return module.named_children(); })
