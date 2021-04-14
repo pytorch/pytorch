@@ -944,6 +944,7 @@ class TestAsserts(TestCase):
         for inputs in self.make_inputs(a, b):
             torch.testing.assert_close(*inputs, rtol=0.0, atol=eps * 2)
 
+    @onlyCPU
     def test_assert_close_nan(self, device):
         a = torch.tensor(float("NaN"), device=device)
         b = torch.tensor(float("NaN"), device=device)
@@ -952,6 +953,7 @@ class TestAsserts(TestCase):
             with self.assertRaises(AssertionError):
                 torch.testing.assert_close(*inputs)
 
+    @onlyCPU
     def test_assert_close_equal_nan(self, device):
         a = torch.tensor(float("NaN"), device=device)
         b = torch.tensor(float("NaN"), device=device)
@@ -1043,14 +1045,7 @@ class TestAsserts(TestCase):
     def test_msg_callable(self, device):
         msg = "Custom error message!"
 
-
-
         def make_msg(a, b, info):
-            return str(info)
-            return (
-                f"Argh, we found {info.total_mismatches} mismatches! "
-                f"That is {info.mismatch_ratio:.1%}!"
-            )
             return msg
 
         a = torch.tensor(1, device=device)
