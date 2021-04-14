@@ -13,11 +13,17 @@ namespace jit {
 
 namespace {
 
+// This function construct stacktrace with module hierarchy
+// Module hierarchy will contain information about where in the
+// module hierarchy this source is. For example if conv2d op
+// exist in hierarcy A->B->C->Conv2d with type annotations of
+// A -> TopM, B->MyModule, C->SomeModule, then module hierarchy
+// will be TopM(A).MyModule(B).SomeModule(C).Conv2d(conv)
+// Source level stack information will be from model source code.
 std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
     const DelegateDebugInfoType& sr_callstack,
     const std::string& root_scope_string,
     const std::string& top_module_type_name) {
-  // constexpr size_t kFunction = 0;
   constexpr size_t kSourceRange = 1;
   constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
@@ -50,9 +56,6 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
               .append("(")
               .append(type_name)
               .append(")");
-          // We will append function name separately
-          //    .append(".")
-          //    .append(std::get<kFunction>(element)->name());
         } else {
           module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
         }
@@ -61,6 +64,7 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
       }
       // Now add source range info to stack
       // When we serialize function names, those can be added here.
+      // TODO: Add function name separately
       entries.emplace_back(
           StackEntry{"FunctionName_UNKNOWN", std::get<kSourceRange>(element)});
     }
@@ -119,7 +123,7 @@ MobileDebugTable::MobileDebugTable(
   }
 }
 
-std::string MobileDebugTable::getModuleHierInfo(
+std::string MobileDebugTable::getModuleHierarchyInfo(
     const int64_t debug_handle,
     const std::string& top_module_type_name) {
   const auto it = callstack_ptr_map_.find(debug_handle);

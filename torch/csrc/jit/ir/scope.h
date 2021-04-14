@@ -151,7 +151,7 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   // Return next element in the callstack list.
   c10::optional<ModuleInstanceInfo> module_instance() const;
 
-  // Return next element in the callstack list.
+  // Returns the source range of the node
   SourceRange source_range() const;
 
   // Return callstack as a vector of [Function, SourceRange] pairs.

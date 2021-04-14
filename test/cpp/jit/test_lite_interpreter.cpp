@@ -641,7 +641,7 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //   def forward(self, x):
   //     return self.A0.forward(self.B0.forward(x))
 
-  std::set<std::string> expected_result({"top(C).A0(A)", "top(C).B0(B)"});
+  std::set<std::string> expected_result({"top(C)", "top(C).A0(A)", "top(C).B0(B)"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 

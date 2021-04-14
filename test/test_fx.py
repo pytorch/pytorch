@@ -469,7 +469,7 @@ class TestFX(JitTestCase):
                             # Pull out constants. These constants will later be
                             # fed to the interpreter C++ object via add_constant()
                             arg_name = f'constant_{constant_idx}'
-                            constants[arg_name] = torch.Tensor(
+                            constants[arg_name] = torch.tensor(
                                 [arg] if isinstance(arg, numbers.Number) else arg)
                             arg_names.append(arg_name)
                             constant_idx += 1
@@ -1054,14 +1054,69 @@ class TestFX(JitTestCase):
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
             if node.op == 'output':
-                output_shape = node.args[0].meta['shape']
-                output_stride = node.args[0].meta['stride']
+                output_shape = node.args[0].meta['tensor_meta'].shape
+                output_stride = node.args[0].meta['tensor_meta'].stride
         self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
                                        'call_module', 'output']))
 
         # Test shape propogation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
         self.assertEqual(output_stride, ref_out.stride())
+
+    def test_shape_prop_layout(self):
+        class ConvTest(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_mod = torch.nn.Conv2d(5, 5, 3)
+
+            def forward(self, x):
+                return self.conv_mod(x)
+
+        # contiguous layout
+        test_mod = ConvTest()
+        traced = symbolic_trace(test_mod)
+        x = torch.randn(5, 5, 224, 224)
+        shape_prop.ShapeProp(traced).propagate(x)
+
+        assert(all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
+                   for node in traced.graph.nodes))
+
+        x_channels_last = x.contiguous(memory_format=torch.channels_last)
+        traced.to(memory_format=torch.channels_last)
+        shape_prop.ShapeProp(traced).propagate(x_channels_last)
+        for node in traced.graph.nodes:
+            # NB: the implementation of conv may not preserve the memory format,
+            # unfortunately. The best we can do is just check that the placeholder
+            # node is channels-last
+            if node.op in {'placeholder'}:
+                self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last)
+
+
+    def test_shape_prop_layout_3d(self):
+        class ConvTest3d(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_mod = torch.nn.Conv3d(5, 5, 3)
+
+            def forward(self, x):
+                return self.conv_mod(x)
+
+        test_mod_3d = ConvTest3d()
+        traced_3d = symbolic_trace(test_mod_3d)
+        x_3d = torch.randn(5, 5, 224, 224, 15)
+        shape_prop.ShapeProp(traced_3d).propagate(x_3d)
+        assert(all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
+                   for node in traced_3d.graph.nodes))
+
+        x_channels_last_3d = x_3d.contiguous(memory_format=torch.channels_last_3d)
+        traced_3d.to(memory_format=torch.channels_last_3d)
+        shape_prop.ShapeProp(traced_3d).propagate(x_channels_last_3d)
+        for node in traced_3d.graph.nodes:
+            # NB: the implementation of conv may not preserve the memory format,
+            # unfortunately. The best we can do is just check that the placeholder
+            # node is channels-last
+            if node.op in {'placeholder'}:
+                self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last_3d)
 
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
@@ -1860,7 +1915,7 @@ class TestFX(JitTestCase):
                 traced(5)
 
         self.assertIn("Call using an FX-traced Module, line 4 of the "
-                      "traced Module’s generated forward function:",
+                      "traced Module's generated forward function:",
                       captured[0])
 
     def test_custom_traceback_not_raised_when_exception_source_is_submodule(self):
@@ -1882,7 +1937,7 @@ class TestFX(JitTestCase):
             captured = traceback.format_exc()
 
         self.assertNotIn("Call using an FX-traced Module, line 4 of the"
-                         " traced Module’s generated forward function:",
+                         " traced Module's generated forward function:",
                          captured)
 
     def test_ast_rewriter_rewrites_assert(self):

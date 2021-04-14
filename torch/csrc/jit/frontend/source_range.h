@@ -179,7 +179,7 @@ struct TORCH_API SourceRange {
   size_t end_;
 };
 
-struct SourceRangeHasher {
+struct TORCH_API SourceRangeHasher {
  public:
   size_t operator()(const torch::jit::SourceRange& key) const;
 };
