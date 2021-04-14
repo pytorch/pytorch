@@ -24,10 +24,10 @@ class MobileDebugTable {
       const std::shared_ptr<CompilationUnit>& cu);
   std::string getSourceDebugString(
       const int64_t debug_handle,
-      const std::string& top_module_type_name = "");
-  std::string getModuleHierInfo(
+      const std::string& top_module_type_name = "ModuleTypeUnknown");
+  std::string getModuleHierarchyInfo(
       const int64_t debug_handle,
-      const std::string& top_module_type_name = "");
+      const std::string& top_module_type_name = "ModuleTypeUnknown");
 
  private:
   ska::flat_hash_map<int64_t, DelegateDebugInfoType> callstack_ptr_map_;

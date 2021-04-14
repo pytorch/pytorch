@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/codegen.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
@@ -93,7 +94,7 @@ static void setInputChunkDescriptors(KernelSpec& spec) {
   // furthermore we know that the tensor inputs are in the
   // beginning of the fusion group's inputs.
   spec.inputChunks().reserve(spec.nTensorInputs());
-  for (int64_t i = 0; i < spec.nTensorInputs(); i++) {
+  for (const auto i : c10::irange(spec.nTensorInputs())) {
     const Value* input = spec.graph()->inputs()[i];
     if (const Node* chunk = usedInFusedChunk(input)) {
       spec.inputChunks().emplace_back(
