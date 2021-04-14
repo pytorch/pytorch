@@ -518,8 +518,8 @@ Workspace chooseForwardSolution(
   miopenConvSolution_t solution;
   MIOPEN_CHECK(miopenConvolutionForwardGetSolution(
       args.handle,
-      args.wdesc.desc(),
       args.idesc.desc(),
+      args.wdesc.desc(),
       args.cdesc.desc(),
       args.odesc.desc(),
       1,        // just return the fastest
@@ -537,10 +537,10 @@ Workspace chooseBackwardDataSolution(
   miopenConvSolution_t solution;
   MIOPEN_CHECK(miopenConvolutionBackwardDataGetSolution(
       args.handle,
-      args.idesc.desc(),
+      args.odesc.desc(),
       args.wdesc.desc(),
       args.cdesc.desc(),
-      args.odesc.desc(),
+      args.idesc.desc(),
       1,        // just return the fastest
       &solution_count,
       &solution));
@@ -632,8 +632,8 @@ void raw_miopen_convolution_forward_out(
     Workspace workspace = chooseForwardSolution(args, &solution_id);
     MIOPEN_CHECK(miopenConvolutionForwardImmediate(
       args.handle,
-      args.wdesc.desc(), weight.data_ptr(),
       args.idesc.desc(), input.data_ptr(),
+      args.wdesc.desc(), weight.data_ptr(),
       args.cdesc.desc(),
       args.odesc.desc(), output.data_ptr(),
       workspace.data, workspace.size,
@@ -729,8 +729,8 @@ void raw_miopen_depthwise_convolution_forward_out(
     Workspace workspace = chooseForwardSolution(args, &solution_id);
     MIOPEN_CHECK(miopenConvolutionForwardImmediate(
       args.handle,
-      args.wdesc.desc(), weight.data_ptr(),
       args.idesc.desc(), input.data_ptr(),
+      args.wdesc.desc(), weight.data_ptr(),
       args.cdesc.desc(),
       args.odesc.desc(), output.data_ptr(),
       workspace.data, workspace.size,
