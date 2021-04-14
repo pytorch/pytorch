@@ -302,15 +302,14 @@ static void RecoverScalarTypeForOutput(
 
 static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
   TORCH_INTERNAL_ASSERT(n->outputs().size() == 1);
-  if (n->output()->type()->cast<TensorType>() == nullptr){
+  if (n->output()->type()->cast<TensorType>() == nullptr || n->output()->type()->cast<TensorType>()->scalarType() == c10::nullopt){
     // skip LowPrecisionCast if op output type is null.
     return;
   }
   auto output_scalar_type =
       n->output()->type()->cast<TensorType>()->scalarType().value();
   for (size_t i = 0; i < n->inputs().size(); ++i) {
-    bool is_tensor = !!n->input(i)->type()->cast<TensorType>();
-    if (n->input(i)->type()->cast<TensorType>() == nullptr || is_tensor){
+    if (n->input(i)->type()->cast<TensorType>() == nullptr || n->input(i)->type()->cast<TensorType>()->scalarType() == c10::nullopt){
       // skip LowPrecisionCast if any op input type node is null.
       return;
     }
@@ -319,13 +318,13 @@ static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
     TORCH_INTERNAL_ASSERT(output_scalar_type == input_tensor_type);
   }
 
-  // The LowPrecision problem will be fixed in ONNX opset 14
+  // The LowPrecision problem will be fixed in ONNX opset 14.
   if (opset_version < ONNX_OPSET_14) {
     auto expected_scalar_type_cast =
         LowPrecisionCastForStandardOps(n, output_scalar_type);
     UpdateScalarTypeForInputs(n, *expected_scalar_type_cast);
     if (output_scalar_type != *expected_scalar_type_cast) {
-      // If input type is changed, convert it to the original type
+      // If input type is changed, convert it to the original type.
       RecoverScalarTypeForOutput(n->output(), output_scalar_type);
     }
   }
