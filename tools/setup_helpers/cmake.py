@@ -5,7 +5,7 @@
 import multiprocessing
 import os
 import re
-from subprocess import check_call, check_output
+from subprocess import check_call, check_output, CalledProcessError
 import sys
 import distutils.sysconfig
 from distutils.version import LooseVersion
@@ -137,7 +137,13 @@ class CMake:
 
         command = [self._cmake_command] + args
         print(' '.join(command))
-        check_call(command, cwd=self.build_dir, env=env)
+        try:
+            check_call(command, cwd=self.build_dir, env=env)
+        except (CalledProcessError, KeyboardInterrupt) as e:
+            # This error indicates that there was a problem with cmake, the
+            # Python backtrace adds no signal here so skip over it by catching
+            # the error and exiting manually
+            sys.exit(1)
 
     @staticmethod
     def defines(args, **kwargs):
