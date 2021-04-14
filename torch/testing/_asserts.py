@@ -224,7 +224,7 @@ def _check_values_equal(actual: torch.Tensor, expected: torch.Tensor) -> Optiona
     """Checks if the values of two tensors are bitwise equal.
 
     Args:
-        expected (torch.Tensor): Actual tensor.
+        actual (torch.Tensor): Actual tensor.
         expected (torch.Tensor): Expected tensor.
 
     Returns:
