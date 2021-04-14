@@ -519,7 +519,7 @@ class TestObserver(QuantizationTestCase):
                 obs = obs_cls(0.1, 0)
             else:
                 obs = obs_cls()
-            x = torch.Tensor()
+            x = torch.tensor([])
             # verify no crash
             x = obs(x)
 
