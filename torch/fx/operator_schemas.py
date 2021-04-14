@@ -130,7 +130,7 @@ def type_matches(signature_type : Any, argument_type : Any):
     return signature_type is argument_type
 
 def normalize_function(
-        target: Callable, args: Tuple[Any], kwargs : Dict[str, Any] = {}, arg_types : Optional[Tuple[Any]] = None,
+        target: Callable, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None, arg_types : Optional[Tuple[Any]] = None,
         kwarg_types : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
     Returns normalized arguments to PyTorch functions. This means that
@@ -144,7 +144,7 @@ def normalize_function(
     Args:
         target (Callable): Function that we are normalizing
         args (Tuple[Any]): Tuple of args to the function
-        kwargs (Dict[str, Any]): Dict of kwargs to the function
+        kwargs (Optional[Dict[str, Any]]): Dict of kwargs to the function
         arg_types (Optional[Tuple[Any]]): Tuple of arg types for the args
         kwarg_types (Optional[Dict[str, Any]]): Dict of arg types for the kwargs
 
@@ -152,7 +152,8 @@ def normalize_function(
 
         Returns normalized_kwargs, or `None` if not successful.
     """
-
+    if kwargs is None:
+        kwargs = {}
     new_kwargs = None
 
     if target in boolean_dispatched or target.__module__ == 'torch.nn.functional':
@@ -216,6 +217,7 @@ def normalize_function(
                     raise RuntimeError(f'Tried to normalize arguments to {torch.typename(target)} but '
                                        f'the schema match was ambiguous! Please provide argument types to '
                                        f'the normalize_arguments() call. Available schemas:\n{schema_printouts}')
+
     return new_kwargs
 
 def _args_kwargs_to_normalized_kwargs(sig : inspect.Signature, args : Tuple[Any, ...],

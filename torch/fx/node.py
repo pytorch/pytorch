@@ -470,7 +470,8 @@ class Node:
             Returns normalized_kwargs, or `None` if not successful.
         """
         if self.op == 'call_function':
-            return normalize_function(self.target, self.args, self.kwargs, arg_types, kwarg_types)
+            assert isinstance(self.target, Callable)  # type: ignore
+            return normalize_function(self.target, self.args, self.kwargs, arg_types, kwarg_types)  # type: ignore
         elif self.op == 'call_module':
             assert isinstance(self.target, str)
             try:
