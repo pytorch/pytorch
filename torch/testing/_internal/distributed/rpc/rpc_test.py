@@ -4952,7 +4952,17 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             device_map={0 : 0, 1 : 1}
         )
 
-    def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map, dst=None):
+    @staticmethod
+    def _gpu_add_given_devices(x, y, x_to, y_to, z_to):
+        x_device = "cpu" if x.device.type == "cpu" else x.device.index
+        y_device = "cpu" if y.device.type == "cpu" else y.device.index
+        if x_device == x_to and y_device == y_to:
+            return x.to(z_to) + y.to(z_to)
+        else:
+            raise ValueError("Wrong device affinity")
+
+    def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map, dst=None, fn=None):
+        fn = TensorPipeAgentCudaRpcTest._gpu_add_given_gpus if fn is None else fn
         x_to = device_map[x_from]
         y_to = device_map[y_from]
 
@@ -4971,19 +4981,26 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         x = torch.zeros(2).to(x_from)
         y = torch.ones(2).to(y_from)
 
-        ret = rpc.rpc_sync(
-            dst,
-            TensorPipeAgentCudaRpcTest._gpu_add_given_gpus,
-            args=(x, y, x_to, y_to, z_to)
-        )
+        ret = rpc.rpc_sync(dst, fn, args=(x, y, x_to, y_to, z_to))
 
         reverse_device_map = {device_map[k] : k for k in device_map}
         z_from = reverse_device_map[z_to]
 
-        self.assertEqual(ret.device.index, z_from)
+        ret_device = "cpu" if ret.device.type == "cpu" else ret.device.index
+        self.assertEqual(ret_device, z_from)
         self.assertEqual(ret, torch.ones(2).to(z_from))
 
         rpc.shutdown()
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_cpu(self):
+        self._test_device_maps_gpu(
+            x_from="cpu",
+            y_from="cpu",
+            z_to="cpu",
+            device_map={"cpu" : "cpu"},
+            fn=TensorPipeAgentCudaRpcTest._gpu_add_given_devices,
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_default(self):

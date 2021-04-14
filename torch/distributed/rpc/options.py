@@ -101,18 +101,16 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         for k in device_map:
             v = device_map[k]
             k, v = torch.device(k), torch.device(v)
-            if k.type != 'cuda' or v.type != 'cuda':
-                raise ValueError(
-                    "`set_device_map` only supports CUDA devices, "
-                    f"but got device pair {k}: {v}"
 
-                )
-            if to in curr_device_maps and k.index in curr_device_maps[to]:
-                curr_v = super().device_maps[to][k.index]
-                if curr_v != v.index:
+            k_index = -1 if k.type == "cpu" else k.index
+            v_index = -1 if v.type == "cpu" else v.index
+
+            if to in curr_device_maps and k_index in curr_device_maps[to]:
+                curr_v = super().device_maps[to][k_index]
+                if curr_v != v_index:
                     raise ValueError(
                         "`set_device_map` only supports 1-to-1 mapping, "
                         f"trying to map {k} to {v} and {curr_v}"
                     )
-            device_index_map[k.index] = v.index
+            device_index_map[k_index] = v_index
         super().set_device_map(to, device_index_map)
