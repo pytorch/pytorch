@@ -11,6 +11,7 @@ using namespace c10::impl;
 
 // -- DeviceGuard -------------------------------------------------------
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DeviceGuard, ResetDeviceDifferentDeviceType) {
   FakeGuardImpl<DeviceType::CUDA> cuda_impl;
   FakeGuardImpl<DeviceType::HIP> hip_impl;
@@ -26,6 +27,7 @@ TEST(DeviceGuard, ResetDeviceDifferentDeviceType) {
 
 // -- OptionalDeviceGuard -----------------------------------------------
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptionalDeviceGuard, ResetDeviceDifferentDeviceType) {
   FakeGuardImpl<DeviceType::CUDA> cuda_impl;
   FakeGuardImpl<DeviceType::HIP> hip_impl;
