@@ -98,7 +98,7 @@ def _check_attributes_equal(
     """Checks if the attributes of two tensors match.
 
     Always checks the :attr:`~torch.Tensor.shape`. Checks for :attr:`~torch.Tensor.device`,
-    :attr:`~torch.Tensor.dtype`, and :meth:`~Tensor.stride` are optional and can be disabled.
+    :attr:`~torch.Tensor.dtype`, and :meth:`~torch.Tensor.stride` are optional and can be disabled.
 
     Args:
         actual (Tensor): Actual tensor.
@@ -108,7 +108,7 @@ def _check_attributes_equal(
         check_dtype (bool): If ``True`` (default), asserts that both :attr:`actual` and :attr:`expected` have the same
             :attr:`~torch.Tensor.dtype`.
         check_stride (bool): If ``True`` (default), asserts that both :attr:`actual` and :attr:`expected` have the same
-            :meth:`~Tensor.stride`.
+            :meth:`~torch.Tensor.stride`.
 
     Returns:
         (Optional[AssertionError]): If checks did not pass.
