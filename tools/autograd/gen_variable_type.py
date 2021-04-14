@@ -43,7 +43,8 @@ from tools.codegen.context import with_native_function
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
-                                 SelfArgument, TensorOptionsArguments)
+                                 SelfArgument, TensorOptionsArguments,
+                                 BaseType)
 from typing import Callable, List, Optional, Sequence, Union
 
 # We don't set or modify grad_fn on these methods. Generally, they return
