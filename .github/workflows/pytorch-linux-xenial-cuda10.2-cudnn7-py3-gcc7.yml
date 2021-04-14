@@ -120,6 +120,18 @@ jobs:
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      - name: Determine shm-size
+        run: |
+          shm_size="1g"
+          case "${BUILD_ENVIRONMENT}" in
+            *cuda*)
+              shm_size="2g"
+              ;;
+            *rocm*)
+              shm_size="8g"
+              ;;
+          esac
+          echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
       - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts
         with:
@@ -140,6 +152,7 @@ jobs:
             -e IN_CI \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
+            --shm-size="${SHM_SIZE}" \
             --tty \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
