@@ -26,10 +26,10 @@ jobs:
             const artifacts = await github.actions.listWorkflowRunArtifacts({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              run_id: ${{ github.event.workflow_run.id }},
+              run_id: process.env.RUN_ID,
             });
             const filteredArtifacts = artifacts.data.artifacts.filter(artifact => {
-              return artifact.name == '${{ matrix.name }}';
+              return artifact.name == process.env.LINT_NAME;
             });
             if (filteredArtifacts.length > 0) {
               const matchArtifact = filteredArtifacts[0];
@@ -41,10 +41,13 @@ jobs:
               });
               const fs = require('fs');
               fs.writeFileSync(
-                '${{ github.workspace }}/linter-output.zip',
+                `${process.env.GITHUB_WORKSPACE}/linter-output.zip`,
                 Buffer.from(download.data),
               );
             }
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          LINT_NAME: ${{ matrix.name }}
       - name: Unzip artifact
         id: unzip
         run: |
