@@ -13,7 +13,6 @@ class TensorMetadata(NamedTuple):
     stride : Tuple[int]
     memory_format : Optional[torch.memory_format]
 
-
     # Quantization metadata
     is_quantized : bool
     qscheme : Optional[torch.qscheme]
