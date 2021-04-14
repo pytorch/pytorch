@@ -4270,7 +4270,7 @@ op_db: List[OpInfo] = [
                    aliases=('special.expit', ),
                    ref=reference_sigmoid if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 1e-2,
-                                                  torch.complex64: 1e-2,
+                                                  torch.complex64: 1e-1,
                                                   torch.bfloat16: 1e-2}),),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/56012
