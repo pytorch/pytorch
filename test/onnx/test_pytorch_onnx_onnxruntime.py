@@ -7550,7 +7550,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (random_data, empty_tensor))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    # TODO: test input size with (0, 0, 0, 0, 0) doesn't work with current ort rel (1.7)
     def test_index_put_if_2(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
@@ -7584,8 +7583,12 @@ class TestONNXRuntime(unittest.TestCase):
 
         model = Example(10)
         random_data = torch.rand((1, 5, 30, 30))
-        empty_tensor = torch.tensor([0], dtype=torch.float).view(1, 1, 1, 1, 1)
-        self.run_test(model, (random_data, empty_tensor))
+        empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
+        random_state = torch.rand((1, 1, 10, 30, 30))
+        self.run_test(model, (random_data, empty_tensor),
+                      input_names=['data', 'state'],
+                      dynamic_axes={'state': [0, 1, 2, 3, 4]},
+                      test_with_inputs=[(random_data, random_state)])
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if_3(self):
