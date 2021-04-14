@@ -87,7 +87,7 @@ void release_image(const Resource::Image& image) {
 
 } // namespace
 
-void* map(
+void* _map(
     const Resource::Memory& memory,
     const Resource::Memory::Access::Flags access) {
   void* data = nullptr;

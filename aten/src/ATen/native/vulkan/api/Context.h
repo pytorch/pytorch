@@ -135,6 +135,19 @@ inline void bind(
 
 } // namespace detail
 
+// Forward declaration
+Descriptor::Set dispatch_prologue(
+    Command::Buffer&,
+    const Shader::Layout::Signature&,
+    const Shader::Descriptor&,
+    const Shader::WorkGroup&);
+
+// Forward declaration
+void dispatch_epilogue(
+    Command::Buffer&,
+    const Descriptor::Set&,
+    const Shader::WorkGroup&);
+
 template<typename... Arguments>
 inline void Context::dispatch(
     Command::Buffer& command_buffer,
@@ -143,12 +156,6 @@ inline void Context::dispatch(
     const Shader::WorkGroup& global_work_group,
     const Shader::WorkGroup& local_work_group_size,
     Arguments&&... arguments) {
-  // Forward declaration
-  Descriptor::Set dispatch_prologue(
-      Command::Buffer&,
-      const Shader::Layout::Signature&,
-      const Shader::Descriptor&,
-      const Shader::WorkGroup&);
 
   // Factor out template parameter independent code to minimize code bloat.
   Descriptor::Set descriptor_set = dispatch_prologue(
@@ -161,12 +168,6 @@ inline void Context::dispatch(
       descriptor_set,
       std::index_sequence_for<Arguments...>{},
       std::forward<Arguments>(arguments)...);
-
-  // Forward declaration
-  void dispatch_epilogue(
-      Command::Buffer&,
-      const Descriptor::Set&,
-      const Shader::WorkGroup&);
 
   // Factor out template parameter independent code to minimize code bloat.
   dispatch_epilogue(
