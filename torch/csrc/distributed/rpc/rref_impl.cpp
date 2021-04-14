@@ -258,6 +258,25 @@ void OwnerRRef::setError(std::exception_ptr eptr) {
   future_->setErrorIfNeeded(std::move(eptr));
 }
 
+void OwnerRRef::recordAllStreams(
+    const std::shared_ptr<LazyStreamContext>& ctx) {
+  if (ctx) {
+    for (auto stream : ctx->getReservedStreams()) {
+      c10::Event event{ctx->deviceType()};
+      event.record(stream);
+      events_.push_back(std::move(event));
+    }
+  }
+}
+
+void OwnerRRef::blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx) {
+  if (ctx) {
+    for (c10::Event& event : events_) {
+      event.block(ctx->getStream(event.device_index()));
+    }
+  }
+}
+
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {
   if (rref.isOwner()) {
     return os << "OwnerRRef("

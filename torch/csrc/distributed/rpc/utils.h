@@ -1,6 +1,8 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/Event.h>
+#include <c10/core/Stream.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -86,6 +88,105 @@ TORCH_API void populateRemoteProfiledEvents(
     const torch::autograd::profiler::ProfilerConfig& profilerConfig,
     const std::vector<std::vector<torch::autograd::profiler::LegacyEvent>>&
         eventLists);
+
+using stream_factory_t = std::function<c10::Stream(c10::DeviceIndex)>;
+
+// A general device context class for both CPU and CUDA. If CUDA is not
+// available, all CUDA-related methods will be no-ops.
+struct TORCH_API LazyStreamContext {
+  LazyStreamContext(const LazyStreamContext& other) = delete;
+  LazyStreamContext(LazyStreamContext&& other) = delete;
+  LazyStreamContext& operator=(const LazyStreamContext& rhs) = delete;
+  LazyStreamContext& operator=(LazyStreamContext&& rhs) & = delete;
+
+  LazyStreamContext(
+      c10::DeviceType device_type,
+      stream_factory_t stream_creator,
+      stream_factory_t current_stream_provider)
+      : device_type_(device_type),
+        stream_creator_(std::move(stream_creator)),
+        current_stream_provider_(std::move(current_stream_provider)) {}
+
+  // let streams in this context wiat for current streams.
+  void waitForCurrentStreams(const std::vector<torch::Tensor>& tensors = {}) {
+    if (!stream_creator_) {
+      // Since the stream_creator is empty the device doesn't support streams
+      return;
+    }
+    for (const auto& tensor : tensors) {
+      if (tensor.is_cuda()) {
+        getStream(tensor.device().index());
+      }
+    }
+
+    for (const auto& entry : streams_) {
+      c10::Event event{device_type_};
+      event.record(current_stream_provider_(entry.first));
+      event.block(entry.second);
+    }
+  }
+
+  // get all streams used in this context
+  std::vector<c10::Stream> getReservedStreams() const {
+    if (!stream_creator_) {
+      // Since the stream_creator is empty the device doesn't support streams
+      return {};
+    }
+    std::vector<c10::Stream> reservedStreams;
+    reservedStreams.reserve(streams_.size());
+    for (const auto& entry : streams_) {
+      reservedStreams.push_back(entry.second);
+    }
+    return reservedStreams;
+  }
+
+  // get a stream for the given device. If it is the first time using that
+  // device, allocate a new stream and store it in the map.
+  c10::Stream getStream(c10::DeviceIndex index) {
+    if (!stream_creator_) {
+      throw std::runtime_error(c10::str(
+          "Attempting to access device stream of device ",
+          index,
+          ", but the device doesn't support streams"));
+    }
+    auto iter = streams_.find(index);
+    if (iter == streams_.end()) {
+      auto stream = stream_creator_(index);
+      streams_.emplace(index, stream);
+      return stream;
+    } else {
+      return iter->second;
+    }
+  }
+
+  std::set<c10::DeviceIndex> devices() const {
+    std::set<c10::DeviceIndex> devices;
+    for (const auto& entry : streams_) {
+      devices.insert(entry.first);
+    }
+    return devices;
+  }
+
+  c10::DeviceType deviceType() const {
+    return device_type_;
+  }
+
+ private:
+  std::unordered_map<c10::DeviceIndex, c10::Stream> streams_;
+  c10::DeviceType device_type_;
+  stream_factory_t stream_creator_;
+  stream_factory_t current_stream_provider_;
+};
+
+inline std::shared_ptr<LazyStreamContext> createLazyStreamContext(
+    c10::DeviceType device_type,
+    stream_factory_t stream_creator,
+    stream_factory_t current_stream_provider) {
+  return std::make_shared<LazyStreamContext>(
+      device_type,
+      std::move(stream_creator),
+      std::move(current_stream_provider));
+}
 
 } // namespace rpc
 } // namespace distributed
