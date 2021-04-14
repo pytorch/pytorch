@@ -1,15 +1,20 @@
-from typing import Optional, Iterable, List, Any, Dict
+# !/usr/bin/env python
+# -*- coding: utf-8 -*-
+# mypy: ignore-errors
+
+from typing import Optional, Iterable, List, Dict
 from collections import defaultdict
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
-    import monkeytype  # type: ignore
-    from monkeytype.db.base import CallTraceStore, CallTraceStoreLogger  #type: ignore[import]
-    from monkeytype.config import default_code_filter    #type: ignore[import]
-    from monkeytype.tracing import CallTrace, CodeFilter, CallTraceLogger    #type: ignore[import]
+    import monkeytype
+    from monkeytype import trace as monkeytype_trace
+    from monkeytype.db.base import CallTraceStore, CallTraceStoreLogger
+    from monkeytype.config import default_code_filter
+    from monkeytype.tracing import CallTrace, CodeFilter
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
-    print("Warning: monkeytype is not installed. Please install monkeytype to enable static type annotation")
+    print("Warning: monkeytype is not installed. Please install monkeytype to enable Profile-Directed Typing in TorchScript")
 
 def get_qualified_name(func):
     return func.__qualname__
@@ -92,5 +97,19 @@ if _IS_MONKEYTYPE_INSTALLED:
 
         def code_filter(self) -> Optional[CodeFilter]:
             return default_code_filter
+else:
+    # When MonkeyType is not installed, we provide dummy class definitions
+    # for the below classes.
+    class JitTypeTraceStoreLogger:
+        def __init__(self):
+            self.traces = None
 
-    type_trace_db = JitTypeTraceStore()
+    class JitTypeTraceStore:
+        def __init__(self):
+            self.trace_records = None
+
+    class JitTypeTraceConfig:
+        def __init__(self):
+            self.s = None
+
+    monkeytype_trace = None  # noqa: F811
