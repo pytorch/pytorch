@@ -10,7 +10,7 @@
 #include <c10d/TCPStore.hpp>
 
 std::condition_variable cv;
-std::mutex cv_m;
+std::mutex cvMutex;
 constexpr int64_t kShortStoreTimeoutMillis = 100;
 constexpr int64_t kStoreCallbackTimeout = 1000;
 constexpr int defaultTimeout = 20;
@@ -259,7 +259,7 @@ void _setCallback(
 }
 
 void _waitFinish() {
-  std::unique_lock<std::mutex> lk(cv_m);
+  std::unique_lock<std::mutex> lk(cvMutex);
   cv.wait_for(
       lk, std::chrono::duration<int, std::milli>(kStoreCallbackTimeout));
 }

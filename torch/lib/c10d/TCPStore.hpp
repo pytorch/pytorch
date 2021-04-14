@@ -20,7 +20,8 @@ enum class WatchResponseType : uint8_t {
   KEY_DELETED
 };
 
-// Abstract base class to handle thread state
+// Abstract base class to handle thread state for TCPStoreMasterDaemon and TCPStoreWorkerDaemon
+// Contains the windows/unix implementations to signal a shutdown sequence for the thread
 class BackgroundThread {
  public:
   explicit BackgroundThread(int storeListenSocket);
@@ -37,22 +38,28 @@ class BackgroundThread {
   std::vector<int> controlPipeFd_{-1, -1};
 #endif
  private:
-  void join();
-  void stop();
+  // Initialization for shutdown signal
   void initStopSignal();
+  // Triggers the shutdown signal
+  void stop();
+  // Joins the thread
+  void join();
+  // Clean up the shutdown signal
   void closeStopSignal();
 };
 
-// Run on master process
-class TCPStoreDaemon : public BackgroundThread {
+// Separate thread that is only launched on master
+class TCPStoreMasterDaemon : public BackgroundThread {
  public:
-  explicit TCPStoreDaemon(int storeListenSocket);
+  explicit TCPStoreMasterDaemon(int storeListenSocket);
 
  protected:
   void run();
   void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
 
+  // The master runs on a single thread so only 
+  // one handler can be executed at a time
   void setHandler(int socket);
   void compareSetHandler(int socket);
   void addHandler(int socket);
@@ -64,7 +71,10 @@ class TCPStoreDaemon : public BackgroundThread {
   void watchHandler(int socket);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
+  // Helper function to alerts waiting workers, used in setHandler, getHandler
   void wakeupWaitingClients(const std::string& key);
+  // Helper function used when the key is changed
+  // used in setHandler, addHandler, getHandler, deleteHandler
   void sendKeyUpdatesToClients(
       const std::string& key,
       const enum WatchResponseType& type,
@@ -81,11 +91,11 @@ class TCPStoreDaemon : public BackgroundThread {
   std::unordered_map<std::string, std::vector<int>> watchedSockets_;
 };
 
-// Listener thread runs on all processes
+// Separate thread that is launched on all instances (including master)
 // Right now only handles callbacks registered from watchKey()
-class ListenThread : public BackgroundThread {
+class TCPStoreWorkerDaemon : public BackgroundThread {
  public:
-  explicit ListenThread(int listenSocket);
+  explicit TCPStoreWorkerDaemon(int listenSocket);
   // Adds a callback to run key change
   void addCallback(
       std::string key,
@@ -100,10 +110,10 @@ class ListenThread : public BackgroundThread {
       std::string,
       std::function<
           void(c10::optional<std::string>, c10::optional<std::string>)>>
-      keyToCallbacks_;
+      keyToCallbacks;
 
  private:
-  std::mutex keyToCallbacksLock;
+  std::mutex keyToCallbacksMutex;
 };
 
 class TCPStore : public Store {
@@ -168,7 +178,6 @@ class TCPStore : public Store {
   int storeSocket_ = -1;
   int listenSocket_ = -1;
   int masterListenSocket_ = -1;
-  std::thread listenThread_;
 
   std::string tcpStoreAddr_;
   PortType tcpStorePort_;
@@ -177,11 +186,8 @@ class TCPStore : public Store {
   const std::string initKey_;
   const std::string regularPrefix_;
 
-  // Only needs to be launched as the server
-  std::unique_ptr<TCPStoreDaemon> tcpStoreDaemon_ = nullptr;
-
-  // Launched from all clients
-  std::unique_ptr<ListenThread> watchListener_ = nullptr;
+  std::unique_ptr<TCPStoreMasterDaemon> tcpStoreMasterDaemon_ = nullptr;
+  std::unique_ptr<TCPStoreWorkerDaemon> tcpStoreWorkerDaemon_ = nullptr;
 };
 
 } // namespace c10d

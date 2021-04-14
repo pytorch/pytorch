@@ -1,8 +1,8 @@
 import torch
 import torch.utils.bundled_inputs
-from torch.utils.mobile_optimizer import *
+from torch.utils.mobile_optimizer import optimize_for_mobile
 import io
-from typing import NamedTuple
+from typing import Dict, List, NamedTuple
 from collections import namedtuple
 
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list

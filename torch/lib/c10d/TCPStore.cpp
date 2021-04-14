@@ -104,20 +104,20 @@ void BackgroundThread::stop() {
 #endif
 
 // TCPStoreListener class methods
-ListenThread::ListenThread(int listenSocket) : BackgroundThread(listenSocket) {
-  daemonThread_ = std::thread(&ListenThread::run, this);
+TCPStoreWorkerDaemon::TCPStoreWorkerDaemon(int listenSocket) : BackgroundThread(listenSocket) {
+  daemonThread_ = std::thread(&TCPStoreWorkerDaemon::run, this);
 }
 
-void ListenThread::addCallback(
+void TCPStoreWorkerDaemon::addCallback(
     std::string key,
     std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
-        cb) {
-  keyToCallbacksLock.lock();
-  keyToCallbacks_[key] = cb;
-  keyToCallbacksLock.unlock();
+        callback) {
+  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex);
+  keyToCallbacks[key] = callback;
 }
 
-void ListenThread::callbackHandler(int socket) {
+// Runs all the callbacks that the worker has registered
+void TCPStoreWorkerDaemon::callbackHandler(int socket) {
   auto watchResponse = tcputil::recvValue<WatchResponseType>(socket);
   std::string key = tcputil::recvString(socket);
   std::vector<uint8_t> currentValueVec = tcputil::recvVector<uint8_t>(socket);
@@ -134,13 +134,12 @@ void ListenThread::callbackHandler(int socket) {
   } else {
     newValue = std::string(newValueVec.begin(), newValueVec.end());
   }
-  keyToCallbacksLock.lock();
-  keyToCallbacks_.at(key)(currentValue, newValue);
-  keyToCallbacksLock.unlock();
+  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex);
+  keyToCallbacks.at(key)(currentValue, newValue);
 }
 
 #ifdef _WIN32
-void ListenThread::run() {
+void TCPStoreWorkerDaemon::run() {
   std::vector<struct pollfd> fds;
   tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
 
@@ -173,7 +172,7 @@ void ListenThread::run() {
   }
 }
 #else
-void ListenThread::run() {
+void TCPStoreWorkerDaemon::run() {
   std::vector<struct pollfd> fds;
   tcputil::addPollfd(fds, controlPipeFd_[0], POLLHUP);
   tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
@@ -208,14 +207,14 @@ void ListenThread::run() {
 }
 #endif
 
-// TCPStoreDaemon class methods
+// TCPStoreMasterDaemon class methods
 // Simply start the daemon thread
-TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket)
+TCPStoreMasterDaemon::TCPStoreMasterDaemon(int storeListenSocket)
     : BackgroundThread(storeListenSocket) {
-  daemonThread_ = std::thread(&TCPStoreDaemon::run, this);
+  daemonThread_ = std::thread(&TCPStoreMasterDaemon::run, this);
 }
 
-void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {
+void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
   // Skipping the fds[0] and fds[1],
   // fds[0] is master's listening socket
   // fds[1] is control pipe's reading fd, it is not for Windows platform
@@ -272,7 +271,7 @@ void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {
 // type of query | size of arg1 | arg1 | size of arg2 | arg2 | ...
 // or, in the case of wait
 // type of query | number of args | size of arg1 | arg1 | ...
-void TCPStoreDaemon::query(int socket) {
+void TCPStoreMasterDaemon::query(int socket) {
   QueryType qt;
   tcputil::recvBytes<QueryType>(socket, &qt, 1);
   if (qt == QueryType::SET) {
@@ -307,7 +306,7 @@ void TCPStoreDaemon::query(int socket) {
   }
 }
 
-void TCPStoreDaemon::wakeupWaitingClients(const std::string& key) {
+void TCPStoreMasterDaemon::wakeupWaitingClients(const std::string& key) {
   auto socketsToWait = waitingSockets_.find(key);
   if (socketsToWait != waitingSockets_.end()) {
     for (int socket : socketsToWait->second) {
@@ -320,7 +319,7 @@ void TCPStoreDaemon::wakeupWaitingClients(const std::string& key) {
   }
 }
 
-void TCPStoreDaemon::sendKeyUpdatesToClients(
+void TCPStoreMasterDaemon::sendKeyUpdatesToClients(
     const std::string& key,
     const enum WatchResponseType& type,
     std::vector<uint8_t>& oldData,
@@ -333,7 +332,7 @@ void TCPStoreDaemon::sendKeyUpdatesToClients(
   }
 }
 
-void TCPStoreDaemon::setHandler(int socket) {
+void TCPStoreMasterDaemon::setHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   std::vector<uint8_t> newData = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> oldData;
@@ -353,16 +352,25 @@ void TCPStoreDaemon::setHandler(int socket) {
                key, WatchResponseType::KEY_UPDATED, oldData, newData);
 }
 
-void TCPStoreDaemon::compareSetHandler(int socket) {
+void TCPStoreMasterDaemon::compareSetHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   std::vector<uint8_t> currentValue = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> newValue = tcputil::recvVector<uint8_t>(socket);
 
   auto pos = tcpStore_.find(key);
   if (pos == tcpStore_.end()) {
-    // TODO: This code path is not ideal as we are "lying" to the caller in case
-    // the key does not exist. We should come up with a working solution.
-    tcputil::sendVector<uint8_t>(socket, currentValue);
+    if (currentValue.empty()) {
+      tcpStore_[key] = newValue;
+
+      // Send key update to all watching clients
+      sendKeyUpdatesToClients(
+          key, WatchResponseType::KEY_CREATED, currentValue, newValue);
+      tcputil::sendVector<uint8_t>(socket, newValue);
+    } else {
+      // TODO: This code path is not ideal as we are "lying" to the caller in case
+      // the key does not exist. We should come up with a working solution.
+      tcputil::sendVector<uint8_t>(socket, currentValue);
+    }
   } else {
     if (pos->second == currentValue) {
       pos->second = std::move(newValue);
@@ -375,7 +383,7 @@ void TCPStoreDaemon::compareSetHandler(int socket) {
   }
 }
 
-void TCPStoreDaemon::addHandler(int socket) {
+void TCPStoreMasterDaemon::addHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   int64_t addVal = tcputil::recvValue<int64_t>(socket);
 
@@ -404,17 +412,17 @@ void TCPStoreDaemon::addHandler(int socket) {
                key, WatchResponseType::KEY_UPDATED, oldData, newData);
 }
 
-void TCPStoreDaemon::getHandler(int socket) const {
+void TCPStoreMasterDaemon::getHandler(int socket) const {
   std::string key = tcputil::recvString(socket);
   auto data = tcpStore_.at(key);
   tcputil::sendVector<uint8_t>(socket, data);
 }
 
-void TCPStoreDaemon::getNumKeysHandler(int socket) const {
+void TCPStoreMasterDaemon::getNumKeysHandler(int socket) const {
   tcputil::sendValue<int64_t>(socket, tcpStore_.size());
 }
 
-void TCPStoreDaemon::deleteHandler(int socket) {
+void TCPStoreMasterDaemon::deleteHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   auto it = tcpStore_.find(key);
   if (it != tcpStore_.end()) {
@@ -428,7 +436,7 @@ void TCPStoreDaemon::deleteHandler(int socket) {
   tcputil::sendValue<int64_t>(socket, numDeleted);
 }
 
-void TCPStoreDaemon::checkHandler(int socket) const {
+void TCPStoreMasterDaemon::checkHandler(int socket) const {
   SizeType nargs;
   tcputil::recvBytes<SizeType>(socket, &nargs, 1);
   std::vector<std::string> keys(nargs);
@@ -443,7 +451,7 @@ void TCPStoreDaemon::checkHandler(int socket) const {
   }
 }
 
-void TCPStoreDaemon::waitHandler(int socket) {
+void TCPStoreMasterDaemon::waitHandler(int socket) {
   SizeType nargs;
   tcputil::recvBytes<SizeType>(socket, &nargs, 1);
   std::vector<std::string> keys(nargs);
@@ -466,21 +474,21 @@ void TCPStoreDaemon::waitHandler(int socket) {
   }
 }
 
-void TCPStoreDaemon::watchHandler(int socket) {
+void TCPStoreMasterDaemon::watchHandler(int socket) {
   std::string key = tcputil::recvString(socket);
 
   // record the socket to respond to when the key is updated
   watchedSockets_[key].push_back(socket);
 }
 
-bool TCPStoreDaemon::checkKeys(const std::vector<std::string>& keys) const {
+bool TCPStoreMasterDaemon::checkKeys(const std::vector<std::string>& keys) const {
   return std::all_of(keys.begin(), keys.end(), [this](const std::string& s) {
     return tcpStore_.count(s) > 0;
   });
 }
 
 #ifdef _WIN32
-void TCPStoreDaemon::run() {
+void TCPStoreMasterDaemon::run() {
   std::vector<struct pollfd> fds;
   tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
 
@@ -522,7 +530,7 @@ void TCPStoreDaemon::run() {
 }
 #else
 
-void TCPStoreDaemon::run() {
+void TCPStoreMasterDaemon::run() {
   std::vector<struct pollfd> fds;
   tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
   // Push the read end of the pipe to signal the stopping of the daemon run
@@ -593,7 +601,7 @@ TCPStore::TCPStore(
   try {
     if (isServer_) {
       // Now start the daemon
-      tcpStoreDaemon_ = std::make_unique<TCPStoreDaemon>(masterListenSocket_);
+      tcpStoreMasterDaemon_ = std::make_unique<TCPStoreMasterDaemon>(masterListenSocket_);
     }
     // Connect to the daemon
     storeSocket_ = tcputil::connect(
@@ -605,13 +613,13 @@ TCPStore::TCPStore(
     // socket to handle requests from server
     listenSocket_ = tcputil::connect(
         tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-    watchListener_ = std::make_unique<ListenThread>(listenSocket_);
+    tcpStoreWorkerDaemon_ = std::make_unique<TCPStoreWorkerDaemon>(listenSocket_);
   } catch (const std::exception&) {
     if (isServer_) {
-      tcpStoreDaemon_ = nullptr;
+      tcpStoreMasterDaemon_ = nullptr;
       tcputil::closeSocket(masterListenSocket_);
     }
-    watchListener_ = nullptr;
+    tcpStoreWorkerDaemon_ = nullptr;
     if (listenSocket_ != -1) {
       tcputil::closeSocket(listenSocket_);
     }
@@ -626,10 +634,10 @@ TCPStore::~TCPStore() {
   if (isServer_) {
     // Store daemon should end because of closed connection.
     // daemon destructor should join the thread
-    tcpStoreDaemon_ = nullptr;
+    tcpStoreMasterDaemon_ = nullptr;
     tcputil::closeSocket(masterListenSocket_);
   }
-  watchListener_ = nullptr;
+  tcpStoreWorkerDaemon_ = nullptr;
   tcputil::closeSocket(listenSocket_);
   tcputil::closeSocket(storeSocket_);
 }
@@ -709,7 +717,7 @@ void TCPStore::watchKey(
         callback) {
   std::string regKey = regularPrefix_ + key;
 
-  watchListener_->addCallback(regKey, callback);
+  tcpStoreWorkerDaemon_->addCallback(regKey, callback);
 
   tcputil::sendValue<QueryType>(listenSocket_, QueryType::WATCH_KEY);
   tcputil::sendString(listenSocket_, regKey);
