@@ -94,6 +94,7 @@ cc_library(
     includes = [
         ".",
         "onnx/",
+        "optimizer/onnxoptimizer/"
     ],
     visibility = ["//visibility:public"],
     deps = [

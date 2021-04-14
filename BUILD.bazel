@@ -1645,7 +1645,6 @@ cc_library(
         "caffe2/utils/*.h",
         "caffe2/utils/math/*.h",
         "caffe2/utils/threadpool/*.h",
-        "third_party/optimizer/onnxoptimizer/*.h",
         "modules/**/*.h",
     ]) + if_cuda(glob([
         "caffe2/**/*.cuh",
@@ -1711,7 +1710,6 @@ cc_library(
         ":caffe2_sgd_srcs",
         ":caffe2_transforms_srcs",
         ":caffe2_utils_srcs",
-        "optimizer/onnxoptimizer/*.cc"
     ],
     copts = CAFFE2_COPTS + ["-mf16c"],
     linkstatic = 1,
@@ -1730,7 +1728,6 @@ cc_library(
         "@foxi",
         "@gloo",
         "@onnx",
-        "@optimizer//:optimizer",
         "@fmt",
     ] + if_cuda(
         [
