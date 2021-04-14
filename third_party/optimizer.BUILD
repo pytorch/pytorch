@@ -2,16 +2,24 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 cc_library(
     name = "optimizer",
-    srcs = [
-        "optimizer/onnxoptimizer/*.cc",
-    ],
+    srcs = glob(
+        [
+            "onnxoptimizer/*.cc",
+        ],
+        exclude = [
+            "onnxoptimizer/cpp2py_export.cc",
+        ],
+    ),
     hdrs = glob([
-        "optimizer/onnxoptimizer/*.h",
+        "onnxoptimizer/*.h",
+        "onnxoptimizer/passes/*.h",
     ]),
     includes = [
-        "optimizer/onnxoptimizer/",
-        "optimizer/onnxoptimizer/passes/",
+        "onnxoptimizer/",
+        "onnxoptimizer/passes/",
     ],
-    linkstatic = 1,
     visibility = ["//visibility:public"],
+    deps = [
+        "@onnx",
+    ]
 )

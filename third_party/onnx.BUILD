@@ -66,7 +66,6 @@ cc_library(
             "onnx/optimizer/*.cc",
             "onnx/shape_inference/*.cc",
             "onnx/version_converter/*.cc",
-            "optimizer/onnxoptimizer/*.cc",
         ],
         exclude = [
             "onnx/cpp2py_export.cc",
@@ -80,8 +79,6 @@ cc_library(
         "onnx/defs/tensor/*.h",
         "onnx/shape_inference/*.h",
         "onnx/version_converter/adapters/*.h",
-        "optimizer/onnxoptimizer/*.h",
-        "optimizer/onnxoptimizer/passes/*.h",
     ]) + [
         "onnx/onnx-ml.pb.h",
         "onnx/onnx-operators-ml.pb.h",
@@ -94,7 +91,6 @@ cc_library(
     includes = [
         ".",
         "onnx/",
-        "optimizer/onnxoptimizer/"
     ],
     visibility = ["//visibility:public"],
     deps = [
