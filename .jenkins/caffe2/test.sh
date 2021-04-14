@@ -171,7 +171,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
     pip install -q --user onnxruntime==1.6.0
-    pip install -q --user onnxoptimizer==0.2.5
+    pip install --user onnxoptimizer
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
