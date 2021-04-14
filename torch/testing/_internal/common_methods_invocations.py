@@ -596,7 +596,7 @@ def sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad,
         ((1,), (2, 2), (2, 3), kwargs.get('alpha', 1), kwargs.get('beta', 1)),
         ((), (2, 2), (2, 3), kwargs.get('alpha', 1), kwargs.get('beta', 1))
     ]
-    test_cases = [*tests_list] if for_inplace_variant else [*tests_list, *tests_require_resizing]  # type: ignore
+    test_cases = tests_list if for_inplace_variant else (tests_list + tests_require_resizing)  # type: ignore
     inputs = tuple(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
                                args=(make_tensor(shape_b, device, dtype,
                                                  requires_grad=requires_grad),
