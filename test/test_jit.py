@@ -13441,10 +13441,10 @@ dedent """
         self.assertTrue(isinstance(f.call(), property))
 
     def test_monkeytype(self):
-        scripted_fn_add = torch.jit._script_pdt(test_sum_monkey, example_inputs = [(3, 4)])
-        scripted_fn_sub = torch.jit._script_pdt(test_sub_monkey, example_inputs = [(3.9, 4.10)])
-        scripted_fn_mul = torch.jit._script_pdt(test_mul_monkey, example_inputs = [(-10, 9)])
-        scripted_fn_complex = torch.jit._script_pdt(test_args_complex, example_inputs = [(torch.rand(3, 4), torch.rand(3, 4))])
+        scripted_fn_add = torch.jit._script_pdt(test_sum_monkey, example_inputs=[(3, 4)])
+        scripted_fn_sub = torch.jit._script_pdt(test_sub_monkey, example_inputs=[(3.9, 4.10)])
+        scripted_fn_mul = torch.jit._script_pdt(test_mul_monkey, example_inputs=[(-10, 9)])
+        scripted_fn_complex = torch.jit._script_pdt(test_args_complex, example_inputs=[(torch.rand(3, 4), torch.rand(3, 4))])
         self.assertEqual(scripted_fn_add(10, 2), test_sum_monkey(10, 2))
         self.assertEqual(scripted_fn_sub(6.5, 2.9), test_sub_monkey(6.5, 2.9))
         self.assertEqual(scripted_fn_mul(-1, 3), test_mul_monkey(-1, 3))

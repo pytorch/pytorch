@@ -1,6 +1,3 @@
-
-import os
-import sys
 import torch
 
 def test_sum_monkey(a, b):
