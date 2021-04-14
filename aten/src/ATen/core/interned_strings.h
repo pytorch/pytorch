@@ -7,13 +7,10 @@
 
 #include <c10/macros/Macros.h>
 
-#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 #include <ATen/core/aten_interned_strings.h>
-#endif
 
 namespace c10 {
 
-#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 #define FORALL_NS_SYMBOLS(_)         \
   _(namespaces, prim)                \
   _(namespaces, aten)                \
@@ -307,6 +304,7 @@ namespace c10 {
   _(cuda, _set_device)               \
   _(cuda, set_stream)                \
   _(cuda, _current_device)           \
+  _(cuda, synchronize)               \
   _(aten, swapaxes)                  \
   _(aten, swapaxes_)                 \
   _(aten, swapdims)                  \
@@ -425,19 +423,6 @@ namespace c10 {
   _(attr, cache_id)                  \
   _(attr, new_axis)                  \
   _(attr, warn_id)
-#else
-#define FORALL_NS_SYMBOLS(_) \
-  _(namespaces, prim)              \
-  _(namespaces, aten)              \
-  _(namespaces, cuda)              \
-  _(namespaces, onnx)              \
-  _(namespaces, attr)              \
-  _(namespaces, scope)             \
-  _(namespaces, user)              \
-  _(namespaces, _caffe2)           \
-  _(namespaces, dimname)           \
-  _(namespaces, namespaces)
-#endif
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.
