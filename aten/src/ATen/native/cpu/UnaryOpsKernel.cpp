@@ -227,18 +227,12 @@ static void bitwise_not_kernel(TensorIterator& iter) {
 }
 
 static void frac_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.dtype(), "frac_cpu", [&]() {
-        cpu_kernel_vec(
-            iter,
-            [=](scalar_t a) -> scalar_t {
-              if (std::isinf(a)) {
-                return std::copysign(static_cast<scalar_t>(0), a);
-              }
-              return a - ::trunc(a);
-            },
-            [=](Vec256<scalar_t> a) { return a.frac(); });
-      });
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "frac_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return a - std::trunc(a); },
+        [=](Vec256<scalar_t> a) { return a.frac(); });
+  });
 }
 
 static void logical_not_kernel(TensorIterator& iter) {
@@ -324,7 +318,7 @@ static void sinc_kernel(TensorIteratorBase& iter) {
   });
 }
 
-static void sinh_kernel(TensorIterator& iter) {
+static void sinh_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -333,7 +327,7 @@ static void sinh_kernel(TensorIterator& iter) {
   });
 }
 
-static void cosh_kernel(TensorIterator& iter) {
+static void cosh_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "cosh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -342,7 +336,7 @@ static void cosh_kernel(TensorIterator& iter) {
   });
 }
 
-static void acosh_kernel(TensorIterator& iter) {
+static void acosh_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "acosh_cpu", [&]() {
       cpu_kernel(
         iter,
@@ -748,7 +742,7 @@ IMPLEMENT_COMPLEX_KERNEL(acos)
 IMPLEMENT_COMPLEX_KERNEL(asin)
 IMPLEMENT_COMPLEX_KERNEL(atan)
 IMPLEMENT_FLOAT_KERNEL(ceil)
-IMPLEMENT_COMPLEX_KERNEL(cos)
+IMPLEMENT_COMPLEX_STRUCTURED_KERNEL(cos)
 IMPLEMENT_FLOAT_KERNEL(erf)
 IMPLEMENT_FLOAT_KERNEL(erfc)
 IMPLEMENT_FLOAT_KERNEL(erfinv)

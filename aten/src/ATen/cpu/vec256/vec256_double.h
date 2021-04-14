@@ -305,16 +305,7 @@ Vec256<double> inline operator/(const Vec256<double>& a, const Vec256<double>& b
 
 // frac. Implement this here so we can use subtraction.
 Vec256<double> Vec256<double>::frac() const {
-  const auto pos_inf_vec = _mm256_set1_pd(INFINITY);
-  const auto pos_zero_vec = _mm256_set1_pd(0.f);
-  const auto neg_inf_vec = _mm256_set1_pd(-INFINITY);
-  const auto neg_zero_vec = _mm256_set1_pd(-0.f);
-  const auto pos_inf_mask = _mm256_cmp_pd(values, pos_inf_vec, _CMP_EQ_OQ);
-  const auto neg_inf_mask = _mm256_cmp_pd(values, neg_inf_vec, _CMP_EQ_OQ);
-  auto frac = *this - this->trunc();
-  frac = _mm256_blendv_pd(frac, pos_zero_vec, pos_inf_mask);
-  frac = _mm256_blendv_pd(frac, neg_zero_vec, neg_inf_mask);
-  return frac;
+  return *this - this->trunc();
 }
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if

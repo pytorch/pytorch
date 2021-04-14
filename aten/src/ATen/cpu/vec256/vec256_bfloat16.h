@@ -574,24 +574,7 @@ Vec256<BFloat16> Vec256<BFloat16>::le(const Vec256<BFloat16>& other) const {
 
 // frac. Implement this here so we can use subtraction
 Vec256<BFloat16> Vec256<BFloat16>::frac() const {
-  __m256 lo, hi;
-  cvtbf16_fp32(values, lo, hi);
-  auto frac_lambda = [](__m256 values){
-    const auto pos_inf_vec = _mm256_set1_ps(INFINITY);
-    const auto pos_zero_vec = _mm256_set1_ps(0.f);
-    const auto neg_inf_vec = _mm256_set1_ps(-INFINITY);
-    const auto neg_zero_vec = _mm256_set1_ps(-0.f);
-    const auto pos_inf_mask = _mm256_cmp_ps(values, pos_inf_vec, _CMP_EQ_OQ);
-    const auto neg_inf_mask = _mm256_cmp_ps(values, neg_inf_vec, _CMP_EQ_OQ);
-    const auto trunc = _mm256_round_ps(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
-    auto frac = _mm256_sub_ps(values, trunc);
-    frac = _mm256_blendv_ps(frac, pos_zero_vec, pos_inf_mask);
-    frac = _mm256_blendv_ps(frac, neg_zero_vec, neg_inf_mask);
-    return frac;
-  };
-  auto o1 = frac_lambda(lo);
-  auto o2 = frac_lambda(hi);
-  return cvtfp32_bf16(o1, o2);
+  return *this - this->trunc();
 }
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
