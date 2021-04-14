@@ -161,7 +161,7 @@ Descriptor::Set& Descriptor::Set::bind(
       binding,
       shader_layout_signature_[binding],
       {
-        .buffer = {
+        VkDescriptorBufferInfo {
           buffer.handle,
           buffer.offset,
           buffer.range,
@@ -179,21 +179,21 @@ Descriptor::Set& Descriptor::Set::bind(
       device_ && descriptor_set_,
       "This descriptor set is in an invalid state! "
       "Potential reason: This descriptor set is moved from.");
+  auto item = Item{
+    binding,
+    shader_layout_signature_[binding]
+  };
 
-  update(Item{
-      binding,
-      shader_layout_signature_[binding],
-      {
-        .image = {
-          image.sampler,
-          image.view,
-          [](const VkDescriptorType type, const VkImageLayout layout) {
-            return (VK_DESCRIPTOR_TYPE_STORAGE_IMAGE == type) ?
-                    VK_IMAGE_LAYOUT_GENERAL : layout;
-          }(shader_layout_signature_[binding], image.layout),
-        },
-      },
-    });
+  item.info.image = VkDescriptorImageInfo {
+    image.sampler,
+    image.view,
+    [](const VkDescriptorType type, const VkImageLayout layout) {
+      return (VK_DESCRIPTOR_TYPE_STORAGE_IMAGE == type) ?
+              VK_IMAGE_LAYOUT_GENERAL : layout;
+    }(shader_layout_signature_[binding], image.layout),
+  };
+
+  update(item);
 
   return *this;
 }

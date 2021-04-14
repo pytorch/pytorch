@@ -374,7 +374,8 @@ Resource::Pool::Pool(
       std::move(policy),
     },
     image_{
-      .sampler = Image::Sampler{gpu},
+      std::vector<Handle<Image, void(*)(const Image&)>>(), 
+      Image::Sampler{gpu},
     },
     fence_{} {
   buffer_.pool.reserve(Configuration::kReserve);

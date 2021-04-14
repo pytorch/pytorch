@@ -289,8 +289,8 @@ struct HashPolicySelector<T, void_t<typename T::hash_policy>>
     typedef typename T::hash_policy type;
 };
 
-template<typename T, typename FindKey, typename ArgumentHash, typename Hasher, typename ArgumentEqual, typename Equal, typename ArgumentAlloc, typename EntryAlloc>
-class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal
+template<typename T, typename FindKey, typename ArgumentHash, typename DetailHasher, typename ArgumentEqual, typename Equal, typename ArgumentAlloc, typename EntryAlloc>
+class sherwood_v3_table : private EntryAlloc, private DetailHasher, private Equal
 {
     using Entry = detailv3::sherwood_v3_entry<T>;
     using AllocatorTraits = std::allocator_traits<EntryAlloc>;
@@ -314,7 +314,7 @@ public:
     {
     }
     explicit sherwood_v3_table(size_type bucket_count, const ArgumentHash & hash = ArgumentHash(), const ArgumentEqual & equal = ArgumentEqual(), const ArgumentAlloc & alloc = ArgumentAlloc())
-        : EntryAlloc(alloc), Hasher(hash), Equal(equal)
+        : EntryAlloc(alloc), DetailHasher(hash), Equal(equal)
     {
         rehash(bucket_count);
     }
@@ -366,7 +366,7 @@ public:
     {
     }
     sherwood_v3_table(const sherwood_v3_table & other, const ArgumentAlloc & alloc)
-        : EntryAlloc(alloc), Hasher(other), Equal(other), _max_load_factor(other._max_load_factor)
+        : EntryAlloc(alloc), DetailHasher(other), Equal(other), _max_load_factor(other._max_load_factor)
     {
         rehash_for_other_container(other);
         try
@@ -380,13 +380,13 @@ public:
             throw;
         }
     }
-    sherwood_v3_table(sherwood_v3_table && other) noexcept
-        : EntryAlloc(std::move(other)), Hasher(std::move(other)), Equal(std::move(other))
+    explicit sherwood_v3_table(sherwood_v3_table && other) noexcept
+        : EntryAlloc(std::move(other)), DetailHasher(std::move(other)), Equal(std::move(other))
     {
         swap_pointers(other);
     }
     sherwood_v3_table(sherwood_v3_table && other, const ArgumentAlloc & alloc) noexcept
-        : EntryAlloc(alloc), Hasher(std::move(other)), Equal(std::move(other))
+        : EntryAlloc(alloc), DetailHasher(std::move(other)), Equal(std::move(other))
     {
         swap_pointers(other);
     }
@@ -405,7 +405,7 @@ public:
             AssignIfTrue<EntryAlloc, AllocatorTraits::propagate_on_container_copy_assignment::value>()(*this, other);
         }
         _max_load_factor = other._max_load_factor;
-        static_cast<Hasher &>(*this) = other;
+        static_cast<DetailHasher &>(*this) = other;
         static_cast<Equal &>(*this) = other;
         rehash_for_other_container(other);
         insert(other.begin(), other.end());
@@ -435,7 +435,7 @@ public:
                 emplace(std::move(elem));
             other.clear();
         }
-        static_cast<Hasher &>(*this) = std::move(other);
+        static_cast<DetailHasher &>(*this) = std::move(other);
         static_cast<Equal &>(*this) = std::move(other);
         return *this;
     }
@@ -911,26 +911,38 @@ private:
         max_lookups = detailv3::min_lookups - 1;
     }
 
+#ifdef _MSC_VER
     uint64_t hash_object(const FindKey & key)
     {
-        return static_cast<Hasher &>(*this)(key);
+        return static_cast<DetailHasher &>(*this)(key);
     }
 
     uint64_t hash_object(const FindKey & key) const
     {
-        return static_cast<const Hasher &>(*this)(key);
+        return static_cast<const DetailHasher &>(*this)(key);
     }
 
     uint64_t hash_object(const value_type & value)
     {
-        return static_cast<Hasher &>(*this)(value.first);
+        return static_cast<DetailHasher &>(*this)(value.first);
     }
 
     uint64_t hash_object(const value_type & value) const
     {
-        return static_cast<const Hasher &>(*this)(value.first);
+        return static_cast<const DetailHasher &>(*this)(value.first);
     }
-
+#else
+    template<typename U>
+    uint64_t hash_object(const U & key)
+    {
+        return static_cast<DetailHasher &>(*this)(key);
+    }
+    template<typename U>
+    uint64_t hash_object(const U & key) const
+    {
+        return static_cast<const DetailHasher &>(*this)(key);
+    }
+#endif
     template<typename L, typename R>
     bool compares_equal(const L & lhs, const R & rhs)
     {

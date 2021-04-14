@@ -255,9 +255,9 @@ uvec3 image_extents(const IntArrayRef sizes) {
   }
 
   return {
-    width,
-    height,
-    div_up(depth, INT64_C(4)),
+    static_cast<uint32_t>(width),
+    static_cast<uint32_t>(height),
+    static_cast<uint32_t>(div_up(depth, INT64_C(4))),
   };
 }
 
