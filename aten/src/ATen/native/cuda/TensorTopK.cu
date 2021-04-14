@@ -155,7 +155,6 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
   checkAllSameGPU("topk_out_cuda", {topK_arg, indices_arg, input_arg});
   dim = at::maybe_wrap_dim(dim, self);
-  // are scalars possible here?
   TORCH_CHECK(values.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   TORCH_CHECK(indices.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   int numDims = self.dim();
@@ -173,8 +172,6 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   if (topKSize.size() > 0) {
     topKSize[dim] = k;
   }
-  //THCTensor_(resize)(state, topK, topKSize, {});
-  //THCudaLongTensor_resize(state, indices, topKSize, {});
   values.resize_(topKSize);
   indices.resize_(topKSize);
   // static_cast is required to ensure that the correct type (INDEX_T)
@@ -323,15 +320,8 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
       sortedIndices.resize_as_(indices);
       values = sortedTopK;
       indices = indices.gather(dim, sortedIndices);
-
-      //THCTensor_(freeCopyTo)(state, sortedTopK, topK);
-      //THCudaLongTensor_freeCopyTo(state, sortedTopKIndices, indices);
-      //THCudaLongTensor_free(state, sortedIndices);
     }
   }
-  // is this necessary?
-  //THCudaLongTensor_free(state, input);
-
   AT_CUDA_CHECK(cudaGetLastError());
   return std::forward_as_tuple(values, indices);
 }
