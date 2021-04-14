@@ -13,7 +13,7 @@ from tools.codegen.api.types import Binding, CppSignatureGroup
 from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
-from tools.codegen.model import FunctionSchema, NativeFunction, Variant
+from tools.codegen.model import FunctionSchema, NativeFunction, Variant, Type, SchemaKind
 from tools.codegen.utils import IDENT_REGEX, split_name_params
 
 try:
