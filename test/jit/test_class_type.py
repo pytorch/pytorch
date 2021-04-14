@@ -1477,12 +1477,30 @@ class TestClassType(JitTestCase):
             def __init__(self):
                 pass
 
-            attr, attr_b = "", ""
+            (attr_a, attr_b), [attr_c, attr_d] = ("", ""), ["", ""]
+            attr_e: int = 0
 
-        def fn(x):
+        def fn_a():
             u = UnresolvedAttrClass()
-            return u.attr
+            return u.attr_a
+
+        def fn_b():
+            u = UnresolvedAttrClass()
+            return u.attr_b
+
+        def fn_c():
+            u = UnresolvedAttrClass()
+            return u.attr_c
+
+        def fn_d():
+            u = UnresolvedAttrClass()
+            return u.attr_d
+
+        def fn_e():
+            u = UnresolvedAttrClass()
+            return u.attr_e
 
         error_message_regex = "object has no attribute or method.*is defined as a class attribute"
-        with self.assertRaisesRegex(RuntimeError, error_message_regex):
-            torch.jit.script(fn)
+        for fn in (fn_a, fn_b, fn_c, fn_d, fn_e):
+            with self.assertRaisesRegex(RuntimeError, error_message_regex):
+                torch.jit.script(fn)

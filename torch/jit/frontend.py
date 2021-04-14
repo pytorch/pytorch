@@ -157,6 +157,22 @@ def get_class_properties(cls, self_name):
     return properties
 
 
+def get_class_assigns(ctx, cls_ast):
+    assigns = []
+    def build_assign(builder, entry):
+        nonlocal assigns
+        try:
+            assigns.append(builder(ctx, entry))
+        except NotSupportedError:
+            pass
+    for entry in cls_ast.body:
+        if isinstance(entry, ast.Assign):
+            build_assign(StmtBuilder.build_Assign, entry)
+        elif isinstance(entry, ast.AnnAssign):
+            build_assign(StmtBuilder.build_AnnAssign, entry)
+    return assigns
+
+
 def get_jit_class_def(cls, self_name):
     # Get defs for each method within the current class independently
     # TODO: proper overriding analysis when implementing class inheritance
@@ -185,7 +201,7 @@ def get_jit_class_def(cls, self_name):
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
     class_ast = py_ast.body[0]
     assert isinstance(class_ast, ast.ClassDef)
-    assigns = [StmtBuilder.build_Assign(ctx, entry) for entry in class_ast.body if isinstance(entry, ast.Assign)]
+    assigns = get_class_assigns(ctx, class_ast)
 
     return build_class_def(ctx, class_ast, methods, properties, self_name, assigns)
 
