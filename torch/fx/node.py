@@ -449,6 +449,26 @@ class Node:
     def normalized_arguments(
             self, root : torch.nn.Module, arg_types : Optional[Tuple[Any]] = None,
             kwarg_types : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """
+        Returns normalized arguments to Python targets. This means that
+        `args/kwargs` will be matched up to the module/functional's
+        signature and return exclusively kwargs in positional order.
+        Also populates default values. Does not support positional-only
+        parameters or varargs parameters (*args, **kwargs).
+
+        Supports module calls.
+
+        May require `arg_types` and `kwarg_types` in order to disambiguate overloads.
+
+        Args:
+            root (torch.nn.Module): Module upon which to resolve module targets.
+            arg_types (Optional[Tuple[Any]]): Tuple of arg types for the args
+            kwarg_types (Optional[Dict[str, Any]]): Dict of arg types for the kwargs
+
+        Returns:
+
+            Returns normalized_kwargs, or `None` if not successful.
+        """
         if self.op == 'call_function':
             return normalize_function(self.target, self.args, self.kwargs, arg_types, kwarg_types)
         elif self.op == 'call_module':
@@ -468,8 +488,6 @@ class Node:
             return None
 
         return None
-
-
 
 
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:

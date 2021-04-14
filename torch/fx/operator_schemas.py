@@ -3,7 +3,7 @@ import inspect
 import numbers
 import typing
 import enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 from torch._jit_internal import boolean_dispatched
 
 _manual_overrides : Dict[Callable, List[inspect.Signature]] = {}
@@ -43,12 +43,6 @@ def _torchscript_type_to_python_type(ts_type : 'torch._C.JitType') -> Any:
     eval'ing the annotation_str. _type_eval_globals sets up expressions
     like "List" and "Future" to map to actual types (typing.List and jit.Future)
     """
-    if isinstance(ts_type, torch._C.TupleType) and len(ts_type.elements()) == 0:
-        # TODO: remove after https://github.com/pytorch/pytorch/pull/54641
-        return Tuple[()]
-    if ts_type is torch._C.NoneType.get():
-        # TODO: remove after https://github.com/pytorch/pytorch/pull/54642
-        return type(None)
     return eval(ts_type.annotation_str, _type_eval_globals)
 
 def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> inspect.Signature:
@@ -136,13 +130,32 @@ def type_matches(signature_type : Any, argument_type : Any):
     return signature_type is argument_type
 
 def normalize_function(
-        target, args, kwargs : Dict[str, Any] = {}, arg_types : Optional[Tuple[Any]] = None,
+        target: Callable, args: Tuple[Any], kwargs : Dict[str, Any] = {}, arg_types : Optional[Tuple[Any]] = None,
         kwarg_types : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """
+    Returns normalized arguments to PyTorch functions. This means that
+    `args/kwargs` will be matched up to the functional's
+    signature and return exclusively kwargs in positional order.
+    Also populates default values. Does not support positional-only
+    parameters or varargs parameters (*args, **kwargs). Does not support modules.
+
+    May require `arg_types` and `kwarg_types` in order to disambiguate overloads.
+
+    Args:
+        target (Callable): Function that we are normalizing
+        args (Tuple[Any]): Tuple of args to the function
+        kwargs (Dict[str, Any]): Dict of kwargs to the function
+        arg_types (Optional[Tuple[Any]]): Tuple of arg types for the args
+        kwarg_types (Optional[Dict[str, Any]]): Dict of arg types for the kwargs
+
+    Returns:
+
+        Returns normalized_kwargs, or `None` if not successful.
+    """
+
     new_kwargs = None
 
     if target in boolean_dispatched or target.__module__ == 'torch.nn.functional':
-        # if target.__module__ == 'torch.nn.functional':
-        #     import pdb; pdb.set_trace()
         target_for_analysis = target
         if target in boolean_dispatched:
             # HACK: `boolean_dispatch` as used in `torch.nn.functional` makes it so that we have
