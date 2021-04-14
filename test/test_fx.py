@@ -30,7 +30,6 @@ from copy import deepcopy
 
 from torch.fx.proxy import TraceError
 
-from fx.quantization import Quantizer
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
@@ -2252,9 +2251,7 @@ class TestFX(JitTestCase):
 
 
         import torch
-        # from torchvision.models.resnet import resnet18
         rn = torchvision_models.resnet18()
-        print('imported the model', rn)
 
         try:
             sys.setprofile(trace_func)
