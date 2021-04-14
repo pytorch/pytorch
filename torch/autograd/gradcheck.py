@@ -138,8 +138,8 @@ def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3) -> 
     if target is None:
         target = inputs
     inp_indices = [i for i, a in enumerate(target) if is_tensor_like(a) and a.requires_grad]
-    for inp_idx in inp_indices:
-        jacobians += [get_numerical_jacobian_wrt_specific_input(fn, inp_idx, inputs, outputs, eps)]
+    for i, (inp, inp_idx) in enumerate(zip(iter_tensors(target, True), inp_indices)):
+        jacobians += [get_numerical_jacobian_wrt_specific_input(fn, inp_idx, inputs, outputs, eps, input=inp)]
     return jacobians
 
 
@@ -261,12 +261,13 @@ def check_outputs_same_dtype_and_shape(output1, output2, eps, idx=None) -> None:
          f" dtypes {output1.dtype} and {output2.dtype}.")
 
 
-def get_numerical_jacobian_wrt_specific_input(fn, input_idx, inputs, outputs, eps) -> Tuple[torch.Tensor, ...]:
+def get_numerical_jacobian_wrt_specific_input(fn, input_idx, inputs, outputs, eps,
+                                              input=None) -> Tuple[torch.Tensor, ...]:
     # Computes the numerical jacobians wrt to a single input. Returns N jacobian
     # tensors, where N is the number of outputs
     # We use a dictionary because for sparse inputs, d_idx aren't necessarily consecutive
     jacobian_cols: Dict[int, List[torch.Tensor]] = {}
-    input = inputs[input_idx]
+    input = inputs[input_idx] if input is None else input
     assert input.requires_grad
     for x, idx, d_idx in iter_tensor(input):
         wrapped_fn = with_prepped_inputs(fn, inputs, input_idx, x)
@@ -304,8 +305,7 @@ def get_jvp_fn(wrapped_fn, input_to_perturb, eps, nbhd_checks_fn):
     return jvp_fn
 
 
-def get_fast_numerical_jacobian_wrt_specific_input(fn, input_idx, inputs, outputs, ur, ui,
-                                                   eps) -> List[torch.Tensor]:
+def get_jvp_wrt_specific_input(fn, input_idx, inputs, outputs, ur, ui, eps) -> List[torch.Tensor]:
     # If fast_mode=False, iter_tensor handles the below cases:
     # basically we want to prepare the input so that it can be modified in-place and do certain
     # operations that require the tensor to have strides
@@ -328,7 +328,7 @@ def check_jacobians_equal(j1, j2, atol):
     return True
 
 
-def combine_jacobian_rows(jacobians_rows, inputs, numel_outputs) -> Tuple[Tuple[torch.Tensor, ...], bool, bool]:
+def stack_and_check_tensors(jacobians_rows, inputs, numel_outputs) -> Tuple[Tuple[torch.Tensor, ...], bool, bool]:
     out_jacobians = allocate_jacobians_with_inputs(inputs, numel_outputs)
     diff_input_list = list(iter_tensors(inputs, True))
     correct_grad_sizes = True
@@ -376,15 +376,17 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad_
         return torch.autograd.grad(output, diff_input_list, grad_output,
                                    retain_graph=True, allow_unused=True)
     if fast_mode:
-        jacobians_rows = compute_fast_analytical_jacobian_rows(vjp_fn, output.clone(), v)
-        jacobians_rows_reentrant = compute_fast_analytical_jacobian_rows(vjp_fn, output.clone(), v)
+        # vjp can be seen as a linear combination of the jacobians rows, we still call into stack_and_check
+        # because we'd like to reuse the checks for dtype and shape
+        jacobians_rows = get_vjp_wrt_specific_output(vjp_fn, output.clone(), v)
+        jacobians_rows_reentrant = get_vjp_wrt_specific_output(vjp_fn, output.clone(), v)
     else:
         jacobians_rows = compute_analytical_jacobian_rows(vjp_fn, output.clone())
         jacobians_rows_reentrant = compute_analytical_jacobian_rows(vjp_fn, output.clone())
     output_numel = output.numel() if not fast_mode else 1
 
-    jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, output_numel)
-    jacobians_reentrant, _, _ = combine_jacobian_rows(jacobians_rows_reentrant, inputs, output_numel)
+    jacobians, correct_grad_types, correct_grad_sizes = stack_and_check_tensors(jacobians_rows, inputs, output_numel)
+    jacobians_reentrant, _, _ = stack_and_check_tensors(jacobians_rows_reentrant, inputs, output_numel)
 
     reentrant = check_jacobians_equal(jacobians, jacobians_reentrant, nondet_tol)
 
@@ -424,8 +426,8 @@ def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
     jacobians_rows_reentrant = compute_analytical_jacobian_rows(backward_fn, output.clone())
 
     output_numel = output.numel()
-    jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, output_numel)
-    jacobians_reentrant, _, _ = combine_jacobian_rows(jacobians_rows_reentrant, inputs, output_numel)
+    jacobians, correct_grad_types, correct_grad_sizes = stack_and_check_tensors(jacobians_rows, inputs, output_numel)
+    jacobians_reentrant, _, _ = stack_and_check_tensors(jacobians_rows_reentrant, inputs, output_numel)
     reentrant = check_jacobians_equal(jacobians, jacobians_reentrant, nondet_tol)
 
     return jacobians, reentrant, correct_grad_sizes, correct_grad_types
@@ -460,7 +462,7 @@ def compute_analytical_jacobian_rows(vjp_fn, sample_output) -> List[List[Optiona
     return jacobians_rows
 
 
-def compute_fast_analytical_jacobian_rows(vjp_fn, sample_output, v) -> List[List[Optional[torch.Tensor]]]:
+def get_vjp_wrt_specific_output(vjp_fn, sample_output, v) -> List[List[Optional[torch.Tensor]]]:
     # For each input, computes vjp_fn(v), which is *supposed* to be v^T J
     jacobians_rows: List[List[Optional[torch.Tensor]]] = []
     grad_inputs = vjp_fn(v.reshape(sample_output.shape))
@@ -526,8 +528,7 @@ def check_no_differentiable_outputs(func, inputs, func_out, eps) -> bool:
 def check_no_differentiable_outputs_fast(func, func_out, all_inputs, inputs_indices,
                                          all_ur, all_ui, eps, nondet_tol):
     for inp_idx, ur, ui in zip(inputs_indices, all_ur, all_ui):
-        numerical_jacobians = get_fast_numerical_jacobian_wrt_specific_input(func, inp_idx, all_inputs,
-                                                                             _as_tuple(func_out), ur, ui, eps)
+        numerical_jacobians = get_jvp_wrt_specific_input(func, inp_idx, all_inputs, _as_tuple(func_out), ur, ui, eps)
         for jacobian in numerical_jacobians:
             if jacobian.numel() == 0:
                 continue
@@ -779,7 +780,8 @@ def slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
     return True
 
 
-def dot(u, v):
+def dot_with_type_promotion(u, v):
+    assert u.dim() == 1 and v.dim() == 1
     return (u * v).sum()
 
 
@@ -838,7 +840,7 @@ If the test
 """.strip()
 
 
-def slow_mode_jacobian_message(func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol):
+def run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol):
     # Compute jacobians in slow mode for better error message
     slow_numerical = _get_numerical_jacobian(func, tupled_inputs, outputs)[input_idx][output_idx]
     slow_analytical = _get_analytical_jacobian(tupled_inputs, outputs, input_idx, output_idx)
@@ -866,11 +868,10 @@ def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
     inp_tensors = [t for t in tupled_inputs if is_tensor_like(t) and t.requires_grad]
     inp_tensor_indices = [i for i, t in enumerate(tupled_inputs) if is_tensor_like(t) and t.requires_grad]
 
+    # Use our own generator to avoid messing with the user's RNG state
     g_cpu = torch.Generator()
     all_ur = [vec_from_tensor(inp, g_cpu, True) for inp in inp_tensors]
-    all_ur_dense = [u.to_dense().reshape(-1) if u.layout == torch.sparse_coo else u for u in all_ur]
     all_ui = [vec_from_tensor(inp, g_cpu, True) for inp in inp_tensors]
-    all_ui_dense = [u.to_dense().reshape(-1) if u.layout == torch.sparse_coo else u for u in all_ui]
     all_v = [vec_from_tensor(out, g_cpu) for out in outputs]
 
     if not outputs:
@@ -883,12 +884,13 @@ def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
 
     # Numerically approximate v^T (J u)
     for i, (input_idx, ur, ui) in enumerate(zip(inp_tensor_indices, all_ur, all_ui)):
-        numerical = get_fast_numerical_jacobian_wrt_specific_input(func, input_idx, tupled_inputs,
-                                                                   outputs, ur, ui, eps)
+        numerical = get_jvp_wrt_specific_input(func, input_idx, tupled_inputs, outputs, ur, ui, eps)
         for j, (a, v) in enumerate(zip(numerical, all_v)):
-            all_numerical[i].append(dot(a, v))
+            all_numerical[i].append(dot_with_type_promotion(a, v))
 
     # Analytically calculate (v^T J) u
+    all_ur_dense = [u.to_dense().reshape(-1) if u.layout == torch.sparse_coo else u for u in all_ur]
+    all_ui_dense = [u.to_dense().reshape(-1) if u.layout == torch.sparse_coo else u for u in all_ui]
     for i, (out, v) in enumerate(zip(outputs, all_v)):
         analytical = check_analytical_jacobian_attributes(tupled_inputs, out, nondet_tol, check_grad_dtypes,
                                                           fast_mode=True, v=v)
@@ -899,7 +901,7 @@ def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
                 ai = av.select(-1, 1)
                 all_analytical[i].append(ar.dot(ur) + 1j * ai.dot(ui))
             else:
-                all_analytical[i].append(dot(a.T.squeeze(0), ur))
+                all_analytical[i].append(dot_with_type_promotion(a.T.squeeze(0), ur))
 
     # Make sure analytical and numerical is the same
     for i, (all_numerical_for_input_i, inp) in enumerate(zip(all_numerical, inp_tensors)):
@@ -908,7 +910,7 @@ def fast_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol,
             n = n.to(device=a.device)
             # TODO: Update adjusted atol
             if not allclose_with_type_promotion(a, n, rtol, adjusted_atol(atol, all_ur[i], all_v[j])):
-                jacobians_str = slow_mode_jacobian_message(func, tupled_inputs, outputs, i, j, rtol, atol)
+                jacobians_str = run_slow_mode_and_get_error(func, tupled_inputs, outputs, i, j, rtol, atol)
                 raise GradcheckError(get_notallclose_msg(a, n, j, i, complex_indices, inp.is_complex()) + jacobians_str)
     return True
 
