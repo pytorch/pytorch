@@ -500,12 +500,24 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 x = F.conv1d(
                     x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
                     self.dilation1d, self.groups)
+                x = F.conv1d(
+                    x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
+                    self.dilation1d, self.groups)
+                x = F.relu(x)
                 x = F.conv2d(
                     x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
                     self.dilation2d, self.groups)
+                x = F.conv2d(
+                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
+                    self.dilation2d, self.groups)
+                x = F.relu(x)
                 x = F.conv3d(
                     x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
                     self.dilation3d, self.groups)
+                x = F.conv3d(
+                    x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
+                    self.dilation3d, self.groups)
+                x = F.relu(x)
                 return x
 
         w1d = torch.randn(1, 1, 1)
@@ -515,7 +527,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         b2d = torch.randn(1)
         b3d = torch.randn(1)
         m = M(w1d, w2d, w3d, b1d, b2d, b3d).eval()
-        self._test_extract_weights(m, results_len=3)
+        self._test_extract_weights(m, results_len=6)
 
     @skipIfNoFBGEMM
     def test_extract_weights_dynamic(self):
