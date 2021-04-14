@@ -289,7 +289,7 @@ class ProcessGroupGloo : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  GlooStore* getStore() {
+  GlooStore* _getStore() {
       return dynamic_cast<ProcessGroupGloo::GlooStore*>(store_.get());
   }
 
