@@ -394,7 +394,15 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # pack weight
                 weight = load_arg(quantized=True)(self.conv_node.args[1])
                 other_args = load_arg(quantized=False)(self.conv_node.args[2:])
-                prepack_args = tuple([weight] + list(other_args))
+                bias, stride, padding, dilation, groups = other_args
+                if self.conv == torch.nn.functional.conv1d:
+                    # F.conv1d can take `int` as well as `list[int]` for stride,
+                    # padding, dilation, but the prepack op cannot. Convert
+                    # these to lists if needed.
+                    stride = [stride] if isinstance(stride, int) else stride
+                    padding = [padding] if isinstance(padding, int) else padding
+                    dilation = [dilation] if isinstance(dilation, int) else dilation
+                prepack_args = (weight, bias, stride, padding, dilation, groups)
                 prepack_op = get_qconv_prepack_op(self.conv)
                 packed_weight = quantizer.quantized_graph.create_node(
                     "call_function", prepack_op, prepack_args, {})

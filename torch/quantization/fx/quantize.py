@@ -576,6 +576,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
 WEIGHT_PREPACK_OPS = {
     torch._ops.ops.quantized.linear_prepack,
     torch._ops.ops.quantized.linear_prepack_fp16,
+    torch._ops.ops.quantized.conv1d_prepack,
     torch._ops.ops.quantized.conv2d_prepack,
     torch._ops.ops.quantized.conv3d_prepack,
 }
