@@ -1,6 +1,10 @@
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
+                                 NativeFunctionsGroup, OptionalType,
+                                 SelfArgument, TensorOptionsArguments, Type,
+                                 assert_never)
 
-from tools.codegen.api.types import *
+from tools.codegen.api.types import (ArgName, BaseCType, Binding,
+                                     ConstRefCType, CType, OptionalCType)
 from tools.codegen.api import cpp
 
 from typing import Union, List

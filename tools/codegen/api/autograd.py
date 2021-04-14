@@ -3,8 +3,8 @@ import re
 from typing import Optional, Sequence, List, Tuple
 
 from tools.codegen.api import cpp
-from tools.codegen.api.types import *
-from tools.codegen.model import *
+from tools.codegen.api.types import Binding
+from tools.codegen.model import NativeFunction, Type, SchemaKind
 from tools.codegen.utils import IDENT_REGEX
 
 # Represents a saved attribute involved in backward calculation.
