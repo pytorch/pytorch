@@ -678,18 +678,6 @@ static void frexp_kernel(TensorIteratorBase& iter) {
   }                                                                                              \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 
-  #define IMPLEMENT_COMPLEX_STRUCTURED_KERNEL(op)                                                \
-  static void op##_kernel(TensorIteratorBase& iter) {                                            \
-    TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
-      iter.serial_for_each(                                                                      \
-          IMPLEMENT_ITERATOR_LAMBDA(op),                                                         \
-          {0, iter.numel()});                                                                    \
-    });                                                                                          \
-    iter.cast_outputs();                                                                         \
-  }                                                                                              \
-  REGISTER_DISPATCH(op##_stub, &op##_kernel)
-
 } // anonymous namespace
 
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
@@ -742,7 +730,7 @@ IMPLEMENT_COMPLEX_KERNEL(acos)
 IMPLEMENT_COMPLEX_KERNEL(asin)
 IMPLEMENT_COMPLEX_KERNEL(atan)
 IMPLEMENT_FLOAT_KERNEL(ceil)
-IMPLEMENT_COMPLEX_STRUCTURED_KERNEL(cos)
+IMPLEMENT_COMPLEX_KERNEL(cos)
 IMPLEMENT_FLOAT_KERNEL(erf)
 IMPLEMENT_FLOAT_KERNEL(erfc)
 IMPLEMENT_FLOAT_KERNEL(erfinv)
@@ -755,7 +743,7 @@ IMPLEMENT_FLOAT_KERNEL(log1p)
 IMPLEMENT_COMPLEX_KERNEL(log2)
 IMPLEMENT_FLOAT_KERNEL(i0)
 IMPLEMENT_FLOAT_KERNEL(round)
-IMPLEMENT_COMPLEX_STRUCTURED_KERNEL(sin)
+IMPLEMENT_COMPLEX_KERNEL(sin)
 IMPLEMENT_COMPLEX_KERNEL(sqrt)
 IMPLEMENT_COMPLEX_KERNEL(tan)
 IMPLEMENT_COMPLEX_KERNEL(tanh)
