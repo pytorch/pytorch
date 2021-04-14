@@ -353,6 +353,17 @@ torch_mobile_core = [
     "torch/csrc/jit/runtime/register_special_ops.cpp",
 ]
 
+libtorch_lite_eager_symbolication = [
+    "torch/csrc/jit/frontend/source_range.cpp",
+    "torch/csrc/jit/mobile/debug_info.cpp",
+    "torch/csrc/jit/serialization/source_range_serialization.cpp",
+    # Later we can split serialization and deserialization logic
+    # to have better separation within build and only build relevant parts.
+    "torch/csrc/jit/serialization/pickle.cpp",
+    "torch/csrc/jit/serialization/pickler.cpp",
+    "torch/csrc/jit/serialization/unpickler.cpp",
+]
+
 # TODO: core_trainer_sources is not necessary for libtorch lite
 libtorch_lite_cmake_sources = sorted(core_trainer_sources + core_sources_common + torch_mobile_core)
 

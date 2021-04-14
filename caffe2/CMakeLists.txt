@@ -516,32 +516,22 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
   list(APPEND LIBTORCH_CMAKE_SRCS "")
 
-  list(APPEND MOBILE_DEBUG_SRCS "")
+  list(APPEND LITE_EAGER_SYMOBLICATION_SRCS "")
   if(USE_SOURCE_DEBUG_ON_MOBILE)
-    set(MOBILE_EAGER_SYMOBLICATION_SRCS
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/debug_info.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/serialization/source_range_serialization.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/frontend/source_range.cpp
-       # Later we can split serialization and deserialization logic
-       # to have better separation within build and only build relevant parts.
-       ${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/serialization/pickler.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/serialization/unpickler.cpp
-       )
-    # For source debug on mobile, we have to add dependency on pickling
+    append_filelist("libtorch_lite_eager_symbolication" LITE_EAGER_SYMOBLICATION_SRCS)
+    # For source debug on lite interpreter, we have to add dependency on pickling
     # but references to read/writeArchiveAndTensor is not built for mobile
     # so this condition specifically says we are building for source debug
     # on mobile.
     if(BUILD_LITE_INTERPRETER)
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp PROPERTIES COMPILE_FLAGS "-DC10_MOBILE -DFEATURE_TORCH_MOBILE")
     endif()
-    list(APPEND MOBILE_DEBUG_SRCS ${MOBILE_EAGER_SYMOBLICATION_SRCS})
   endif()
 
   # Switch between the full jit interpreter and lite interpreter
   if(BUILD_LITE_INTERPRETER)
     append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
-    list(APPEND LIBTORCH_CMAKE_SRCS ${MOBILE_DEBUG_SRCS})
+    list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
   endif()
@@ -578,7 +568,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/sequential.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
-    list(APPEND TORCH_SRCS ${MOBILE_DEBUG_SRCS})
+    list(APPEND TORCH_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   endif()
 
   # This one needs to be unconditionally added as Functions.cpp is also unconditionally added
