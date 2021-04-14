@@ -80,6 +80,7 @@ from torch.testing._internal.common_methods_invocations import method_tests as a
 from torch.testing._internal.common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from jit.test_monkeytype import test_sum_monkey, test_sub_monkey, test_mul_monkey, test_args_complex
 
 # For testing truediv in python 2
 from torch.testing._internal.test_module.future_div import div_int_future, div_float_future
@@ -281,7 +282,6 @@ def get_grad_executor(plan_state, diff_graph_idx=None, skip_check=False):
                 raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
     grad_executors = list(plan_state.code.grad_executor_states())
     return grad_executors[diff_graph_idx or 0]
-
 
 def all_backward_graphs(script_module, diff_graph_idx=None):
     # Note: for Python 2 the order seems to be unstable
@@ -13440,6 +13440,16 @@ dedent """
         self.assertTrue(isinstance(f, torch.jit.ScriptModule))
         self.assertTrue(isinstance(f.call(), property))
 
+    def test_monkeytype(self):
+        scripted_fn_add = torch.jit._script_pdt(test_sum_monkey, example_inputs = [(3, 4)])
+        scripted_fn_sub = torch.jit._script_pdt(test_sub_monkey, example_inputs = [(3.9, 4.10)])
+        scripted_fn_mul = torch.jit._script_pdt(test_mul_monkey, example_inputs = [(-10, 9)])
+        scripted_fn_complex = torch.jit._script_pdt(test_args_complex, example_inputs = [(torch.rand(3, 4), torch.rand(3, 4))])
+        self.assertEqual(scripted_fn_add(10, 2), test_sum_monkey(10, 2))
+        self.assertEqual(scripted_fn_sub(6.5, 2.9), test_sub_monkey(6.5, 2.9))
+        self.assertEqual(scripted_fn_mul(-1, 3), test_mul_monkey(-1, 3))
+        arg1, arg2 = torch.rand(3, 4), torch.rand(3, 4)
+        self.assertEqual(scripted_fn_complex(arg1, arg2), test_args_complex(arg1, arg2))
 
     def test_pass(self):
         def foo(x):
