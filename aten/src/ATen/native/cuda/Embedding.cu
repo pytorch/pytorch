@@ -236,7 +236,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  if (num_indices <= 768 && !scale_grad_by_freq) {
+  if (num_indices <= 3072 && !scale_grad_by_freq) {
     auto indices_contig = indices.contiguous();
     auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
     int64_t stride = grad_weight.stride(0);
