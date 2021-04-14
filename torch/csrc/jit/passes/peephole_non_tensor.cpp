@@ -8,8 +8,7 @@ namespace torch {
 namespace jit {
 
 struct PeepholeOptimizeNonTensorImpl {
-  PeepholeOptimizeNonTensorImpl(
-      const std::shared_ptr<Graph>& graph)
+  PeepholeOptimizeNonTensorImpl(const std::shared_ptr<Graph>& graph)
       : graph_(graph) {}
 
   bool run() {
@@ -42,7 +41,7 @@ struct PeepholeOptimizeNonTensorImpl {
       // all belong to the given block
       // TODO: this doesn't work with Scalar-Tensor ops! We should
       // canonicalize those
-     if (node->kind() == prim::If) {
+      if (node->kind() == prim::If) {
         IfView n(node);
         // this handles redundant short circuits like "x and True" or "x or
         // False"
@@ -115,6 +114,28 @@ struct PeepholeOptimizeNonTensorImpl {
           node->output()->replaceAllUsesWith(node->input());
           changed = true;
         }
+      } else if (node->kind() == aten::ne || node->kind() == aten::eq) {
+        if (node->inputs().size() != 2 ||
+            node->inputs().at(0) != node->inputs().at(1)) {
+          continue;
+        }
+        auto inp_kind = node->inputs().at(0)->type()->kind();
+        // only handling common types here because other types like Tensor might
+        // throw on aten::eq even if both inputs are the same
+        switch (inp_kind) {
+          case TypeKind::BoolType:
+          case TypeKind::IntType:
+          case TypeKind::FloatType:
+          case TypeKind::ListType:
+          case TypeKind::DictType: {
+            WithInsertPoint guard(node);
+            // node->output()->replaceAllUsesWith(
+            //     graph_->insertConstant(node->kind() == aten::eq));
+            changed = true;
+          }
+          default:
+            break;
+        }
       }
 
       // [aliasing sensitive optimizations]
@@ -130,8 +151,7 @@ struct PeepholeOptimizeNonTensorImpl {
   std::shared_ptr<Graph> graph_;
 };
 
-bool PeepholeOptimizeNonTensor(
-    const std::shared_ptr<Graph>& graph) {
+bool PeepholeOptimizeNonTensor(const std::shared_ptr<Graph>& graph) {
   PeepholeOptimizeNonTensorImpl peephole(graph);
   bool changed = peephole.run();
   GRAPH_DUMP("After PeepholeOptimize: ", graph);

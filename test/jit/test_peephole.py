@@ -306,3 +306,12 @@ class TestPeephole(JitTestCase):
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
         self.run_pass("constant_propagation", foo.graph)
         FileCheck().check_count("aten::len", 4).run(foo.graph)
+
+    def test_optimize_out_comparison_same_value(self):
+        @torch.jit.script
+        def foo(x: int):
+            return x == x, x != x
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("aten::eq").check_not("aten::neq").run(foo.graph)
+        self.assertEqual(foo(1), (True, False))

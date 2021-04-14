@@ -103,8 +103,9 @@ struct SymbolicShapeAnalyzer {
       EliminateCommonSubexpression(graph_);
     }
     substituteInputTensorProperties(/*substitute_symbolic_dims*/ true);
-    // XXX: do not run any passes aftr we have substituted in symbolic dimension
-    // value, we do it so they can be easily extracted into the output shape
+    // XXX: do not run any passes after we have substituted in symbolic
+    // dimension value, we do it so they can be easily extracted into the output
+    // shape
     return extractOutputShape();
   }
 
