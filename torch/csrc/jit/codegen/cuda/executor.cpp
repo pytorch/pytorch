@@ -18,6 +18,8 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <fstream>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -43,6 +45,13 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()
               << " =======\n\n"
               << code << "\n======================================\n\n";
+  } else if (isDebugDumpEnabled(DebugDumpOption::DumpKernel)) {
+    std::stringstream file_name;
+    file_name << "__tmp_kernel" << fusion_id_ << ".cu";
+    std::cout << "PRINTING: " << file_name.str() << std::endl;
+    std::ofstream out(file_name.str());
+    out << code << std::endl;
+    out.close();
   }
 
   return code;
@@ -540,10 +549,38 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     kernel_arguments.appendPhiloxRNGSeed(rand_offset);
   }
 
+  if (isDebugDumpEnabled(DebugDumpOption::PrintRuntimeArgs)) {
+    std::cout << "Arguments for kernel" << fusion_id_ << ":" << std::endl
+              << "Inputs:" << std::endl;
+    for (auto input : inputs) {
+      if (input.isTensor()) {
+        std::cout << input.toTensor().scalar_type() << " "
+                  << input.toTensor().sizes() << std::endl;
+      }
+    }
+    std::cout << "Outputs:" << std::endl;
+    for (auto output : allocated_outputs) {
+      std::cout << "  " << output.scalar_type() << " " << output.sizes()
+                << std::endl;
+    }
+    std::cout << "Reduction buffers:" << std::endl;
+    for (auto buffer : global_buffers.empty_buffers) {
+      std::cout << "  " << buffer.scalar_type() << " " << buffer.sizes()
+                << std::endl;
+    }
+    std::cout << "Semaphores:" << std::endl;
+    for (auto buffer : global_buffers.zero_buffers) {
+      std::cout << "  " << buffer.scalar_type() << " " << buffer.sizes()
+                << std::endl
+                << std::endl;
+    }
+  }
+
   cudaEvent_t start_event = {};
   cudaEvent_t finish_event = {};
 
-  if (measure_kernel_time_) {
+  if (measure_kernel_time_ ||
+      isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth)) {
     cudaEventCreate(&start_event);
     cudaEventCreate(&finish_event);
     cudaEventRecord(start_event);
@@ -565,13 +602,33 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
         nullptr));
   }
 
-  if (measure_kernel_time_) {
+  if (measure_kernel_time_ ||
+      isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth)) {
     cudaEventRecord(finish_event);
     cudaEventSynchronize(start_event);
     cudaEventSynchronize(finish_event);
     cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event);
     cudaEventDestroy(start_event);
     cudaEventDestroy(finish_event);
+
+    if (isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth)) {
+      size_t bytes = 0;
+      // Figure how many bytes are inputs, outputs, and temporary buffers
+      for (auto input : inputs) {
+        if (input.isTensor()) {
+          bytes += input.toTensor().numel() *
+              dataTypeSize(aten_to_data_type(input.toTensor().scalar_type()));
+        }
+      }
+      for (auto output : allocated_outputs) {
+        bytes += output.numel() *
+            dataTypeSize(aten_to_data_type(output.scalar_type()));
+      }
+      double gb_per_s =
+          ((double)bytes / ((double)kernel_time_ms_ / 1000)) / (double)1.0e9;
+      std::cout << "kernel" << fusion_id_ << " run in " << kernel_time_ms_
+                << " ms, achieved: " << gb_per_s << " GB/s" << std::endl;
+    }
   }
 
   return allocated_outputs;

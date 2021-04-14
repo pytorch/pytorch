@@ -19,11 +19,17 @@ enum class DebugDumpOption {
   CudaFull, //!< Dump the complete CUDA C++ code
   LaunchParam, //!< Dump the Launch parameters of kernel
   FusionSegments, //!< Dump Segmented Fusion Graph
+  DumpKernel, //!< Dump CUDA Strings to File
+  PrintRuntimeArgs, //!< Print the runtime arguments when launching kernels
+  EffectiveBandwidth, //! Measure kernel performance and print effective
+                      //! bandwidth
   FusionSegmentsDrawing //!< Dump Segmented Fusion Graph
 };
 
 bool isDebugDumpEnabled(DebugDumpOption option);
 
+// Check if fallback path should be used which will dispatch to eagermode if any
+// errors are encountered. Helpful for debugging.
 bool useFallback();
 
 //! Ceil integer division

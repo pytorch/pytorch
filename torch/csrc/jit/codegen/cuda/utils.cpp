@@ -22,6 +22,9 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::CudaFull, false},
       {DebugDumpOption::LaunchParam, false},
       {DebugDumpOption::FusionSegments, false},
+      {DebugDumpOption::DumpKernel, false},
+      {DebugDumpOption::PrintRuntimeArgs, false},
+      {DebugDumpOption::EffectiveBandwidth, false},
       {DebugDumpOption::FusionSegmentsDrawing, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
@@ -43,6 +46,12 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::LaunchParam] = true;
       } else if (token == "segmented_fusion") {
         options_map[DebugDumpOption::FusionSegments] = true;
+      } else if (token == "dump_kernel") {
+        options_map[DebugDumpOption::DumpKernel] = true;
+      } else if (token == "print_args") {
+        options_map[DebugDumpOption::PrintRuntimeArgs] = true;
+      } else if (token == "dump_eff_bandwidth") {
+        options_map[DebugDumpOption::EffectiveBandwidth] = true;
       } else if (token == "draw_segmented_fusion") {
         options_map[DebugDumpOption::FusionSegmentsDrawing] = true;
       } else {

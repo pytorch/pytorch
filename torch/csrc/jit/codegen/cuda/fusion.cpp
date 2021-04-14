@@ -347,6 +347,15 @@ void Fusion::printMath(bool from_outputs_only) {
 
   FusionGuard fg(this);
   auto exprs_for_print = exprs();
+  std::cout << "Inputs:" << std::endl;
+  for (auto inp : inputs()) {
+    std::cout << "  " << inp << ", " << inp->getDataType().value() << std::endl;
+  }
+
+  std::cout << "Outputs:" << std::endl;
+  for (auto out : outputs()) {
+    std::cout << "  " << out << ", " << out->getDataType().value() << std::endl;
+  }
 
   // If we want everything in the fusion, grab all values without uses to
   // traverse from.
