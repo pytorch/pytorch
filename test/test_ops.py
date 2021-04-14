@@ -622,12 +622,9 @@ class TestCommon(JitCommonTestCase):
             return make_tensor(wrong_shape, dtype=t.dtype, device=t.device)
 
         out = _apply_out_transform(_case_two_transform, expected)
-        print(sample)
-        print(out.shape)
         msg_fail = "Resized a non-empty tensor but did not warn about it."
         with self.assertWarnsRegex(UserWarning, "An output with one or more elements", msg=msg_fail):
             op_out(out=out)
-            print(out.shape)
         self.assertEqual(expected, out)
 
         # Case 3: out= with the correct dtype and device, but an empty
