@@ -972,7 +972,7 @@ if(USE_TBB)
 endif()
 
 
-if(NOT WIN32)
+if(LINUX)
   find_library(BREAKPAD_LIB breakpad_client)
   find_path(BREAKPAD_INCLUDE_DIR breakpad)
   if(BREAKPAD_LIB_FOUND AND BREAKPAD_INCLUDE_DIR_FOUND)
