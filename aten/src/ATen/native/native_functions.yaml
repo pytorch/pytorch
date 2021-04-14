@@ -2055,7 +2055,7 @@
 
 - func: mkldnn_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
   dispatch:
-      MkldnnCPU: mkldnn_linear_backward_input
+    MkldnnCPU: mkldnn_linear_backward_input
 
 - func: mkldnn_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
   dispatch:
