@@ -1578,7 +1578,9 @@ if(NOT INTERN_BUILD_MOBILE)
 
   set(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
-  find_package(MAGMA)
+  if(USE_MAGMA)
+    find_package(MAGMA)
+  endif()
   if((USE_CUDA OR USE_ROCM) AND MAGMA_FOUND)
     include_directories(SYSTEM ${MAGMA_INCLUDE_DIR})
     if(USE_CUDA)
@@ -1604,6 +1606,7 @@ if(NOT INTERN_BUILD_MOBILE)
     message(STATUS "MAGMA V2 check: ${MAGMA_V2}")
   else()
     message(STATUS "MAGMA not found. Compiling without MAGMA support")
+    unset(USE_MAGMA)
   endif()
 
   # ARM specific flags
