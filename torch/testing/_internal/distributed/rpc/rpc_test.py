@@ -13,10 +13,10 @@ from threading import Event, Lock
 from unittest import mock
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
+import torch.nn as nn
 from torch.distributed.rpc import (
     RRef,
     _get_debug_info,

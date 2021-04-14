@@ -1,3 +1,1 @@
-from .trace_dependencies import (
-    trace_dependencies,
-)
+from .trace_dependencies import trace_dependencies
