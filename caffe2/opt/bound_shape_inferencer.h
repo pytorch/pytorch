@@ -136,6 +136,7 @@ class TORCH_API BoundShapeInferencer : public BoundShapeInferencerBase {
   void InferTile(const OperatorDef& op);
   void InferSparseLengthsSumSparseLookup(const OperatorDef& op);
   void InferSoftmax(const OperatorDef& op);
+  void InferBucketize(const OperatorDef& op);
   void InferLpNorm(const OperatorDef& op);
   void InferTranspose(const OperatorDef& op);
 

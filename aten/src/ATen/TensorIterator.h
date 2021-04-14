@@ -339,13 +339,6 @@ public:
   void build_unary_op(const Tensor& out, const Tensor& a);
 
 protected:
-  // Subclasses that want to initialize output Tensors themselves
-  // before calling set_output() must call set_output_current_dtype()
-  // before calling set_output() as well.
-  void set_output_current_dtype(int64_t output_idx) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
-    operands_[output_idx].current_dtype = operands_[output_idx].target_dtype;
-  }
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
   void mark_outputs();
