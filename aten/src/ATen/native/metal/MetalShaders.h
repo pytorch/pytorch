@@ -707,6 +707,103 @@ kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),func
     }
 }
 
+constant bool split_channels_in_is_arr = (ushort_arg_0 > 4);
+constant bool split_channels_in_is_tex = !split_channels_in_is_arr;
+constant bool split_channels_out1_is_arr = (ushort_arg_1 > 4);
+constant bool split_channels_out1_is_tex = !split_channels_out1_is_arr;
+constant bool split_channels_out2_is_arr = (ushort_arg_2 > 4);
+constant bool split_channels_out2_is_tex = !(split_channels_out2_is_arr);
+// A naive implementation to split the input texture into two on channel dimension
+kernel void split_channels(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(split_channels_in_is_arr)]],
+                           texture2d<half, access::read> in_tex[[texture(0), function_constant(split_channels_in_is_tex)]],
+                           texture2d_array<half, access::write> out1_arr[[texture(1),function_constant(split_channels_out1_is_arr)]],
+                           texture2d<half, access::write> out1_tex[[texture(1),function_constant(split_channels_out1_is_tex)]],
+                           texture2d_array<half, access::write> out2_arr[[texture(2), function_constant(split_channels_out2_is_arr)]],
+                           texture2d<half, access::write> out2_tex[[texture(2),function_constant(split_channels_out2_is_tex)]],
+                           ushort3 gid[[thread_position_in_grid]]) {
+    
+    ushort W,H;
+    if(split_channels_in_is_arr) {
+        W = in_arr.get_width();
+        H = in_arr.get_height();
+    } else {
+        W = in_tex.get_width();
+        H = in_tex.get_height();
+    }
+    if(gid.x >= W || gid.y >= H){
+        return;
+    }
+    const ushort C1 = ushort_arg_1;
+    const ushort s1 = divRoundUp(C1, 4);
+    const ushort c_offset = C1 % 4;
+    half4 tmp1(0.0, 0.0, 0.0, 0.0);
+    half4 tmp2(0.0, 0.0, 0.0, 0.0);
+    half4 in41 = split_channels_in_is_arr ? in_arr.read(gid.xy, gid.z) : in_tex.read(gid.xy);
+    half4 in42 = split_channels_in_is_arr ? in_arr.read(gid.xy, gid.z+1) : half4(0,0,0,0);
+    
+    if(gid.z < s1 - 1) {
+        if(split_channels_out1_is_arr) {
+            out1_arr.write(in41, gid.xy, gid.z);
+        }
+    }
+    else if(gid.z == s1 - 1) {
+        if(c_offset == 0){
+            if(split_channels_out1_is_arr) {
+                out1_arr.write(in41, gid.xy, gid.z);
+            } else {
+                out1_tex.write(in41, gid.xy);
+            }
+            return;
+        } else if(c_offset == 1) {
+            tmp1.x = in41.x;
+            tmp2.xyz = in41.yzw;
+            tmp2.w = in42.x;
+        } else if (c_offset == 2) {
+            tmp1.xy = in41.xy;
+            tmp2.xy = in41.zw;
+            tmp2.zw = in42.xy;
+        } else {
+            tmp1.xyz = in41.xyz;
+            tmp2.x = in41.w;
+            tmp2.yzw = in42.xyz;
+        }
+        if(split_channels_out1_is_arr) {
+            out1_arr.write(tmp1, gid.xy, gid.z);
+        } else {
+            out1_tex.write(tmp1, gid.xy);
+        }
+        if(split_channels_out2_is_arr) {
+            out2_arr.write(tmp2, gid.xy, 0);
+        } else {
+            out2_tex.write(tmp2, gid.xy);
+        }
+    }
+    else {
+        if (c_offset == 0) {
+            if(split_channels_out2_is_arr) {
+                out2_arr.write(in41, gid.xy, gid.z - s1);
+            } else {
+                out2_tex.write(in41, gid.xy);
+            }
+            return;
+        }
+        else if (c_offset == 1 ){
+            tmp2.xyz = in41.yzw;
+            tmp2.w = in42.x;
+        } else if (c_offset == 2){
+            tmp2.xy = in41.zw;
+            tmp2.zw = in42.xy;
+        } else {
+            tmp2.x = in41.w;
+            tmp2.yzw = in42.xyz;
+        }
+        if(split_channels_out2_is_arr) {
+            out2_arr.write(tmp2, gid.xy, gid.z - s1 + 1);
+        } else {
+            out2_tex.write(tmp2, gid.xy);
+        }
+    }
+}
 )PT_METAL_SHADERS";
 
 #endif /* MPSCNNShaders_h */
