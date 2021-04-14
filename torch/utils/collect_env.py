@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py`.
 import datetime
@@ -7,6 +9,7 @@ import subprocess
 import sys
 import os
 from collections import namedtuple
+
 
 try:
     import torch
@@ -174,7 +177,7 @@ def get_nvidia_smi():
         smis = [new_path, legacy_path]
         for candidate_smi in smis:
             if os.path.exists(candidate_smi):
-                smi = f'"{candidate_smi}"'
+                smi = '"{}"'.format(candidate_smi)
                 break
     return smi
 
@@ -425,15 +428,16 @@ def main():
     output = get_pretty_env_info()
     print(output)
 
-    minidump_dir = torch.utils._crash_handler.DEFAULT_MINIDUMP_DIR
-    if sys.platform == "linux" and os.path.exists(minidump_dir):
-        dumps = [os.path.join(minidump_dir, dump) for dump in os.listdir(minidump_dir)]
-        latest = max(dumps, key=os.path.getctime)
-        ctime = os.path.getctime(latest)
-        creation_time = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M:%S')
-        print(f"\n *** Detected a minidump at {latest} created on {creation_time}, "
-              "if this is related to your bug please include it when you file a report ***",
-              file=sys.stderr)
+    if TORCH_AVAILABLE and hasattr(torch, 'utils') and hasattr(torch.utils, '_crash_handler'):
+        minidump_dir = torch.utils._crash_handler.DEFAULT_MINIDUMP_DIR
+        if sys.platform == "linux" and os.path.exists(minidump_dir):
+            dumps = [os.path.join(minidump_dir, dump) for dump in os.listdir(minidump_dir)]
+            latest = max(dumps, key=os.path.getctime)
+            ctime = os.path.getctime(latest)
+            creation_time = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M:%S')
+            msg = "\n*** Detected a minidump at {} created on {}, ".format(latest, creation_time) + \
+                  "if this is related to your bug please include it when you file a report ***"
+            print(msg, file=sys.stderr)
 
 
 
