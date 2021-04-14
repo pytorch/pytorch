@@ -328,7 +328,7 @@
   abs, angle: polar_backward(grad, result)
 
 - name: conj(Tensor(a) self) -> Tensor(a)
-  self: grad.clone().conj_()
+  self: grad.conj()
 
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
@@ -1098,6 +1098,9 @@
 - name: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
   self: non_differentiable
 
+- name: linalg_eigvals(Tensor self) -> Tensor
+  self: non_differentiable
+
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
 
@@ -1488,8 +1491,8 @@
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
 
-- name: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
-  self: adaptive_avg_pool3d_backward(grad, self)
+- name: _adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
+  self: _adaptive_avg_pool3d_backward(grad, self)
 
 - name: adaptive_max_pool2d(Tensor self, int[2] output_size) -> (Tensor, Tensor)
   self: adaptive_max_pool2d_backward(grad, self, result1)
@@ -1597,8 +1600,8 @@
   grad_output: _adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
   self: zeros_like(self)
 
-- name: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
-  grad_output: adaptive_avg_pool3d(grad, { grad_output.size(-3), grad_output.size(-2), grad_output.size(-1) })
+- name: _adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
+  grad_output: _adaptive_avg_pool3d(grad, { grad_output.size(-3), grad_output.size(-2), grad_output.size(-1) })
   self: zeros_like(self)
 
 - name: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor

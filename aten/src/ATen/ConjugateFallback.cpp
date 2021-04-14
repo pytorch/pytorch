@@ -76,7 +76,7 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
     auto tensor = std::move(ivalue).toTensor();
     if (mut_arg) {
       // TODO: This is a waste if the argument is write only
-      native::conj_(tensor);
+      native::conj_physical_(tensor);
       tensor.set_conj(false);
       mutable_inputs.emplace_back(tensor);
     } else {
@@ -85,10 +85,10 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
     (*stack)[stack_start + i] = std::move(tensor);
   }
 
-  op.callBoxed(stack);
+  op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::Conjugate), stack);
 
   for (auto& mutable_input : mutable_inputs) {
-    native::conj_(mutable_input);
+    native::conj_physical_(mutable_input);
     mutable_input.set_conj(true);
   }
 }
@@ -100,7 +100,7 @@ TORCH_LIBRARY_IMPL(_, Conjugate, m) {
 TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("copy_", torch::CppFunction::makeFallthrough());
   m.impl("conj", torch::CppFunction::makeFallthrough());
-  m.impl("conj_", torch::CppFunction::makeFallthrough());
+  m.impl("conj_physical_", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
   m.impl("empty_like", torch::CppFunction::makeFallthrough());
   m.impl("empty.out", torch::CppFunction::makeFallthrough());

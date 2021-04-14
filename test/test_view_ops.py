@@ -317,6 +317,14 @@ class TestViewOps(TestCase):
         self.assertEqual(a[5:].imag, a.imag[5:])
 
     @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_conj_view(self, device, dtype) -> None:
+        t = _make_tensor((4, 5,), dtype, device)
+        v = t.conj()
+        self.assertTrue(self.is_view_of(t, v))
+        self.assertEqual(v, t.numpy().conj())
+
+    @onlyOnCPUAndCUDA
     @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
     @suppress_warnings
     def test_set_real_imag(self, device, dtypes):

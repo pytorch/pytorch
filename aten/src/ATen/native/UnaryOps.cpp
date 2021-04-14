@@ -284,12 +284,12 @@ Tensor conj(const Tensor& self) {
   return self_;
 }
 
-Tensor& conj_out(Tensor& result, const Tensor& self) {
+Tensor& conj_physical_out(Tensor& result, const Tensor& self) {
   return unary_op_impl_out(result, self, conj_stub);
 }
 
-Tensor& conj_(Tensor& self) {
-  return unary_op_impl_(self, conj_out);
+Tensor& conj_physical_(Tensor& self) {
+  return unary_op_impl_(self, conj_physical_out);
 }
 
 Tensor& bitwise_not_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, bitwise_not_stub); }
@@ -490,6 +490,21 @@ Tensor logit(const Tensor& self, c10::optional<double> eps) {
 }
 Tensor& logit_(Tensor& self, c10::optional<double> eps) {
   return at::logit_out(self, self, eps);
+}
+
+Tensor& special_logit_out(const Tensor& self, c10::optional<double> eps, Tensor& result) {
+  return at::logit_out(result, self, eps);
+}
+Tensor special_logit(const Tensor& self, c10::optional<double> eps) {
+  return self.logit(eps);
+}
+
+// special_expit, alias for sigmoid
+Tensor& special_expit_out(const Tensor& self, Tensor& result) {
+  return at::sigmoid_out(result, self);
+}
+Tensor special_expit(const Tensor& self) {
+  return self.sigmoid();
 }
 
 Tensor& nan_to_num_out(const Tensor& self,
@@ -790,7 +805,6 @@ DEFINE_DISPATCH(abs_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-va
 DEFINE_DISPATCH(angle_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(real_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(imag_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-// NB: conj_stub IGNORES the conjugate bit on input tenso
 DEFINE_DISPATCH(conj_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
