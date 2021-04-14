@@ -486,7 +486,7 @@ Then navigate to `localhost:8000` in your web browser.
 You can start a lightweight HTTP server on the remote machine with:
 
 ```
-python -m http.server 8000 <path_to_html_output> 
+python -m http.server 8000 <path_to_html_output>
 ```
 
 Alternatively, you can run `rsync` on your local machine to copy the files from
