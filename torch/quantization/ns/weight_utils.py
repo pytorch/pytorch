@@ -7,7 +7,7 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
-from .utils import getattr_from_fqn
+from .utils import getattr_from_fqn, return_first_non_observer_node
 
 from typing import List
 
@@ -51,6 +51,27 @@ def get_lstm_mod_weights(mod: nn.Module) -> List[torch.Tensor]:
             res.append(weight_value.param.__getstate__()[0][4][0].__getstate__()[0][0])
             res.append(weight_value.param.__getstate__()[0][4][1].__getstate__()[0][0])
         return res
+
+def get_conv_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
+    # TODO(future PR): docblock
+    # TODO(future PR): handle non standard weights (i.e. after reshape, etc)
+    if node.target in (F.conv2d, F.conv3d):
+        # traverse backwards from the weight arg, accounting for any observers
+        weight_arg_node = node.args[1]
+        assert isinstance(weight_arg_node, Node)
+        weight_node = return_first_non_observer_node(weight_arg_node, gm)
+        assert isinstance(weight_node, Node)
+        assert weight_node.op == 'get_attr'
+        weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore
+        return weight.detach()
+    else:
+        assert node.target in (toq.conv2d, toq.conv3d)
+        # qconv state is arg 1
+        qconv_state_node = node.args[1]
+        assert isinstance(qconv_state_node, Node)
+        assert qconv_state_node.op == 'get_attr'
+        qconv_state_obj = getattr_from_fqn(gm, qconv_state_node.target)  # type: ignore
+        return qconv_state_obj.weight()
 
 def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
     # TODO(future PR): better docblock, with example FX IR
