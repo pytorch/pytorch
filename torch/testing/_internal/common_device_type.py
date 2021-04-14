@@ -241,10 +241,10 @@ class DeviceTypeTestBase(TestCase):
             # Constructs the test's name
             test_name = _construct_test_name(name, op, cls.device_type, dtype)
 
-            # wraps instantiated test with op decorators
+            # Wraps instantiated test with op decorators
             # NOTE: test_wrapper exists because we don't want to apply
             #   op-specific decorators to the original test.
-            #   Test-sepcific decorators are applied to the original test,
+            #   Test-specific decorators are applied to the original test,
             #   however.
             if op is not None:
                 try:
@@ -408,7 +408,7 @@ def get_device_type_test_bases():
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
-            # skip if sanitizer is enabled
+            # Skip if sanitizer is enabled
             if not TEST_WITH_ASAN and not TEST_WITH_TSAN and not TEST_WITH_UBSAN:
                 test_bases.append(CUDATestBase)
         else:
@@ -425,6 +425,21 @@ def get_device_type_test_bases():
 
 
 device_type_test_bases = get_device_type_test_bases()
+
+
+def filter_desired_device_types(device_type_test_bases, except_for=None, only_for=None):
+    # device type cannot appear in both except_for and only_for
+    intersect = set(except_for if except_for else []) & set(only_for if only_for else [])
+    assert not intersect, f"device ({intersect}) appeared in both except_for and only_for"
+
+    if except_for:
+        device_type_test_bases = filter(
+            lambda x: x.device_type not in except_for, device_type_test_bases)
+    if only_for:
+        device_type_test_bases = filter(
+            lambda x: x.device_type in only_for, device_type_test_bases)
+
+    return list(device_type_test_bases)
 
 
 # Note [How to extend DeviceTypeTestBase to add new test device]
@@ -446,7 +461,8 @@ device_type_test_bases = get_device_type_test_bases()
 _TORCH_TEST_DEVICES = os.environ.get('TORCH_TEST_DEVICES', None)
 if _TORCH_TEST_DEVICES:
     for path in _TORCH_TEST_DEVICES.split(':'):
-        mod = runpy.run_path(path, init_globals=globals())
+        # runpy (a stdlib module) lacks annotations
+        mod = runpy.run_path(path, init_globals=globals())  # type: ignore[func-returns-value]
         device_type_test_bases.append(mod['TEST_CLASS'])
 
 
@@ -476,15 +492,29 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
+    # Filter out the device types based on user inputs
+    desired_device_type_test_bases = filter_desired_device_types(device_type_test_bases,
+                                                                 except_for, only_for)
+
+    def split_if_not_empty(x: str):
+        return x.split(",") if len(x) != 0 else []
+
+    # Filter out the device types based on environment variables if available
+    # Usage:
+    # export PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda,cpu
+    # export PYTORCH_TESTING_DEVICE_EXCEPT_FOR=xla
+    env_only_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_ONLY_FOR", ''))
+    env_except_for = split_if_not_empty(os.getenv("PYTORCH_TESTING_DEVICE_EXCEPT_FOR", ''))
+
+    desired_device_type_test_bases = filter_desired_device_types(desired_device_type_test_bases,
+                                                                 env_except_for, env_only_for)
+
+
     # Creates device-specific test cases
-    for base in device_type_test_bases:
-        # Skips bases listed in except_for
-        if except_for is not None and only_for is not None:
-            assert base.device_type not in except_for or base.device_type not in only_for,\
-                "same device cannot appear in except_for and only_for"
-        if except_for is not None and base.device_type in except_for:
-            continue
-        if only_for is not None and base.device_type not in only_for:
+    for base in desired_device_type_test_bases:
+        # Special-case for ROCm testing -- only test for 'cuda' i.e. ROCm device by default
+        # The except_for and only_for cases were already checked above. At this point we only need to check 'cuda'.
+        if TEST_WITH_ROCM and base.device_type != 'cuda':
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
@@ -495,13 +525,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
-                # Requires tests be a function for Python2 compat
-                # (In Python2 tests are type checked methods wrapping functions)
                 test = getattr(generic_test_class, name)
-                if hasattr(test, '__func__'):
-                    test = test.__func__
-                assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
-
                 # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
                 sig = inspect.signature(device_type_test_class.instantiate_test)
                 if len(sig.parameters) == 3:
@@ -511,12 +535,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                     device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member
                 assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
-
-                # Unwraps to functions (when available) for Python2 compat
                 nontest = getattr(generic_test_class, name)
-                if hasattr(nontest, '__func__'):
-                    nontest = nontest.__func__
-
                 setattr(device_type_test_class, name, nontest)
 
         # Mimics defining the instantiated class in the caller's file
@@ -548,7 +567,7 @@ class OpDTypes(Enum):
 #   <test_name>(self, device, dtype, op)
 # For example:
 # @ops(unary_ufuncs)
-# test_numerics(self, device, dtype, op):
+# def test_numerics(self, device, dtype, op):
 #   <test_code>
 class ops(object):
     def __init__(self, op_list, *, dtypes: OpDTypes = OpDTypes.basic,
@@ -731,7 +750,7 @@ def onlyOnCPUAndCUDA(fn):
     @wraps(fn)
     def only_fn(self, device, *args, **kwargs):
         if self.device_type != 'cpu' and self.device_type != 'cuda':
-            reason = "Doesn't run on {0}".format(self.device_type)
+            reason = "onlyOnCPUAndCUDA: doesn't run on {0}".format(self.device_type)
             raise unittest.SkipTest(reason)
 
         return fn(self, device, *args, **kwargs)
@@ -781,9 +800,7 @@ class precisionOverride(object):
 # @dtypes((torch.long, torch.float32), (torch.int, torch.float64))
 class dtypes(object):
 
-    # Note: *args, **kwargs for Python2 compat.
-    # Python 3 allows (self, *args, device_type='all').
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, device_type="all"):
         if len(args) > 0 and isinstance(args[0], (list, tuple)):
             for arg in args:
                 assert isinstance(arg, (list, tuple)), \
@@ -795,7 +812,7 @@ class dtypes(object):
             assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
 
         self.args = args
-        self.device_type = kwargs.get('device_type', 'all')
+        self.device_type = device_type
 
     def __call__(self, fn):
         d = getattr(fn, 'dtypes', {})
@@ -829,6 +846,9 @@ def onlyCUDA(fn):
 
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
+
+def expectedFailureMeta(fn):
+    return expectedFailure('meta')(fn)
 
 class expectedAlertNondeterministic:
     def __init__(self, caller_name, device_type=None, fn_has_device_arg=True):

@@ -17,6 +17,14 @@ pushd ../../
 buck run fbsource//third-party/protobuf:protoc -- --plugin=protoc-gen-mypy="${MYPY_PROTOBUF_HOME}"/protoc-gen-mypy --mypy_out=./ caffe2/proto/*.proto
 popd
 
+# get rid of 'builtins.' prefix, which pyre does not like
+sed -E -i 's/builtins\.//g' ./*.pyi
+
+# mypy-protobuf references types from other mypy-protobuf-generated stubs as
+# 'type.V', but it should just be 'type', so we get rid of the '.V' suffix
+# when it's not followed by parens to indicate a particular enum value.
+sed -E -i 's/\.V([^(_[:alnum:]])/\1/g' ./*.pyi
+
 # ---------------------------
 # Freedom-patched DeviceTypes
 # ---------------------------

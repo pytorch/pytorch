@@ -436,10 +436,10 @@ def _model_to_graph(model, args, verbose=False,
                     training=None, dynamic_axes=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
-    if isinstance(args, torch.Tensor):
+    if isinstance(args, (torch.Tensor, int, float, bool)):
         args = (args, )
 
-    if isinstance(example_outputs, torch.Tensor):
+    if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
         example_outputs = (example_outputs,)
 
     graph, params, torch_out, module = _create_jit_graph(model, args,

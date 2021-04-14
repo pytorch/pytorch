@@ -16,8 +16,8 @@ struct TORCH_API StaticModuleOptions {
   bool cleanup_activations{true};
   bool enable_out_variant{true};
   bool optimize_memory{true};
-  bool optimize_output_memory{
-      false}; // to enable MemoryPlanner on output tensors
+  // to enable MemoryPlanner on output tensors
+  bool optimize_output_memory{false};
 };
 
 /// The static runime supports two execution modes.
@@ -81,7 +81,6 @@ class TORCH_API StaticModule {
   typedef enum {
     CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
     INPUT_VALUE = -1, // VALUE nodes representing graph inputs
-    OTHER_VALUE = 0 // other VALUE nodes (use non-negative index)
   } VALUE_KIND;
 
  private:
@@ -296,15 +295,25 @@ class MemoryPlanner {
   }
 
  private:
+  // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
+
   // each pair contains the size (in bytes) of data to be allocated
   // and a vector of StorageImpl's that should be backed by that same data
   // Thus, if memonger is disabled, all vectors are of size 1.
   std::vector<std::pair<size_t, std::vector<c10::StorageImpl*>>>
-      managed_storage_;
+      managed_tensor_storage_;
   size_t managed_bytes_{0};
   size_t reused_tensors_{0};
   at::DataPtr buffer_; // allocated each time we call Run()
+
+  // since output tensors are alive after one inference, their storage
+  // is managed differently (e.g., deallocation happens at client side)
+  // std::vector<std::pair<sizse_t, std::vector<c10::StorageImpl*>>>
+  //     managed_output_storage_;
+  // size_t managed_output_bytes_{0};
+  // size_t reused_output_tensors_{0};
+  // at::DataPtr output_buffer_; // allocated each time we call Run()
 
   static size_t compute_aligned_tensor_size(size_t nbytes);
   static at::DataPtr allocate_buffer(size_t size);

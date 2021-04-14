@@ -177,7 +177,7 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
             import torch._dl as _dl_flags  # type: ignore
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
-    from torch._C import *
+    from torch._C import *  # noqa: F403
     sys.setdlopenflags(old_flags)
     del old_flags
     del _dl_flags
@@ -194,7 +194,7 @@ else:
     # See Note [Global dependencies]
     if USE_GLOBAL_DEPS:
         _load_global_deps()
-    from torch._C import *
+    from torch._C import *  # noqa: F403
 
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
@@ -278,6 +278,12 @@ def is_tensor(obj):
 
     Args:
         obj (Object): Object to test
+    Example::
+
+        >>> x=torch.tensor([1,2,3])
+        >>> torch.is_tensor(x)
+        True
+
     """
     return isinstance(obj, torch.Tensor)
 
@@ -371,6 +377,10 @@ def use_deterministic_algorithms(d):
           ``indices`` is a list of tensors
         * :func:`torch.index_put` with ``accumulate=True`` when called on a CPU
           tensor
+        * :func:`torch.put` with ``accumulate=True`` when called on a CPU
+          tensor
+        * :func:`torch.gather` when ``input`` dimension is one and called
+          on a CUDA tensor that requires grad
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when `d=True`:
@@ -401,12 +411,17 @@ def use_deterministic_algorithms(d):
         * :func:`torch.scatter_add_` when called on a CUDA tensor
         * :func:`torch.index_add_` when called on a CUDA tensor
         * :func:`torch.index_copy`
+        * :func:`torch.Tensor.index_put_` when ``accumulate=False``
+        * :func:`torch.put` when ``accumulate=False``
+        * :func:`torch.put` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.index_select` when called on a CUDA tensor that requires grad
         * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
+        * :func:`torch.gather` when ``input`` dimension is larger than one
+          and called on a CUDA tensor that requires grad
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`
@@ -577,7 +592,7 @@ if TYPE_CHECKING:
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
-    from torch._C._VariableFunctions import *  # type: ignore
+    from torch._C._VariableFunctions import *  # type: ignore # noqa: F403
 
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
@@ -590,7 +605,7 @@ for name in dir(_C._VariableFunctions):
 ################################################################################
 
 # needs to be after the above ATen bindings so we can overwrite from Python side
-from .functional import *
+from .functional import *  # noqa: F403
 
 
 ################################################################################
@@ -683,8 +698,8 @@ def compiled_with_cxx11_abi():
 
 
 # Import the ops "namespace"
-from torch._ops import ops as ops
-from torch._classes import classes as classes
+from torch._ops import ops
+from torch._classes import classes
 
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom
