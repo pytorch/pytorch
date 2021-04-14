@@ -268,9 +268,10 @@ class GenExternalAtenFallback:
             if len(annotated_tensor_indices) > 0:
                 indices_str = ", ".join([str(i) for i in annotated_tensor_indices])
                 collect_mutated_tensors = f'\n  std::vector<size_t> xlatens_update_indices = {{{indices_str}}};'
+                # TODO: uncomment the resize line below. Taken out temporarily for testing
                 update_tensors = '''
   for (int i : xlatens_update_indices) {
-    if (xlatens_tensors[i].sizes() != xlatens[i].sizes()) xlatens_tensors[i].resize_(xlatens[i].sizes());
+    // if (xlatens_tensors[i].sizes() != xlatens[i].sizes()) xlatens_tensors[i].resize_(xlatens[i].sizes());
     at::_copy_from(xlatens[i], xlatens_tensors[i]);
   }
 '''
