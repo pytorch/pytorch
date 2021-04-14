@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 import bz2
 import datetime
@@ -14,7 +15,7 @@ from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Set, Tuple, cast)
-from xml.dom import minidom  # type: ignore[import]
+from xml.dom import minidom
 
 import requests
 from typing_extensions import TypedDict

@@ -972,6 +972,18 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(3, 3).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
 
+    def test_hardsigmoid(self):
+        model = torch.nn.Hardsigmoid()
+
+        x = torch.rand(3, 3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+        # corner cases
+        x = torch.tensor(3).to(dtype=torch.float32)
+        self.run_test(model, x)
+        x = torch.tensor(-3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
@@ -1540,8 +1552,8 @@ class TestONNXRuntime(unittest.TestCase):
     def test_div_rounding_mode(self):
         class TrueDivModule(torch.nn.Module):
             def forward(self, x, y):
-                return (x.div(y, rounding_mode='true'),
-                        torch.div(x, y, rounding_mode='true'))
+                return (x.div(y, rounding_mode=None),
+                        torch.div(x, y, rounding_mode=None))
 
         class TruncDivModule(torch.nn.Module):
             def forward(self, x, y):
