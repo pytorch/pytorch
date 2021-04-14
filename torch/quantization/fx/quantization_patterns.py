@@ -632,7 +632,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         return quantizer.quantized_graph.create_node(
                             "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
                     else:
-                        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+                        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
 @register_quant_pattern(torch.nn.BatchNorm2d)
 @register_quant_pattern(torch.nn.BatchNorm3d)
