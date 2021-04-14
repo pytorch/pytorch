@@ -3596,6 +3596,23 @@ class TestTorchDeviceType(TestCase):
                 _test_in_place_broadcastable(small2, small_expanded, large_expanded)
                 _test_in_place_broadcastable(small2, small, large)
 
+    # Ensures that index_put throws nondeterministic alerts in the correct cases
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.double)
+    def test_index_put_nondeterministic_alert(self, device, dtype):
+        @expectedAlertNondeterministic('index_put_ with accumulate=False')
+        def test_func(slf, device, op_call):
+            S = 10
+            a = torch.randn(S, dtype=dtype, device=device)
+            indices = (torch.tensor([0, 0], device=device), )
+            values = torch.tensor([0, 1], dtype=dtype, device=device)
+            op_call(a, indices, values, accumulate=False)
+
+        test_func(self, device, lambda *args, **kwargs: torch.index_put(*args, **kwargs))
+        test_func(self, device, lambda *args, **kwargs: args[0].index_put(*args[1:], **kwargs))
+        test_func(self, device, lambda *args, **kwargs: torch.index_put_(*args, **kwargs))
+        test_func(self, device, lambda *args, **kwargs: args[0].index_put_(*args[1:], **kwargs))
+
     # Ensures that kthvalue throws nondeterministic alerts in the correct cases
     @dtypes(torch.double)
     def test_kthvalue_nondeterministic_alert(self, device, dtype):
@@ -3669,6 +3686,38 @@ class TestTorchDeviceType(TestCase):
         test_func(self, device, 'method')
         test_func_expect_error(self, device, 'method with indices')
         test_func_expect_error(self, device, 'out with indices')
+
+    def _test_gather_backward_one_dim(self, device, deterministic: bool = False) -> None:
+        with DeterministicGuard(deterministic):
+            m = random.randint(2000, 3000)
+            elems = random.randint(10 * m, 20 * m)
+            dim = 0
+            src = torch.randn(m, device=device, requires_grad=True)
+            idx = torch.randint(m, (elems,), device=device)
+            res = torch.gather(src, dim, idx)
+            weight = torch.rand_like(res, device=device) * 10 ** 6
+            res.backward(weight)
+            grad = src.grad.detach().clone()
+
+            if torch.device(device).type == 'cuda':
+                for _ in range(2):
+                    src.grad.data.zero_()
+                    res = torch.gather(src, dim, idx)
+                    res.backward(weight)
+                    self.assertEqual(src.grad, grad, atol=0, rtol=0)
+            else:
+                expected = torch.zeros_like(src, device=device)
+                for i in range(elems):
+                    expected[idx[i]] += weight[i]
+                self.assertEqual(grad, expected, atol=0, rtol=0)
+
+    @onlyOnCPUAndCUDA
+    def test_gather_backward_deterministic_path(self, device) -> None:
+        self._test_gather_backward_one_dim(device, True)
+
+    @onlyCPU
+    def test_gather_backward_one_dim(self, device) -> None:
+        self._test_gather_backward_one_dim(device, False)
 
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_log_normal(self, device, dtype):
@@ -7044,15 +7093,6 @@ tensor_op_tests = [
     ('true_divide', 'tensor_with_inplace', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
         1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '3', _small_3d, lambda t, d: [_number(3., 3, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '-1', _small_3d, lambda t, d: [_number(-1., -1, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('pow', '-2', _small_3d, lambda t, d: [_number(-2., -2, t)],
-        1e-1, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
-    ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
-        1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types,
         _cpu_types, True, [tf32_on_and_off(0.01)]),

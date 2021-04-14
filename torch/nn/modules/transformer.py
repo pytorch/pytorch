@@ -32,6 +32,8 @@ class Transformer(Module):
         custom_encoder: custom encoder (default=None).
         custom_decoder: custom decoder (default=None).
         layer_norm_eps: the eps value in layer normalization components (default=1e-5).
+        batch_first: If ``True``, then the input and output tensors are provided
+            as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
 
     Examples::
         >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
@@ -46,20 +48,22 @@ class Transformer(Module):
     def __init__(self, d_model: int = 512, nhead: int = 8, num_encoder_layers: int = 6,
                  num_decoder_layers: int = 6, dim_feedforward: int = 2048, dropout: float = 0.1,
                  activation: str = "relu", custom_encoder: Optional[Any] = None, custom_decoder: Optional[Any] = None,
-                 layer_norm_eps: float = 1e-5) -> None:
+                 layer_norm_eps: float = 1e-5, batch_first: bool = False) -> None:
         super(Transformer, self).__init__()
 
         if custom_encoder is not None:
             self.encoder = custom_encoder
         else:
-            encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation, layer_norm_eps)
+            encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout,
+                                                    activation, layer_norm_eps, batch_first)
             encoder_norm = LayerNorm(d_model, eps=layer_norm_eps)
             self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         if custom_decoder is not None:
             self.decoder = custom_decoder
         else:
-            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation, layer_norm_eps)
+            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout,
+                                                    activation, layer_norm_eps, batch_first)
             decoder_norm = LayerNorm(d_model, eps=layer_norm_eps)
             self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
@@ -67,6 +71,8 @@ class Transformer(Module):
 
         self.d_model = d_model
         self.nhead = nhead
+
+        self.batch_first = batch_first
 
     def forward(self, src: Tensor, tgt: Tensor, src_mask: Optional[Tensor] = None, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None,
@@ -84,8 +90,8 @@ class Transformer(Module):
             memory_key_padding_mask: the ByteTensor mask for memory keys per batch (optional).
 
         Shape:
-            - src: :math:`(S, N, E)`.
-            - tgt: :math:`(T, N, E)`.
+            - src: :math:`(S, N, E)`, `(N, S, E)` if batch_first.
+            - tgt: :math:`(T, N, E)`, `(N, T, E)` if batch_first.
             - src_mask: :math:`(S, S)`.
             - tgt_mask: :math:`(T, T)`.
             - memory_mask: :math:`(T, S)`.
@@ -103,7 +109,7 @@ class Transformer(Module):
             positions will be unchanged. If a BoolTensor is provided, the positions with the
             value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
 
-            - output: :math:`(T, N, E)`.
+            - output: :math:`(T, N, E)`, `(N, T, E)` if batch_first.
 
             Note: Due to the multi-head attention architecture in the transformer model,
             the output sequence length of a transformer is same as the input sequence
@@ -116,7 +122,9 @@ class Transformer(Module):
             >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
         """
 
-        if src.size(1) != tgt.size(1):
+        if not self.batch_first and src.size(1) != tgt.size(1):
+            raise RuntimeError("the batch number of src and tgt must be equal")
+        elif self.batch_first and src.size(0) != tgt.size(0):
             raise RuntimeError("the batch number of src and tgt must be equal")
 
         if src.size(2) != self.d_model or tgt.size(2) != self.d_model:
@@ -255,16 +263,25 @@ class TransformerEncoderLayer(Module):
         dropout: the dropout value (default=0.1).
         activation: the activation function of intermediate layer, relu or gelu (default=relu).
         layer_norm_eps: the eps value in layer normalization components (default=1e-5).
+        batch_first: If ``True``, then the input and output tensors are provided
+            as (batch, seq, feature). Default: ``False``.
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
         >>> src = torch.rand(10, 32, 512)
         >>> out = encoder_layer(src)
-    """
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu", layer_norm_eps=1e-5):
+    Alternatively, when ``batch_first`` is ``True``:
+        >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True)
+        >>> src = torch.rand(32, 10, 512)
+        >>> out = encoder_layer(src)
+    """
+    __constants__ = ['batch_first']
+
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu",
+                 layer_norm_eps=1e-5, batch_first=False):
         super(TransformerEncoderLayer, self).__init__()
-        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first)
         # Implementation of Feedforward model
         self.linear1 = Linear(d_model, dim_feedforward)
         self.dropout = Dropout(dropout)
@@ -318,18 +335,28 @@ class TransformerDecoderLayer(Module):
         dropout: the dropout value (default=0.1).
         activation: the activation function of intermediate layer, relu or gelu (default=relu).
         layer_norm_eps: the eps value in layer normalization components (default=1e-5).
+        batch_first: If ``True``, then the input and output tensors are provided
+            as (batch, seq, feature). Default: ``False``.
 
     Examples::
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
         >>> memory = torch.rand(10, 32, 512)
         >>> tgt = torch.rand(20, 32, 512)
         >>> out = decoder_layer(tgt, memory)
-    """
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu", layer_norm_eps=1e-5):
+    Alternatively, when ``batch_first`` is ``True``:
+        >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8, batch_first=True)
+        >>> memory = torch.rand(32, 10, 512)
+        >>> tgt = torch.rand(32, 20, 512)
+        >>> out = decoder_layer(tgt, memory)
+    """
+    __constants__ = ['batch_first']
+
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu",
+                 layer_norm_eps=1e-5, batch_first=False):
         super(TransformerDecoderLayer, self).__init__()
-        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
-        self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first)
+        self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first)
         # Implementation of Feedforward model
         self.linear1 = Linear(d_model, dim_feedforward)
         self.dropout = Dropout(dropout)
