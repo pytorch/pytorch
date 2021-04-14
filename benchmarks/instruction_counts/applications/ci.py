@@ -16,7 +16,7 @@ TIMEOUT = 600  # Seconds
 RETRIES = 2
 
 VERSION = 0
-MD5 = "b984f1ebad546ed3ee612244b8c72e53"
+MD5 = "4d55e8abf881ad38bb617a96714c1296"
 
 
 def main(argv: List[str]) -> None:
@@ -45,13 +45,10 @@ def main(argv: List[str]) -> None:
     for key in keys:
         md5.update(key.encode("utf-8"))
 
-    # Fail early, since collection takes a long time.
+    # Warn early, since collection takes a long time.
     if md5.hexdigest() != MD5 and not args.subset:
-        msg = f"Expected {MD5}, got {md5.hexdigest()} instead"
-        if in_debug_mode:
-            print(f"WARNING: {msg}")
-        else:
-            raise ValueError(msg)
+        version = -1
+        print(f"WARNING: Expected {MD5}, got {md5.hexdigest()} instead")
 
     results = Runner(work_orders).run()
 
