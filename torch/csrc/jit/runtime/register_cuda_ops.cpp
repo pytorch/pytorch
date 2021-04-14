@@ -16,6 +16,25 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
+void _device_synchronize(int64_t device_index) {
+  // This is a helper API which synchronizes the device identified
+  // by the device index. The device index of the device is passed as an
+  // argument to this API.
+  auto current_device_index = c10::cuda::current_device();
+  // If the current_device and the device to synchronize are not
+  // the same, set the device to the device_index of the device
+  // to synchronize.
+  if (current_device_index != device_index) {
+    c10::cuda::set_device(device_index);
+  }
+  c10::cuda::device_synchronize();
+
+  // Reset the device to current_device before synchronizing.
+  if (current_device_index != device_index) {
+    c10::cuda::set_device(current_device_index);
+  }
+}
+
 RegisterOperators const reg({
     Operator(
         "cuda::current_stream.device(Device? device) -> __torch__.torch.classes.cuda.Stream",
@@ -117,6 +136,30 @@ RegisterOperators const reg({
           auto packed = s->pack();
           auto unpacked = c10::cuda::CUDAStream::unpack(packed);
           c10::cuda::setCurrentCUDAStream(unpacked);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "cuda::synchronize() -> ()",
+        [](Stack* stack) { c10::cuda::device_synchronize(); },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "cuda::synchronize.device(Device? device) -> ()",
+        [](Stack* stack) {
+          auto device = pop(stack).toOptional<c10::Device>();
+          c10::DeviceIndex device_index = device.has_value()
+              ? device->index()
+              : c10::cuda::current_device();
+          _device_synchronize(device_index);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "cuda::synchronize.int(int? val) -> ()",
+        [](Stack* stack) {
+          auto idx = pop(stack).toOptional<int64_t>();
+          c10::DeviceIndex device_index = idx.has_value()
+              ? static_cast<c10::DeviceIndex>(idx.value())
+              : c10::cuda::current_device();
+          _device_synchronize(device_index);
         },
         aliasAnalysisFromSchema()),
 });
