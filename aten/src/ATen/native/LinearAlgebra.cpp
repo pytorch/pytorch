@@ -666,19 +666,18 @@ static TensorIterator build_addr_iter(Tensor& result,
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
 
-  Tensor self_;
-  if (&result != &self) {
-    std::tie(self_) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr");
-  } else {
-    self_ = self;
-  }
+  const auto vec1_size0 = vec1.sizes()[0];
+  const auto vec2_size0 = vec2.sizes()[0];
+  auto self_ = &result == &self
+    ? c10::MaybeOwned<Tensor>::borrowed(self)
+    : expand_size(self, {vec1_size0, vec2_size0}, "addr");
   TORCH_CHECK(
-    self_.dim() == 2,
-    "2D tensor expected, got ", self_.dim(), "D tensor for input"
+    self_->dim() == 2,
+    "2D tensor expected, got ", self_->dim(), "D tensor for input"
   );
   TORCH_CHECK(
-    self_.size(0) == vec1.size(0) && self_.size(1) == vec2.size(0),
-    "size mismatch, input: ", self_.sizes(),
+    self_->sizes()[0] == vec1_size0 && self_->sizes()[1] == vec2_size0,
+    "size mismatch, input: ", self_->sizes(),
     ", v1: ", vec1.sizes(),
     ", v2: ", vec2.sizes()
   );
@@ -686,8 +685,8 @@ static TensorIterator build_addr_iter(Tensor& result,
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(true)
     .add_output(result)
-    .add_input(self_)
-    .add_input(vec1.reshape({vec1.size(0), 1}))
+    .add_input(*self_)
+    .add_input(vec1.reshape({vec1_size0, 1}))
     .add_input(vec2)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
@@ -860,7 +859,7 @@ static void addmm_impl_cpu_(
       m1_sizes[0], "x", m1_sizes[1], " @ ", m2_sizes[0], "x", m2_sizes[1], " != ",
       self_sizes[0], "x", self_sizes[1], ")");
 
-  native::resize_(result, self_sizes);
+  at::native::resize_output(result, self_sizes);
   const auto result_strides = result.strides();
   const auto result_sizes = result.sizes();
 
@@ -997,10 +996,10 @@ static void addbmm_impl_(
 }
 
 Tensor& addbmm_out(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
-  Tensor b_self = std::get<0>(expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out"));
+  auto b_self = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
   {
     at::NoNamesGuard guard;
-    addbmm_impl_(result, b_self, batch1, batch2, beta, alpha);
+    addbmm_impl_(result, *b_self, batch1, batch2, beta, alpha);
   }
   at::namedinference::propagate_names_for_addmm(result, batch1, batch2, self);
   return result;
@@ -1018,10 +1017,10 @@ Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, co
 Tensor& addmm_cpu_out(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
-  Tensor b_self = std::get<0>(expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out"));
+  auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
     at::NoNamesGuard guard;
-    addmm_impl_cpu_(result, b_self, mat1, mat2, beta, alpha);
+    addmm_impl_cpu_(result, *b_self, mat1, mat2, beta, alpha);
   }
   at::namedinference::propagate_names_for_addmm(result, mat1, mat2, self);
   return result;
@@ -1133,6 +1132,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   TORCH_CHECK(batch2_sizes[0] == bs && batch2_sizes[1] == contraction_size);
 
   if (is_bmm_out) {
+    // Here it is result
     self_or_result.resize_({bs, res_rows, res_cols});
   } else {
     const auto self_sizes = self_or_result.sizes();
@@ -1198,10 +1198,9 @@ Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch
 }
 
 Tensor& baddbmm_out_cpu(const Tensor& self_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
-  Tensor self;
-  std::tie(self) = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
-  result.resize_(self.sizes());
-  result.copy_(self);
+  auto self = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+  result.resize_(self->sizes());
+  result.copy_(*self);
   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha);
 }
 
@@ -1956,7 +1955,7 @@ Tensor &frobenius_norm_out(const Tensor& self,
   // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
   //    However, norm_out and sqrt_out do not support automatic differentiation.
   //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
-  resize_output(result, result_.sizes());
+  at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
 }
@@ -1998,7 +1997,7 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
     auto permutation_reverse = create_reverse_permutation(permutation);
     result_ = result_.permute(permutation_reverse);
   }
-  resize_output(result, result_.sizes());
+  at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
 }
@@ -2110,7 +2109,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
       TORCH_CHECK(false, "Order ", ord, " not supported for matrix norm");
     }
   }
-  resize_output(result, result_.sizes());
+  at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
 }
@@ -2146,7 +2145,7 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
       Tensor result_ = at::linalg_vector_norm(self, opt_num_ord, opt_dim, keepdim, opt_dtype);
       // TODO: Resize and copy should be avoided with
       //       https://github.com/pytorch/pytorch/issues/52712
-      resize_output(result, result_.sizes());
+      at::native::resize_output(result, result_.sizes());
       result.copy_(result_);
     } else if (dim_.size() == 2) {
       _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
@@ -2234,7 +2233,8 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const optional<Scalar
 }
 
 Tensor linalg_vector_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  Tensor result;
+  ScalarType out_dtype = opt_dtype.value_or(toValueType(self.scalar_type()));
+  Tensor result = create_reduction_result(self, opt_dim.value_or(IntArrayRef{}), keepdim, out_dtype);
   return at::native::linalg_vector_norm_impl(self, opt_ord, opt_dim, keepdim, opt_dtype, result);
 }
 
@@ -2520,43 +2520,64 @@ Tensor& linalg_tensorsolve_out(const Tensor& self, const Tensor& other, optional
   return result;
 }
 
+namespace {
+struct KronImpl final {
+  public:
+    explicit KronImpl(const Tensor& self, const Tensor& other) {
+      maxdim = std::max(self.dim(), other.dim());
+      int64_t pad_self = maxdim - self.dim();
+      int64_t pad_other = maxdim - other.dim();
+      a_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
+      b_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
+      result_reshape = c10::SmallVector<int64_t, 10>(maxdim);
+      for (int64_t i = 0; i < maxdim; i++) {
+        a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
+        a_reshape[2 * i + 1] = 1;
+        b_reshape[2 * i] = 1;
+        b_reshape[2 * i + 1] = (i >= pad_other ? other.sizes()[i - pad_other] : 1);
+        result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1];
+      }
+      self_view = at::_unsafe_view(self, a_reshape);
+      other_view = at::_unsafe_view(other, b_reshape);
+    }
+
+    Tensor& kron_out(Tensor& result) const {
+      TORCH_INTERNAL_ASSERT(result.defined(), "Cannot call kron_out with an undefined result tensor as the out argument. Please allocate a Tensor before calling kron_out with it.");
+
+      c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
+      for (int64_t i = 0; i < maxdim; i++) {
+        mul_shape[2 * i] = a_reshape[2 * i];
+        mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
+      }
+      at::native::resize_output(result, result_reshape);
+      auto result_mul = at::_unsafe_view(result, mul_shape);
+      at::mul_out(result_mul, self_view, other_view);
+
+      return result;
+    }
+
+    Tensor kron() const {
+      return at::_unsafe_view(at::mul(self_view, other_view), result_reshape);
+    }
+  private:
+    int64_t maxdim;
+    Tensor self_view;
+    Tensor other_view;
+    c10::SmallVector<int64_t, 10> result_reshape;
+    c10::SmallVector<int64_t, 10> a_reshape;
+    c10::SmallVector<int64_t, 10> b_reshape;
+};
+}
+
 /*
 Calculates the Kronecker product between two Tensors.
 */
 Tensor& kron_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  int64_t maxdim = std::max(self.dim(), other.dim());
-  int64_t pad_self = maxdim - self.dim();
-  int64_t pad_other = maxdim - other.dim();
-  c10::SmallVector<int64_t, 10> a_reshape(2 * maxdim);
-  c10::SmallVector<int64_t, 10> b_reshape(2 * maxdim);
-  c10::SmallVector<int64_t, 10> result_reshape(maxdim);
-  for (int64_t i = 0; i < maxdim; i++) {
-    a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
-    a_reshape[2 * i + 1] = 1;
-    b_reshape[2 * i] = 1;
-    b_reshape[2 * i + 1] = (i >= pad_other ? other.sizes()[i - pad_other] : 1);
-    result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1];
-  }
-  auto self_view = at::_unsafe_view(self, a_reshape);
-  auto other_view = at::_unsafe_view(other, b_reshape);
-  if (!result.defined()) {
-    result = at::_unsafe_view(at::mul(self_view, other_view), result_reshape);
-  } else {
-    c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
-    for (int64_t i = 0; i < maxdim; i++) {
-      mul_shape[2 * i] = a_reshape[2 * i];
-      mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
-    }
-    resize_output(result, result_reshape);
-    auto result_mul = at::_unsafe_view(result, mul_shape);
-    at::mul_out(result_mul, self_view, other_view);
-  }
-  return result;
+  return KronImpl(self, other).kron_out(result);
 }
 
 Tensor kron(const Tensor& self, const Tensor& other) {
-  at::Tensor result;
-  return at::kron_out(result, self, other);
+  return KronImpl(self, other).kron();
 }
 
 } // namespace native

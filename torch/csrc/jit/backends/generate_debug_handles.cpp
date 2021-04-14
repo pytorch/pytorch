@@ -5,6 +5,7 @@
 namespace torch {
 namespace jit {
 
+namespace {
 bool isGraphInlined(const Graph& graph) {
   std::stack<const Block*> blocks_to_visit;
   blocks_to_visit.push(graph.block());
@@ -35,47 +36,43 @@ bool isGraphInlined(const Graph& graph) {
   }
   return true;
 }
+} // namespace
 
-std::pair<NodeToDebugHandle, DebugHandleToDebugInfo> generate_debug_handles(
-    const Module& mod, const std::vector<std::string>& method_names) {
+NodeToDebugHandle TORCH_API generate_debug_handles(const std::shared_ptr<Graph>& graph) {
   NodeToDebugHandle node_to_debug_handles;
-  BackendDebugHandleManager dbg_handle_manager;
+  BackendDebugHandleManager* dbg_handle_manager_ptr = getBackendDebugHandleManager();
 
-  for (const auto& method_name : method_names) {
-    auto m = mod.find_method(method_name);
-    if (m) {
-      const auto& graph = m.value().graph();
-      TORCH_CHECK(isGraphInlined(*graph),
-          "Debug handles and InlinedCallStackPtrMap can be generated "
-          "only for inlined graphs.");
-      std::stack<Block*> blocks_to_visit;
-      blocks_to_visit.push(graph->block());
-      while (!blocks_to_visit.empty()) {
-        Block* b = blocks_to_visit.top();
-        blocks_to_visit.pop();
-        for (Node* n : b->nodes()) {
-          DebugHandleType debug_handle{-1};
-          if (n->callstack().has_value()) {
-            debug_handle =
-              dbg_handle_manager.getNextDebugHandleForInlinedCallStackPtr(
-                  n->sourceRange(), n->callstack().value());
-          } else {
-            // If node has no callstack, it is the top level node.
-            // In that case just save source range.
-            debug_handle = dbg_handle_manager
-                               .getNextDebugHandleForInlinedCallStackPtr(
-                                   n->sourceRange(),
-                                   c10::intrusive_ptr<InlinedCallStack>());
-          }
-          node_to_debug_handles.emplace(debug_handle, n);
-          for (Block* subblock : n->blocks()) {
-            blocks_to_visit.push(subblock);
-          }
+  TORCH_CHECK(isGraphInlined(*graph),
+      "Debug handles and InlinedCallStackPtrMap can be generated "
+      "only for inlined graphs.");
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      DebugHandleType debug_handle{-1};
+      if (dbg_handle_manager_ptr) {
+        if (n->callstack().has_value()) {
+          debug_handle =
+            dbg_handle_manager_ptr->getNextDebugHandleForInlinedCallStackPtr(
+                n->sourceRange(), n->callstack().value());
+        } else {
+          // If node has no callstack, it is the top level node.
+          // In that case just save source range.
+          debug_handle = dbg_handle_manager_ptr
+                             ->getNextDebugHandleForInlinedCallStackPtr(
+                                 n->sourceRange(),
+                                 c10::intrusive_ptr<InlinedCallStack>());
         }
+      }
+      node_to_debug_handles.emplace(n, debug_handle);
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
       }
     }
   }
-  return {node_to_debug_handles, dbg_handle_manager.getCallStackPtrMap()};
+  return node_to_debug_handles;
 }
 
 } // namespace jit

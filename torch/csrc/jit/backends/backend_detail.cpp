@@ -1,7 +1,8 @@
 #include <torch/csrc/jit/backends/backend_detail.h>
 
-#include <ATen/core/builtin_function.h>
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/backend_debug_handler.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 
@@ -10,46 +11,6 @@
 namespace torch {
 namespace jit {
 namespace detail {
-c10::FunctionSchema getIsAvailableSchema() {
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument available("available", c10::BoolType::get());
-  c10::FunctionSchema preprocessor_schema(
-      "is_available",
-      /*overload_name=*/"",
-      /*arguments=*/{self},
-      /*returns=*/{available});
-  return preprocessor_schema;
-}
-
-c10::FunctionSchema getCompileSchema() {
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument mod("processed", c10::AnyType::get());
-  auto any_dict_ty =
-      c10::DictType::create(c10::StringType::get(), c10::AnyType::get());
-  c10::Argument method_compile_spec("method_compile_spec", any_dict_ty);
-  c10::Argument handles("handles", any_dict_ty);
-
-  c10::FunctionSchema compile_schema(
-      "compile",
-      /*overload_name=*/"",
-      /*arguments=*/{self, mod, method_compile_spec},
-      /*returns=*/{handles});
-  return compile_schema;
-}
-
-c10::FunctionSchema getExecuteSchema() {
-  auto any_list_ty = c10::ListType::create(c10::AnyType::get());
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument handle("handle", c10::AnyType::get());
-  c10::Argument input("input", any_list_ty);
-  c10::Argument output("output", any_list_ty);
-  return c10::FunctionSchema(
-      "execute",
-      /*overload_name=*/"",
-      /*arguments=*/{self, handle, input},
-      /*returns=*/{output});
-}
-
 namespace {
 std::unordered_map<std::string, BackendPreprocessFunction>&
 backendPreprocessFunctions() {
@@ -90,11 +51,7 @@ Module codegen_backend_module(
     const c10::Dict<IValue, IValue>& method_compile_spec,
     const c10::DictTypePtr& any_dict_ty) {
   const c10::QualifiedName qual_backend_name(
-      {"__torch__",
-       "torch",
-       "classes",
-       detail::kBackendsNamespace,
-       backend_name});
+      {"__torch__", "torch", "classes", kBackendsNamespace, backend_name});
   // TODO: Validate method_compile_spec.
 
   // Clone orig_module to make sure backend transformation is
@@ -106,6 +63,11 @@ Module codegen_backend_module(
       "torch.jit." + backend_name + "LoweredModule",
       std::make_shared<CompilationUnit>(),
       /*shouldMangle=*/true);
+
+  // 1. Initialized debug infor recorder with loweredModule pointer.
+  // 2. Later call debug_info_recorder.stopRecording() to gather
+  //    recorded debug info and save it in a static global map.
+  BackendModuleDebugInfoRecorder debug_info_recorder(loweredModule._ivalue());
 
   // Generate attributes.
   // This is the preprocessed module.
@@ -318,6 +280,10 @@ Module codegen_backend_module(
         "] is not available. Execution of this Module is still possible by "
         "saving and loading on a device where the backend is available.");
   }
+
+  // stop debug info recording.
+  debug_info_recorder.stopRecording();
+
   return loweredModule;
 }
 } // namespace detail

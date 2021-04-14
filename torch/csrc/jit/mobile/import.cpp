@@ -50,8 +50,15 @@
 //   (('module_debug_handles', 10))))
 //   Here 10 is the debug handle.
 // We also store separately and optionally callstack_debug_map.
-// This serializes inlined callstack (InlinedCallStack dats structure)
+// This serializes inlined callstack (InlinedCallStack data structure)
 // corresponding to the debug handles.
+// Callstack_debug_map serializes tuples of
+// (int64_t(debug_handle), int64_t(source_range_tag), InlinedCallStack)
+// source_range_tag maps to .debug_pkl files where this tag maps it to
+// source range.
+// InlinedCallStack is serialized as:
+// IValue(InlinedCallStack) = {IValue(ModuleInstanceInfo), int64_t(source_range_tag), IValue(InlinedCallStack)}
+// ModuleInstanceInfo is serialized as a tuple of (class_type_name, instance_name)
 
 // Note that currently the backward compatibility is not supported by bytecode.
 // This format and process need to be revisited and redesigned if we want to

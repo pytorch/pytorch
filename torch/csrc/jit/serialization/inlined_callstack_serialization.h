@@ -40,7 +40,7 @@ class InlinedCallStackSerializer {
       serialized_inlined_callstack_;
 };
 
-class InlinedCallStackPickler {
+class TORCH_API InlinedCallStackPickler {
  public:
   InlinedCallStackPickler() = default;
 
@@ -69,7 +69,7 @@ class InlinedCallStackDeserializer {
           cached_inlined_callstacks_;
 };
 
-class InlinedCallStackUnpickler {
+class TORCH_API InlinedCallStackUnpickler {
  public:
   ska::flat_hash_map<int64_t, DelegateDebugInfoType> unpickle(
       at::DataPtr&& data,

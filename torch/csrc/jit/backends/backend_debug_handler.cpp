@@ -3,6 +3,10 @@
 namespace torch {
 namespace jit {
 
+namespace {
+thread_local BackendDebugHandleManager* debug_handle_manager_ptr{nullptr};
+} // namespace
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<DebugHandleType> BackendDebugHandleManager::unique_debug_handle_{0};
 
@@ -28,5 +32,51 @@ std::unordered_map<DebugHandleType, DelegateDebugInfoType> BackendDebugHandleMan
   return handles_to_inlined_callstack_ptrs_;
 }
 
+BackendModuleDebugInfoRecorder::BackendModuleDebugInfoRecorder(ObjectPtr module_ptr) {
+  TORCH_CHECK(debug_handle_manager_ptr == nullptr,
+      "Module debug recording alredy in progress.");
+  debug_handle_manager_ptr = &debug_handle_manager;
+  module_ptr_ = module_ptr;
+}
+
+void BackendModuleDebugInfoRecorder::stopRecording() {
+  getStaticBackendModuleDebugInfoMapPtr()->addDebugInfoMap(
+      module_ptr_, std::move(debug_handle_manager_ptr->getCallStackPtrMap()));
+  debug_handle_manager_ptr = nullptr;
+}
+
+BackendDebugHandleManager* getBackendDebugHandleManager() {
+  return debug_handle_manager_ptr;
+}
+
+BackendModuleDebugInfoMap* getStaticBackendModuleDebugInfoMapPtr() {
+  static BackendModuleDebugInfoMap module_debug_info_map;
+  return &module_debug_info_map;
+}
+
+void BackendModuleDebugInfoMap::addDebugInfoMap(const ObjectPtr& ptr, DelegateDebugInfoMapType&& debug_map) {
+  std::unique_lock<std::mutex> lock(debug_info_mutex_);
+  TORCH_CHECK(debug_info_map_.count(ptr) == 0,
+      "Debug info map already exists for the said module.");
+  debug_info_map_.emplace(ptr, std::move(debug_map));
+}
+
+void BackendModuleDebugInfoMap::removeDebugInfoMap(const ObjectPtr& ptr) {
+  std::unique_lock<std::mutex> lock(debug_info_mutex_);
+  const auto& it = debug_info_map_.find(ptr);
+  if (it == debug_info_map_.end()) {
+    return;
+  }
+  debug_info_map_.erase(it);
+}
+
+c10::optional<DelegateDebugInfoMapType> BackendModuleDebugInfoMap::getDebugInfoMap(const ObjectPtr& ptr) {
+  std::unique_lock<std::mutex> lock(debug_info_mutex_);
+  const auto& it = debug_info_map_.find(ptr);
+  if (it == debug_info_map_.end()) {
+    return c10::nullopt;
+  }
+  return it->second;
+}
 } // namespace jit
 } // namespace torch

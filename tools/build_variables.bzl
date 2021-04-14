@@ -60,8 +60,8 @@ jit_core_headers = [
     "torch/csrc/utils/memory.h",
     "torch/csrc/WindowsTorchApiMacro.h",
     "torch/csrc/jit/frontend/source_range.h",
-    "torch/csrc/jit/serialization/source_range_serialization.h",
     "torch/csrc/jit/serialization/inlined_callstack_serialization.h",
+    "torch/csrc/jit/serialization/source_range_serialization.h",
     "torch/csrc/jit/frontend/lexer.h",
     "torch/csrc/jit/frontend/strtod.h",
     "torch/csrc/jit/frontend/parser_constants.h",
@@ -139,6 +139,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/backends/backend_detail.cpp",
     "torch/csrc/jit/backends/backend_interface.cpp",
     "torch/csrc/jit/backends/backend_resolver.cpp",
+    "torch/csrc/jit/backends/generate_debug_handles.cpp",
     "torch/csrc/jit/codegen/fuser/codegen.cpp",
     "torch/csrc/jit/codegen/fuser/compiler.cpp",
     "torch/csrc/jit/codegen/fuser/executor.cpp",
@@ -272,6 +273,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/tensorexpr/loopnest.cpp",
     "torch/csrc/jit/tensorexpr/mem_arena.cpp",
     "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
+    "torch/csrc/jit/tensorexpr/operators/conv2d.cpp",
     "torch/csrc/jit/tensorexpr/reduction.cpp",
     "torch/csrc/jit/tensorexpr/registerizer.cpp",
     "torch/csrc/jit/tensorexpr/tensor.cpp",
@@ -353,6 +355,19 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
+]
+
+libtorch_lite_eager_symbolication = [
+    "torch/csrc/jit/frontend/source_range.cpp",
+    "torch/csrc/jit/ir/scope.cpp",
+    "torch/csrc/jit/mobile/debug_info.cpp",
+    "torch/csrc/jit/serialization/inlined_callstack_serialization.cpp",
+    "torch/csrc/jit/serialization/source_range_serialization.cpp",
+    # Later we can split serialization and deserialization logic
+    # to have better separation within build and only build relevant parts.
+    "torch/csrc/jit/serialization/pickle.cpp",
+    "torch/csrc/jit/serialization/pickler.cpp",
+    "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
 # TODO: core_trainer_sources is not necessary for libtorch lite
@@ -674,6 +689,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/ScalarOps.cpp",
     "aten/src/ATen/SequenceNumber.cpp",
     "aten/src/ATen/SparseTensorImpl.cpp",
+    "aten/src/ATen/SparseCsrTensorImpl.cpp",
     "aten/src/ATen/SparseTensorUtils.cpp",
     "aten/src/ATen/TensorGeometry.cpp",
     "aten/src/ATen/TensorIndexing.cpp",
@@ -722,9 +738,11 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/DispatchStub.cpp",
     "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
+    "aten/src/ATen/native/mkl/SparseCsrLinearAlgebra.cpp",
     "aten/src/ATen/native/mkl/SpectralOps.cpp",
     "aten/src/ATen/native/mkldnn/BinaryOps.cpp",
     "aten/src/ATen/native/mkldnn/Conv.cpp",
+    "aten/src/ATen/native/mkldnn/Copy.cpp",
     "aten/src/ATen/native/mkldnn/IDeepRegistration.cpp",
     "aten/src/ATen/native/mkldnn/Linear.cpp",
     "aten/src/ATen/native/mkldnn/MKLDNNCommon.cpp",
@@ -968,7 +986,9 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SoftMax.cpp",
     "aten/src/ATen/native/sparse/SparseMatMul.cpp",
     "aten/src/ATen/native/sparse/SparseTensor.cpp",
+    "aten/src/ATen/native/sparse/SparseCsrTensor.cpp",
     "aten/src/ATen/native/sparse/SparseTensorMath.cpp",
+    "aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp",
     "aten/src/TH/THAllocator.cpp",
     "aten/src/TH/THBlas.cpp",
     "aten/src/TH/THGeneral.cpp",
