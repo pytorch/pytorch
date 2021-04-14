@@ -69,14 +69,7 @@ def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
     return CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
 
 def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...]) -> Derivative:
-<<<<<<< HEAD
-    arguments = cpp_arguments(f)
-    argument_names = tuple(a.name for a in arguments)
-    argument_types = tuple(a.type for a in arguments)
-=======
-    original_formula = formula
     arguments: List[NamedCType] = [a.nctype.remove_const_ref() for a in cpp_arguments(f)]
->>>>>>> 2b1ca73749 (split out NamedCType from CType. Remove direct string comparison from autograd codegen)
 
     return_names = tuple(n if n != 'self' else 'result' for n in cpp.return_names(f))
     return_types = tuple(cpp.return_type(r).remove_const_ref() for r in f.func.returns)
