@@ -701,7 +701,6 @@ class TestAsserts(TestCase):
         """
         return [torch.testing.assert_equal, torch.testing.assert_close]
 
-
     def make_inputs(self, actual: Any, expected: Any) -> List[Tuple[Any, Any]]:
         """Makes inputs for assert functions based on two examples.
 
@@ -859,7 +858,7 @@ class TestAsserts(TestCase):
                 fn()
 
     @onlyCPU
-    def test_assert_tensors_equal(self, device):
+    def test_assert_equal(self, device):
         actual = torch.tensor(1, device=device)
         expected = actual.clone()
 
@@ -930,7 +929,7 @@ class TestAsserts(TestCase):
         actual[0, 1] = 1
         expected[0, 1] = 2
         expected[1, 2] = 9
-        
+
         expected_regexs = (
             r"\s+2\s+",  # absolute number of mismatches
             r"22([.]2+)?\s*[%]",  # relative number of mismatches
@@ -943,70 +942,6 @@ class TestAsserts(TestCase):
         for fn in self.assert_fns_with_inputs(actual, expected):
             with self.assertRaisesRegexs(AssertionError, *expected_regexs):
                 fn()
-
-    @onlyCPU
-    def test_equal(self, device):
-        actual = torch.tensor(1, device=device)
-        expected = actual.clone()
-
-        for fn in self.assert_fns_with_inputs(actual, expected):
-            fn()
-
-    @onlyCPU
-    def test_assert_close_only_rtol(self, device):
-        actual = torch.empty((), device=device)
-        expected = actual.clone()
-
-        for inputs in self.make_inputs(actual, expected):
-            with self.assertRaises(UsageError):
-                torch.testing.assert_close(*inputs, rtol=0.0)
-
-    @onlyCPU
-    def test_assert_close_only_atol(self, device):
-        actual = torch.empty((), device=device)
-        expected = actual.clone()
-
-        for inputs in self.make_inputs(actual, expected):
-            with self.assertRaises(UsageError):
-                torch.testing.assert_close(*inputs, atol=0.0)
-
-    @onlyCPU
-    def test_assert_close_mismatching_values_rtol(self, device):
-        eps = 1e-3
-        actual = torch.tensor(1.0, device=device)
-        expected = torch.tensor(1.0 + eps, device=device)
-
-        for inputs in self.make_inputs(actual, expected):
-            with self.assertRaises(AssertionError):
-                torch.testing.assert_close(*inputs, rtol=eps / 2, atol=0.0)
-
-    @onlyCPU
-    def test_assert_close_matching_values_rtol(self, device):
-        eps = 1e-3
-        actual = torch.tensor(1.0, device=device)
-        expected = torch.tensor(1.0 + eps, device=device)
-
-        for inputs in self.make_inputs(actual, expected):
-            torch.testing.assert_close(*inputs, rtol=eps * 2, atol=0.0)
-
-    @onlyCPU
-    def test_assert_close_mismatching_values_atol(self, device):
-        eps = 1e-3
-        actual = torch.tensor(0.0, device=device)
-        expected = torch.tensor(eps, device=device)
-
-        for inputs in self.make_inputs(actual, expected):
-            with self.assertRaises(AssertionError):
-                torch.testing.assert_close(*inputs, rtol=0.0, atol=eps / 2)
-
-    @onlyCPU
-    def test_assert_close_matching_values_atol(self, device):
-        eps = 1e-3
-        actual = torch.tensor(0.0, device=device)
-        expected = torch.tensor(eps, device=device)
-
-        for inputs in self.make_inputs(actual, expected):
-            torch.testing.assert_close(*inputs, rtol=0.0, atol=eps * 2)
 
     @onlyCPU
     def test_sequence_mismatching_len(self, device):
@@ -1052,12 +987,12 @@ class TestAsserts(TestCase):
 
     @onlyCPU
     def test_unknown_type(self, device):
-        a = torch.empty((), device=device)
-        b = {a.clone()}
+        actual = torch.empty((), device=device)
+        expected = {actual.clone()}
 
         for fn in self.get_assert_fns():
-            with self.assertRaisesRegexs(UsageError, str(type(a)), str(type(b))):
-                fn(a, b)
+            with self.assertRaisesRegexs(UsageError, str(type(actual)), str(type(expected))):
+                fn(actual, expected)
 
     @onlyCPU
     def test_scalars(self, device):
@@ -1065,16 +1000,16 @@ class TestAsserts(TestCase):
         array = np.array(number)
         tensor = torch.tensor(number, device=device)
 
-        for a, b in itertools.permutations((number, array, tensor), 2):
-            for fn in self.assert_fns_with_inputs(a, b):
+        for actual, expected in itertools.permutations((number, array, tensor), 2):
+            for fn in self.assert_fns_with_inputs(actual, expected):
                 fn()
 
     @onlyCPU
     def test_numpy(self, device):
-        a = torch.rand(2, 2, device=device)
-        b = a.clone().numpy()
+        actual = torch.rand(2, 2, device=device)
+        expected = actual.clone().numpy()
 
-        for fn in self.assert_fns_with_inputs(a, b):
+        for fn in self.assert_fns_with_inputs(actual, expected):
             fn()
 
 
