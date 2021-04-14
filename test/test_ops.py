@@ -585,7 +585,7 @@ class TestCommon(JitCommonTestCase):
             return make_tensor(t.shape,
                                dtype=t.dtype,
                                device=t.device,
-                               discontiguous=True)
+                               noncontiguous=True)
 
         # Extracts strides from a tensor or iterable of tensors into a tuple
         def _extract_strides(out):
