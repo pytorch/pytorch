@@ -376,7 +376,7 @@ class StreamContext(object):
 
 def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ignore
     r"""Wrapper around the Context-manager StreamContext that
-        selects a given stream.
+    selects a given stream.
 
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
