@@ -12,10 +12,11 @@ Parser notes:
           or `// @YOUR_LABEL` (C++).
 """
 
-from core.api import GroupedModules, GroupedStmts, GroupedVariants
+from core.api import GroupedModules, GroupedStmts, GroupedVariants, TimerArgs
 from core.types import FlatIntermediateDefinition
 from core.utils import flatten, parse_stmts
 from definitions.setup import Setup
+from torch.utils.benchmark.utils.timer import Language
 
 
 BENCHMARKS: FlatIntermediateDefinition = flatten({
@@ -254,6 +255,47 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
             signature=r"f(x, y, w0, w1, w2) -> z",
             torchscript=True,
             autograd=True,
+        ),
+    },
+
+    "InferenceMode": {
+        "Functional": TimerArgs(
+            "torch::Tensor y = x * x;",
+            """
+            c10::InferenceMode guard;
+            auto x = torch::ones({3, 3});
+            """,
+            language=Language.CPP,
+        ),
+
+        "View": TimerArgs(
+            "torch::Tensor y = x.view({9});",
+            """
+            c10::InferenceMode guard;
+            auto x = torch::ones({3, 3});
+            """,
+            language=Language.CPP,
+        ),
+
+        "Inplace": TimerArgs(
+            "torch::Tensor y = x.mul_(x);",
+            """
+            c10::InferenceMode guard;
+            auto x = torch::ones({3, 3});
+            """,
+            language=Language.CPP,
+        ),
+
+        # Mixed inputs scenario isn't the main use case of InferenceMode
+        # so this one is less important.
+        "Mixed": TimerArgs(
+            "torch::Tensor y = x + s;",
+            """
+            auto s = torch::ones({3, 3});
+            c10::InferenceMode guard;
+            auto x = torch::ones({3, 3});
+            """,
+            language=Language.CPP,
         ),
     },
 })
