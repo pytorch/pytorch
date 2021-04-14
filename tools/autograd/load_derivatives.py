@@ -7,13 +7,16 @@ import re
 from typing import Sequence, Any, Tuple, List, Set, Dict, Match, Optional
 import yaml
 
-from tools.codegen.api.autograd import *
-from tools.codegen.api.types import *
+from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
+                                        SavedAttribute)
+from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
+                                     intArrayRefT, tensorOptionsT, typeAndSizeT, intT,
+                                     tensorGeometryT, scalarTypeT, SpecialArgName)
 from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
-from tools.codegen.model import *
-from tools.codegen.utils import *
+from tools.codegen.model import FunctionSchema, NativeFunction
+from tools.codegen.utils import IDENT_REGEX, split_name_params
 
 try:
     # use faster C loader if available
@@ -310,28 +313,29 @@ def saved_variables(
     saved: List[SavedAttribute] = []
 
     for nctype in nctypes:
+        name = nctype.name.name if isinstance(nctype.name, SpecialArgName) else nctype.name
         # First search the formula for expressions which can be evaluated
         # when the autograd Function is created to avoid saving variables
         for regex, info in REPLACEMENTS:
             def repl(m: Match[str]) -> str:
                 suffix: str = info['suffix'](m) if callable(info['suffix']) else info['suffix']
-                expr: str = info['expr'](nctype.name) if 'expr' in info else m.group(0)
+                expr: str = info['expr'](name) if 'expr' in info else m.group(0)
                 saved.append(SavedAttribute(
-                    nctype=info['nctype'](nctype.name + suffix),
+                    nctype=info['nctype'](name + suffix),
                     expr=expr,
                 ))
                 if 'res' in info:
-                    replacement: str = info['res'](nctype.name)
+                    replacement: str = info['res'](name)
                     return replacement
-                return nctype.name + suffix
+                return name + suffix
 
-            formula = re.sub(regex.format(nctype.name), repl, formula)
+            formula = re.sub(regex.format(name), repl, formula)
 
         # Find any variables which remain in the formula and save them
-        if re.search(IDENT_REGEX.format(nctype.name), formula):
+        if re.search(IDENT_REGEX.format(name), formula):
             saved.append(SavedAttribute(
                 nctype=nctype,
-                expr=nctype.name,
+                expr=name,
             ))
 
     return formula, tuple(saved)
