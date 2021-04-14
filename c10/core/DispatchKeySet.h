@@ -235,7 +235,9 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::SparseCPU,
   DispatchKey::SparseCUDA,
   DispatchKey::SparseHIP,
-  DispatchKey::Meta,
+  DispatchKey::SparseCsrCPU,
+  DispatchKey::SparseCsrCUDA,
+  DispatchKey::Meta
 });
 
 // The set of dispatch keys that come after autograd

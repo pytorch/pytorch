@@ -34,6 +34,8 @@ enum class Backend {
   XPU,
   SparseCPU,
   SparseCUDA,
+  SparseCsrCPU,
+  SparseCsrCUDA,
   SparseHIP,
   SparseXPU,
   MSNPU,
@@ -74,6 +76,10 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::SparseCUDA;
   } else if (t == DispatchKey::SparseHIP) {
     return Backend::SparseHIP;
+  } else if (t == DispatchKey::SparseCsrCPU) {
+    return Backend::SparseCsrCPU;
+  } else if (t == DispatchKey::SparseCsrCUDA) {
+    return Backend::SparseCsrCUDA;
   } else if (t == DispatchKey::MkldnnCPU) {
     return Backend::MkldnnCPU;
   } else if (t == DispatchKey::QuantizedCPU) {
@@ -117,6 +123,10 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::SparseCUDA;
     case Backend::SparseHIP:
       return DispatchKey::SparseHIP;
+    case Backend::SparseCsrCPU:
+      return DispatchKey::SparseCsrCPU;
+    case Backend::SparseCsrCUDA:
+      return DispatchKey::SparseCsrCUDA;
     case Backend::MkldnnCPU:
       return DispatchKey::MkldnnCPU;
     case Backend::Vulkan:
@@ -156,6 +166,10 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CUDA;
     case Backend::SparseHIP:
       return DeviceType::HIP;
+    case Backend::SparseCsrCPU:
+      return DeviceType::CPU;
+    case Backend::SparseCsrCUDA:
+      return DeviceType::CUDA;
     case Backend::XPU:
     case Backend::SparseXPU:
     case Backend::QuantizedXPU:
@@ -205,6 +219,10 @@ static inline const char* toString(Backend b) {
       return "SparseHIP";
     case Backend::SparseXPU:
       return "SparseXPU";
+    case Backend::SparseCsrCPU:
+      return "SparseCsrCPU";
+    case Backend::SparseCsrCUDA:
+      return "SparseCsrCUDA";
     case Backend::MkldnnCPU:
       return "MkldnnCPU";
     case Backend::Vulkan:
@@ -228,6 +246,16 @@ static inline bool isSparse(Backend b) {
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static inline bool isSparseCsr(Backend b) {
+  switch(b) {
+    case Backend::SparseCsrCPU:
+    case Backend::SparseCsrCUDA:
       return true;
     default:
       return false;
