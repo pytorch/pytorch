@@ -323,6 +323,7 @@ struct TORCH_API Node {
   // null pointers next_in_graph[0] is next pointer next_in_graph[1] is prev
   // pointer using an array to allow the same iterator class for forward and
   // reverse node lists This list represents a topological sort
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-non-private-member-variables-in-classes,modernize-avoid-c-arrays)
   Node* next_in_graph[2] = {nullptr, nullptr};
 
   std::shared_ptr<Wrap<Node>> wrap() {
@@ -1429,7 +1430,8 @@ struct TORCH_API ProfileIValueOp : public Node {
   ProfileIValueOp(
       Graph* graph,
       std::function<void(std::vector<IValue>&)> callback)
-      : Node(graph, ::c10::prim::profile_ivalue), callback_(callback) {}
+      : Node(graph, ::c10::prim::profile_ivalue),
+        callback_(std::move(callback)) {}
 
   void cloneFrom(Node* other_) override;
   Node* allocNewInstance(Graph* g) override;
