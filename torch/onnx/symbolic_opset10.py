@@ -231,7 +231,7 @@ def fmod(g, input, other):
     return g.op("Mod", input, other, fmod_i=1)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i', 'i')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
@@ -240,9 +240,12 @@ def embedding_bag(g,
                   mode,
                   sparse,
                   per_sample_weights,
-                  include_last_offset):
+                  include_last_offset,
+                  padding_idx):
     if scale_grad_by_freq and sym_help._training_mode:
         return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
+    if padding_idx is not None and padding_idx >= 0:
+        raise RuntimeError('embedding_bag with padding_idx')
     from torch.onnx.symbolic_opset9 import select
     import warnings
     warnings.warn("Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
