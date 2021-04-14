@@ -13,10 +13,9 @@ template <typename Callable> class scope_exit {
   bool Engaged = true; // False once moved-from or release()d.
 
 public:
-  // Had to add a dummy int argument to prevent lint warning:
-  // constructor accepting a forwarding reference can hide the move constructor
+  // @lint-ignore CLANGTIDY
   template <typename Fp>
-  scope_exit(Fp &&F, int) : ExitFunction(std::forward<Fp>(F)) {}
+  scope_exit(Fp &&F) : ExitFunction(std::forward<Fp>(F)) {}
 
   scope_exit(scope_exit &&Rhs) noexcept
       : ExitFunction(std::move(Rhs.ExitFunction)), Engaged(Rhs.Engaged) {
@@ -44,7 +43,7 @@ template <typename Callable>
 [[nodiscard]] scope_exit<typename std::decay<Callable>::type>
 make_scope_exit(Callable &&F) {
   return scope_exit<typename std::decay<Callable>::type>(
-    std::forward<Callable>(F), 0);
+    std::forward<Callable>(F));
 }
 
 }
