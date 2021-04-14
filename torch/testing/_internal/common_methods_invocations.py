@@ -416,11 +416,11 @@ def sample_inputs_binary(op_info, device, dtype, requires_grad):
     )
     return list(
         SampleInput(make_tensor(s1, device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad),
-                     args=(make_tensor(s2, device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad),))
+                                low=low, high=high,
+                                requires_grad=requires_grad),
+                    args=(make_tensor(s2, device, dtype,
+                                      low=low, high=high,
+                                      requires_grad=requires_grad),))
         for s1, s2 in test_cases)
 
 
@@ -443,9 +443,9 @@ class _BinaryUfuncInfo(OpInfo):
                  name,  # the string name of the function
                  *,
                  ref,  # a reference function
-                 dtypes=floating_types(),
-                 dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
-                 dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+                 dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                 dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                 dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfROCM=floating_types_and(torch.half),
                  domain=(None, None),  # the [low, high) domain of the function
                  sample_inputs_func=sample_inputs_binary,
@@ -458,6 +458,8 @@ class _BinaryUfuncInfo(OpInfo):
                                                dtypesIfROCM=dtypesIfROCM,
                                                sample_inputs_func=sample_inputs_func,
                                                supports_sparse=supports_sparse,
+                                               supports_inplace_autograd=False,
+                                               assert_autodiffed=True,
                                                **kwargs)
         self.ref = ref
         self.domain = domain
