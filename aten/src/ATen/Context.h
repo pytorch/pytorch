@@ -222,7 +222,12 @@ class TORCH_API Context {
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
+#ifdef __HIP_PLATFORM_HCC__
+  // Until MIOpen immediate mode performance is adequate, we want benchmarking by default.
+  bool benchmark_cudnn = true;
+#else
   bool benchmark_cudnn = false;
+#endif
   bool allow_tf32_cudnn = true;
   bool allow_tf32_cublas = true;
   bool enabled_mkldnn = true;
