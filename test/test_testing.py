@@ -445,9 +445,9 @@ class TestTesting(TestCase):
 
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
-        def check(size, low, high, requires_grad, discontiguous):
+        def check(size, low, high, requires_grad, noncontiguous):
             t = make_tensor(size, device, dtype, low=low, high=high,
-                            requires_grad=requires_grad, discontiguous=discontiguous)
+                            requires_grad=requires_grad, noncontiguous=noncontiguous)
 
             self.assertEqual(t.shape, size)
             self.assertEqual(t.device, torch.device(device))
@@ -465,7 +465,7 @@ class TestTesting(TestCase):
                 self.assertFalse(t.requires_grad)
 
             if t.numel() > 1:
-                self.assertEqual(t.is_contiguous(), not discontiguous)
+                self.assertEqual(t.is_contiguous(), not noncontiguous)
             else:
                 self.assertTrue(t.is_contiguous())
 
@@ -944,6 +944,7 @@ class TestAsserts(TestCase):
         for inputs in self.make_inputs(a, b):
             torch.testing.assert_close(*inputs, rtol=0.0, atol=eps * 2)
 
+    @onlyCPU
     def test_assert_close_nan(self, device):
         a = torch.tensor(float("NaN"), device=device)
         b = torch.tensor(float("NaN"), device=device)
@@ -952,6 +953,7 @@ class TestAsserts(TestCase):
             with self.assertRaises(AssertionError):
                 torch.testing.assert_close(*inputs)
 
+    @onlyCPU
     def test_assert_close_equal_nan(self, device):
         a = torch.tensor(float("NaN"), device=device)
         b = torch.tensor(float("NaN"), device=device)

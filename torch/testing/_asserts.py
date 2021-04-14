@@ -3,8 +3,7 @@ import contextlib
 import functools
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type, TypeVar, Union
-
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type, TypeVar
 
 import torch
 from torch import Tensor
@@ -156,7 +155,7 @@ def _equalize_attributes(a: Tensor, b: Tensor) -> Tuple[Tensor, Tensor]:
 
 
 _Trace = namedtuple(
-    "Trace",
+    "_Trace",
     (
         "total_elements",
         "total_mismatches",
@@ -169,26 +168,28 @@ _Trace = namedtuple(
 )
 
 
-def _trace_mismatches(a: torch.Tensor, b: torch.Tensor, mismatches: torch.Tensor) -> _Trace:
-    """Traces mismatches and returns the found information.
-
-    The returned named tuple has the following fields:
-    - total_elements (int): Total number of values.
-    - total_mismatches (int): Total number of mismatches.
-    - mismatch_ratio (float): Quotient of total mismatches and total elements.
-    - max_abs_diff (Union[int, float]): Greatest absolute difference of :attr:`a` and :attr:`b`.
-    - max_abs_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
-    - max_rel_diff (Union[int, float]): Greatest relative difference of :attr:`a` and :attr:`b`.
-    - max_rel_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
-
-    For ``max_abs_diff`` and ``max_rel_diff`` the returned type depends on the :attr:`~torch.Tensor.dtype` of
-    :attr:`a` and :attr:`b`.
+def _trace_mismatches(a: Tensor, b: Tensor, mismatches: Tensor) -> _Trace:
+    """Traces mismatches.
 
     Args:
         a (Tensor): First tensor.
         b (Tensor): Second tensor.
         mismatches (Tensor): Boolean mask of the same shape as :attr:`a` and :attr:`b` that indicates the
             location of mismatches.
+
+    Returns:
+        (NamedTuple): Mismatch diagnostics with the following fields:
+
+            - total_elements (int): Total number of values.
+            - total_mismatches (int): Total number of mismatches.
+            - mismatch_ratio (float): Quotient of total mismatches and total elements.
+            - max_abs_diff (Union[int, float]): Greatest absolute difference of :attr:`a` and :attr:`b`.
+            - max_abs_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
+            - max_rel_diff (Union[int, float]): Greatest relative difference of :attr:`a` and :attr:`b`.
+            - max_rel_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
+
+            The returned type of ``max_abs_diff`` and ``max_rel_diff`` depends on the :attr:`~torch.Tensor.dtype` of
+            :attr:`a` and :attr:`b`.
     """
     total_elements = mismatches.numel()
     total_mismatches = torch.sum(mismatches).item()
