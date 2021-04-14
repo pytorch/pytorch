@@ -4,7 +4,7 @@ from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
                                  assert_never)
 
 from tools.codegen.api.types import (ArgName, BaseCType, Binding,
-                                     ConstRefCType, NamedCType, OptionalCType,
+                                     ConstRefCType, OptionalCType, CType, NamedCType,
                                      tensorT, scalarT, intArrayRefT, dimnameListT)
 from tools.codegen.api import cpp
 
