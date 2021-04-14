@@ -4,7 +4,8 @@ from tools.codegen.model import (Argument, Arguments, BaseTy, BaseType,
                                  TensorOptionsArguments, Type, assert_never)
 from tools.codegen.api.types import (ArgName, BaseCType, Binding,
                                      ConstRefCType, CType, MutRefCType,
-                                     OptionalCType, SpecialArgName)
+                                     OptionalCType, SpecialArgName,
+                                     TupleCType, ArrayCType, ListCType, VectorCType, ArrayRefCType)
 from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
