@@ -151,6 +151,8 @@ class _Formatter(object):
 
 
 def _scalar_str(self, formatter1, formatter2=None):
+    # handle the negative bit
+
     if formatter2 is not None:
         real_self = torch.view_as_real(self)
         real_str = _scalar_str(real_self[0], formatter1)
@@ -233,10 +235,15 @@ def _tensor_str(self, indent):
         self = self.rename(None)
 
     summarize = self.numel() > PRINT_OPTS.threshold
+
+    # handle the negative bit
+    self = self.resolve_neg()
+
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
 
     if self.dtype.is_complex:
+        # handle the conjugate bit
         self = self.resolve_conj()
         real_self = torch.view_as_real(self)
         real = real_self[..., 0]

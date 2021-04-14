@@ -218,4 +218,8 @@ inline bool is_conj(const Tensor& tensor) {
   return tensor.is_conj();
 }
 
+inline bool is_neg(const Tensor& tensor) {
+  return tensor.is_neg();
+}
+
 }

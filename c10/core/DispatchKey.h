@@ -145,6 +145,14 @@ enum class DispatchKey : uint8_t {
   // constituent parts.
   Named,
 
+  // The Negative dispatch key is set for any tensors that need to perform negation
+  // This is implemented at a dispatch level right before any backends run
+  Negative,
+
+  // The Conjugate dispatch key is set for any tensors that need to perform conjugation
+  // This is implemented at a dispatch level right before any backends run
+  Conjugate,
+
   // Note [InplaceOrView key]
   // InplaceOrView key is used by inplace or view ops to register a kernel
   // that does additional setup for future autograd computation.
@@ -180,10 +188,6 @@ enum class DispatchKey : uint8_t {
   // up to the `VariableType` kernel. Thus we only add the extra dispatch
   // to view/inplace ops to minimize its perf impact to real models.
   InplaceOrView,
-
-  // The Conjugate dispatch key is set for any tensors that need to perform conjugation
-  // This is implemented at a dispatch level right before any backends run
-  Conjugate,
 
   // Note [Alias Dispatch Key : Autograd]
   // All backends are oblivious to autograd; autograd is handled as a

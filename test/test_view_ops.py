@@ -318,11 +318,23 @@ class TestViewOps(TestCase):
 
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_conj_view(self, device, dtype) -> None:
+    def test_conj_neg_imag_view(self, device, dtype) -> None:
         t = _make_tensor((4, 5,), dtype, device)
+        t_numpy_conj = t.numpy().conj()
         v = t.conj()
         self.assertTrue(self.is_view_of(t, v))
-        self.assertEqual(v, t.numpy().conj())
+        self.assertEqual(v, t_numpy_conj)
+
+        if (t.is_complex()):
+            v_imag = v.imag
+            self.assertTrue(self.is_view_of(v, v_imag))
+            self.assertEqual(v_imag, t_numpy_conj.imag)
+            self.assertTrue(v_imag.is_neg())
+
+        t = _make_tensor((4, 5,), dtype, device)
+        v = t.neg()
+        self.assertTrue(self.is_view_of(t, v))
+        self.assertEqual(v, t.numpy().neg())
 
     @onlyOnCPUAndCUDA
     @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))

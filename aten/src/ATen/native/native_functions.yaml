@@ -303,6 +303,9 @@
 - func: resolve_conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
 
+- func: resolve_neg(Tensor(a) self) -> Tensor(a)
+  variants: function, method
+
 - func: acos(Tensor self) -> Tensor
   variants: function, method
   dispatch:
@@ -1972,6 +1975,11 @@
   manual_cpp_binding: True
 
 - func: is_conj(Tensor self) -> bool
+  variants: function, method
+  device_guard: False
+  manual_cpp_binding: True
+
+- func: is_neg(Tensor self) -> bool
   variants: function, method
   device_guard: False
   manual_cpp_binding: True

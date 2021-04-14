@@ -26,7 +26,7 @@ from .gen_trace_type import (
 #
 # A map: function name => name of the argument that all outputs are view of
 
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex', 'view_as_real_physical', 'conj']
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex', 'view_as_real_physical', 'conj', 'neg']
 
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
@@ -76,7 +76,7 @@ MULTI_OUTPUT_SAFE_FUNCTIONS = {
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
     'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
-    'tensor_split', 'swapdims', 'swapaxes', 'resolve_conj'
+    'tensor_split', 'swapdims', 'swapaxes', 'resolve_conj', 'resolve_neg'
 })
 
 ARRAYREF_TO_VEC = CodeTemplate("""\

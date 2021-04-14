@@ -257,6 +257,7 @@ static void reciprocal_kernel(TensorIterator& iter) {
   });
 }
 
+// NB: Ignores the negative bit on tensors
 static void neg_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "neg_cpu", [&]() {
     cpu_kernel_vec(

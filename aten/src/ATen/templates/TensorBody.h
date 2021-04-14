@@ -368,6 +368,14 @@ class TORCH_API Tensor {
     impl_->set_conj(conjugate);
   }
 
+  inline bool is_neg() const {
+    return impl_->is_neg();
+  }
+
+  inline void set_neg(bool negative) const {
+    impl_->set_neg(negative);
+  }
+
   /// Returns a `Tensor`'s layout.
   Layout layout() const noexcept {
     return impl_->layout();

@@ -255,8 +255,9 @@ Tensor real(const Tensor& self) {
 
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = at::view_as_real(self);
-    return at::select(real_tensor, real_tensor.dim() - 1, 1);
+    auto real_tensor = at::view_as_real_physical(self);
+    auto true_real_tensor = self.is_conj() ? real_tensor.neg() : real_tensor;
+    return at::select(true_real_tensor, real_tensor.dim() - 1, 1);
   } else {
     TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
   }
@@ -576,7 +577,26 @@ Tensor& neg_out(const Tensor& self, Tensor& result) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
   return unary_op_impl_out(result, self, neg_stub);
 }
-Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
+
+Tensor resolve_neg(const Tensor& self) {
+  if (!self.is_neg()) { return self; }
+  auto result = at::empty_like(self, self.options());
+  // negation is handled in `copy_()`
+  return result.copy_(self);
+}
+
+Tensor neg(const Tensor& self) {
+  Tensor self_;
+  auto impl = c10::make_intrusive<TensorImpl>(
+    Storage(self.storage()), self.key_set(), self.dtype());
+  impl->set_storage_offset(self.storage_offset());
+  impl->set_sizes_and_strides(self.sizes(), self.strides());
+  impl->set_neg(!self.is_neg());
+  self_ = Tensor(std::move(impl));
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
 Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
 Tensor& negative_out(const Tensor& self, Tensor& result) { return at::neg_out(result, self); }
