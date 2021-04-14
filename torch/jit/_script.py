@@ -36,13 +36,14 @@ from torch.jit._state import (
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic)
 
-_IS_MONKEYTYPE_INSTALLED = True
-try:
-    from monkeytype import trace as monkeytype_trace  # type: ignore[import]
-    from torch.jit._monkey_config_jit import JitTypeTraceConfig, type_trace_db
-    monkeytype_config = JitTypeTraceConfig(type_trace_db)
-except ImportError:
-    _IS_MONKEYTYPE_INSTALLED = False
+from torch.jit._monkeytype_config import (
+    monkeytype_trace,
+    JitTypeTraceConfig ,
+    JitTypeTraceStore
+)  # type: ignore[import]
+
+global type_trace_db
+type_trace_db = JitTypeTraceStore()
 
 torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
@@ -849,7 +850,92 @@ def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
-def script(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional[List[Tuple]]=None):
+def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional[List[Tuple]]=None):
+    # This is a private API, intended for internal use only . Usage of this API is only for experimental
+    # purposes only and is highly discouraged to be used.
+    if not _enabled:
+        return obj
+
+    if optimize is not None:
+        warnings.warn(
+            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
+        )
+
+    # No-op for modules and functions that are already scripted
+    if isinstance(obj, ScriptModule):
+        return obj
+    if isinstance(obj, ScriptFunction):
+        return obj
+
+    if isinstance(obj, torch.nn.Module):
+        obj = call_prepare_scriptable_func(obj)
+        return torch.jit._recursive.create_script_module(
+            obj, torch.jit._recursive.infer_methods_to_compile
+        )
+
+    qualified_name = _qualified_name(obj)
+
+    # If MonkeyType is installed, enable profile directed type annotation
+    # Check if example_inputs are defined and generate call traces
+    # for the method by running eager mode version of the method with
+    # the provide example inputs. This logs all the traces in type_trace_db
+    if monkeytype_trace:
+        monkeytype_config = JitTypeTraceConfig(type_trace_db)
+        with monkeytype_trace(monkeytype_config):
+            for example_input in example_inputs:
+                obj(*example_input)
+
+    if inspect.isclass(obj):
+        # If this type is a `nn.Module` subclass, they probably meant to pass
+        # an instance instead of a Module
+        if issubclass(obj, torch.nn.Module):
+            raise RuntimeError(
+                "Type '{}' cannot be compiled since it inherits"
+                " from nn.Module,"
+                " pass an instance instead".format(obj)
+            )
+
+        # Enums are automatically usable in TorchScript, explicitly scripting
+        # is not necessary, but not harmful either.
+        if issubclass(obj, enum.Enum):
+            return obj
+
+        if not _is_new_style_class(obj):
+            raise RuntimeError(
+                "TorchScript classes must be new-style classes. "
+                "Please inherit from 'object'."
+            )
+        if len(obj.mro()) > 2:
+            raise RuntimeError(
+                "TorchScript classes does not support inheritance yet. "
+                "Please directly inherit from 'object'."
+            )
+        if _rcb is None:
+            _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
+        _compile_and_register_class(obj, _rcb, qualified_name)
+        return obj
+    else:
+        # this is a decorated fn, and we need to the underlying fn and its rcb
+        if hasattr(obj, "__script_if_tracing_wrapper"):
+            obj = obj.__original_fn
+            _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+
+        _check_directly_compile_overloaded(obj)
+        maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
+        if maybe_already_compiled_fn:
+            return maybe_already_compiled_fn
+        ast = get_jit_def(obj, obj.__name__)
+        if _rcb is None:
+            _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+        fn = torch._C._jit_script_compile(
+            qualified_name, ast, _rcb, get_default_args(obj)
+        )
+        # Forward docstrings
+        fn.__doc__ = obj.__doc__
+        _set_jit_function_cache(obj, fn)
+        return fn
+
+def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
@@ -1012,10 +1098,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional
 
     qualified_name = _qualified_name(obj)
 
-    if _IS_MONKEYTYPE_INSTALLED:
-        # If MonkeyType is installed, enable static type annotation
-        _script(obj, example_inputs)
-
     if inspect.isclass(obj):
         # If this type is a `nn.Module` subclass, they probably meant to pass
         # an instance instead of a Module
@@ -1065,16 +1147,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional
         fn.__doc__ = obj.__doc__
         _set_jit_function_cache(obj, fn)
         return fn
-
-def _script(obj, example_inputs: Optional[List[Tuple]]=None):
-
-    # Check if example_inputs are defined and generate call traces
-    # for the method by running eager mode version of the method with
-    # the provide example inputs. This logs all the traces in type_trace_db
-    if example_inputs:
-        with monkeytype_trace(monkeytype_config):
-            for example_input in example_inputs:
-                obj(*example_input)
 
 # overloads are registered in _jit_internal and compiled here so that _overload
 # can be used in nn/functional.py without an import cycle
