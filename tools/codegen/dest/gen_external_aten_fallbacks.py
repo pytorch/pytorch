@@ -3,10 +3,15 @@ from typing_extensions import Literal
 from dataclasses import dataclass
 import re
 
-from tools.codegen.context import *
-from tools.codegen.utils import *
-from tools.codegen.model import *
-from tools.codegen.api.types import *
+from tools.codegen.context import method_with_native_function
+from tools.codegen.utils import Target, mapMaybe
+from tools.codegen.model import (Argument, ExternalBackendFunction,
+                                 ExternalBackendFunctionsGroup, SchemaKind,
+                                 assert_never, Return, is_generic_dispatch_key,
+                                 ListType, OptionalType, BaseType, BaseTy, Variant)
+from tools.codegen.api.types import DispatcherSignature, CppSignatureGroup
+import tools.codegen.api.dispatcher as dispatcher
+import tools.codegen.api.cpp as cpp
 
 # TODO: if any of these are XLA specific, we should move them into yaml.
 _FN_DENYLIST_REGEX = [
