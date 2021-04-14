@@ -3,10 +3,17 @@ import itertools
 from typing_extensions import Literal
 from dataclasses import dataclass
 
-from tools.codegen.context import *
-from tools.codegen.utils import *
-from tools.codegen.model import *
-from tools.codegen.api.types import *
+from tools.codegen.context import method_with_native_function
+from tools.codegen.utils import Target, mapMaybe
+from tools.codegen.model import (DispatchKey, NativeFunction,
+                                 NativeFunctionsGroup, SchemaKind,
+                                 TensorOptionsArguments, assert_never,
+                                 is_cuda_dispatch_key,
+                                 is_structured_dispatch_key)
+from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
+                                     CppSignature, CppSignatureGroup,
+                                     DispatcherSignature, Expr, MutRefCType,
+                                     NativeSignature)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
@@ -271,15 +278,6 @@ if (strides.empty()) {{
         elif k is SchemaKind.inplace:
             return maybe_set_guard
         elif k is SchemaKind.out:
-            if self.dispatch_key == DispatchKey.CPU:
-                resize_impl = "resize_output_cpu"
-            else:
-                # Only bothering to include a resize_output fastpath for CPU for now.
-                # We can add one in if for the perf if we need to. But it'll be easier when external backends
-                # have access to meta functions, and we can write one for resize_.
-                resize_impl = "resize_output"
-            # TODO: Provide a way of bypassing the tests here, if the meta
-            # function consulted maybe_get_output()
             return f"""
 {maybe_set_guard}
 const auto& out = outputs_[output_idx].get();
@@ -287,7 +285,7 @@ TORCH_CHECK(options.dtype() == out.dtype(),
     "Expected out tensor to have dtype ", options.dtype(), ", but got ", out.dtype(), " instead");
 TORCH_CHECK(options.device() == out.device(),
     "Expected out tensor to have device ", options.device(), ", but got ", out.device(), " instead");
-bool resized = at::native::{resize_impl}(outputs_[output_idx], sizes);
+bool resized = at::native::resize_output(outputs_[output_idx], sizes);
 // Only restride if a resize occurred; otherwise we ignore the (advisory)
 // strides from the meta function and directly use the output tensor's
 // preexisting strides
