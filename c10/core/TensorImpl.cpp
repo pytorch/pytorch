@@ -6,11 +6,13 @@
 #include <c10/util/Optional.h>
 #include <c10/core/InferenceMode.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
     true,
     "If set, keeps memory when a tensor is shrinking its size.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     caffe2_max_keep_on_shrink_memory,
     LLONG_MAX,
@@ -82,8 +84,10 @@ TensorImpl::TensorImpl(
 }
 
 TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta data_type, c10::optional<c10::Device> device_opt)
+    // NOLINTNEXTLINE(performance-move-const-arg)
     : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::TypeMeta data_type,
                        c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
@@ -194,6 +198,7 @@ bool TensorImpl::compute_channels_last_contiguous_2d() const {
         }
         return true;
       }
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case 3:
       // TODO dim == 3 case will be enabled once it is fully tested
       return false;
@@ -206,6 +211,7 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
   // Please don't combine these code, constant array is used here to let
   // compiler fully unroll the loop to get better performance
   switch (sizes_and_strides_.size()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 5:
       {
         int64_t expected = 1;
@@ -220,6 +226,7 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
         }
         return true;
       }
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case 4:
       // TODO dim == 4 case will be enabled once it is fully tested
       return false;
@@ -240,6 +247,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   if (dim() == 1) {
     return sizes_and_strides_.size_at_unchecked(0) < 2 || sizes_and_strides_.stride_at_unchecked(0) == 1;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   SmallVector<int64_t,5> perm;
   perm.resize(dim());
   for (int64_t i = 0; i < dim(); i ++) {
@@ -335,6 +343,7 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
           device};
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
 // Setting requires_grad to true on inference tensor outside InferenceMode
@@ -461,6 +470,7 @@ void TensorImpl::copy_tensor_metadata(
 namespace impl {
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AutogradMetaFactory* meta_factory = nullptr;
 }
 
