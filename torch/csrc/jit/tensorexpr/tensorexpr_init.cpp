@@ -128,32 +128,25 @@ void initTensorExprBindings(PyObject* module) {
             return self.load(v);
           })
       .def(
-          "loadWithMask",
-          [](Placeholder& self,
-             const std::vector<ExprHandle>& args,
-             const ExprHandle& mask) { return self.loadWithMask(args, mask); })
-      .def(
           "store",
           [](Placeholder& self,
              const std::vector<ExprHandle>& args,
              const ExprHandle& val) { return self.store(args, val); })
       .def(
-          "storeWithMask",
-          [](Placeholder& self,
-             const std::vector<ExprHandle>& args,
-             const ExprHandle& val,
-             const ExprHandle& mask) {
-            return self.storeWithMask(args, val, mask);
-          })
-      .def("buf", [](Placeholder& self) { return BufHandle(self.data()); })
-      .def("data", [](Placeholder& self) { return self.data(); });
+          "buf",
+          [](Placeholder& self) { return BufHandle(self.data()); },
+          py::return_value_policy::reference)
+      .def(
+          "data",
+          [](Placeholder& self) { return self.data(); },
+          py::return_value_policy::reference);
   py::class_<Tensor, std::unique_ptr<Tensor, py::nodelete>>(te, "Tensor")
       .def(py::init(
           [](BufHandle& b, Stmt* s) { return new Tensor(b.node(), s); }))
       .def(
           "load",
           [](Tensor& self, const std::vector<ExprHandle>& v) {
-            return self.call(v);
+            return self.load(v);
           })
       .def("buf", [](Tensor& self) { return BufHandle(self.buf()); })
       .def("stmt", &Tensor::stmt, py::return_value_policy::reference);
@@ -283,15 +276,6 @@ void initTensorExprBindings(PyObject* module) {
              const ExprHandle& value) {
             return Store::make(buf, indicies, value);
           },
-          py::return_value_policy::reference)
-      .def_static(
-          "make",
-          [](const BufHandle& buf,
-             std::vector<ExprHandle>& indicies,
-             const ExprHandle& value,
-             const ExprHandle& mask) {
-            return Store::make(buf, indicies, value, mask);
-          },
           py::return_value_policy::reference);
 
   py::class_<For, Stmt, std::unique_ptr<For, py::nodelete>>(te, "For")
@@ -306,16 +290,6 @@ void initTensorExprBindings(PyObject* module) {
           [](const VarHandle& var,
              const ExprHandle& start,
              const ExprHandle& stop,
-             Stmt* body,
-             const LoopOptions& loop_options) {
-            return For::make(var, start, stop, body, loop_options);
-          },
-          py::return_value_policy::reference)
-      .def_static(
-          "make",
-          [](const VarHandle& var,
-             const ExprHandle& start,
-             const ExprHandle& stop,
              Stmt* body) { return For::make(var, start, stop, body); },
           py::return_value_policy::reference);
 
@@ -325,12 +299,17 @@ void initTensorExprBindings(PyObject* module) {
           [](const ExprHandle& condition, Stmt* true_stmt, Stmt* false_stmt) {
             return new Cond(condition.node(), true_stmt, false_stmt);
           },
-          py::return_value_policy::reference);
+          py::return_value_policy::reference)
+      .def("true_stmt", &Cond::true_stmt, py::return_value_policy::reference)
+      .def("false_stmt", &Cond::false_stmt, py::return_value_policy::reference);
 
   py::class_<
       tensorexpr::Block,
       Stmt,
       std::unique_ptr<tensorexpr::Block, py::nodelete>>(te, "Block")
+      .def(py::init([](const std::vector<Stmt*>& stmts) {
+        return tensorexpr::Block::make(stmts);
+      }))
       .def(
           "stmts",
           &tensorexpr::Block::stmts,
@@ -360,6 +339,24 @@ void initTensorExprBindings(PyObject* module) {
           "get_loops_for",
           [](const LoopNest& self, Tensor* t) {
             return self.getLoopStmtsFor(t);
+          },
+          py::return_value_policy::reference)
+      .def(
+          "get_all_loopnests_for",
+          [](const LoopNest& self, const BufHandle& b) {
+            return self.getAllLoopNestsWritingToBuf(b.node());
+          },
+          py::return_value_policy::reference)
+      .def(
+          "get_innermost_loops_for",
+          [](const LoopNest& self, const BufHandle* b) {
+            return self.getAllInnermostLoopsWritingToBuf(b->node());
+          },
+          py::return_value_policy::reference)
+      .def(
+          "get_parent_loop",
+          [](const LoopNest& self, const Stmt* s) {
+            return self.getParentLoop(s);
           },
           py::return_value_policy::reference)
       .def(
@@ -452,27 +449,10 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "rfactor",
-          [](LoopNest& self, const Stmt& s, const VarHandle& v) {
-            auto st = dynamic_cast<const Store*>(&s);
-            if (!st) {
-              return;
-            }
-            auto r = st->value();
-            self.rfactor(r, v.node());
-          },
-          py::return_value_policy::reference)
-      .def(
-          "rfactor",
-          [](LoopNest& self,
-             const Stmt& s,
-             const VarHandle& v,
-             tensorexpr::Block& ins_point) {
-            auto st = dynamic_cast<const Store*>(&s);
-            if (!st) {
-              return;
-            }
-            auto r = st->value();
-            self.rfactor(r, v.node(), &ins_point);
+          [](LoopNest& self, Stmt* s, For* target_for) {
+            Buf* rfac_buf = nullptr;
+            self.rfactor(s, target_for, &rfac_buf);
+            return BufHandle(rfac_buf);
           },
           py::return_value_policy::reference)
       .def(
