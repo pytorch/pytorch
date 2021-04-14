@@ -263,5 +263,21 @@ class TestBundledInputs(TestCase):
                 inputs=[torch.ones(1, 2), ]  # type: ignore
             )
 
+    def test_double_augment(self):
+        class SingleTensorModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+        m = torch.jit.script(SingleTensorModel())
+        torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+            m,
+            inputs=[(torch.ones(1),)]  # type: ignore
+        )
+        with self.assertRaises(Exception):
+            torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+                m,
+                inputs=[(torch.ones(1),)]  # type: ignore
+            )
+
 if __name__ == '__main__':
     run_tests()
