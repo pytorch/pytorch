@@ -1180,12 +1180,16 @@ class TestBinaryUfuncs(TestCase):
         if dtype == torch.bfloat16:
             precision *= 10
             np_dtype = np.float16
+
             def to_numpy(t):
                 return np.array(t.tolist(), dtype=np_dtype)
+
         else:
             np_dtype = torch_to_numpy_dtype_dict[dtype]
+
             def to_numpy(t):
                 return np.array(t.cpu(), dtype=np_dtype)
+
         # TODO: turn these into separate tests
         for sample in op.sample_inputs(device, dtype):
             _input = (sample.input,) + sample.args
