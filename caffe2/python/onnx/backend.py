@@ -25,7 +25,7 @@ import onnx
 from onnx import TensorProto
 import onnx.numpy_helper
 import onnx.defs
-import onnx.optimizer
+import onnxoptimizer
 import onnx.shape_inference
 import onnx.utils
 from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
@@ -652,7 +652,7 @@ class Caffe2Backend(Backend):
             passes.append('split_init')
         if predict:
             passes.append('split_predict')
-        out = onnx.optimizer.optimize(input, passes)
+        out = onnxoptimizer.optimize(input, passes)
         return out
 
     @classmethod
@@ -868,13 +868,6 @@ class Caffe2Backend(Backend):
     def _onnx_model_to_caffe2_net(cls, onnx_model, device, opset_version, include_initializers):
         device_option = get_device_option(Device(device))
 
-        # Prior to onnx version update to onnx-1.8.0, errors caused by failures in
-        # in the onnx shape inference call were being supressed. Hence a try-catch block
-        # is added around the infer_shapes call to avoid these failures and preserve status
-        try:
-            onnx_model = onnx.utils.polish_model(onnx_model)
-        except RuntimeError:
-            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
         init_model = cls.optimize_onnx(onnx_model, init=True)
         pred_model = cls.optimize_onnx(onnx_model, predict=True)
 
