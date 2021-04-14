@@ -590,46 +590,36 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
 def sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad, **kwargs):
     for_inplace_variant = kwargs.get('for_inplace_variant', False)
+    alpha_beta = kwargs.get('alpha_beta', None)
     tests_list = [
-        ((S, M), (S, S), (S, M)),
+        ((2, 3), (2, 2), (2, 3)),
     ]
     tests_require_resizing = [
-        ((1,), (S, S), (S, M)),
-        ((), (S, S), (S, M))
+        ((1,), (2, 2), (2, 3)),
+        ((), (2, 2), (3, 3))
     ]
     test_cases = [*tests_list] if for_inplace_variant else [*tests_list, *tests_require_resizing]  # type: ignore
     inputs = tuple(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
                                args=(make_tensor(shape_b, device, dtype,
                                                  requires_grad=requires_grad),
                                      make_tensor(shape_c, device, dtype,
-                                                 requires_grad=requires_grad)))
+                                                 requires_grad=requires_grad)),
+                               kwargs=alpha_beta)
                    for shape_a, shape_b, shape_c in test_cases)
     return inputs
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     for_inplace_variant = kwargs.get('for_inplace_variant', False)
-    tests_list = [
-        ((S, M), (S, S), (S, M), dict(beta=0.2, alpha=0.6)),
-    ]
-    tests_require_resizing = [
-        ((1,), (S, S), (S, M), dict(beta=0.2, alpha=0.6)),
-        ((), (S, S), (S, M), dict(beta=0.2, alpha=0.6))
-    ]
-    test_cases = [*tests_list] if for_inplace_variant else [*tests_list, *tests_require_resizing]  # type: ignore
-    inputs = list(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
-                              args=(make_tensor(shape_b, device, dtype,
-                                                requires_grad=requires_grad),
-                                    make_tensor(shape_c, device, dtype,
-                                                requires_grad=requires_grad)),
-                              kwargs=kwargs)
-                  for shape_a, shape_b, shape_c, kwargs in test_cases)
+    inputs = sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad,
+                                                   alpha_beta=dict(beta=0.2, alpha=0.6),
+                                                   for_inplace_variant=for_inplace_variant)
     if dtype.is_complex:
         another_input = SampleInput(make_tensor((S, S), device, dtype, requires_grad=requires_grad),
                                     args=(make_tensor((S, S), device, dtype, requires_grad=requires_grad),
                                           make_tensor((S, S), device, dtype, requires_grad=False)),
                                     kwargs=dict(beta=1 + 2j, alpha=2 + 3j))
-        inputs.append(another_input)
-    return tuple(inputs)
+        inputs = inputs + (another_input,)
+    return inputs
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     for_inplace_variant = kwargs.get('for_inplace_variant', False)
