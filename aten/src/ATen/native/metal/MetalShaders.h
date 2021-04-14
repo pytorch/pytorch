@@ -579,7 +579,7 @@ kernel void reshape(texture2d_array<half, access::read> in_arr[[texture(0), func
     const ushort W1 = ushort_arg_5;
     const ushort C1 = ushort_arg_6;
     const ushort N1 = ushort_arg_7;
-        
+
     const int numel1 = H1 * W1 * C1 * N1;
     const ushort slices2 = divRoundUp(C2, 4);
     const ushort slices1 = divRoundUp(C1, 4);
@@ -606,7 +606,7 @@ kernel void reshape(texture2d_array<half, access::read> in_arr[[texture(0), func
         } else {
             value[idx] = in_tex.read(ushort2(x1, y1))[pos];
         }
-            
+
     }
     if(reshape_out_is_arr) {
         out_arr.write(value, gid.xy, gid.z);

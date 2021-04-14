@@ -5,17 +5,19 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void UnrollLoops(std::shared_ptr<Graph>& graph);
+// return true if graph is modified
+TORCH_API bool UnrollLoops(std::shared_ptr<Graph>& graph);
 
 TORCH_API Node* PeelLoop(Node* n, size_t times);
 
-TORCH_API void PeelProfilingLoops(const std::shared_ptr<Graph>& graph);
+// return true if graph is modified
+TORCH_API bool PeelProfilingLoops(const std::shared_ptr<Graph>& graph);
 
 struct TORCH_API LoopsPeeler {
   LoopsPeeler(std::function<bool(Node* n)> callback, size_t num_iterations = 1)
       : callback_(std::move(callback)), num_iterations_(num_iterations) {}
 
-  void run(const std::shared_ptr<Graph>& graph);
+  bool run(const std::shared_ptr<Graph>& graph);
 
  private:
   void collectLoop(Node* n);

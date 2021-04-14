@@ -309,8 +309,14 @@ static inline ScalarType toComplexType(ScalarType t) {
       return ScalarType::ComplexFloat;
     case ScalarType::Double:
       return ScalarType::ComplexDouble;
+    case ScalarType::ComplexHalf:
+      return ScalarType::ComplexHalf;
+    case ScalarType::ComplexFloat:
+      return ScalarType::ComplexFloat;
+    case ScalarType::ComplexDouble:
+      return ScalarType::ComplexDouble;
     default:
-      TORCH_CHECK(false, "Unknown Complex ScalarType");
+      TORCH_CHECK(false, "Unknown Complex ScalarType for ", t);
   }
 }
 

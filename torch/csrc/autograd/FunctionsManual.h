@@ -57,8 +57,8 @@ at::Tensor angle_backward(at::Tensor grad, const at::Tensor& self);
 at::Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st);
 at::Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st);
 at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other);
-at::Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, c10::string_view rounding_mode);
-at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, c10::string_view rounding_mode);
+at::Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, const c10::optional<std::string>& rounding_mode);
+at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, const c10::optional<std::string>& rounding_mode);
 at::Tensor mvlgamma_backward(at::Tensor grad, const at::Tensor & self, int64_t p);
 at::Tensor permute_backwards(const at::Tensor & grad, at::IntArrayRef fwd_dims);
 at::Tensor rad2deg_backward(const at::Tensor& grad);
@@ -160,7 +160,7 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
                           std::string mode, const Tensor& Q, const Tensor& R);
 Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, const Tensor& lambda, const Tensor& v);
-Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det);
+Tensor linalg_det_backward(const Tensor & grad, const Tensor& self, const Tensor& det);
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor & input,
     const c10::optional<Tensor> & gamma,

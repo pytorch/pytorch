@@ -332,8 +332,12 @@ struct DDPLoggingData {
   bool find_unused_parameters = false;
   bool gradient_as_bucket_view = false;
 
-  // Communication hook, if set, otherwise, will be builtin_allreduce.
+  // Communication hook. Empty string if not set, in which case it will not be
+  // logged.
   std::string comm_hook = "";
+  // Whether we are running under model.join() context manager for DDP uneven
+  // inputs.
+  bool join_uneven_inputs = false;
 
   // The following runtime stats are collected for the first 10 iterations
   // and then are collected every kDDPRuntimeLoggingSampleRate=100 iterations.
@@ -376,24 +380,10 @@ struct DDPLoggingData {
     std::ostream& output,
     const DDPLoggingData& ddp_logging_data
   ) {
-    std::stringstream deviceIdsStream, bucketSizesStream;
-    auto toString = [](std::stringstream& ss, const std::vector<int>& vec ) -> std::string {
-      for (size_t i = 0; i < vec.size(); ++i) {
-        if (i != 0) {
-          ss << ",";
-        }
-        ss << vec[i];
-      }
-      return ss.str();
-    };
 
-    std::string devicesStr = toString(deviceIdsStream, ddp_logging_data.device_ids);
-    std::string bucketSizesStr = toString(bucketSizesStream, ddp_logging_data.bucket_sizes);
-    std::string dtypesStr;
-    for (const auto & dtype : ddp_logging_data.dtypes) {
-      dtypesStr += dtype;
-      dtypesStr += " ";
-    }
+    std::string devicesStr = c10::Join(", ", ddp_logging_data.device_ids);
+    std::string bucketSizesStr = c10::Join(", ", ddp_logging_data.bucket_sizes);
+    std::string dtypesStr = c10::Join(" ", ddp_logging_data.dtypes);
 
     std::string ddpLoggingDataInfo = c10::str(
       "world_size: ", ddp_logging_data.world_size, ", module_name: ",
@@ -428,13 +418,18 @@ struct DDPLoggingData {
     }
     ddpLoggingDataInfo += backendInfo;
 
-    std::string commHookInfo = "";
     if (ddp_logging_data.comm_hook != "") {
-      commHookInfo += c10::str(
+      auto commHookInfo = c10::str(
         "comm_hook: ", ddp_logging_data.comm_hook
       );
+      ddpLoggingDataInfo += commHookInfo;
     }
-    ddpLoggingDataInfo += commHookInfo;
+
+    if (ddp_logging_data.join_uneven_inputs) {
+      auto joinInfo = c10::str("join_uneven_inputs: ", ddp_logging_data.join_uneven_inputs);
+      ddpLoggingDataInfo += joinInfo;
+    }
+
     return output << ddpLoggingDataInfo;
   }
 };

@@ -1,30 +1,27 @@
-from contextlib import contextmanager
 import copy
-import itertools
-import os
 import inspect
+import itertools
 import logging
+import os
 import warnings
+from contextlib import contextmanager
 from typing import NamedTuple
 
 import torch
-
-from . import comm
 import torch.distributed as dist
 
 RPC_AVAILABLE = False
 if dist.is_available():
-    from torch.distributed.distributed_c10d import _get_default_group
     from torch.distributed.distributed_c10d import ReduceOp
+    from torch.distributed.distributed_c10d import _get_default_group
 if torch.distributed.rpc.is_available():
     RPC_AVAILABLE = True
     from torch.distributed.rpc import RRef
+from torch._utils import _get_device_index
+
 from ..modules import Module
-from .replicate import replicate
-from .scatter_gather import scatter_kwargs, gather, is_namedtuple
-from .parallel_apply import parallel_apply
-from torch._utils import _get_device_index, _get_all_device_indices
 from ._functions import _get_stream
+from .scatter_gather import scatter_kwargs, gather, is_namedtuple
 
 
 def _find_tensors(obj):
@@ -44,6 +41,7 @@ def _find_tensors(obj):
     if isinstance(obj, dict):
         return itertools.chain(*map(_find_tensors, obj.values()))
     return []
+
 
 def _dump_DDP_relevant_env_vars():
     relevant_env_vars = [
@@ -100,7 +98,6 @@ def _dump_DDP_relevant_env_vars():
         value = os.environ[var] if var in os.environ else "N/A"
         formatted_output += "env:%s=%s\n" % (var, value)
     print(formatted_output)
-
 
 
 class _DDPUnevenInputsConfig(NamedTuple):
@@ -304,14 +301,18 @@ class DistributedDataParallel(Module):
 
     Args:
         module (Module): module to be parallelized
-        device_ids (list of int or torch.device): CUDA devices. This should
-                   only be provided when the input module resides on a single
-                   CUDA device. For single-device modules, the i'th
-                   :attr:`module` replica is placed on ``device_ids[i]``. For
-                   multi-device modules and CPU modules, ``device_ids`` must be
-                   ``None`` or an empty list, and input data for the forward
-                   pass must be placed on the correct device. (default: all
-                   visible devices for single-device modules)
+        device_ids (list of int or torch.device): CUDA devices.
+                   1) For single-device modules, ``device_ids`` can
+                   contain exactly one device id, which represents the only
+                   CUDA device where the input module corresponding to this process resides.
+                   Alternatively, ``device_ids`` can also be ``None``.
+                   2) For multi-device modules and CPU modules,
+                   ``device_ids`` must be ``None``.
+
+                   When ``device_ids`` is ``None`` for both cases,
+                   both the input data for the forward pass and the actual module
+                   must be placed on the correct device.
+                   (default: ``None``)
         output_device (int or torch.device): Device location of output for
                       single-device CUDA modules. For multi-device modules and
                       CPU modules, it must be ``None``, and the module itself
@@ -365,13 +366,20 @@ class DistributedDataParallel(Module):
         >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
         >>> net = torch.nn.parallel.DistributedDataParallel(model, pg)
     """
-    def __init__(self, module, device_ids=None,
-                 output_device=None, dim=0, broadcast_buffers=True,
-                 process_group=None,
-                 bucket_cap_mb=25,
-                 find_unused_parameters=False,
-                 check_reduction=False,
-                 gradient_as_bucket_view=False):
+
+    def __init__(
+        self,
+        module,
+        device_ids=None,
+        output_device=None,
+        dim=0,
+        broadcast_buffers=True,
+        process_group=None,
+        bucket_cap_mb=25,
+        find_unused_parameters=False,
+        check_reduction=False,
+        gradient_as_bucket_view=False,
+    ):
 
         super(DistributedDataParallel, self).__init__()
 
@@ -380,28 +388,40 @@ class DistributedDataParallel(Module):
             "doesn't have any parameter that requires a gradient."
         )
 
+        if device_ids is not None and len(device_ids) > 1:
+            raise ValueError("device_ids can only be None or contain a single element.")
+
         self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
         distinct_device_types = {p.device.type for p in module.parameters()}
-        assert len(distinct_device_types) == 1, (
-            "DistributedDataParallel's input module must be on "
-            "the same type of devices, but input module parameters locate in {}."
-        ).format(distinct_device_types)
+        if len(distinct_device_types) != 1:
+            raise ValueError(
+                "DistributedDataParallel's input module must be on "
+                "the same type of devices, but input module parameters locate in {}.".format(
+                    distinct_device_types
+                )
+            )
         self.device_type = list(distinct_device_types)[0]
 
-        if self.device_type == "cpu" or self.is_multi_device_module:
-            assert not device_ids and not output_device, (
-                "DistributedDataParallel device_ids and output_device arguments "
-                "only work with single-device GPU modules, but got "
-                "device_ids {}, output_device {}, and module parameters {}."
-            ).format(device_ids, output_device, {p.device for p in module.parameters()})
+        if (
+            device_ids is None
+            or len(device_ids) == 0  # For backward compatibility.
+            or self.device_type == "cpu"
+            or self.is_multi_device_module
+        ):
+            if device_ids or output_device:
+                raise ValueError(
+                    "DistributedDataParallel device_ids and output_device arguments "
+                    "only work with single-device/multiple-device GPU modules or CPU modules, "
+                    "but got device_ids {}, output_device {}, and module parameters {}.".format(
+                        device_ids,
+                        output_device,
+                        {p.device for p in module.parameters()},
+                    )
+                )
 
             self.device_ids = None
             self.output_device = None
         else:
-            # Use all devices by default for single-device GPU modules
-            if device_ids is None:
-                device_ids = _get_all_device_indices()
-
             self.device_ids = [_get_device_index(x, True) for x in device_ids]
 
             if output_device is None:
@@ -425,7 +445,7 @@ class DistributedDataParallel(Module):
             ddp_join_enabled=False, ddp_join_divide_by_initial_world_size=False
         )
         self.gradient_as_bucket_view = gradient_as_bucket_view
-        if hasattr(module, '_ddp_params_and_buffers_to_ignore'):
+        if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
             self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
         else:
             self.parameters_to_ignore = []
@@ -438,32 +458,31 @@ class DistributedDataParallel(Module):
                 "The `check_reduction` argument in `DistributedDataParallel` "
                 "module is deprecated. Please avoid using it."
             )
-            pass
 
         # Check that a module does not have Uninitialized parameters
         for param in module.parameters():
             if isinstance(param, torch.nn.parameter.UninitializedParameter):
                 raise RuntimeError(
-                    'Modules with uninitialized parameters can\'t be used with `DistributedDataParallel`. '
-                    'Run a dummy forward pass to correctly initialize the modules')
+                    "Modules with uninitialized parameters can't be used with `DistributedDataParallel`. "
+                    "Run a dummy forward pass to correctly initialize the modules"
+                )
         # used for intra-node param sync and inter-node sync as wel
         self.broadcast_bucket_size = int(250 * 1024 * 1024)
 
         # reduction bucket size
         self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
         # Whether to perform input tensor CPU to GPU copies on a side-stream
-        self.use_side_stream_for_tensor_copies = os.environ.get("PYTORCH_DDP_USE_SIDE_STREAM", "1") == "1"
+        self.use_side_stream_for_tensor_copies = (
+            os.environ.get("PYTORCH_DDP_USE_SIDE_STREAM", "1") == "1"
+        )
 
+        # TODO(wayi@): Remove this field since SPMD is no longer supported,
+        # and also remove all the relevant unnecessary loops.
         # Module replication within process (single-process multi device)
-        self._module_copies = self._replicate_modules_within_process()
+        self._module_copies = [self.module]
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # Verify model equivalence.
-        # Corresponding params' layouts (strides) must match across
-        # replicas within this process and across processes.
-        # see Note: "Gradient Layout Contract" in Reducer::initialize_buckets).
-        if self.device_ids is not None and len(self.device_ids) > 1:
-            dist._verify_replicas_within_process(parameters, expect_sparse_gradient)
         dist._verify_model_across_ranks(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
@@ -478,9 +497,8 @@ class DistributedDataParallel(Module):
 
         if len(module_states) > 0:
             self._distributed_broadcast_coalesced(
-                module_states,
-                self.broadcast_bucket_size,
-                authoritative_rank)
+                module_states, self.broadcast_bucket_size, authoritative_rank
+            )
 
     def _ddp_init_helper(self, parameters, expect_sparse_gradient):
         """
@@ -499,7 +517,8 @@ class DistributedDataParallel(Module):
         bucket_indices = dist._compute_bucket_assignment_by_size(
             parameters[0],
             [dist._DEFAULT_FIRST_BUCKET_BYTES, self.bucket_bytes_cap],
-            expect_sparse_gradient[0])
+            expect_sparse_gradient[0],
+        )
 
         # Note: reverse list of buckets because we want to approximate the
         # order in which their gradients are produced, and assume they
@@ -511,7 +530,8 @@ class DistributedDataParallel(Module):
             expect_sparse_gradient,
             self.bucket_bytes_cap,
             self.find_unused_parameters,
-            self.gradient_as_bucket_view)
+            self.gradient_as_bucket_view,
+        )
 
         self.logger = dist.Logger(self.reducer)
 
@@ -520,7 +540,8 @@ class DistributedDataParallel(Module):
             self.module.__class__.__name__,
             [] if self.device_ids is None else self.device_ids,
             -1 if self.output_device is None else self.output_device,
-            self.broadcast_buffers)
+            self.broadcast_buffers,
+        )
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)
@@ -528,94 +549,39 @@ class DistributedDataParallel(Module):
     def __getstate__(self):
         self._check_default_group()
         attrs = copy.copy(self.__dict__)
-        del attrs['process_group']
-        del attrs['reducer']
-        del attrs['logger']
+        del attrs["process_group"]
+        del attrs["reducer"]
+        del attrs["logger"]
         return attrs
 
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
-        self.__dict__.setdefault('require_forward_param_sync', True)
-        self.__dict__.setdefault('require_backward_grad_sync', True)
+        self.__dict__.setdefault("require_forward_param_sync", True)
+        self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         self._ddp_init_helper(parameters, expect_sparse_gradient)
 
-    def _replicate_modules_within_process(self):
-        if self.device_ids and len(self.device_ids) > 1:
-            warnings.warn(
-                "Single-Process Multi-GPU is not the recommended mode for "
-                "DDP. In this mode, each DDP instance operates on multiple "
-                "devices and creates multiple module replicas within one "
-                "process. The overhead of scatter/gather and GIL contention "
-                "in every forward pass can slow down training. "
-                "Please consider using one DDP instance per device or per "
-                "module replica by explicitly setting device_ids or "
-                "CUDA_VISIBLE_DEVICES. "
-            )
-
-            # only create replicas for single-device CUDA modules
-            #
-            # TODO: we don't need to replicate params in here. they're always going to
-            # be broadcasted using larger blocks in broadcast_coalesced, so it might be
-            # better to not pollute the caches with these small blocks
-            module_copies = replicate(self.module, self.device_ids, detach=True)
-            module_copies[0] = self.module
-
-            for module_copy in module_copies[1:]:
-                for param, copy_param in zip(self.module.parameters(), self._get_parameters(module_copy)):
-                    # Reducer requires param copies have the same strides across replicas.
-                    # Fixes up copy_param strides in case replicate didn't match param strides.
-                    if param.layout is torch.strided and param.stride() != copy_param.stride():
-                        with torch.no_grad():
-                            copy_param.set_(copy_param.clone()
-                                                      .as_strided(param.size(), param.stride())
-                                                      .copy_(copy_param))
-                    copy_param.requires_grad = param.requires_grad
-
-            return module_copies
-
-        else:
-            return [self.module]
-
     def _build_params_for_reducer(self):
         # Build tuple of (module, parameter) for all parameters that require grads.
-        if self.device_ids and len(self.device_ids) > 1:
-            # Single-process multi-device mode,does not support self.parameters_to_ignore.
-            if self.parameters_to_ignore:
-                raise ValueError(
-                    "Single-Process multi-device mode does not "
-                    "support ignoring parameters upfront. Please consider "
-                    "using one DDP instance per device."
-                )
-
-            modules_and_parameters = [
-                [
-                    (module, parameter)
-                    for module in replica.modules()
-                    for parameter in filter(
-                        lambda parameter: parameter.requires_grad,
-                        self._get_parameters(module, recurse=False))
-                ] for replica in self._module_copies]
-        else:
-            modules_and_parameters = [
-                [
-                    (module, parameter)
-                    for module_name, module in replica.named_modules()
-                    for parameter in [
-                        param
-                        # Note that we access module.named_parameters instead of
-                        # parameters(module). parameters(module) is only needed in the
-                        # single-process multi device case, where it accesses replicated
-                        # parameters through _former_parameters.
-                        for param_name, param in module.named_parameters(recurse=False)
-                        if param.requires_grad
-                        and f"{module_name}.{param_name}" not in self.parameters_to_ignore
-                    ]
+        modules_and_parameters = [
+            [
+                (module, parameter)
+                for module_name, module in replica.named_modules()
+                for parameter in [
+                    param
+                    # Note that we access module.named_parameters instead of
+                    # parameters(module). parameters(module) is only needed in the
+                    # single-process multi device case, where it accesses replicated
+                    # parameters through _former_parameters.
+                    for param_name, param in module.named_parameters(recurse=False)
+                    if param.requires_grad
+                    and f"{module_name}.{param_name}" not in self.parameters_to_ignore
                 ]
-                for replica in self._module_copies
             ]
+            for replica in self._module_copies
+        ]
 
         # Deduplicate any parameters that might be shared across child modules.
         memo = set()
@@ -623,16 +589,20 @@ class DistributedDataParallel(Module):
             # "p not in memo" is the deduplication check.
             # "not memo.add(p)" is always True, and it's only there to cause "add(p)" if needed.
             [(m, p) for m, p in replica_mps if p not in memo and not memo.add(p)]
-            for replica_mps in modules_and_parameters]
+            for replica_mps in modules_and_parameters
+        ]
 
         # Build list of parameters.
         parameters = [
             list(parameter for _, parameter in replica)
-            for replica in modules_and_parameters]
+            for replica in modules_and_parameters
+        ]
 
         # Checks if a module will produce a sparse gradient.
         def produces_sparse_gradient(module):
-            if isinstance(module, torch.nn.Embedding) or isinstance(module, torch.nn.EmbeddingBag):
+            if isinstance(module, torch.nn.Embedding) or isinstance(
+                module, torch.nn.EmbeddingBag
+            ):
                 return module.sparse
             return False
 
@@ -640,11 +610,14 @@ class DistributedDataParallel(Module):
         # gradients for the corresponding parameters.
         expect_sparse_gradient = [
             list(produces_sparse_gradient(module) for module, _ in replica)
-            for replica in modules_and_parameters]
+            for replica in modules_and_parameters
+        ]
 
         # The following modules_params and modules_buffers are used for
         # param/buffer sync in _sync_params.
-        self.modules_params = [list(self._get_parameters(m)) for m in self._module_copies]
+        self.modules_params = [
+            list(self._get_parameters(m)) for m in self._module_copies
+        ]
         # Collect buffers for modules, filtering out buffers that should be ignored.
         named_module_buffers = [
             [(buffer, buffer_name) for buffer_name, buffer in m.named_buffers()]
@@ -665,10 +638,13 @@ class DistributedDataParallel(Module):
         """
         Returns a generator of module parameters
         """
+
         def model_parameters(m):
-            ps = m._former_parameters.values() \
-                if hasattr(m, "_former_parameters") \
+            ps = (
+                m._former_parameters.values()
+                if hasattr(m, "_former_parameters")
                 else m.parameters(recurse=False)
+            )
             for p in ps:
                 yield p
 
@@ -685,11 +661,13 @@ class DistributedDataParallel(Module):
             pickle_not_supported = True
 
         if pickle_not_supported:
-            raise RuntimeError("DDP Pickling/Unpickling are only supported "
-                               "when using DDP with the default process "
-                               "group. That is, when you have called "
-                               "init_process_group and have not passed "
-                               "process_group argument to DDP constructor")
+            raise RuntimeError(
+                "DDP Pickling/Unpickling are only supported "
+                "when using DDP with the default process "
+                "group. That is, when you have called "
+                "init_process_group and have not passed "
+                "process_group argument to DDP constructor"
+            )
 
     @contextmanager
     def no_sync(self):
@@ -720,12 +698,11 @@ class DistributedDataParallel(Module):
             self.logger.set_runtime_stats_and_log()
             self.reducer.prepare_for_forward()
         if self.ddp_uneven_inputs_config.ddp_join_enabled:
-            ones = torch.ones(
-                1, device=self.device
-            )
+            ones = torch.ones(1, device=self.device)
             work = dist.all_reduce(ones, group=self.process_group, async_op=True)
             self.reducer._set_forward_pass_work_handle(
-                work, self.ddp_uneven_inputs_config.ddp_join_divide_by_initial_world_size
+                work,
+                self.ddp_uneven_inputs_config.ddp_join_divide_by_initial_world_size,
             )
 
         # Calling _rebuild_buckets before forward compuation,
@@ -745,13 +722,8 @@ class DistributedDataParallel(Module):
             self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
         if self.device_ids:
-            if len(self.device_ids) == 1:
-                inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
-                output = self.module(*inputs[0], **kwargs[0])
-            else:
-                inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
-                outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
-                output = self.gather(outputs, self.output_device)
+            inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
+            output = self.module(*inputs[0], **kwargs[0])
         else:
             output = self.module(*inputs, **kwargs)
 
@@ -778,10 +750,11 @@ class DistributedDataParallel(Module):
         r"""
         Recursively moves input to the target_gpu.
         """
+
         def to_map(obj):
             if isinstance(obj, torch.Tensor):
                 if not self.use_side_stream_for_tensor_copies:
-                    return (obj.to(target_gpu), )
+                    return (obj.to(target_gpu),)
                 else:
                     # Perform CPU -> GPU copies in a background stream. This code is
                     # motivated from similar logic in torch/nn/parallel/_functions.py
@@ -796,7 +769,7 @@ class DistributedDataParallel(Module):
                         # Ensure tensor memory is not reused until work on
                         # main stream is complete
                         output.record_stream(current_stream)
-                    return (output, )
+                    return (output,)
             if is_namedtuple(obj):
                 return [type(obj)(*args) for args in zip(*map(to_map, obj))]
             if isinstance(obj, tuple) and len(obj) > 0:
@@ -825,9 +798,6 @@ class DistributedDataParallel(Module):
         kwargs = tuple(kwargs)
         return inputs, kwargs
 
-    def parallel_apply(self, replicas, inputs, kwargs):
-        return parallel_apply(replicas, inputs, kwargs, self.device_ids[:len(replicas)])
-
     def gather(self, outputs, output_device):
         return gather(outputs, output_device, dim=self.dim)
 
@@ -841,9 +811,7 @@ class DistributedDataParallel(Module):
     # forward pass to determine the no. of currently active processes and whether
     # all processes have joined.
     def _schedule_shadow_all_reduce_for_fwd_pass(self):
-        all_active_procs = torch.zeros(
-            1, device=self.device
-        )
+        all_active_procs = torch.zeros(1, device=self.device)
         dist.all_reduce(all_active_procs, group=self.process_group)
         return all_active_procs.item()
 
@@ -875,7 +843,9 @@ class DistributedDataParallel(Module):
         # Agree upon the process that will be the authoritative model copy.
         # The current rank is a candidate for being the authoritative copy if
         # is_last_joiner=True. We break ties via picking the larger rank.
-        self._authoritative_rank = self._find_common_rank(self._distributed_rank, is_last_joiner)
+        self._authoritative_rank = self._find_common_rank(
+            self._distributed_rank, is_last_joiner
+        )
         self._sync_params_and_buffers(authoritative_rank=self._authoritative_rank)
 
     # Schedule allreduce ops to match those scheduled in the reducer's backward
@@ -892,9 +862,7 @@ class DistributedDataParallel(Module):
             # divide_by_initial_world_size=True, we divide grads by the static
             # world size, if not, the dividing factor is reduced by the number
             # of joined processes.
-            zero_tensors = [
-                torch.zeros_like(t) for t in bucket_tensors
-            ]
+            zero_tensors = [torch.zeros_like(t) for t in bucket_tensors]
             work = self.process_group.allreduce(zero_tensors)
             allreduce_work.append(work)
         for work in allreduce_work:
@@ -928,11 +896,6 @@ class DistributedDataParallel(Module):
         To use this to enable training with uneven inputs across processes,
         simply wrap this context manager around your training loop. No further
         modifications to the model or data loading is required.
-
-        .. warning::
-            This module works only with the multi-process, single-device usage
-            of :class:`torch.nn.parallel.DistributedDataParallel`,
-            which means that a single process works on a single GPU.
 
         .. warning::
             This module currently does not support custom distributed collective
@@ -990,13 +953,9 @@ class DistributedDataParallel(Module):
           >>>  # blocking for rank 1's allreduce to complete.
           >>>  torch.cuda.synchronize(device=rank)
         """
+        # Log uneven input API usage.
+        self.logger._set_uneven_input_join()
         try:
-            if self.device_ids and len(self.device_ids) > 1:
-                raise ValueError(
-                    """DDP join() API does not support Single-Process Multi-GPU
-                    mode training. The recommended approach for DDP training is
-                    to spawn a single process that works on a single GPU."""
-                )
             has_error = False
             self.ddp_uneven_inputs_config = _DDPUnevenInputsConfig(
                 ddp_join_enabled=enable,
@@ -1156,9 +1115,7 @@ class DistributedDataParallel(Module):
         self.logger._set_comm_hook_name(hook.__qualname__)
         dist._register_comm_hook(self.reducer, state, hook)
 
-    def _register_builtin_comm_hook(
-        self, comm_hook_type
-    ):
+    def _register_builtin_comm_hook(self, comm_hook_type):
         r"""
         Registers a built-in communication hook that specifies how DDP
         aggregates gradients across multiple workers.
@@ -1221,35 +1178,6 @@ class DistributedDataParallel(Module):
 
     def _sync_params(self):
         with torch.no_grad():
-            # only do intra-node parameters sync for replicated single-device
-            # CUDA modules
-            if self.device_ids and len(self.device_ids) > 1:
-                # intra-node parameter sync
-                result = comm.broadcast_coalesced(
-                    self.modules_params[0],
-                    self.device_ids,
-                    self.broadcast_bucket_size)
-                for tensors, module_params in zip(result[1:],
-                                                  self.modules_params[1:]):
-                    for tensor, param in zip(tensors, module_params):
-                        # Formerly, this spot used param.set_(tensor) to steal tensor's
-                        # data without a deep copy.  Unfortunately, that wiped out the
-                        # allreduce hook attached to param's AccumulateGrad function,
-                        # likely causing https://github.com/pytorch/pytorch/issues/37079.
-                        # TODO:  If set_ becomes safe to use here, use set_.
-                        # Otherwise, find another way to steal tensor's data.
-                        param.copy_(tensor)
-                        # Assume we have just run the optimizer and zeroed the
-                        # grads of the parameters on the root model. We need
-                        # to zero the grads on all model replicas as well.
-                        # This snippet is copied from torch.optim.Optimizer.
-                        if param.grad is not None:
-                            if param.grad.grad_fn is not None:
-                                param.grad.detach_()
-                            else:
-                                param.grad.requires_grad_(False)
-                            param.grad.zero_()
-
             # module buffer sync
             if self.will_sync_module_buffers():
                 # Synchronize buffers across processes.
@@ -1268,26 +1196,15 @@ class DistributedDataParallel(Module):
                     self.broadcast_bucket_size,
                     authoritative_rank,
                 )
-                # only do intra-node buffer sync for replicated single-device
-                # CUDA modules
-                if self.device_ids and len(self.device_ids) > 1:
-                    # intra-node buffer sync
-                    result = comm.broadcast_coalesced(
-                        self.modules_buffers[0],
-                        self.device_ids,
-                        self.broadcast_bucket_size)
-                    for tensors, module_buffers in zip(result[1:],
-                                                       self.modules_buffers[1:]):
-                        for tensor, buffer in zip(tensors, module_buffers):
-                            buffer.set_(tensor)
 
     def _passing_sync_batchnorm_handle(self, module_copies):
         for dev_idx, module in enumerate(module_copies):
             for layer in module.modules():
                 if isinstance(layer, torch.nn.modules.SyncBatchNorm):
-                    assert self.device_type != 'cpu', "SyncBatchNorm layers only work with GPU modules"
-                    layer._specify_ddp_gpu_num(
-                        len(self.device_ids) if self.device_ids else 1)
+                    assert (
+                        self.device_type != "cpu"
+                    ), "SyncBatchNorm layers only work with GPU modules"
+                    layer._specify_ddp_gpu_num(1)
 
     def _check_comm_hook(self, hook):
         if not callable(hook):
@@ -1323,7 +1240,6 @@ class DistributedDataParallel(Module):
         # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
         module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
 
-
     def get_ddp_logging_data(self):
         r"""
         This interface can be called after DistributedDataParallel() is
@@ -1344,5 +1260,7 @@ class DistributedDataParallel(Module):
         "kDDPRuntimeLoggingSampleRate=100" training iterations.
         """
         if sample_rate < 1:
-            raise ValueError("DDP runtime logging sample rate should be equal or greater than 1")
+            raise ValueError(
+                "DDP runtime logging sample rate should be equal or greater than 1"
+            )
         self.reducer._set_ddp_runtime_logging_sample_rate(sample_rate)

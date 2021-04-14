@@ -22,12 +22,12 @@ using namespace at::native::metal;
 }
 
 - (void)dealloc {
-  _imageWrapper = nil;
+  _imageWrapper = nullptr;
 }
 
 - (void)prepareForSynchronization {
   if (_imageWrapper) {
-    _imageWrapper->prepareForSynchronization();
+    _imageWrapper->prepare();
   }
 }
 
@@ -43,9 +43,7 @@ MPSImageWrapper::MPSImageWrapper(IntArrayRef sizes) {
 }
 
 MPSImageWrapper::~MPSImageWrapper() {
-  _delegate = nil;
-  _commandBuffer = nil;
-  _image = nil;
+  release();
 }
 
 void MPSImageWrapper::copyDataFromHost(const float* inputData) {
@@ -66,12 +64,7 @@ MPSImage* MPSImageWrapper::image() const {
 }
 
 void MPSImageWrapper::recycleImage() {
-  if ([_image isTemporaryImage]) {
-    [_image recycle];
-    [_commandBuffer remove:(MPSTemporaryImage*)_image];
-    [_commandBuffer removeDelegate:_delegate];
-    _image = nil;
-  }
+  release();
 }
 
 void MPSImageWrapper::setCommandBuffer(MetalCommandBuffer* cb) {
@@ -108,7 +101,12 @@ void MPSImageWrapper::copyFromTexture(MPSImage* image) {
   }
 }
 
-void MPSImageWrapper::prepareForSynchronization() {
+void MPSImageWrapper::setTexture(MPSImage* image) {
+    TORCH_CHECK(image);
+    _image = image;
+}
+
+void MPSImageWrapper::prepare() {
   // If the temporary image is still alive in the current command buffer,
   // make it a static image.
   if ([_image isTemporaryImage] && _image.readCount != 0) {
@@ -123,11 +121,34 @@ void MPSImageWrapper::prepareForSynchronization() {
     _image =
         createStaticImage((MPSTemporaryImage*)_image, _commandBuffer, false);
   }
+#if DEBUG
+  else {
+    if (_image) {
+      NSLog(
+          @"[MPSImageWrapper] Found a static image: [%lld, %lld, %lld, %lld]",
+          (int64_t)_image.numberOfImages,
+          (int64_t)_image.featureChannels,
+          (int64_t)_image.height,
+          (int64_t)_image.width);
+    }
+  }
+#endif
 }
 
 void MPSImageWrapper::synchronize() {
   TORCH_CHECK(commandBuffer());
   [commandBuffer() synchronize];
+}
+
+void MPSImageWrapper::release() {
+  if ([_image isTemporaryImage]) {
+    [_image recycle];
+    [_commandBuffer remove:(MPSTemporaryImage*)_image];
+  }
+  [_commandBuffer removeDelegate:_delegate];
+  _delegate = nil;
+  _commandBuffer = nil;
+  _image = nil;
 }
 
 }
