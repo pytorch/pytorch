@@ -104,7 +104,8 @@ void BackgroundThread::stop() {
 #endif
 
 // TCPStoreListener class methods
-TCPStoreWorkerDaemon::TCPStoreWorkerDaemon(int listenSocket) : BackgroundThread(listenSocket) {
+TCPStoreWorkerDaemon::TCPStoreWorkerDaemon(int listenSocket)
+    : BackgroundThread(listenSocket) {
   daemonThread_ = std::thread(&TCPStoreWorkerDaemon::run, this);
 }
 
@@ -367,8 +368,8 @@ void TCPStoreMasterDaemon::compareSetHandler(int socket) {
           key, WatchResponseType::KEY_CREATED, currentValue, newValue);
       tcputil::sendVector<uint8_t>(socket, newValue);
     } else {
-      // TODO: This code path is not ideal as we are "lying" to the caller in case
-      // the key does not exist. We should come up with a working solution.
+      // TODO: This code path is not ideal as we are "lying" to the caller in
+      // case the key does not exist. We should come up with a working solution.
       tcputil::sendVector<uint8_t>(socket, currentValue);
     }
   } else {
@@ -481,7 +482,8 @@ void TCPStoreMasterDaemon::watchHandler(int socket) {
   watchedSockets_[key].push_back(socket);
 }
 
-bool TCPStoreMasterDaemon::checkKeys(const std::vector<std::string>& keys) const {
+bool TCPStoreMasterDaemon::checkKeys(
+    const std::vector<std::string>& keys) const {
   return std::all_of(keys.begin(), keys.end(), [this](const std::string& s) {
     return tcpStore_.count(s) > 0;
   });
@@ -601,7 +603,8 @@ TCPStore::TCPStore(
   try {
     if (isServer_) {
       // Now start the daemon
-      tcpStoreMasterDaemon_ = std::make_unique<TCPStoreMasterDaemon>(masterListenSocket_);
+      tcpStoreMasterDaemon_ =
+          std::make_unique<TCPStoreMasterDaemon>(masterListenSocket_);
     }
     // Connect to the daemon
     storeSocket_ = tcputil::connect(
@@ -613,7 +616,8 @@ TCPStore::TCPStore(
     // socket to handle requests from server
     listenSocket_ = tcputil::connect(
         tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-    tcpStoreWorkerDaemon_ = std::make_unique<TCPStoreWorkerDaemon>(listenSocket_);
+    tcpStoreWorkerDaemon_ =
+        std::make_unique<TCPStoreWorkerDaemon>(listenSocket_);
   } catch (const std::exception&) {
     if (isServer_) {
       tcpStoreMasterDaemon_ = nullptr;

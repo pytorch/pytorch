@@ -20,8 +20,9 @@ enum class WatchResponseType : uint8_t {
   KEY_DELETED
 };
 
-// Abstract base class to handle thread state for TCPStoreMasterDaemon and TCPStoreWorkerDaemon
-// Contains the windows/unix implementations to signal a shutdown sequence for the thread
+// Abstract base class to handle thread state for TCPStoreMasterDaemon and
+// TCPStoreWorkerDaemon Contains the windows/unix implementations to signal a
+// shutdown sequence for the thread
 class BackgroundThread {
  public:
   explicit BackgroundThread(int storeListenSocket);
@@ -58,7 +59,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
 
-  // The master runs on a single thread so only 
+  // The master runs on a single thread so only
   // one handler can be executed at a time
   void setHandler(int socket);
   void compareSetHandler(int socket);
