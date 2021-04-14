@@ -8,7 +8,6 @@
 @end
 
 @interface MetalCommandBuffer : NSObject
-@property(nonatomic, weak, readonly) NSThread* thread;
 @property(nonatomic, strong, readonly) id<MTLCommandBuffer> buffer;
 
 + (MetalCommandBuffer*)newBuffer;

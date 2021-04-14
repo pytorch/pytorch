@@ -107,8 +107,8 @@ Tensor& relu_quantized_cpu_(Tensor& qx) {
   return qx;
 }
 
-Tensor& leaky_relu_out_quantized_cpu(Tensor& result, const Tensor& self,
-                                 const Scalar& negval) {
+Tensor& leaky_relu_out_quantized_cpu(const Tensor& self,
+                                 const Scalar& negval, Tensor& result) {
   qrelu_leaky_stub(self.device().type(), result, self, negval);
   return result;
 }
