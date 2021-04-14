@@ -350,26 +350,23 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
       {{M, "M"}});
 
   te::LoopNest loop({BT});
+  te::Buf* rfac_buf;
 
-  {
-    auto const& loops = loop.getLoopStmtsFor(BT);
-    TORCH_CHECK(loops.size() == 1);
-    te::For* m = loops[0];
-    te::For* mo;
-    te::For* mi;
-    loop.splitWithMask(m, kChunkSize, &mo, &mi);
-  }
+  auto loops = loop.getLoopStmtsFor(BT);
+  TORCH_CHECK(loops.size() == 1);
+  te::For* mo;
+  te::For* mi;
+  loop.splitWithMask(loops.at(0), kChunkSize, &mo, &mi);
 
-  {
-    auto const& loops = loop.getLoopStmtsFor(BT);
-    TORCH_CHECK(loops.size() == 2);
-    te::For* mo = loops[0];
-    te::For* mi = loops[1];
-    // TODO: rfactor works on the untransformed var set. This is a problem since we need to
-    // look for the loop after Split to rfactor.
-    auto bt_body = te::NodeFinder<te::ReduceOp>::find(loop.root_stmt())[0];
-    loop.rfactor(bt_body, mi->var());
-  }
+  loop.reorderAxis(mo, mi);
+  loops = loop.getLoopStmtsFor(BT);
+  auto bt_body = const_cast<te::Stmt*>(loop.getAllWritesToBuf(BT->buf())[1]);
+  TORCH_CHECK(loop.rfactor(bt_body, loops.at(0), &rfac_buf));
+  loop.reorderAxis(loops.at(0), loops.at(1));
+
+  loops = loop.getAllInnermostLoopsWritingToBuf(rfac_buf);
+  TORCH_CHECK(loops.size() == 2);
+  loop.vectorize(loops.at(1));
 
   loop.prepareForCodegen();
   te::Stmt* s = loop.root_stmt();
@@ -386,61 +383,4 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
   }
 }
 
-// TODO: add this back when the problem is fixed
-// BENCHMARK_REGISTER_F(Reduce1D, TeRfactorV1)->Args({1 << 24});
-
-// Similar to TeRfactor itself. But manually constructed the Split expression.
-BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV2)(benchmark::State& state) {
-  te::KernelScope ks;
-
-  int M = A.numel();
-  const int kChunkSize = 8;
-  TORCH_CHECK(M % kChunkSize == 0);
-
-  te::Placeholder AP(te::BufHandle("A", {M}, te::kFloat));
-  te::Tensor* BT = te::Reduce(
-      "reduce_full",
-      {},
-      te::Sum(),
-      [&](const te::ExprHandle& mo, const te::ExprHandle& mi) {
-        return AP.load(mo * kChunkSize + mi);
-      },
-      {{M / kChunkSize, "mo"}, {kChunkSize, "mi"}});
-
-  te::LoopNest loop({BT});
-
-  {
-    auto const& loops = loop.getLoopStmtsFor(BT);
-    TORCH_CHECK(loops.size() == 2);
-    te::For* mo = loops[0];
-    te::For* mi = loops[1];
-    auto bt_body = te::NodeFinder<te::ReduceOp>::find(loop.root_stmt())[0];
-    loop.rfactor(bt_body, mi->var());
-  }
-
-  {
-    // Look for the new For and vectorize, but rfactor didn't return the newly added "For *".
-    // Resort to a hack to find the lost "For *".
-    // TODO: make it easier to find the transformed loop after rfactor.
-    auto loops = te::NodeFinder<te::For>::find(loop.root_stmt());
-    TORCH_CHECK(loops.size() == 4);
-    auto mi = loops[2];
-    loop.vectorize(mi);
-  }
-
-  loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
-  s = te::IRSimplifier::simplify(s);
-  auto cg = CreateCodeGen("llvm_codegen", s, {AP, BT});
-
-  auto func = [&](at::Tensor& A, at::Tensor& B) {
-    cg->call({A.data_ptr<float>(), B.data_ptr<float>()});
-  };
-
-  ValidateFunc(func, "reduce1d_te_naive", A, B);
-  for (auto _ : state) {
-    func(A, B);
-  }
-}
-
-BENCHMARK_REGISTER_F(Reduce1D, TeRfactorV2)->Args({1 << 24});
+BENCHMARK_REGISTER_F(Reduce1D, TeRfactorV1)->Args({1 << 24});
