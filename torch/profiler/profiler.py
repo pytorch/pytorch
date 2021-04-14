@@ -78,26 +78,27 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None):
 
 
 class profile(object):
-    """
-    Profiler context manager.
+    """Profiler context manager.
 
     Args:
-
-    - ``activities`` - list of activity groups (CPU, CUDA) to use in profiling, supported values:
-      ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``;
-      default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA;
-    - ``schedule`` - callable that takes step (int) as a single parameter and returns
-      ``ProfilerAction`` value that specifies the profiler action to perform at each step;
-    - ``on_trace_ready`` - callable that is called at each step when ``schedule`` returns ``ProfilerAction.RECORD_AND_SAVE``
-      during the profiling;
-    - ``record_shapes`` - save information about operator's input shapes;
-    - ``profile_memory`` - track tensor memory allocation/deallocation;
-    - ``with_stack`` - record source information (file and line number) for the ops;
-    - ``with_flops`` - use formula to estimate the FLOPS of specific operators (matrix multiplication and 2D convolution);
-    - ``use_cuda`` - (deprecated, use ``activities``).
+        activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+        schedule (callable): callable that takes step (int) as a single parameter and returns
+            ``ProfilerAction`` value that specifies the profiler action to perform at each step.
+        on_trace_ready (callable): callable that is called at each step when ``schedule``
+            returns ``ProfilerAction.RECORD_AND_SAVE`` during the profiling.
+        record_shapes (bool): save information about operator's input shapes.
+        profile_memory (bool): track tensor memory allocation/deallocation.
+        with_stack (bool): record source information (file and line number) for the ops.
+        with_flops (bool): use formula to estimate the FLOPS of specific operators
+            (matrix multiplication and 2D convolution).
+        use_cuda (bool):
+            .. deprecated:: 1.8.1
+                use ``activities`` instead.
 
     .. note::
-        Use ``torch.profiler.schedule`` to generate the callable schedule.
+        Use :func:`~torch.profiler.schedule` to generate the callable schedule.
         Non-default schedules are useful when profiling long training jobs
         and allow the user to obtain multiple traces at the different iterations
         of the training process.
@@ -105,7 +106,7 @@ class profile(object):
         duration of the context manager.
 
     .. note::
-        Use ``torch.profiler.tensorboard_trace_handler`` to generate result files for TensorBoard:
+        Use :func:`~torch.profiler.tensorboard_trace_handler` to generate result files for TensorBoard:
 
         ``on_trace_ready=torch.profiler.tensorboard_trace_handler(dir_name)``
 
@@ -114,7 +115,8 @@ class profile(object):
         ``tensorboard --logdir dir_name``
 
         to see the results in TensorBoard.
-        For more information, see `Pytorch Profiler <https://github.com/pytorch/kineto/tree/master/tb_plugin>`__
+        For more information, see
+        `PyTorch Profiler TensorBoard Plugin <https://github.com/pytorch/kineto/tree/master/tb_plugin>`__
 
     .. note::
         Enabling shape and stack tracing results in additional overhead.
@@ -126,7 +128,8 @@ class profile(object):
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA]
+                torch.profiler.ProfilerActivity.CUDA,
+            ]
         ) as p:
             code_to_profile()
         print(p.key_averages().table(
@@ -147,7 +150,8 @@ class profile(object):
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA],
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
 
             # In this example with wait=1, warmup=1, active=2,
             # profiler will skip the first step/iteration,
@@ -297,13 +301,11 @@ class profile(object):
         return self.profiler.export_chrome_trace(path)
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
-        """
-        Save stack traces in a file in a format suitable for visualization.
+        """Save stack traces in a file in a format suitable for visualization.
 
         Args:
-
-        - ``path`` - save stacks file to this location;
-        - ``metric`` - metric to use: "self_cpu_time_total" or "self_cuda_time_total"
+            path (str): save stacks file to this location;
+            metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
 
         .. note::
             Example of using FlameGraph tool:
@@ -316,11 +318,12 @@ class profile(object):
         return self.profiler.export_stacks(path, metric)
 
     def key_averages(self, group_by_input_shape: bool = False, group_by_stack_n: int = 0):
-        """
-        Averages events, grouping them by operator name and (optionally) input shapes and
+        """Averages events, grouping them by operator name and (optionally) input shapes and
         stack.
-        Note: to use shape/stack functionality make sure to set record_shapes/with_stack
-        when creating profiler context manager.
+
+        .. note::
+            To use shape/stack functionality make sure to set record_shapes/with_stack
+            when creating profiler context manager.
         """
         assert self.profiler
         return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
