@@ -10,6 +10,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import num_profiled_runs
+from typing import Tuple, List
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -48,6 +49,27 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
+
+    def test_requires_grad(self):
+
+        class Mod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.var = torch.autograd.Variable(torch.randn(2), requires_grad=True)
+
+            @torch.jit.script_method
+            def forward(self, input: torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+                var_lst = [self.var]
+                var = torch.cat(var_lst)
+                output = var + input
+                return output, var_lst
+
+        mod = Mod()
+        for i in range(2):
+            input = torch.randn((2,))
+            output, var_lst = mod.forward(input)
+            loss = torch.cat(var_lst).sum()
+            loss.backward()
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Simple Executor doesn't support gradients")
     def test_prune_grad(self):
