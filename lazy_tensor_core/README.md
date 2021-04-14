@@ -12,6 +12,32 @@ In general, lazy tensors follow PyTorch APIs. Some additional lazy_tensor_core s
 See the [API Guide](API_GUIDE.md) for best practices when writing networks that
 run on deep learning accelerators.
 
+## Adding Vendor Backends
+
+Executing a computation for tensors on the lazy device requires a vendor backend.
+If such a backend isn't implemented and registered, attempting to run such a
+computation will fail with an error message indicating the missing implementation.
+
+The `BackendImplInterface` coordinates the several major pieces required to implement
+a vendor backend. A `BackendRegistrar` helper is provided to register the backend
+once it's implemented. The forementioned major pieces of a backend are defined by
+the following interfaces:
+
+* `NodeLowering`, which provides a way to lower PyTorch tensor operations to code
+  for the accelerator.
+* `ComputationClient`, which defines tensor transfers to and from the accelerator
+  memory and launching computations.
+* `LoweringContext`, which provides state tracking to be used by code generation.
+
+The current interfaces are subject to frequent changes and improvements as we learn
+from vendor needs. We recommend tracking them and adjusting as needed until we
+achieve a high degree of stability.
+
+A re-implementation of PyTorch/XLA using this arhitecture [is available](https://github.com/pytorch/xla/tree/asuhan/xla_ltc_plugin),
+reusing large parts of upstream PyTorch/XLA. Besides the in-line documentation
+in the interfaces mentioned above, it provides a realistic example of a vendor
+plug-in.
+
 ## <a name="Troubleshooting"></a> Troubleshooting
 
 If an accelerator integration using this infrastructure isn't performing as expected,
