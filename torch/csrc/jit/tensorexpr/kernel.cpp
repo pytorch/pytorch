@@ -233,7 +233,7 @@ static std::vector<ExprHandle> computeIndicesToBroadcast(
 ExprHandle TensorExprKernel::broadcast(
     Tensor* t,
     const std::vector<ExprHandle>& axes) {
-  return t->call(computeIndicesToBroadcast(
+  return t->load(computeIndicesToBroadcast(
       axes, ExprVectorToExprHandleVector(t->buf()->dims())));
 }
 
@@ -256,7 +256,7 @@ ExprHandle TensorExprKernel::chunk(
     }
   }
 
-  return t->call(indices);
+  return t->load(indices);
 }
 
 ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
@@ -2154,21 +2154,21 @@ Tensor* TensorExprKernel::computeSoftmax(
       Compute("aten_softmax_exp", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             v->node()->input(0), convert_indices_to_expr_handle(indices));
-        return exp(inp - max->call(remove_softmax_dim_index(indices)));
+        return exp(inp - max->load(remove_softmax_dim_index(indices)));
       });
   auto sum = Reduce(
       "aten_softmax_sum",
       non_softmax_dims,
       Sum(),
       [&](ParameterList& indices) {
-        return e->call(move_softmax_dim_index_to_pos(indices));
+        return e->load(move_softmax_dim_index_to_pos(indices));
       },
       {output_dims[softmax_dim]});
   if (!log_softmax) {
     auto result =
         Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
-          return e->call(indices) /
-              sum->call(remove_softmax_dim_index(indices));
+          return e->load(indices) /
+              sum->load(remove_softmax_dim_index(indices));
         });
     return new Tensor(
         result->buf(),
@@ -2177,15 +2177,15 @@ Tensor* TensorExprKernel::computeSoftmax(
 
   auto log_sum = Compute(
       "aten_softmax_log_sum", non_softmax_dims, [&](ParameterList& indices) {
-        return log(sum->call(indices));
+        return log(sum->load(indices));
       });
   auto result =
       Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             v->node()->input(0), convert_indices_to_expr_handle(indices));
         auto non_softmax_indices = remove_softmax_dim_index(indices);
-        return inp - max->call(non_softmax_indices) -
-            log_sum->call(non_softmax_indices);
+        return inp - max->load(non_softmax_indices) -
+            log_sum->load(non_softmax_indices);
       });
   return new Tensor(
       result->buf(),
@@ -2273,10 +2273,9 @@ Tensor* TensorExprKernel::computeCatWoConditionals(const torch::jit::Value* v) {
       }
     }
     auto inp_buf = tensors_.at(inp)->buf();
-    auto load_expr = new Load(inp_buf, load_indices, new IntImm(1));
+    auto load_expr = new Load(inp_buf, load_indices);
     auto load_promoted = promoteToDtype(ExprHandle(load_expr), highType);
-    Stmt* st = new Store(
-        output_buf, store_indices, load_promoted.node(), new IntImm(1));
+    Stmt* st = new Store(output_buf, store_indices, load_promoted.node());
     for (size_t i = dims.size(); i > 0; --i) {
       st = new For(for_vars[i - 1], new IntImm(0), dims[i - 1].node(), st);
     }
@@ -2446,7 +2445,7 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
               Mod::make(absolute_position, IntImm::make(stride));
           new_axes[stride_index] = index;
         }
-        return tensor->call(new_axes);
+        return tensor->load(new_axes);
       });
 }
 

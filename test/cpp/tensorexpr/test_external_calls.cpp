@@ -388,7 +388,7 @@ TEST(ExternalCall, ComputeInterop) {
           const VarHandle& c,
           const VarHandle& h,
           const VarHandle& w) {
-        return ConvResult->call(n, c, h, w) + MatmulResult->call(n, c, h, w);
+        return ConvResult->load(n, c, h, w) + MatmulResult->load(n, c, h, w);
       });
 
   LoopNest l({Input, Weight, ConvResult, MatmulResult, Result});
@@ -463,7 +463,7 @@ TEST(ExternalCall, Inlining) {
       "Result",
       {{8, "i"}, {8, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return MatmulResult->call(i, j) + FloatImm::make(3.0f);
+        return MatmulResult->load(i, j) + FloatImm::make(3.0f);
       });
 
   Stmt* root_stmt =
