@@ -452,22 +452,20 @@ std::vector<int64_t> ComputeShapeFromReshape(
   }
   std::vector<int64_t> final_shape;
   // shape_ratio is used to calculate the real value of -1.
-  // it is updated on each dimension to avoid overflow.
+  // One example with reshape 0 and -1:
+  // input_shape = 2 16 5 4
+  // reshape = -1 0 4
+  // final_shape = 10 16 4
   double shape_ratio = 1.0;
   for (auto i = 0; i < input_shape_size; i++) {
-    if (i < minus_one_pos) {
+    shape_ratio *= static_cast<double>(input_shape[i]);
+  }
+  for (auto i = 0; i < reshape_size; i++) {
+    if (i != minus_one_pos) {
       if (reshape[i] != 0) {
-        shape_ratio *= static_cast<double>(input_shape[i]) / reshape[i];
-      }
-    } else if (minus_one_pos > -1) {
-      if (i < input_shape_size - reshape_size + minus_one_pos + 1) {
-        shape_ratio *= static_cast<double>(input_shape[i]);
+        shape_ratio /= static_cast<double>(reshape[i]);
       } else {
-        auto reshape_idx = i - input_shape_size + reshape_size;
-        if (reshape[reshape_idx] != 0) {
-          shape_ratio *=
-              static_cast<double>(input_shape[i]) / reshape[reshape_idx];
-        }
+        shape_ratio /= static_cast<double>(input_shape[i]);
       }
     }
   }
@@ -479,7 +477,7 @@ std::vector<int64_t> ComputeShapeFromReshape(
   final_shape.push_back(static_cast<int64_t>(std::round(shape_ratio)));
   for (auto i = minus_one_pos + 1; i < reshape_size; i++) {
     int64_t cur_shape = reshape[i] == 0
-        ? input_shape[i + input_shape_size - reshape_size]
+        ? input_shape[i]
         : reshape[i];
     final_shape.push_back(cur_shape);
   }
