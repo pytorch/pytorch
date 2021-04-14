@@ -273,6 +273,11 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
+  if (owns_pyobj_) {
+    TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
+    impl::GetPythonHooks()->py_decref(pyobj_);
+    pyobj_ = nullptr;  // for safety
+  }
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
@@ -470,6 +475,18 @@ void SetAutogradMetaFactory(AutogradMetaFactory* factory) {
 AutogradMetaFactory* GetAutogradMetaFactory() {
   TORCH_CHECK(meta_factory, "Support for autograd has not been loaded; have you linked against libtorch.so?")
   return meta_factory;
+}
+
+namespace {
+PythonHooks* python_hooks = nullptr;
+}
+
+void SetPythonHooks(PythonHooks* hooks) {
+  python_hooks = hooks;
+}
+PythonHooks* GetPythonHooks() {
+  TORCH_INTERNAL_ASSERT(python_hooks, "Attempted to use Python functionality without linking against libtorch_python.so")
+  return python_hooks;
 }
 
 } // namespace impl

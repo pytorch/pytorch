@@ -416,4 +416,18 @@ ScalarType get_default_scalar_type() {
   return typeMetaToScalarType(get_default_dtype());
 }
 
+struct ConcretePythonHooks : public c10::impl::PythonHooks {
+  void py_decref(void* _pyobj) const override {
+    pybind11::gil_scoped_acquire gil;
+    PyObject* pyobj = static_cast<PyObject*>(_pyobj);
+    // TODO This assert is not generally true for the op described here;
+    // rename method
+    TORCH_INTERNAL_ASSERT(Py_REFCNT(pyobj) == 1);
+    Py_DECREF(pyobj);
+  };
+};
+
+ConcretePythonHooks python_hooks;
+static c10::impl::PythonHooksRegisterer python_hooks_registerer(&python_hooks);
+
 }} // namespace torch::tensors

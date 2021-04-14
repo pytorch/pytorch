@@ -12,7 +12,7 @@
 struct THPVariable {
     PyObject_HEAD
     // Payload
-    torch::autograd::Variable cdata;
+    c10::MaybeOwned<at::Tensor> cdata;
     // Hooks to be run on backwards pass (corresponds to Python attr
     // '_backwards_hooks', set by 'register_hook')
     PyObject* backward_hooks = nullptr;
@@ -47,7 +47,7 @@ inline bool THPVariable_Check(PyObject *obj)
 }
 
 inline const at::Tensor& THPVariable_Unpack(THPVariable* var) {
-  return var->cdata;
+  return *var->cdata;
 }
 
 inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {
