@@ -9,7 +9,8 @@ class SyncBatchNorm(Function):
     def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group, world_size):
         if not input.is_contiguous(memory_format=torch.channels_last):
             input = input.contiguous()
-        weight = weight.contiguous()
+        if weight is not None:
+            weight = weight.contiguous()
 
         size = int(input.numel() // input.size(1))
         if size == 1 and world_size < 2:

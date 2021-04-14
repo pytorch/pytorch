@@ -220,7 +220,8 @@ class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
 
-    For bags of constant length and no :attr:`per_sample_weights` and 2D inputs, this class
+    For bags of constant length, no :attr:`per_sample_weights`, no indices equal to :attr:`padding_idx`,
+    and with 2D inputs, this class
 
         * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=1)``,
         * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=1)``,
@@ -231,7 +232,7 @@ class EmbeddingBag(Module):
 
     EmbeddingBag also supports per-sample weights as an argument to the forward
     pass. This scales the output of the Embedding before performing a weighted
-    reduction as specified by ``mode``. If :attr:`per_sample_weights`` is passed, the
+    reduction as specified by ``mode``. If :attr:`per_sample_weights` is passed, the
     only supported ``mode`` is ``"sum"``, which computes a weighted sum according to
     :attr:`per_sample_weights`.
 
@@ -254,52 +255,43 @@ class EmbeddingBag(Module):
                                  supported when ``mode="max"``.
         include_last_offset (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
                                       is equivalent to the size of `indices`. This matches the CSR format.
+        padding_idx (int, optional): If given, indicates which indices in :attr:`input` represent padding. When
+                                     a :attr:`padding_idx` is encountered in :attr:`input` during a reduction,
+                                     it is skipped. This allows each bag to be a different logical size.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
                          initialized from :math:`\mathcal{N}(0, 1)`.
 
-    Inputs: :attr:`input` (IntTensor or LongTensor), :attr:`offsets` (IntTensor or LongTensor, optional), and
-        :attr:`per_index_weights` (Tensor, optional)
-
-        - :attr:`input` and :attr:`offsets` have to be of the same type, either int or long
-
-        - If :attr:`input` is 2D of shape `(B, N)`,
-
-          it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
-          this will return ``B`` values aggregated in a way depending on the :attr:`mode`.
-          :attr:`offsets` is ignored and required to be ``None`` in this case.
-
-        - If :attr:`input` is 1D of shape `(N)`,
-
-          it will be treated as a concatenation of multiple bags (sequences).
-          :attr:`offsets` is required to be a 1D tensor containing the
-          starting index positions of each bag in :attr:`input`. Therefore,
-          for :attr:`offsets` of shape `(B)`, :attr:`input` will be viewed as
-          having ``B`` bags. Empty bags (i.e., having 0-length) will have
-          returned vectors filled by zeros.
-
-        per_sample_weights (Tensor, optional): a tensor of float / double weights, or None
-            to indicate all weights should be taken to be ``1``. If specified, :attr:`per_sample_weights`
-            must have exactly the same shape as input and is treated as having the same
-            :attr:`offsets`, if those are not ``None``. Only supported for ``mode='sum'``.
-
-
-    Output shape: `(B, embedding_dim)`
-
     Examples::
 
-        >>> # an Embedding module containing 10 tensors of size 3
+        >>> # an EmbeddingBag module containing 10 tensors of size 3
         >>> embedding_sum = nn.EmbeddingBag(10, 3, mode='sum')
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.LongTensor([1,2,4,5,4,3,2,9])
-        >>> offsets = torch.LongTensor([0,4])
+        >>> input = torch.tensor([1,2,4,5,4,3,2,9], dtype=torch.long)
+        >>> offsets = torch.tensor([0,4], dtype=torch.long)
         >>> embedding_sum(input, offsets)
         tensor([[-0.8861, -5.4350, -0.0523],
                 [ 1.1306, -2.5798, -1.0044]])
+
+        >>> # Example with padding_idx
+        >>> embedding_sum = nn.EmbeddingBag(10, 3, mode='sum', padding_idx=2)
+        >>> input = torch.tensor([2, 2, 2, 2, 4, 3, 2, 9], dtype=torch.long)
+        >>> offsets = torch.tensor([0,4], dtype=torch.long)
+        >>> embedding_sum(input, offsets)
+        tensor([[ 0.0000,  0.0000,  0.0000],
+                [-0.7082,  3.2145, -2.6251]])
+
+        >>> # An EmbeddingBag can be loaded from an Embedding like so
+        >>> embedding = nn.Embedding(10, 3, padding_idx=2)
+        >>> embedding_sum = nn.EmbeddingBag.from_pretrained(
+                embedding.weight,
+                padding_idx=embedding.padding_idx,
+                mode='sum')
     """
     __constants__ = ['num_embeddings', 'embedding_dim', 'max_norm', 'norm_type',
-                     'scale_grad_by_freq', 'mode', 'sparse', 'include_last_offset']
+                     'scale_grad_by_freq', 'mode', 'sparse', 'include_last_offset',
+                     'padding_idx']
 
     num_embeddings: int
     embedding_dim: int
@@ -310,17 +302,25 @@ class EmbeddingBag(Module):
     mode: str
     sparse: bool
     include_last_offset: bool
+    padding_idx: Optional[int]
 
     def __init__(self, num_embeddings: int, embedding_dim: int,
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
                  mode: str = 'mean', sparse: bool = False, _weight: Optional[Tensor] = None,
-                 include_last_offset: bool = False) -> None:
+                 include_last_offset: bool = False, padding_idx: Optional[int] = None) -> None:
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.max_norm = max_norm
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
+        if padding_idx is not None:
+            if padding_idx > 0:
+                assert padding_idx < self.num_embeddings, 'padding_idx must be within num_embeddings'
+            elif padding_idx < 0:
+                assert padding_idx >= -self.num_embeddings, 'padding_idx must be within num_embeddings'
+                padding_idx = self.num_embeddings + padding_idx
+        self.padding_idx = padding_idx
         if _weight is None:
             self.weight = Parameter(torch.empty(num_embeddings, embedding_dim))
             self.reset_parameters()
@@ -334,12 +334,49 @@ class EmbeddingBag(Module):
 
     def reset_parameters(self) -> None:
         init.normal_(self.weight)
+        self._fill_padding_idx_with_zero()
+
+    def _fill_padding_idx_with_zero(self) -> None:
+        if self.padding_idx is not None:
+            with torch.no_grad():
+                self.weight[self.padding_idx].fill_(0)
 
     def forward(self, input: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None) -> Tensor:
+        """Forward pass of EmbeddingBag.
+
+        Args:
+            input (Tensor): Tensor containing bags of indices into the embedding matrix.
+            offsets (Tensor, optional): Only used when :attr:`input` is 1D. :attr:`offsets` determines
+                the starting index position of each bag (sequence) in :attr:`input`.
+            per_sample_weights (Tensor, optional): a tensor of float / double weights, or None
+                to indicate all weights should be taken to be ``1``. If specified, :attr:`per_sample_weights`
+                must have exactly the same shape as input and is treated as having the same
+                :attr:`offsets`, if those are not ``None``. Only supported for ``mode='sum'``.
+
+        Returns:
+            Tensor output shape of `(B, embedding_dim)`.
+
+        .. note::
+
+            A few notes about ``input`` and ``offsets``:
+
+            - :attr:`input` and :attr:`offsets` have to be of the same type, either int or long
+
+            - If :attr:`input` is 2D of shape `(B, N)`, it will be treated as ``B`` bags (sequences)
+              each of fixed length ``N``, and this will return ``B`` values aggregated in a way
+              depending on the :attr:`mode`. :attr:`offsets` is ignored and required to be ``None`` in this case.
+
+            - If :attr:`input` is 1D of shape `(N)`, it will be treated as a concatenation of
+              multiple bags (sequences).  :attr:`offsets` is required to be a 1D tensor containing the
+              starting index positions of each bag in :attr:`input`. Therefore, for :attr:`offsets` of shape `(B)`,
+              :attr:`input` will be viewed as having ``B`` bags. Empty bags (i.e., having 0-length) will have
+              returned vectors filled by zeros.
+        """
         return F.embedding_bag(input, self.weight, offsets,
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse,
-                               per_sample_weights, self.include_last_offset)
+                               per_sample_weights, self.include_last_offset,
+                               self.padding_idx)
 
     def extra_repr(self) -> str:
         s = '{num_embeddings}, {embedding_dim}'
@@ -350,12 +387,15 @@ class EmbeddingBag(Module):
         if self.scale_grad_by_freq is not False:
             s += ', scale_grad_by_freq={scale_grad_by_freq}'
         s += ', mode={mode}'
+        if self.padding_idx is not None:
+            s += ', padding_idx={padding_idx}'
         return s.format(**self.__dict__)
 
     @classmethod
     def from_pretrained(cls, embeddings: Tensor, freeze: bool = True, max_norm: Optional[float] = None,
                         norm_type: float = 2., scale_grad_by_freq: bool = False,
-                        mode: str = 'mean', sparse: bool = False, include_last_offset: bool = False) -> 'EmbeddingBag':
+                        mode: str = 'mean', sparse: bool = False, include_last_offset: bool = False,
+                        padding_idx: Optional[int] = None) -> 'EmbeddingBag':
         r"""Creates EmbeddingBag instance from given 2-dimensional FloatTensor.
 
         Args:
@@ -369,6 +409,7 @@ class EmbeddingBag(Module):
             mode (string, optional): See module initialization documentation. Default: ``"mean"``
             sparse (bool, optional): See module initialization documentation. Default: ``False``.
             include_last_offset (bool, optional): See module initialization documentation. Default: ``False``.
+            padding_idx (int, optional): See module initialization documentation. Default: ``None``.
 
         Examples::
 
@@ -392,6 +433,7 @@ class EmbeddingBag(Module):
             scale_grad_by_freq=scale_grad_by_freq,
             mode=mode,
             sparse=sparse,
-            include_last_offset=include_last_offset)
+            include_last_offset=include_last_offset,
+            padding_idx=padding_idx)
         embeddingbag.weight.requires_grad = not freeze
         return embeddingbag

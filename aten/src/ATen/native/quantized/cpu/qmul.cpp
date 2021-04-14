@@ -105,7 +105,7 @@ class QMul final {
   static Tensor run(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     check_inputs(qa, qb);
     auto qc = at::_empty_affine_quantized(
-        DimVector(infer_size(qa.sizes(), qb.sizes())),
+        infer_size_dimvector(qa.sizes(), qb.sizes()),
         at::device(kCPU).dtype(qa.scalar_type()),
         scale,
         zero_point,

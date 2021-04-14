@@ -26,7 +26,7 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
  public:
   CUDAFuture(at::TypePtr type) : at::ivalue::Future(std::move(type)) {
     // Use current device to initialize currentDevice_. This is necessary
-    // because postMarkCompletedHook won't be called when the Future contains
+    // because preMarkCompletedHook won't be called when the Future contains
     // an error. Uninitialized currentDevice_ could lead to crash when used
     // in CUDAGuard.
     currentDevice_ = c10::cuda::current_device();
@@ -45,7 +45,7 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
    * given IValue by walking through all subvalues and extracting data pointers
    * from CUDA tensors.
    */
-  void postMarkCompletedHook(
+  void preMarkCompletedHook(
       const at::IValue& value,
       c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
           dataPtrs) override {

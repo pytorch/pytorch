@@ -7,16 +7,14 @@
 NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
 @implementation MetalCommandBuffer {
   NSMutableArray* _images;
-  NSMutableArray<id<PTMetalCommandBufferDelegate>>* _delegates;
-  std::mutex _mutex;
+  NSMutableSet<id<PTMetalCommandBufferDelegate>>* _delegates;
 }
 
 + (MetalCommandBuffer*)newBuffer {
   MetalCommandBuffer* cb = [MetalCommandBuffer new];
   cb->_buffer = [[MPSCNNContext sharedInstance].commandQueue commandBuffer];
-  cb->_thread = [NSThread currentThread];
   cb->_images = [NSMutableArray new];
-  cb->_delegates = [NSMutableArray new];
+  cb->_delegates = [NSMutableSet new];
   return cb;
 }
 
@@ -26,32 +24,28 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
   NSMutableDictionary* dict = [thd threadDictionary];
   MetalCommandBuffer* cb = dict[thread_local_storage_key];
   if (!cb) {
-    cb = [MetalCommandBuffer new];
-    cb->_buffer = [[MPSCNNContext sharedInstance].commandQueue commandBuffer];
-    cb->_thread = thd;
-    cb->_images = [NSMutableArray new];
-    cb->_delegates = [NSMutableArray new];
+    cb = [MetalCommandBuffer newBuffer];
     dict[thread_local_storage_key] = cb;
   }
   return cb;
 }
 
 - (void)addDelegate:(id<PTMetalCommandBufferDelegate>)delegate {
-  if ([_delegates containsObject:delegate]) {
-    [_delegates removeObject:delegate];
+  if (delegate) {
+    [_delegates addObject:delegate];
   }
-  [_delegates addObject:delegate];
 }
 
 - (void)removeDelegate:(id<PTMetalCommandBufferDelegate>)delegate {
-  [_delegates removeObject:delegate];
+  if (delegate) {
+    [_delegates removeObject:delegate];
+  }
 }
 
 - (void)add:(MPSTemporaryImage*)image {
   if (![image isTemporaryImage]) {
     return;
   }
-  std::lock_guard<std::mutex> g(_mutex);
   [_images addObject:image];
 }
 
@@ -59,7 +53,6 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
   if (![image isTemporaryImage]) {
     return;
   }
-  std::lock_guard<std::mutex> g(_mutex);
   [_images removeObject:image];
 }
 
@@ -91,7 +84,8 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
 - (void)cleanup {
   [_images removeAllObjects];
   [_delegates removeAllObjects];
-  [[_thread threadDictionary] removeObjectForKey:thread_local_storage_key];
+  _buffer = nil;
+  [[NSThread currentThread].threadDictionary removeObjectForKey:thread_local_storage_key];
 }
 
 - (BOOL)isEqual:(id)object {
@@ -99,7 +93,7 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
     return NO;
   }
   MetalCommandBuffer* mc = (MetalCommandBuffer*)object;
-  return (_thread == mc.thread && _buffer == mc.buffer);
+  return _buffer == mc.buffer;
 }
 
 @end
