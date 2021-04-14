@@ -29,6 +29,7 @@ torch::Tensor RoIAlign(
     bool aligned,
     c10::optional<std::vector<torch::Tensor>>
                                 ) {
+    TORCH_CHECK(features.is_metal());
     TORCH_CHECK(features.size(0) == 1);
     TORCH_CHECK(rois.dim() == 2);
     TORCH_CHECK(rois.size(1) == 4 || rois.size(1) == 5);
@@ -48,6 +49,9 @@ torch::Tensor RoIAlign(
     std::vector<int64_t> outputSize {rois.size(0), features.size(1), aligned_height, aligned_width};
     MetalTensorImplStorage mt{outputSize};
     MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(features);
+    if(!commandBuffer || !commandBuffer.buffer) {
+        commandBuffer = [MetalCommandBuffer currentBuffer];
+    }
     mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
     MPSImage* Y = mt.texture()->image();
     id<MTLComputeCommandEncoder> encoder =

@@ -15,6 +15,7 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
   cb->_buffer = [[MPSCNNContext sharedInstance].commandQueue commandBuffer];
   cb->_images = [NSMutableArray new];
   cb->_delegates = [NSMutableSet new];
+  [NSThread currentThread].threadDictionary[thread_local_storage_key] = cb;
   return cb;
 }
 
