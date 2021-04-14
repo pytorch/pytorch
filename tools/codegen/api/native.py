@@ -4,7 +4,8 @@ from tools.codegen.model import (Argument, FunctionSchema, Return,
 
 from tools.codegen.api.types import (ArgName, BaseCType, Binding,
                                      ConstRefCType, CType, MutRefCType,
-                                     OptionalCType)
+                                     OptionalCType,
+                                     ListCType)
 from tools.codegen.api import cpp
 
 from typing import Union, Sequence, List, Optional
