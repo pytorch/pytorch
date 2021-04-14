@@ -9,7 +9,12 @@ from torch.fx.graph import Node
 
 from .utils import getattr_from_fqn, return_first_non_observer_node
 
-from typing import List
+from .ns_types import (
+    NSSingleResultValuesType,
+    NSSingleResultType,
+)
+
+from typing import List, Optional, Set, Tuple, Callable
 
 def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
     # TODO(future PR): handle QAT variants
@@ -120,3 +125,78 @@ def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
         #   caller can handle the unpacking
         (weight, _bias), _name = packed_weight.__getstate__()
         return weight
+
+def extract_weight_from_node(
+    node: Node,
+    gm: GraphModule,
+    type_a_related_to_b: Set[Tuple[Callable, Callable]],
+) -> Optional[NSSingleResultType]:
+    res_type = NSSingleResultValuesType.WEIGHT.value
+    if node.op == 'call_function':
+
+        # linear
+        # TODO(future PR): other function types
+        related_to_linear = node.target in (F.linear,) or \
+            (node.target, F.linear) in type_a_related_to_b
+        related_to_conv2d = node.target in (F.conv2d,) or \
+            (node.target, F.conv2d) in type_a_related_to_b
+        related_to_conv3d = node.target in (F.conv3d,) or \
+            (node.target, F.conv3d) in type_a_related_to_b
+
+        if related_to_linear:
+            weight = get_linear_fun_weight(node, gm)
+            return {
+                'type': res_type,
+                'values': [weight],
+                'prev_node_name': node.name,
+                'prev_node_target_type': str(node.target),
+                'ref_node_name': node.name,
+                'index_within_arg': 0,
+            }
+        elif (related_to_conv2d or related_to_conv3d):
+            weight = get_conv_fun_weight(node, gm)
+            return {
+                'type': res_type,
+                'values': [weight],
+                'prev_node_name': node.name,
+                'prev_node_target_type': str(node.target),
+                'ref_node_name': node.name,
+                'index_within_arg': 0,
+            }
+
+    else:  # call_module
+        # for call_module, we need to look up the modules to do the type check
+        assert isinstance(node.target, str)
+        mod = getattr_from_fqn(gm, node.target)
+
+        # check that A is one the modules we need
+        # assume B is related (this is done by graph matcher)
+        # TODO(future PR): 1d and 3d convs
+        related_to_conv1d_mod = isinstance(mod, nn.Conv1d) or \
+            (type(mod), nn.Conv1d) in type_a_related_to_b
+        related_to_conv2d_mod = isinstance(mod, nn.Conv2d) or \
+            (type(mod), nn.Conv2d) in type_a_related_to_b
+        related_to_conv3d_mod = isinstance(mod, nn.Conv3d) or \
+            (type(mod), nn.Conv3d) in type_a_related_to_b
+        related_to_linear_mod = isinstance(mod, nn.Linear) or \
+            (type(mod), nn.Linear) in type_a_related_to_b
+        related_to_lstm_mod = isinstance(mod, nn.LSTM) or \
+            (type(mod), nn.LSTM) in type_a_related_to_b
+
+        # TODO(future PR): other module types
+        if related_to_conv1d_mod or related_to_conv2d_mod or related_to_conv3d_mod:
+            weights = [get_conv_mod_weight(mod)]
+        elif related_to_lstm_mod:
+            weights = get_lstm_mod_weights(mod)
+        else:
+            assert related_to_linear_mod, f"module type {type(mod)} not handled yet"
+            weights = [get_linear_mod_weight(mod)]
+        return {
+            'type': res_type,
+            'values': weights,
+            'prev_node_name': node.name,
+            'prev_node_target_type': str(type(mod)),
+            'ref_node_name': node.name,
+            'index_within_arg': 0,
+        }
+    return None
