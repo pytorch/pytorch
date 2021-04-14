@@ -81,14 +81,17 @@ class TestFXExperimental(JitTestCase):
             if node.op == "output":
                 node.meta['shape'] = a.shape
                 node.meta['dtype'] = a.dtype
+                node.meta['is_quantized'] = a.is_quantized
         for mod in module_with_submodules.modules():
             if isinstance(mod, GraphModule):
                 for node in mod.graph.nodes:
                     node.meta['shape'] = a.shape
                     node.meta['dtype'] = a.dtype
+                    node.meta['is_quantized'] = a.is_quantized
         for node in module_with_submodules.graph.nodes:
             node.meta['shape'] = a.shape
             node.meta['dtype'] = a.dtype
+            node.meta['is_quantized'] = a.is_quantized
 
         weights1 = {}
         weights2 = {}
@@ -126,9 +129,9 @@ class TestFXExperimental(JitTestCase):
         )
         result = graph_manipulation.serialize_tensor_quantization(q_tensor)
         result2 = graph_manipulation.serialize_tensor_quantization(q_tensor_channel)
-        assert result["q_scheme"] == "torch.per_tensor_affine"
+        assert result["qscheme"] == "torch.per_tensor_affine"
         assert result["q_scale"] == 1.0
-        assert result2["q_scheme"] == "torch.per_channel_affine"
+        assert result2["qscheme"] == "torch.per_channel_affine"
         assert len(result2["q_per_channel_scales"]) == 2
 
     def test_find_single_partition(self):
@@ -1110,7 +1113,7 @@ class {test_classname}(torch.nn.Module):
                 self.rhs = rhs
 
             def forward(self, a, b, c, d, e):
-                s = torch.Tensor((0))
+                s = torch.tensor([])
                 matmuls = []
 
                 # For some reason using a list comprehension or for-loop for this

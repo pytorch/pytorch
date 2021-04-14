@@ -51,8 +51,32 @@ class ShapeProp(torch.fx.Interpreter):
         result = super().run_node(n)
 
         if isinstance(result, torch.Tensor):
-            n.meta['shape'] = result.shape  # type: ignore
-            n.meta['dtype'] = result.dtype  # type: ignore
+            n.meta['shape'] = result.shape
+            n.meta['dtype'] = result.dtype
+            n.meta['stride'] = result.stride()
+            n.meta['is_quantized'] = result.is_quantized
+
+            memory_formats = {
+                torch.contiguous_format,
+                torch.channels_last,
+                torch.channels_last_3d,
+            }
+
+            memory_format = None
+
+            for query_format in memory_formats:
+                if result.is_contiguous(memory_format=query_format):
+                    memory_format = query_format
+                    break
+
+            n.meta['memory_format'] = memory_format
+
+            if n.meta['is_quantized']:
+                n.meta['qscheme'] = result.qscheme()
+
+                if n.meta['qscheme'] in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
+                    n.meta['q_scale'] = result.q_scale()
+                    n.meta['q_zero_point'] = result.q_zero_point()
 
         return result
 
