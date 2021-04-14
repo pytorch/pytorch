@@ -30,7 +30,7 @@ jobs:
           with open('.github/workflows/cancel_redundant_workflows.yml') as f:
                 data = yaml.safe_load(f)
                 workflows_to_cancel = data[True]['workflow_run']['workflows']
-          assert workflows.sort() == workflows_to_cancel.sort()
+          assert sorted(workflows) == sorted(workflows_to_cancel)
         shell: python
       - name: ShellCheck
         # https://github.com/koalaman/shellcheck/tree/v0.7.1#installing-a-pre-compiled-binary
