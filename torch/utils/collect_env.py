@@ -34,6 +34,7 @@ SystemEnv = namedtuple('SystemEnv', [
     'hip_compiled_version',
     'hip_runtime_version',
     'miopen_runtime_version',
+    'caching_allocator_config',
 ])
 
 
@@ -272,6 +273,11 @@ def get_pip_packages(run_lambda):
     return 'pip3', out3
 
 
+def get_cachingallocator_config():
+    ca_config = os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')
+    return ca_config
+
+
 def get_env_info():
     run_lambda = run
     pip_version, pip_list_output = get_pip_packages(run_lambda)
@@ -313,6 +319,7 @@ def get_env_info():
         gcc_version=get_gcc_version(run_lambda),
         clang_version=get_clang_version(run_lambda),
         cmake_version=get_cmake_version(run_lambda),
+        caching_allocator_config=get_cachingallocator_config(),
     )
 
 env_info_fmt = """
