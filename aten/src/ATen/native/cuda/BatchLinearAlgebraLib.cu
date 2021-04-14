@@ -118,6 +118,17 @@ inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
   auto m = cuda_int_cast(A.size(-2), "m");
   auto n = cuda_int_cast(A.size(-1), "n");
 
+  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
+  // cuBLAS from cuda10 and older doesn't work with nrhs == 0 (cuda11 works)
+  // so we need to put this early return
+  if (nrhs == 0) {
+    return;
+  }
+
+  auto batch_size = cuda_int_cast(batchCount(B), "batch_size");
+  auto lda = std::max<int>(1, m);
+  auto ldb = std::max<int>(1, m);
+
   // cuBLAS's requirement
   TORCH_CHECK(
     m >= n,
@@ -125,19 +136,19 @@ inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
 
   // cuBLAS documentation says:
   // Matrices Aarray[i] should not overlap; otherwise, undefined behavior is expected.
-  Tensor B_broadcasted, A_broadcasted;
-  std::tie(B_broadcasted, A_broadcasted) = at::native::_linalg_broadcast_batch_dims(B, A, "cusolver_gels_batched", /*check_inputs=*/false);
+  // explicitly broadcast the batch dimensions of A
+  IntArrayRef A_batch_sizes(A.sizes().data(), A.dim() - 2);
+  IntArrayRef B_batch_sizes(B.sizes().data(), B.dim() - 2);
+  std::vector<int64_t> expand_batch_portion = at::infer_size(A_batch_sizes, B_batch_sizes);
+  expand_batch_portion.insert(expand_batch_portion.end(), {A.size(-2), A.size(-1)});
+  Tensor A_expanded = A.expand({expand_batch_portion});
+  Tensor A_broadcasted = cloneBatchedColumnMajor(A_expanded);
 
-  // cuBLAS batched trsm requires input to be the device array of pointers to device single matrices
-  Tensor A_ptr_array = get_device_pointers<scalar_t>(A);
+  // cuBLAS batched gels requires input to be the device array of pointers to device single matrices
+  Tensor A_ptr_array = get_device_pointers<scalar_t>(A_broadcasted);
   Tensor B_ptr_array = get_device_pointers<scalar_t>(B);
   auto A_ptr_array_data = reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr());
   auto B_ptr_array_data = reinterpret_cast<scalar_t**>(B_ptr_array.data_ptr());
-
-  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
-  auto batch_size = cuda_int_cast(batchCount(B_broadcasted), "batch_size");
-  auto lda = std::max<int>(1, m);
-  auto ldb = std::max<int>(1, m);
 
   auto infos_data = infos.data_ptr<int>();
   auto handle = at::cuda::getCurrentCUDABlasHandle();
