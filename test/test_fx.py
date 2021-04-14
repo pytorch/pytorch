@@ -2561,7 +2561,10 @@ instantiate_device_type_tests(TestOperatorSignatures, globals())
 @skipIfNoTorchVision
 class TestVisionTracing(JitTestCase):
     PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
-    INCONSISTENT_TYPE = (RuntimeError, r"Return value was annotated as having type __torch__.torchvision.models[.\w]+ but is actually of type Tensor")
+    INCONSISTENT_TYPE = (
+        RuntimeError,
+        r"Return value was annotated as having type __torch__.torchvision.models[.\w]+ but is actually of type Tensor"
+    )
 
     UNTRACEABLE_MODELS = {
         "fasterrcnn_resnet50_fpn": PROXY_ITERATED,
@@ -2577,8 +2580,6 @@ class TestVisionTracing(JitTestCase):
     }
 
     output_transform = {
-        "googlenet": lambda x: x.logits,
-        "inception_v3": lambda x: x.logits,
         "fcn_resnet50": lambda x: x["out"],
         "fcn_resnet101": lambda x: x["out"],
         "deeplabv3_resnet50": lambda x: x["out"],
@@ -2594,9 +2595,10 @@ class TestVisionTracing(JitTestCase):
     }
 
     @classmethod
-    def generate_test_fn(cls, name, model, x):
+    def generate_test_fn(cls, name, model_fn, x, kwargs):
         def run_test(self):
-            model.eval()
+            model = model_fn(**kwargs)
+            model = model.eval()
             if name in self.UNTRACEABLE_MODELS:
                 err, exc = self.UNTRACEABLE_MODELS[name]
                 with self.assertRaisesRegex(err, exc):
@@ -2604,6 +2606,9 @@ class TestVisionTracing(JitTestCase):
             else:
                 out_transform = self.output_transform.get(name, lambda x: x)
                 graph : torch.fx.GraphModule = symbolic_trace(model)
+                a = out_transform(model(x))
+                b = out_transform(graph(x))
+                self.assertEqual(a, b)
 
                 if name in self.UNSCRIPTABLE_MODELS:
                     err, exc = self.UNSCRIPTABLE_MODELS[name]
@@ -2611,10 +2616,7 @@ class TestVisionTracing(JitTestCase):
                         script = torch.jit.script(graph)
                 else:
                     script = torch.jit.script(graph)
-                    a = out_transform(model(x))
-                    b = out_transform(graph(x))
                     c = out_transform(script(x))
-                    self.assertEqual(a, b)
                     self.assertEqual(a, c)
 
         return run_test
@@ -2623,49 +2625,48 @@ class TestVisionTracing(JitTestCase):
     def generate_classification_tests(cls):
         for k, v in torchvision_models.__dict__.items():
             if callable(v) and k[0].lower() == k[0] and k[0] != "_":
-                x = torch.rand(1, 3, 299, 299) if k in ['inception_v3'] else torch.rand(1, 3, 224, 224)
-                model = v(num_classes=50)
                 test_name = 'test_torchvision_models_' + k
-                model_test = cls.generate_test_fn(k, model, x)
+                x = torch.rand(1, 3, 299, 299) if k in ['inception_v3'] else torch.rand(1, 3, 224, 224)
+                kwargs = dict(num_classes=50)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
                 setattr(cls, test_name, model_test)
 
     @classmethod
     def generate_segmentation_tests(cls):
         for k, v in torchvision_models.segmentation.__dict__.items():
             if callable(v) and k[0].lower() == k[0] and k[0] != "_":
-                x = torch.rand(1, 3, 32, 32)
-                model = v(num_classes=10, pretrained_backbone=False)
                 test_name = 'test_torchvision_models_segmentation_' + k
-                model_test = cls.generate_test_fn(k, model, x)
+                x = torch.rand(1, 3, 32, 32)
+                kwargs = dict(num_classes=10, pretrained_backbone=False)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
                 setattr(cls, test_name, model_test)
 
     @classmethod
     def generate_detection_tests(cls):
         for k, v in torchvision_models.detection.__dict__.items():
             if callable(v) and k[0].lower() == k[0] and k[0] != "_":
-                x = [torch.rand(3, 300, 300)]
-                model = v(num_classes=10, pretrained_backbone=False)
                 test_name = 'test_torchvision_models_detection_' + k
-                model_test = cls.generate_test_fn(k, model, x)
+                x = [torch.rand(3, 300, 300)]
+                kwargs = dict(num_classes=10, pretrained_backbone=False)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
                 setattr(cls, test_name, model_test)
 
     @classmethod
     def generate_video_tests(cls):
         for k, v in torchvision_models.video.__dict__.items():
             if callable(v) and k[0].lower() == k[0] and k[0] != "_":
-                x = torch.rand(1, 3, 4, 112, 112)
-                model = v(num_classes=50)
                 test_name = 'test_torchvision_models_video_' + k
-                model_test = cls.generate_test_fn(k, model, x)
+                x = torch.rand(1, 3, 4, 112, 112)
+                kwargs = dict(num_classes=50)
+                model_test = cls.generate_test_fn(k, v, x, kwargs)
                 setattr(cls, test_name, model_test)
 
-    # @skipIfNoTorchVision
     @classmethod
     def generate_tests(cls):
         cls.generate_classification_tests()
-        # cls.generate_detection_tests()
-        # cls.generate_segmentation_tests()
-        # cls.generate_video_tests()
+        cls.generate_detection_tests()
+        cls.generate_segmentation_tests()
+        cls.generate_video_tests()
 
 if HAS_TORCHVISION:
     TestVisionTracing.generate_tests()
