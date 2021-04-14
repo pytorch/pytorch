@@ -458,7 +458,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self._test_extract_weights(m, results_len=8)
 
     @skipIfNoFBGEMM
-    def test_extract_weights_fun(self):
+    def test_extract_weights_linear_fun(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -473,6 +473,38 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 return x
 
         m = M().eval()
+        self._test_extract_weights(m, results_len=2)
+
+    @skipIfNoFBGEMM
+    def test_extract_weights_conv_fun(self):
+        # TODO(future PR): add conv1d, needs a quantization fix
+        class M(torch.nn.Module):
+            def __init__(self, weight2d, weight3d, bias):
+                super().__init__()
+                self.weight2d = torch.nn.Parameter(weight2d)
+                self.weight3d = torch.nn.Parameter(weight3d)
+                self.bias = torch.nn.Parameter(bias)
+                self.stride2d = (1, 1)
+                self.padding2d = (0, 0)
+                self.dilation2d = (1, 1)
+                self.groups = 1
+                self.stride3d = (1, 1, 1)
+                self.padding3d = (0, 0, 0)
+                self.dilation3d = (1, 1, 1)
+
+            def forward(self, x):
+                x = F.conv2d(
+                    x, self.weight2d, self.bias, self.stride2d, self.padding2d,
+                    self.dilation2d, self.groups)
+                x = F.conv3d(
+                    x, self.weight3d, self.bias, self.stride3d, self.padding3d,
+                    self.dilation3d, self.groups)
+                return x
+
+        w2d = torch.randn(1, 1, 1, 1)
+        w3d = torch.randn(1, 1, 1, 1, 1)
+        b = torch.randn(1)
+        m = M(w2d, w3d, b).eval()
         self._test_extract_weights(m, results_len=2)
 
     @skipIfNoFBGEMM
