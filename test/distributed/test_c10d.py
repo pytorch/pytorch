@@ -2720,8 +2720,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         Note: this test can be sped up by only running it on a CPU module
         once DistributedDataParallel supports them.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        torch.cuda.set_device(self.rank)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            init_method=f"file://{self.file_name}"
+        )
+        process_group = c10d.distributed_c10d._get_default_group()
 
         class FindUnusedParametersModule(nn.Module):
             def __init__(self):
@@ -2784,7 +2790,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             )
         except Exception as ex:
             self.assertTrue(
-                str(ex).startswith("Expected to mark a variable ready only once.")
+                str(ex).startswith(
+                    "Expected to mark a variable ready only once.",
+                )
             )
             unused_index = 2
             unused_index_str = f"Parameter at index {unused_index}"
@@ -2805,6 +2813,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         else:
             self.fail("Expected exception")
 
+        dist.barrier(process_group)
+
         # Then test that the default behavior can be overridden by setting
         # `find_unused_parameters=False`.
         try:
@@ -2822,18 +2832,42 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         except Exception as ex:
             self.fail("Unexpected exception: %s" % ex)
 
-        dist.barrier(group=process_group)
-
+    # TODO: Combine the following tests once https://github.com/pytorch/pytorch/issues/55967
+    # is resolved.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @with_dist_debug_levels(levels=["OFF", "DETAIL", "INFO"])
-    def test_find_unused_parameters_kwarg(self):
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_find_unused_parameters_kwarg_debug_detail(self):
         self._test_find_unused_parameters_kwarg()
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
-    def test_find_unused_parameters_kwarg_grad_is_view(self):
+    @with_dist_debug_levels(levels=["INFO"])
+    def test_find_unused_parameters_kwarg_debug_info(self):
+        self._test_find_unused_parameters_kwarg()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_find_unused_parameters_kwarg_debug_off(self):
+        self._test_find_unused_parameters_kwarg()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_find_unused_parameters_kwarg_grad_is_view_debug_detail(self):
+        self._test_find_unused_parameters_kwarg(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["INFO"])
+    def test_find_unused_parameters_kwarg_grad_is_view_debug_info(self):
+        self._test_find_unused_parameters_kwarg(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_find_unused_parameters_kwarg_grad_is_view_debug_off(self):
         self._test_find_unused_parameters_kwarg(gradient_as_bucket_view=True)
 
     def _test_global_local_unused_params_grad(self, gradient_as_bucket_view=False):

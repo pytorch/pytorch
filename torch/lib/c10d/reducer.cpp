@@ -1780,54 +1780,6 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   return result;
 }
 
-// Verifies replicas in this process treat the same number of params,
-// all params require grad, and corresponding params across replicas
-// have the same dtype/size/layout.
-void verify_replicas_within_process(
-    std::vector<std::vector<at::Tensor>> model_replicas,
-    std::vector<std::vector<bool>> expect_sparse_gradients) {
-  const auto replica_count = model_replicas.size();
-  if (replica_count == 1) {
-    // Single device per process, nothing to check.
-    return;
-  }
-  for (size_t replica_index = 0; replica_index < replica_count;
-       replica_index++) {
-    const auto variable_count = model_replicas[replica_index].size();
-    TORCH_CHECK(
-        model_replicas[replica_index].size() == model_replicas[0].size(),
-        "Model replicas must have an equal number of parameters.");
-    TORCH_CHECK(
-        expect_sparse_gradients[replica_index].size() ==
-            expect_sparse_gradients[0].size(),
-        "Expected number of entries in expect_sparse_gradients ",
-        "to be equal across replicas.");
-    for (size_t variable_index = 0; variable_index < variable_count;
-         variable_index++) {
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].requires_grad(),
-          "Variables must require gradients (have `requires_grad` set).");
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].sizes() ==
-              model_replicas[0][variable_index].sizes(),
-          "Variables across model replicas must have identical sizes.");
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].strides() ==
-              model_replicas[0][variable_index].strides(),
-          "Variables across model replicas must have identical strides.");
-      TORCH_CHECK(
-          model_replicas[replica_index][variable_index].dtype() ==
-              model_replicas[0][variable_index].dtype(),
-          "Variables across model replicas must have identical dtype.");
-      TORCH_CHECK(
-          expect_sparse_gradients[replica_index][variable_index] ==
-              expect_sparse_gradients[0][variable_index],
-          "Expected the same variables across replicas to either both ",
-          "or neither expect a sparse gradient.");
-    }
-  }
-}
-
 // Verifies corresponding params in replica 0 have the same sizes/strides
 // across processes.
 void verify_replica0_across_processes(
