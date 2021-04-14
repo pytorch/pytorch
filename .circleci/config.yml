@@ -7012,12 +7012,6 @@ workflows:
           name: "docker-pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
           image_name: "pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
       - docker_build_job:
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: "docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
           image_name: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
       - docker_build_job:
