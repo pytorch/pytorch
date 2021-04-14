@@ -94,7 +94,6 @@ void IRVisitor::visit(const Load* v) {
   for (const Expr* ind : v->indices()) {
     ind->accept(this);
   }
-  v->mask()->accept(this);
 }
 
 void IRVisitor::visit(const Buf* v) {
@@ -107,7 +106,6 @@ void IRVisitor::visit(const Store* v) {
     ind->accept(this);
   }
   v->value()->accept(this);
-  v->mask()->accept(this);
 }
 
 void IRVisitor::visit(const AtomicAdd* v) {

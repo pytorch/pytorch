@@ -5,8 +5,6 @@ from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequenc
 from enum import Enum, auto
 import itertools
 
-from tools.codegen.utils import *
-
 # A little trick from https://github.com/python/mypy/issues/6366
 # for getting mypy to do exhaustiveness checking
 # TODO: put this somewhere else, maybe
@@ -74,6 +72,8 @@ class DispatchKey(Enum):
     MkldnnCPU = auto()
     SparseCPU = auto()
     SparseCUDA = auto()
+    SparseCsrCPU = auto()
+    SparseCsrCUDA = auto()
     SparseHIP = auto()
     SparseXPU = auto()
     NestedTensor = auto()
@@ -1093,22 +1093,6 @@ class Arguments:
             ret.append(self.tensor_options)
         ret.extend(self.post_tensor_options_kwarg_only)
         return ret
-
-    # NB: contains out args.
-    @property
-    def tensor_args(self) -> Sequence[Union[Argument, SelfArgument]]:
-        ret: List[Union[Argument, SelfArgument]] = []
-        candidates: List[Union[Argument, SelfArgument]] = []
-        candidates.extend(self.positional)
-        candidates.extend(self.pre_tensor_options_kwarg_only)
-        candidates.extend(self.post_tensor_options_kwarg_only)
-        candidates.extend(self.out)
-        for arg in candidates:
-            a = arg.argument if isinstance(arg, SelfArgument) else arg
-            if a.type.is_tensor_like():
-                ret.append(arg)
-        return ret
-
 
     def signature(self, *, strip_default: bool = False) -> 'Arguments':
         # dataclasses.replace could be used here, but it is less
