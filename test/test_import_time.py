@@ -9,7 +9,7 @@ class TestImportTime(TestCase):
     # a way to track the duration of `import torch` in our ossci-metrics
     # S3 bucket (see tools/print_test_stats.py)
     def test_time_import_torch(self):
-        subprocess.run(['python3', '-c', 'import torch'])
+        subprocess.run([sys.executable, '-c', 'import torch'])
 
 
 if __name__ == '__main__':
