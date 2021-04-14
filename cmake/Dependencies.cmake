@@ -1604,9 +1604,14 @@ if(NOT INTERN_BUILD_MOBILE)
     message(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
     message(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
     message(STATUS "MAGMA V2 check: ${MAGMA_V2}")
+  elseif(USE_MAGMA)
+    message(WARNING
+      "Not compiling with MAGMA. Suppress this warning with "
+      "-DUSE_MAGMA=OFF.")
+    caffe2_update_option(USE_MAGMA OFF)
   else()
     message(STATUS "MAGMA not found. Compiling without MAGMA support")
-    unset(USE_MAGMA)
+    caffe2_update_option(USE_MAGMA OFF)
   endif()
 
   # ARM specific flags
