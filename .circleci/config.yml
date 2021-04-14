@@ -9643,11 +9643,6 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
           image_name: "pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
-          filters:
-            branches:
-              only:
-                - /ci-all\/.*/
-                - /release\/.*/
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda11_2_cudnn8_py3_gcc7_build
           requires:
