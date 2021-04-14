@@ -42,8 +42,7 @@ from torch.jit._monkeytype_config import (
     JitTypeTraceStore
 )  # type: ignore[import]
 
-global type_trace_db
-type_trace_db = JitTypeTraceStore()
+type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
 torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
@@ -850,9 +849,10 @@ def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
-def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional[List[Tuple]]=None):
+def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional[List[Tuple]] = None):
     # This is a private API, intended for internal use only . Usage of this API is only for experimental
     # purposes only and is highly discouraged to be used.
+    global type_trace_db
     if not _enabled:
         return obj
 
@@ -879,6 +879,7 @@ def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Opt
     # Check if example_inputs are defined and generate call traces
     # for the method by running eager mode version of the method with
     # the provide example inputs. This logs all the traces in type_trace_db
+    type_trace_db = JitTypeTraceStore()
     if monkeytype_trace:
         monkeytype_config = JitTypeTraceConfig(type_trace_db)
         with monkeytype_trace(monkeytype_config):
