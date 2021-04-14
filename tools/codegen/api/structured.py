@@ -3,7 +3,7 @@ from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
                                  SelfArgument, TensorOptionsArguments, Type,
                                  assert_never)
 
-from tools.codegen.api.types import (ArgName, BaseCType, Binding,
+from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      ConstRefCType, CType, OptionalCType)
 from tools.codegen.api import cpp
 
