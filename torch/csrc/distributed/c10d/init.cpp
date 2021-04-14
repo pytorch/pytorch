@@ -1479,13 +1479,6 @@ Example::
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
-      "_verify_replicas_within_process",
-      &::c10d::verify_replicas_within_process,
-      py::arg("replicas"),
-      py::arg("expect_sparse_gradient"),
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
       "_verify_model_across_ranks",
       &::c10d::verify_replica0_across_processes,
       py::arg("process_group"),
