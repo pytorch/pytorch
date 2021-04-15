@@ -119,11 +119,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       assign_parent();
     }
 
-    if (profiler::profilerEnabled()) {
-      // If profiler is enabled, thread_id is stored.
-      // See NOTE [ Sequence Numbers ]
-      thread_id_ = at::RecordFunction::currentThreadId();
-    }
+    // Store the thread_id of the forward operator.
+    // See NOTE [ Sequence Numbers ]
+    thread_id_ = at::RecordFunction::currentThreadId();
   }
 
   explicit Node(edge_list&& next_edges = edge_list())
