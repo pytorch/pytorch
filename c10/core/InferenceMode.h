@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/grad_mode.h>
+#include <c10/core/GradMode.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 
@@ -15,7 +15,8 @@ struct TORCH_API InferenceMode {
   //                  GradMode is disabled.
   //   NormalMode: InplaceOrView in raw_local_dispatch_key_set.included(),
   //               Autograd not in raw_local_dispatch_key_set.excluded()
-  //               GradMode is enabled.
+  //               GradMode is enabled by default unless toggled manually through
+  //               NoGradGuard.
   //
   // Invariant:
   // - InplaceOrView is never in the excluded set
@@ -44,7 +45,7 @@ struct TORCH_API InferenceMode {
   // 3. Why does setting InferenceMode also set GradMode?
   //
   //    This is required since InferenceMode is a faster and more restricive
-  //    version of NoGradMode. All runtime checks using GradMode::is_enabled()
+  //    version of NoGradGuard. All runtime checks using GradMode::is_enabled()
   //    are applicable to InferenceMode as well, e.g.
   //    `tensorTypeInCurrentExecutionContext` in interpreter.cpp.
   InferenceMode(bool enabled=true): prev_mode(InferenceMode::is_enabled()),

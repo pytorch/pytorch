@@ -83,7 +83,6 @@ cc_library(
     copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
     deps = [
         ":c10_headers",
-        ":aten_headers",
     ] + if_cuda(
         ["@cuda"],
         [],
