@@ -1023,8 +1023,7 @@ REGISTER_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // TODO: Support only 9 args once the old signature has been removed.
         TORCH_CHECK(
-            p_node->inputs().size() == 8 ||
-            p_node->inputs().size() == 9,
+            p_node->inputs().size() == 8 || p_node->inputs().size() == 9,
             "Expected number of inputs is 8 or 9, but got " +
                 std::to_string(p_node->inputs().size()));
 
