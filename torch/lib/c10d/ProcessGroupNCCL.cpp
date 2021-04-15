@@ -469,6 +469,11 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   ncclCommWatchdogThread_.join();
 #endif
 
+  if (asyncErrorHandling_) {
+    workMetaListCV_.notify_one();
+    workCleanupThread_.join();
+  }
+
   {
     // Abort all NCCL Communicators on Process Group Destruction
     std::lock_guard<std::mutex> lock(mutex_);
@@ -481,10 +486,6 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     }
   }
 
-  if (asyncErrorHandling_) {
-    workMetaListCV_.notify_one();
-    workCleanupThread_.join();
-  }
 }
 
 void ProcessGroupNCCL::abortTimedOutCollectives(std::unordered_set<std::string>& abortedCommIds) {
