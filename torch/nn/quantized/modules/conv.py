@@ -174,6 +174,16 @@ class _ConvNd(nn.Module):
         self.zero_point = state[13]
         self.training = state[14]
 
+    def __deepcopy__(self, memo):
+        new_instance = type(self).__new__(type(self))
+        torch.nn.Module.__init__(new_instance)
+        state = self.__getstate__()
+        new_instance.__setstate__(state)
+        return new_instance
+
+    def __copy__(self):
+        return self.__deepcopy__({})
+
     @classmethod
     def get_qconv(cls, mod, activation_post_process, weight_post_process=None):
         r"""Creates a qconv object and returns it.
