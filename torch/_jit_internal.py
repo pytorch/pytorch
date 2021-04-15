@@ -22,7 +22,7 @@ import torch.distributed.rpc
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
 import torch.package._mangling as package_mangling
-from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
+from typing import Any, Callable, cast, Dict, Generic, List, Optional, Tuple, TypeVar, Union  # noqa: F401
 
 if sys.version_info[:2] > (3, 7):
     from typing import Final
@@ -33,6 +33,7 @@ else:
 # argument
 boolean_dispatched: 'weakref.WeakKeyDictionary[Callable, Dict[str, Callable]]' = weakref.WeakKeyDictionary()  # noqa: T484
 
+T = TypeVar("T")
 
 def createResolutionCallbackFromEnv(lookup_base):
     """
@@ -443,7 +444,7 @@ class FunctionModifiers(object):
         "if this method is not scripted, copy the python method onto the scripted model"
 
 
-def export(fn):
+def export(fn: T) -> T:
     """
     This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
     :class:`ScriptModule` and should be compiled.
@@ -485,11 +486,11 @@ def export(fn):
         # any compiled methods and wasn't decorated with `@torch.jit.export`
         m = torch.jit.script(MyModule())
     """
-    fn._torchscript_modifier = FunctionModifiers.EXPORT
+    fn._torchscript_modifier = FunctionModifiers.EXPORT  # type: ignore
     return fn
 
 
-def unused(fn):
+def unused(fn: T) -> T:
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and replaced with the raising of an exception. This allows you
@@ -533,9 +534,9 @@ def unused(fn):
         if prop.fset:
             setattr(prop.fset, "_torchscript_modifier", FunctionModifiers.UNUSED)  # noqa: B010
 
-        return prop
+        return cast(T, prop)
 
-    fn._torchscript_modifier = FunctionModifiers.UNUSED
+    fn._torchscript_modifier = FunctionModifiers.UNUSED  # type: ignore
     return fn
 
 def ignore(drop=False, **kwargs):
@@ -623,17 +624,17 @@ def ignore(drop=False, **kwargs):
         warnings.warn("ignore(True) has been deprecated. TorchScript will now drop the function "
                       "call on compilation. Use torch.jit.unused now. {}", category=FutureWarning)
 
-    def decorator(fn):
+    def decorator(fn: T) -> T:
         if drop:
-            fn._torchscript_modifier = FunctionModifiers.UNUSED
+            fn._torchscript_modifier = FunctionModifiers.UNUSED  # type: ignore
         else:
-            fn._torchscript_modifier = FunctionModifiers.IGNORE
+            fn._torchscript_modifier = FunctionModifiers.IGNORE  # type: ignore
         return fn
     return decorator
 
 
-def _copy_to_script_wrapper(fn):
-    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
+def _copy_to_script_wrapper(fn: T) -> T:
+    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER  # type: ignore
     return fn
 
 def module_has_exports(mod):
