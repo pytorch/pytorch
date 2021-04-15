@@ -802,7 +802,7 @@ class TestTyping(TestCase):
         T = TypeVar('T', int, str)
 
 
-        class DP(IterDataPipe[T]):
+        class DP(IterDataPipe[T]):  # type: ignore
             def __init__(self, ds):
                 self.ds = ds
 
@@ -812,12 +812,12 @@ class TestTyping(TestCase):
 
         ds = list(range(10))
 
-        d = DP(ds)
+        dp = DP(ds)
         with self.assertRaisesRegex(RuntimeError, "Only the instance with `__iter__` decorated"):
-            d.enforce_type(int)
+            dp.reinforce_type(int)
 
 
-        class DP(IterDataPipe[T]):
+        class DP(IterDataPipe[T]):  # type: ignore
             def __init__(self, ds):
                 self.ds = ds
 
@@ -826,25 +826,25 @@ class TestTyping(TestCase):
                 for d in self.ds:
                     yield d
 
-        # Valid type enforcement
-        dp = DP(ds).enforce_type(int)
+        # Valid type reinforcement
+        dp = DP(ds).reinforce_type(int)
         self.assertEqual(list(d for d in dp), ds)
 
         # Invalid type
         with self.assertRaisesRegex(TypeError, r"'expected_type' must be a type"):
-            dp = DP(ds).enforce_type(1)
+            dp = DP(ds).reinforce_type(1)
 
         # Type is not subtype
         with self.assertRaisesRegex(TypeError, r"Expected 'expected_type' as a subtype of"):
-            dp = DP(ds).enforce_type(float)
+            dp = DP(ds).reinforce_type(float)
 
         # Invalid data at runtime
-        dp = DP(ds).enforce_type(str)
+        dp = DP(ds).reinforce_type(str)
         with self.assertRaisesRegex(RuntimeError, r"Expected an instance as subtype"):
             list(d for d in dp)
 
         # Context Manager to disable the runtime validation
-        with runtime_validation_enabled(False):
+        with runtime_validation_disabled():
             self.assertEqual(list(d for d in dp), ds)
 
 

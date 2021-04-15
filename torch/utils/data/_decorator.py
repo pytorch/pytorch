@@ -166,7 +166,6 @@ def runtime_validation(f):
         if not _runtime_validation_enabled:
             yield from f(self)
         else:
-            #  t = self.type.param if expected_type is None else expected_type
             it = f(self)
             for d in it:
                 if not self.type.issubtype_of_instance(d):

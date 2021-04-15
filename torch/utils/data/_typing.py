@@ -259,7 +259,7 @@ class _DataPipeMeta(GenericMeta):
     def __getitem__(self, param):
         if param is None:
             raise TypeError('{}[t]: t can not be None'.format(self.__name__))
-        if isinstance(param, Tuple):
+        if isinstance(param, tuple):
             param = Tuple[param]
         _type_check(param, msg="{}[t]: t must be a type".format(self.__name__))
         t = _DataPipeType(param)
@@ -311,8 +311,8 @@ def _mro_subclass_init(obj):
 
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
-    # Add function for datapipe instance to refine the type
-    sub_cls.enforce_type = _enforce_type
+    # Add function for datapipe instance to reinforce the type
+    sub_cls.reinforce_type = _reinforce_type
 
     # TODO:
     # - add global switch for type checking at compile-time
@@ -334,18 +334,18 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
                 raise TypeError("Expected return type of '__iter__' as a subtype of {}, but found {}"
                                 " for {}".format(sub_cls.type, _type_repr(data_type), sub_cls.__name__))
 
-def _enforce_type(self, expected_type):
+def _reinforce_type(self, expected_type):
     r"""
-    Refine the type for DataPipe instance for runtime validation. If the class is not
+    Reinforce the type for DataPipe instance for runtime validation. If the class is not
     decorated with `runtime_validation`, it will raise RuntimeError. And the 'expected_type'
     is required to be a subtype of the original type hint. It's useful for users to
     apply a more strict requirement for data type.
     """
     if '@runtime_validation' not in inspect.getsource(self.__iter__):
         raise RuntimeError("Only the instance with `__iter__` decorated by `runtime_validation` "
-                           "can call `enforce_type` to refine the type for runtime validation.")
+                           "can call `reinforce_type` to reinforce the type for runtime validation.")
 
-    if isinstance(expected_type, Tuple):
+    if isinstance(expected_type, tuple):
         expected_type = Tuple[expected_type]
     _type_check(expected_type, msg="'expected_type' must be a type")
 
