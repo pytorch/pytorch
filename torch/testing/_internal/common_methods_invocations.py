@@ -1353,6 +1353,33 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     return wrapped_fn
 
 
+def scipy_unary_ufunc_integer_promotion_wrapper(fn):
+    # Wrapper that passes PyTorch's default scalar
+    #   type as an argument to the wrapped NumPy
+    #   unary ufunc when given an integer input.
+    #   This mimicks PyTorch's integer->floating point
+    #   type promotion.
+    #
+    # This is necessary when NumPy promotes
+    #   integer types to double, since PyTorch promotes
+    #   integer types to the default scalar type.
+
+    # Helper to determine if promotion is needed
+    def is_integral(dtype):
+        return dtype in [np.bool_, bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
+
+    # NOTE: Promotion in PyTorch is from integer types to the default dtype
+    np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
+
+    @wraps(fn)
+    def wrapped_fn(x):
+        if is_integral(x.dtype):
+            return fn(x).astype(np_dtype)
+        return fn(x)
+
+    return wrapped_fn
+
+
 # Metadata class for Fast Fourier Transforms in torch.fft.
 class SpectralFuncInfo(OpInfo):
     """Operator information for torch.fft transforms. """
@@ -2124,6 +2151,25 @@ def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
             SampleInput(make_tensor((), device, dtype,
                                     low=low,
                                     requires_grad=requires_grad)))
+
+
+def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
+
+    samples = (SampleInput(make_tensor((S,), device, dtype,
+                                       requires_grad=requires_grad)),
+               SampleInput(make_tensor((), device, dtype,
+                                       requires_grad=requires_grad)))
+
+    if dtype.is_floating_point:
+        t = make_tensor((S,), device, dtype,
+                        requires_grad=requires_grad)
+
+        with torch.no_grad():
+            t[torch.randn_like(t) > 0] = 0
+
+        samples += (SampleInput(t),)
+
+    return samples
 
 
 def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', **kwargs):
@@ -3088,8 +3134,7 @@ op_db: List[OpInfo] = [
                                                   torch.float16: 5e-1}),),
                    dtypes=floating_types_and(torch.bfloat16),
                    dtypesIfCPU=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-                   supports_autograd=True),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16)),
     UnaryUfuncInfo('special.i0e',
                    aten_name='special_i0e',
                    ref=scipy.special.i0e,
@@ -3098,17 +3143,17 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   supports_autograd=True,
+                   sample_inputs_func=sample_inputs_i0_i1,
                    safe_casts_outputs=True),
     UnaryUfuncInfo('special.i1',
                    aten_name='special_i1',
-                   ref=scipy.special.i1,
-                   decorators=(precisionOverride({torch.bfloat16: 3e-1,
+                   ref=scipy_unary_ufunc_integer_promotion_wrapper(scipy.special.i1),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                   torch.float16: 3e-1}),),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   supports_autograd=False,
+                   sample_inputs_func=sample_inputs_i0_i1,
                    safe_casts_outputs=True),
     UnaryUfuncInfo('special.i1e',
                    aten_name='special_i1e',
@@ -3118,7 +3163,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   supports_autograd=True,
+                   sample_inputs_func=sample_inputs_i0_i1,
                    safe_casts_outputs=True),
     OpInfo('floor_divide',
            dtypes=all_types_and(torch.half, torch.bfloat16),
