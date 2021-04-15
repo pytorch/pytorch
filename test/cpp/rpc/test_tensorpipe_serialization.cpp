@@ -45,6 +45,7 @@ TEST(TensorpipeSerialize, Base) {
   for (auto& tpTensor : sendingTpMessage.tensors) {
     tensorpipe::Descriptor::Tensor t;
     t.length = tpTensor.length;
+    t.sourceDevice = tpTensor.buffer.device();
     t.metadata = tpTensor.metadata;
     recvingTpDescriptor.tensors.push_back(std::move(t));
   }
