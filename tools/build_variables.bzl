@@ -590,7 +590,6 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/serialization/python_print.cpp",
     "torch/csrc/jit/frontend/source_range.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
-    "torch/csrc/distributed/rpc/types.cpp",
     "torch/csrc/jit/python/python_sugared_value.cpp",
     "torch/csrc/jit/python/python_tree_views.cpp",
     "torch/csrc/jit/runtime/static/init.cpp",
@@ -629,6 +628,7 @@ libtorch_python_distributed_core_sources = [
     "torch/lib/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
+    "torch/csrc/distributed/rpc/types.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
