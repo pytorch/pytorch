@@ -19,13 +19,20 @@ void warnProducerTerminatedBeforeSharedTensorsReleased() {
 }
 
 struct CudaIPCGlobalEntities {
+  // This class is used as a singleton (see cuda_ipc_global_entities)
+  // This variable is used to track its lifetime to avoid accessing it
+  // after it was destroyed which would lead to segmentation faults
+  // Note that a trvial type is used which doesn't suffer from construction
+  // and destruction order issues
+  static bool alive;
+
   std::mutex ref_counters_mutex_;
   std::atomic<int64_t> sync_events_used_{0};
   std::map<std::string, std::shared_ptr<CudaIPCRefCountersFile>>
       ref_counters_files_;
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
   CudaIPCSentDataLimbo CudaIPCSentDataLimbo_;
-  CudaIPCGlobalEntities()  = default;
+  CudaIPCGlobalEntities() { alive = true; }
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
     // Clear shared blocks to avoid releasing shared blocks after
@@ -37,6 +44,7 @@ struct CudaIPCGlobalEntities {
     if (next_available_ref_counters_file_) {
       warnProducerTerminatedBeforeSharedTensorsReleased();
     }
+    alive = false;
   }
   void safe_clean_current_file() {
     std::lock_guard<std::mutex> lock(ref_counters_mutex_);
@@ -48,6 +56,7 @@ struct CudaIPCGlobalEntities {
   }
 };
 
+bool CudaIPCGlobalEntities::alive = false;
 CudaIPCGlobalEntities cuda_ipc_global_entities;
 
 CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
@@ -102,6 +111,9 @@ void CudaIPCSentDataLimbo::add(std::unique_ptr<CudaIPCSentData> shared_block) {
 void CudaIPCSentDataDelete(void* ptr) {
   std::unique_ptr<CudaIPCSentData> sent_data(
       static_cast<CudaIPCSentData*>(ptr));
+  if(!CudaIPCGlobalEntities::alive) {
+    return;
+  }
   if (sent_data->counter_value() > 0) {
     cuda_ipc_global_entities.CudaIPCSentDataLimbo_.add(std::move(sent_data));
   }
@@ -109,6 +121,9 @@ void CudaIPCSentDataDelete(void* ptr) {
 }
 
 void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
+  if(!CudaIPCGlobalEntities::alive) {
+    return;
+  }
   std::lock_guard<std::mutex> lock(
       cuda_ipc_global_entities.ref_counters_mutex_);
   auto& map = cuda_ipc_global_entities.ref_counters_files_;
@@ -180,6 +195,9 @@ CudaIPCSentData::~CudaIPCSentData() {
     if (event_sync_required_) {
       at::cuda::CUDAGuard device_guard(device_.index());
       cudaEventDestroy(event_);
+      if(!CudaIPCGlobalEntities::alive) {
+        return;
+      }
       cuda_ipc_global_entities.sync_events_used_ --;
     }
   } catch (...) { /* No throw */
@@ -226,6 +244,9 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
 }
 
 bool CudaIPCCollect() {
+  if(!CudaIPCGlobalEntities::alive) {
+    return true;
+  }
   bool freed_memory = cuda_ipc_global_entities.CudaIPCSentDataLimbo_.collect();
   if (cuda_ipc_global_entities.CudaIPCSentDataLimbo_.size() == 0) {
     cuda_ipc_global_entities.safe_clean_current_file();
