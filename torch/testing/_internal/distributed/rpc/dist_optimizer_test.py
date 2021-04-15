@@ -208,3 +208,4 @@ class DistOptimizerTest(RpcAgentTestFixture):
         self._test_dist_optim_base(optim.Adadelta, rho=0.95)
         self._test_dist_optim_base(optim.RMSprop, lr=0.05)
         self._test_dist_optim_base(optim.Adamax, lr=0.05)
+        self._test_dist_optim_base(optim.Rprop, lr=0.05)
