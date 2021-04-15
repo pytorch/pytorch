@@ -10,7 +10,7 @@ from unittest import TestCase
 from torch.distributed.elastic.rendezvous.utils import (
     _matches_machine_hostname,
     _parse_rendezvous_config,
-    _parse_rendezvous_endpoint,
+    parse_rendezvous_endpoint,
     _try_parse_port,
 )
 
@@ -114,7 +114,7 @@ class UtilsTest(TestCase):
 
         for endpoint in endpoints:
             with self.subTest(endpoint=endpoint):
-                host, port = _parse_rendezvous_endpoint(endpoint, default_port=123)
+                host, port = parse_rendezvous_endpoint(endpoint, default_port=123)
 
                 expected_host, expected_port = endpoint.rsplit(":", 1)
 
@@ -124,12 +124,14 @@ class UtilsTest(TestCase):
                 self.assertEqual(host, expected_host)
                 self.assertEqual(port, int(expected_port))
 
-    def test_parse_rendezvous_endpoint_returns_tuple_if_endpoint_has_no_port(self) -> None:
+    def test_parse_rendezvous_endpoint_returns_tuple_if_endpoint_has_no_port(
+        self,
+    ) -> None:
         endpoints = ["dummy.com", "dummy-1.com", "123.123.123.123", "[2001:db8::1]"]
 
         for endpoint in endpoints:
             with self.subTest(endpoint=endpoint):
-                host, port = _parse_rendezvous_endpoint(endpoint, default_port=123)
+                host, port = parse_rendezvous_endpoint(endpoint, default_port=123)
 
                 expected_host = endpoint
 
@@ -144,12 +146,14 @@ class UtilsTest(TestCase):
 
         for endpoint in endpoints:
             with self.subTest(endpoint=endpoint):
-                host, port = _parse_rendezvous_endpoint("", default_port=123)
+                host, port = parse_rendezvous_endpoint("", default_port=123)
 
                 self.assertEqual(host, "localhost")
                 self.assertEqual(port, 123)
 
-    def test_parse_rendezvous_endpoint_raises_error_if_hostname_is_invalid(self) -> None:
+    def test_parse_rendezvous_endpoint_raises_error_if_hostname_is_invalid(
+        self,
+    ) -> None:
         endpoints = ["~", "dummy.com :123", "~:123", ":123"]
 
         for endpoint in endpoints:
@@ -159,7 +163,7 @@ class UtilsTest(TestCase):
                     rf"^The hostname of the rendezvous endpoint '{endpoint}' must be a "
                     r"dot-separated list of labels, an IPv4 address, or an IPv6 address.$",
                 ):
-                    _parse_rendezvous_endpoint(endpoint, default_port=123)
+                    parse_rendezvous_endpoint(endpoint, default_port=123)
 
     def test_parse_rendezvous_endpoint_raises_error_if_port_is_invalid(self) -> None:
         endpoints = ["dummy.com:", "dummy.com:abc", "dummy.com:-123", "dummy.com:-"]
@@ -171,7 +175,7 @@ class UtilsTest(TestCase):
                     rf"^The port number of the rendezvous endpoint '{endpoint}' must be an integer "
                     r"between 0 and 65536.$",
                 ):
-                    _parse_rendezvous_endpoint(endpoint, default_port=123)
+                    parse_rendezvous_endpoint(endpoint, default_port=123)
 
     def test_parse_rendezvous_endpoint_raises_error_if_port_is_too_big(self) -> None:
         endpoints = ["dummy.com:65536", "dummy.com:70000"]
@@ -183,33 +187,50 @@ class UtilsTest(TestCase):
                     rf"^The port number of the rendezvous endpoint '{endpoint}' must be an integer "
                     r"between 0 and 65536.$",
                 ):
-                    _parse_rendezvous_endpoint(endpoint, default_port=123)
+                    parse_rendezvous_endpoint(endpoint, default_port=123)
 
-    def test_matches_machine_hostname_returns_true_if_hostname_is_loopback(self) -> None:
-        hosts = ["localhost", "127.0.0.1", "::1", "0000:0000:0000:0000:0000:0000:0000:0001"]
+    def test_matches_machine_hostname_returns_true_if_hostname_is_loopback(
+        self,
+    ) -> None:
+        hosts = [
+            "localhost",
+            "127.0.0.1",
+            "::1",
+            "0000:0000:0000:0000:0000:0000:0000:0001",
+        ]
 
         for host in hosts:
             with self.subTest(host=host):
                 self.assertTrue(_matches_machine_hostname(host))
 
-    def test_matches_machine_hostname_returns_true_if_hostname_is_machine_hostname(self) -> None:
+    def test_matches_machine_hostname_returns_true_if_hostname_is_machine_hostname(
+        self,
+    ) -> None:
         host = socket.gethostname()
 
         self.assertTrue(_matches_machine_hostname(host))
 
-    def test_matches_machine_hostname_returns_true_if_hostname_is_machine_fqdn(self) -> None:
+    def test_matches_machine_hostname_returns_true_if_hostname_is_machine_fqdn(
+        self,
+    ) -> None:
         host = socket.getfqdn()
 
         self.assertTrue(_matches_machine_hostname(host))
 
-    def test_matches_machine_hostname_returns_true_if_hostname_is_machine_address(self) -> None:
-        addr_list = socket.getaddrinfo(socket.gethostname(), None, proto=socket.IPPROTO_TCP)
+    def test_matches_machine_hostname_returns_true_if_hostname_is_machine_address(
+        self,
+    ) -> None:
+        addr_list = socket.getaddrinfo(
+            socket.gethostname(), None, proto=socket.IPPROTO_TCP
+        )
 
         for addr in (addr_info[4][0] for addr_info in addr_list):
             with self.subTest(addr=addr):
                 self.assertTrue(_matches_machine_hostname(addr))
 
-    def test_matches_machine_hostname_returns_false_if_hostname_does_not_match(self) -> None:
+    def test_matches_machine_hostname_returns_false_if_hostname_does_not_match(
+        self,
+    ) -> None:
         hosts = ["dummy", "0.0.0.0", "::2"]
 
         for host in hosts:
