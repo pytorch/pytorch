@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/grad_mode.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 
@@ -37,7 +38,8 @@ struct TORCH_API InferenceMode {
   //    `k.add_(2)` still need to go through InplaceOrView kernel so that it's
   //    prepared for future autograd.
   InferenceMode(bool enabled=true): prev_mode(InferenceMode::is_enabled()),
-      prev_keyset(c10::impl::tls_local_dispatch_key_set()) {
+      prev_keyset(c10::impl::tls_local_dispatch_key_set()),
+      grad_mode(at::AutoGradMode(enabled)) {
     this->set_enabled(enabled);
     DispatchKeySet included = enabled ? prev_keyset.included_.remove(c10::DispatchKey::InplaceOrView)
          : prev_keyset.included_.add(c10::DispatchKey::InplaceOrView);
@@ -59,5 +61,9 @@ struct TORCH_API InferenceMode {
     static void set_enabled(bool enabled);
     bool prev_mode;
     c10::impl::LocalDispatchKeySet prev_keyset;
+    // InferenceMode should enable AutoGradMode accordingly. This is required
+    // since GradMode::is_enabled() is used in many runtime checks,
+    // e.g. `tensorTypeInCurrentExecutionContext` in interpreter.cpp.
+    at::AutoGradMode grad_mode;
 };
 } // namespace c10
