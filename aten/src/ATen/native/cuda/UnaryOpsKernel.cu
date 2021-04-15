@@ -19,7 +19,7 @@
 namespace at {
 namespace native {
 
-void bitwise_not_kernel_cuda(TensorIterator& iter) {
+void bitwise_not_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     gpu_kernel(iter, []GPU_LAMBDA(bool a) {
       return !a;
@@ -33,7 +33,7 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void exp_kernel_cuda(TensorIterator& iter) {
+void exp_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "exp_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::exp(a);
@@ -41,7 +41,7 @@ void exp_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void expm1_kernel_cuda(TensorIterator& iter) {
+void expm1_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "expm1_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::expm1(a);
@@ -62,7 +62,7 @@ __host__ __device__ static inline c10::complex<T> rsqrt_wrapper(c10::complex<T> 
   return one / ::sqrt(v);
 }
 
-void rsqrt_kernel_cuda(TensorIterator& iter) {
+void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "rsqrt_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
@@ -71,7 +71,7 @@ void rsqrt_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void sqrt_kernel_cuda(TensorIterator& iter) {
+void sqrt_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "sqrt_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::sqrt(a);
@@ -79,7 +79,7 @@ void sqrt_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void clamp_kernel_cuda(TensorIterator& iter, const Scalar& min_value, const Scalar& max_value) {
+void clamp_kernel_cuda(TensorIteratorBase& iter, const Scalar& min_value, const Scalar& max_value) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     auto upper = max_value.to<scalar_t>();
@@ -94,7 +94,7 @@ void clamp_kernel_cuda(TensorIterator& iter, const Scalar& min_value, const Scal
   });
 }
 
-void clamp_min_kernel_cuda(TensorIterator& iter, const Scalar& min_value) {
+void clamp_min_kernel_cuda(TensorIteratorBase& iter, const Scalar& min_value) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_min_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
@@ -108,7 +108,7 @@ void clamp_min_kernel_cuda(TensorIterator& iter, const Scalar& min_value) {
   });
 }
 
-void clamp_max_kernel_cuda(TensorIterator& iter, const Scalar& max_value) {
+void clamp_max_kernel_cuda(TensorIteratorBase& iter, const Scalar& max_value) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_max_cuda", [&]() {
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
@@ -123,7 +123,7 @@ void clamp_max_kernel_cuda(TensorIterator& iter, const Scalar& max_value) {
 }
 
 void nan_to_num_kernel_cuda(
-    TensorIterator& iter,
+    TensorIteratorBase& iter,
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
@@ -148,7 +148,7 @@ void nan_to_num_kernel_cuda(
   });
 }
 
-void frexp_kernel_cuda(TensorIterator& iter) {
+void frexp_kernel_cuda(TensorIteratorBase& iter) {
 #ifdef __HIP_PLATFORM_HCC__
   // Reference: https://rocmdocs.amd.com/en/latest/ROCm_API_References/HIP-MATH.html
   //            https://github.com/ROCm-Developer-Tools/HIP/issues/2169
