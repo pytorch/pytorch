@@ -9,7 +9,6 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import num_profiled_runs
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -48,66 +47,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
-
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
-    def test_differentiable_graph_ops_requires_grad(self):
-        x = torch.randn(8, 2, dtype=torch.float).requires_grad_()
-        y = torch.randn(8, 2, dtype=torch.float)
-
-        def t(x : torch.Tensor, y : torch.Tensor):
-            o = x + 1.0
-            o1 = torch.relu(o)
-            o = y + 1.5
-            o2 = torch.relu(o)
-            o3 = o1 + o2
-
-            _ = o1.add_(1.0)
-            _ = o2.add_(1.0)
-            o = o1 * 1.0
-            oo1 = torch.relu(o)
-            o = o2 * 2.0
-            oo2 = torch.relu(o)
-            oo3 = oo1 + oo2
-            return o1, o2, o3, oo1, oo2, oo3
-
-        with enable_profiling_mode_for_profiling_tests():
-
-            t_jit = torch.jit.script(t)
-            jit_o = t_jit(x, y)
-            jit_o = t_jit(x, y)
-            o = t(x, y)
-
-            FileCheck().check("prim::DifferentiableGraph").run(t_jit.graph_for(x, y))
-            # validate the differentiableGraphOps are marking proper requires_grad
-            for oo, jit_oo in zip(o, jit_o):
-                self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
-                self.assertEqual(oo, jit_oo)
-            # one more runs to trigger fusion
-            jit_o = t_jit(x, y)
-            for oo, jit_oo in zip(o, jit_o):
-                self.assertEqual(oo.dtype, jit_oo.dtype)
-                self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
-                self.assertEqual(oo, jit_oo)
-
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Simple Executor doesn't support gradients")
-    def test_prune_grad(self):
-        @torch.jit.script
-        def t(input, bias):
-            return torch.nn.functional.relu(input + bias)
-        input = torch.randn(2, 8, requires_grad=True)
-        bias = torch.randn(8, requires_grad=False)    # bias does NOT require grad
-        NUM_PROFILED_RUNS = 1
-        with num_profiled_runs(NUM_PROFILED_RUNS):
-            WARMUP = 3    # 2 runs to reach backward + 1 to optimize it
-            for x in range(WARMUP):
-                o = t(input, bias)
-                o.sum().backward()
-
-            fwd_plan = list(t.get_debug_state().execution_plans.values())[0]
-            bwd_graph = list(fwd_plan.code.grad_executor_states()[0].execution_plans.values())[0].graph
-            tup = next(bwd_graph.outputs())
-            self.assertEqual(len(list(tup.node().inputs())), 1)
 
     def test_simple_merge(self):
         # o --> o
