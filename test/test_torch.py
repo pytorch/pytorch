@@ -31,7 +31,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIfNoMagma, skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
-    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, 
+    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipCPUIfNoLapack, skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
     expectedAlertNondeterministic)
