@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <ATen/Parallel.h>
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -16,19 +15,15 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 struct WithCPUFuser {
-  WithCPUFuser(bool val = true)
-      : cpuFuserEnabled(canFuseOnCPU()), numThreads(at::get_num_threads()) {
+  WithCPUFuser(bool val = true) : cpuFuserEnabled(canFuseOnCPU()) {
     overrideCanFuseOnCPU(val);
-    at::set_num_threads(1);
   }
 
   ~WithCPUFuser() {
     overrideCanFuseOnCPU(cpuFuserEnabled);
-    at::set_num_threads(numThreads);
   }
 
   bool cpuFuserEnabled;
-  int numThreads;
 };
 
 TEST(TEFuserPass, FuserPass_1) {
