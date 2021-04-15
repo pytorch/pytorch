@@ -376,8 +376,8 @@
   output_differentiability: [False]
 
 - name: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
-  self: other.cross(grad, dim)
-  other: grad.cross(self, dim)
+  self: other.conj().cross(grad, dim)
+  other: grad.cross(self.conj(), dim)
 
 - name: logcumsumexp(Tensor self, int dim) -> Tensor
   self: logcumsumexp_backward(grad, self, result, dim)
