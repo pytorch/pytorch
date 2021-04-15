@@ -305,10 +305,14 @@ class CudaKernelGenerator : private kir::IrVisitor {
     bool is_vector_op = false;
     size_t vector_word_size = 1;
 
-    if (node->out()->isA<kir::TensorIndex>()) {
+    if (vectorize_scope_ && node->out()->isA<kir::TensorIndex>()) {
       auto ti = node->out()->as<kir::TensorIndex>();
+
+      bool vectorize_op = false;
+      bool misaligned_op = false;
+
       for (auto id : ti->view()->fuserTv()->domain()->domain()) {
-        if (id->getParallelType() != ParallelType::Vectorize) {
+        if (!isParallelTypeVectorize(id->getParallelType())) {
           continue;
         }
 
@@ -317,19 +321,29 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
         TORCH_INTERNAL_ASSERT(
             vector_size_optional.has_value(),
-            "Could not evalualte constant value bound to vectorized dim.");
+            "Could not evaluate constant value bound to vectorized dim.");
 
         vector_word_size = vector_size_optional.value();
 
-        is_vector_op = true;
+        vectorize_op = id->getParallelType() == ParallelType::Vectorize;
+        misaligned_op =
+            id->getParallelType() == ParallelType::MisalignedVectorize;
         break;
       }
 
-      if (is_vector_op) {
+      if (vectorize_op) {
         TORCH_INTERNAL_ASSERT(
             node->operation() == UnaryOpType::Set,
             "Cannot vectorize operations that are not sets. ",
             "Use cache_before and cache_after to store/load with vectorized reads into buffers.");
+        is_vector_op = true;
+      }
+
+      if (misaligned_op) {
+        is_vector_op = (node->operation() == UnaryOpType::Set);
+      }
+
+      if (is_vector_op) {
         TORCH_INTERNAL_ASSERT(
             node->out()->dtype() == node->in()->dtype(),
             "Vectorized store/load requires input and output datatypes match.");
@@ -345,6 +359,15 @@ class CudaKernelGenerator : private kir::IrVisitor {
                << "Array<" << node->in()->dtype() << ", " << vector_word_size
                << ">*>"
                << "(&" << gen(node->in()) << ");\n";
+      return;
+    }
+
+    if (node->out()->isA<kir::NamedScalar>()) {
+      const auto op_type = node->operation();
+      if (auto op = inline_op_str(op_type)) {
+        indent() << gen(node->out()) << " = " << *op << genInline(node->in())
+                 << ";\n";
+      }
       return;
     }
 
@@ -873,12 +896,14 @@ class CudaKernelGenerator : private kir::IrVisitor {
   void visit(const kir::ForLoop* node) final {
     // TODO(kir): handle this during lowering
     if (node->iter_domain()->isThread() || node->iter_domain()->isBroadcast() ||
-        node->iter_domain()->parallelType() == ParallelType::Vectorize) {
+        node->vectorize()) {
+      vectorize_scope_ = node->vectorize();
       handleScope(node->body());
+      vectorize_scope_ = false;
       return;
     }
 
-    if (node->iter_domain()->rawExtent()->isOneInt()) {
+    if (node->extent()->isOneInt()) {
       indent() << "constexpr " << node->index()->dtype() << " "
                << gen(node->index()) << " = 0;\n";
       handleScope(node->body());
@@ -887,7 +912,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
     const auto gen_index = gen(node->index());
     const auto gen_start = genInline(node->iter_domain()->start());
-    const auto gen_extent = genInline(node->iter_domain()->extent());
+    const auto gen_extent = genInline(node->extent());
     if (!node->unroll()) {
       indent() << "#pragma unroll 1\n";
     }
@@ -900,6 +925,11 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   void visit(const kir::IfThenElse* node) final {
+    if (node->cond()->isConst() && node->cond()->value().value()) {
+      handleScope(node->thenBody());
+      return;
+    }
+
     indent() << "if (" << genInline(node->cond()) << ") ";
 
     // "then" block
@@ -981,6 +1011,9 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
   // TODO(kir): replace with explicit assignment statements
   bool print_inline_ = false;
+
+  // Mark when we are inside of a vectorized for-loop
+  bool vectorize_scope_ = false;
 };
 
 } // namespace

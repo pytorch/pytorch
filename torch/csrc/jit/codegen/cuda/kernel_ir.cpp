@@ -167,6 +167,13 @@ bool TensorDomain::hasRFactor() const {
   return !rfactor_domain_.empty();
 }
 
+bool TensorDomain::hasVectorize() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->parallelType() == ParallelType::Vectorize ||
+        id->parallelType() == ParallelType::MisalignedVectorize;
+  });
+}
+
 IterDomain* TensorDomain::axis(int i) const {
   TORCH_INTERNAL_ASSERT(i >= 0 && i < int(domain_.size()));
   return domain_[i];
@@ -446,16 +453,38 @@ ForLoop::ForLoop(
     Passkey passkey,
     Val* index,
     IterDomain* iter_domain,
-    bool unroll)
+    bool vectorize,
+    Val* extent,
+    bool unroll,
+    Val* shift)
     : Expr(passkey),
       index_{index},
       iter_domain_{iter_domain},
+      vectorize_(vectorize),
+      extent_{extent},
       body_(this),
-      unroll_(unroll) {
+      unroll_(unroll),
+      shift_{shift} {
   TORCH_INTERNAL_ASSERT(index->dtype() == DataType::Int);
   addInput(index);
   addInput(iter_domain);
 }
+
+ForLoop::ForLoop(
+    Passkey passkey,
+    Val* index,
+    IterDomain* iter_domain,
+    Val* extent,
+    bool unroll,
+    Val* shift)
+    : ForLoop(
+          passkey,
+          index,
+          iter_domain,
+          isParallelTypeVectorize(iter_domain->parallelType()),
+          extent,
+          unroll,
+          shift) {}
 
 IfThenElse::IfThenElse(Passkey passkey, Bool* cond)
     : Expr(passkey), cond_{cond}, then_body_(this), else_body_(this) {

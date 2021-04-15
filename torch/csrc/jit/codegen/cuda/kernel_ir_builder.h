@@ -51,13 +51,15 @@ class TORCH_CUDA_CU_API IrBuilder {
 
   // Unary operations
   Val* negExpr(Val* val);
+  Val* namedSetExpr(const std::string& name, Val* val);
+  Val* namedAddressExpr(const std::string& name, Val* val);
 
   // Binary operations
   Val* andExpr(Val* lhs, Val* rhs);
   Val* eqExpr(Val* lhs, Val* rhs);
+  Val* gtExpr(Val* lhs, Val* rhs);
   Val* ltExpr(Val* lhs, Val* rhs);
   Val* leExpr(Val* lhs, Val* rhs);
-  Val* gtExpr(Val* lhs, Val* rhs);
   Val* geExpr(Val* lhs, Val* rhs);
   Val* addExpr(Val* lhs, Val* rhs);
   Val* subExpr(Val* lhs, Val* rhs);
@@ -65,6 +67,9 @@ class TORCH_CUDA_CU_API IrBuilder {
   Val* divExpr(Val* lhs, Val* rhs);
   Val* ceilDivExpr(Val* lhs, Val* rhs);
   Val* modExpr(Val* lhs, Val* rhs);
+
+  // Ternary operations
+  Val* whereExpr(Val* pred, Val* lhs, Val* rhs);
 
   // Shortcuts for frequently used vals
   Int* zero();

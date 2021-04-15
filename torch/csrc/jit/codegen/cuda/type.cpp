@@ -264,6 +264,8 @@ static const char* unary_op_type_inline_op2string(UnaryOpType t) {
       return "~";
     case UnaryOpType::Set:
       return "";
+    case UnaryOpType::Address:
+      return "(int64_t) &";
     default:
       break;
   }
@@ -429,6 +431,8 @@ static const char* parallel_type2string(ParallelType t) {
       return "threadIdx.x";
     case ParallelType::Vectorize:
       return "V";
+    case ParallelType::MisalignedVectorize:
+      return "MV";
     case ParallelType::Unroll:
       return "UR";
     case ParallelType::Unswitch:
@@ -647,6 +651,11 @@ bool isParallelTypeBlockDim(ParallelType ptype) {
 
 bool isParallelTypeThread(ParallelType ptype) {
   return isParallelTypeBlockDim(ptype) || isParallelTypeThreadDim(ptype);
+}
+
+bool isParallelTypeVectorize(ParallelType ptype) {
+  return ptype == ParallelType::Vectorize ||
+      ptype == ParallelType::MisalignedVectorize;
 }
 
 c10::optional<std::string> cast_func_str(

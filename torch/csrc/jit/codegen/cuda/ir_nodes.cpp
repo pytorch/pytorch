@@ -896,6 +896,13 @@ bool TensorDomain::hasRFactor() const {
   return !rfactor_domain_.empty();
 }
 
+bool TensorDomain::hasVectorize() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->getParallelType() == ParallelType::Vectorize ||
+        id->getParallelType() == ParallelType::MisalignedVectorize;
+  });
+}
+
 c10::optional<unsigned int> TensorDomain::getReductionAxis() const {
   auto it = std::find_if(domain_.begin(), domain_.end(), [](const auto& id) {
     return id->isReduction();

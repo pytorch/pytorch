@@ -166,6 +166,9 @@ TensorView* castOp(DataType dtype, TensorView* v1) {
 // UNARY OPERATIONS
 
 Val* unaryOp(UnaryOpType type, Val* v1) {
+  TORCH_INTERNAL_ASSERT(
+      type != UnaryOpType::Address,
+      "The reference operator & is not accessible in the Fusion IR");
   Val* out = newValLike(v1, v1->getDataType().value());
   new UnaryOp(type, out, v1);
   return out;

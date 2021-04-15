@@ -32,9 +32,28 @@ Val* IrBuilder::newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   return result;
 }
 
+Val* IrBuilder::whereExpr(Val* pred, Val* lhs, Val* rhs) {
+  TORCH_CHECK(lhs->dtype() == rhs->dtype(), "Incompatible operand types");
+  auto result = newResult(lhs->dtype());
+  create<TernaryOp>(TernaryOpType::Where, result, pred, lhs, rhs);
+  return result;
+}
+
 Val* IrBuilder::negExpr(Val* val) {
   auto result = newResult(val->dtype());
   create<UnaryOp>(UnaryOpType::Neg, result, val);
+  return result;
+}
+
+Val* IrBuilder::namedSetExpr(const std::string& name, Val* val) {
+  auto result = create<NamedScalar>(name, val->dtype());
+  create<UnaryOp>(UnaryOpType::Set, result, val);
+  return result;
+}
+
+Val* IrBuilder::namedAddressExpr(const std::string& name, Val* val) {
+  auto result = create<NamedScalar>(name, DataType::Int);
+  create<UnaryOp>(UnaryOpType::Address, result, val);
   return result;
 }
 
@@ -46,16 +65,16 @@ Val* IrBuilder::eqExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::Eq, lhs, rhs);
 }
 
+Val* IrBuilder::gtExpr(Val* lhs, Val* rhs) {
+  return newLogicExpr(BinaryOpType::GT, lhs, rhs);
+}
+
 Val* IrBuilder::ltExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::LT, lhs, rhs);
 }
 
 Val* IrBuilder::leExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::LE, lhs, rhs);
-}
-
-Val* IrBuilder::gtExpr(Val* lhs, Val* rhs) {
-  return newLogicExpr(BinaryOpType::GT, lhs, rhs);
 }
 
 Val* IrBuilder::geExpr(Val* lhs, Val* rhs) {

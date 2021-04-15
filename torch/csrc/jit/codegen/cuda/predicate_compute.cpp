@@ -200,7 +200,8 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     const kir::Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
     kir::Bool* thread_pred,
-    bool ignore_block_grid_external_ops) {
+    bool ignore_block_grid_external_ops,
+    bool misaligned_vectorization) {
   FUSER_PERF_SCOPE("getInlinePredicate");
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
@@ -260,12 +261,14 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     }
   }
 
-  if (preds.empty()) {
+  const auto extent =
+      (misaligned_vectorization) ? preds.size() - 1 : preds.size();
+  if (preds.empty() || extent == 0) {
     return ir_builder.create<kir::Bool>(true);
   }
 
   kir::Val* cond = preds[0];
-  for (size_t i = 1; i < preds.size(); i++) {
+  for (size_t i = 1; i < extent; i++) {
     cond = ir_builder.andExpr(cond, preds[i]);
   }
 

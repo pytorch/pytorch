@@ -22,13 +22,288 @@ namespace {
 kir::ForLoop* cloneLoopNest(const kir::ForLoop* for_loop, bool unroll = false) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
   const auto new_loop = ir_builder.create<kir::ForLoop>(
-      for_loop->index(), for_loop->iter_domain(), unroll);
+      for_loop->index(), for_loop->iter_domain(), for_loop->extent(), unroll);
   for (auto expr : for_loop->body().exprs()) {
     if (auto nested_for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
       expr = cloneLoopNest(nested_for_loop, unroll);
     }
     new_loop->body().push_back(expr);
   }
+  return new_loop;
+}
+
+// Create a new vectorize For-Loop
+// Add For-Loop to If-Then-Else parent scope
+// for (index = start; index < extent; index += offset)
+// vectorize flag - Do not generate for-loop
+// shift value - Add shift to global indices generated within For-Loop
+void cloneVectorizeLoopNests(
+    kir::IfThenElse* parent_ite,
+    const std::vector<kir::ForLoop*>& for_loops,
+    kir::Val* extent,
+    bool vectorize,
+    kir::Val* shift) {
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+
+  for (auto fl : for_loops) {
+    auto first_expr = fl->body().exprs().front();
+    bool has_vectorize_op =
+        (first_expr->isA<kir::UnaryOp>() &&
+         first_expr->as<kir::UnaryOp>()->operation() == UnaryOpType::Set &&
+         first_expr->as<kir::UnaryOp>()->out()->isA<kir::TensorView>() &&
+         first_expr->as<kir::UnaryOp>()
+             ->out()
+             ->as<kir::TensorView>()
+             ->domain()
+             ->hasVectorize());
+
+    TORCH_INTERNAL_ASSERT(!has_vectorize_op || fl->body().exprs().size() == 1);
+
+    const auto new_loop = ir_builder.create<kir::ForLoop>(
+        fl->index(),
+        fl->iter_domain(),
+        vectorize && has_vectorize_op,
+        extent,
+        false,
+        shift);
+
+    for (auto expr : fl->body().exprs()) {
+      new_loop->body().push_back(expr);
+    }
+
+    parent_ite->thenBody().push_back(new_loop);
+  }
+}
+
+// Find any child For-Loops
+// Add remaining expressions to new parent For-Loop
+std::vector<kir::ForLoop*> parseVectorizedForLoop(
+    const kir::ForLoop* for_loop,
+    kir::ForLoop* new_loop) {
+  std::vector<kir::ForLoop*> loops;
+  for (auto expr : for_loop->body().exprs()) {
+    if (auto nested_for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
+      loops.push_back(nested_for_loop);
+    } else {
+      new_loop->body().push_back(expr);
+    }
+  }
+  return loops;
+}
+
+// Find the first vectorize set - either read or write
+// Add child For-Loop to loop_structure
+// Enable vectorize flag in child For-Loop
+kir::Expr* findVectorizedSet(
+    std::vector<kir::ForLoop*>& loop_structure,
+    const std::vector<kir::ForLoop*>& for_loops) {
+  for (auto fl : for_loops) {
+    auto first_expr = fl->body().exprs().front();
+    bool has_vectorize_op =
+        (first_expr->isA<kir::UnaryOp>() &&
+         first_expr->as<kir::UnaryOp>()->operation() == UnaryOpType::Set &&
+         fl->iter_domain()->parallelType() ==
+             ParallelType::MisalignedVectorize);
+    if (has_vectorize_op) {
+      loop_structure.push_back(fl);
+      return first_expr;
+    }
+  }
+  return nullptr;
+}
+
+// Get full extent for the inner-most, merged root domain
+kir::Val* getVectorizeExtent(
+    kir::TensorView* tv,
+    const std::vector<kir::Val*>& indices) {
+  auto domain = tv->domain()->hasRFactor() ? tv->domain()->rfactorDomain()
+                                           : tv->domain()->rootDomain();
+
+  TORCH_INTERNAL_ASSERT(domain.size() == indices.size());
+
+  bool is_contiguous = true;
+  for (auto status : tv->domain()->contiguity()) {
+    is_contiguous &= status;
+  }
+
+  // If the tensorview is not contiguous, return inner-most root domain extent
+  if (!is_contiguous) {
+    return domain.back()->extent();
+  }
+
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  // Calculate extent of merged root domains
+  kir::Val* extent = nullptr;
+  for (int i = int(domain.size()) - 1; i >= 0; --i) {
+    auto root_id = domain.at(i);
+    if (root_id->isBroadcast() || root_id->isReduction() ||
+        gpu_lower->trivialReductionInfo().isDerived(root_id)) {
+      continue;
+    } else if (extent == nullptr) {
+      extent = root_id->extent();
+    } else if (extent != nullptr && indices.at(i)->isZeroInt()) {
+      // This root id must be merged and contiguous. Expand the
+      // vectorization partition.
+      extent = ir_builder.mulExpr(extent, root_id->extent());
+    } else {
+      break;
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(extent != nullptr);
+
+  return extent;
+}
+
+kir::Val* setupNamedScalar(
+    kir::Scope& body,
+    kir::Val* val,
+    const std::string& name,
+    bool address = false) {
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  auto namedScalar = (address) ? ir_builder.namedAddressExpr(name, val)
+                               : ir_builder.namedSetExpr(name, val);
+  auto alloc = ir_builder.create<kir::Allocate>(
+      namedScalar, MemoryType::Local, ir_builder.one());
+  body.push_back(alloc);
+  body.push_back(namedScalar->definition());
+  return namedScalar;
+}
+
+kir::ForLoop* handleMisalignedVectorization(
+    std::vector<kir::ForLoop*> loop_structure,
+    const kir::ForLoop* for_loop) {
+  // for_loop body contains allocate, read, compute, write operations
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+
+  // create new base For-Loop
+  const auto new_loop = ir_builder.create<kir::ForLoop>(
+      for_loop->index(), for_loop->iter_domain(), for_loop->extent());
+
+  // Find child For-Loops and add remaining expressions to base For-Loop
+  auto child_loops = parseVectorizedForLoop(for_loop, new_loop);
+
+  // Find the first vectorize set - either read or write
+  auto vec_expr = findVectorizedSet(loop_structure, child_loops);
+  TORCH_INTERNAL_ASSERT(vec_expr != nullptr);
+  TORCH_INTERNAL_ASSERT(vec_expr->outputs().front()->isA<kir::TensorView>());
+  TORCH_INTERNAL_ASSERT(vec_expr->inputs().front()->isA<kir::TensorView>());
+
+  auto out_tv = vec_expr->outputs().front()->as<kir::TensorView>();
+  auto in_tv = vec_expr->inputs().front()->as<kir::TensorView>();
+
+  // It is assumed that either of input and output is on global memory
+  TORCH_INTERNAL_ASSERT(
+      out_tv->memoryType() == MemoryType::Global ||
+          in_tv->memoryType() == MemoryType::Global,
+      "Either input or output tensor must be on global memory.");
+  // However, not both of them
+  TORCH_INTERNAL_ASSERT(
+      !(out_tv->memoryType() == MemoryType::Global &&
+        in_tv->memoryType() == MemoryType::Global),
+      "Both input and output tensors are on global memory.");
+  // Must be either global or local
+  TORCH_INTERNAL_ASSERT(
+      (out_tv->memoryType() == MemoryType::Global ||
+       out_tv->memoryType() == MemoryType::Local),
+      "Invalid memory type of output tensor");
+  TORCH_INTERNAL_ASSERT(
+      (in_tv->memoryType() == MemoryType::Global ||
+       in_tv->memoryType() == MemoryType::Local),
+      "Invalid memory type of input tensor");
+
+  // TensorView on global memory. This is the tensor that may have
+  // a non-aligned base address.
+  auto global_tv =
+      (out_tv->memoryType() == MemoryType::Global) ? out_tv : in_tv;
+
+  // TensorView with the misaligned vec iterDomain. It is the consumer
+  // of vectorized load or the producer of vectorized store. It is
+  // assumed that when the output TV is not on global memory, this
+  // expression is a vectorized load, so the output TV is vec_tv.
+  // TODO: Check vec_tv has indeed MisalignedVectorize parallel type.
+  auto vec_tv = (out_tv->memoryType() != MemoryType::Global) ? out_tv : in_tv;
+
+  auto pred = PredicateCompute::getInlinePredicate(
+      vec_expr, loop_structure, nullptr, false, true);
+  if (pred == nullptr) {
+    pred = ir_builder.create<kir::Bool>(true);
+  }
+
+  kir::IfThenElse* pred_ite = ir_builder.create<kir::IfThenElse>(pred);
+  new_loop->body().push_back(pred_ite);
+
+  // Generate vectorize index
+  auto indices = (out_tv->memoryType() == MemoryType::Global)
+      ? Index::getConsumerStridedIndices(out_tv->fuserTv(), loop_structure)
+      : Index::getProducerStridedIndices(
+            in_tv->fuserTv(), out_tv->fuserTv(), loop_structure);
+
+  //  Get full extent for merged root domains
+  auto extent = getVectorizeExtent(vec_tv, indices);
+
+  auto vector_size =
+      vec_tv->domain()->domain().back()->extent()->as<kir::Int>();
+
+  auto index =
+      ir_builder.create<kir::TensorIndex>(global_tv->fuserTv(), indices);
+  auto base_address =
+      setupNamedScalar(pred_ite->thenBody(), index, "base_address", true);
+
+  kir::Int* data_size =
+      ir_builder.create<kir::Int>(dataTypeSize(vec_tv->dtype()));
+  auto vector_data_size = ir_builder.mulExpr(vector_size, data_size);
+  auto a = ir_builder.modExpr(base_address, vector_data_size);
+  auto b = ir_builder.divExpr(a, data_size);
+  auto c = ir_builder.subExpr(vector_size, b);
+  auto shift_init = setupNamedScalar(pred_ite->thenBody(), c, "shift_val");
+
+  auto shift_pred = ir_builder.eqExpr(shift_init, vector_size);
+  auto shift_val =
+      ir_builder.whereExpr(shift_pred, ir_builder.zero(), shift_init);
+  auto shift = setupNamedScalar(pred_ite->thenBody(), shift_val, "shift");
+
+  auto remaining_extent = ir_builder.subExpr(extent, shift);
+  auto remainder_val = ir_builder.modExpr(remaining_extent, vector_size);
+  auto remainder =
+      setupNamedScalar(pred_ite->thenBody(), remainder_val, "remainder");
+
+  auto last_index = ir_builder.subExpr(extent, vector_size);
+  auto threshold_val = ir_builder.subExpr(last_index, shift);
+  auto threshold =
+      setupNamedScalar(pred_ite->thenBody(), threshold_val, "threshold");
+
+  auto last_root_dim_index = setupNamedScalar(
+      pred_ite->thenBody(), indices.back(), "last_root_dim_index");
+  auto last_root_dim_index_shift =
+      ir_builder.addExpr(last_root_dim_index, shift);
+
+  // Part A - Vectorize
+  kir::Val* vectorize_pred = ir_builder.leExpr(last_root_dim_index, threshold);
+  kir::IfThenElse* vectorize_ite =
+      ir_builder.create<kir::IfThenElse>(vectorize_pred->as<kir::Bool>());
+  cloneVectorizeLoopNests(vectorize_ite, child_loops, vector_size, true, shift);
+  pred_ite->thenBody().push_back(vectorize_ite);
+
+  // Part B - Pre
+  kir::Val* lshift_pred =
+      ir_builder.eqExpr(last_root_dim_index, ir_builder.zero());
+  kir::IfThenElse* pre_ite =
+      ir_builder.create<kir::IfThenElse>(lshift_pred->as<kir::Bool>());
+  cloneVectorizeLoopNests(pre_ite, child_loops, shift, false, nullptr);
+  pred_ite->thenBody().push_back(pre_ite);
+
+  // Part C - Post
+  kir::Val* lower_bound = ir_builder.gtExpr(last_root_dim_index, threshold);
+  kir::Val* upper_bound = ir_builder.ltExpr(last_root_dim_index_shift, extent);
+  kir::Val* rshift_pred = ir_builder.andExpr(lower_bound, upper_bound);
+  kir::IfThenElse* post_ite =
+      ir_builder.create<kir::IfThenElse>(rshift_pred->as<kir::Bool>());
+  cloneVectorizeLoopNests(post_ite, child_loops, remainder, false, shift);
+  pred_ite->thenBody().push_back(post_ite);
+
   return new_loop;
 }
 
@@ -52,6 +327,19 @@ bool isReductionInitExpr(const kir::Expr* expr) {
     return false;
   }
   return true;
+}
+
+bool containsMisalignedVectorization(const kir::ForLoop* fl) {
+  for (auto expr : fl->body().exprs()) {
+    if (expr->isA<kir::ForLoop>()) {
+      auto child_fl = expr->as<kir::ForLoop>();
+      if (child_fl->iter_domain()->parallelType() ==
+          ParallelType::MisalignedVectorize) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 } // namespace
@@ -125,8 +413,15 @@ void UnrollPass::handle(kir::ForLoop* fl) {
 
     // Make copy of exprs because we replace them inplace in fl
     const auto exprs_copy = fl->body().exprs();
-    for (auto expr : exprs_copy) {
-      handle(expr);
+
+    if (containsMisalignedVectorization(fl)) {
+      auto new_fl = handleMisalignedVectorization(for_loops_, fl);
+      loop_replacement_map_.insert({fl, new_fl});
+      return;
+    } else {
+      for (auto expr : exprs_copy) {
+        handle(expr);
+      }
     }
 
     for_loops_.pop_back();

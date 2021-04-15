@@ -661,6 +661,7 @@ class TORCH_CUDA_CU_API TensorDomain final : public Val {
   bool hasBlockBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
+  bool hasVectorize() const;
 
   const std::vector<IterDomain*>& noReductions() const {
     return no_reduction_domain_;
@@ -1206,13 +1207,30 @@ class TORCH_CUDA_CU_API Scope {
 //!
 //! TODO(kir): this is not a real expression
 //!
+//! ForLoop may represent a part of an iteration domain representend
+//! by iter_domain_. In that case, the loop extent field, extent_, may
+//! be smaller than the extent of iter_domain_.
 class TORCH_CUDA_CU_API ForLoop final : public Expr {
  public:
+  //! By default, the loop extent is set as the extent of iter_domain.
+  //! It can be overwritten if extent is not null.
   ForLoop(
       Passkey passkey,
       Val* index,
       IterDomain* iter_domain,
-      bool unroll = false);
+      Val* extent = nullptr,
+      bool unroll = false,
+      Val* shift = nullptr);
+
+  //! Same as the above but explicitly enable/disable the vectorization.
+  ForLoop(
+      Passkey passkey,
+      Val* index,
+      IterDomain* iter_domain,
+      bool vectorize,
+      Val* extent = nullptr,
+      bool unroll = false,
+      Val* shift = nullptr);
 
   void accept(IrVisitor* visitor) const override {
     visitor->visit(this);
@@ -1224,6 +1242,21 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 
   Val* index() const {
     return index_;
+  }
+
+  //! Return the extent of the loop, which is by default the extent of
+  //! iter_domain_ but may be the one setat the constructor call.
+  Val* extent() const {
+    TORCH_INTERNAL_ASSERT(iter_domain_ != nullptr);
+    return extent_ != nullptr ? extent_ : iter_domain_->extent();
+  }
+
+  bool vectorize() const {
+    return vectorize_;
+  }
+
+  kir::Val* shift() const {
+    return shift_;
   }
 
   IterDomain* iter_domain() const {
@@ -1244,9 +1277,18 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 
  private:
   Val* const index_ = nullptr;
-  IterDomain* const iter_domain_;
+  IterDomain* const iter_domain_ = nullptr;
+  // vectorize is true when the for-loop contains a vectorize set
+  // the flag is used to omit the for-loop from the kernel
+  bool vectorize_ = false;
+  //! Extent of the loop, which may be smaller than the extent of iter_domain_
+  Val* const extent_ = nullptr;
   Scope body_;
   bool unroll_ = false;
+
+  // [pre | vectorize | post] <= inner-most, merged root domain
+  // shift_ is applied to the vectorize and post sections.
+  Val* shift_ = nullptr;
 };
 
 //! IfThenElse provides scoping for an boolean operator. Exprs placed in its

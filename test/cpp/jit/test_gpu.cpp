@@ -13160,6 +13160,429 @@ TEST(NVFuserTest, FusionBroadcastAcrossComputeAt_CUDA) {
   testValidate(&fusion, cg_outputs, aten_inputs, {t3}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionVectorizeMisalignedPointwise_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  auto tv1 = makeContigTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  const int kTDX = 64;
+  const int kVecSize = 4;
+  const int kNumElems = kTDX * kVecSize;
+
+  tv2->split(1, kNumElems);
+
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+  auto c2 = tv2->cache_before();
+
+  tv2->split(-1, kVecSize);
+
+  c0->computeAt(tv2, -2);
+  c1->computeAt(tv2, -2);
+
+  c0->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+  c1->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(-2)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int bx = 128;
+  const int by = 457;
+  at::Tensor t0 = at::randn({bx, by}, options);
+  at::Tensor t1 = at::randn({bx, by}, options);
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0 + t1;
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeContig_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(4);
+  auto tv1 = makeContigTensor(4);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  tv2->reorder({{0, 1}, {1, 0}});
+  tv2->merge(-2);
+
+  const int kTDX = 64;
+  const int kVecSize = 2;
+  const int kNumElems = kTDX * kVecSize;
+
+  tv2->split(-1, kNumElems);
+
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+  auto c2 = tv2->cache_before();
+
+  tv2->split(0, 128);
+  tv2->split(-1, kVecSize);
+
+  c0->computeAt(tv2, -2);
+  c1->computeAt(tv2, -2);
+
+  c0->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+  c1->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::BIDy);
+  tv2->axis(-2)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int n = 32;
+  const int c = 128;
+  const int h = 51;
+  const int w = 23;
+  at::Tensor t0 = at::randn({n, c, h, w}, options);
+  at::Tensor t1 = at::randn({n, c, h, w}, options);
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0 + t1;
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicPass_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  constexpr int kNumDims = 4;
+  constexpr int kTDX = 64;
+  constexpr int kVecSize = 2;
+  constexpr int kNumElems = kTDX * kVecSize;
+
+  auto tv0 = makeSymbolicTensor(kNumDims);
+  auto tv1 = makeSymbolicTensor(kNumDims);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  // Create caches for vectorization
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+  auto c2 = tv2->cache_before();
+
+  // Merge all dimensions together except inner-most dim
+  for (int idx = 0; idx < kNumDims - 2; ++idx) {
+    tv2->merge(0);
+  }
+  // Split inner-most dim
+  tv2->split(-1, kNumElems);
+  tv2->split(-1, kVecSize);
+  TransformPropagator::from(tv2);
+
+  c0->computeAt(tv2, -2);
+  c1->computeAt(tv2, -2);
+
+  // Parallelization Strategy
+  c0->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+  c1->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int n = 5;
+  const int c = 3;
+  const int h = 51;
+  const int w = 257;
+  at::Tensor t0 = at::randn({n, c, h, w}, options);
+  at::Tensor t1 = at::randn({n, c, h, w}, options);
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0 + t1;
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicFail_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  constexpr int kNumDims = 4;
+  constexpr int kTDX = 64;
+  constexpr int kVecSize = 2;
+  constexpr int kNumElems = kTDX * kVecSize;
+  std::vector<int64_t> bcast_shape{1, 1, 1, -1};
+
+  auto tv0 = makeContigTensor(kNumDims);
+  auto tv1 = TensorViewBuilder().shape(bcast_shape).build();
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  // Create caches for vectorization
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+  auto c2 = tv2->cache_before();
+
+  // Merge all dimensions together
+  // Backward merge order is necessary for vectorize validation
+  for (int idx = kNumDims - 1; idx > 0; --idx) {
+    tv2->merge(idx - 1);
+  }
+  tv2->split(-1, kNumElems);
+  tv2->split(-1, kVecSize);
+  TransformPropagator::from(tv2);
+
+  c0->computeAt(tv2, -2);
+  c1->computeAt(tv2, -2);
+
+  // Parallelization Strategy
+  c0->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+  c1->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int n = 32;
+  const int c = 128;
+  const int h = 51;
+  const int w = 23;
+  at::Tensor t0 = at::randn({n, c, h, w}, options);
+  at::Tensor t1 = at::randn({1, 1, 1, w}, options);
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  // TODO: throw assertion - cannot merge non-contiguous vectorization axes
+  // Make sure compilation fails
+  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+}
+
+TEST(NVFuserTest, FusionVectorizeMisalignedRFactor_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  auto tv1 = makeContigTensor(2);
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+
+  auto tv3 = sum(tv2, {-1});
+
+  fusion.addOutput(tv3);
+
+  tv3->split(-1, 128 * 4);
+  tv3->split(-1, 4);
+  // Reduce outer dim first
+  auto tv4 = tv3->rFactor({-3, -1});
+  // Tv3 will reduce threads
+
+  tv0->computeAt(tv3, 1);
+  tv1->computeAt(tv3, 1);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  tv0->computeAt(tv4, -2);
+  tv1->computeAt(tv4, -2);
+
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+
+  c0->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+  c1->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  tv4->axis(-2)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv2->computeAt(tv4, -1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int bx = 128;
+  const int by = 2050;
+  at::Tensor t0 = at::randn({bx, by}, options);
+  at::Tensor t1 = at::randn({bx, by}, options);
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0.add(t1).sum(1);
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionVectorizeMisalignedWrongDimFail_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  auto tv1 = makeContigTensor(2);
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  tv2->split(1, 16);
+  tv2->split(1, 64);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDx);
+
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+  auto c2 = tv2->cache_before();
+
+  c0->computeAt(tv2, -2);
+  c1->computeAt(tv2, -2);
+
+  std::vector<TensorView*> vectorized_tvs = {c0, c1, tv2};
+  for (auto tv : vectorized_tvs) {
+    tv->split(-1, 4);
+    // Vectorize the wrong dimension
+    tv->axis(-2)->parallelize(ParallelType::MisalignedVectorize);
+  }
+
+  FusionExecutor fe;
+  // Make sure compilation fails
+  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+}
+
+TEST(NVFuserTest, FusionVectorizeMisalignedStride_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(2);
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  const int kTDX = 64;
+  const int kVecSize = 4;
+  const int kNumElems = kTDX * kVecSize;
+
+  tv2->split(1, kNumElems);
+
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+
+  tv2->split(-1, kVecSize);
+
+  c0->computeAt(tv2, -2);
+  c1->computeAt(tv2, -2);
+
+  c0->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+  c1->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(-2)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int bx = 128;
+  const int by = 2049;
+  at::Tensor t0 = at::randn({bx, by}, options).index({"...", Slice(3)});
+  at::Tensor t1 = at::randn({bx, by}, options).index({"...", Slice(3)});
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0 + t1;
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(2);
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  const int kTDX = 64;
+  const int kVecSize = 4;
+  const int kNumElems = kTDX * kVecSize;
+
+  tv2->split(1, kNumElems);
+
+  auto c0 = tv0->cache_after();
+  auto c1 = tv1->cache_after();
+  auto c2 = tv2->cache_before();
+
+  tv2->split(-1, kVecSize);
+
+  c0->computeAt(tv2, -2);
+  c1->computeAt(tv2, -2);
+
+  c0->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+  c1->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(-2)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::MisalignedVectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int bx = 128;
+  const int by = 2049;
+  at::Tensor t0 = at::randn({bx, by}, options).index({"...", Slice(3)});
+  at::Tensor t1 = at::randn({bx, by}, options).index({"...", Slice(3)});
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  // Failure because the input + output tensors do not have the same stride
+  ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
+}
+
 TEST(NVFuserTest, FusionVectorization1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

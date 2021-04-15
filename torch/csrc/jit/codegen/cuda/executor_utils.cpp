@@ -165,6 +165,75 @@ bool validateKernelArg(
   }
 }
 
+// Return true if all the tensors have the same stride
+bool checkSameStride(const std::vector<c10::IValue>& tensors) {
+  if (tensors.size() < 2) {
+    return true;
+  }
+  for (size_t idx = 0; idx < tensors.size() - 1; ++idx) {
+    auto current = tensors[idx];
+    auto next = tensors[idx + 1];
+    if (!current.isTensor() || !next.isTensor()) {
+      return false;
+    }
+
+    const auto& current_tensor = current.toTensor();
+    const auto& next_tensor = next.toTensor();
+    if (current_tensor.ndimension() != next_tensor.ndimension()) {
+      return false;
+    }
+
+    for (int64_t i = 0; i < current_tensor.ndimension(); ++i) {
+      if (current_tensor.stride(i) != next_tensor.stride(i)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// Return true if all the tensors have the same stride
+bool checkSameContiguity(const std::vector<c10::IValue>& tensors) {
+  auto reference = tensors.front();
+  if (!reference.isTensor()) {
+    return false;
+  }
+
+  // Determine if the reference tensor is contiguous
+  const auto& reference_tensor = reference.toTensor();
+  int64_t expected_stride = 1;
+  for (int64_t i = 1; i <= reference_tensor.ndimension(); ++i) {
+    int64_t ind = reference_tensor.ndimension() - i;
+    if (reference_tensor.stride(ind) != expected_stride) {
+      return false;
+    }
+    expected_stride *= reference_tensor.size(ind);
+  }
+
+  // Check if all the tensors have the same contiguity
+  return checkSameStride(tensors);
+}
+
+bool checkValidMisalignedTensors(
+    const std::unordered_set<TensorView*>& inp_tv,
+    const std::unordered_set<TensorView*>& out_tv,
+    const std::vector<c10::IValue>& inp_tensors,
+    const std::vector<c10::IValue>& out_tensors) {
+  if (out_tv.empty()) {
+    // Only check input tensors
+    return checkSameStride(inp_tensors);
+  } else if (!out_tv.empty() && out_tensors.empty()) {
+    // Assume out tensors are contiguous
+    return checkSameContiguity(inp_tensors);
+  } else {
+    // Only check input and output tensors
+    std::vector<c10::IValue> tensors;
+    tensors.insert(tensors.end(), inp_tensors.begin(), inp_tensors.end());
+    tensors.insert(tensors.end(), out_tensors.begin(), out_tensors.end());
+    return checkSameStride(tensors);
+  }
+}
+
 } // namespace
 
 void validateKernelInputs(
@@ -288,6 +357,9 @@ void validateVectorizedTensors(
     const std::vector<at::Tensor>& outputs,
     GpuLower& lower,
     kir::ExpressionEvaluator& expr_eval) {
+  std::unordered_set<TensorView*> global_inp_misaligned_tv;
+  std::unordered_set<TensorView*> global_out_misaligned_tv;
+  std::unordered_set<TensorView*> misaligned_tv;
   std::unordered_map<TensorView*, int> tv_to_vector_word_size;
   for (auto expr : fusion->exprs()) {
     if (!expr->isA<UnaryOp>() ||
@@ -299,9 +371,11 @@ void validateVectorizedTensors(
       continue;
     }
     auto out_tv = uop->out()->as<TensorView>();
+    auto in_tv = uop->in()->as<TensorView>();
     IterDomain* vector_dim = nullptr;
     for (auto id : out_tv->domain()->domain()) {
-      if (id->getParallelType() == ParallelType::Vectorize) {
+      if (id->getParallelType() == ParallelType::Vectorize ||
+          id->getParallelType() == ParallelType::MisalignedVectorize) {
         vector_dim = id;
         break;
       }
@@ -316,10 +390,28 @@ void validateVectorizedTensors(
         "Non constant vector dimension found in ",
         out_tv);
     tv_to_vector_word_size[out_tv] = vector_word_size.value();
-    tv_to_vector_word_size[uop->in()->as<TensorView>()] =
-        vector_word_size.value();
+    tv_to_vector_word_size[in_tv] = vector_word_size.value();
+
+    if (vector_dim->getParallelType() == ParallelType::MisalignedVectorize) {
+      if (out_tv->getMemoryType() == MemoryType::Global &&
+          in_tv->getMemoryType() == MemoryType::Local) {
+        global_out_misaligned_tv.insert(out_tv);
+      } else if (
+          in_tv->getMemoryType() == MemoryType::Global &&
+          out_tv->getMemoryType() == MemoryType::Local) {
+        global_inp_misaligned_tv.insert(in_tv);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Unsupported memory configuration for misaligned vectorization.");
+      }
+      misaligned_tv.insert(out_tv);
+      misaligned_tv.insert(in_tv);
+    }
   }
 
+  std::vector<c10::IValue> inp_misaligned_tensors;
+  std::vector<c10::IValue> out_misaligned_tensors;
   for (auto entry : tv_to_vector_word_size) {
     auto tv = entry.first;
     auto word_size = entry.second;
@@ -332,14 +424,18 @@ void validateVectorizedTensors(
           tv,
           " in fusion inputs.");
       auto inp_pos = std::distance(fusion->inputs().begin(), inp_it);
-
       auto aten_inp = inputs[inp_pos];
-      TORCH_INTERNAL_ASSERT(
-          canVectorize(aten_inp, word_size),
-          "Error vectorizing, ",
-          tv,
-          " as input provided does not allowed vectorization by word size, ",
-          word_size);
+
+      if (global_inp_misaligned_tv.find(tv) != global_inp_misaligned_tv.end()) {
+        inp_misaligned_tensors.emplace_back(aten_inp);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            canVectorize(aten_inp, word_size),
+            "Error vectorizing, ",
+            tv,
+            " as input provided does not allowed vectorization by word size, ",
+            word_size);
+      }
     } else if (tv->isFusionOutput() && outputs.size() > 0) {
       auto out_it =
           std::find(fusion->outputs().begin(), fusion->outputs().end(), tv);
@@ -349,23 +445,38 @@ void validateVectorizedTensors(
           tv,
           " in provided fusion outputs.");
       auto out_pos = std::distance(fusion->outputs().begin(), out_it);
-
       auto aten_out = outputs[out_pos];
-      TORCH_INTERNAL_ASSERT(
-          canVectorize(aten_out, word_size),
-          "Error vectorizing, ",
-          tv,
-          " as output provided does not allowed vectorization by word size, ",
-          word_size);
+
+      if (global_out_misaligned_tv.find(tv) != global_out_misaligned_tv.end()) {
+        out_misaligned_tensors.emplace_back(aten_out);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            canVectorize(aten_out, word_size),
+            "Error vectorizing, ",
+            tv,
+            " as output provided does not allowed vectorization by word size, ",
+            word_size);
+      }
     } else {
-      TORCH_INTERNAL_ASSERT(
-          canVectorize(tv, word_size, lower, expr_eval),
-          "Could not vectorize ",
-          tv,
-          " it's inner most dim is not a multiple of ",
-          word_size);
+      if (misaligned_tv.find(tv) == misaligned_tv.end()) {
+        TORCH_INTERNAL_ASSERT(
+            canVectorize(tv, word_size, lower, expr_eval),
+            "Could not vectorize ",
+            tv,
+            " it's inner most dim is not a multiple of ",
+            word_size);
+      }
     }
   }
+
+  // If input stride is non-contiguous + no outputs, return false
+  TORCH_INTERNAL_ASSERT(
+      checkValidMisalignedTensors(
+          global_inp_misaligned_tv,
+          global_out_misaligned_tv,
+          inp_misaligned_tensors,
+          out_misaligned_tensors),
+      "All global tensors must have the same stride for misaligned vectorization.");
 }
 
 kir::ExpressionEvaluator bindKernelInputs(

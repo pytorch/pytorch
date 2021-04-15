@@ -88,8 +88,79 @@ void validateIr(Fusion* fusion) {
 
 namespace {
 
+// Check contiguity for all root domains associated with Misaligned Vectorize
+// ParallelType
+void checkContiguity(
+    const std::unordered_set<IterDomain*>& domains,
+    TensorView* tv) {
+  TORCH_INTERNAL_ASSERT(tv->getMemoryType() == MemoryType::Global);
+
+  for (size_t idx = 0; idx < tv->getRootDomain().size(); ++idx) {
+    auto root = tv->getRootDomain()[idx];
+    if (domains.find(root) != domains.end()) {
+      TORCH_INTERNAL_ASSERT(
+          !root->isBroadcast(),
+          "Misaligned vectorization prohibits merging broadcast domains.",
+          "Issue found in, ",
+          tv);
+      TORCH_INTERNAL_ASSERT(
+          tv->domain()->contiguity()[idx],
+          "Cannot merge non-contiguous root domains with misaligned vectorization.",
+          "Issue found in, ",
+          tv);
+    }
+  }
+}
+
+// Check contiguity for all root domains associated with Misaligned Vectorize
+// ParallelType
+void checkContiguity(
+    const std::unordered_set<IterDomain*>& domains,
+    TensorView* consumer,
+    TensorView* producer) {
+  TORCH_INTERNAL_ASSERT(consumer->getMemoryType() == MemoryType::Local);
+  TORCH_INTERNAL_ASSERT(producer->getMemoryType() == MemoryType::Global);
+
+  auto root_c2p =
+      PairwiseRootDomainMap(producer, consumer)
+          .mapConsumerToProducer(consumer->domain(), producer->domain());
+
+  std::unordered_map<IterDomain*, bool> producer_domain_contiguity;
+  for (size_t idx = 0; idx < producer->getRootDomain().size(); ++idx) {
+    auto root = producer->getRootDomain()[idx];
+    auto contiguity = producer->domain()->contiguity()[idx];
+    producer_domain_contiguity.insert({root, contiguity});
+  }
+
+  for (auto consumer_root : consumer->getRootDomain()) {
+    if (domains.find(consumer_root) != domains.end()) {
+      auto producer_root = root_c2p[consumer_root];
+      TORCH_INTERNAL_ASSERT(
+          producer_domain_contiguity.find(producer_root) !=
+          producer_domain_contiguity.end());
+
+      TORCH_INTERNAL_ASSERT(
+          !consumer_root->isBroadcast() || !producer_root->isBroadcast(),
+          "Misaligned vectorization prohibits merging broadcast domains.",
+          "Issue found in, ",
+          consumer);
+
+      TORCH_INTERNAL_ASSERT(root_c2p.find(consumer_root) != root_c2p.end());
+
+      TORCH_INTERNAL_ASSERT(
+          producer_domain_contiguity[producer_root],
+          "Cannot merge non-contiguous root domains with misaligned vectorization.",
+          "Issue found in, ",
+          consumer);
+    }
+  }
+}
+
 class VectorizeValidator : public OptInDispatch {
  private:
+  // Initially, vectorized_id is the IterDomain with Vectorize ParallelType
+  // After processing all merge and split operations,
+  // vectorized_id is the corresponding root domain
   VectorizeValidator(IterDomain* vectorized_id)
       : vectorized_id_(vectorized_id) {}
 
@@ -101,6 +172,8 @@ class VectorizeValidator : public OptInDispatch {
     } else if (s->inner() == vectorized_id_) {
       vectorized_id_ = s->in();
     }
+    domains_.insert(s->outer());
+    domains_.insert(s->inner());
   }
 
   void handle(Merge* m) final {
@@ -109,9 +182,12 @@ class VectorizeValidator : public OptInDispatch {
     } else {
       vectorized_id_ = m->inner();
     }
+    domains_.insert(m->outer());
+    domains_.insert(m->inner());
   }
 
  private:
+  std::unordered_set<IterDomain*> domains_;
   IterDomain* vectorized_id_ = nullptr;
   bool is_valid = true;
 
@@ -119,14 +195,18 @@ class VectorizeValidator : public OptInDispatch {
   static void validate(TensorView* tv) {
     // Make sure there's only one vectorized ID
     IterDomain* v_id = nullptr;
+    bool misaligned_vectorize = false;
     for (auto id : tv->domain()->domain()) {
-      if (id->getParallelType() == ParallelType::Vectorize) {
+      if (id->getParallelType() == ParallelType::Vectorize ||
+          id->getParallelType() == ParallelType::MisalignedVectorize) {
         TORCH_INTERNAL_ASSERT(
             v_id == nullptr,
             "Found two vectorized domains in ",
             tv,
             " only one is allowed.");
         v_id = id;
+        misaligned_vectorize =
+            id->getParallelType() == ParallelType::MisalignedVectorize;
       }
     }
 
@@ -147,7 +227,7 @@ class VectorizeValidator : public OptInDispatch {
 
     TORCH_CHECK(
         vector_size_optional.has_value(),
-        "Could not evalualte constant value bound to vectorized dim.");
+        "Could not evaluate constant value bound to vectorized dim.");
 
     auto vector_size = ((int64_t)dataTypeSize(tv->getDataType().value())) *
         vector_size_optional.value();
@@ -176,9 +256,23 @@ class VectorizeValidator : public OptInDispatch {
 
     TORCH_CHECK(
         validator.is_valid,
-        "Invalid vectorized pattern found, vectorization iter domains must be descendants of inner most dimension.",
+        "Invalid vectorized pattern found, vectorization iter domains must be descendants of inner-most dimension.",
         "Issue found in, ",
         tv);
+
+    if (misaligned_vectorize) {
+      if (tv->getMemoryType() == MemoryType::Global) {
+        checkContiguity(validator.domains_, tv);
+      } else if (
+          tv->definition()->getExprType() == ExprType::UnaryOp &&
+          tv->definition()->as<UnaryOp>()->getUnaryOpType() ==
+              UnaryOpType::Set) {
+        auto input = tv->definition()->input(0);
+        TORCH_INTERNAL_ASSERT(input->isA<TensorView>());
+        auto input_tv = input->as<TensorView>();
+        checkContiguity(validator.domains_, tv, input_tv);
+      }
+    }
 
     TORCH_INTERNAL_ASSERT(validator.vectorized_id_ != nullptr);
 
@@ -229,6 +323,7 @@ void validateVectorize(Fusion* fusion) {
 
   for (auto tv : used_tvs) {
     bool has_vectorize_dim = false;
+    bool has_misaligned_vectorize_dim = false;
 
     for (size_t i = 0; i < tv->nDims(); i++) {
       IterDomain* id = tv->axis(i);
@@ -238,7 +333,7 @@ void validateVectorize(Fusion* fusion) {
       if (concrete_id->getParallelType() == ParallelType::Vectorize) {
         // If we want to do this check up front we would have to do 2 things:
         // (1) Check that the tensor view with vectorize being set on it is
-        // getting it set outside the local compute at position
+        // getting set outside the local compute at position
         // (2) Check any producers of the tensor view with vectorize being set
         // on it to make sure their compute at position isn't to the right of
         // the vectorize dim.
@@ -246,6 +341,18 @@ void validateVectorize(Fusion* fusion) {
             i >= tv->getComputeAtPosition(),
             "IterDomains to the left of the compute at point cannot be vectorized.");
         has_vectorize_dim = true;
+      }
+
+      if (concrete_id->getParallelType() == ParallelType::MisalignedVectorize) {
+        TORCH_INTERNAL_ASSERT(
+            !tv->hasComputeAt() ||
+                tv->getComputeAtPosition() == tv->nDims() - 1,
+            "Only allow misaligned vectorization in the -2 computeAt position.");
+        TORCH_INTERNAL_ASSERT(
+            tv->getMemoryType() == MemoryType::Local ||
+                tv->getMemoryType() == MemoryType::Global,
+            "Only allow misaligned vectorization between global and local memory.");
+        has_misaligned_vectorize_dim = true;
       }
     }
     if (has_vectorize_dim) {
@@ -255,6 +362,8 @@ void validateVectorize(Fusion* fusion) {
                tv->definition()->as<UnaryOp>()->getUnaryOpType() ==
                    UnaryOpType::Set),
           "Vectorized accesses cannot be inline with computation, they are only supported with a Set operation.");
+    }
+    if (has_vectorize_dim || has_misaligned_vectorize_dim) {
       VectorizeValidator::validate(tv);
     }
   }

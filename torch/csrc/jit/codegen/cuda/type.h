@@ -54,6 +54,7 @@ enum class ExprType {
 enum class UnaryOpType {
   Abs,
   Acos,
+  Address,
   Asin,
   Atan,
   Atanh,
@@ -158,6 +159,7 @@ enum class ParallelType {
   TIDy,
   TIDx,
   Vectorize,
+  MisalignedVectorize,
   Unroll,
   Unswitch,
   Serial
@@ -216,6 +218,8 @@ std::string typePrefix(const DataType);
 TORCH_CUDA_CU_API bool isParallelTypeThreadDim(ParallelType);
 TORCH_CUDA_CU_API bool isParallelTypeBlockDim(ParallelType);
 TORCH_CUDA_CU_API bool isParallelTypeThread(ParallelType);
+
+TORCH_CUDA_CU_API bool isParallelTypeVectorize(ParallelType);
 
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const BinaryOpType);

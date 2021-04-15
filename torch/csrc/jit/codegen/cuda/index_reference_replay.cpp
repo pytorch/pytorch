@@ -216,6 +216,10 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
             if (loop_id->getParallelType() == ParallelType::Vectorize) {
               replayed_id->parallelize(ParallelType::Vectorize);
             }
+            if (loop_id->getParallelType() ==
+                ParallelType::MisalignedVectorize) {
+              replayed_id->parallelize(ParallelType::MisalignedVectorize);
+            }
             return replayed_id;
           }
         }
@@ -252,7 +256,7 @@ IndexCompute getReferenceIndexing(
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
-  // Create a simple index maspping from loop iter domains to their local index.
+  // Create a simple index mapping from loop iter domains to their local index.
   // This is only applicable to global memory buffers.
   std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map;
 
@@ -261,8 +265,7 @@ IndexCompute getReferenceIndexing(
     auto lowered_id = gpu_lower->lowerValue(reference_tensor->axis(loop_i))
                           ->as<kir::IterDomain>();
     initial_index_map[lowered_id] = loop_structure[loop_i]->index();
-    if (loop_structure[loop_i]->iter_domain()->parallelType() ==
-        ParallelType::Vectorize) {
+    if (loop_structure[loop_i]->vectorize()) {
       initial_index_map[lowered_id] = ir_builder.create<kir::Int>(0);
     }
   }
