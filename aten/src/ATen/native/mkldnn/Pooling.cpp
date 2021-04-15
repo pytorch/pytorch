@@ -3,6 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <c10/util/irange.h>
 #include <tuple>
 
 
@@ -618,7 +619,7 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
 
   auto output_size_vec = grad_output.sizes();
   std::vector<int64_t> kernel_size(input.dim() - 2);
-  for (size_t i = 2; i < input.dim(); ++i) {
+  for (const auto i: c10::irange(2, input.dim())) {
     auto s1 = input.size(i);
     auto s2 = output_size_vec[i];
     TORCH_CHECK(s2 != 0, "output size can not be zero");
