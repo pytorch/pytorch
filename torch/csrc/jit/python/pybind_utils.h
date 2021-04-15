@@ -1027,7 +1027,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
             /*args=*/args.ptr(),
             /*kwargs=*/kwargs.ptr(),
             /*func_name=*/qualname.name().c_str(),
-            /*torch_api_function*/callee.ptr(),
+            /*torch_api_function=*/callee.ptr(),
             /*module_name=*/qualname.prefix().c_str()));
   }
 
