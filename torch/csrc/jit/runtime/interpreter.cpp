@@ -18,12 +18,12 @@
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <cassert>
 
 #ifdef USE_RPC
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -516,31 +516,9 @@ struct CodeImpl {
     }
     n_inputs = graph_->inputs().size();
     // std::cout << *graph_ << "\n";
-    auto graph_nodes = graph_->nodes();
-    std::unordered_map<std::string, std::vector<int>> op_to_trailing_ignore;
-    for (auto node : graph_nodes) {
-      // TODO only do it for aten:: operators?
-      if (!node->maybeOperator())
-        continue;
-      auto op = node->getOperator();
-      auto op_schema = node->getOperator().schema();
-      if (op_schema.name().find("aten::") != std::string::npos) {
-        auto numIgnore = calculate_trailing_unnecessary_args(
-            op_schema.arguments(), node->inputs());
-        auto unique_name = op_schema.name() + "." + op_schema.overload_name();
-        auto it = op_to_trailing_ignore.insert(
-            std::pair<std::string, std::vector<int>>(
-                unique_name, std::vector<int>()));
-        it.first->second.push_back(numIgnore);
-      }
+    if (from_mobile_) {
+      process_ops_for_mobile();
     }
-
-    for (auto& it : op_to_trailing_ignore) {
-      int min_ignore = *std::min_element(it.second.begin(), it.second.end());
-      op_to_unnecessary_args_.insert(
-          std::pair<std::string, int>(it.first, min_ignore));
-    }
-
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
     // we deferred the emission of bailout blocks so they appear at the end
@@ -552,23 +530,55 @@ struct CodeImpl {
     return constant_table_;
   }
 
+  void process_ops_for_mobile() {
+    DepthFirstGraphNodeIterator graph_it(graph_);
+    Node* node = graph_it.next();
+    std::unordered_map<std::string, std::vector<int>> op_to_trailing_ignore;
+    while (node) {
+      if (node->maybeOperator()) {
+        auto op_schema = node->getOperator().schema();
+        auto numIgnore = calculate_trailing_unnecessary_args(
+            op_schema.arguments(), node->inputs(), op_schema.is_vararg());
+        auto unique_name = op_schema.name() + "." + op_schema.overload_name();
+        auto it = op_to_trailing_ignore.insert(
+            std::pair<std::string, std::vector<int>>(
+                unique_name, std::vector<int>()));
+        it.first->second.push_back(numIgnore);
+      }
+      node = graph_it.next();
+    }
+
+    for (auto& it : op_to_trailing_ignore) {
+      int min_ignore = *std::min_element(it.second.begin(), it.second.end());
+      op_to_unnecessary_args_.insert(
+          std::pair<std::string, int>(it.first, min_ignore));
+    }
+  }
+
   int calculate_trailing_unnecessary_args(
       std::vector<Argument> schema_args,
-      at::ArrayRef<Value*> actual_inputs) {
-    assert(schema_args.size() == actual_inputs.size());
-    auto num_args = schema_args.size();
-
+      at::ArrayRef<Value*> actual_inputs,
+      bool is_vararg) {
+    if (is_vararg) {
+      AT_ASSERT(schema_args.size() <= actual_inputs.size());
+    } else {
+      AT_ASSERT(schema_args.size() == actual_inputs.size());
+    }
     // first construct boolean vector to mark if arg is necessary or
     // unneccessary
-    std::vector<bool> necessary_mark;
-    necessary_mark.resize(num_args);
-    for (size_t i = 0; i < num_args; i++) {
+    auto num_args = (schema_args.size() == actual_inputs.size())
+        ? schema_args.size()
+        : actual_inputs.size();
+    std::vector<bool> necessary_mark(num_args, true);
+    for (size_t i = 0; i < schema_args.size(); i++) {
       // this means it is not default argument, so it is necessary
       if (!schema_args.at(i).default_value().has_value()) {
         necessary_mark[i] = true;
       } else {
         auto schema_value = schema_args.at(i).default_value().value();
         auto actual_value = toIValue(actual_inputs[i]);
+        // if the IR has same value as default value of the schema,
+        // it is not neccessary argument.
         if (schema_value == actual_value) {
           necessary_mark[i] = false;
         } else {
@@ -576,6 +586,10 @@ struct CodeImpl {
         }
       }
     }
+
+    // scan backwards to count how many trailing
+    // unnecessary args there are.
+    // i.e [nec, unnec, nec, unnec, unnec] -> 2
     auto is_true = [](bool x) { return x == true; };
     auto first_true_end =
         std::find_if(necessary_mark.crbegin(), necessary_mark.crend(), is_true);
