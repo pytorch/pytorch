@@ -168,9 +168,9 @@ def get_class_assigns(ctx, cls_ast):
             pass
     for entry in cls_ast.body:
         if isinstance(entry, ast.Assign):
-            build_assign(StmtBuilder.build_Assign, entry)
+            maybe_build_assign(StmtBuilder.build_Assign, entry)
         elif isinstance(entry, ast.AnnAssign):
-            build_assign(StmtBuilder.build_AnnAssign, entry)
+            maybe_build_assign(StmtBuilder.build_AnnAssign, entry)
     return assigns
 
 
