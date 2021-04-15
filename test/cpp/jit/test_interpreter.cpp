@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <ATen/Parallel.h>
-#include "c10/core/DeviceType.h"
-#include "test/cpp/jit/test_utils.h"
-#include "torch/jit.h"
-#include "torch/script.h"
-#include "torch/torch.h"
+#include <c10/core/DeviceType.h>
+#include <test/cpp/jit/test_utils.h>
+#include <torch/jit.h>
+#include <torch/script.h>
+#include <torch/torch.h>
 
 namespace torch {
 namespace jit {
@@ -145,7 +145,6 @@ TEST(InterpreterTest, Basic_CUDA) {
 }
 
 TEST(InterpreterTest, IgnoreTrailArgs) {
-
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
   constexpr int seq_len = 32;
@@ -157,12 +156,11 @@ TEST(InterpreterTest, IgnoreTrailArgs) {
 
   auto graph = build_mobile_export_analysis_graph();
   Code function(graph, "", true);
-  auto op_to_num_ignore_function = function.op_to_num_ignore_inputs();
-  for (auto & it : op_to_num_ignore_function) {
-    std::cout << it.second << std::endl;
+  auto op_to_unnecessary_args = function.op_to_unnecessary_args();
+  for (auto& it : op_to_unnecessary_args) {
+    std::cout << it.first << std::endl;
     ASSERT_TRUE(it.second == 1);
   }
-
 }
 
 TEST(InterpreterTest, runAsyncBasicTest) {

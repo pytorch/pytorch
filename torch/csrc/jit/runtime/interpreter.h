@@ -1,5 +1,4 @@
 #pragma once
-#include "c10/util/ArrayRef.h"
 #include <c10/util/Optional.h>
 #include <memory>
 #include <vector>
@@ -64,7 +63,7 @@ struct TORCH_API Code {
   const std::vector<c10::IValue>& constant_table() const;
   const std::vector<c10::TypePtr>& type_table() const;
   const std::vector<Instruction>& instructions() const;
-  const std::unordered_map<std::string, int> op_to_num_ignore_inputs() const;
+  const std::unordered_map<std::string, int> op_to_unnecessary_args() const;
   const std::vector<Node*>& instructions_source() const;
   void request_bailout(size_t index);
   size_t register_size() const;

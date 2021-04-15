@@ -1,12 +1,10 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include "NativeFunctions.h"
 
 #include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
-#include <cassert>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
@@ -25,6 +23,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <cassert>
 
 #ifdef USE_RPC
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -481,7 +480,7 @@ struct CodeImpl {
   std::unordered_map<Value*, int> value_to_reg_;
 
   // map from operator name to trailing unnecessary inputs
-  std::unordered_map<std::string, int> op_to_num_ignore_inputs_;
+  std::unordered_map<std::string, int> op_to_unnecessary_args_;
 
   // running count of uses as we emit. When we reach use_count_[v] =
   // v.uses().size() we know it is the final use and we can move rather than
@@ -503,9 +502,9 @@ struct CodeImpl {
       bool from_mobile,
       size_t remaining_bailout_depth)
       : function_name_(std::move(function_name)),
+        from_mobile_(from_mobile),
         preprocess_(*graph),
         current_node_(preprocess_.graph->return_node()),
-        from_mobile_(from_mobile),
         remaining_bailout_depth_(remaining_bailout_depth) {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
@@ -519,25 +518,28 @@ struct CodeImpl {
     // std::cout << *graph_ << "\n";
     auto graph_nodes = graph_->nodes();
     std::unordered_map<std::string, std::vector<int>> op_to_trailing_ignore;
-    for (auto node: graph_nodes) {
+    for (auto node : graph_nodes) {
       // TODO only do it for aten:: operators?
-      if (!node->maybeOperator()) continue;
+      if (!node->maybeOperator())
+        continue;
       auto op = node->getOperator();
-      if (op.schema().name().find("aten::") != std::string::npos) {
-        const auto& op_schema = op.schema();
-        const auto& op_args = op_schema.arguments();
-        auto node_inputs = node->inputs();
-        auto numIgnore = calculate_trailing_ignore(op_args, node_inputs);
-        auto it = op_to_trailing_ignore.insert(std::pair<std::string, std::vector<int>>(op.schema().name(), std::vector<int>()));
+      auto op_schema = node->getOperator().schema();
+      if (op_schema.name().find("aten::") != std::string::npos) {
+        auto numIgnore = calculate_trailing_unnecessary_args(
+            op_schema.arguments(), node->inputs());
+        auto unique_name = op_schema.name() + "." + op_schema.overload_name();
+        auto it = op_to_trailing_ignore.insert(
+            std::pair<std::string, std::vector<int>>(
+                unique_name, std::vector<int>()));
         it.first->second.push_back(numIgnore);
       }
     }
 
-    for (auto & it : op_to_trailing_ignore) {
+    for (auto& it : op_to_trailing_ignore) {
       int min_ignore = *std::min_element(it.second.begin(), it.second.end());
-      op_to_num_ignore_inputs_.insert(std::pair<std::string, int>(it.first, min_ignore));
+      op_to_unnecessary_args_.insert(
+          std::pair<std::string, int>(it.first, min_ignore));
     }
-
 
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
@@ -550,18 +552,19 @@ struct CodeImpl {
     return constant_table_;
   }
 
-  int calculate_trailing_ignore(std::vector<Argument> schema_args, at::ArrayRef<Value*> actual_inputs) {
+  int calculate_trailing_unnecessary_args(
+      std::vector<Argument> schema_args,
+      at::ArrayRef<Value*> actual_inputs) {
     assert(schema_args.size() == actual_inputs.size());
-
     auto num_args = schema_args.size();
 
-    // first construct boolean vector to mark if arg is necessary or unneccessary
+    // first construct boolean vector to mark if arg is necessary or
+    // unneccessary
     std::vector<bool> necessary_mark;
-    necessary_mark.reserve(num_args);
-
-    for (size_t i = 0; i < num_args; i++){
+    necessary_mark.resize(num_args);
+    for (size_t i = 0; i < num_args; i++) {
       // this means it is not default argument, so it is necessary
-      if (!schema_args.at(i).default_value().has_value()){
+      if (!schema_args.at(i).default_value().has_value()) {
         necessary_mark[i] = true;
       } else {
         auto schema_value = schema_args.at(i).default_value().value();
@@ -573,19 +576,10 @@ struct CodeImpl {
         }
       }
     }
-    // scan backwards to count how many trailing unnecessary args there are
-    // for example, [necessary, unneccessary, necessary, unneccessary, unneccessary] -> 2
-    int num_trailing_ignore = 0;
-    for (size_t i = num_args - 1; i > -1; i--){
-      if (!necessary_mark[i]) {
-        num_trailing_ignore += 1;
-      } else {
-        break;
-      }
-    }
-
-    return num_trailing_ignore;
-
+    auto is_true = [](bool x) { return x == true; };
+    auto first_true_end =
+        std::find_if(necessary_mark.crbegin(), necessary_mark.crend(), is_true);
+    return std::distance(necessary_mark.crbegin(), first_true_end);
   }
 
   void request_bailout(size_t index) {
@@ -612,8 +606,8 @@ struct CodeImpl {
     return instructions_;
   }
 
-  const std::unordered_map<std::string, int> op_to_num_ignore_inputs() const {
-    return op_to_num_ignore_inputs_;
+  const std::unordered_map<std::string, int> op_to_unnecessary_args() const {
+    return op_to_unnecessary_args_;
   }
 
   const std::vector<Node*>& instructions_source() const {
@@ -709,14 +703,17 @@ struct CodeImpl {
   void emitOperator(Node* node) {
     // TODO: pass in variable to tell if it happening during mobile export
     const Operator& op = node->getOperator();
-
+    auto unique_op_name =
+        op.schema().name() + "." + op.schema().overload_name();
     auto min_ignore = 0;
     // make sure we only do this for mobile code
-    if (from_mobile_ && op_to_num_ignore_inputs_.find(op.schema().name()) != op_to_num_ignore_inputs_.end()) {
-      min_ignore = op_to_num_ignore_inputs_[op.schema().name()];
-
+    if (from_mobile_ &&
+        op_to_unnecessary_args_.find(unique_op_name) !=
+            op_to_unnecessary_args_.end()) {
+      min_ignore = op_to_unnecessary_args_[unique_op_name];
     }
-    at::ArrayRef<Value*> necessary_inputs = node->inputs().slice(0, node->inputs().size() - min_ignore);
+    at::ArrayRef<Value*> necessary_inputs =
+        node->inputs().slice(0, node->inputs().size() - min_ignore);
     emitLoadInputs(necessary_inputs);
 
     if (op.hasOperation() && op.schema().is_vararg()) {
@@ -1856,8 +1853,9 @@ const std::vector<Instruction>& Code::instructions() const {
   return pImpl->instructions();
 }
 
-const std::unordered_map<std::string, int> Code::op_to_num_ignore_inputs() const {
-  return pImpl->op_to_num_ignore_inputs();
+const std::unordered_map<std::string, int> Code::op_to_unnecessary_args()
+    const {
+  return pImpl->op_to_unnecessary_args();
 }
 
 const std::vector<Node*>& Code::instructions_source() const {
