@@ -573,7 +573,13 @@ node [shape=box];
     def __enter__(self):
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
+        # If __exit__ was called because an exception was raised, we do not attempt to
+        # attempt to finalize the package. Instead, control is returned to the
+        # caller to continue raising the exception.
+        if exc_type is not None:
+            return
+
         self.close()
 
     def _write(self, filename, str_or_bytes):
