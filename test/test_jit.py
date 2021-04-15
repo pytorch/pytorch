@@ -15055,6 +15055,34 @@ dedent """
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "else branches of for loops aren't supported"):
             torch.jit.script(fn)
 
+    def test_bool_op(self):
+        def test_bool_add(a: bool, b: bool):
+            return a + b
+        def test_bool_sub(a: bool, b: bool):
+            return a - b
+        def test_bool_mul(a: bool, b: bool):
+            return a * b
+        def test_bool_div(a: bool, b: bool):
+            return a / b
+
+        self.checkScript(test_bool_add, (True, False, ))
+        self.checkScript(test_bool_add, (True, True, ))
+        self.checkScript(test_bool_add, (False, False, ))
+        self.checkScript(test_bool_add, (False, True, ))
+
+        self.checkScript(test_bool_sub, (True, False, ))
+        self.checkScript(test_bool_sub, (True, True, ))
+        self.checkScript(test_bool_sub, (False, False, ))
+        self.checkScript(test_bool_sub, (False, True, ))
+
+        self.checkScript(test_bool_mul, (True, False, ))
+        self.checkScript(test_bool_mul, (True, True, ))
+        self.checkScript(test_bool_mul, (False, False, ))
+        self.checkScript(test_bool_mul, (False, True, ))
+
+        self.checkScript(test_bool_div, (True, True, ))
+        self.checkScript(test_bool_div, (False, True, ))
+
     def test_split(self):
         def split_two(tensor):
             a, b, c = torch.split(tensor, 2, dim=1)
