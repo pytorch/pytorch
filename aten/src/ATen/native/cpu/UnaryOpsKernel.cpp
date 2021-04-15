@@ -664,6 +664,7 @@ static void frexp_kernel(TensorIteratorBase& iter) {
           IMPLEMENT_ITERATOR_LAMBDA(op),                                            \
           {0, iter.numel()});                                                       \
     });                                                                             \
+    iter.cast_outputs();                                                            \
   }                                                                                 \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 
@@ -675,6 +676,7 @@ static void frexp_kernel(TensorIteratorBase& iter) {
           IMPLEMENT_ITERATOR_LAMBDA(op),                                                         \
           {0, iter.numel()});                                                                    \
     });                                                                                          \
+    iter.cast_outputs();                                                                         \
   }                                                                                              \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 
