@@ -1806,6 +1806,7 @@ endif()
 #
 set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+set(FMT_INSTALL ON CACHE BOOL "")
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 
 # Disable compiler feature checks for `fmt`.
@@ -1821,18 +1822,6 @@ list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 
 # ---[ Kineto
-if(USE_KINETO AND INTERN_BUILD_MOBILE)
-  message(STATUS "Not using libkineto in a mobile build.")
-  set(USE_KINETO OFF)
-endif()
-if(USE_KINETO AND MSVC)
-  message(STATUS "Not using libkineto in a Windows build.")
-  set(USE_KINETO OFF)
-endif()
-if(USE_KINETO AND APPLE)
-  message(STATUS "Not using libkineto in a Mac build.")
-  set(USE_KINETO OFF)
-endif()
 if(USE_KINETO AND (NOT USE_CUDA))
   set(LIBKINETO_NOCUPTI ON CACHE STRING "")
   message(STATUS "Using CPU-only Kineto in the non-CUDA build.")

@@ -117,6 +117,8 @@ if(ANDROID_ABI)
   import_static_lib(libeigen_blas)
   import_static_lib(libcpuinfo)
   import_static_lib(libclog)
+  import_static_lib(libfmt)
+  import_static_lib(libkineto)
 
   # Link most things statically on Android.
   set(pytorch_jni_LIBS
@@ -134,6 +136,8 @@ if(ANDROID_ABI)
       libeigen_blas
       libcpuinfo
       libclog
+      libfmt
+      libkineto
   )
 else()
   # Prefer dynamic linking on the host
@@ -160,6 +164,11 @@ else()
 
   if(USE_PYTORCH_QNNPACK)
     list(APPEND pytorch_jni_LIBS pytorch_qnnpack)
+  endif()
+
+  if(USE_KINETO)
+    list(APPEND pytorch_jni_LIBS fmt)
+    list(APPEND pytorch_jni_LIBS kineto)
   endif()
 
 endif()

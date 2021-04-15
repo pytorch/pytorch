@@ -2,16 +2,13 @@
 
 #include <torch/csrc/autograd/profiler_legacy.h>
 
-// Kineto is currently available on Linux server-side
-#ifdef USE_KINETO
-#if !defined(__linux__) || defined(_WIN32) || defined(C10_MOBILE) || defined(__APPLE__) || defined(DISABLE_KINETO)
+#ifdef DISABLE_KINETO
 #undef USE_KINETO
-#endif
 #endif
 
 #ifdef USE_KINETO
 namespace libkineto {
-class TraceActivity;
+struct TraceActivity;
 class ActivityTraceInterface;
 }
 #endif

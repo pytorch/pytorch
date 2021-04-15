@@ -68,6 +68,10 @@ if(@BUILD_SHARED_LIBS@)
   find_package(Caffe2 REQUIRED PATHS ${CMAKE_CURRENT_LIST_DIR}/../Caffe2)
   set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
   append_torchlib_if_found(c10)
+
+  if(@USE_KINETO@)
+    append_torchlib_if_found(kineto fmt)
+  endif()
 else()
   add_library(torch STATIC IMPORTED) # set imported_location at the bottom
   #library need whole archive
@@ -121,6 +125,10 @@ else()
   endif()
 
   append_torchlib_if_found(sleef asmjit)
+
+  if(@USE_KINETO@)
+    append_torchlib_if_found(kineto fmt)
+  endif()
 endif()
 
 if(@USE_CUDA@)
