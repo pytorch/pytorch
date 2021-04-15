@@ -57,6 +57,13 @@ namespace crash_handler {
 void initCrashHandlerBindings(PyObject* module) {
   auto m = pybind11::handle(module).cast<pybind11::module>();
 
+} // namespace throughput_benchmark
+
+namespace crash_handler {
+
+void initCrashHandlerBindings(PyObject* module) {
+  auto m = pybind11::handle(module).cast<pybind11::module>();
+
   m.def("_enable_minidump_collection", _enable_minidump_collection)
       .def("_get_minidump_directory", _get_minidump_directory);
 }

@@ -31,6 +31,16 @@ IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform == "linux"
 
 
+def check_breakpad():
+    try:
+        torch._C._get_minidump_directory()
+        return True
+    except RuntimeError as e:
+        return "Minidump handler is uninintialized, make sure to call" in str(e)
+
+HAS_BREAKPAD = check_breakpad()
+
+
 def remove_build_path():
     if sys.platform == "win32":
         print("Not wiping extensions build folder because Windows")
@@ -869,6 +879,58 @@ class TestCppExtensionJIT(common.TestCase):
         gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
 
     @unittest.skipIf(not IS_LINUX, "Crash handling only implemented on Linux")
+    @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
+    def test_crash_handler(self):
+        def run_test(stderr_file, destination):
+            # Code to enable dumps and trigger a segfault
+            csrc = textwrap.dedent(f"""
+            #include <torch/torch.h>
+
+            int fail() {{
+                torch::crash_handler::_enable_minidump_collection("{destination}");
+
+                volatile int* bad = nullptr;
+                return *bad;
+            }}
+            """)
+
+            # Some special stuff to overwrite stderr for a C++ extension
+            # Copied from: https://stackoverflow.com/questions/8804893/redirect-stdout-from-python-for-c-calls
+            sys.stdout.flush()
+            newstdout = os.dup(2)
+            devnull = os.open(stderr_file, os.O_WRONLY)
+            os.dup2(devnull, 2)
+            os.close(devnull)
+            sys.stdout = os.fdopen(newstdout, 'w')
+
+            module = torch.utils.cpp_extension.load_inline(
+                name="segfault",
+                cpp_sources=csrc,
+                functions=["fail"],
+            )
+            module.fail()
+
+
+        with tempfile.TemporaryDirectory() as temp_dir, tempfile.NamedTemporaryFile() as stderr:
+            # Use multiprocessing to spin up a separate process to make catching
+            # the segfault easier
+            p = Process(target=run_test, args=(stderr.name, temp_dir))
+            p.start()
+            p.join()
+            with open(stderr.name) as f:
+                result = f.read().strip()
+
+            # Check that the signal handler was called
+            self.assertTrue(result.startswith(f"Wrote minidump to {temp_dir}"))
+
+            with open(result.replace("Wrote minidump to ", ""), "rb") as dump_file:
+                dump_bytes = dump_file.read()
+
+                # Check that the file has the correct magic number
+                self.assertEqual(b"MDMP", dump_bytes[0:4])
+
+
+    @unittest.skipIf(not HAS_BREAKPAD, "Breakpad library must be present on system for crash handler")
     @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
     def test_crash_handler(self):
         def run_test(stderr_file, destination):

@@ -955,7 +955,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
       ${TORCH_ROOT}/aten/src
       ${CMAKE_CURRENT_BINARY_DIR}/aten/src
-      
       ${CMAKE_BINARY_DIR}/aten/src)
       target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
       endif()
@@ -982,6 +981,18 @@ else()
   target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
 endif()
 
+
+if(LINUX)
+  find_library(BREAKPAD_LIB breakpad_client)
+  find_path(BREAKPAD_INCLUDE_DIR breakpad)
+  if(BREAKPAD_LIB_FOUND AND BREAKPAD_INCLUDE_DIR_FOUND)
+    target_link_libraries(torch_cpu PRIVATE ${BREAKPAD_LIB})
+    add_compile_definitions(ADD_BREAKPAD_SIGNAL_HANDLER)
+    target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
+  else()
+    message(STATUS "breakpad library not found")
+  endif()
+endif()
 
   target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
