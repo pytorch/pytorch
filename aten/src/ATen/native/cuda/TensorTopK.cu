@@ -293,12 +293,12 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     // FIXME: the k/v inplace sort along slice only works for size <=
     // 2048 at the moment
     // Workaround:
-#if defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_LONG)
-    int maxSliceSize = 1024;
-#else
-    int maxSliceSize = 2048;
-#endif
-
+    int maxSliceSize;
+    if (values.element_size() >= 8) {
+      maxSliceSize = 1024;
+    } else {
+      maxSliceSize = 2048;   
+    }
     if (sliceSize <= maxSliceSize) {
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
