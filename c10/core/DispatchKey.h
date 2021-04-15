@@ -133,6 +133,7 @@ enum class DispatchKey : uint8_t {
   // can be registered to implement the custom determination of the
   // correct backend.
   BackendSelect,
+  PythonKey,
 
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
