@@ -721,11 +721,6 @@ void Engine::evaluate_function(
       for (const auto& capture : *capture_vec) {
         auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
         captured_grad = inputs[capture.input_idx_];
-        if (capture.hooks_.size() == 0) {
-          continue;
-        }
-        // Set the ThreadLocalState before calling hooks
-        at::ThreadLocalStateGuard(graph_task->thread_locals_);
         for (auto& hook : capture.hooks_) {
           captured_grad = (*hook)(captured_grad);
         }
