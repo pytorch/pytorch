@@ -273,9 +273,7 @@ void Reducer::copy_grad_to_bucket(
     at::Tensor& bucket_view) {
   // See Note [DDP Communication Hook]
   if (comm_hook_ == nullptr) {
-    // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
-    auto wrapped = c10::scalar_to_tensor(double(1.) / divFactor_);
-    wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
+    auto wrapped = at::native::wrapped_scalar_tensor(double(1.) / divFactor_);
     // Divides while copying into the bucket view.
     at::mul_out(bucket_view, grad, wrapped);
   } else {
