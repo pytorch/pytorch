@@ -12,12 +12,15 @@ struct TORCH_API InferenceMode {
   // Note [Expected TLS state in InferenceMode]:
   //   InferenceMode: InplaceOrView not in raw_local_dispatch_key_set.included(),
   //                  Autograd in raw_local_dispatch_key_set.excluded()
+  //                  GradMode is disabled.
   //   NormalMode: InplaceOrView in raw_local_dispatch_key_set.included(),
   //               Autograd not in raw_local_dispatch_key_set.excluded()
+  //               GradMode is enabled.
   //
   // Invariant:
   // - InplaceOrView is never in the excluded set
   // - Autograd is never in the included set
+  // - Setting InferenceMode will set GradMode accordingly, but not vice versa.
   //
   //  1. Why do we put InplaceOrView in included set outside InferenceMode?
   //
@@ -37,10 +40,17 @@ struct TORCH_API InferenceMode {
   //    }
   //    `k.add_(2)` still need to go through InplaceOrView kernel so that it's
   //    prepared for future autograd.
+  //
+  // 3. Why does setting InferenceMode also set GradMode?
+  //
+  //    This is required since InferenceMode is a faster and more restricive
+  //    version of NoGradMode. All runtime checks using GradMode::is_enabled()
+  //    are applicable to InferenceMode as well, e.g.
+  //    `tensorTypeInCurrentExecutionContext` in interpreter.cpp.
   InferenceMode(bool enabled=true): prev_mode(InferenceMode::is_enabled()),
       prev_keyset(c10::impl::tls_local_dispatch_key_set()),
-      grad_mode(at::AutoGradMode(enabled)) {
-    this->set_enabled(enabled);
+      grad_mode(at::AutoGradMode(!enabled)) {
+    set_enabled(enabled);
     DispatchKeySet included = enabled ? prev_keyset.included_.remove(c10::DispatchKey::InplaceOrView)
          : prev_keyset.included_.add(c10::DispatchKey::InplaceOrView);
     DispatchKeySet excluded = enabled ? (prev_keyset.excluded_ | c10::autograd_dispatch_keyset)
@@ -56,14 +66,13 @@ struct TORCH_API InferenceMode {
     c10::impl::_force_tls_local_dispatch_key_set(prev_keyset);
   }
   static bool is_enabled();
+  // set_enabled() is not user facing and should be only used in
+  // ThreadLocalState.cpp.
+  static void set_enabled(bool enabled);
 
   private:
-    static void set_enabled(bool enabled);
     bool prev_mode;
     c10::impl::LocalDispatchKeySet prev_keyset;
-    // InferenceMode should enable AutoGradMode accordingly. This is required
-    // since GradMode::is_enabled() is used in many runtime checks,
-    // e.g. `tensorTypeInCurrentExecutionContext` in interpreter.cpp.
     at::AutoGradMode grad_mode;
 };
 } // namespace c10
