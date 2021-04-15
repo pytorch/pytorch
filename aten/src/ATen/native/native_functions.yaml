@@ -747,12 +747,16 @@
     CUDA: _bincount_cuda
 
 - func: bitwise_not(Tensor self) -> Tensor
+  structured_delegate: bitwise_not.out
   variants: function, method
 
 - func: bitwise_not_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: bitwise_not.out
   variants: method
 
 - func: bitwise_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: bitwise_not_out
 
@@ -1717,16 +1721,16 @@
   variants: method
 
 - func: frac(Tensor self) -> Tensor
+  structured_delegate: frac.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: frac
 
 - func: frac_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: frac.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: frac_
 
 - func: frac.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: frac_out
 
@@ -3012,16 +3016,16 @@
   device_guard: False
 
 - func: round(Tensor self) -> Tensor
+  structured_delegate: round.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: round
 
 - func: round_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: round.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: round_
 
 - func: round.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU: round_out
     CUDA: round_out
@@ -3090,16 +3094,16 @@
     CPU, CUDA: hardshrink_backward
 
 - func: rsqrt(Tensor self) -> Tensor
+  structured_delegate: rsqrt.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: rsqrt
 
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: rsqrt.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: rsqrt_
 
 - func: rsqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: rsqrt_out
 
@@ -5819,16 +5823,16 @@
     CPU, CUDA: erfinv_out
 
 - func: i0(Tensor self) -> Tensor
+  structured_delegate: i0.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: i0
 
 - func: i0_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: i0.out
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: i0_
 
 - func: i0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: i0_out
 
