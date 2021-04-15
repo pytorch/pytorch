@@ -171,6 +171,21 @@ class TestTracer(JitTestCase):
         self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
         self.assertTrue(torch.allclose(eager_out, traced_out))
 
+    def test_non_persistent_buffers(self):
+        class NonPersistant(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("test", torch.zeros(1), persistent=False)
+            def forward(self, inputs):
+                return inputs
+
+        model = NonPersistant()
+        traced_model = torch.jit.trace(model, [torch.zeros(1)])
+        result = False
+        if "test" in traced_model.state_dict():
+            result = True
+
+        self.assertFalse(result, "A non persistent buffer was found in state_dict")
 
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
