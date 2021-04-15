@@ -86,19 +86,34 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(module_a_i.result, "module_a")
         self.assertIsNot(module_a, module_a_i)
 
-  
     def test_dunder_imports(self):
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             import package_b
             obj = package_b.PackageBObject
             he.save_pickle("res", "obj.pkl", obj)
-        
+
         buffer.seek(0)
         hi = PackageImporter(buffer)
         loaded_obj = hi.load_pickle("res", "obj.pkl")
-        # hi will throw errors if cannot resolve __import__'s
-        # dependencies on loading side
+
+        package_b = hi.import_module("package_b")
+        self.assertEqual(package_b.result, "package_b")
+
+        package_a = hi.import_module("package_a")
+        self.assertEqual(package_a.result, "package_a")
+
+        package_a_subpackage = hi.import_module("package_a.subpackage")
+        self.assertEqual(package_a_subpackage.result, "package_a.subpackage")
+
+        subpackage_1 = hi.import_module("package_b.subpackage_1")
+        self.assertEqual(subpackage_1.result, "subpackage_1")
+
+        subpackage_2 = hi.import_module("package_b.subpackage_2")
+        self.assertEqual(subpackage_2.result, "subpackage_2")
+
+        subsubpackage_0 = hi.import_module("package_b.subpackage_0.subsubpackage_0")
+        self.assertEqual(subsubpackage_0.result, "subsubpackage_0")
 
     def test_save_module_binary(self):
         f = BytesIO()

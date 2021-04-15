@@ -45,16 +45,14 @@ class _ExtractModuleReferences(ast.NodeVisitor):
         # __import__ calls aren't routed to the visit_Import/From nodes
         if hasattr(node.func, "id") and node.func.id == "__import__":
             name = node.args[0].value
-            fromlist = None
+            fromlist = []
             level = 0
             if len(node.args) > 3:
-                fromlist = []
                 for v in node.args[3].elts:
                     fromlist.append(v.value)
             elif hasattr(node, "keywords"):
                 for keyword in node.keywords:
                     if keyword.arg == "fromlist":
-                        fromlist = []
                         for v in keyword.value.elts:
                             fromlist.append(v.value)
             if len(node.args) > 4:
@@ -63,7 +61,7 @@ class _ExtractModuleReferences(ast.NodeVisitor):
                 for keyword in node.keywords:
                     if keyword.arg == "level":
                         level = keyword.value.value
-            if fromlist is None or fromlist == []:
+            if fromlist == []:
                 # the top-level package (the name up till the first dot) is returned
                 # when the fromlist argument is empty in normal import system,
                 # we need to include top level package to match this behavior and last
