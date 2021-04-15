@@ -1,5 +1,4 @@
 #include <ATen/Config.h>
-#include <ATen/Utils.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>

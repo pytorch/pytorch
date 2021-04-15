@@ -15009,38 +15009,6 @@ dedent """
             # 🤷🤷🤷🤷
             return torch.nn.functional.relu(a)
 
-    def test_bool_op(self):
-
-        def test_bool_add(a: bool, b: bool):
-            return a + b
-
-        def test_bool_sub(a: bool, b: bool):
-            return a - b
-
-        def test_bool_mul(a: bool, b: bool):
-            return a * b
-
-        def test_bool_div(a: bool, b: bool):
-            return a / b
-
-        self.checkScript(test_bool_add, (True, False, ))
-        self.checkScript(test_bool_add, (True, True, ))
-        self.checkScript(test_bool_add, (False, False, ))
-        self.checkScript(test_bool_add, (False, True, ))
-
-        self.checkScript(test_bool_sub, (True, False, ))
-        self.checkScript(test_bool_sub, (True, True, ))
-        self.checkScript(test_bool_sub, (False, False, ))
-        self.checkScript(test_bool_sub, (False, True, ))
-
-        self.checkScript(test_bool_mul, (True, False, ))
-        self.checkScript(test_bool_mul, (True, True, ))
-        self.checkScript(test_bool_mul, (False, False, ))
-        self.checkScript(test_bool_mul, (False, True, ))
-
-        self.checkScript(test_bool_div, (True, True, ))
-        self.checkScript(test_bool_div, (False, True, ))
-
     def test_get_set_state_with_tensors(self):
         class M(torch.nn.Module):
             def __init__(self):
