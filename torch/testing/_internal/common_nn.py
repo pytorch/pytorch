@@ -1192,7 +1192,7 @@ def multimarginloss_weights_no_reduce_test():
 
 
 def fractional_max_pool2d_test(test_case):
-    random_samples = torch.DoubleTensor(1, 3, 2).uniform_()
+    random_samples = torch.empty((1, 3, 2), dtype=torch.double).uniform_()
     if test_case == 'ratio':
         return dict(
             constructor=lambda: nn.FractionalMaxPool2d(
@@ -1228,7 +1228,7 @@ def fractional_max_pool2d_test(test_case):
 
 
 def fractional_max_pool3d_test(test_case):
-    random_samples = torch.DoubleTensor(2, 4, 3).uniform_()
+    random_samples = torch.empty((2, 4, 3), dtype=torch.double).uniform_()
     if test_case == 'ratio':
         return dict(
             constructor=lambda: nn.FractionalMaxPool3d(
