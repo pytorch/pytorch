@@ -613,7 +613,7 @@ def sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad,
                                                  requires_grad=requires_grad),
                                      make_tensor(shape_c, device, dtype,
                                                  requires_grad=requires_grad)),
-                               kwargs={'alpha': alpha, 'beta': beta}, 
+                               kwargs={'alpha': alpha, 'beta': beta},
                                broadcasts_input=broadcasts_input)
                    for shape_a, shape_b, shape_c, alpha, beta, broadcasts_input in test_cases)
     return inputs
