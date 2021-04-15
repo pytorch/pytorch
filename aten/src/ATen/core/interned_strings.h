@@ -327,6 +327,7 @@ namespace c10 {
   _(aten, special_expm1)             \
   _(aten, exp2)                      \
   _(aten, special_exp2)              \
+  _(aten, special_i0e)               \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
