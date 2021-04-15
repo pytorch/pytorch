@@ -629,23 +629,23 @@ void listSetItem(Stack* stack);
             }                                                             \
           },                                                              \
           aliasAnalysisFromSchema())
-#define DEFINE_BOOL_OP(aten_op, op)                                     \
-  OperatorGenerator(                                                    \
-      TORCH_SELECTIVE_SCHEMA(#aten_op ".bool(bool a, bool b) -> bool"), \
-      [](Stack* stack) {                                                \
-        bool a, b;                                                      \
-        pop(stack, a, b);                                               \
-        push(stack, op);                                                \
-      },                                                                \
-      aliasAnalysisFromSchema()),                                       \
-  OperatorGenerator(                                                    \
-      TORCH_SELECTIVE_SCHEMA(#aten_op ".bool(bool a, bool b) -> int"),  \
-      [](Stack* stack) {                                                \
-        auto b = pop(stack).toBool();                                   \
-        auto a = pop(stack).toBool();                                   \
-        push(stack, op);                                                \
-      },                                                                \
-      aliasAnalysisFromSchema())
+#define DEFINE_BOOL_OP(aten_op, op)                                        \
+  OperatorGenerator(                                                       \
+      TORCH_SELECTIVE_SCHEMA(#aten_op ".bool(bool a, bool b) -> bool"),    \
+      [](Stack* stack) {                                                   \
+        bool a, b;                                                         \
+        pop(stack, a, b);                                                  \
+        push(stack, op);                                                   \
+      },                                                                   \
+      aliasAnalysisFromSchema()),                                          \
+      OperatorGenerator(                                                   \
+          TORCH_SELECTIVE_SCHEMA(#aten_op ".bool(bool a, bool b) -> int"), \
+          [](Stack* stack) {                                               \
+            auto b = pop(stack).toBool();                                  \
+            auto a = pop(stack).toBool();                                  \
+            push(stack, op);                                               \
+          },                                                               \
+          aliasAnalysisFromSchema())
 #define DEFINE_STRING_OP(op_name, string_op, result)                    \
   OperatorGenerator(                                                    \
       TORCH_SELECTIVE_SCHEMA(#op_name ".str(str a, str b) ->" #result), \
@@ -837,8 +837,7 @@ void listSetItem(Stack* stack);
   DEFINE_GENERIC_OP_WITH_COMPLEX(aten_op, op, op, op, int, float, complex), \
       DEFINE_INT_COMPLEX_OP(aten_op, op, complex),                          \
       DEFINE_FLOAT_COMPLEX_OP(aten_op, op, complex),                        \
-      DEFINE_INT_FLOAT_OP(aten_op, op, float),                              \
-      DEFINE_BOOL_OP(aten_op, op),                                          \
+      DEFINE_INT_FLOAT_OP(aten_op, op, float), DEFINE_BOOL_OP(aten_op, op), \
       DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX(aten_op, op, op, op, Scalar)
 
 } // namespace jit

@@ -15056,12 +15056,16 @@ dedent """
             torch.jit.script(fn)
 
     def test_bool_op(self):
+
         def test_bool_add(a: bool, b: bool):
             return a + b
+
         def test_bool_sub(a: bool, b: bool):
             return a - b
+
         def test_bool_mul(a: bool, b: bool):
             return a * b
+
         def test_bool_div(a: bool, b: bool):
             return a / b
 
