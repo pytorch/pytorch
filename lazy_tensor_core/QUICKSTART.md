@@ -1,13 +1,7 @@
 # Lazy Tensors Core
 
-1. Clone under your copy of the PyTorch repo (assuming you've already built it from source).
-1. Install glob2 and the Lark parser, used for automatic code generation:
-
-```bash
-pip install glob2 lark-parser
-```
-
-1. Run `python setup.py develop`.
+1. Clone a copy of the PyTorch repo, switch to the `lazy_tensor_staging` branch and build it. Use `git submodule update --init --recursive` to fetch all submodules.
+1. From the `lazy_tensor_core` subfolder, run `python setup.py develop`.
 1. Run `example.py`. It'll report that no lazy tensor backend is registered.
 
 Suggested build environment:
