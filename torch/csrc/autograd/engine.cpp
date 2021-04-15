@@ -735,7 +735,7 @@ void Engine::evaluate_function(
   // Set the ThreadLocalState before calling the function.
   // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
   // always saves ThreadLocalState without grad_mode.
-  at::ThreadLocalStateGuard(graph_task->thread_locals_);
+  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
 
   // Switches to a function's CUDA stream (if applicable) before calling it
   const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
