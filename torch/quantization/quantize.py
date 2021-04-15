@@ -19,6 +19,7 @@ from .quantization_mappings import (
 
 from .stubs import DeQuantStub, QuantWrapper
 from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_weight_only_qconfig
+from .auto_trace import add_auto_observation, add_auto_convert
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
@@ -196,7 +197,8 @@ def add_quant_dequant(module):
 
 def prepare(model, inplace=False, allow_list=None,
             observer_non_leaf_module_list=None,
-            prepare_custom_config_dict=None):
+            prepare_custom_config_dict=None,
+            automatic_functional_tracing=False):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
     Quantization configuration should be assigned preemptively
@@ -248,6 +250,13 @@ def prepare(model, inplace=False, allow_list=None,
     add_observer_(
         model, qconfig_propagation_list, observer_non_leaf_module_list,
         custom_module_class_mapping=custom_module_class_mapping)
+
+    # TODO: remove
+    automatic_functional_tracing = not inplace
+    if automatic_functional_tracing:
+        assert not inplace
+        model = add_auto_observation(model)
+
     return model
 
 def _remove_activation_post_process(module):
@@ -438,7 +447,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
 
 def convert(
         module, mapping=None, inplace=False, remove_qconfig=True,
-        convert_custom_config_dict=None):
+        convert_custom_config_dict=None, automatic_functional_tracing=False):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class. And remove qconfig at the
     end if remove_qconfig is set to True.
@@ -473,6 +482,13 @@ def convert(
         convert_custom_config_dict=convert_custom_config_dict)
     if remove_qconfig:
         _remove_qconfig(module)
+
+    # TODO: remove
+    automatic_functional_tracing = not inplace
+    if automatic_functional_tracing and getattr(module.__class__, '__interception_module__', False):
+        assert not inplace
+        module = add_auto_convert(module)
+
     return module
 
 def _convert(
