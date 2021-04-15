@@ -20,7 +20,7 @@ class TestVerify(TestCase):
                 # self.assertExpected(str(e)[:60])
                 # NB: why we comment out the above check? because numpy keeps
                 # changing the error format, and we have to keep updating the
-                # expect files let's relax this constraint
+                # expect files let's relax this constraint.
                 return
             else:
                 raise
