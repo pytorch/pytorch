@@ -1238,7 +1238,9 @@ class TestSparse(TestCase):
             S = self._gen_sparse(2, nnz, [n, m], dtype, device, coalesced)[0]
             S_dense = S.to_dense().requires_grad_(True)
             S.requires_grad_(True)
-            self.assertEqual(torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha), torch.addmm(D1, S_dense, D2, beta=beta, alpha=alpha))
+            Y = torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
+            Y_dense = torch.addmm(D1, S_dense, D2, beta=beta, alpha=alpha)
+            self.assertEqual(Y, Y_dense)
 
             def fn(S, D1, D2, beta=beta, alpha=alpha):
                 return torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
