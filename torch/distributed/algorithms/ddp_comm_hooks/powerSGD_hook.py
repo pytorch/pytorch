@@ -8,7 +8,7 @@ import torch.distributed as dist
 from . import default_hooks as default
 
 
-def _orthogonalize(matrix, epsilon=1e-8):
+def _orthogonalize(matrix, epsilon=0):
     """
     Applies Gram-Schmidt procedure to orthogonalize a given 2D tensor.
     If epsilon is 0, this is equivalent to `torch.qr(matrix, out=(matrix, _))`,
@@ -23,7 +23,15 @@ def _orthogonalize(matrix, epsilon=1e-8):
         if epsilon == 0:
             # Note that col ** 2 can underflow/overflow if we use FP16.
             # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
-            col /= torch.norm(col)
+            try:
+                col /= torch.norm(col)
+            except ZeroDivisionError:
+                logging.error(
+                    "The matrix to be orthogonalized has at least a column of all 0s. Please set a small value such as 1e-8 "
+                    "as `orthogonalization_epsilon` in PowerSGD state."
+                )
+                # Recover the values from NaNs to 0s.
+                col.fill_(0.0)
         else:
             col /= torch.norm(col) + epsilon
         # Project it on the rest and remove it.
@@ -59,6 +67,22 @@ def _should_compress(
     )
 
 
+def _report_compression_stats(bucket, state):
+    """
+    Report compression stats at the frequency of `compression_stats_logging_frequency` specified in PowerSGD state.
+    """
+    if (
+        bucket.is_the_last_bucket_to_allreduce()
+        and state.iter >= state.next_stats_report
+    ):
+        stats = state.compression_stats()
+        logging.info(
+            "Compression stats: iter {}, total before compression {}, total after compression {}, "
+            "rate {}".format(state.iter, stats[1], stats[2], stats[0])
+        )
+        state.next_stats_report = state.iter + state.compression_stats_logging_frequency
+
+
 class PowerSGDState(object):
     r"""
     Stores both the algorithm's hyperparameters and the internal state for all the gradients during the training.
@@ -75,11 +99,13 @@ class PowerSGDState(object):
 
     2. ``start_powerSGD_iter`` defers PowerSGD compression until step ``start_powerSGD_iter``, and vanilla allreduce runs prior to step ``start_powerSGD_iter``. This hybrid scheme of **vanilla allreduce + PowerSGD** can effectively improve the accuracy, even a relatively small ``matrix_approximation_rank`` is used. This is because that, the beginning of training phase is usually very sensitive to inaccurate gradients, and compressing gradients too early may make the training quickly take a suboptimal trajectory, which can result in an irrecoverable impact on the accuracy.
 
-    To tune ``start_powerSGD_iter``, we suggest to start with 10% of total training steps, and increase it until a satisfactory accuracy is reached.
+    To tune ``start_powerSGD_iter``, we suggest to start with 10% of total training steps, and increase it until a satisfactory accuracy is reached. If there is a warm-up stage in the training, ``start_powerSGD_iter`` typically should be no less than the number of warm-up steps.
 
-    3. ``min_compression_rate`` is the minimum compression rate required when a layer is compressed. Due to the computation overheads incurred by the compression, a tensor is worth compressing only if there can be sufficient saving in bandwidth, where `` (num_rows + num_cols) * matrix_approximation_rank * min_compression_rate < num_rows * num_cols``. If the specified compression rate threshold cannot be satisfied, the tensor will be directly allreduced without compression.
+    3. ``min_compression_rate`` is the minimum compression rate required when a layer is compressed. Due to the computation overheads incurred by the compression, a tensor is worth compressing only if there can be sufficient saving in bandwidth, where ``(num_rows + num_cols) * matrix_approximation_rank * min_compression_rate < num_rows * num_cols``. If the specified compression rate threshold cannot be satisfied, the tensor will be directly allreduced without compression.
 
     Compression statistics are logged every ``compression_stats_logging_frequency`` iterations once PowerSGD compression starts.
+
+    4. ``orthogonalization_epsilon`` can be a very small value (e.g., 1e-8) added to every normalized matrix column in orthogonalization step, to prevent div-by-zero error if any column has all 0s. If this can already be prevented (e.g., by batch normalization), an epsilon of 0 is recommended for accuracy.
 
     .. warning ::
         If error feedback or warm-up is enabled, the minimum value of ``start_powerSGD_iter`` allowed in DDP is 2.
@@ -89,11 +115,13 @@ class PowerSGDState(object):
 
     __slots__ = [
         "process_group",
-        # The three fields below are the hyperparameters that should be tuned by the user.
+        # The fields below are the hyperparameters that often need to be tuned by the user.
         "matrix_approximation_rank",
         "start_powerSGD_iter",
+        # The fields below are the hyperparameters that seldom need be tuned by the user.
         "min_compression_rate",
-        # The two fields below are the binary hyperparameters recommended to be turned on for performance.
+        "orthogonalization_epsilon",
+        # The fields below are the binary hyperparameters recommended to be turned on for performance and accuracy.
         "use_error_feedback",
         "warm_start",
         # The fields below are internal state.
@@ -113,20 +141,22 @@ class PowerSGDState(object):
         self,
         process_group,
         matrix_approximation_rank=1,
-        start_powerSGD_iter=10,
+        start_powerSGD_iter=1_000,
         min_compression_rate=2,
         use_error_feedback=True,
         warm_start=True,
+        orthogonalization_epsilon=0,
         random_seed=0,
         compression_stats_logging_frequency=10_000,
     ):
         logging.info(
             "PowerSGD config: matrix_approximation_rank = {}; start_powerSGD_iter = {}; "
-            "min_compression_rate = {}; use_error_feedback = {}; warm_start = {}; "
+            "min_compression_rate = {}; orthogonalization_epsilon = {}; use_error_feedback = {}; warm_start = {}; "
             "random_seed = {}; compression_stats_logging_frequency = {}".format(
                 matrix_approximation_rank,
                 start_powerSGD_iter,
                 min_compression_rate,
+                orthogonalization_epsilon,
                 use_error_feedback,
                 warm_start,
                 random_seed,
@@ -169,6 +199,8 @@ class PowerSGDState(object):
         # this can also accelerate training.
         # However, this is at the cost of extra memory.
         self.warm_start = warm_start
+        # Can use a very small value to prevent div-by-zero error caused by orthogonalization of vanishing gradients.
+        self.orthogonalization_epsilon = orthogonalization_epsilon
         # The purpose of this RNG is to generate different random seeds for initializing Q across iterations,
         # but in the same order for all the DDP replicas.
         # Different random seeds across iterations indicate different 'projections' of the gradients at different SGD steps.
@@ -288,7 +320,7 @@ def powerSGD_hook(
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensors()[0]
+    input_tensor = bucket.get_tensor()
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
@@ -346,17 +378,7 @@ def powerSGD_hook(
             uncompressed_tensors.append(tensor)
             state.total_numel_after_compression += compress_test[1]
 
-    # Accumulate and report stats
-    if (
-        bucket.is_the_last_bucket_to_allreduce()
-        and state.iter >= state.next_stats_report
-    ):
-        stats = state.compression_stats()
-        logging.info(
-            "Compression stats: iter {}, total before compression {}, total after compression {}, "
-            "rate {}".format(state.iter, stats[1], stats[2], stats[0])
-        )
-        state.next_stats_report = state.iter + state.compression_stats_logging_frequency
+    _report_compression_stats(bucket, state)
 
     # Step II: Handle uncompressed tensors.
     # Allocate contiguous memory for these tensors to allreduce efficiently.
@@ -413,7 +435,7 @@ def powerSGD_hook(
     # The exception is the first iteration when PowerSGD is applied.
     if not need_randomize_qs:
         for q in qs:
-            _orthogonalize(q)
+            _orthogonalize(q, state.orthogonalization_epsilon)
     else:
         with torch.random.fork_rng(devices=[]):
             # Fork this RNG to avoid changing the seed globally and affecting the random sampling anywhere else in the training.
@@ -430,7 +452,7 @@ def powerSGD_hook(
                         dtype=dtype,
                     )
                 )
-                _orthogonalize(q)
+                _orthogonalize(q, state.orthogonalization_epsilon)
 
     # Compute Ps.
     for tensor, q, p in zip(tensors_to_compress, qs, ps):
@@ -464,7 +486,7 @@ def powerSGD_hook(
     def compute_qs(fut):
         state.p_memory_dict[bucket_index] = fut.value()[0]
         for p in ps:
-            _orthogonalize(p)
+            _orthogonalize(p, state.orthogonalization_epsilon)
 
         # Compute Qs.
         for tensor, p, q in zip(tensors_to_compress, ps, qs):
@@ -572,7 +594,7 @@ def batched_powerSGD_hook(
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensors()[0]
+    input_tensor = bucket.get_tensor()
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
@@ -582,12 +604,18 @@ def batched_powerSGD_hook(
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
     total_length = input_tensor.shape[0]
+    state.total_numel_before_compression += total_length
 
     # View the input tensor as a 2D square-shape tensor, and pad 0s if necessary.
     square_side_length = math.ceil(math.sqrt(total_length))
+    state.total_numel_after_compression += (
+        square_side_length * state.matrix_approximation_rank * 2
+    )
     padded_total_length = square_side_length ** 2
     input_tensor.resize_(padded_total_length)
     input_tensor[total_length:padded_total_length].fill_(0)
+
+    _report_compression_stats(bucket, state)
 
     # Incorporate the error from the previous state into the gradients.
     bucket_index = bucket.get_index()
@@ -654,7 +682,7 @@ def batched_powerSGD_hook(
         state.q_memory_dict[bucket_index] = create_low_rank_tensor(
             fill_random_values=True, rng=state.rng
         )
-    _orthogonalize(state.q_memory_dict[bucket_index], 0)
+    _orthogonalize(state.q_memory_dict[bucket_index])
 
     torch.matmul(
         matrix, state.q_memory_dict[bucket_index], out=state.p_memory_dict[bucket_index]
@@ -665,7 +693,7 @@ def batched_powerSGD_hook(
 
     def compute_q(fut):
         state.p_memory_dict[bucket_index] = fut.value()[0]
-        _orthogonalize(state.p_memory_dict[bucket_index], 0)
+        _orthogonalize(state.p_memory_dict[bucket_index])
 
         torch.matmul(
             matrix.t(),

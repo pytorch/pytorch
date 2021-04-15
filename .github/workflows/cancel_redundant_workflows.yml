@@ -3,6 +3,7 @@ on:
   workflow_run:
     types:
       - requested
+    # NOTE: Make sure to add to this list as you add more workflows running on 'pull_request'
     workflows:
       - clang-format
       - Lint

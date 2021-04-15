@@ -8,7 +8,7 @@ import sys
 import zipfile
 import warnings
 
-class ReadFilesFromZipIterDataPipe(IterDataPipe):
+class ReadFilesFromZipIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     r""" :class:`ReadFilesFromZipIterDataPipe`.
 
     Iterable data pipe to extract zip binary streams from input iterable which contains tuples of

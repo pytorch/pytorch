@@ -28,58 +28,67 @@ TEST(TensorpipeSerialize, Base) {
       torch::distributed::rpc::tensorpipeSerialize(
           std::move(sendingRpcMessage));
 
-  // Mimic receiving message descriptor: recvingTpMessage is a copy of
+  // Mimic receiving message descriptor: recvingTpDescriptor is a copy of
   // sendingTpMessage except for the data pointers which are left null.
-  tensorpipe::Message recvingTpMessage;
-  recvingTpMessage.metadata = sendingTpMessage.metadata;
-  recvingTpMessage.payloads.reserve(sendingTpMessage.payloads.size());
+  tensorpipe::Descriptor recvingTpDescriptor;
+  recvingTpDescriptor.metadata = sendingTpMessage.metadata;
+  recvingTpDescriptor.payloads.reserve(sendingTpMessage.payloads.size());
   for (auto& tpPayload : sendingTpMessage.payloads) {
-    tensorpipe::Message::Payload p;
+    tensorpipe::Descriptor::Payload p;
     p.length = tpPayload.length;
     p.metadata = tpPayload.metadata;
-    recvingTpMessage.payloads.push_back(std::move(p));
+    recvingTpDescriptor.payloads.push_back(std::move(p));
   }
-  EXPECT_EQ(recvingTpMessage.payloads.size(), sendingTpMessage.payloads.size());
-  recvingTpMessage.tensors.reserve(sendingTpMessage.tensors.size());
+  EXPECT_EQ(
+      recvingTpDescriptor.payloads.size(), sendingTpMessage.payloads.size());
+  recvingTpDescriptor.tensors.reserve(sendingTpMessage.tensors.size());
   for (auto& tpTensor : sendingTpMessage.tensors) {
-    tensorpipe::Message::Tensor t;
-    t.buffer = tensorpipe::CpuBuffer{
-        nullptr, tpTensor.buffer.unwrap<tensorpipe::CpuBuffer>().length};
+    tensorpipe::Descriptor::Tensor t;
+    t.length = tpTensor.length;
+    t.sourceDevice = tpTensor.buffer.device();
     t.metadata = tpTensor.metadata;
-    recvingTpMessage.tensors.push_back(std::move(t));
+    recvingTpDescriptor.tensors.push_back(std::move(t));
   }
-  EXPECT_EQ(recvingTpMessage.tensors.size(), sendingTpMessage.tensors.size());
+  EXPECT_EQ(
+      recvingTpDescriptor.tensors.size(), sendingTpMessage.tensors.size());
 
   // Mimic readDescriptor() callback:
   // - Allocate buffers
   // - Fill pointers in tensorpipe message
-  torch::distributed::rpc::TensorpipeReadBuffers recvingTpBuffers =
-      torch::distributed::rpc::tensorpipeAllocate(recvingTpMessage);
+  tensorpipe::Allocation recvingTpAllocation;
+  torch::distributed::rpc::TensorpipeReadBuffers recvingTpBuffers;
+  std::tie(recvingTpAllocation, recvingTpBuffers) =
+      torch::distributed::rpc::tensorpipeAllocate(recvingTpDescriptor);
 
   // Mimic tensorpipe data transfer
-  for (int i = 0; i < recvingTpMessage.payloads.size(); i++) {
+  EXPECT_EQ(
+      recvingTpAllocation.payloads.size(), sendingTpMessage.payloads.size());
+  for (int i = 0; i < recvingTpAllocation.payloads.size(); i++) {
     tensorpipe::Message::Payload& srcPayload = sendingTpMessage.payloads[i];
-    tensorpipe::Message::Payload& dstPayload = recvingTpMessage.payloads[i];
+    tensorpipe::Allocation::Payload& dstPayload =
+        recvingTpAllocation.payloads[i];
     if (srcPayload.length) {
       // Empty vector's data() can return nullptr, use the length to avoid
       // coying into nullptr
       memcpy(dstPayload.data, srcPayload.data, srcPayload.length);
     }
   }
-  for (int i = 0; i < recvingTpMessage.tensors.size(); i++) {
+  EXPECT_EQ(
+      recvingTpAllocation.tensors.size(), sendingTpMessage.tensors.size());
+  for (int i = 0; i < recvingTpAllocation.tensors.size(); i++) {
     tensorpipe::Message::Tensor& srcTensor = sendingTpMessage.tensors[i];
-    tensorpipe::Message::Tensor& dstTensor = recvingTpMessage.tensors[i];
+    tensorpipe::Allocation::Tensor& dstTensor = recvingTpAllocation.tensors[i];
     memcpy(
         dstTensor.buffer.unwrap<tensorpipe::CpuBuffer>().ptr,
         srcTensor.buffer.unwrap<tensorpipe::CpuBuffer>().ptr,
-        srcTensor.buffer.unwrap<tensorpipe::CpuBuffer>().length);
+        srcTensor.length);
   }
 
   // Mimic read() callback:
   // - Unpickle
   torch::distributed::rpc::Message recvingRpcMessage =
       torch::distributed::rpc::tensorpipeDeserialize(
-          std::move(recvingTpMessage), std::move(recvingTpBuffers));
+          std::move(recvingTpDescriptor), std::move(recvingTpBuffers));
 
   // Data is ready
   EXPECT_EQ(mtype, recvingRpcMessage.type());
@@ -121,11 +130,7 @@ TEST(TensorpipeSerialize, RecopySparseTensors) {
   EXPECT_NE(
       tiny.storage().data(),
       sendingTpMessage.tensors[1].buffer.unwrap<tensorpipe::CpuBuffer>().ptr);
-  EXPECT_EQ(
-      tiny.element_size() * k1K,
-      sendingTpMessage.tensors[1]
-          .buffer.unwrap<tensorpipe::CpuBuffer>()
-          .length);
+  EXPECT_EQ(tiny.element_size() * k1K, sendingTpMessage.tensors[1].length);
 }
 
 TEST(TensorpipeSerialize, NoDeleterTensors) {
@@ -149,15 +154,9 @@ TEST(TensorpipeSerialize, NoDeleterTensors) {
   EXPECT_EQ(tpBuffers.copiedTensors.size(), 2);
   EXPECT_EQ(sendingTpMessage.tensors.size(), 2);
   EXPECT_EQ(
-      tpBuffers.copiedTensors[0].size(),
-      sendingTpMessage.tensors[0]
-          .buffer.unwrap<tensorpipe::CpuBuffer>()
-          .length);
+      tpBuffers.copiedTensors[0].size(), sendingTpMessage.tensors[0].length);
   EXPECT_EQ(
-      tpBuffers.copiedTensors[1].size(),
-      sendingTpMessage.tensors[1]
-          .buffer.unwrap<tensorpipe::CpuBuffer>()
-          .length);
+      tpBuffers.copiedTensors[1].size(), sendingTpMessage.tensors[1].length);
   EXPECT_EQ(
       tpBuffers.copiedTensors[0].data(),
       sendingTpMessage.tensors[0].buffer.unwrap<tensorpipe::CpuBuffer>().ptr);
@@ -168,14 +167,10 @@ TEST(TensorpipeSerialize, NoDeleterTensors) {
       memcmp(
           tpBuffers.copiedTensors[0].data(),
           t1.storage().data(),
-          sendingTpMessage.tensors[0]
-              .buffer.unwrap<tensorpipe::CpuBuffer>()
-              .length) == 0);
+          sendingTpMessage.tensors[0].length) == 0);
   EXPECT_TRUE(
       memcmp(
           tpBuffers.copiedTensors[1].data(),
           t2.storage().data(),
-          sendingTpMessage.tensors[1]
-              .buffer.unwrap<tensorpipe::CpuBuffer>()
-              .length) == 0);
+          sendingTpMessage.tensors[1].length) == 0);
 }

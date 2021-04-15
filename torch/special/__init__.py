@@ -12,11 +12,13 @@ entr(input, *, out=None) -> Tensor
 Computes the entropy on :attr:`input` (as defined below), elementwise.
 
 .. math::
+    \begin{align}
     \text{entr(x)} = \begin{cases}
         -x * \ln(x)  & x > 0 \\
         0 &  x = 0.0 \\
         -\infty & x < 0
     \end{cases}
+    \end{align}
 """ + """
 
 Args:
@@ -73,7 +75,7 @@ Keyword args:
 
 Example::
 
-    >>> torch.erf(torch.tensor([0, -1., 10.]))
+    >>> torch.special.erf(torch.tensor([0, -1., 10.]))
     tensor([ 0.0000, -0.8427,  1.0000])
 """.format(**common_args))
 
@@ -95,7 +97,7 @@ Keyword args:
 
 Example::
 
-    >>> torch.erfc(torch.tensor([0, -1., 10.]))
+    >>> torch.special.erfc(torch.tensor([0, -1., 10.]))
     tensor([ 1.0000, 1.8427,  0.0000])
 """.format(**common_args))
 
@@ -118,8 +120,67 @@ Keyword args:
 
 Example::
 
-    >>> torch.erfinv(torch.tensor([0, 0.5, -1.]))
+    >>> torch.special.erfinv(torch.tensor([0, 0.5, -1.]))
     tensor([ 0.0000,  0.4769,    -inf])
+""".format(**common_args))
+
+logit = _add_docstr(_special.special_logit,
+                    r"""
+logit(input, eps=None, *, out=None) -> Tensor
+
+Returns a new tensor with the logit of the elements of :attr:`input`.
+:attr:`input` is clamped to [eps, 1 - eps] when eps is not None.
+When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
+
+.. math::
+    \begin{align}
+    y_{i} &= \ln(\frac{z_{i}}{1 - z_{i}}) \\
+    z_{i} &= \begin{cases}
+        x_{i} & \text{if eps is None} \\
+        \text{eps} & \text{if } x_{i} < \text{eps} \\
+        x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
+        1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
+    \end{cases}
+    \end{align}
+""" + r"""
+Args:
+    {input}
+    eps (float, optional): the epsilon for input clamp bound. Default: ``None``
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.rand(5)
+    >>> a
+    tensor([0.2796, 0.9331, 0.6486, 0.1523, 0.6516])
+    >>> torch.special.logit(a, eps=1e-6)
+    tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
+""".format(**common_args))
+
+expit = _add_docstr(_special.special_expit,
+                    r"""
+expit(input, *, out=None) -> Tensor
+
+Computes the expit (also known as the logistic sigmoid function) of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \frac{1}{1 + e^{-\text{input}_{i}}}
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> t = torch.randn(4)
+    >>> t
+    tensor([ 0.9213,  1.0887, -0.8858, -1.7683])
+    >>> torch.special.expit(t)
+    tensor([ 0.7153,  0.7481,  0.2920,  0.1458])
 """.format(**common_args))
 
 exp2 = _add_docstr(_special.special_exp2,
@@ -151,8 +212,6 @@ expm1(input, *, out=None) -> Tensor
 Computes the exponential of the elements minus 1
 of :attr:`input`.
 
-..
-
 .. math::
     y_{i} = e^{x_{i}} - 1
 
@@ -167,6 +226,25 @@ Keyword args:
 
 Example::
 
-    >>> torch.expm1(torch.tensor([0, math.log(2.)]))
+    >>> torch.special.expm1(torch.tensor([0, math.log(2.)]))
     tensor([ 0.,  1.])
+""".format(**common_args))
+
+i0e = _add_docstr(_special.special_i0e,
+                  r"""
+i0e(input, *, out=None) -> Tensor
+Computes the exponentially scaled zeroth order modified Bessel function of the first kind (as defined below)
+for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \exp(-|x|) * i0(x) = \exp(-|x|) * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+
+""" + r"""
+Args:
+    {input}
+Keyword args:
+    {out}
+Example::
+    >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
+    tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
 """.format(**common_args))

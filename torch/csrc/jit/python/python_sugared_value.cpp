@@ -230,7 +230,8 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       "set_device",
       "device_index",
       "device_count",
-      "set_stream"};
+      "set_stream",
+      "synchronize"};
 
   if (cuda_ops.find(field) != cuda_ops.end()) {
     // Both current_device and set_device API's are a part of c10::cuda
@@ -243,6 +244,11 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       return std::make_shared<BuiltinFunction>(
           Symbol::cuda(field), c10::nullopt);
     }
+  }
+
+  if (field == "Stream" || field == "Event") {
+    auto class_type = getCustomClass("__torch__.torch.classes.cuda." + field);
+    return std::make_shared<ClassValue>(class_type);
   }
 
   py::object member = getattr(loc, field);

@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/SharedReduceOps.h>
@@ -16,10 +17,13 @@ namespace at { namespace native {
 
 namespace {
 
-c10::MaybeOwned<Tensor> prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor) {
+c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor) {
+  if (tensor.is_non_overlapping_and_dense()) { // common case
+      transpose_tensor = tensor.is_contiguous();
+      return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  }
   IntArrayRef tensor_strides = tensor.strides();
   IntArrayRef tensor_sizes = tensor.sizes();
-
   if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
     transpose_tensor = false;
     return c10::MaybeOwned<Tensor>::borrowed(tensor);
@@ -32,7 +36,7 @@ c10::MaybeOwned<Tensor> prepare_matrix_for_cublas(const Tensor& tensor, bool& tr
   }
 }
 
-} // namespaec
+} // namespace
 
 Tensor prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
   IntArrayRef tensor_strides = tensor.strides();
@@ -73,16 +77,21 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU("addmm", args);
 
-  Tensor self_;
-  if (&result != &self) {
-    std::tie(self_) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
-  } else {
-    self_ = self;
-  }
-
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
-  IntArrayRef self__sizes = self_.sizes();
+  IntArrayRef self__sizes;
+  c10::MaybeOwned<Tensor> self_;
+  if (&result != &self) {
+    self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
+    self__sizes = self_->sizes();
+  } else {
+    self_ = c10::MaybeOwned<Tensor>::borrowed(self);
+    self__sizes = self_->sizes();
+    TORCH_CHECK(result.dim() == 2, "tensors must be 2-D");
+    TORCH_CHECK(self__sizes[0] == mat1_sizes[0], "self_ dim 0 must match mat1 dim 0");
+    TORCH_CHECK(self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
+  }
+
   TORCH_CHECK(
       mat1_sizes[1] == mat2_sizes[0],
       "mat1 dim 1 must match mat2 dim 0",
@@ -90,17 +99,14 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       mat1_sizes[1],
       " mat2 dim0: ",
       mat2_sizes[0]);
-  TORCH_CHECK(self__sizes[0] == mat1_sizes[0], "self_ dim 0 must match mat1 dim 0");
-  TORCH_CHECK(self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
 
   if (&result != &self) {
-    at::native::resize_as_(result, self_);
+    at::native::resize_output(result, self__sizes);
     if (beta.toComplexDouble() != 0.0) {
-      at::native::copy_(result, self_);
+      at::native::copy_(result, *self_);
     }
   }
 
-  TORCH_CHECK(result.dim() == 2 && self_.dim() == 2, "tensors must be 2-D");
 
   IntArrayRef result_sizes = result.sizes();
   if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
@@ -127,7 +133,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   int64_t mat1_ld = mat1_->stride((transpose_mat1 == transpose_result) ? 1 : 0);
   int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
   int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
-  at::ScalarType scalar_type = self_.scalar_type();
+  at::ScalarType scalar_type = self_->scalar_type();
 
   if (mat1.numel() == 0) {
     // By definition, when beta==0, values in self should be ignored. nans and infs
@@ -165,7 +171,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       result_ptr, result_ld
     );
   });
-  if (result.data_ptr() != result_->data_ptr()) {
+  if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
   return result;
@@ -301,15 +307,12 @@ Tensor& addmm__cuda(Tensor& self, const Tensor& mat1, const Tensor& mat2,
 }
 
 Tensor& baddbmm_out_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
-  Tensor self_;
-  if (&result != &self) {
-    std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
-  } else {
-   self_ = self;
-  }
+  auto self_ = &result == &self
+    ? c10::MaybeOwned<Tensor>::borrowed(self)
+    : expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
   {
     at::NoNamesGuard guard;
-    baddbmm_out_cuda_impl(result, self_, batch1, batch2, beta, alpha);
+    baddbmm_out_cuda_impl(result, *self_, batch1, batch2, beta, alpha);
   }
   namedinference::propagate_names_if_nonempty(
        result,

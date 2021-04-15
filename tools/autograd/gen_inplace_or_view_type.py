@@ -301,9 +301,9 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         else:
             _, unpacked_bindings = unpack_args(f)
             call += emit_view_lambda(f, unpacked_bindings)
-            creation_meta = ('at::GradMode::is_enabled() ? '
-                             'CreationMeta::DEFAULT : '
-                             'CreationMeta::NO_GRAD_MODE')
+            creation_meta = ('InferenceMode::is_enabled() ? '
+                             'CreationMeta::INFERENCE_MODE : '
+                             '(at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE)')
             rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                          '/* is_fw_differentiable */ true, '
                          f'/* view_func */ func, /* creation_meta */ {creation_meta})')
