@@ -109,6 +109,10 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
         'torch.nn.MaxPool2d': set([
             nn.MaxPool2d,
         ]),
+        # sigmoid
+        'torch.sigmoid': set([
+            torch.sigmoid,
+        ]),
     }
     return base_name_to_sets_of_related_ops
 
@@ -137,6 +141,7 @@ def get_non_matchable_functions() -> Set[Callable]:
     # TODO(future PR): allow customizations
     return set([
         torch.quantize_per_tensor,
+        operator.getitem,
     ])
 
 def get_non_matchable_modules() -> Set[Callable]:
@@ -646,10 +651,6 @@ def get_matching_subgraph_pairs(
 ({cur_subgraph_a}, {type_start_a}) and
 ({cur_subgraph_b}, {type_start_b}) are not related"""
                 raise GraphMatchingException(msg)
-            elif subgraph_relationship == SubgraphTypeRelationship.EQUAL:
-                # For now, skip nodes with equal types. In the future, this can
-                # be made configurable.
-                continue
             key_name_a = _get_name_for_subgraph(
                 cur_subgraph_a, gm_a, base_name_to_sets_of_related_ops,
                 existing_names_a)

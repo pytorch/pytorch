@@ -34,8 +34,10 @@ from torch.quantization._numeric_suite_fx import (
     extract_weights,
     _extract_weights_impl,
     add_loggers,
+    _add_loggers_impl,
     OutputLogger,
     add_shadow_loggers,
+    _add_shadow_loggers_impl,
     extract_logger_info,
     extract_shadow_logger_info,
 )
@@ -233,11 +235,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @skipIfNoFBGEMM
-    def test_nodes_with_equal_types_do_not_get_matched(self):
-        # verifies that by default, nodes with equivalent types do not get matched.
-        # This is important for user defined types, for which we do not know
-        # the weight extraction functions or input type. In the future, this can
-        # be made configurable.
+    def test_nodes_with_equal_types_get_matched(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -264,16 +262,16 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
-        # Conv2 should not be matched because we disabled quantization for it,
-        # so its type is the same in mp and mq. sigmoid should not be
-        # matched because they use the same function in mp and mq. relu should
-        # be matched because it is in the allowlist of functions with same
-        # signature across dtypes.
+        # all of these should be matched
         expected_types = {
-            'base_op_torch.nn.Conv2d_0':
+            'base_op_torch.nn.Conv2d_1':
                 ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
+            'base_op_torch.nn.Conv2d_0':
+                ((nn.Conv2d, nn.Conv2d), (nn.Conv2d, nn.Conv2d)),
             'base_op_torch.mul_0': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
             'base_op_torch.relu_0': ((F.relu, F.relu), (F.relu, F.relu)),
+            'base_op_torch.sigmoid_0':
+                ((torch.sigmoid, torch.sigmoid), (torch.sigmoid, torch.sigmoid)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -588,7 +586,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Conv2d(1, 1, 1),
             nn.Conv2d(1, 1, 1),
         ).eval()
-        self._test_match_shadow_activations(
+        res = self._test_match_shadow_activations(
             m, (torch.randn(1, 1, 4, 4),), results_len=2)
 
     @skipIfNoFBGEMM
@@ -610,7 +608,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 return x
 
         m = M().eval()
-        self._test_match_shadow_activations(
+        res = self._test_match_shadow_activations(
             m, (torch.randn(4, 4),), results_len=2)
 
     @skipIfNoFBGEMM
@@ -719,6 +717,75 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 results_len=1,
                 qconfig_dict=qconfig_dict,
                 should_log_inputs=should_log_inputs)
+
+    @skipIfNoFBGEMM
+    def test_user_module(self):
+        """
+        For user defined modules,
+        1. weight extraction should not crash
+        2. unshadowed activations should have loggers, loggers will only log if
+             the output dtype is in the allowlist
+        3. shadowed activations should not have loggers
+             (since I/O dtype is unknown)
+        """
+        class UserModule(nn.Module):
+            def forward(self, x):
+                return x
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(1, 1)
+                self.user_module = UserModule()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.user_module(x)
+                return x
+
+        m = M().eval()
+
+        # quantize without tracing through UserModule
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        prepare_custom_config_dict = {'non_traceable_module_name': ['user_module']}
+        mp = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
+        mp(torch.randn(1, 1, 1))
+        mq = convert_fx(copy.deepcopy(mp))
+
+        # weight extraction should not crash
+        weights = _extract_weights_impl('fp32_prepared', mp, 'int8', mq)
+
+        # unshadowed activations should have loggers
+
+        # add loggers, without retracing
+        # note: converting again because we cannot copy a quantized linear
+        mp_ns, mq_ns = _add_loggers_impl(
+            'fp32_prepared', copy.deepcopy(mp), 'int8',
+            convert_fx(copy.deepcopy(mp)), OutputLogger,
+            should_log_inputs=True)
+        # both fp32 and int8 models should have 4 loggers each, 2 for I/O
+        # of linear, and 2 for I/O of user_module
+        unshadowed_expected_occurrence = {
+            ns.call_module(OutputLogger): 4,
+        }
+        self.checkGraphModuleNodes(
+            mp_ns, expected_node_occurrence=unshadowed_expected_occurrence)
+        self.checkGraphModuleNodes(
+            mq_ns, expected_node_occurrence=unshadowed_expected_occurrence)
+
+        # shadowed activations should only have loggers for nodes where
+        # the types are known and we can do a dtype cast
+
+        # add shadow loggers, without retracing
+        mp_shadows_mq_ns = _add_shadow_loggers_impl(
+            'fp32_prepared', mp, 'int8', mq, OutputLogger,
+            should_log_inputs=True)
+        # 2 loggers for I/O of linear, 0 loggers for I/O of user_module
+        shadowed_expected_occurrence = {
+            ns.call_module(OutputLogger): 2,
+        }
+        self.checkGraphModuleNodes(
+            mp_shadows_mq_ns, expected_node_occurrence=unshadowed_expected_occurrence)
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
@@ -841,7 +908,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             x = torch.randn(2, 4)
             self._test_match_activations(
                 sparse_nn, (idx, offsets, x),
-                results_len=4,
+                results_len=5,
                 should_log_inputs=should_log_inputs)
 
     @skipIfNoFBGEMM
@@ -851,7 +918,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
             offsets = torch.LongTensor([0, 4])
             x = torch.randn(2, 4)
-            self._test_match_activations(
+            self._test_match_shadow_activations(
                 sparse_nn, (idx, offsets, x),
                 results_len=4,
                 should_log_inputs=should_log_inputs)
