@@ -1014,8 +1014,8 @@ class TestAsserts(TestCase):
     @onlyCPU
     def test_scalars(self, device):
         number = 1
-        array = np.array(number)
-        tensor = torch.tensor(number, device=device)
+        array = np.array(number, dtype=np.int32)
+        tensor = torch.tensor(number, dtype=torch.int32, device=device)
 
         for actual, expected in itertools.permutations((number, array, tensor), 2):
             for fn in self.assert_fns_with_inputs(actual, expected):
