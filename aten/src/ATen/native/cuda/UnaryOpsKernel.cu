@@ -311,7 +311,7 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
-REGISTER_DISPATCH(entr_stub, &entr_kernel_cuda);
+REGISTER_DISPATCH(special_entr_stub, &entr_kernel_cuda);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
 
 } // namespace native

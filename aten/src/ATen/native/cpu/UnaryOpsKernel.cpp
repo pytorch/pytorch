@@ -722,7 +722,7 @@ REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel);
-REGISTER_DISPATCH(entr_stub, &entr_kernel);
+REGISTER_DISPATCH(special_entr_stub, &entr_kernel);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel);
 
 

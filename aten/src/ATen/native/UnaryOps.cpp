@@ -77,6 +77,36 @@ TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& result) {  \
   func##_stub(device_type(), *this);                                      \
 }
 
+CREATE_UNARY_TORCH_IMPL_FUNC(acos)
+CREATE_UNARY_TORCH_IMPL_FUNC(acosh)
+CREATE_UNARY_TORCH_IMPL_FUNC(asin)
+CREATE_UNARY_TORCH_IMPL_FUNC(asinh)
+CREATE_UNARY_TORCH_IMPL_FUNC(atan)
+CREATE_UNARY_TORCH_IMPL_FUNC(atanh)
+CREATE_UNARY_TORCH_IMPL_FUNC(cos)
+CREATE_UNARY_TORCH_IMPL_FUNC(cosh)
+CREATE_UNARY_TORCH_IMPL_FUNC(digamma)
+CREATE_UNARY_TORCH_IMPL_FUNC(erf)
+CREATE_UNARY_TORCH_IMPL_FUNC(erfc)
+CREATE_UNARY_TORCH_IMPL_FUNC(erfinv)
+CREATE_UNARY_TORCH_IMPL_FUNC(exp)
+CREATE_UNARY_TORCH_IMPL_FUNC(exp2)
+CREATE_UNARY_TORCH_IMPL_FUNC(expm1)
+CREATE_UNARY_TORCH_IMPL_FUNC(lgamma)
+CREATE_UNARY_TORCH_IMPL_FUNC(log)
+CREATE_UNARY_TORCH_IMPL_FUNC(log10)
+CREATE_UNARY_TORCH_IMPL_FUNC(log1p)
+CREATE_UNARY_TORCH_IMPL_FUNC(log2)
+CREATE_UNARY_TORCH_IMPL_FUNC(reciprocal)
+CREATE_UNARY_TORCH_IMPL_FUNC(sigmoid)
+CREATE_UNARY_TORCH_IMPL_FUNC(sin)
+CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
+CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_entr)
+CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
+CREATE_UNARY_TORCH_IMPL_FUNC(tan)
+CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
+
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
   auto iter = TensorIterator::unary_op(result, self);
@@ -371,13 +401,6 @@ Tensor& sgn_out(const Tensor& self, Tensor& result) {
 
 Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
-
-CREATE_UNARY_TORCH_IMPL_FUNC(sin)
-CREATE_UNARY_TORCH_IMPL_FUNC(cos)
-CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
-CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
-CREATE_UNARY_TORCH_IMPL_FUNC(cosh)
-CREATE_UNARY_TORCH_IMPL_FUNC(acosh)
 
 // arccosh, alias for acosh
 Tensor& arccosh_out(const Tensor& self, Tensor& result) { return at::acosh_out(result, self); }
@@ -725,7 +748,7 @@ DEFINE_DISPATCH(clamp_min_stub); // NOLINT(cppcoreguidelines-avoid-non-const-glo
 DEFINE_DISPATCH(cos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(digamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(entr_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_entr_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfinv_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
