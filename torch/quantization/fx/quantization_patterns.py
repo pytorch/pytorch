@@ -91,6 +91,9 @@ binary_op_all_dtypes = [
 binary_op_float16_dtypes = [
     (torch.float16, torch.float16, None)
 ]
+binary_op_int8_dtypes = [
+    (torch.quint8, torch.qint8, None),
+]
 binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
     operator.add: binary_op_all_dtypes,
     torch.add: binary_op_all_dtypes,
@@ -102,6 +105,9 @@ binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, 
     torch.div: binary_op_float16_dtypes,
     operator.truediv: binary_op_float16_dtypes,
     torch.sum: binary_op_float16_dtypes
+}
+binary_reference_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
+    torch.bmm: binary_op_int8_dtypes,
 }
 
 
@@ -170,60 +176,86 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
-        # leave the op unquantized if the dtype combination is not supported
-        if dtypes not in binary_op_supported_dtypes[self.binary_op]:
-            warnings.warn(
-                "dtype combination: {} is not "
-                "supported by {} "
-                "supported dtype combinations are: {}".format(dtypes, self.binary_op, binary_op_supported_dtypes[self.binary_op]))
-            if self.relu_node:
-                op_out = quantizer.quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=False))
-                relu_args = [op_out]
-                relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
-                relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
-                return quantizer.quantized_graph.create_node(
-                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
-            else:
-                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+        print("\nstart")
+        print(node)
+        print(is_reference, self.binary_op)
+        print(binary_reference_op_supported_dtypes[self.binary_op])
+        print(dtypes in binary_reference_op_supported_dtypes[self.binary_op])
 
-        if dtypes in [(torch.quint8, torch.qint8, None)]:
-            assert self.quantized_binary_op is not None
-            if self.num_tensor_args == 1:
-                # add/mul scalar
-                first_arg = self.binary_op_node.args[0]
-                cache_for_no_tensor_check: Dict[Node, bool] = dict()
-                if isinstance(first_arg, Node) and (
-                        not all_node_args_have_no_tensors(
-                            first_arg, quantizer.modules, cache_for_no_tensor_check)):
-                    quantized_index = 0
-                else:
-                    quantized_index = 1
-
-                return quantizer.quantized_graph.create_node(
-                    'call_function', self.quantized_binary_op,
-                    load_arg(quantized=[quantized_index])(self.binary_op_node.args), self.binary_op_node.kwargs)
-            else:
+        if is_reference and dtypes in binary_reference_op_supported_dtypes[self.binary_op]:
+            if dtypes in binary_op_int8_dtypes:
+                args = load_arg(quantized=[0, 1])(node.args)
+                args = load_arg(quantized=False)(node.args)
+                kwargs = load_arg(quantized=False)(node.kwargs)
+                op_out = quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
                 cur_idx = quantizer.activation_post_process_indexes[node.name]
                 activation_post_process = \
                     quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
                 quantizer.activation_post_process_indexes[node.name] += 1
-                scale, zero_point = activation_post_process.calculate_qparams()
-                scale = float(scale)
-                zero_point = int(zero_point)
-                scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+                return quantize_node(
+                    quantizer, op_out, activation_post_process,
+                    node, is_input=False)
+            else:
+                warnings.warn(
+                    "No implementation found for dtype combination: {}"
+                    "for op {} with is_reference={} despite it being listed as supported"
+                    "this should not happen".format(dtypes, self.binary_op, is_reference))
+                assert False
+        elif not is_reference and dtypes in binary_op_supported_dtypes[self.binary_op]:
+            if dtypes in [(torch.quint8, torch.qint8, None)]:
+                assert self.quantized_binary_op is not None
+                if self.num_tensor_args == 1:
+                    # add/mul scalar
+                    first_arg = self.binary_op_node.args[0]
+                    cache_for_no_tensor_check: Dict[Node, bool] = dict()
+                    if isinstance(first_arg, Node) and (
+                            not all_node_args_have_no_tensors(
+                                first_arg, quantizer.modules, cache_for_no_tensor_check)):
+                        quantized_index = 0
+                    else:
+                        quantized_index = 1
 
-                if self.relu_node is not None:
-                    op = torch.ops.quantized.add_relu
+                    return quantizer.quantized_graph.create_node(
+                        'call_function', self.quantized_binary_op,
+                        load_arg(quantized=[quantized_index])(self.binary_op_node.args), self.binary_op_node.kwargs)
                 else:
-                    op = torch.ops.quantized.add
-                kwargs = {**self.binary_op_node.kwargs}
-                add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
-                op = quantizer.quantized_graph.create_node(
-                    'call_function', self.quantized_binary_op, add_args, kwargs)
-                return op
+                    cur_idx = quantizer.activation_post_process_indexes[node.name]
+                    activation_post_process = \
+                        quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
+                    quantizer.activation_post_process_indexes[node.name] += 1
+                    scale, zero_point = activation_post_process.calculate_qparams()
+                    scale = float(scale)
+                    zero_point = int(zero_point)
+                    scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+
+                    if self.relu_node is not None:
+                        op = torch.ops.quantized.add_relu
+                    else:
+                        op = torch.ops.quantized.add
+                    kwargs = {**self.binary_op_node.kwargs}
+                    add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
+                    op = quantizer.quantized_graph.create_node(
+                        'call_function', self.quantized_binary_op, add_args, kwargs)
+                    return op
+            else:
+                assert dtypes == (torch.float16, torch.float16, None)
+                # TODO (refactor) this is duplicated, maybe have a helper function
+                if self.relu_node:
+                    op_out = quantizer.quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=False))
+                    relu_args = [op_out]
+                    relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
+                    relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                    return quantizer.quantized_graph.create_node(
+                        "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+                else:
+                    return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
         else:
-            assert dtypes == (torch.float16, torch.float16, None)
-            # TODO (refactor) this is duplicated, maybe have a helper function
+            # leave the op unquantized if the dtype,reference combination is not supported
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by {} for is_reference={}. "
+                "Supported non-reference dtype combinations are: {} "
+                "Supported reference dtypes combinations are: {}".format(dtypes, self.binary_op, is_reference, binary_op_supported_dtypes[self.binary_op], binary_reference_op_supported_dtypes[self.binary_op]))
             if self.relu_node:
                 op_out = quantizer.quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=False))
                 relu_args = [op_out]
@@ -233,6 +265,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
             else:
                 return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+
 
 @register_quant_pattern(torch.cat)
 class CatQuantizeHandler(QuantizeHandler):
@@ -767,6 +800,8 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.InstanceNorm3d)
 @register_quant_pattern(torch.nn.LayerNorm)
 @register_quant_pattern(torch.nn.SiLU)
+# we currently only support reference patterns for these ops so they have been removed
+# until they receive a proper fp16 kernal. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.GELU)
 # @register_quant_pattern(torch.nn.Softmax)
 @register_quant_pattern(torch.nn.functional.hardswish)
@@ -774,6 +809,8 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.layer_norm)
 @register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.silu)
+# we currently only support reference patterns for these ops so they have been removed
+# until they receive a proper fp16 kernal. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.functional.gelu)
 # @register_quant_pattern(torch.nn.functional.softmax)
 class DefaultNodeQuantizeHandler(QuantizeHandler):
@@ -837,68 +874,71 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 "supported by {} "
                 "supported dtype combinations are: {}".format(dtypes, self.op, supported_dtypes[self.op]))
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
-
         # TODO: make helper functions for (torch.quint8, torch.qint8, None)
-        if not is_reference and dtypes in [(torch.quint8, torch.qint8, None)]:
-            cur_idx = quantizer.activation_post_process_indexes[node.name]
-            activation_post_process = \
-                quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-            quantizer.activation_post_process_indexes[node.name] += 1
-            if node.op == 'call_module':
-                module = quantizer.modules[node.target]
-                module.activation_post_process = activation_post_process
-                quantized_module_cls = get_static_quant_module_class(
-                    type(module), additional_static_quant_mapping)
-                quantized_module = quantized_module_cls.from_float(module)
-                parent_name, name = _parent_name(node.target)
-                setattr(quantizer.modules[parent_name], name, quantized_module)
-                return quantizer.quantized_graph.create_node(
-                    'call_module',
-                    node.target,
-                    load_arg(quantized=[0])(node.args),
-                    load_arg(quantized=False)(node.kwargs))
+        if not is_reference:
+            if dtypes in [(torch.quint8, torch.qint8, None)]:
+                cur_idx = quantizer.activation_post_process_indexes[node.name]
+                activation_post_process = \
+                    quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
+                quantizer.activation_post_process_indexes[node.name] += 1
+                if node.op == 'call_module':
+                    module = quantizer.modules[node.target]
+                    module.activation_post_process = activation_post_process
+                    quantized_module_cls = get_static_quant_module_class(
+                        type(module), additional_static_quant_mapping)
+                    quantized_module = quantized_module_cls.from_float(module)
+                    parent_name, name = _parent_name(node.target)
+                    setattr(quantizer.modules[parent_name], name, quantized_module)
+                    return quantizer.quantized_graph.create_node(
+                        'call_module',
+                        node.target,
+                        load_arg(quantized=[0])(node.args),
+                        load_arg(quantized=False)(node.kwargs))
+                else:
+                    assert node.op == "call_function"
+                    # call_function
+                    scale, zero_point = activation_post_process.calculate_qparams()
+                    scale = float(scale)
+                    zero_point = int(zero_point)
+
+                    scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+
+                    assert not isinstance(node.target, str), "Expecting node.target for "
+                    "call_function to be a function instead of a string"
+                    quantized_op = get_quantized_operator(node.target)
+                    args = load_arg(quantized=[0])(node.args)
+                    kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale_arg,
+                              "output_zero_point": zero_point_arg}
+                    if quantized_op in ARGS_TO_SKIP:
+                        args_to_skip = ARGS_TO_SKIP[quantized_op]
+                        for arg in args_to_skip:
+                            if arg in kwargs:
+                                kwargs.pop(arg)
+                    return quantizer.quantized_graph.create_node(
+                        "call_function", quantized_op, args, kwargs)
             else:
-                assert node.op == "call_function"
-                # call_function
-                scale, zero_point = activation_post_process.calculate_qparams()
-                scale = float(scale)
-                zero_point = int(zero_point)
-
-                scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
-
-                assert not isinstance(node.target, str), "Expecting node.target for "
-                "call_function to be a function instead of a string"
-                quantized_op = get_quantized_operator(node.target)
-                args = load_arg(quantized=[0])(node.args)
-                kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale_arg,
-                          "output_zero_point": zero_point_arg}
-                if quantized_op in ARGS_TO_SKIP:
-                    args_to_skip = ARGS_TO_SKIP[quantized_op]
-                    for arg in args_to_skip:
-                        if arg in kwargs:
-                            kwargs.pop(arg)
-                return quantizer.quantized_graph.create_node(
-                    "call_function", quantized_op, args, kwargs)
-        elif is_reference and dtypes in [(torch.quint8, torch.qint8, None)]:
-            args = load_arg(quantized=[0])(node.args)
-            args = load_arg(quantized=False)(node.args)
-            kwargs = load_arg(quantized=False)(node.kwargs)
-            op_out = quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
-            cur_idx = quantizer.activation_post_process_indexes[node.name]
-            activation_post_process = \
-                quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
-            quantizer.activation_post_process_indexes[node.name] += 1
-            return quantize_node(
-                quantizer, op_out, activation_post_process,
-                node, is_input=False)
-        elif not is_reference and dtypes in [(torch.float16, torch.float16, None)]:
-            # Generally fp16 kernels don't exist for the supported fp16 ops
-            warnings.warn(
-                "Only reference patterns are currently supported for {dtype} dtype with {op} op".format(dtype=dtypes, op=self.op))
-            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+                assert dtypes in [(torch.float16, torch.float16, None)]
+                # Generally fp16 kernels don't exist for fp16 ops
+                warnings.warn(
+                    "Only reference patterns are currently supported for {dtype} dtype with {op} op".format(dtype=dtypes, op=self.op))
+                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
         else:
-            assert is_reference and dtypes in [(torch.float16, torch.float16, None)]
-            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+            assert is_reference
+            if dtypes in [(torch.quint8, torch.qint8, None)]:
+                load_arg(quantized=[0])(node.args)
+                args = load_arg(quantized=False)(node.args)
+                kwargs = load_arg(quantized=False)(node.kwargs)
+                op_out = quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+                cur_idx = quantizer.activation_post_process_indexes[node.name]
+                activation_post_process = \
+                    quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
+                quantizer.activation_post_process_indexes[node.name] += 1
+                return quantize_node(
+                    quantizer, op_out, activation_post_process,
+                    node, is_input=False)
+            else:
+                assert dtypes in [(torch.float16, torch.float16, None)]
+                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
 
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point

@@ -3068,7 +3068,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quantized_module, torch.ops.quantized.instance_norm,
                 skip_op_arg_for_functional=True)
 
-    def _test_default_node_quant_handler_ops(self, module, functional, qconfig, is_reference = True, node_list=[], additional_quant_pattern_dict={}):
+    def _test_default_node_quant_handler_ops(self, module, functional, qconfig, is_reference=True, node_list=[], additional_quant_pattern_dict={}):
         class M(torch.nn.Module):
             def __init__(self, mod, func):
                 super().__init__()
@@ -3097,7 +3097,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         module = torch.nn.GELU
         functional = torch.nn.functional.gelu
         qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        is_reference=False
+        # qconfig = {"object_type": [(module, None), (functional, qconfig)]}
+        is_reference = False
         node_list = [
             ns.call_module(module),
             ns.call_function(functional),
@@ -3109,7 +3110,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         module = torch.nn.Softmax
         functional = torch.nn.functional.softmax
         qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        is_reference=False
+        is_reference = False
         node_list = [
             ns.call_module(module),
             ns.call_function(functional),
@@ -3121,7 +3122,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         module = torch.nn.GELU
         functional = torch.nn.functional.gelu
         qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        is_reference=True
+        is_reference = True
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_method("dequantize"),
@@ -3141,7 +3142,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         module = torch.nn.Softmax
         functional = torch.nn.functional.softmax
         qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        is_reference=True
+        is_reference = True
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_method("dequantize"),
@@ -3161,19 +3162,49 @@ class TestQuantizeFxOps(QuantizationTestCase):
         module = torch.nn.SiLU
         functional = torch.nn.functional.silu
         qconfig = float16_static_qconfig
-        is_reference=True
+        is_reference = True
         node_list = [
-                ns.call_method("to"),
-                ns.call_method("dequantize"),
-                ns.call_module(module),
-                ns.call_method("to"),
-                ns.call_method('dequantize'),
-                ns.call_function(functional),
-                ns.call_method("to"),
-                ns.call_method('dequantize')
-            ]
+            ns.call_method("to"),
+            ns.call_method("dequantize"),
+            ns.call_module(module),
+            ns.call_method("to"),
+            ns.call_method('dequantize'),
+            ns.call_function(functional),
+            ns.call_method("to"),
+            ns.call_method('dequantize')
+        ]
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
+
+    def test_bmm_int_reference(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bmm = torch.bmm
+
+            def forward(self, x, y):
+                out = self.bmm(x, y)
+                return out
+
+        data_x = torch.randn((2, 2, 2,))
+        data_y = torch.randn((2, 2, 2,))
+        qconfig_dict = {"": torch.quantization.get_default_qconfig("fbgemm")}
+        is_reference = True
+        node_list = [
+            ns.call_module(torch.nn.GELU),
+        ]
+
+        m = M().eval()
+        m_prep = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        m_prep(data_x, data_y)
+        print("m_prep")
+        print(m_prep)
+        m_quant = torch.quantization.quantize_fx.convert_fx(m_prep, is_reference=is_reference)
+        m_quant(data_x, data_y)
+        print("m_quant")
+        print(m_quant)
+
+        self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
 
     @skipIfNoFBGEMM
     def test_clamp(self):
@@ -4080,3 +4111,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         model = models.__dict__[name](pretrained=True).eval().float()
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
+
+    if __name__ == "__main__":
+        a = TestQuantizeFxOps()
+        a.test_bmm_int_reference()
