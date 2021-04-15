@@ -172,10 +172,12 @@ class TestTracer(JitTestCase):
         self.assertTrue(torch.allclose(eager_out, traced_out))
 
     def test_non_persistent_buffers(self):
+
         class NonPersistant(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.register_buffer("test", torch.zeros(1), persistent=False)
+
             def forward(self, inputs):
                 return inputs
 
