@@ -20,7 +20,7 @@ from etcd import (  # type: ignore
 
 from .api import RendezvousConnectionError, RendezvousParameters, RendezvousStateError
 from .dynamic_rendezvous import RendezvousBackend, Token
-from .utils import _parse_rendezvous_endpoint
+from .utils import parse_rendezvous_endpoint
 
 
 class EtcdRendezvousBackend(RendezvousBackend):
@@ -145,7 +145,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
 
 
 def _create_etcd_client(params: RendezvousParameters) -> EtcdClient:
-    host, port = _parse_rendezvous_endpoint(params.endpoint, default_port=2379)
+    host, port = parse_rendezvous_endpoint(params.endpoint, default_port=2379)
 
     # The timeout
     read_timeout = cast(int, params.get_as_int("read_timeout", 60))
@@ -210,4 +210,6 @@ def create_backend(params: RendezvousParameters) -> EtcdRendezvousBackend:
     """
     client = _create_etcd_client(params)
 
-    return EtcdRendezvousBackend(client, params.run_id, key_prefix="/torch/elastic/rendezvous")
+    return EtcdRendezvousBackend(
+        client, params.run_id, key_prefix="/torch/elastic/rendezvous"
+    )

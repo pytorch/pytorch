@@ -1113,6 +1113,56 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           requires_grad=requires_grad),))
     return inputs
 
+# Generates input tensors for testing reduction ops
+def _generate_reduction_inputs(device, dtype, requires_grad):
+    yield make_tensor((), device, dtype, requires_grad=requires_grad)
+    yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
+    yield make_tensor((2, 3), device, dtype, requires_grad=requires_grad, noncontiguous=True)
+    yield make_tensor((3, 2, 1, 2, 2), device, dtype, requires_grad=requires_grad)
+
+# Generates a subset of possible dim and keepdim kwargs for a tensor
+# with ndim dims appropriate for testing. If supports_multiple_dims
+# is True (default) then dim kwarg can be a list of dims.
+def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
+    for keepdim in [True, False]:
+        # Always test reducing inner and outer most dimensions
+        yield {'dim': 0, 'keepdim': keepdim}
+        yield {'dim': -1, 'keepdim': keepdim}
+
+        # Also reduce middle dimension
+        if ndim > 2:
+            yield {'dim': ndim // 2, 'keepdim': keepdim}
+
+        if supports_multiple_dims:
+            # Always test reducing all dims
+            yield {'dim': tuple(range(ndim)), 'keepdim': keepdim}
+
+            # Test reducing both first and last dimensions
+            if ndim > 1:
+                yield {'dim': (0, ndim - 1), 'keepdim': keepdim}
+
+            # Test reducing every other dimension starting with the second
+            if ndim > 3:
+                yield {'dim': tuple(range(1, ndim, 2)), 'keepdim': keepdim}
+
+# Wraps sample_inputs_reduction function to provide the additional supports_multiple_dims args
+def sample_inputs_reduction_wrapper(supports_multiple_dims):
+    # Generates sample inputs for reduction ops that contain the input tensor
+    # and dim and keepdim kwargs. If a reduction op needs to test additional
+    # args/kwargs then create a separate sample_inputs function
+    def fn(op_info, device, dtype, requires_grad):
+        inputs = []
+
+        for t in _generate_reduction_inputs(device, dtype, requires_grad):
+            # Add case without dim and keepdim kwargs
+            inputs.append(SampleInput(t))
+            for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
+                inputs.append(SampleInput(t, kwargs=kwargs))
+
+        return inputs
+
+    return fn
+
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
         return make_tensor(size, device, dtype, requires_grad=requires_grad)
@@ -1135,7 +1185,6 @@ def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     inputs.append(SampleInput(get_tensor_input(()), args=(1, -1, True, True)))
 
     return inputs
-
 
 def sample_inputs_outer(op_info, device, dtype, requires_grad, **kwargs):
     inputs = []
@@ -2226,6 +2275,26 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
+def sample_inputs_matmul(op_info, device, dtype, requires_grad):
+    test_cases = (((L,), (L,)),
+                  ((S, M), (M,)),
+                  ((M,), (M, S)),
+                  ((S, M), (M, S)),
+                  ((S, S, M), (M,)),
+                  ((S, S, M), (M, S)),
+                  ((M,), (S, M, S)),
+                  ((S, M), (S, M, S)),
+                  ((S, S, M, M), (S, S, M, S)),
+                  ((S, S, M, M), (M,)),
+                  ((M,), (S, S, M, S)))
+    sample_inputs = []
+    for lhs_shape, rhs_shape in test_cases:
+        lhs = make_tensor(lhs_shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
+        rhs = make_tensor(rhs_shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(lhs, args=(rhs,)))
+    return tuple(sample_inputs)
+
+
 def sample_inputs_polar(op_info, device, dtype, requires_grad, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -3233,6 +3302,16 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=floating_types_and(torch.bfloat16),
                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                    supports_autograd=False),
+    UnaryUfuncInfo('special.i0e',
+                   aten_name='special_i0e',
+                   ref=scipy.special.i0e,
+                   decorators=(precisionOverride({torch.bfloat16: 3e-1,
+                                                  torch.float16: 3e-1}),),
+                   dtypes=all_types_and(torch.bool, torch.bfloat16),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   supports_autograd=False,
+                   safe_casts_outputs=True),
     OpInfo('floor_divide',
            dtypes=all_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_floor_divide,
@@ -3542,6 +3621,22 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
            sample_inputs_func=sample_inputs_matrix_exp,
            supports_out=False),
+    OpInfo('matmul',
+           dtypes=floating_types(),
+           dtypesIfCPU=all_types_and_complex(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128),
+           dtypesIfROCM=floating_types_and(torch.half),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_matmul,
+           skips=(
+               # matmul does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+               # https://github.com/pytorch/pytorch/issues/55754
+               SkipInfo('TestGradients', 'test_fn_grad',
+                        device_type='cpu', dtypes=(torch.complex128,)),
+               # https://github.com/pytorch/pytorch/issues/55755
+               SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
+                        device_type='cpu', dtypes=(torch.float16,)),)),
     OpInfo('max',
            op=torch.max,
            variant_test_name='binary',
@@ -3583,6 +3678,10 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
+    OpInfo('sum',
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     OpInfo('maximum',
            op=torch.maximum,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -4716,14 +4815,6 @@ def method_tests():
         ('nanmedian', (), NO_ARGS, 'scalar'),
         ('nanmedian', (), (0,), 'scalar_dim', (), [0]),
         ('nanmedian', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('sum', (S, S, S), NO_ARGS),
-        ('sum', (S, S, S), (1,), 'dim', (), [0]),
-        ('sum', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
-        ('sum', (), NO_ARGS, 'scalar'),
-        ('sum', (), (0,), 'scalar_dim', (), [0]),
-        ('sum', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('sum', (S, S, S), ([1, 2],), 'multi_dim'),
-        ('sum', (S, S, S), ([1, 2], True,), 'multi_dim_keepdim'),
         ('nansum', (S, S, S), NO_ARGS),
         ('nansum', (S, S, S), (1,), 'dim', (), [0]),
         ('nansum', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
@@ -4778,17 +4869,6 @@ def method_tests():
         ('mv', (S, M), ((M,),), '', (True,)),
         ('inner', (S,), ((S,),), "1d_1d", (False,)),
         ('inner', (), ((S, S),), "scalar_2d", (False,)),
-        ('matmul', (L,), ((L,),), '', (True,)),
-        ('matmul', (S, M), ((M,),), "2d_1d", (True,)),
-        ('matmul', (M,), ((M, S),), "1d_2d", (True,)),
-        ('matmul', (S, M), ((M, S),), "2d_2d", (True,)),
-        ('matmul', (S, S, M), ((M,),), "3d_1d", (True,)),
-        ('matmul', (S, S, M), ((M, S),), "3d_2d", (True,)),
-        ('matmul', (M,), ((S, M, S),), "1d_3d", (True,)),
-        ('matmul', (S, M), ((S, M, S),), "2d_3d", (True,)),
-        ('matmul', (S, S, M, M), ((S, S, M, S),), "4d_4d", (True,)),
-        ('matmul', (S, S, M, M), ((M,),), "4d_1d", (True,)),
-        ('matmul', (M,), ((S, S, M, S),), "1d_4d", (True,)),
         ('mvlgamma', torch.empty(S,).uniform_(0.5, 1), [1], "p=1"),
         ('mvlgamma', torch.empty(S,).uniform_(1, 2), [2], "p=2"),
         ('mvlgamma', torch.empty(S, S).uniform_(1.5, 3), [3], "p=3"),
