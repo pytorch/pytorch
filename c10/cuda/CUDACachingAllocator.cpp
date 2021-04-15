@@ -288,7 +288,7 @@ class DeviceCachingAllocator {
   // cudaStreamGetCaptureInfo in the hot path.
   int captures_underway = 0;
   // See free() for this thing's purpose
-  std::vector<Block*> insert_events_deferred_until_no_capture;
+  std::vector<Block*> needs_events_deferred_until_no_capture;
   // outstanding cuda events
   std::deque<std::pair<cudaEvent_t, Block*>> cuda_events;
 
@@ -473,7 +473,7 @@ class DeviceCachingAllocator {
         // It's forbidden to cudaEventQuery an event recorded during CUDA graph capture.
         // We conservatively defer recording end-of-life events until the next call to
         // process_events() (which won't happen until no captures are underway)
-        insert_events_deferred_until_no_capture.push_back(block);
+        needs_events_deferred_until_no_capture.push_back(block);
       } else {
         insert_events(block);
       }
@@ -606,7 +606,7 @@ class DeviceCachingAllocator {
 
         block_info.size = block->size;
         block_info.allocated = block->allocated;
-        block_info.active = block->allocated || (block->event_count > 0);
+        block_info.active = block->allocated || (block->event_count > 0) || !block->stream_uses.empty();
 
         segment_info.total_size += block_info.size;
         if (block_info.allocated) {
@@ -707,7 +707,7 @@ class DeviceCachingAllocator {
   /** moves a block into a pool of cached free blocks */
   void free_block(Block* block)
   {
-    TORCH_INTERNAL_ASSERT(!block->allocated && block->event_count == 0);
+    TORCH_INTERNAL_ASSERT(!block->allocated && block->event_count == 0 && block->stream_uses.empty());
 
     size_t original_block_size = block->size;
 
@@ -746,7 +746,7 @@ class DeviceCachingAllocator {
   /** combine previously split blocks. returns the size of the subsumed block, or 0 on failure. */
   size_t try_merge_blocks(Block* dst, Block* src, BlockPool& pool)
   {
-    if (!src || src->allocated || src->event_count > 0) {
+    if (!src || src->allocated || src->event_count > 0 || !src->stream_uses.empty()) {
       return 0;
     }
 
@@ -767,7 +767,8 @@ class DeviceCachingAllocator {
 
     const size_t subsumed_size = src->size;
     dst->size += subsumed_size;
-    pool.blocks.erase(src);
+    auto erased = pool.blocks.erase(src);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(erased == 1);
     delete src;
 
     return subsumed_size;
@@ -964,6 +965,11 @@ class DeviceCachingAllocator {
   void synchronize_and_free_events() {
     // Synchronize on outstanding events and then free associated blocks.
 
+    // This function syncs, so capture should not be underway. Might as well
+    // make sure capture-deferred end of life events get processed too.
+    TORCH_INTERNAL_ASSERT(captures_underway == 0);
+    insert_events_deferred_until_no_capture();
+
     for (auto& e : cuda_events) {
       cudaEvent_t event = e.first;
       Block* block = e.second;
@@ -1000,15 +1006,19 @@ class DeviceCachingAllocator {
     C10_CUDA_CHECK(cudaSetDevice(prev_device));
   }
 
-  void process_events()
-  {
-    if (C10_UNLIKELY(insert_events_deferred_until_no_capture.size() > 0)) {
-      for (auto* block : insert_events_deferred_until_no_capture) {
+  void insert_events_deferred_until_no_capture() {
+    if (C10_UNLIKELY(needs_events_deferred_until_no_capture.size() > 0)) {
+      for (auto* block : needs_events_deferred_until_no_capture) {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
         insert_events(block);
       }
-      insert_events_deferred_until_no_capture.clear();
+      needs_events_deferred_until_no_capture.clear();
     }
+  }
+
+  void process_events()
+  {
+    insert_events_deferred_until_no_capture();
 
     // Process outstanding cudaEvents. Events that are completed are removed
     // from the queue, and the 'event_count' for the corresponding allocation
