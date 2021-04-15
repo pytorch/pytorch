@@ -164,6 +164,9 @@ public:
   Vec256<double> i0() const {
     return map(calc_i0);
   }
+  Vec256<double> i0e() const {
+    return map(calc_i0e);
+  }
   Vec256<double> igamma(const Vec256<double> &x) const {
     __at_align32__ double tmp[size()];
     __at_align32__ double tmp_x[size()];
@@ -328,22 +331,27 @@ Vec256<double> inline minimum(const Vec256<double>& a, const Vec256<double>& b) 
   return _mm256_or_pd(min, isnan);
 }
 
-
 // std::fmax, which returns the non-NaN input if either input is a NaN.
 template <>
 Vec256<double> inline fmax(const Vec256<double>& a, const Vec256<double>& b) {
+  // Make sure all NaN's are filled with bit 1, including the sign bit
+  Vec256<double> a_normalized = _mm256_or_pd(_mm256_cmp_pd(a, a, _CMP_UNORD_Q), a);
+  Vec256<double> b_normalized = _mm256_or_pd(_mm256_cmp_pd(b, b, _CMP_UNORD_Q), b);
   // Exploit the fact that all-ones is a NaN, and the second input is returned if either input is NaN.
-  Vec256<double> max_ab = _mm256_max_pd(a, b);
-  Vec256<double> max_ba = _mm256_max_pd(b, a);
+  Vec256<double> max_ab = _mm256_max_pd(a_normalized, b_normalized);
+  Vec256<double> max_ba = _mm256_max_pd(b_normalized, a_normalized);
   return _mm256_and_pd(max_ab, max_ba);
 }
 
 // std::fmin, which returns the non-NaN input if either input is a NaN.
 template <>
 Vec256<double> inline fmin(const Vec256<double>& a, const Vec256<double>& b) {
+  // Make sure all NaN's are filled with bit 1, including the sign bit
+  Vec256<double> a_normalized = _mm256_or_pd(_mm256_cmp_pd(a, a, _CMP_UNORD_Q), a);
+  Vec256<double> b_normalized = _mm256_or_pd(_mm256_cmp_pd(b, b, _CMP_UNORD_Q), b);
   // Exploit the fact that all-ones is a NaN, and the second input is returned if either input is NaN.
-  Vec256<double> min_ab = _mm256_min_pd(a, b);
-  Vec256<double> min_ba = _mm256_min_pd(b, a);
+  Vec256<double> min_ab = _mm256_min_pd(a_normalized, b_normalized);
+  Vec256<double> min_ba = _mm256_min_pd(b_normalized, a_normalized);
   return _mm256_and_pd(min_ab, min_ba);
 }
 
