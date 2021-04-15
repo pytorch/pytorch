@@ -65,6 +65,6 @@ popd
 retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
-# git checkout driazati/test
+git checkout driazati/test
 git --no-pager log --max-count 1
 popd

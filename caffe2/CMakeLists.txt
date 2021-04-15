@@ -968,6 +968,11 @@ if(USE_TBB)
   target_link_libraries(torch_cpu PUBLIC tbb)
 endif()
 
+if($ENV{LIBTORCH_CPU_DEBUG})
+  message("DEBUGMODE for libtorch is on")
+  target_compile_options(torch_cpu PRIVATE "-g")
+endif()
+
 
   target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
