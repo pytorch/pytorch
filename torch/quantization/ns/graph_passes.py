@@ -10,6 +10,7 @@ from .utils import (
     NodeInputOrOutputType,
     return_first_non_observer_node,
     get_number_of_non_param_args,
+    get_target_type_str,
 )
 
 from .ns_types import (
@@ -43,14 +44,7 @@ def _insert_logger_after_node(
     # create new name
     logger_node_name = \
         get_new_attr_name_with_prefix(node.name + logger_node_name_suffix)(gm)
-    # create a string representation of the node's target type
-    target_type = ''
-    if node.op == 'call_function':
-        target_type = str(node.target)
-    elif node.op == 'call_module':
-        assert isinstance(node.target, str)
-        target_mod = getattr_from_fqn(gm, node.target)
-        target_type = str(type(target_mod))
+    target_type = get_target_type_str(node, gm)
     # create the logger object
     logger_obj = logger_cls(
         ref_node_name, node.name, model_name, ref_name, target_type,
@@ -477,8 +471,8 @@ def create_a_shadows_b(
             )
             if not node_io_types_known_a_and_b:
                 print(
-                    f'skipping shadow loggers for node_b: {node_b.format_node()}' +
-                    f', start_node_a: {subgraph_a.start_node.format_node()}' +
+                    f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
+                    f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
                     ', unknown dtype cast')
                 env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
                 continue
