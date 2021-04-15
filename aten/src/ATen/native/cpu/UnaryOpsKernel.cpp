@@ -318,7 +318,7 @@ static void sinc_kernel(TensorIteratorBase& iter) {
   });
 }
 
-static void sinh_kernel(TensorIterator& iter) {
+static void sinh_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -327,7 +327,7 @@ static void sinh_kernel(TensorIterator& iter) {
   });
 }
 
-static void cosh_kernel(TensorIterator& iter) {
+static void cosh_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "cosh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -336,7 +336,7 @@ static void cosh_kernel(TensorIterator& iter) {
   });
 }
 
-static void acosh_kernel(TensorIterator& iter) {
+static void acosh_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "acosh_cpu", [&]() {
       cpu_kernel(
         iter,
@@ -631,6 +631,17 @@ static void frexp_kernel(TensorIterator& iter) {
   });
 }
 
+static void i0e_kernel(TensorIteratorBase& iter) {
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, iter.common_dtype(), "i0e_cpu", [&]() {
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t x) { return calc_i0e(x); },
+            [](Vec256<scalar_t> x) { return x.i0e(); });
+      });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -736,13 +747,14 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel);
 REGISTER_DISPATCH(entr_stub, &entr_kernel);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel);
+REGISTER_DISPATCH(i0e_stub, &i0e_kernel);
 
 
 IMPLEMENT_COMPLEX_KERNEL(acos)
 IMPLEMENT_COMPLEX_KERNEL(asin)
 IMPLEMENT_COMPLEX_KERNEL(atan)
 IMPLEMENT_FLOAT_KERNEL(ceil)
-IMPLEMENT_COMPLEX_KERNEL(cos)
+IMPLEMENT_COMPLEX_STRUCTURED_KERNEL(cos)
 IMPLEMENT_FLOAT_KERNEL(erf)
 IMPLEMENT_FLOAT_KERNEL(erfc)
 IMPLEMENT_FLOAT_KERNEL(erfinv)

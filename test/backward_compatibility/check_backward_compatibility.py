@@ -79,6 +79,7 @@ allow_list = [
     ("aten::mkldnn_linear", datetime.date(2021, 3, 2)),
     ("aten::_mode*", datetime.date(2021, 5, 2)),
     ("aten::linalg_multi_dot", datetime.date(2021, 3, 25)),
+    ("aten::coalesce", datetime.date(2021, 4, 15)),
     ("aten::empty_meta", datetime.date(2021, 4, 1)),
     ("aten::div", datetime.date(2021, 4, 28)),
     ("aten::divide", datetime.date(2021, 4, 28)),
@@ -86,8 +87,8 @@ allow_list = [
     ("aten::assert_async", datetime.date(2021, 5, 1)),
     ("aten::cumprod_backward", datetime.date(2021, 5, 1)),
     ("aten::_triangular_solve_helper", datetime.date(9999, 1, 1)),
-    ("aten::complex*", datetime.date(2021, 5, 1)),
-    ("aten::take_backward", datetime.date(2021, 5, 1)),
+    ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
+    ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
 ]
 
 def allow_listed(schema, allow_list):
