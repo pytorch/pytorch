@@ -1905,7 +1905,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
                                    args=(make_tensor(shape_e, low=low_e, high=high_e,
                                                      requires_grad=e_grad, device=device,
                                                      dtype=dtype) + additive_e,),
-                                    broadcasts_input=broadcasts_input)
+                                   broadcasts_input=broadcasts_input)
                        for shape_b, low_b, high_b, additive_b, b_grad, shape_e, low_e,
                        high_e, additive_e, e_grad, broadcasts_input in cases)
         tensor_scalar_inputs = (
