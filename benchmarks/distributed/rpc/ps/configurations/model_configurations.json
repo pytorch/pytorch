@@ -1,0 +1,22 @@
+{
+    "1":{
+        "model_id":1,
+        "configurations":{
+            "num_embeddings":4,
+            "embedding_dim": 4,
+            "dense_input_size": 4,
+            "dense_output_size": 4,
+            "sparse": true
+        }
+    },
+    "2":{
+        "model_id":1,
+        "configurations":{
+            "num_embeddings":4,
+            "embedding_dim": 4,
+            "dense_input_size": 4,
+            "dense_output_size": 4,
+            "sparse": false
+        }
+    }
+}

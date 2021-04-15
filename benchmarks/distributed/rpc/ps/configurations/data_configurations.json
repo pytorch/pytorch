@@ -1,0 +1,11 @@
+{
+    "1":{
+        "data_id":1,
+        "configurations":{
+            "min_val":0,
+            "max_val":4,
+            "batch_size":4,
+            "mult":2
+        }
+    }
+}

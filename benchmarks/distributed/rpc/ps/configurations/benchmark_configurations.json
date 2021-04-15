@@ -1,0 +1,47 @@
+{
+    "1":{
+        "backend":"gloo",
+        "hook_id":5,
+        "ddp_trainers":2
+    },
+    "2":{
+        "backend":"gloo_and_nccl",
+        "hook_id":-1
+    },
+    "3":{
+        "backend":"nccl",
+        "hook_id":4,
+        "ddp_trainers":2
+    },
+    "4":{
+        "backend":"nccl",
+        "hook_id":2,
+        "ddp_trainers":2
+    },
+    "5":{
+        "backend":"nccl",
+        "hook_id":2,
+        "ddp_trainers":2,
+        "use_cuda_rpc": true
+    },
+    "6":{
+        "backend":"nccl",
+        "hook_id":2,
+        "ddp_trainers":2,
+        "use_cuda_rpc": true,
+        "batch_mode":true
+    },
+    "7":{
+        "backend":"gloo",
+        "hook_id":1,
+        "ddp_trainers":2,
+        "use_cuda_rpc": true
+    },
+    "8":{
+        "backend":"gloo",
+        "hook_id":1,
+        "ddp_trainers":2,
+        "use_cuda_rpc": true,
+        "batch_mode":true
+    }
+}
