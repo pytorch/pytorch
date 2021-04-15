@@ -122,6 +122,14 @@ else()
   set(ROCTRACER_PATH $ENV{ROCTRACER_PATH})
 endif()
 
+# MAGMA_HOME
+if(NOT DEFINED ENV{MAGMA_HOME})
+  set(MAGMA_HOME ${ROCM_PATH}/magma)
+  set(ENV{MAGMA_HOME} ${ROCM_PATH}/magma)
+else()
+  set(MAGMA_HOME $ENV{MAGMA_HOME})
+endif()
+
 if(NOT DEFINED ENV{PYTORCH_ROCM_ARCH})
   set(PYTORCH_ROCM_ARCH gfx803;gfx900;gfx906;gfx908)
 else()
