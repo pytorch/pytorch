@@ -273,7 +273,7 @@ class TestBundledInputs(TestCase):
             m,
             inputs=[(torch.ones(1),)]  # type: ignore
         )
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "Models can only be augmented with bundled inputs once."):
             torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
                 m,
                 inputs=[(torch.ones(1),)]  # type: ignore
