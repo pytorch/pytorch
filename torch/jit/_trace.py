@@ -1036,7 +1036,8 @@ class TracedModule(ScriptModule):
                 tmp_module._parameters[name] = param
                 check_unique(param)
         for name, buf in orig._buffers.items():
-            if buf is not None:
+            # If the buffer is marked as non persistent, then it is ignored
+            if buf is not None and name not in orig._non_persistent_buffers_set:
                 tmp_module._buffers[name] = buf
                 check_unique(buf)
         for name, val in orig.__dict__.items():
