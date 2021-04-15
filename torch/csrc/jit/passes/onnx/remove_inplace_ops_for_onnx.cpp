@@ -19,8 +19,9 @@ namespace {
 const std::set<c10::Symbol> inplace_ops =
     {aten::append, aten::index_put_, aten::pop, aten::insert, aten::Delete};
 
-// InplaceConverter defines a set of functions that together enables the conversion
-// from prim::GetAttr, prim::SetAttr, and ATen in-place operators to ONNX out-place operators.
+// InplaceConverter defines a set of functions that together enables the
+// conversion from prim::GetAttr, prim::SetAttr, and ATen in-place operators to
+// ONNX out-place operators.
 struct InplaceConverter {
   InplaceConverter(
       std::shared_ptr<Graph> graph,
@@ -50,7 +51,8 @@ struct InplaceConverter {
   void convertGetSetAttrToInplaceOps(Block* block);
 
   // ValueTracker provides apis to record aliases for a single value,
-  // and to retrieve the correct alias of any given value based on the location in the graph it is used.
+  // and to retrieve the correct alias of any given value based on the location
+  // in the graph it is used.
   struct ValueTracker {
     ValueTracker() : graph_(nullptr) {}
 
@@ -61,7 +63,6 @@ struct InplaceConverter {
     std::string toString() const;
 
    private:
-
     std::shared_ptr<Graph> graph_;
 
     // Map from aliases to root value.
@@ -459,7 +460,8 @@ void InplaceConverter::ValueTracker::recordSetValue(
   // If this value has alias from outer block,
   // then the update must be reflected back to outside.
   // Thus it needs to be registered as a subblock output.
-  // This step can be skipped if other alias of this value has already been registered as sublock output.
+  // This step can be skipped if other alias of this value has already been
+  // registered as sublock output.
   if (!registered && from_outer_alias) {
     if (owning_block_nkind == prim::Loop) {
       owning_block->registerOutput(new_v);
@@ -489,7 +491,8 @@ void InplaceConverter::ValueTracker::recordSetValue(
   GRAPH_UPDATE(this->toString());
 }
 
-// Based on current value aliases record, pass over graph and correct alias reference for all the nodes.
+// Based on current value aliases record, pass over graph and correct alias
+// reference for all the nodes.
 void InplaceConverter::correctAliasReferences() {
   correctAliasReferences(graph_->block());
 }
@@ -558,11 +561,16 @@ Value* InplaceConverter::ValueTracker::findAliasForValueAtNode(
     }
   }
 
-  TORCH_INTERNAL_ASSERT(nullptr != found_alias, "More details: \n",
-    n->sourceRange().str(),
-    "Input ", v->debugName(), " of node ", *n,
-    " was modified by in-place operation, but we cannot find its updated value. ",
-    "Please report a bug to PyTorch, and/or try to avoid using in-place operators on this value.");
+  TORCH_INTERNAL_ASSERT(
+      nullptr != found_alias,
+      "More details: \n",
+      n->sourceRange().str(),
+      "Input ",
+      v->debugName(),
+      " of node ",
+      *n,
+      " was modified by in-place operation, but we cannot find its updated value. ",
+      "Please report a bug to PyTorch, and/or try to avoid using in-place operators on this value.");
 
   return found_alias;
 }
@@ -745,10 +753,11 @@ void InplaceConverter::replaceAttrWithInplaceOps(
 void InplaceConverter::convertGetSetAttrToInplaceOps(Block* block) {
   std::unordered_map<std::string, Value*> attr_name_value_map = {};
   std::unordered_map<Node*, std::string> attr_node_fullname_map = {};
-  // First pass over graph, to gather all attribute names, and their intial values.
-  // Create dummy initial values for attributes if necessary.
-  // By the end of this pass, these dummy initial values should have zero uses, and can be safely removed.
-  // Otherwise it will imply error in model for using uninitialized values.
+  // First pass over graph, to gather all attribute names, and their intial
+  // values. Create dummy initial values for attributes if necessary. By the end
+  // of this pass, these dummy initial values should have zero uses, and can be
+  // safely removed. Otherwise it will imply error in model for using
+  // uninitialized values.
   gatherAttrNameInitialValueMap(
       block, attr_name_value_map, attr_node_fullname_map);
   GRAPH_UPDATE("Graph after gatherAttrNameInitialValueMap", graph_->toString());
@@ -760,7 +769,8 @@ void InplaceConverter::convertGetSetAttrToInplaceOps(Block* block) {
   replaceAttrWithInplaceOps(block, attr_name_value_map, attr_node_fullname_map);
 }
 
-// Convert inplace ops to outplace version, and record the associated new alias in ValueTracker.
+// Convert inplace ops to outplace version, and record the associated new alias
+// in ValueTracker.
 void InplaceConverter::convertInplaceOpsAndTrackAlias(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
@@ -811,11 +821,13 @@ void InplaceConverter::convertInplaceOpsAndTrackAlias() {
 }
 
 void InplaceConverter::convertMutationForONNX() {
-  // First pass to convert all prim::GetAttr and prim::SetAttr to ATen inplace operators.
+  // First pass to convert all prim::GetAttr and prim::SetAttr to ATen inplace
+  // operators.
   convertGetSetAttrToInplaceOps(graph_->block());
   GRAPH_UPDATE("Graph after convertGetSetAttrToInplaceOps", graph_->toString());
   vt_.init(graph_);
-  // Second pass to convert all inplace operators to outplace version, and record the associated new alias in ValueTracker.
+  // Second pass to convert all inplace operators to outplace version, and
+  // record the associated new alias in ValueTracker.
   convertInplaceOpsAndTrackAlias();
   // Third pass to check and correct alias reference for all the nodes.
   correctAliasReferences();
