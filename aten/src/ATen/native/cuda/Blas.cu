@@ -1,14 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <c10/util/MaybeOwned.h>
 
 namespace at { namespace native {
 
 TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta_, const Scalar& alpha_, const Tensor& result) {
-  Tensor self_ = self;
-  if (self.numel()==1) {
-    self_ = self.expand({mat.size(0)});
-  }
+  c10::MaybeOwned<Tensor> self_ = expand_size(self, {mat.size(0)});
   auto betaval = beta_.toComplexDouble();
   if (mat.numel() == 0) {
     // shortcut for an empty matrix
@@ -24,8 +22,8 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
               beta_, self.scalar_type(), c10::nullopt /* layout */, at::kCPU, c10::nullopt /* pin_memory */));
     }
   } else {
-    if (!result.is_same(self_) && betaval != 0.0) { //if beta is 0, result contents will be zeroed later
-      at::native::copy_(const_cast<Tensor&>(result), self_);
+    if (!result.is_same(*self_) && betaval != 0.0) { //if beta is 0, result contents will be zeroed later
+      at::native::copy_(const_cast<Tensor&>(result), *self_);
     }
     if (result.numel() != 0) {
       auto r_stride = result.stride(0);
