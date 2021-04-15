@@ -485,7 +485,7 @@ def method_impl(
     method_header = ['HANDLE_TH_ERRORS']
     method_header += namedtuple_inits
     method_header += [
-        "Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
+        "const Tensor& self = THPVariable_Unpack(self_);"
     ] if method else []
 
     method_footer = ([] if noarg else ['Py_RETURN_NONE;']) + ['END_HANDLE_TH_ERRORS']

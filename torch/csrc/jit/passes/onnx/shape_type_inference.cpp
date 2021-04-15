@@ -1393,7 +1393,7 @@ size_t ONNXAssignOutputShape(
   index_check();
 
   if (THPVariable_Check(output_obj)) {
-    at::Tensor var = reinterpret_cast<THPVariable*>(output_obj)->cdata;
+    at::Tensor var = THPVariable_Unpack(output_obj);
     ONNXUpdateTypeFromTensor(
         graph->outputs().at(outputs_index), var, onnx_shape_inference);
     outputs_index++;
@@ -1412,11 +1412,11 @@ size_t ONNXAssignOutputShape(
       if (list_len > 0) {
         auto list_elem = PyList_GET_ITEM(output_obj, 0);
         TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
-        auto& var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+        auto& var = THPVariable_Unpack(list_elem);
         for (size_t i = 1; i < list_len; ++i) {
           list_elem = PyList_GET_ITEM(output_obj, i);
           TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
-          auto& new_var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+          auto& new_var = THPVariable_Unpack(list_elem);
           TORCH_CHECK(
               var.scalar_type() == new_var.scalar_type(),
               "Unsupported sequence type in model outputs. ONNX supports sequences of elements of the same data type.");
