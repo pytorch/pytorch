@@ -33,7 +33,6 @@ header_template_rule(
     out = "c10/macros/cmake_macros.h",
     substitutions = {
         "cmakedefine": "define",
-        "#define FEATURE_TORCH_MOBILE": "/* #undef FEATURE_TORCH_MOBILE */",
         "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
     },
 )
@@ -130,6 +129,7 @@ genrule(
         "aten/src/ATen/RegisterMkldnnCPU.cpp",
         "aten/src/ATen/RegisterQuantizedCPU.cpp",
         "aten/src/ATen/RegisterSparseCPU.cpp",
+        "aten/src/ATen/RegisterSparseCsrCPU.cpp",
         "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
         "aten/src/ATen/RegisterMeta.cpp",
         "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
@@ -508,6 +508,7 @@ filegroup(
         "aten/src/ATen/native/cuda/TensorTransformations.cu.cc",
         "aten/src/ATen/native/cuda/TriangularOps.cu.cc",
         "aten/src/ATen/native/cuda/UnaryOpsKernel.cu.cc",
+        "aten/src/ATen/native/cuda/UnarySpecialOpsKernel.cu.cc",
         "aten/src/ATen/native/cuda/Unique.cu.cc",
         "aten/src/ATen/native/cuda/UpSampleBicubic2d.cu.cc",
         "aten/src/ATen/native/cuda/UpSampleBilinear2d.cu.cc",
