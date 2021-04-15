@@ -12,7 +12,7 @@ from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, IS_WINDOWS, FILE_SCHEMA
 
 import torch
 import torch.cuda
@@ -25,7 +25,6 @@ from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
-from torch.testing._internal.common_utils import FILE_SCHEMA
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -5138,7 +5137,7 @@ class DistributedTest:
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
         @unittest.skipIf(
-            IS_MACOS,
+            IS_MACOS or IS_WINDOWS,
             "MacOS uses uv transport which does not have as robust error handling as tcp transport"
         )
         def test_monitored_barrier_gloo(self):
@@ -5277,7 +5276,7 @@ class DistributedTest:
         @require_backends_available({"gloo"})
         @skip_if_small_worldsize
         @unittest.skipIf(
-            IS_MACOS,
+            IS_MACOS or IS_WINDOWS,
             "MacOS uses uv transport which does not have as robust error handling as tcp transport"
         )
         def test_monitored_barrier_failure_order(self):
