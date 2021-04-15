@@ -1055,14 +1055,69 @@ class TestFX(JitTestCase):
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
             if node.op == 'output':
-                output_shape = node.args[0].meta['shape']
-                output_stride = node.args[0].meta['stride']
+                output_shape = node.args[0].meta['tensor_meta'].shape
+                output_stride = node.args[0].meta['tensor_meta'].stride
         self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
                                        'call_module', 'output']))
 
         # Test shape propogation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
         self.assertEqual(output_stride, ref_out.stride())
+
+    def test_shape_prop_layout(self):
+        class ConvTest(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_mod = torch.nn.Conv2d(5, 5, 3)
+
+            def forward(self, x):
+                return self.conv_mod(x)
+
+        # contiguous layout
+        test_mod = ConvTest()
+        traced = symbolic_trace(test_mod)
+        x = torch.randn(5, 5, 224, 224)
+        shape_prop.ShapeProp(traced).propagate(x)
+
+        assert(all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
+                   for node in traced.graph.nodes))
+
+        x_channels_last = x.contiguous(memory_format=torch.channels_last)
+        traced.to(memory_format=torch.channels_last)
+        shape_prop.ShapeProp(traced).propagate(x_channels_last)
+        for node in traced.graph.nodes:
+            # NB: the implementation of conv may not preserve the memory format,
+            # unfortunately. The best we can do is just check that the placeholder
+            # node is channels-last
+            if node.op in {'placeholder'}:
+                self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last)
+
+
+    def test_shape_prop_layout_3d(self):
+        class ConvTest3d(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_mod = torch.nn.Conv3d(5, 5, 3)
+
+            def forward(self, x):
+                return self.conv_mod(x)
+
+        test_mod_3d = ConvTest3d()
+        traced_3d = symbolic_trace(test_mod_3d)
+        x_3d = torch.randn(5, 5, 224, 224, 15)
+        shape_prop.ShapeProp(traced_3d).propagate(x_3d)
+        assert(all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
+                   for node in traced_3d.graph.nodes))
+
+        x_channels_last_3d = x_3d.contiguous(memory_format=torch.channels_last_3d)
+        traced_3d.to(memory_format=torch.channels_last_3d)
+        shape_prop.ShapeProp(traced_3d).propagate(x_channels_last_3d)
+        for node in traced_3d.graph.nodes:
+            # NB: the implementation of conv may not preserve the memory format,
+            # unfortunately. The best we can do is just check that the placeholder
+            # node is channels-last
+            if node.op in {'placeholder'}:
+                self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last_3d)
 
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
@@ -2261,14 +2316,14 @@ class TestOperatorSignatures(JitTestCase):
 
 
 class TestFunctionalTracing(JitTestCase):
-    IGNORE_FUNCS = ('has_torch_function', 'has_torch_function_unary',
-                    'has_torch_function_variadic', 'handle_torch_function',
-                    'boolean_dispatch')
-    TO_PATCH = {'has_torch_function': None,
-                'has_torch_function_unary': None,
-                'has_torch_function_variadic': None}
+    IGNORE_FUNCS = ("has_torch_function", "has_torch_function_unary",
+                    "has_torch_function_variadic", "handle_torch_function",
+                    "boolean_dispatch")
+    TO_PATCH = {"has_torch_function": None,
+                "has_torch_function_unary": None,
+                "has_torch_function_variadic": None}
 
-    BUILT_IN_FUNC = (AssertionError, '')
+    BUILT_IN_FUNC = (AssertionError, "")
     PROXY_ITERABLE = (TypeError, r"argument of type 'Proxy' is not iterable")
     PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
     LEN_ERROR = (RuntimeError, r"'len' is not supported in symbolic tracing by default")
@@ -2363,33 +2418,33 @@ class TestFunctionalTracing(JitTestCase):
         "hardsigmoid": CONTROL_FLOW,
         "hardswish": CONTROL_FLOW,
         "hardtanh": CONTROL_FLOW,
-        'hinge_embedding_loss': CONTROL_FLOW,
-        'huber_loss': CONTROL_FLOW,
-        'interpolate': CONTROL_FLOW,
-        'kl_div': CONTROL_FLOW,
-        'l1_loss': CONTROL_FLOW,
-        'leaky_relu': CONTROL_FLOW,
-        'local_response_norm': CONTROL_FLOW,
-        'margin_ranking_loss': CONTROL_FLOW,
-        'mse_loss': CONTROL_FLOW,
-        'multi_head_attention_forward': CONTROL_FLOW,
-        'multi_margin_loss': CONTROL_FLOW,
-        'multilabel_margin_loss': CONTROL_FLOW,
-        'multilabel_soft_margin_loss': CONTROL_FLOW,
-        'nll_loss': CONTROL_FLOW,
-        'poisson_nll_loss': CONTROL_FLOW,
-        'relu': CONTROL_FLOW,
-        'relu6': CONTROL_FLOW,
-        'rrelu': CONTROL_FLOW,
-        'selu': CONTROL_FLOW,
-        'silu': CONTROL_FLOW,
-        'smooth_l1_loss': CONTROL_FLOW,
-        'soft_margin_loss': CONTROL_FLOW,
-        'threshold': CONTROL_FLOW,
-        'triplet_margin_loss': CONTROL_FLOW,
-        'triplet_margin_with_distance_loss': CONTROL_FLOW,
-        'unfold': CONTROL_FLOW,
-        'upsample': CONTROL_FLOW,
+        "hinge_embedding_loss": CONTROL_FLOW,
+        "huber_loss": CONTROL_FLOW,
+        "interpolate": CONTROL_FLOW,
+        "kl_div": CONTROL_FLOW,
+        "l1_loss": CONTROL_FLOW,
+        "leaky_relu": CONTROL_FLOW,
+        "local_response_norm": CONTROL_FLOW,
+        "margin_ranking_loss": CONTROL_FLOW,
+        "mse_loss": CONTROL_FLOW,
+        "multi_head_attention_forward": CONTROL_FLOW,
+        "multi_margin_loss": CONTROL_FLOW,
+        "multilabel_margin_loss": CONTROL_FLOW,
+        "multilabel_soft_margin_loss": CONTROL_FLOW,
+        "nll_loss": CONTROL_FLOW,
+        "poisson_nll_loss": CONTROL_FLOW,
+        "relu": CONTROL_FLOW,
+        "relu6": CONTROL_FLOW,
+        "rrelu": CONTROL_FLOW,
+        "selu": CONTROL_FLOW,
+        "silu": CONTROL_FLOW,
+        "smooth_l1_loss": CONTROL_FLOW,
+        "soft_margin_loss": CONTROL_FLOW,
+        "threshold": CONTROL_FLOW,
+        "triplet_margin_loss": CONTROL_FLOW,
+        "triplet_margin_with_distance_loss": CONTROL_FLOW,
+        "unfold": CONTROL_FLOW,
+        "upsample": CONTROL_FLOW,
 
         "upsample_bilinear": INTERPOLATE_ARGS_CONFLICT,
         "upsample_nearest": INTERPOLATE_ARGS_CONFLICT,
@@ -2411,8 +2466,11 @@ class TestFunctionalTracing(JitTestCase):
         "upsample_nearest",
     )
 
-    # For the operator like `in`, internal exception during the iteration
-    # can be raised on Python 3.8, rather than the error of `object is not iterable`
+    # Inconsistent behavior between Python 3.8 and other Python versions:
+    # - Python 3.8: Re-raise internal exception like `PROXY_ITERATED`
+    # - Other Python: Raise `argument of type 'Proxy' is not iterable` due to the same
+    #                 internal exception above
+    # Use the following map to override the expected exception for Python 3.8
     UNTRACEABLE_FUNCTIONALS_PY38 = {
         "adaptive_max_pool1d": PROXY_ITERATED,
         "adaptive_max_pool2d": PROXY_ITERATED,
@@ -2442,10 +2500,6 @@ class TestFunctionalTracing(JitTestCase):
             # Ignore non-callable object like modules
             if not isinstance(fn, Callable):
                 continue
-            # Remove built-in function/method
-            #  if not hasattr(fn, '__module__') or fn.__module__ != 'torch.nn.functional':
-            #      continue
-            # Ignore functions without any Tensor argument
             if f not in cls.FUNCTIONALS_WITHOUT_ANNOTATION:
                 try:
                     sig = inspect.signature(fn)
@@ -2482,7 +2536,7 @@ class TestFunctionalTracing(JitTestCase):
     def generate_tests(cls):
         functional_list = cls._get_functional()
         for func_name, fn in functional_list:
-            test_name = 'test_nn_functional_' + func_name
+            test_name = "test_nn_functional_" + func_name
             functional_test = cls.generate_test_func(func_name, fn)
             setattr(cls, test_name, functional_test)
 
