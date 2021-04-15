@@ -17,7 +17,6 @@ from .ns_types import (
 from typing import List, Optional, Set, Tuple, Callable
 
 def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
-    # TODO(future PR): handle QAT variants
     if (
         isinstance(mod, nn.Conv1d) or
         isinstance(mod, nn.Conv2d) or
@@ -34,7 +33,6 @@ def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
         return mod._weight_bias()[0]  # type: ignore
 
 def get_linear_mod_weight(mod: nn.Module) -> torch.Tensor:
-    # TODO(future PR): make more generic, handle everything
     if isinstance(mod, nn.Linear):
         return mod.weight.detach()
     elif isinstance(mod, nni.LinearReLU):
@@ -138,8 +136,6 @@ def extract_weight_from_node(
     res_type = NSSingleResultValuesType.WEIGHT.value
     if node.op == 'call_function':
 
-        # linear
-        # TODO(future PR): other function types
         related_to_linear = node.target in (F.linear,) or \
             (node.target, F.linear) in type_a_related_to_b
         related_to_conv1d = node.target in (F.conv1d,) or \

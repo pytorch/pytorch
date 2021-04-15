@@ -30,6 +30,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
             nn.Conv1d,
             nnq.Conv1d,
             nniqat.ConvBn1d,
+            nniqat.ConvBnReLU1d,
             nniq.ConvReLU1d,
             nni.ConvReLU1d,
         ]),
@@ -38,6 +39,8 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
             nnq.Conv2d,
             nnqat.Conv2d,
             nniqat.ConvBn2d,
+            nniqat.ConvBnReLU2d,
+            nniqat.ConvReLU2d,
             nniq.ConvReLU2d,
             nni.ConvReLU2d,
         ]),
@@ -46,6 +49,8 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
             nnq.Conv3d,
             nnqat.Conv3d,
             nniqat.ConvBn3d,
+            nniqat.ConvBnReLU3d,
+            nniqat.ConvReLU3d,
             nniq.ConvReLU3d,
             nni.ConvReLU3d,
         ]),
@@ -73,6 +78,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
             nniq.LinearReLU,
             nnqat.Linear,
             nnqd.Linear,
+            nniqat.LinearReLU,
         ]),
         # linear functionals
         'torch.nn.functional.linear': set([
