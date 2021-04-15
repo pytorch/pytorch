@@ -8,7 +8,7 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Union, cast
+from typing import Any, Callable, Dict, List, Optional, Union, cast, Tuple
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
@@ -17,6 +17,7 @@ from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElas
 from torch.distributed.elastic.multiprocessing import Std
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
 from torch.distributed.elastic.rendezvous import RendezvousParameters
+from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
 
 
@@ -150,6 +151,25 @@ def _get_entrypoint_name(
         return ""
 
 
+def _get_addr_and_port(
+    rdzv_parameters: RendezvousParameters,
+) -> Tuple[Optional[str], Optional[int]]:
+    if rdzv_parameters.backend != "static":
+        return (None, None)
+    endpoint = rdzv_parameters.endpoint
+    endpoint = endpoint.strip()
+    if not endpoint:
+        raise ValueError(
+            "Endpoint is missing in endpoint. Try to add --master_addr and --master_port"
+        )
+    master_addr, master_port = parse_rendezvous_endpoint(endpoint, default_port=-1)
+    if master_port == -1:
+        raise ValueError(
+            f"port is missing in endpoint: {endpoint}. Try to specify --master_port"
+        )
+    return (master_addr, master_port)
+
+
 # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
 # torch.distributed.elastic.multiprocessing.errors.record.
 @record
@@ -192,6 +212,7 @@ def launch_agent(
 
     agent = None
     rdzv_handler = rdzv_registry.get_rendezvous_handler(rdzv_parameters)
+    master_addr, master_port = _get_addr_and_port(rdzv_parameters)
     try:
         spec = WorkerSpec(
             role=config.role,
@@ -203,6 +224,8 @@ def launch_agent(
             monitor_interval=config.monitor_interval,
             redirects=config.redirects,
             tee=config.tee,
+            master_addr=master_addr,
+            master_port=master_port,
         )
 
         cfg = metrics.MetricsConfig(config.metrics_cfg) if config.metrics_cfg else None
