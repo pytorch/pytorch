@@ -249,10 +249,14 @@ def get_timeout(test_id):
         return DEFAULT_TIMEOUT
 
 default_pg_timeout = 60
-# These tests can run slowly and need additional time to complete, otherwise
-# they would be taken down by NCCL_ASYNC_ERROR_HANDLING.
+
 CUSTOM_PG_TIMEOUT = {
+    # This test runs slowly and needs additional time to complete, otherwise can
+    # be taken down by NCCL_ASYNC_ERROR_HANDLING
     "test_ddp_uneven_inputs": 300,
+    # This test has a short timeout since it tests being taken down by
+    # NCCL_ASYNC_ERROR_HANDLING which we want to happen quickly.
+    "test_ddp_model_diff_across_ranks": 5,
 }
 
 
@@ -5104,7 +5108,9 @@ class DistributedTest:
             rank_0_ctx = (
                 suppress()
                 if dist.get_backend() == dist.Backend.NCCL
-                else self.assertRaisesRegex(RuntimeError, "Connection closed by peer")
+                # Gloo can raise various exception messages, so just assert
+                # Runtime error here.
+                else self.assertRaises(RuntimeError)
             )
             ctx = (
                 rank_0_ctx
