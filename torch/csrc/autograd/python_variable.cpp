@@ -226,7 +226,6 @@ static void THPVariable_dealloc(THPVariable* self)
   // in another thread that successfully rezzes the object after we tested
   // the use_count, but before we actually managed to call the destructor.
   // I think it doesn't matter.
-  const auto& tensor = THPVariable_Unpack(self);
   PyObject_GC_UnTrack(self);
   THPVariable_clear(self);
   self->cdata.~MaybeOwned<Variable>();
