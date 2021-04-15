@@ -153,7 +153,7 @@ void entr_kernel_cuda(TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
 REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
-REGISTER_DISPATCH(i0e_stub, &i0e_kernel_cuda);
+REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_cuda);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel_cuda);
 REGISTER_DISPATCH(sinc_stub, &sinc_kernel_cuda);
 REGISTER_DISPATCH(logit_stub, &logit_kernel_cuda);
@@ -161,7 +161,7 @@ REGISTER_DISPATCH(erf_stub, &erf_kernel_cuda);
 REGISTER_DISPATCH(erfc_stub, &erfc_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
-REGISTER_DISPATCH(entr_stub, &entr_kernel_cuda);
+REGISTER_DISPATCH(special_entr_stub, &entr_kernel_cuda);
 
 } // namespace native
 } // namespace at
