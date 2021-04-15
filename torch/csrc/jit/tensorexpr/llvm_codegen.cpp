@@ -176,8 +176,8 @@ class LLVMCodeGenImpl : public IRVisitor {
   std::unordered_map<const Block*, std::vector<const Var*>> scopeToVar_;
   const Block* scope_;
 
-  std::string llvmCode;
-  std::string asmCode;
+  std::string llvmCode_;
+  std::string asmCode_;
 
  private:
   llvm::LLVMContext& getContext();
@@ -268,10 +268,10 @@ class LLVMCodeGenImpl : public IRVisitor {
 
   void optimize(llvm::Module& M);
   std::string getLLVMCodeText() {
-    return llvmCode;
+    return llvmCode_;
   }
   std::string getASMCodeText() {
-    return asmCode;
+    return asmCode_;
   }
 };
 
@@ -552,7 +552,7 @@ void LLVMCodeGenImpl::emitKernel(
 
   asmBuffer.set_size(0);
   module_->print(asmStream, nullptr);
-  llvmCode = asmStream.str().str();
+  llvmCode_ = asmStream.str().str();
   GRAPH_DEBUG(
       "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
 
@@ -569,10 +569,10 @@ void LLVMCodeGenImpl::emitKernel(
       llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
 #endif
   PM.run(*module_);
-  asmCode = asmStream.str().str();
+  asmCode_ = asmStream.str().str();
 
   GRAPH_DEBUG(
-      "\nLLVM generated assembly code\n\n", asmCode, "\n");
+      "\nLLVM generated assembly code\n\n", asmCode_, "\n");
 }
 
 // TODO: The binary ops are copypasta.
