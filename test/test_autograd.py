@@ -5340,7 +5340,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-separate_complex_tests = ['view_as_real', 'div', 'pow', '__rdiv__', 'add', 'sub']
+separate_complex_tests = ['view_as_real', 'div', '__rdiv__', 'sub']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
@@ -5357,12 +5357,12 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'expand', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'zero_',
-                'eq_', 'ne_', 'add', '__radd__', 'sum', 'mul',
+                '__radd__', 'sum', 'mul',
                 '__rmul__', 'dot', 'vdot', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'fill_', 'sub',
                 'mean', 'inverse', 'linalg.tensorinv', 'matrix_exp',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split',
-                'baddbmm', 'addbmm', 'addmv'] + complex_list_filter + separate_complex_tests
+                'baddbmm', 'addbmm'] + complex_list_filter + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
