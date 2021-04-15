@@ -199,14 +199,15 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
   for (size_t tensorIdx = 0; tensorIdx < numTensors; ++tensorIdx) {
     const tensorpipe::Descriptor::Tensor& tensor =
         tpDescriptor.tensors[tensorIdx];
-    if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCpu) {
+    if (tensor.sourceDevice.type == tensorpipe::kCpuDeviceType) {
       buffers.tensors.emplace_back(
           at::getCPUAllocator()->allocate(tensor.length));
       tensorpipe::CpuBuffer buffer;
       buffer.ptr = buffers.tensors.back().get();
       tpAllocation.tensors[tensorIdx].buffer = buffer;
 #ifdef USE_CUDA_NOT_ROCM
-    } else if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCuda) {
+    } else if (tensor.sourceDevice.type == tensorpipe::kCudaDeviceType) {
+      // TODO: This could be simply `tensor.targetDevice.value().index`.
       auto deviceIndex = std::stoi(tensor.metadata);
       auto stream = at::cuda::CUDAStream(ctx->getStream(deviceIndex));
       // CUDACachingAllocator will call recordStream accordingly on the current
