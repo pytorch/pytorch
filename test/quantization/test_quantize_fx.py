@@ -14,6 +14,8 @@ from torch.quantization.quantize_fx import (
     prepare_qat_fx,
 )
 
+from torch.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
+
 from torch.quantization.fx.pattern_utils import (
     is_match,
     MatchAllNode,
@@ -3065,8 +3067,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 module, F.instance_norm, [4], data,
                 quantized_module, torch.ops.quantized.instance_norm,
                 skip_op_arg_for_functional=True)
-
-    def _test_default_node_quant_handler_ops(self, module, functional):
+             
+    # This test can probably be generalized to non reference tests, but the node_list will need a constructor
+    def _test_ref_default_node_quant_handler_ops(self, module, functional, dtypes=(torch.float16, torch.float16, None), additional_quant_pattern_dict={}):
         class M(torch.nn.Module):
             def __init__(self, mod, func):
                 super().__init__()
@@ -3078,31 +3081,58 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.functional(x)
                 return x
 
-        data = torch.randn((2, 2, 2, 2), dtype=torch.float16)
+        data = torch.randn((2, 2, 2, 2))
         quant_type = QuantType.STATIC
-        qconfig_dict = {
-            "": float16_static_qconfig
-        }
-        m = M(module, functional).eval()
-        m_prep = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
-        m_quant = torch.quantization.quantize_fx.convert_fx(m_prep)
-        self.assertEqual(m_quant(data),m(data.float()), rtol=1e-3, atol=1e-4)
+        custom_qconfig_dict = {"additional_quant_pattern": additional_quant_pattern_dict}
+        assert dtypes in [(torch.quint8, torch.qint8, None), (torch.float16, torch.float16, None)]
+        if dtypes == (torch.quint8, torch.qint8, None):
+            qconfig_dict = {"": torch.quantization.get_default_qconfig("fbgemm")}
+            node_list = [
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_method("dequantize"),
+                ns.call_module(module),
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_method('dequantize'),
+                ns.call_function(functional),
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_method('dequantize')
+            ]
+        elif dtypes == (torch.float16, torch.float16, None):
+            qconfig_dict = {"": float16_static_qconfig}
+            node_list = [
+                ns.call_method("to"),
+                ns.call_method("dequantize"),
+                ns.call_module(module),
+                ns.call_method("to"),
+                ns.call_method('dequantize'),
+                ns.call_function(functional),
+                ns.call_method("to"),
+                ns.call_method('dequantize')
+            ]
 
-        node_occurrence = {
-            ns.call_method("to"): 3
-        }
-        m_quant_2 = self.checkGraphModeFxOp(
-            M(module, functional), (data.float(),), quant_type, custom_qconfig_dict=qconfig_dict,
-            expected_node_occurrence=node_occurrence)
+        m = M(module, functional).eval()
+        m_prep = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict, custom_qconfig_dict)
+        m_prep(data)
+        m_quant = torch.quantization.quantize_fx.convert_fx(m_prep, is_reference=True)
+        m_quant(data)
+
+        self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
 
     def test_gelu(self):
-        self._test_default_node_quant_handler_ops(torch.nn.GELU, torch.nn.functional.gelu)
+        additional_patterns = {torch.nn.GELU: DefaultNodeQuantizeHandler,
+                               torch.nn.functional.gelu: DefaultNodeQuantizeHandler}
+        self._test_ref_default_node_quant_handler_ops(
+            torch.nn.GELU, torch.nn.functional.gelu, (torch.quint8, torch.qint8, None), additional_patterns)
 
     def test_softmax(self):
-        self._test_default_node_quant_handler_ops(torch.nn.Softmax, torch.nn.functional.softmax)
+        additional_patterns = {torch.nn.Softmax: DefaultNodeQuantizeHandler,
+                               torch.nn.functional.softmax: DefaultNodeQuantizeHandler}
+        self._test_ref_default_node_quant_handler_ops(
+            torch.nn.Softmax, torch.nn.functional.softmax, (torch.quint8, torch.qint8, None), additional_patterns)
 
     def test_silu(self):
-        self._test_default_node_quant_handler_ops(torch.nn.SiLU, torch.nn.functional.silu)
+        self._test_ref_default_node_quant_handler_ops(
+            torch.nn.SiLU, torch.nn.functional.silu, (torch.float16, torch.float16, None))
 
     @skipIfNoFBGEMM
     def test_clamp(self):

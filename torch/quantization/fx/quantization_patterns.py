@@ -767,18 +767,19 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.InstanceNorm3d)
 @register_quant_pattern(torch.nn.LayerNorm)
 @register_quant_pattern(torch.nn.SiLU)
-@register_quant_pattern(torch.nn.GELU)
-@register_quant_pattern(torch.nn.Softmax)
+# @register_quant_pattern(torch.nn.GELU)
+# @register_quant_pattern(torch.nn.Softmax)
 @register_quant_pattern(torch.nn.functional.hardswish)
 @register_quant_pattern(torch.nn.functional.instance_norm)
 @register_quant_pattern(torch.nn.functional.layer_norm)
 @register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.silu)
-@register_quant_pattern(torch.nn.functional.gelu)
-@register_quant_pattern(torch.nn.functional.softmax)
+# @register_quant_pattern(torch.nn.functional.gelu)
+# @register_quant_pattern(torch.nn.functional.softmax)
 class DefaultNodeQuantizeHandler(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
+
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
         if node.op == "call_function" or node.op == "call_method":
@@ -818,15 +819,15 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             torch.nn.InstanceNorm3d: int8_dtypes,
             torch.nn.LayerNorm: all_dtypes,
             torch.nn.SiLU: fp16_dtypes,
-            torch.nn.GELU: all_dtypes,
-            torch.nn.Softmax: all_dtypes,
+            torch.nn.GELU: int8_dtypes,
+            torch.nn.Softmax: int8_dtypes,
             torch.nn.functional.hardswish: int8_dtypes,
             torch.nn.functional.instance_norm: int8_dtypes,
             torch.nn.functional.layer_norm: all_dtypes,
             torch.nn.functional.leaky_relu: int8_dtypes,
             torch.nn.functional.silu: fp16_dtypes,
-            torch.nn.functional.gelu: all_dtypes,
-            torch.nn.functional.softmax: all_dtypes,
+            torch.nn.functional.gelu: int8_dtypes,
+            torch.nn.functional.softmax: int8_dtypes,
         }
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
@@ -838,7 +839,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
         # TODO: make helper functions for (torch.quint8, torch.qint8, None)
-        if dtypes in [(torch.quint8, torch.qint8, None)]:
+        if not is_reference and dtypes in [(torch.quint8, torch.qint8, None)]:
             cur_idx = quantizer.activation_post_process_indexes[node.name]
             activation_post_process = \
                 quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
@@ -869,7 +870,8 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 "call_function to be a function instead of a string"
                 quantized_op = get_quantized_operator(node.target)
                 args = load_arg(quantized=[0])(node.args)
-                kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale_arg, "output_zero_point": zero_point_arg}
+                kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale_arg,
+                          "output_zero_point": zero_point_arg}
                 if quantized_op in ARGS_TO_SKIP:
                     args_to_skip = ARGS_TO_SKIP[quantized_op]
                     for arg in args_to_skip:
@@ -877,9 +879,27 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                             kwargs.pop(arg)
                 return quantizer.quantized_graph.create_node(
                     "call_function", quantized_op, args, kwargs)
-        else:
-            assert dtypes == (torch.float16, torch.float16, None)
+        elif is_reference and dtypes in [(torch.quint8, torch.qint8, None)]:
+            args = load_arg(quantized=[0])(node.args)
+            args = load_arg(quantized=False)(node.args)
+            kwargs = load_arg(quantized=False)(node.kwargs)
+            op_out = quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+            cur_idx = quantizer.activation_post_process_indexes[node.name]
+            activation_post_process = \
+                quantizer.modules[quantizer.activation_post_process_map[node.name][cur_idx]]
+            quantizer.activation_post_process_indexes[node.name] += 1
+            return quantize_node(
+                quantizer, op_out, activation_post_process,
+                node, is_input=False)
+        elif not is_reference and dtypes in [(torch.float16, torch.float16, None)]:
+            # Generally fp16 kernels don't exist for the supported fp16 ops
+            warnings.warn(
+                "Only reference patterns are currently supported for {dtype} dtype with {op} op".format(dtype=dtypes, op=self.op))
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+        else:
+            assert is_reference and dtypes in [(torch.float16, torch.float16, None)]
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+
 
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
 @register_quant_pattern(torch.nn.functional.elu)
