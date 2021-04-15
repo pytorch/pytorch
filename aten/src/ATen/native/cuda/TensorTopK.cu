@@ -313,13 +313,8 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
       // themselves using the reported indices, providing previously
       // allocated tensors to receive the results.
 
-      //Tensor sortedTopK;
-      Tensor sortedIndices;
-      //std::tie(sortedTopK, sortedIndices) = at::sort(values, dim, largest);
+      Tensor sortedIndices = at::empty_like(indices);
       at::native::sort_out_cuda(values, dim, largest, values, sortedIndices);
-      //sortedIndices.resize_as_(indices);
-      //values = sortedTopK;
-      //indices = indices.gather(dim, sortedIndices);
       indices.copy_(indices.gather(dim, sortedIndices));
     }
   }
