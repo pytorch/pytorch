@@ -16,7 +16,7 @@ using namespace torch::jit::tensorexpr;
 
 struct WithCPUFuser {
   WithCPUFuser(bool val = true)
-      : cpuFuserEnabled(canFuseOnCPU()), parallel(texprParallelCPUEnabled) {
+      : cpuFuserEnabled(canFuseOnCPU()), parallel(texprParallelCPUEnabled()) {
     overrideCanFuseOnCPU(val);
     setTexprParallelCPUEnabled(true);
   }
