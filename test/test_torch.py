@@ -3732,6 +3732,17 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
+    def test_repeat_interleave(self, device):
+        y = torch.tensor([[1, 2], [3, 4]], device=device)
+        for dtype in [torch.int, torch.long]:
+            a = torch.repeat_interleave(
+                y,
+                torch.tensor([1, 2], dtype=dtype, device=device),
+                dim=0,
+            )
+            self.assertEqual(a.dtype, y.dtype)
+            self.assertEqual(a.size(), torch.Size([3, 2]))
+
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
     @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_bernoulli_p(self, device, dtype):
