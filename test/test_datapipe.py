@@ -798,7 +798,7 @@ class TestTyping(TestCase):
                 self.assertEqual(list(d for d in dp), ds)
 
 
-        # Test functional call for each instance
+        # Type reinforcement
         T = TypeVar('T', int, str)
 
 
