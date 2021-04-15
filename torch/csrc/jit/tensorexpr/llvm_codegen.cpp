@@ -550,10 +550,13 @@ void LLVMCodeGenImpl::emitKernel(
 
   optimize(*module_);
 
-  // print graph debug info after optimization
   asmBuffer.set_size(0);
   module_->print(asmStream, nullptr);
   llvmCode = asmStream.str().str();
+  GRAPH_DEBUG(
+      "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
+
+  // print graph debug info after optimization
   asmBuffer.set_size(0);
   llvm::legacy::PassManager PM;
   jit_->getTargetMachine().addPassesToEmitFile(
@@ -568,8 +571,7 @@ void LLVMCodeGenImpl::emitKernel(
   PM.run(*module_);
   asmCode = asmStream.str().str();
 
-  GRAPH_DEBUG(
-      "\nLLVM module after optimizations\n\n", llvmCode, "\n", asmCode, "\n");
+  GRAPH_DEBUG("\nLLVM generated assembly code\n\n", asmCode, "\n");
 }
 
 // TODO: The binary ops are copypasta.
