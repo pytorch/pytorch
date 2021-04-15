@@ -55,7 +55,7 @@ def _try_parse_port(port_str: str) -> Optional[int]:
     return None
 
 
-def _parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tuple[str, int]:
+def parse_rendezvous_endpoint(endpoint: Optional[str], default_port: int) -> Tuple[str, int]:
     """Extracts the hostname and the port number from a rendezvous endpoint.
 
     Args:

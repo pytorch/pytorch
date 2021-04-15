@@ -10,14 +10,20 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 import uuid
+from contextlib import closing
+from typing import Optional, Any, Dict
 from unittest import mock
 from unittest.mock import Mock, patch
 
+import torch
+import torch.distributed as dist
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.utils import get_socket_with_port
 from torch.distributed.launcher.api import (
     LaunchConfig,
     elastic_launch,
@@ -36,6 +42,16 @@ def simple_rank_scale():
 
 def function_with_bug():
     raise RuntimeError("test error")
+
+
+def _dist_sum(wait=0):
+    rank = int(os.environ["RANK"])
+    dist.init_process_group(backend="gloo")
+    t = torch.tensor(rank)
+
+    time.sleep(wait)
+    dist.all_reduce(t, op=dist.reduce_op.SUM)
+    return t.item()
 
 
 class MockException(Exception):
@@ -78,17 +94,27 @@ class ElasticLaunchTest(unittest.TestCase):
         max_nodes: int,
         nproc_per_node: int,
         run_id: str = "",
+        rdzv_backend: str = "etcd",
+        config: Optional[Dict[str, Any]] = None,
+        rdzv_endpoint: Optional[str] = None,
     ) -> LaunchConfig:
+        rdzv_configs = {}
+        if config:
+            rdzv_configs.update(config)
+        endpoint = self._etcd_endpoint
+        if rdzv_endpoint:
+            endpoint = rdzv_endpoint
         return LaunchConfig(
             min_nodes=min_nodes,
             max_nodes=max_nodes,
             nproc_per_node=nproc_per_node,
             run_id=run_id,
-            rdzv_endpoint=self._etcd_endpoint,
+            rdzv_endpoint=endpoint,
             monitor_interval=1,
-            rdzv_backend="etcd",
+            rdzv_backend=rdzv_backend,
             start_method="fork",
             max_restarts=0,
+            rdzv_configs=rdzv_configs,
         )
 
     def check_works_ran(self, world_size: int):
@@ -97,6 +123,20 @@ class ElasticLaunchTest(unittest.TestCase):
         )
 
     def test_launch_script_python(self):
+        nnodes = 1
+        nproc_per_node = 4
+
+        elastic_launch(
+            self.get_test_launch_config(nnodes, nnodes, nproc_per_node),
+            sys.executable,
+        )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
+
+        # make sure all the workers ran.
+        # each worker touches a file with its global rank as the name.
+        world_size = nnodes * nproc_per_node
+        self.check_works_ran(world_size)
+
+    def test_launch_script_python_local_rank_transfer(self):
         nnodes = 1
         nproc_per_node = 4
 
@@ -132,6 +172,34 @@ class ElasticLaunchTest(unittest.TestCase):
         )()
 
         expected_res = [10, 11, 12, 13]
+        actual_res = sorted(value for value in res.values())
+        self.assertEqual(expected_res, actual_res)
+
+    def test_launch_dist_sum_with_static_rdzv(self):
+        nnodes = 1
+        nproc_per_node = 4
+        sock = get_socket_with_port()
+        with closing(sock):
+            master_port = sock.getsockname()[1]
+        rdzv_endpoint = f"127.0.0.1:{master_port}"
+        rank = 0
+        rdzv_config = {
+            "rank": rank,
+        }
+
+        res = elastic_launch(
+            self.get_test_launch_config(
+                nnodes,
+                nnodes,
+                nproc_per_node,
+                rdzv_backend="static",
+                config=rdzv_config,
+                rdzv_endpoint=rdzv_endpoint,
+            ),
+            _dist_sum,
+        )()
+
+        expected_res = [sum(range(nproc_per_node))] * nproc_per_node
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
