@@ -89,3 +89,24 @@ TEST(Vitals, OnAndOff) {
     }
   }
 }
+
+TEST(Vitals, APIVitals) {
+  std::stringstream buffer;
+  bool rvalue;
+  std::streambuf* sbuf = std::cout.rdbuf();
+  std::cout.rdbuf(buffer.rdbuf());
+  {
+#ifdef _WIN32
+    _putenv("TORCH_VITAL=1");
+#else
+    setenv("TORCH_VITAL", "1", 1);
+#endif
+    APIVitals api_vitals;
+    rvalue = api_vitals.setVital("TestingSetVital", "TestAttr", "TestValue");
+  }
+  std::cout.rdbuf(sbuf);
+
+  auto s = buffer.str();
+  ASSERT_TRUE(rvalue);
+  ASSERT_TRUE(s.find("TestingSetVital.TestAttr\t\t TestValue") != std::string::npos);
+}
