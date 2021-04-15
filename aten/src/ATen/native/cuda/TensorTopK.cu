@@ -297,7 +297,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
     if (values.element_size() >= 8) {
       maxSliceSize = 1024;
     } else {
-      maxSliceSize = 2048;   
+      maxSliceSize = 2048;
     }
     if (sliceSize <= maxSliceSize) {
       // This avoids any memory allocations and performs all sorting
