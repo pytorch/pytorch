@@ -231,7 +231,7 @@ class DeviceTypeTestBase(TestCase):
         if hasattr(test, 'precision_overrides'):
             return test.precision_overrides.get(dtype, self.precision)
         elif hasattr(self, 'precision_overrides'):
-            return self.precision_overrides.get(dtype, self.precision)
+            return getattr(self, 'precision_overrides').get(dtype, self.precision)
         else:
             return self.precision
 
