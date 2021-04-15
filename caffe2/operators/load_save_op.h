@@ -309,6 +309,7 @@ class TORCH_API SaveOpImpl {
   std::string strip_prefix_;
   std::string full_db_name_;
   std::string db_type_;
+  std::string db_options_;
   std::vector<std::string> blob_names_;
   SerializationOptions options_;
 };
