@@ -19,7 +19,7 @@ class WindowsJob:
         self.cuda_version = cuda_version
         self.force_on_cpu = force_on_cpu
         self.multi_gpu = multi_gpu
-        self.master_only= master_only
+        self.master_only = master_only
         self.nightly_only = nightly_only
 
     def gen_tree(self):

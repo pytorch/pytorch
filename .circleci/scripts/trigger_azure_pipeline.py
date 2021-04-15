@@ -3,7 +3,6 @@
 import re
 import os
 import sys
-import base64
 import requests
 import time
 
@@ -19,8 +18,8 @@ s.headers.update({"Authorization": "Basic " + AZURE_DEVOPS_PAT_BASE64})
 def submit_build(pipeline_id, project_id, source_branch):
     print("Submitting build for branch: " + source_branch)
     run_build_raw = s.post(build_base_url, json={
-        "definition": { "id": pipeline_id },
-        "project": { "id": project_id },
+        "definition": {"id": pipeline_id},
+        "project": {"id": project_id},
         "sourceBranch": source_branch
     })
 
@@ -48,7 +47,7 @@ def get_log_content(url):
 def wait_for_build(_id):
     build_detail = get_build(_id)
     build_status = build_detail['status']
-    
+
     while build_status == 'notStarted':
         print('Waiting for run to start: ' + str(_id))
         sys.stdout.flush()
@@ -105,7 +104,7 @@ if __name__ == '__main__':
     while retry > 0:
         build_id = submit_build(PIPELINE_ID, PROJECT_ID, SOURCE_BRANCH)
         build_status, build_result = wait_for_build(build_id)
-        
+
         if build_result == 'cancelled':
             retry = retry - 1
             if retry > 0:
@@ -117,4 +116,3 @@ if __name__ == '__main__':
                 print("No more chance to retry. Giving up.")
         if build_result != 'succeeded':
             sys.exit(-1)
-
