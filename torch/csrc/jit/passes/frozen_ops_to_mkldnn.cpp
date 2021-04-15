@@ -577,16 +577,19 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     if (body_node->kind() == aten::hardswish) {
       body_node->replaceWithNewSymbol(prim::MKLDNNHardSwish);
       body_node->destroy();
+      continue;
     }
 
     if (body_node->kind() == aten::hardsigmoid) {
       body_node->replaceWithNewSymbol(prim::MKLDNNHardSigmoid);
       body_node->destroy();
+      continue;
     }
 
     if (body_node->kind() == aten::relu6) {
       body_node->replaceWithNewSymbol(prim::MKLDNNRelu6);
       body_node->destroy();
+      continue;
     }
 
     if (body_node->kind() == aten::conv2d ||
@@ -595,6 +598,7 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       if (!body_node->namedInput("padding")->type()->cast<StringType>()) {
         body_node->replaceWithNewSymbol(Symbol::prim("mkldnn_convolution"));
         body_node->destroy();
+        continue;
       }
     }
   }
