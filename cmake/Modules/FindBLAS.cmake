@@ -20,7 +20,7 @@ SET(BLAS_INCLUDE_DIR)
 SET(BLAS_INFO)
 SET(BLAS_F2C)
 
-SET(WITH_BLAS "" CACHE STRING "Blas type [blis/mkl/open/goto/acml/atlas/accelerate/veclib/generic]")
+SET(WITH_BLAS "" CACHE STRING "Blas type [accelerate/acml/atlas/blis/generic/goto/mkl/open/veclib]")
 
 # Old FindBlas
 INCLUDE(CheckCSourceRuns)

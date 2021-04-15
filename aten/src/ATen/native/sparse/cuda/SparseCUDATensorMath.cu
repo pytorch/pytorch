@@ -162,16 +162,15 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
 }
 
 Tensor& addmm_out_sparse_dense_cuda(
-    Tensor& result,
     const Tensor& self,
     const SparseTensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
-    const Scalar& alpha
+    const Scalar& alpha,
+    Tensor& result
 ) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return s_addmm_out_sparse_dense_cuda(result, b_self, mat1, mat2, beta, alpha);
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_out_sparse_dense_cuda(result, *b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor s_addmm_sparse_dense_cuda(
@@ -193,9 +192,8 @@ Tensor addmm_sparse_dense_cuda(
     const Scalar& beta,
     const Scalar& alpha
 ) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-  return s_addmm_sparse_dense_cuda(b_self, mat1, mat2, beta, alpha);
+  c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_sparse_dense_cuda(*b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor& s_addmm_sparse_dense_cuda_(
@@ -216,7 +214,11 @@ Tensor& s_addmm_sparse_dense_cuda_(
 // hspmm(SparseTensor mat1, Tensor mat2)
 // --------------------------------------------------------------------
 
-SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse_, const Tensor& dense/* , const Scalar& alpha */) {
+SparseTensor& hspmm_out_sparse_cuda(
+    const SparseTensor& sparse_,
+    const Tensor& dense,
+    SparseTensor& r_
+    /* , const Scalar& alpha */) {
   TORCH_CHECK(sparse_.is_cuda(), "hspmm: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "hspmm: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(dense.is_cuda(), "hspmm: expected 'mat2' to be CUDA, but got CPU");
@@ -276,7 +278,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 
 SparseTensor hspmm_sparse_cuda(const SparseTensor& sparse, const Tensor& dense) {
   SparseTensor r = at::empty({0}, sparse.options());
-  hspmm_out_sparse_cuda(r, sparse, dense);
+  hspmm_out_sparse_cuda(sparse, dense, r);
   return r;
 }
 
@@ -848,7 +850,7 @@ Tensor& _bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool 
 
   // First need to coalesce to get all of the first dimension indices
   // in order since we'll be sending each matrix into the MM operation
-  SparseTensor self_coalesced = coalesce_sparse_cuda(self);
+  SparseTensor self_coalesced = self.coalesce();
 
   int64_t nnz =        self_coalesced._nnz();
   Tensor indices = self_coalesced._indices();
