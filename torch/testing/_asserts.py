@@ -38,7 +38,7 @@ try:
 
     _NUMPY_AVAILABLE = True
 except ImportError:
-    np = None
+    np = None  # type: ignore[assignment]
     _NUMPY_AVAILABLE = False
 
 
