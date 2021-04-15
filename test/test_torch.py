@@ -7517,6 +7517,14 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         c = deepcopy([a, a.grad])
         self.assertTrue(c[0].grad is c[1])
 
+    def test_tensor_base_init(self):
+        # Direct construction not OK
+        self.assertRaises(TypeError, lambda: torch._C._TensorBase())
+        # But construction of subclass is OK
+        class T(torch._C._TensorBase):
+            pass
+        T()
+
 # TODO: this empy class is temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
 class TestViewOps(TestCase):
