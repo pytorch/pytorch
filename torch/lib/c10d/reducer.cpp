@@ -33,7 +33,8 @@ Reducer::Reducer(
     std::vector<std::vector<bool>> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
     bool find_unused_parameters,
-    bool gradient_as_bucket_view)
+    bool gradient_as_bucket_view,
+    std::unordered_map<size_t, std::string> paramNames)
     : replicas_(std::move(replicas)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -50,7 +51,9 @@ Reducer::Reducer(
       bucket_bytes_cap_(bucket_bytes_cap),
       divFactor_(kUnsetDivFactor),
       comm_hook_(nullptr),
-      thread_local_state_(at::ThreadLocalState()) {
+      thread_local_state_(at::ThreadLocalState()),
+      ddp_debug_level_(parseDistDebugLevel()),
+      param_names_(std::move(paramNames)) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_CHECK(replicas_.size() == 1, "Expected exactly one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
@@ -273,9 +276,7 @@ void Reducer::copy_grad_to_bucket(
     at::Tensor& bucket_view) {
   // See Note [DDP Communication Hook]
   if (comm_hook_ == nullptr) {
-    // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
-    auto wrapped = c10::scalar_to_tensor(double(1.) / divFactor_);
-    wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
+    auto wrapped = at::native::wrapped_scalar_tensor(double(1.) / divFactor_);
     // Divides while copying into the bucket view.
     at::mul_out(bucket_view, grad, wrapped);
   } else {
@@ -464,30 +465,37 @@ void Reducer::autograd_hook(VariableIndex index) {
   mark_variable_ready(index);
 }
 
-void Reducer::mark_variable_ready(VariableIndex index) {
-  const auto replica_index = index.replica_index;
-  const auto variable_index = index.variable_index;
-  TORCH_CHECK(replica_index < replicas_.size(), "Out of range replica index.");
-  TORCH_CHECK(
-      variable_index < variable_locators_.size(),
-      "Out of range variable index.");
-  backward_stats_[replica_index][variable_index] =
-      current_time_in_nanos() - cpu_timer_.backward_compute_start_time;
-
-  // Any time we mark a variable ready (be it in line due to unused parameters,
-  // or via an autograd hook), we require a call to the finalize function. If
-  // this doesn't happen before the next iteration (or call to
-  // `prepare_for_backwards`), we know something is wrong.
-  require_finalize_ = true;
-
-  const auto& bucket_index = variable_locators_[variable_index];
-  auto& bucket = buckets_[bucket_index.bucket_index];
-  auto& replica = bucket.replicas[replica_index];
-
+void Reducer::checkAndRaiseMarkedTwiceError(size_t curVariableIndex) {
   // Something is wrong if all variables contained in this bucket replica have
   // already been marked as ready.
-  if (replica.pending == 0) {
-    const auto common_error = c10::str(
+  // We don't expect the same variable to be marked ready twice.
+  bool marked_twice = perIterationReadyParams_.find(curVariableIndex) != perIterationReadyParams_.end();
+
+  if (marked_twice) {
+    // Report index of param that has been marked twice. In debug mode, also
+    // report fully qualified parameter name.
+    auto param_name = param_names_.find(curVariableIndex);
+    const bool found_param_name = param_name != param_names_.end();
+    TORCH_INTERNAL_ASSERT(
+      ddp_debug_level_ == c10d::DistributedDebugLevel::OFF
+      || found_param_name,
+      "Expected to find parameter name in debug mode."
+    );
+    std::string paramInfo = c10::str(
+        "Parameter at index ",
+        curVariableIndex,
+        found_param_name ? c10::str(" with name ", param_name->second) : "",
+        " has been marked as ready twice. This means that multiple autograd engine ",
+        " hooks have fired for this particular parameter during this iteration."
+    );
+    // param_names_ is empty in debug mode.
+    if (!found_param_name) {
+      paramInfo += c10::str(
+        " You can set the environment variable TORCH_DISTRIBUTED_DEBUG to either",
+        " INFO or DETAIL to print parameter names for further debugging."
+      );
+    }
+    std::string common_error = c10::str(
         "Expected to mark a variable ready only once. ",
         "",
         "This error is caused by one of the following reasons: ",
@@ -500,6 +508,9 @@ void Reducer::mark_variable_ready(VariableIndex index) {
         "parameters been used by different reentrant backward passes ",
         "multiple times, and hence marking a variable ready multiple times. ",
         "DDP does not support such use cases yet.");
+
+    common_error += c10::str("\n", paramInfo);
+
     TORCH_CHECK(
         has_marked_unused_parameters_,
         common_error,
@@ -516,6 +527,33 @@ void Reducer::mark_variable_ready(VariableIndex index) {
         "`torch.nn.parallel.DistributedDataParallel`.");
     TORCH_CHECK(!has_marked_unused_parameters_, common_error);
   }
+}
+
+void Reducer::mark_variable_ready(VariableIndex index) {
+  const auto replica_index = index.replica_index;
+  const auto variable_index = index.variable_index;
+  TORCH_CHECK(replica_index < replicas_.size(), "Out of range replica index.");
+  TORCH_CHECK(
+      variable_index < variable_locators_.size(),
+      "Out of range variable index.");
+
+  if (replica_index == 0) {
+    checkAndRaiseMarkedTwiceError(variable_index);
+    perIterationReadyParams_.insert(variable_index);
+  }
+  backward_stats_[replica_index][variable_index] =
+      current_time_in_nanos() - cpu_timer_.backward_compute_start_time;
+
+  // Any time we mark a variable ready (be it in line due to unused parameters,
+  // or via an autograd hook), we require a call to the finalize function. If
+  // this doesn't happen before the next iteration (or call to
+  // `prepare_for_backwards`), we know something is wrong.
+  require_finalize_ = true;
+
+  const auto& bucket_index = variable_locators_[variable_index];
+  auto& bucket = buckets_[bucket_index.bucket_index];
+  auto& replica = bucket.replicas[replica_index];
+
 
   // If it was scheduled, wait on allreduce in forward pass that tells us
   // division factor based on no. of currently participating processes.
@@ -1019,6 +1057,9 @@ void Reducer::prepare_for_backward(
   // Reset unused parameter accounting.
   has_marked_unused_parameters_ = false;
   unused_parameters_.clear();
+  // Reset per iteration marked ready parameters.
+  perIterationReadyParams_.clear();
+
   search_unused_parameters(outputs);
 }
 
@@ -1045,6 +1086,28 @@ void Reducer::copy_bucket_to_grad(
     // The grad is not modified.
     return false;
   });
+}
+
+std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
+  std::vector<std::string> unMarkedParamNames;
+  for (const auto& it : param_names_) {
+    if (perIterationReadyParams_.find(it.first) ==
+        perIterationReadyParams_.end()) {
+      unMarkedParamNames.push_back(it.second);
+    }
+  }
+  return unMarkedParamNames;
+}
+
+std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
+  std::vector<size_t> unmarked_param_indices;
+  const auto variable_count = replicas_[0].size();
+  for (size_t variable_index = 0; variable_index < variable_count; variable_index++) {
+    if (perIterationReadyParams_.find(variable_index) == perIterationReadyParams_.end()) {
+      unmarked_param_indices.push_back(variable_index);
+    }
+  }
+  return unmarked_param_indices;
 }
 
 // A bucket with one or more dense tensors needs to be unflattened.
@@ -1422,6 +1485,14 @@ void Reducer::ensure_prior_reduction_finished() {
   // The variable `require_finalize_` is true until all gradients
   // have been computed and reduction of all buckets has been kicked off.
   if (require_finalize_) {
+    // Collect unmarked parameter indices, additionally, in debug mode retrieve
+    // parameter names.
+    auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
+    // We should have some unmarked parameter indices, otherwise we would not
+    // have run into this error branch.
+    TORCH_INTERNAL_ASSERT(unmarked_param_indices.size() > 0);
+    const std::string unmarkedParamIndices = c10::Join(", ", unmarked_param_indices);
+
     std::string kBaseErrorMsg =
         "Expected to have finished reduction in the prior iteration before "
         "starting a new one. "
@@ -1457,6 +1528,45 @@ void Reducer::ensure_prior_reduction_finished() {
           " means that not all `forward` outputs participate in computing loss. You can fix this by ";
       kBaseErrorMsg += kOutputsNotUsedInLossErrorMsg;
       kBaseErrorMsg += kDDPBugErrorMsg;
+    }
+
+    const std::string unmarked_param_indices_info = c10::str(
+        "\n",
+        "Parameter indices which did not receive grad for rank ",
+        process_group_->getRank(),
+        ": ",
+        unmarked_param_indices
+      );
+
+    if (ddp_debug_level_ == DistributedDebugLevel::OFF) {
+      // Without debug mode, log unmarked_param_indices, as well as recommendation
+      // to use debug mode to print parameter names.
+      kBaseErrorMsg += unmarked_param_indices_info;
+      kBaseErrorMsg +=
+        "\n In addition, you can set the environment variable "
+        "TORCH_DISTRIBUTED_DEBUG to either INFO or DETAIL to print out information "
+        "about which particular parameters did not receive gradient on this rank "
+        "as part of this error";
+    } else {
+      // Retrieve set of parameter names that did not receive gradient.
+      auto unmarkedParams = getUnmarkedParamsForIteration();
+      TORCH_INTERNAL_ASSERT(unmarkedParams.size() > 0);
+      for (const auto& s : unmarkedParams) {
+        LOG(INFO) << "[Rank " << process_group_->getRank() << "] "
+                  << "Parameter: " << s
+                  << " did not get gradient in backwards pass.";
+      }
+      const std::string unmarkedParamInfo = c10::Join(", ", unmarkedParams);
+      // In debug mode, log param names and indices that went unused.
+      kBaseErrorMsg +=
+        c10::str(
+          "\n",
+          "Parameters which did not receive grad for rank ",
+          process_group_->getRank(),
+          ": ",
+          unmarkedParamInfo
+        );
+      kBaseErrorMsg += unmarked_param_indices_info;
     }
     TORCH_CHECK(false, kBaseErrorMsg);
   }
