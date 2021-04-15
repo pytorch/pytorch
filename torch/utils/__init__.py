@@ -4,9 +4,6 @@ import sys
 from .throughput_benchmark import ThroughputBenchmark
 from ._crash_handler import enable_minidump_collection
 
-from .throughput_benchmark import ThroughputBenchmark
-from ._crash_handler import enable_minidump_collection
-
 # Set the module for a given object for nicer printing
 def set_module(obj, mod):
     if not isinstance(mod, str):
