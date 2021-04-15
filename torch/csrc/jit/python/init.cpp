@@ -212,7 +212,8 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& graph,
              bool lowprecision_cast,
              int opset_version) {
-            return ScalarTypeAnalysisForONNX(graph, lowprecision_cast, opset_version);
+            return ScalarTypeAnalysisForONNX(
+                graph, lowprecision_cast, opset_version);
           },
           py::arg("graph"),
           py::arg("lowprecision_cast") = true,
