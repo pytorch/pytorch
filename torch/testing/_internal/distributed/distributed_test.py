@@ -5064,7 +5064,9 @@ class DistributedTest:
             rank_0_ctx = (
                 suppress()
                 if dist.get_backend() == dist.Backend.NCCL
-                else self.assertRaisesRegex(RuntimeError, "Connection closed by peer")
+                # Gloo can raise various exception messages, so just assert
+                # Runtime error here.
+                else self.assertRaises(RuntimeError)
             )
             ctx = (
                 rank_0_ctx
