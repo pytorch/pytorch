@@ -571,8 +571,7 @@ void LLVMCodeGenImpl::emitKernel(
   PM.run(*module_);
   asmCode = asmStream.str().str();
 
-  GRAPH_DEBUG(
-      "\nLLVM generated assembly code\n\n", asmCode, "\n");
+  GRAPH_DEBUG("\nLLVM generated assembly code\n\n", asmCode, "\n");
 }
 
 // TODO: The binary ops are copypasta.
