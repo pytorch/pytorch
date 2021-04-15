@@ -15,7 +15,7 @@ cases*/
 
 #ifdef __HIP_PLATFORM_HCC__
 static auto type_declarations_template = CodeTemplate(R"(
-#include <hip/hip_runtime.h>
+${RuntimeHeader}
 ${HalfHeader}
 ${RandHeader}
 
@@ -213,8 +213,6 @@ void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
 #ifdef __HIP_PLATFORM_HCC__
 constexpr auto half_support_literal =
     R"(
-#include <hip/hip_fp16.h>
-
 typedef __half half;
 )";
 #else
