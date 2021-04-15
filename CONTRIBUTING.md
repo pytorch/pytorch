@@ -411,8 +411,12 @@ pip install -r requirements.txt
 # npm install -g katex
 # Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
 # npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
-# If you're a Facebook employee using a devserver, yarn may be more convenient:
-# yarn global add katex
+```
+
+> Note that if you are a Facebook employee using a devserver, yarn may be more convenient to install katex:
+
+```
+yarn global add katex
 ```
 
 3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
@@ -477,6 +481,13 @@ et my_machine -t="8000:8000"
 ```
 
 Then navigate to `localhost:8000` in your web browser.
+
+**Tip:**
+You can start a lightweight HTTP server on the remote machine with:
+
+```
+python -m http.server 8000 <path_to_html_output>
+```
 
 Alternatively, you can run `rsync` on your local machine to copy the files from
 your remote machine:

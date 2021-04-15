@@ -22,16 +22,11 @@ jobs:
       - name: Ensure consistent CircleCI YAML config
         run: cd .circleci && ./ensure-consistency.py
       - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
+        run: .github/scripts/ensure_consistent_workflows.py
+      - name: Lint native_functions.yaml
         run: |
-          import yaml
-          import subprocess
-          workflows = subprocess.check_output(['python', '.github/scripts/generate_workflow_names.py'],
-                                              encoding="ascii").splitlines()
-          with open('.github/workflows/cancel_redundant_workflows.yml') as f:
-                data = yaml.safe_load(f)
-                workflows_to_cancel = data[True]['workflow_run']['workflows']
-          assert sorted(workflows) == sorted(workflows_to_cancel)
-        shell: python
+          pip install ruamel.yaml==0.17.4
+          .github/scripts/lint_native_functions.py
       - name: ShellCheck
         # https://github.com/koalaman/shellcheck/tree/v0.7.1#installing-a-pre-compiled-binary
         run: |
@@ -77,6 +72,20 @@ jobs:
       - name: Ensure no direct cub include
         run: |
           (! git grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
+
+  python2-setup-compat:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 2.x
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+      - name: Attempt to run setup.py
+        run: |
+          python2 setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
 
   toc:
     runs-on: ubuntu-18.04
