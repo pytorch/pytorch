@@ -2576,12 +2576,14 @@ DEFINE_DISPATCH(unpack_pivots_stub);
 std::tuple<Tensor, Tensor, Tensor> _lu_unpack(
     const Tensor& LU_data,
     const Tensor& LU_pivots,
-    bool pivots_as_permutation_matrix
+    bool unpack_data,
+    bool unpack_pivots
     ) {
   TORCH_CHECK(LU_pivots.is_contiguous() && (LU_pivots.scalar_type() == at::kInt),
       "LU_pivots is expected to be a contiguous tensor of torch.int32 dtype."
       "Desigend to be used with the output produced by torch.lu");
 
+  Tensor L, U;
   // In the generalized LU factorization, the following shape relations hold:
   // A.shape[-2:] == (m, n),
   // P.shape[-2:] == (m, m),
@@ -2592,16 +2594,22 @@ std::tuple<Tensor, Tensor, Tensor> _lu_unpack(
   int64_t n = LU_data.size(-1);
   int64_t k = std::min(m, n);
 
-  auto U = LU_data.triu();
-  if (m != k) {
-    U = U.narrow(-2, 0, k);
+  if (unpack_data) {
+    U = LU_data.triu();
+    if (m != k) {
+      U = U.narrow(-2, 0, k);
+    }
+
+    L = LU_data.tril();
+    if (k != n) {
+      L = L.narrow(-1, 0, k);
+    }
+    L.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
   }
 
-  auto L = LU_data.tril();
-  if (k != n) {
-    L = L.narrow(-1, 0, k);
+  if (!unpack_pivots) {
+    return std::make_tuple(Tensor(), L, U);
   }
-  L.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
 
   auto unpacked_pivots_sizes = LU_pivots.sizes().vec();
   unpacked_pivots_sizes[LU_pivots.dim() - 1] = m;
@@ -2635,10 +2643,6 @@ std::tuple<Tensor, Tensor, Tensor> _lu_unpack(
     iter,
     LU_pivots.size(-1)
   );
-
-  if (!pivots_as_permutation_matrix) {
-    return std::tie(unpacked_pivots, L, U);
-  }
 
   // The permutation matrix is converted to LU_data.dtype
   // because `matmul` does not work with integer matrices.
