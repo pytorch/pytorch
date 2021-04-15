@@ -353,7 +353,7 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   void _backward(const Tensor& self, at::TensorList inputs,
     const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph,
     bool create_graph) const override;
-  Tensor& requires_grad_(const Tensor& self, bool _requires_grad) const override;
+  void requires_grad_(const Tensor& self, bool _requires_grad) const override;
 };
 
 VariableHooks variableHooks;
@@ -478,13 +478,13 @@ void VariableHooks::_backward(
   torch::autograd::backward({self}, {_gradient}, keep_graph, create_graph, input_vars);
 }
 
-Tensor& VariableHooks::requires_grad_(const Tensor& self, bool _requires_grad) const {
+void VariableHooks::requires_grad_(const Tensor& self, bool _requires_grad) const {
   if (!self.is_leaf() && !_requires_grad) {
     throw std::runtime_error(
       autograd::utils::requires_grad_leaf_error(_requires_grad)
     );
   }
-  return const_cast<Tensor&>(self).set_requires_grad(_requires_grad);
+  self.set_requires_grad(_requires_grad);
 }
 
 // Backward View Variables
