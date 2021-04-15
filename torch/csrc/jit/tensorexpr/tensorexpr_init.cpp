@@ -133,12 +133,8 @@ void initTensorExprBindings(PyObject* module) {
              const std::vector<ExprHandle>& args,
              const ExprHandle& val) { return self.store(args, val); })
       .def(
-          "buf",
-          [](Placeholder& self) { return BufHandle(self.data()); },
-          py::return_value_policy::reference)
-      .def(
           "data",
-          [](Placeholder& self) { return self.data(); },
+          [](Placeholder& self) { return BufHandle(self.data()); },
           py::return_value_policy::reference);
   py::class_<Tensor, std::unique_ptr<Tensor, py::nodelete>>(te, "Tensor")
       .def(py::init(
