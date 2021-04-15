@@ -727,6 +727,32 @@ class TestONNXRuntime(unittest.TestCase):
         d = torch.randn(2, 3)
         self.run_test(MyModel(), (a, b, c, d))
 
+    def test_tuple_input(self):
+        class TupleModel(torch.nn.Module):
+            def forward(self, a: Tuple[torch.Tensor, torch.Tensor]):
+                return a
+
+        x = (torch.randn(3, 4), torch.randn(4, 3))
+        self.run_test(TupleModel(), input=(x,))
+
+    def test_tuple_primitive_input(self):
+        class TupleModel(torch.nn.Module):
+            def forward(self, a: Tuple[int, torch.Tensor], b):
+                return a[0], a[1] + b
+
+        x = (3, torch.randn(4, 3))
+        y = torch.randn(4, 3)
+        self.run_test(TupleModel(), input=(x, y))
+
+    def test_nested_tuple_input(self):
+        class NestedTupleModel(torch.nn.Module):
+            def forward(self, a, b: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]):
+                return a + b[0] + b[1][0] + b[1][1]
+
+        x = torch.randn(4, 5)
+        y = (torch.randn(4, 5), (torch.randn(1, 5), torch.randn(4, 1)))
+        self.run_test(NestedTupleModel(), input=(x, y))
+
     @disableScriptTest()
     def test_optional_inputs_with_no_optionals(self):
         class NoOptionalModel(torch.nn.Module):
@@ -872,6 +898,46 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         z = torch.randn(2, 3)
         self.run_test(Model(), (x, None, z))
+
+    def test_primitive_input_integer(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: int, y):
+                return x + y
+
+        x = 3
+        y = torch.randint(10, (2, 3, 4))
+        self.run_test(Model(), (x, y))
+
+    def test_primitive_input_floating(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: float, y):
+                return x + y
+
+        x = 3.0
+        y = torch.randn(2, 3, 4)
+        self.run_test(Model(), (x, y))
+
+    def test_primitive_input_bool(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, flag: bool, x, y):
+                if flag:
+                    return x
+                else:
+                    return y
+
+        flag = True
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
+        self.run_test(torch.jit.script(Model()), (flag, x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_cste_script(self):
@@ -1424,7 +1490,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ArithmeticModule(), (x, y, z, t))
 
         class ArithmeticModule(torch.nn.Module):
-            def forward(self, x: float, y: float):
+            def forward(self, x: int, y: int):
                 return x == y
 
         x = 3
@@ -3166,7 +3232,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Model(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # scripting prim_dtype
     def test_lstm_no_hidden(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
@@ -3180,7 +3245,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(LSTMModel(), (input,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # scripting prim_dtype
     def test_lstm_proj_no_hidden(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
@@ -3622,6 +3686,18 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input):
                 return input > 1
         self._test_compare_ops(GreaterModel(), 1)
+
+    def test_gt_primitive(self):
+        class GreaterModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.y : int = 2
+
+            def forward(self, x: int):
+                return self.y > x
+
+        x = 3
+        self.run_test(GreaterModel(), (x, ))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_ge_scalar(self):
