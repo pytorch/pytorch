@@ -2462,7 +2462,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.008,
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -3806,7 +3806,7 @@ new_module_tests = [
         input_size=(2, 3, 4),
         desc='relu_activation',
         with_tf32=True,
-        tf32_precision=0.1,
+        tf32_precision=0.2,
         # TODO(#50743): figure out the error
         # RuntimeError: The size of tensor a (6) must match the size of tensor b (4)
         # at non-singleton dimension 2
@@ -3865,7 +3865,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.02,
     )
 ]
 
