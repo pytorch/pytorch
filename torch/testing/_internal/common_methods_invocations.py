@@ -2749,22 +2749,30 @@ def sample_inputs_scatter_ops(op_info, device, dtype, requires_grad):
     def _make(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
-    def _make_idx(shape, high):
-        return _make(shape, dtype=torch.long, low=0, high=high)
+    test_cases = (
+        ((M, S), (S, S)),
+        ((M, S), (M, S // 2)),
+    )
 
-    cases = [
-        (_make((M, S)), (0, _make_idx((S, S), high=M), _make((S, S))),),
-        (_make((M, S)), (1, _make_idx((M, S // 2), high=S), _make((M, S // 2))),),
-        (_make((M, S)), (-1, _make_idx((M, S // 2), high=S), _make((M, S // 2))),),
-        (_make(()), (0, torch.tensor(0, dtype=torch.long, device=device), _make(())),),
-    ]
+    samples = []
+    for self_shape, shape in test_cases:
+        for dim in [0, 1, -1]:
+            other_dim = 1 - (dim if dim >= 0 else -dim)
+            index = gather_variable(shape, other_dim, self_shape[dim], device=device)
+            samples.append(SampleInput(_make(self_shape), args=(dim, index, _make(shape))))
+
+    samples.append(
+        SampleInput(_make(()), args=(0, torch.tensor(0, dtype=torch.long, device=device), _make(()))),
+    )
 
     if op_info.name == 'scatter':
-        cases.append((_make(()), (0, torch.tensor(0, dtype=torch.long, device=device), 2.5)))
+        samples.append(SampleInput(
+            _make(()),
+            args=(0, torch.tensor(0, dtype=torch.long, device=device), 2.5)
+        ))
 
-    inputs = [SampleInput(tensor, args=args) for tensor, args in cases]
-    return inputs
-
+    return samples
+    
 foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('exp'),
     ForeachUnaryFuncInfo('acos'),
