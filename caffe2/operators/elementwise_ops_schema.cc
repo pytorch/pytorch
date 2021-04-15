@@ -320,7 +320,8 @@ OPERATOR_SCHEMA(MulGradient)
     .NumInputs(3)
     .NumOutputs(2)
     .TensorInferenceFunction(ElementwiseGradientOpShapeInference)
-    .AllowInplace({{0, 0}, {0, 1}});
+    .AllowInplace({{0, 0}, {0, 1}})
+    .CostInferenceFunction(PointwiseCostInference<2>);
 
 OPERATOR_SCHEMA(Div)
     .NumInputs(2)
