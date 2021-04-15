@@ -76,6 +76,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
             nnqat.Linear,
             nnqd.Linear,
             nniqat.LinearReLU,
+            nn.modules.linear._LinearWithBias,
         ]),
         # linear functionals
         'torch.nn.functional.linear': set([
@@ -103,6 +104,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
         'torch.mul': set([
             torch.mul,
             toq.mul,
+            operator.mul,
         ]),
         # relu
         'torch.relu': set([
@@ -115,6 +117,111 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
         # sigmoid
         'torch.sigmoid': set([
             torch.sigmoid,
+        ]),
+        # BatchNorm
+        'torch.nn.BatchNorm2d': set([
+            nn.BatchNorm2d,
+            nnq.BatchNorm2d,
+        ]),
+        'torch.nn.BatchNorm3d': set([
+            nn.BatchNorm3d,
+            nnq.BatchNorm3d,
+        ]),
+        # ConvTranspose
+        'torch.nn.ConvTranspose1d': set([
+            nn.ConvTranspose1d,
+            nnq.ConvTranspose1d,
+        ]),
+        'torch.nn.ConvTranspose2d': set([
+            nn.ConvTranspose2d,
+            nnq.ConvTranspose2d,
+        ]),
+        # ELU
+        'torch.nn.ELU': set([
+            nn.ELU,
+            nnq.ELU,
+        ]),
+        # Embedding
+        'torch.nn.Embedding': set([
+            nn.Embedding,
+            nnq.Embedding,
+        ]),
+        # EmbeddingBag
+        'torch.nn.EmbeddingBag': set([
+            nn.EmbeddingBag,
+            nnq.EmbeddingBag,
+        ]),
+        # GroupNorm
+        'torch.nn.GroupNorm': set([
+            nn.GroupNorm,
+            nnq.GroupNorm,
+        ]),
+        # Hardswish
+        'torch.nn.Hardswish': set([
+            nn.Hardswish,
+            nnq.Hardswish,
+        ]),
+        # InstanceNorm
+        'torch.nn.InstanceNorm1d': set([
+            nn.InstanceNorm1d,
+            nnq.InstanceNorm1d,
+        ]),
+        'torch.nn.InstanceNorm2d': set([
+            nn.InstanceNorm2d,
+            nnq.InstanceNorm2d,
+        ]),
+        'torch.nn.InstanceNorm3d': set([
+            nn.InstanceNorm3d,
+            nnq.InstanceNorm3d,
+        ]),
+        # LayerNorm
+        'torch.nn.LayerNorm': set([
+            nn.LayerNorm,
+            nnq.LayerNorm,
+        ]),
+        # LeakyReLU
+        'torch.nn.LeakyReLU': set([
+            nn.LeakyReLU,
+            nnq.LeakyReLU,
+        ]),
+        # ReLU6
+        'torch.nn.ReLU6': set([
+            nn.ReLU6,
+            nnq.ReLU6,
+        ]),
+        # BNReLU2d
+        'torch.nn.intrinsic.BNReLU2d': set([
+            nni.BNReLU2d,
+            nniq.BNReLU2d,
+        ]),
+        'torch.nn.intrinsic.BNReLU3d': set([
+            nni.BNReLU3d,
+            nniq.BNReLU3d,
+        ]),
+        # F.elu
+        'torch.nn.functional.elu': set([
+            F.elu,
+            toq.elu,
+        ]),
+        # F.hardswish
+        'torch.nn.functional.hardswish': set([
+            F.hardswish,
+            toq.hardswish,
+        ]),
+        # F.instance_norm
+        'torch.nn.functional.instance_norm': set([
+            F.instance_norm,
+            toq.instance_norm,
+        ]),
+        # F.layer_norm
+        'torch.nn.functional.layer_norm': set([
+            F.layer_norm,
+            toq.layer_norm,
+        ]),
+        # F.leaky_relu
+        'torch.nn.functional.leaky_relu': set([
+            F.leaky_relu,
+            toq.leaky_relu,
         ]),
     }
     return base_name_to_sets_of_related_ops

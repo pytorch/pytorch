@@ -1,5 +1,6 @@
 import copy
 import math
+import operator
 
 import torch
 import torch.nn as nn
@@ -24,8 +25,19 @@ from torch.testing._internal.common_quantization import (
     SparseNNModel,
     skip_if_no_torchvision,
 )
+from torch.quantization.quantization_mappings import (
+    get_default_static_quant_module_mappings,
+    get_default_dynamic_quant_module_mappings,
+    get_default_float_to_quantized_operator_mappings,
+)
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import override_qengines
+from torch.quantization.fx.pattern_utils import get_default_quant_patterns
+import torch.quantization.fx.quantization_patterns as qp
+from torch.quantization.ns.pattern_utils import (
+    get_base_name_to_sets_of_related_ops,
+    get_type_a_related_to_b,
+)
 from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
     GraphMatchingException,
@@ -416,6 +428,138 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 ((torch.sigmoid, torch.sigmoid), (torch.sigmoid, torch.sigmoid)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
+
+    def test_op_relationship_mapping(self):
+        """
+        Tests that the mapping of op relationships is complete.
+        """
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+        type_a_related_to_b = \
+            get_type_a_related_to_b(base_name_to_sets_of_related_ops)
+
+        # 1. check static quant module mappings
+        static_quant_mod_mappings = get_default_static_quant_module_mappings()
+        for fp32_type, int8_type in static_quant_mod_mappings.items():
+            # skip quants and dequants, for the purposes of Numerical Suite
+            types_to_skip = (
+                torch.quantization.QuantStub,
+                torch.quantization.DeQuantStub,
+                nnq.FloatFunctional,
+            )
+            if fp32_type in types_to_skip:
+                continue
+
+            # verify relatedness
+            in_type_a_related_to_b = \
+                (fp32_type, int8_type) in type_a_related_to_b
+            self.assertTrue(
+                in_type_a_related_to_b,
+                f"{fp32_type} and {int8_type} need a relationship mapping")
+
+        # 2. check static quant op mappings
+        static_quant_fun_mappings = get_default_float_to_quantized_operator_mappings()
+        for fp32_type, int8_type in static_quant_fun_mappings.items():
+            # verify relatedness
+            in_type_a_related_to_b = \
+                (fp32_type, int8_type) in type_a_related_to_b
+            self.assertTrue(
+                in_type_a_related_to_b,
+                f"{fp32_type} and {int8_type} need a relationship mapping")
+
+        # 3. check dynamic quant mappings
+        dynamic_quant_mappings = get_default_dynamic_quant_module_mappings()
+        for fp32_type, int8_type in dynamic_quant_mappings.items():
+            # TODO(future PR): enable correct weight extraction for these
+            # and remove from this list.
+            types_to_skip = (
+                nn.GRUCell,
+                nn.GRU,
+                nn.LSTMCell,
+                nn.RNNCell,
+            )
+            if fp32_type in types_to_skip:
+                continue
+            # verify relatedness
+            in_type_a_related_to_b = \
+                (fp32_type, int8_type) in type_a_related_to_b
+            self.assertTrue(
+                in_type_a_related_to_b,
+                f"{fp32_type} and {int8_type} need a relationship mapping")
+
+        # 4. go through the ops mapped to each QuantizeHandler type, and verify
+        # correctness.
+        def _op_in_base_sets_of_related_ops(op):
+            for name, ops in base_name_to_sets_of_related_ops.items():
+                if op in ops:
+                    return True
+            return False
+
+        default_quant_patterns = get_default_quant_patterns()
+        for pattern, qhandler_cls in default_quant_patterns.items():
+            base_op = None
+            if isinstance(pattern, tuple):
+                base_op = pattern[-1]
+            elif isinstance(pattern, str):
+                # TODO(future PR): add handling for these
+                continue
+            else:
+                base_op = pattern
+
+            qhandler_cls_all_ops_quantizeable = [
+                qp.CatQuantizeHandler,
+                qp.ConvReluQuantizeHandler,
+                qp.LinearReLUQuantizeHandler,
+                qp.BatchNormQuantizeHandler,
+                qp.EmbeddingQuantizeHandler,
+                qp.RNNDynamicQuantizeHandler,
+                qp.ELUQuantizeHandler,
+            ]
+
+            qhandler_cls_quant_op_same_signature = [
+                qp.FixedQParamsOpQuantizeHandler,
+                qp.CopyNodeQuantizeHandler,
+            ]
+
+            if qhandler_cls == qp.BinaryOpQuantizeHandler:
+                # these ops do not have quantized equivalents
+                ops_to_skip = [
+                    torch.bmm,
+                    torch.sum,
+                    torch.div,
+                    torch.sub,
+                    operator.truediv,
+                    operator.sub
+                ]
+                if base_op in ops_to_skip:
+                    continue
+                self.assertTrue(
+                    _op_in_base_sets_of_related_ops(base_op),
+                    f"{base_op} not in sets of related ops")
+            elif qhandler_cls == qp.RNNDynamicQuantizeHandler:
+                # TODO(future PR): add support for all classes in
+                # RNNDynamicQuantizeHandler
+                pass
+            elif qhandler_cls == qp.DefaultNodeQuantizeHandler:
+                ops_to_skip = [
+                    torch.nn.SiLU,
+                    torch.nn.functional.silu,
+                ]
+                if base_op in ops_to_skip:
+                    continue
+                self.assertTrue(
+                    _op_in_base_sets_of_related_ops(base_op),
+                    f"{base_op} not in sets of related ops")
+            elif qhandler_cls in qhandler_cls_quant_op_same_signature:
+                # these ops use the same op signature for fp32 and quantized
+                # tensors
+                pass
+            elif qhandler_cls in qhandler_cls_all_ops_quantizeable:
+                self.assertTrue(
+                    _op_in_base_sets_of_related_ops(base_op),
+                    f"{base_op} not in sets of related ops")
+            else:
+                raise AssertionError(
+                    f"handing for {qhandler_cls} not implemented")
 
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
