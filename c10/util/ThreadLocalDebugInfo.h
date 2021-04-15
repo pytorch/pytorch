@@ -14,6 +14,7 @@ enum class C10_API_ENUM DebugInfoKind : uint8_t {
   MOBILE_RUNTIME_INFO,
   PROFILER_STATE,
   INFERENCE_CONTEXT, // for inference usage
+  PARAM_COMMS_INFO,
 
   TEST_INFO, // used only in tests
   TEST_INFO_2, // used only in tests
