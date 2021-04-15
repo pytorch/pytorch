@@ -7266,7 +7266,6 @@ tensor_op_tests = [
     ('norm', '3_norm_neg_dim', _small_3d, lambda t, d: [3, -2], 1e-1, 1e-1, 1e-5,
         torch.testing.get_all_fp_dtypes(), _cpu_types, False),
     ('new_ones', '', _small_3d, lambda t, d: [1, 2, 3, 4, 5], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('permute', '', _new_t((1, 2, 3, 4)), lambda t, d: [2, 1, 3, 0], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('put_', '', _new_t((2, 5, 3)),
         lambda t, d: [torch.LongTensor([[0], [-2]]).to(device=d),
                       torch.LongTensor([[3], [4]]).to(dtype=_convert_t(t, d), device=d)],
