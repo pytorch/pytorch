@@ -4011,7 +4011,7 @@ TEST(LoopNest, DISABLED_ColReduceSplitMaskUnevenReorder) {
   checkColReduce(s, *p.first, p.second);
 }
 
-TEST(LoopNest, DISABLED_VectorizeUse) {
+TEST(LoopNest, VectorizeUse) {
   KernelScope kernel_scope;
   constexpr int N = 8;
   Placeholder a("a", kFloat, {N});
@@ -4019,7 +4019,7 @@ TEST(LoopNest, DISABLED_VectorizeUse) {
       "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
   Tensor* c = Compute(
       "c", {{N, "n"}}, [&](const VarHandle& n) { return b->load(n) + 2.0f; });
-  LoopNest nest({c});
+  LoopNest nest({c}, {b, c});
   auto loops = nest.getAllLoopNestsWritingToBuf(b->buf())[0];
   nest.vectorize(loops[0]);
   loops = nest.getAllLoopNestsWritingToBuf(c->buf())[0];
