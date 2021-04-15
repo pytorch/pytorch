@@ -518,10 +518,15 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
     def _test_match_shadow_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
         should_log_inputs=False, qconfig_dict=None, skip_scripting=False,
+        prepare_fn=prepare_fx,
     ):
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
+        if prepare_fn == prepare_fx:
+            m.eval()
+        else:
+            m.train()
+        mp = prepare_fn(m, qconfig_dict)
         mp(*data)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
@@ -659,36 +664,42 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_match_activations_fun_qat(self):
         self._test_match_activations_fun_impl(prepare_fn=prepare_qat_fx)
 
-    @skipIfNoFBGEMM
-    def test_add_shadow_loggers_mod(self):
+    def _test_add_shadow_loggers_mod_impl(self, prepare_fn=prepare_fx):
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
             nn.Conv2d(1, 1, 1),
         ).eval()
+        qconfig_dict = None
+        if prepare_fn == prepare_qat_fx:
+            qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
         res = self._test_match_shadow_activations(
-            m, (torch.randn(1, 1, 4, 4),), results_len=2)
+            m, (torch.randn(1, 1, 4, 4),), results_len=2,
+            prepare_fn=prepare_fn, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
-    def test_add_shadow_loggers_fun(self):
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w1 = nn.Parameter(torch.empty(4, 4))
-                self.b1 = nn.Parameter(torch.zeros(4))
-                self.w2 = nn.Parameter(torch.empty(4, 4))
-                self.b2 = nn.Parameter(torch.zeros(4))
-                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
-                torch.nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
+    def test_add_shadow_loggers_mod_ptq(self):
+        self._test_add_shadow_loggers_mod_impl(prepare_fn=prepare_fx)
 
-            def forward(self, x):
-                x = F.linear(x, self.w1, self.b1)
-                x = F.linear(x, self.w2, self.b2)
-                x = F.relu(x)
-                return x
+    @skipIfNoFBGEMM
+    def test_add_shadow_loggers_mod_qat(self):
+        self._test_add_shadow_loggers_mod_impl(prepare_fn=prepare_qat_fx)
 
-        m = M().eval()
+    def _test_add_shadow_loggers_fun_impl(self, prepare_fn=prepare_fx):
+        m = LinearReluLinearFunctional()
+        qconfig_dict = None
+        if prepare_fn == prepare_qat_fx:
+            qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
         res = self._test_match_shadow_activations(
-            m, (torch.randn(4, 4),), results_len=2)
+            m, (torch.randn(4, 4),), results_len=2, prepare_fn=prepare_fn,
+            qconfig_dict=qconfig_dict)
+
+    @skipIfNoFBGEMM
+    def test_add_shadow_loggers_fun_ptq(self):
+        self._test_add_shadow_loggers_fun_impl(prepare_fn=prepare_fx)
+
+    @skipIfNoFBGEMM
+    def test_add_shadow_loggers_fun_qat(self):
+        self._test_add_shadow_loggers_fun_impl(prepare_fn=prepare_qat_fx)
 
     @skipIfNoFBGEMM
     def test_add_shadow_loggers_multiple_dtype_casts(self):
