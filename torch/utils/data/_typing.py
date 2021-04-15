@@ -4,6 +4,7 @@
 import collections
 import inspect
 import numbers
+import warnings
 from typing import (Any, Dict, Iterator, List, Set, Tuple,
                     TypeVar, Union, get_type_hints)
 from typing import _tp_cache, _type_check, _type_repr  # type: ignore
@@ -341,9 +342,10 @@ def _reinforce_type(self, expected_type):
     is required to be a subtype of the original type hint. It's useful for users to
     apply a more strict requirement for data type.
     """
-    if '@runtime_validation' not in inspect.getsource(self.__iter__):
-        raise RuntimeError("Only the instance with `__iter__` decorated by `runtime_validation` "
-                           "can call `reinforce_type` to reinforce the type for runtime validation.")
+    if "@runtime_validation" not in inspect.getsource(self.__iter__):
+        warnings.warn("The type of data generated from `DataPipe` instance won't be validated "
+                      "at runtime. Decorator of `runtime_validation` is required to be attached "
+                      "to `__iter__` method of {} for runtime type validation".format(self.__class__))
 
     if isinstance(expected_type, tuple):
         expected_type = Tuple[expected_type]

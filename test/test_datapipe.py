@@ -813,8 +813,11 @@ class TestTyping(TestCase):
         ds = list(range(10))
 
         dp = DP(ds)
-        with self.assertRaisesRegex(RuntimeError, "Only the instance with `__iter__` decorated"):
+        with warnings.catch_warnings(record=True) as wa:
             dp.reinforce_type(int)
+            self.assertRegex(
+                str(wa[0].message),
+                r"The type of data generated from `DataPipe` instance won't be validated")
 
 
         class DP(IterDataPipe[T]):  # type: ignore
