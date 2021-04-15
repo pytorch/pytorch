@@ -2772,7 +2772,7 @@ def sample_inputs_scatter_ops(op_info, device, dtype, requires_grad):
         ))
 
     return samples
-    
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('exp'),
     ForeachUnaryFuncInfo('acos'),
