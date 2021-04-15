@@ -2,6 +2,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/rref_interface.h>
+#include <c10/core/Event.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
@@ -395,6 +396,19 @@ class TORCH_API OwnerRRef final : public RRef {
   friend class RRefContext;
 
   std::shared_ptr<JitFuture> future_;
+
+ public:
+  // Records an event per each stream in the context and stores them in
+  // the current OwnerRRef instance.
+  void recordAllStreams(const std::shared_ptr<LazyStreamContext>& ctx);
+
+  // Blocks all streams in the context on all events previously stored in
+  // the current OwnerRRef instance.
+  void blockAllStreams(std::shared_ptr<LazyStreamContext>& ctx);
+
+ private:
+  // a storage for device events for synchronization.
+  std::vector<c10::Event> events_;
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const RRef& rref);
