@@ -61,7 +61,6 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::arctanh_, aten::atanh_},
       {aten::fix, aten::trunc},
       {aten::fix_, aten::trunc_},
-      {aten::positive, aten::clone},
       {aten::negative, aten::neg},
       {aten::negative_, aten::neg_},
       {aten::subtract, aten::sub},
