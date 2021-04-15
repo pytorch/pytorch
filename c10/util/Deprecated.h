@@ -15,10 +15,6 @@
 //      ...
 //    };
 
-// NB: In PyTorch, this block is not actually used at the moment
-// because we are C++11.  However, aspirationally, we would like
-// to use this version, because as of C++14 it is the correct and
-// portable way to declare something deprecated.
 // NB: __cplusplus doesn't work for MSVC, so for now MSVC always uses
 // the "__declspec(deprecated)" implementation and not the C++14 "[[deprecated]]"
 // attribute. We tried enabling "[[deprecated]]" for C++14 on MSVC, but

@@ -23,6 +23,15 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  # Used so that only cuda specific versions of tests are generated
+  # mainly used so that we're not spending extra cycles testing cpu
+  # devices on expensive gpu machines
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
+elif [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="xla"
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
@@ -175,7 +184,7 @@ test_without_numpy() {
 # which transitively includes tbb.h which is not available!
 if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
   sudo mkdir -p /usr/include/tbb
-  sudo cp -r $PWD/third_party/tbb/include/tbb/* /usr/include/tbb
+  sudo cp -r "$PWD"/third_party/tbb/include/tbb/* /usr/include/tbb
 fi
 
 test_libtorch() {
@@ -387,7 +396,7 @@ test_vec256() {
     vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
     for vec256_exec in $vec256_tests
     do
-      $vec256_exec --gtest_output=xml:test/test-reports/vec256/$vec256_exec.xml
+      $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
     done
     popd
     assert_git_not_dirty
@@ -437,6 +446,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
   install_torchvision
+  install_monkeytype
   test_python
   test_aten
   test_vec256

@@ -1,5 +1,5 @@
-from tools.codegen.utils import *
-from tools.codegen.model import *
+from tools.codegen.utils import S, T, context
+from tools.codegen.model import NativeFunction, NativeFunctionsGroup
 import tools.codegen.local as local
 
 import functools
@@ -21,9 +21,7 @@ def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunction]) -> I
     else:
         f = g
     with context(f'in {f.loc}:\n  {f.func}'):
-        with local.parametrize(
-            use_c10_dispatcher=f.use_c10_dispatcher,
-        ):
+        with local.parametrize():
             yield
 
 # Given a function that operates on NativeFunction, wrap it into a new function

@@ -37,7 +37,12 @@ Tensor _bincount_cpu_template(
 
   const input_t* self_p = self.data_ptr<input_t>();
   if (has_weights) {
-    output = native::zeros({nbins}, weights.options());
+    output = native::zeros(
+        {nbins},
+        optTypeMetaToScalarType(weights.options().dtype_opt()),
+        weights.options().layout_opt(),
+        weights.options().device_opt(),
+        weights.options().pinned_memory_opt());
     weights_t* output_p = output.data_ptr<weights_t>();
     const weights_t* weights_p = weights.data_ptr<weights_t>();
     for (int64_t i = 0; i < self_size; i++) {

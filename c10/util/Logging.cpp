@@ -1,6 +1,9 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#ifdef FBCODE_CAFFE2
+#include <folly/synchronization/SanitizeThread.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -10,6 +13,7 @@
 
 // Common code that we use regardless of whether we use glog or not.
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_use_fatal_for_enforce,
     false,
@@ -19,6 +23,7 @@ C10_DEFINE_bool(
 namespace c10 {
 
 namespace {
+// NOLINTNEXTLINE(modernize-redundant-void-arg)
 std::function<string(void)>* GetFetchStackTrace() {
   static std::function<string(void)> func = []() {
     return get_backtrace(/*frames_to_skip=*/1);
@@ -161,8 +166,11 @@ DECLARE_bool(logtostderr);
 // This backward compatibility flags are in order to deal with cases where
 // Caffe2 are not built with glog, but some init flags still pass in these
 // flags. They may go away in the future.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(minloglevel, 0, "Equivalent to glog minloglevel");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(v, 0, "Equivalent to glog verbose");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(logtostderr, false, "Equivalent to glog logtostderr");
 #endif // !defined(c10_USE_GLOG)
 
@@ -213,6 +221,10 @@ bool InitCaffeLogging(int* argc, char** argv) {
 }
 
 void UpdateLoggingLevelsFromFlags() {
+#ifdef FBCODE_CAFFE2
+  // TODO(T82645998): Fix data race exposed by TSAN.
+  folly::annotate_ignore_thread_sanitizer_guard g(__FILE__, __LINE__);
+#endif
   // If caffe2_log_level is set and is lower than the min log level by glog,
   // we will transfer the caffe2_log_level setting to glog to override that.
   FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
@@ -238,6 +250,7 @@ void ShowLogInfoToStderr() {
 #include <android/log.h>
 #endif // ANDROID
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_log_level,
     c10::GLOG_WARNING,

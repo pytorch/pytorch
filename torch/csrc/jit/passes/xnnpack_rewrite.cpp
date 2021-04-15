@@ -392,8 +392,7 @@ script::Module optimizeForMobile(
   auto cloned_module = m.clone();
   cloned_module.eval();
 
-  if (!optimization_blocklist.count(MobileOptimizerType::CONV_BN_FUSION) &&
-      optimize_forward) {
+  if (!optimization_blocklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
     cloned_module = FoldConvBatchNorm(cloned_module);
   }
 
@@ -433,9 +432,11 @@ script::Module optimizeForMobile(
     }
   }
 
-  if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU) &&
-      optimize_forward) {
-    FuseAddRelu(cloned_module);
+  if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
+    for (const std::string& method : methods_to_optimize) {
+      auto graph = cloned_module.get_method(method).graph();
+      FuseAddRelu(graph);
+    }
   }
   cloned_module.register_attribute("mobile_optimized", BoolType::get(), true);
   return cloned_module;

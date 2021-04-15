@@ -87,7 +87,7 @@ static void threshold_kernel(
     TensorIterator& iter,
     const Scalar& threshold_scalar,
     const Scalar& value_scalar) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "threshold_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "threshold_cpu", [&] {
     using Vec = Vec256<scalar_t>;
     scalar_t threshold = threshold_scalar.to<scalar_t>();
     Vec threshold_v = Vec(threshold);
