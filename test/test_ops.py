@@ -63,18 +63,16 @@ class TestOpInfo(TestCase):
     #   does NOT throw a runtime error.
     # TODO: support multi-tensor outputs
     @onlyOnCPUAndCUDA
-    @ops(op_db, allowed_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16))
+    @ops(op_db, dtypes=OpDTypes.supported_backward,
+         allowed_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16))
     def test_supported_backward(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
-        if not op.supports_complex_autograd and dtype.is_complex:
-            self.skipTest("Skipped! Complex autograd not supported.")
 
         for sample in op.sample_inputs(device, dtype, requires_grad=True):
             result = op(sample.input, *sample.args, **sample.kwargs)
             if not isinstance(result, torch.Tensor):
                 continue
-
             result.sum().backward()
 
     # Verifies that ops do not have an entry in
