@@ -228,9 +228,13 @@ class DeviceTypeTestBase(TestCase):
         return test.dtypes.get(cls.device_type, test.dtypes.get('all', None))
 
     def _get_precision_override(self, test, dtype):
-        if not hasattr(test, 'precision_overrides'):
+        if hasattr(test, 'precision_overrides'):
+            return test.precision_overrides.get(dtype, self.precision)
+        elif hasattr(self, 'precision_overrides'):
+            return self.precision_overrides.get(dtype, self.precision)
+        else:
             return self.precision
-        return test.precision_overrides.get(dtype, self.precision)
+
 
     # Creates device-specific tests.
     @classmethod
@@ -760,7 +764,7 @@ def onlyOnCPUAndCUDA(fn):
 # Specifies per-dtype precision overrides.
 # Ex.
 #
-# @precisionOverride(torch.half : 1e-2, torch.float : 1e-4)
+# @precisionOverride({torch.half : 1e-2, torch.float : 1e-4})
 # @dtypes(torch.half, torch.float, torch.double)
 # def test_X(self, device, dtype):
 #   ...
