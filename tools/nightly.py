@@ -135,7 +135,7 @@ def logging_rotate() -> None:
 @contextlib.contextmanager
 def logging_manager(*, debug: bool = False) -> Iterator[None]:
     """Setup logging. If a failure starts here we won't
-    be able to save the user ina  reasonable way.
+    be able to save the user in a reasonable way.
 
     Logging structure: there is one logger (the root logger)
     and in processes all events.  There are two handlers:
@@ -198,19 +198,19 @@ def check_branch(subcommand, branch):
         return "Branch name to checkout must be supplied with '-b' option"
     # next check that the local repo is clean
     cmd = ["git", "status", "--untracked-files=no", "--porcelain"]
-    p = subprocess.run(cmd, capture_output=True, check=True, text=True)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, universal_newlines=True)
     if p.stdout.strip():
         return "Need to have clean working tree to checkout!\n\n" + p.stdout
     # next check that the branch name doesn't already exist
     cmd = ["git", "show-ref", "--verify", "--quiet", "refs/heads/" + branch]
-    p = subprocess.run(cmd, capture_output=True, check=False)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     if not p.returncode:
         return f"Branch {branch!r} already exists"
 
 
 @contextlib.contextmanager
 def timer(logger, prefix):
-    """Timed conetxt manager"""
+    """Timed context manager"""
     start_time = time.time()
     yield
     logger.info(f"{prefix} took {time.time() - start_time:.3f} [s]")
@@ -283,7 +283,7 @@ def conda_solve(
     )
     cmd.extend(channel_args)
     cmd.extend(SPECS_TO_INSTALL)
-    p = subprocess.run(cmd, capture_output=True, check=True)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
     # parse solution
     solve = json.loads(p.stdout)
     link = solve["actions"]["LINK"]
@@ -322,17 +322,17 @@ def pytorch_install(url):
 
 def _site_packages(dirname, platform):
     if platform.startswith("win"):
-        os.path.join(pytdir.name, "Lib", "site-packages")
+        template = os.path.join(dirname, "Lib", "site-packages")
     else:
         template = os.path.join(dirname, "lib", "python*.*", "site-packages")
-        spdir = glob.glob(template)[0]
+    spdir = glob.glob(template)[0]
     return spdir
 
 
 def _ensure_commit(git_sha1):
     """Make sure that we actually have the commit locally"""
     cmd = ["git", "cat-file", "-e", git_sha1 + "^{commit}"]
-    p = subprocess.run(cmd, capture_output=True, check=False)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     if p.returncode == 0:
         # we have the commit locally
         return
@@ -357,7 +357,7 @@ def _nightly_version(spdir):
     # now cross reference with nightly version
     _ensure_commit(git_version)
     cmd = ["git", "show", "--no-patch", "--format=%s", git_version]
-    p = subprocess.run(cmd, capture_output=True, check=True, text=True)
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, universal_newlines=True)
     m = SHA1_RE.search(p.stdout)
     if m is None:
         raise RuntimeError(
@@ -431,6 +431,7 @@ def _get_listing(source_dir, target_dir, platform):
         raise RuntimeError(f"Platform {platform!r} not recognized")
     listing.extend(_find_missing_pyi(source_dir, target_dir))
     listing.append(os.path.join(source_dir, "version.py"))
+    listing.append(os.path.join(source_dir, "testing", "_internal", "generated"))
     listing.append(os.path.join(source_dir, "bin"))
     listing.append(os.path.join(source_dir, "include"))
     return listing
@@ -497,7 +498,7 @@ def move_nightly_files(spdir, platform):
 
 def _available_envs():
     cmd = ["conda", "env", "list"]
-    p = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    p = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     lines = p.stdout.splitlines()
     envs = {}
     for line in map(str.strip, lines):

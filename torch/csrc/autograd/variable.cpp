@@ -4,13 +4,16 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/InferenceMode.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
+#include <torch/csrc/autograd/utils/error_messages.h>
 
 #include <ATen/core/VariableHooksInterface.h>
 
 #include <ATen/ATen.h>
+#include <ATen/MemoryOverlap.h>
 #include <c10/util/Exception.h>
 
 #include <list>
@@ -20,28 +23,84 @@
 #include <string>
 #include <vector>
 #include <typeinfo>
+#include <iostream>
 
 namespace torch {
 namespace autograd {
 
 
-DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
-  c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn,
+DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
+  c10::optional<ViewInfo> backward_info,
+  c10::optional<ViewInfo> forward_info,
   CreationMeta creation_meta)
-    : AutogradMeta(self_impl), creation_meta(creation_meta) {
-  base_ = std::move(base);
-  view_fn_ = std::move(view_fn);
-  TORCH_CHECK(base_.defined(), "base is undefined");
-  if (base_.is_view()) {
-    base_ = base_._base();
-  }
+    : AutogradMeta(self_impl),
+      backward_info_(std::move(backward_info)),
+      forward_info_(std::move(forward_info)),
+      creation_meta_(creation_meta) {
   is_view_ = true;
-  self_impl->set_version_counter(impl::version_counter(base_));
-  attr_version = self_impl->version_counter().current_version();
+  if (backward_info_.has_value()) {
+    self_impl->set_version_counter(impl::version_counter(backward_info_.value().base_));
+    attr_version_ = self_impl->version_counter().current_version();
+  }
 }
 
-DifferentiableViewMeta::~DifferentiableViewMeta() {
-  base_.reset();
+// Chain this view info with the new view op between base and tensor
+ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
+  std::function<Variable(const Variable&)> view_func) const {
+  // Set `view_func` using the root base as input.
+  // `view_func` is used to recover views in backward when either as_strided is not supported
+  // or the view function changes the metadata which is not recorded by as_strided
+  // See Note [View + Inplace update on base tensor] and [View + Inplace update on view tensor]
+  // for more details how we use this function in backward.
+  if (view_func) {
+    // both current_view and it's parent have a view_func
+    if (view_fn_) {
+      // Copy parent view function to gain ownership
+      auto prev_fn = view_fn_;
+      view_func = [=](const at::Tensor& root_base) {
+        auto temp = prev_fn(root_base);
+        return view_func(temp);
+      };
+    } else {
+      // current_view has a view_func and but it's parent doesn't have one
+      if (base.unsafeGetTensorImpl()->support_as_strided()) {
+        auto size = base.sizes().vec();
+        auto stride = base.strides().vec();
+        auto storage_offset = base.storage_offset();
+        view_func = [=](const at::Tensor& root_base) {
+          auto temp = root_base.as_strided(size, stride, storage_offset);
+          return view_func(temp);
+        };
+      } else {
+        // When base is a view but doesn't carry a view_fn in DifferentiableViewMeta, it's
+        // a view that doesn't support inplace update, e.g. unbind.
+        // In this case we should throw an error when inplace update happens in **forward**.
+        // One would naturally think the following function will be first called in backward pass.
+        // But the first call site is indeed in **forward** pass when we refresh `grad_fn`
+        // triggered by inplace update.
+        // Search Note [View + Inplace update for view tensor] to for the call site.
+        view_func = [=](const at::Tensor& root_base) {
+          TORCH_CHECK(false, "This view is the output of a function that returns multiple views."
+                  "Such functions do not allow the output views to be modified inplace."
+                  "You should replace the inplace operation by an out-of-place one");
+          return root_base;
+        };
+      }
+    }
+  } else if(view_fn_) {
+    // if current_view doesn't have a view_func but it's parent has one
+    // Copy parent view function to gain ownership
+    auto prev_view_fn = view_fn_;
+    auto size = tensor.sizes().vec();
+    auto stride = tensor.strides().vec();
+    auto storage_offset = tensor.storage_offset();
+    view_func = [=](const at::Tensor& root_base) {
+      auto temp = prev_view_fn(root_base);
+      return temp.as_strided(size, stride, storage_offset);
+    };
+  }
+
+  return ViewInfo(base_, view_func);
 }
 
 namespace {
@@ -76,26 +135,26 @@ namespace impl {
 
   void rebase_history(const Variable& self, Edge gradient_edge) {
     TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
-    if (self.is_view()) {
-      // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
-
+    auto diff_view_meta = get_view_autograd_meta(self);
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
       // See NOTE [ View + Inplace detection ]
-      if (diff_view_meta->creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
+      auto creation_meta = diff_view_meta->get_creation_meta();
+      if (creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
         // Do not use handle_view_on_rebase here as check_inplace should have been called before this
         // and either throw an error or clear the warning
         // Temporary error message as a full fix is too risky for now
         // Should be an internal assert again
-        TORCH_INTERNAL_ASSERT(diff_view_meta->creation_meta == CreationMeta::DEFAULT);
+        TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::DEFAULT);
         TORCH_INTERNAL_ASSERT(gradient_edge.input_nr == 0);
         TORCH_INTERNAL_ASSERT(gradient_edge.function);
         TORCH_CHECK(
             gradient_edge.function->num_inputs() == 1,
             "Functions which modify views in-place must return a single Variable");
+        auto view_info = diff_view_meta->get_backward_view();
         diff_view_meta->output_nr_ = gradient_edge.input_nr;
         auto copy_slices = std::make_shared<CopySlices>(
-            diff_view_meta->base_, at::TensorGeometry(self), diff_view_meta->view_fn_, std::move(gradient_edge.function));
-        set_gradient_edge(diff_view_meta->base_, {std::move(copy_slices), 0});
+            view_info.base_, at::TensorGeometry(self), view_info.view_fn_, std::move(gradient_edge.function));
+        set_gradient_edge(view_info.base_, {std::move(copy_slices), 0});
         self.grad_fn(); // trigger an update to the view's grad_fn
         return;
       }
@@ -105,7 +164,7 @@ namespace impl {
   }
 
   void create_cpp_hook(const Variable& self) {
-    auto &list = materialize_autograd_meta(self)->cpp_hooks_list;
+    auto &list = materialize_autograd_meta(self)->cpp_hooks_list_;
     list.reset(new hooks_list());
     std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, self.output_nr()));
     clear_hooks(self);
@@ -178,10 +237,9 @@ namespace impl {
     // This logic is only relevant for custom autograd Functions for which multiple
     // operations can happen on a given Tensor before its gradient edge is set when
     // exiting the custom Function.
-    if (self.is_view()) {
-      // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
-      diff_view_meta->attr_version = self._version();
+    auto diff_view_meta = get_view_autograd_meta(self);
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
+      diff_view_meta->set_attr_version(self._version());
     }
   }
 
@@ -258,9 +316,19 @@ namespace impl {
   }
 
   AutogradMeta* get_autograd_meta(const Variable& self) {
-    // NB: could return null
+    // NB: could return nullptr
     TORCH_CHECK(self.defined(), "cannot call get_autograd_meta() on undefined tensor");
     return static_cast<AutogradMeta*>(self.unsafeGetTensorImpl()->autograd_meta());
+  }
+
+  DifferentiableViewMeta* get_view_autograd_meta(const Variable& self) {
+    // NB: return nullptr if self is not a view
+    AutogradMeta* meta = get_autograd_meta(self);
+    if (meta && meta->is_view_) {
+      return static_cast<DifferentiableViewMeta*>(meta);
+    } else {
+      return nullptr;
+    }
   }
 
 } // namespace impl
@@ -276,6 +344,16 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   bool is_view(const Tensor&) const override;
   const Tensor& base(const Tensor&) const override;
   const std::string& name(const Tensor&) const override;
+  bool is_leaf(const Tensor&) const override;
+  int64_t output_nr(const Tensor&) const override;
+  void set_data(const Tensor & self, const Tensor & new_data) const override;
+  Tensor data(const Tensor & self) const override;
+  int64_t _version(const Tensor & self) const override;
+  void retain_grad(const Tensor & self) const override;
+  void _backward(const Tensor& self, at::TensorList inputs,
+    const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph,
+    bool create_graph) const override;
+  Tensor& requires_grad_(const Tensor& self, bool _requires_grad) const override;
 };
 
 VariableHooks variableHooks;
@@ -298,24 +376,136 @@ Tensor VariableHooks::tensor_data(const Tensor& self) const {
   return at::Tensor(self_impl_copy);
 }
 
-// View Variables
+bool VariableHooks::is_leaf(const Tensor & self) const {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->grad_fn_ == nullptr;
+  } else {
+    return true;
+  }
+}
+
+int64_t VariableHooks::output_nr(const Tensor & self) const {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->output_nr_;
+  } else {
+    return 0;
+  }
+}
+
+void VariableHooks::set_data(const Tensor & self, const Tensor & new_data) const {
+  // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
+  // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
+  // tensor type.
+  TORCH_CHECK(
+    _has_compatible_shallow_copy_type(self, new_data),
+    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
+
+  // Resets gradient accumulator if metadata is out of date
+  AutogradMeta* autograd_meta = impl::get_autograd_meta(self);
+  if (autograd_meta) {
+    std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
+    auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
+    if (prior_accumulator) {
+      const auto prior_device = prior_accumulator->input_metadata(0).device();
+      const auto new_device = new_data.device();
+
+      if (!new_data.options().type_equal(self.options()) || prior_device != new_device) {
+        autograd_meta->grad_accumulator_.reset();
+      }
+    }
+  }
+
+  // Version counter is not shared when we replace a `Variable`'s tensor data
+  // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
+  // See NOTE [ Version Counter Sharing ] for details.
+  //
+  // `var.set_data(new_data)` always ignores `var`'s `allow_tensor_metadata_change_`, because
+  // users need this API as an escape hatch for changing a tensor's metadata regardless of its
+  // `allow_tensor_metadata_change_` value, and the users are responsible for ensuring this is
+  // the behavior they want.
+  self.unsafeGetTensorImpl()->shallow_copy_from(new_data.getIntrusivePtr());
+}
+
+Tensor VariableHooks::data(const Tensor & self) const {
+  return self.variable_data();
+}
+
+int64_t VariableHooks::_version(const Tensor & self) const {
+  return self.unsafeGetTensorImpl()->version_counter().current_version();
+}
+
+void VariableHooks::retain_grad(const Tensor & self) const {
+  TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
+  if (self.is_leaf()) {  // no-op for leaves
+    return;
+  }
+  if (impl::get_autograd_meta(self)->retains_grad_) {
+    return;
+  }
+  c10::weak_intrusive_ptr<c10::TensorImpl> weak_self(self.getIntrusivePtr());
+
+  std::function<void(Tensor)> retain_grad_hook([weak_self](const Tensor& grad) {
+    if (weak_self.expired()) {
+      return;
+    } else {
+      auto var = weak_self.lock();
+      if (!var->grad().defined()) {
+        if (grad.is_sparse()) {
+          var->mutable_grad() = grad.clone();
+        } else {
+          var->mutable_grad() = grad.clone(at::MemoryFormat::Contiguous);
+        }
+      } else {
+        var->mutable_grad() = var->grad() + grad;
+      }
+    }
+  });
+
+  self.register_hook(retain_grad_hook);
+  impl::get_autograd_meta(self)->retains_grad_ = true;
+}
+
+void VariableHooks::_backward(
+    const Tensor& self,
+    at::TensorList inputs,
+    const c10::optional<Tensor>& gradient,
+    c10::optional<bool> keep_graph,
+    bool create_graph) const {
+  // TODO torch::autograd::backward should take the c10::optional<Tensor> gradient directly
+  // instead of us having to unwrap it to Tensor _gradient here.
+  Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
+  std::vector<torch::autograd::Variable> input_vars(inputs.begin(), inputs.end());
+  torch::autograd::backward({self}, {_gradient}, keep_graph, create_graph, input_vars);
+}
+
+Tensor& VariableHooks::requires_grad_(const Tensor& self, bool _requires_grad) const {
+  if (!self.is_leaf() && !_requires_grad) {
+    throw std::runtime_error(
+      autograd::utils::requires_grad_leaf_error(_requires_grad)
+    );
+  }
+  return const_cast<Tensor&>(self).set_requires_grad(_requires_grad);
+}
+
+// Backward View Variables
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 bool VariableHooks::is_view(const Tensor& self) const {
-  if (torch::autograd::impl::get_autograd_meta(self)) {
-    return torch::autograd::impl::get_autograd_meta(self)->is_view_;
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta) {
+    return diff_view_meta->has_bw_view();
   } else {
     return false;
   }
 }
 
 const Tensor& VariableHooks::base(const Tensor& self) const {
-  if (self.is_view()) {
-    // is_view() implies get_autograd_meta()
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
-    return diff_view_meta->base_;
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta) {
+    TORCH_CHECK(diff_view_meta->has_bw_view(), "Can't get base of non-backward view Tensor");
+    return diff_view_meta->get_backward_view().base_;
   } else {
-    throw std::runtime_error("Can't get base of non-view Variable");
+    throw std::runtime_error("Can't get base of non-view Tensor");
   }
 }
 
@@ -337,18 +527,17 @@ namespace {
 }
 
 const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tensor& self) const {
-  if (self.is_view()) {
-    // NB: is_view() ==> get_autograd_meta()
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
-
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
     // See NOTE [ View + Inplace detection ]
-    if (diff_view_meta->creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
+    if (diff_view_meta->get_creation_meta() != CreationMeta::MULTI_OUTPUT_SAFE) {
       std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
-      if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
+      auto view_info = diff_view_meta->get_backward_view();
+      if (!diff_view_meta->grad_fn_ && !view_info.base_.requires_grad()) {
         return diff_view_meta->grad_fn_;
       }
       auto current_version = self._version();
-      if (diff_view_meta->attr_version != current_version) {
+      if (diff_view_meta->get_attr_version() != current_version) {
         // This is an indirect rebase_history due to another view or the base being modified inplace
         handle_view_on_rebase(diff_view_meta, /* indirect */ true);
         TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
@@ -377,29 +566,29 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
         //
         // TODO: Potentially the following logic can be replaced by special logic in VariableType_x.cpp
         //       that would provide a way to recreate the grad_fn chain.
-        if (diff_view_meta->has_view_fn()) {
-          auto view_fn = diff_view_meta->view_fn();
-          auto diff_view = view_fn(diff_view_meta->base_);
+        if (view_info.has_view_fn()) {
+          auto view_fn = view_info.view_fn();
+          auto diff_view = view_fn(view_info.base_);
           diff_view_meta->grad_fn_ = diff_view.grad_fn();
         } else {
           auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
-          fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
+          fn->self_geometry = at::TensorGeometry(view_info.base_);
           fn->size = self.sizes().vec();
           fn->stride = self.strides().vec();
           fn->storage_offset = self.storage_offset();
-          fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
+          fn->set_next_edges(torch::autograd::collect_next_edges(view_info.base_));
           fn->add_input_metadata(
-            diff_view_meta->base_.options(),
+            view_info.base_.options(),
             self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
-            diff_view_meta->base_.device());
+            view_info.base_.device());
           diff_view_meta->grad_fn_ = std::move(fn);
         }
-        diff_view_meta->attr_version = current_version;
+        diff_view_meta->set_attr_version(current_version);
       }
       return diff_view_meta->grad_fn_;
     }
   }
-  
+
   if (torch::autograd::impl::get_autograd_meta(self)) {
     return torch::autograd::impl::get_autograd_meta(self)->grad_fn_;
   } else {
@@ -408,7 +597,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
 }
 
 void VariableHooks::remove_hook(const Tensor& self, unsigned pos) const {
-  auto &list = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_list;
+  auto &list = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_list_;
   TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
   (*list)[pos] = nullptr;
@@ -418,7 +607,7 @@ unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(
   TORCH_CHECK(self.requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
-  auto &list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list;
+  auto &list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list_;
   if(!list) {
     torch::autograd::impl::create_cpp_hook(self);
   }
@@ -429,7 +618,8 @@ unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(
 
 void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect) {
   /// See NOTE [ View + Inplace detection ] for justification of the logic below
-  if (diff_view_meta->creation_meta != CreationMeta::DEFAULT) {
+  auto creation_meta = diff_view_meta->get_creation_meta();
+  if (creation_meta != CreationMeta::DEFAULT) {
     auto grad_fn = diff_view_meta->grad_fn_.get();
     std::string msg;
     std::string modified_obj;
@@ -442,28 +632,37 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     if (grad_fn) {
       msg = c10::str("Output ", diff_view_meta->output_nr_, " of ", grad_fn->name(), " is a view and ",
                      modified_obj, " modified inplace.");
+    } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
+      msg = c10::str("A view was created in inference mode and ", modified_obj, " modified inplace in normal mode.");
     } else {
       msg = c10::str("A view was created in no_grad mode and ", modified_obj, " modified inplace with grad mode enabled.");
     }
 
-    if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_NODE) {
+    if (creation_meta == CreationMeta::MULTI_OUTPUT_NODE) {
       TORCH_CHECK(false, msg, " This view is the output of a function that returns multiple views. Such functions do not"
                          " allow the output views to be modified inplace. You should replace the inplace operation by an"
                          " out-of-place one.");
     } else {
-      if (diff_view_meta->creation_meta == CreationMeta::NO_GRAD_MODE) {
+      if (creation_meta == CreationMeta::NO_GRAD_MODE) {
         TORCH_INTERNAL_ASSERT(!grad_fn);
         msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is deprecated and will be forbidden"
                        "  starting 1.6 (see https://github.com/pytorch/pytorch/pull/32839 for more details about this). You"
                        " can clarify your code and remove this warning by moving both the view and the inplace either both"
                        " inside the no_grad block (if you don't want the inplace to be tracked) or both outside (if you want"
                        " the inplace to be tracked).");
-      } else if (diff_view_meta->creation_meta == CreationMeta::IN_CUSTOM_FUNCTION) {
+      } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
+        TORCH_INTERNAL_ASSERT(!grad_fn);
+        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is forbidden. "
+                       " You can clarify your code by moving both the view and the inplace either both"
+                       " inside the inference_mode block (if you don't want the inplace to be tracked) or both outside (if you want"
+                       " the inplace to be tracked).");
+        TORCH_CHECK(false, msg);
+      } else if (creation_meta == CreationMeta::IN_CUSTOM_FUNCTION) {
         msg = c10::str(msg, " This view was created inside a custom Function (or because an input was returned as-is) and the"
                        " autograd logic to handle view+inplace would override the custom backward associated with the custom"
                        " Function, leading to incorrect gradients. This behavior is deprecated and will be forbidden starting"
                        " version 1.6. You can remove this warning by cloning the output of the custom Function.");
-      } else if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
+      } else if (creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
         msg = c10::str(msg, " This view is an output of a function that "
                        "returns multiple views. Inplace operators on such "
                        "views are being deprecated and will be forbidden "
@@ -487,8 +686,10 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     // We warn only once per view
     // Note that if a Tensor is modified inplace from two threads at the same time, this is not thread safe and can warn
     // multiple time. This is ok as it should be a rare event.
-    diff_view_meta->creation_meta = CreationMeta::DEFAULT;
+    diff_view_meta->set_creation_meta(CreationMeta::DEFAULT);
   }
 }
+
+
 
 }} // namespace torch::autograd

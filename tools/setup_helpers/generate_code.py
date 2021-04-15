@@ -1,6 +1,13 @@
 import argparse
 import os
 import sys
+import yaml
+
+try:
+    # use faster C loader if available
+    from yaml import CSafeLoader as YamlLoader
+except ImportError:
+    from yaml import SafeLoader as YamlLoader
 
 source_files = {'.py', '.cpp', '.h'}
 
@@ -30,7 +37,6 @@ def generate_code(ninja_global=None,
                   operator_selector=None):
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
-    from tools.jit.gen_unboxing_wrappers import gen_unboxing_wrappers
     from tools.codegen.selective_build.selector import SelectiveBuilder
 
 
@@ -70,13 +76,6 @@ def generate_code(ninja_global=None,
             disable_autograd=disable_autograd,
             operator_selector=operator_selector,
         )
-        gen_unboxing_wrappers(
-            declarations_path or DECLARATIONS_PATH,
-            jit_gen_dir,
-            tools_jit_templates,
-            disable_autograd=disable_autograd,
-            operator_selector=operator_selector,
-            force_schema_registration=force_schema_registration)
 
     if subset == "python" or not subset:
         gen_annotated(
@@ -84,15 +83,16 @@ def generate_code(ninja_global=None,
             python_install_dir,
             autograd_dir)
 
+
 def get_selector_from_legacy_operator_selection_list(
         selected_op_list_path: str,
 ):
-    from tools.autograd.utils import load_op_list_and_strip_overload
-
-    selected_op_list = load_op_list_and_strip_overload(
-        None,
-        selected_op_list_path,
-    )
+    with open(selected_op_list_path, 'r') as f:
+        # strip out the overload part
+        # It's only for legacy config - do NOT copy this code!
+        selected_op_list = {
+            opname.split('.', 1)[0] for opname in yaml.load(f, Loader=YamlLoader)
+        }
 
     # Internal build doesn't use this flag any more. Only used by OSS
     # build now. Every operator should be considered a root operator
@@ -104,14 +104,11 @@ def get_selector_from_legacy_operator_selection_list(
     is_used_for_training = True
 
     from tools.codegen.selective_build.selector import SelectiveBuilder
-
-    selector: SelectiveBuilder = SelectiveBuilder.get_nop_selector()
-    if selected_op_list is not None:
-        selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
-            selected_op_list,
-            is_root_operator,
-            is_used_for_training,
-        )
+    selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
+        selected_op_list,
+        is_root_operator,
+        is_used_for_training,
+    )
 
     return selector
 
@@ -154,7 +151,7 @@ def main():
     )
     parser.add_argument(
         '--selected-op-list-path',
-        help='Path to the yaml file that contains the list of operators to include for custom build.',
+        help='Path to the YAML file that contains the list of operators to include for custom build.',
     )
     parser.add_argument(
         '--operators_yaml_path',

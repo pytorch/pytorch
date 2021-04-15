@@ -4,16 +4,19 @@
 #include <c10/mobile/CPUProfilingAllocator.h>
 
 // TODO: rename flags to C10
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
     false,
     "If set, print out detailed memory usage");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
     false,
     "If set, do memory zerofilling when allocating on CPU");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_junk_fill,
     false,
@@ -45,9 +48,11 @@ void* alloc_cpu(size_t nbytes) {
   // We might have clowny upstream code that tries to alloc a negative number
   // of bytes. Let's catch it early.
   CAFFE_ENFORCE(
-    ((ptrdiff_t)nbytes) >= 0,
-    "alloc_cpu() seems to have been called with negative number: ", nbytes);
+      ((ptrdiff_t)nbytes) >= 0,
+      "alloc_cpu() seems to have been called with negative number: ",
+      nbytes);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* data;
 #ifdef __ANDROID__
   data = memalign(gAlignment, nbytes);
@@ -71,14 +76,14 @@ void* alloc_cpu(size_t nbytes) {
       data,
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
       nbytes,
-      " bytes. Buy new RAM!");
+      " bytes.");
 
   // move data to a thread's NUMA node
   NUMAMove(data, nbytes, GetCurrentNUMANode());
   CHECK(
       !FLAGS_caffe2_cpu_allocator_do_zero_fill ||
       !FLAGS_caffe2_cpu_allocator_do_junk_fill)
-    << "Cannot request both zero-fill and junk-fill at the same time";
+      << "Cannot request both zero-fill and junk-fill at the same time";
   if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
     memset(data, 0, nbytes);
   } else if (FLAGS_caffe2_cpu_allocator_do_junk_fill) {
@@ -92,12 +97,15 @@ void free_cpu(void* data) {
 #ifdef _MSC_VER
   _aligned_free(data);
 #else
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(data);
 #endif
 }
 
 struct C10_API DefaultCPUAllocator final : at::Allocator {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   DefaultCPUAllocator() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~DefaultCPUAllocator() override {}
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = alloc_cpu(nbytes);
@@ -148,6 +156,7 @@ template <uint32_t PreGuardBytes, uint32_t PostGuardBytes>
 class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
   DefaultMobileCPUAllocator() = default;
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~DefaultMobileCPUAllocator() override = default;
 
   static void deleter(void* const pointer) {
@@ -166,6 +175,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
       c10::free_cpu(pointer);
       // This adds extra cost to freeing memory to the default case when
       // caching allocator is not enabled.
+      // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
       CPUCachingAllocator::record_free(pointer);
       auto allocation_planner = GetThreadLocalAllocationPlanner();
       if (allocation_planner != nullptr) {
@@ -174,6 +184,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
   }
 
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual DataPtr allocate(const size_t nbytes) const override {
     if (C10_UNLIKELY(0u == nbytes)) {
       return {
@@ -185,6 +196,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
 
     auto alloc_size = PreGuardBytes + nbytes + PostGuardBytes;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     void* data;
     auto allocator_ptr = GetThreadLocalCachingAllocator();
     auto profiling_allocator_ptr = GetThreadLocalProfilingAllocator();
@@ -208,6 +220,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     };
   }
 
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
   virtual DeleterFnPtr raw_deleter() const override {
     return deleter;
   }
@@ -231,6 +244,7 @@ void SetCPUAllocator(at::Allocator* alloc, uint8_t priority) {
 //            returned to the user.
 // Post-guard: 16 bytes for XNNPACK.
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-non-const-global-variables)
 static DefaultMobileCPUAllocator<gAlignment, 16u> g_mobile_cpu_allocator;
 
 at::Allocator* GetDefaultMobileCPUAllocator() {
@@ -248,12 +262,14 @@ REGISTER_ALLOCATOR(DeviceType::CPU, &g_mobile_cpu_allocator);
 #else
 
 // Global default CPU Allocator
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static DefaultCPUAllocator g_cpu_alloc;
 
 at::Allocator* GetDefaultCPUAllocator() {
   return &g_cpu_alloc;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
 
 #endif /* C10_Mobile */
@@ -291,18 +307,44 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
       allocated = allocated_;
       nbytes = it->second;
       size_table_.erase(it);
+    } else {
+      C10_LOG_EVERY_MS(WARNING, 1000)
+          << "Memory block of unknown size was allocated before the profiling started, "
+          << "profiler results will not include the deallocation event";
     }
   }
   if (nbytes == 0) {
     return;
   }
   if (FLAGS_caffe2_report_cpu_memory_usage) {
-    LOG(INFO) << "C10 deleted " << nbytes << " bytes, total alloc "
-              << allocated << " bytes.";
+    LOG(INFO) << "C10 deleted " << nbytes << " bytes, total alloc " << allocated
+              << " bytes.";
   }
   if (profile_memory) {
-    reportMemoryUsageToProfiler(ptr, -nbytes, c10::Device(c10::DeviceType::CPU));
+    reportMemoryUsageToProfiler(
+        ptr, -nbytes, c10::Device(c10::DeviceType::CPU));
   }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_API at::Allocator* cpu_caching_alloc = nullptr;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_API uint8_t cpu_caching_alloc_priority = 0;
+
+void SetCPUCachingAllocator(Allocator* alloc, uint8_t priority) {
+  if (priority >= cpu_caching_alloc_priority) {
+    cpu_caching_alloc = alloc;
+    cpu_caching_alloc_priority = priority;
+  }
+}
+
+Allocator* GetCPUCachingAllocator() {
+  if (cpu_caching_alloc == nullptr) {
+    VLOG(1)
+        << "There is not caching allocator registered for CPU, use the default allocator instead.";
+    return GetAllocator(DeviceType::CPU);
+  }
+  return cpu_caching_alloc;
 }
 
 } // namespace c10

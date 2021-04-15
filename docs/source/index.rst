@@ -58,16 +58,24 @@ Features described in this documentation are classified by release status:
    torch.cuda.amp <amp>
    torch.backends <backends>
    torch.distributed <distributed>
+   torch.distributed.optim <distributed.optim>
    torch.distributions <distributions>
    torch.fft <fft>
    futures
+   fx
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
+   torch.special <special>
+   torch.overrides
+   torch.package <package>
+   profiler
    nn.init
    onnx
    optim
    complex_numbers
+   ddp_comm_hooks
+   pipeline
    quantization
    rpc
    torch.random <random>
@@ -92,8 +100,8 @@ Features described in this documentation are classified by release status:
    :caption: Libraries
 
    torchaudio <https://pytorch.org/audio/stable>
-   torchtext <https://pytorch.org/text>
-   torchvision <https://pytorch.org/vision>
+   torchtext <https://pytorch.org/text/stable>
+   torchvision <https://pytorch.org/vision/stable>
    TorchElastic <https://pytorch.org/elastic/>
    TorchServe <https://pytorch.org/serve>
    PyTorch on XLA Devices <http://pytorch.org/xla/>

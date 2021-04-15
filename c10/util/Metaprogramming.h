@@ -50,6 +50,27 @@ template <typename T>
 using infer_function_traits_t = typename infer_function_traits<T>::type;
 
 /**
+ * make_function_traits: creates a `function_traits` type given a Return type
+ * and a typelist of Argument types
+ *
+ * Example:
+ * bool f(int, int);
+ *
+ * infer_function_traits_t<f> == make_function_traits_t<bool, typelist::typelist<int, int>>
+ */
+template <typename Result, typename ArgList> struct make_function_traits {
+  static_assert(false_t<ArgList>::value, "In guts::make_function_traits<Result, TypeList>, the ArgList argument must be typelist<...>.");
+};
+
+template <typename Result, typename... Args>
+struct make_function_traits<Result, typelist::typelist<Args...>> {
+  using type = function_traits<Result(Args...)>;
+};
+
+template <typename Result, typename ArgList>
+using make_function_traits_t = typename make_function_traits<Result, ArgList>::type;
+
+/**
  * Use extract_arg_by_filtered_index to return the i-th argument whose
  * type fulfills a given type trait. The argument itself is perfectly forwarded.
  *
@@ -307,6 +328,31 @@ template<class... Tuples>
     constexpr size_t num_elements = guts::typelist::size<flattened_types>::value;
     return detail::tuple_concat<concatenated_tuple, Tuples...>(std::forward<Tuples>(tuples)..., std::make_index_sequence<num_elements>());
   }
+
+
+/**
+ * Concatenate multiple integer sequences
+ * Example:
+ *   concat_iseq_t<std::index_sequence<2, 5, 3>, std::index_sequence<4, 2>, std::index_sequence<5>>
+ *     == std::index_sequence<2, 5, 3, 4, 2, 5>
+ */
+template<class... ISeqs> struct concat_iseq {
+  static_assert(false_t<ISeqs...>::value, "In concat_iseq<T1, ...>, the T arguments each must be std::integer_sequence<...> with the same IntType.");
+};
+template<>
+struct concat_iseq<> {
+  using type = std::index_sequence<>;
+};
+template<class IntType, IntType... Indices>
+struct concat_iseq<std::integer_sequence<IntType, Indices...>> {
+  using type = std::integer_sequence<IntType, Indices...>;
+};
+template<class IntType, IntType... Head1Indices, IntType... Head2Indices, class... TailISeqs>
+struct concat_iseq<std::integer_sequence<IntType, Head1Indices...>, std::integer_sequence<IntType, Head2Indices...>, TailISeqs...> {
+    using type = typename concat_iseq<std::integer_sequence<IntType, Head1Indices..., Head2Indices...>, TailISeqs...>::type;
+};
+template<class... ISeqs>
+using concat_iseq_t = typename concat_iseq<ISeqs...>::type;
 
 
 }}

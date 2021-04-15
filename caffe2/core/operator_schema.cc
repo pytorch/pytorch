@@ -1,6 +1,8 @@
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/logging.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 OpSchema::OpSchema(const string& type, const string& file, const int line)
@@ -256,7 +258,7 @@ OpSchema& OpSchema::IdenticalTypeAndShapeOfMultipleInputs(
   return TensorInferenceFunction(
       [indices](const OperatorDef&, const vector<TensorShape>& input_types) {
         vector<TensorShape> out(indices.size());
-        for (int i = 0; i < indices.size(); i++) {
+        for (const auto i : c10::irange(indices.size())) {
           out[i] = input_types[indices.at(i)];
         }
         return out;
@@ -307,8 +309,8 @@ OpSchema::Arg(const char* name, const char* description, bool required) {
 }
 
 #define DEFINE_STANDARG_ARG(name, str)                                \
-  CAFFE2_API const char* OpSchema::Arg_##name = #str;                 \
-  CAFFE2_API OpSchema& OpSchema::Arg##name(const char* description) { \
+  TORCH_API const char* OpSchema::Arg_##name = #str;                 \
+  TORCH_API OpSchema& OpSchema::Arg##name(const char* description) { \
     return Arg(#str, description, true);                              \
   }
 

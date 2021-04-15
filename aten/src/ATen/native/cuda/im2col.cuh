@@ -108,7 +108,7 @@ void im2col(
       height_col,
       width_col,
       data_col);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename dt, typename accT>
@@ -208,7 +208,7 @@ void col2im(
           output_height,
           output_width,
           data_im);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // namespace native

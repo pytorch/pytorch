@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/builtin_functions.h>
+
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/resolver.h>
@@ -65,6 +66,8 @@ def list_with_default(out_size: List[int], defaults: List[int]):
   return out_size
 def _assert(condition : bool, message : str):
   assert condition, message
+def type(self: Tensor, dtype: int, non_blocking: bool=False, copy: bool=False) -> Tensor:
+  return self.to(dtype, non_blocking, copy)
 )SCRIPT";
 
 // an additional overload for Tensor variant of _assert
@@ -72,6 +75,8 @@ const auto aten_ops_additional =
     R"SCRIPT(
 def _assert(condition : Tensor, message : str):
   assert bool(condition), message
+def __contains__(self: str, key: str):
+    return self.find(key, 0, len(self)) != -1
 )SCRIPT";
 
 // Implementations of historic symbol behaviors are defined here
@@ -94,7 +99,7 @@ auto div_tensor = R"SCRIPT(
 def div_0_3(self: Tensor, other: Tensor) -> Tensor:
   if (self.is_floating_point() or other.is_floating_point()):
     return self.true_divide(other)
-  return self.floor_divide(other)
+  return self.divide(other, rounding_mode='trunc')
 )SCRIPT";
 
 // Tensor x Scalar
@@ -102,7 +107,7 @@ auto div_tensor_scalar = R"SCRIPT(
 def div_0_3(self: Tensor, other: number) -> Tensor:
   if (self.is_floating_point() or isinstance(other, float)):
     return self.true_divide(other)
-  return self.floor_divide(other)
+  return self.divide(other, rounding_mode='trunc')
 )SCRIPT";
 
 // Scalar x Scalar
@@ -117,7 +122,7 @@ auto div_tensor_out = R"SCRIPT(
 def div_0_3(self: Tensor, other: Tensor, *, out: Tensor) -> Tensor:
   if (self.is_floating_point() or other.is_floating_point() or out.is_floating_point()):
     return self.true_divide(other, out=out)
-  return self.floor_divide(other, out=out)
+  return self.divide(other, rounding_mode='trunc', out=out)
 )SCRIPT";
 
 // Tensor x Tensor inplace
@@ -125,7 +130,7 @@ auto div__tensor = R"SCRIPT(
 def div__0_3(self: Tensor, other: Tensor) -> Tensor:
   if (self.is_floating_point() or other.is_floating_point()):
     return self.true_divide_(other)
-  return self.floor_divide_(other)
+  return self.divide_(other, rounding_mode='trunc')
 )SCRIPT";
 
 // Tensor x Scalar inplace
@@ -133,7 +138,7 @@ auto div__scalar = R"SCRIPT(
 def div__0_3(self: Tensor, other: number) -> Tensor:
   if (self.is_floating_point() or isinstance(other, float)):
     return self.true_divide_(other)
-  return self.floor_divide_(other)
+  return self.divide_(other, rounding_mode='trunc')
 )SCRIPT";
 
 // NOTE: torch.full would historically infer a float dtype for bool and

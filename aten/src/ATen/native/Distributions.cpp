@@ -118,7 +118,7 @@ DEFINE_DISPATCH(bernoulli_tensor_stub);
 DEFINE_DISPATCH(bernoulli_scalar_stub);
 DEFINE_DISPATCH(cauchy_stub);
 DEFINE_DISPATCH(exponential_stub);
-DEFINE_DISPATCH(multinomial_stub);
+DEFINE_DISPATCH(multinomial_with_replacement_stub);
 DEFINE_DISPATCH(geometric_stub);
 DEFINE_DISPATCH(log_normal_stub);
 DEFINE_DISPATCH(uniform_stub);
@@ -152,7 +152,7 @@ Tensor bernoulli(const Tensor& self, double p, c10::optional<Generator> gen) {
   return result;
 }
 
-Tensor& bernoulli_out(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {
+Tensor& bernoulli_out(const Tensor& self, c10::optional<Generator> gen, Tensor& result) {
   return at::native::templates::bernoulli_out_impl<BernoulliStub, Generator>(result, self, gen);
 }
 
@@ -225,8 +225,19 @@ struct UniformStub {
   }
 };
 
+template<typename RNG>
+struct UniformMeta {
+  // No-op!
+  void operator()(TensorIterator& iter, double from, double to, c10::optional<Generator> gen) {
+  }
+};
+
 Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> gen) {
   return at::native::templates::uniform_impl_<UniformStub, Generator>(self, from, to, gen);
+}
+
+Tensor& uniform_meta_(Tensor& self, double from, double to, c10::optional<Generator> gen) {
+  return at::native::templates::uniform_impl_<UniformMeta, Generator>(self, from, to, gen);
 }
 
 // ==================================================== Normal ========================================================
@@ -242,15 +253,20 @@ Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> 
   return at::native::templates::normal_impl_<NormalStub, Generator>(self, mean, std, gen);
 }
 
-Tensor& normal_out(Tensor& output, const Tensor& mean, double std, c10::optional<Generator> gen) {
+Tensor& normal_meta_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);  // TODO: dedupe
+  return self;
+}
+
+Tensor& normal_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
-Tensor& normal_out(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor& normal_out(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
-Tensor& normal_out(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor& normal_out(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
@@ -289,12 +305,34 @@ struct RandomFromToStub {
   }
 };
 
+template<typename RNG>
+struct RandomFromToMeta {
+  // No-op!
+  void operator()(TensorIterator& iter, uint64_t range, int64_t from, c10::optional<Generator> gen) {
+  }
+  void operator()(TensorIterator& iter, c10::optional<Generator> gen) {
+  }
+};
+
 Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> gen) {
   return at::native::templates::random_from_to_impl<RandomFromToStub, Generator>(self, from, to, gen);
 }
 
 Tensor& random_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
   return random_(self, 0, to, gen);
+}
+
+Tensor& random_meta_(Tensor& self, c10::optional<Generator> gen) {
+  // No error checking yay
+  return self;
+}
+
+Tensor& random_meta_(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> gen) {
+  return at::native::templates::random_from_to_impl<RandomFromToMeta, Generator>(self, from, to, gen);
+}
+
+Tensor& random_meta_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
+  return random_meta_(self, 0, to, gen);
 }
 
 // ====================================================================================================================
@@ -456,12 +494,11 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, c10::optional<Generator> gen) {
 /* The largest consecutive integer representable in float32 (2^24) */
 constexpr int64_t FLOAT32_MAX_CONSECUTIVE_INT = 1 << (FLT_MANT_DIG);
 
-Tensor& multinomial_out(
-    Tensor& result,
-    const Tensor& self,
+Tensor& multinomial_out(const Tensor& self,
     int64_t n_sample,
     bool with_replacement,
-    c10::optional<Generator> gen) {
+    c10::optional<Generator> gen,
+    Tensor& result) {
   TORCH_CHECK(
       result.device() == self.device(),
       "multinomial arguments must have the same device");
@@ -497,8 +534,10 @@ Tensor& multinomial_out(
   // Reference:
   // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
   // Half is not supported on CPU.
-  if (!with_replacement &&
-      !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half)) {
+  TORCH_CHECK(
+      !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half),
+      "multinomial is not implemented for half on CPU");
+  if (!with_replacement) {
     // Sanity checks on `self`.
     auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
     TORCH_CHECK(
@@ -537,13 +576,8 @@ Tensor& multinomial_out(
     return result;
   }
 
-  multinomial_stub(
-      result.device().type(),
-      result,
-      self,
-      n_sample,
-      with_replacement,
-      gen);
+  multinomial_with_replacement_stub(
+      result.device().type(), result, self, n_sample, gen);
   return result;
 }
 
@@ -553,7 +587,7 @@ Tensor multinomial(
     bool with_replacement,
     c10::optional<Generator> gen) {
   Tensor result = at::empty({0}, self.options().dtype(kLong));
-  native::multinomial_out(result, self, n_sample, with_replacement, gen);
+  native::multinomial_out(self, n_sample, with_replacement, gen, result);
   return result;
 }
 

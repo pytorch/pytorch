@@ -1,8 +1,8 @@
 import math
 import warnings
 
-import torch
 from torch import Tensor
+import torch
 
 
 # These no_grad_* functions are necessary as wrappers around the parts of these
@@ -77,7 +77,16 @@ def calculate_gain(nonlinearity, param=None):
     Tanh              :math:`\frac{5}{3}`
     ReLU              :math:`\sqrt{2}`
     Leaky Relu        :math:`\sqrt{\frac{2}{1 + \text{negative\_slope}^2}}`
+    SELU              :math:`\frac{3}{4}`
     ================= ====================================================
+
+    .. warning::
+        In order to implement `Self-Normalizing Neural Networks`_ ,
+        you should use ``nonlinearity='linear'`` instead of ``nonlinearity='selu'``.
+        This gives the initial weights a variance of ``1 / N``,
+        which is necessary to induce a stable fixed point in the forward pass.
+        In contrast, the default gain for ``SELU`` sacrifices the normalisation
+        effect for more stable gradient flow in rectangular layers.
 
     Args:
         nonlinearity: the non-linear function (`nn.functional` name)
@@ -85,6 +94,8 @@ def calculate_gain(nonlinearity, param=None):
 
     Examples:
         >>> gain = nn.init.calculate_gain('leaky_relu', 0.2)  # leaky_relu with negative_slope=0.2
+
+    .. _Self-Normalizing Neural Networks: https://papers.nips.cc/paper/2017/hash/5d44ee6f2c3f71b73125876103c8f6c4-Abstract.html
     """
     linear_fns = ['linear', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d', 'conv_transpose2d', 'conv_transpose3d']
     if nonlinearity in linear_fns or nonlinearity == 'sigmoid':
@@ -102,12 +113,13 @@ def calculate_gain(nonlinearity, param=None):
         else:
             raise ValueError("negative_slope {} not a valid number".format(param))
         return math.sqrt(2.0 / (1 + negative_slope ** 2))
+    elif nonlinearity == 'selu':
+        return 3.0 / 4  # Value found empirically (https://github.com/pytorch/pytorch/pull/50664)
     else:
         raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
 
-def uniform_(tensor, a=0., b=1.):
-    # type: (Tensor, float, float) -> Tensor
+def uniform_(tensor: Tensor, a: float = 0., b: float = 1.) -> Tensor:
     r"""Fills the input Tensor with values drawn from the uniform
     distribution :math:`\mathcal{U}(a, b)`.
 
@@ -123,8 +135,7 @@ def uniform_(tensor, a=0., b=1.):
     return _no_grad_uniform_(tensor, a, b)
 
 
-def normal_(tensor, mean=0., std=1.):
-    # type: (Tensor, float, float) -> Tensor
+def normal_(tensor: Tensor, mean: float = 0., std: float = 1.) -> Tensor:
     r"""Fills the input Tensor with values drawn from the normal
     distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
 
@@ -139,8 +150,7 @@ def normal_(tensor, mean=0., std=1.):
     """
     return _no_grad_normal_(tensor, mean, std)
 
-def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
-    # type: (Tensor, float, float, float, float) -> Tensor
+def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = -2., b: float = 2.) -> Tensor:
     r"""Fills the input Tensor with values drawn from a truncated
     normal distribution. The values are effectively drawn from the
     normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
@@ -162,8 +172,7 @@ def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
     return _no_grad_trunc_normal_(tensor, mean, std, a, b)
 
 
-def constant_(tensor, val):
-    # type: (Tensor, float) -> Tensor
+def constant_(tensor: Tensor, val: float) -> Tensor:
     r"""Fills the input Tensor with the value :math:`\text{val}`.
 
     Args:
@@ -177,8 +186,7 @@ def constant_(tensor, val):
     return _no_grad_fill_(tensor, val)
 
 
-def ones_(tensor):
-    # type: (Tensor) -> Tensor
+def ones_(tensor: Tensor) -> Tensor:
     r"""Fills the input Tensor with the scalar value `1`.
 
     Args:
@@ -191,8 +199,7 @@ def ones_(tensor):
     return _no_grad_fill_(tensor, 1.)
 
 
-def zeros_(tensor):
-    # type: (Tensor) -> Tensor
+def zeros_(tensor: Tensor) -> Tensor:
     r"""Fills the input Tensor with the scalar value `0`.
 
     Args:
@@ -277,15 +284,17 @@ def _calculate_fan_in_and_fan_out(tensor):
     num_output_fmaps = tensor.size(0)
     receptive_field_size = 1
     if tensor.dim() > 2:
-        receptive_field_size = tensor[0][0].numel()
+        # math.prod is not always available, accumulate the product manually
+        # we could use functools.reduce but that is not supported by TorchScript
+        for s in tensor.shape[2:]:
+            receptive_field_size *= s
     fan_in = num_input_fmaps * receptive_field_size
     fan_out = num_output_fmaps * receptive_field_size
 
     return fan_in, fan_out
 
 
-def xavier_uniform_(tensor, gain=1.):
-    # type: (Tensor, float) -> Tensor
+def xavier_uniform_(tensor: Tensor, gain: float = 1.) -> Tensor:
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010), using a uniform
@@ -312,8 +321,7 @@ def xavier_uniform_(tensor, gain=1.):
     return _no_grad_uniform_(tensor, -a, a)
 
 
-def xavier_normal_(tensor, gain=1.):
-    # type: (Tensor, float) -> Tensor
+def xavier_normal_(tensor: Tensor, gain: float = 1.) -> Tensor:
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010), using a normal

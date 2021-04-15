@@ -37,38 +37,17 @@
 #include <THC/generic/THCTensorMathReduce.h>
 #include <THC/THCGenerateBFloat16Type.h>
 
-#include <THC/generic/THCTensorMasked.h>
-#include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCTensorMasked.h>
-#include <THC/THCGenerateBoolType.h>
-
 #include <THC/generic/THCTensorScatterGather.h>
 #include <THC/THCGenerateAllTypes.h>
 
 #include <THC/generic/THCTensorScatterGather.h>
 #include <THC/THCGenerateBoolType.h>
 
-#include <THC/generic/THCTensorIndex.h>
-#include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCTensorIndex.h>
-#include <THC/THCGenerateBoolType.h>
-
-#include <THC/generic/THCTensorIndex.h>
-#include <THC/THCGenerateBFloat16Type.h>
-
-#include <THC/generic/THCTensorMasked.h>
-#include <THC/THCGenerateBFloat16Type.h>
-
 #include <THC/generic/THCTensorSort.h>
 #include <THC/THCGenerateAllTypes.h>
 
 #include <THC/generic/THCTensorSort.h>
 #include <THC/THCGenerateBFloat16Type.h>
-
-#include <THC/generic/THCTensorMode.h>
-#include <THC/THCGenerateAllTypes.h>
 
 #include <THC/generic/THCTensorTopK.h>
 #include <THC/THCGenerateAllTypes.h>

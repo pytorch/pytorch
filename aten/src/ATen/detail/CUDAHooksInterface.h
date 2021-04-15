@@ -67,7 +67,7 @@ constexpr const char* CUDA_HELP =
 // TODO: Consider putting the stub definitions in another class, so that one
 // never forgets to implement each virtual function in the real implementation
 // in CUDAHooks.  This probably doesn't buy us much though.
-struct CAFFE2_API CUDAHooksInterface {
+struct TORCH_API CUDAHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~CUDAHooksInterface() {}
@@ -181,17 +181,21 @@ struct CAFFE2_API CUDAHooksInterface {
   virtual int getNumGPUs() const {
     return 0;
   }
+
+  virtual void deviceSynchronize(int64_t device_index) const {
+    TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);
+  }
 };
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
 // for the "..." in a variadic macro"
-struct CAFFE2_API CUDAHooksArgs {};
+struct TORCH_API CUDAHooksArgs {};
 
 C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 #define REGISTER_CUDA_HOOKS(clsname) \
   C10_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
 namespace detail {
-CAFFE2_API const CUDAHooksInterface& getCUDAHooks();
+TORCH_API const CUDAHooksInterface& getCUDAHooks();
 } // namespace detail
 } // namespace at

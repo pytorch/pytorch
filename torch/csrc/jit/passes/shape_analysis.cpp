@@ -67,8 +67,9 @@ bool containsTensorType(const TypePtr& t) {
 
 class ShapePropagator {
  public:
-  explicit ShapePropagator(std::shared_ptr<Graph> graph) : aliasDb_(graph) {
-    collectResizeSet(std::move(graph)->block());
+  explicit ShapePropagator(const std::shared_ptr<Graph>& graph)
+      : aliasDb_(graph) {
+    collectResizeSet(graph->block());
   }
 
   void PropagateShapeOnBlock(Block* block, bool insert_expands = true) {
@@ -882,7 +883,7 @@ class ShapePropagator {
             "aten::trunc(Tensor self) -> Tensor",
             "aten::rot90(Tensor self, int k, int[] dims) -> Tensor",
             "aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
-            "aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor",
+            "aten::slice(Tensor self, int dim, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor",
             "aten::alias(Tensor self) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
@@ -1269,9 +1270,10 @@ class ShapePropagator {
                       type->withScalarType(maybe_dtype_option->toScalarType())};
                 }
                 if (type->scalarType()) {
-                  return {at::isFloatingType(*type->scalarType())
-                              ? type
-                              : type->withScalarType(at::kLong)};
+                  return {
+                      at::isFloatingType(*type->scalarType())
+                          ? type
+                          : type->withScalarType(at::kLong)};
                 } else {
                   return {type};
                 }
@@ -2108,12 +2110,12 @@ class ShapePropagator {
             "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
             /*const_inputs=*/attr::size)) {
       auto tp = tensor_types.at(0);
-      std::vector<int64_t> sizes, strides;
-      std::tie(sizes, strides) = at::inferExpandGeometry(
+      auto sizesAndStrides = at::inferExpandGeometry_dimvector(
           tp->sizes().concrete_sizes().value(),
           tp->strides().concrete_sizes().value(),
           node->get<c10::List<int64_t>>(attr::size).value().vec());
-      node->output()->setType(tp->withSizesStrides(sizes, strides));
+      node->output()->setType(tp->withSizesStrides(
+          std::get<0>(sizesAndStrides), std::get<1>(sizesAndStrides)));
       return true;
     } else if (
         node->matches(
@@ -2170,29 +2172,69 @@ void PropagateInputShapes(const std::shared_ptr<Graph>& graph) {
 
 namespace {
 
-void EraseShapeInformation(at::ArrayRef<Value*> vals) {
+using TypeCache = std::unordered_map<TypePtr, TypePtr>;
+
+TypePtr getOrCreateUnshapedType(TypePtr type, TypeCache& unshaped_type_cache);
+
+TypePtr unshapedTypeImpl(TypePtr type, TypeCache& unshaped_type_cache) {
+  if (type->isSubtypeOf(TensorType::get())) {
+    return TensorType::get();
+  }
+  std::vector<TypePtr> unshaped_contained_types;
+  for (const auto& contained_type : type->containedTypes()) {
+    unshaped_contained_types.push_back(
+        getOrCreateUnshapedType(contained_type, unshaped_type_cache));
+  }
+  return type->withContained(unshaped_contained_types);
+}
+
+TypePtr getOrCreateUnshapedType(TypePtr type, TypeCache& unshaped_type_cache) {
+  auto maybe_cached_type = unshaped_type_cache.find(type);
+  if (maybe_cached_type != unshaped_type_cache.end()) {
+    return maybe_cached_type->second;
+  }
+  auto unshaped_type = unshapedTypeImpl(type, unshaped_type_cache);
+  unshaped_type_cache[type] = unshaped_type;
+  return unshaped_type;
+}
+
+void EraseShapeInformation(
+    const std::shared_ptr<Graph>& graph,
+    TypeCache& unshaped_type_cache);
+
+void EraseShapeInformation(
+    at::ArrayRef<Value*> vals,
+    TypeCache& unshaped_type_cache) {
   for (Value* v : vals) {
-    v->setType(unshapedType(v->type()));
+    v->setType(getOrCreateUnshapedType(v->type(), unshaped_type_cache));
   }
 }
 
-void EraseShapeInformation(Block* b) {
-  EraseShapeInformation(b->inputs());
-  EraseShapeInformation(b->outputs());
+void EraseShapeInformation(Block* b, TypeCache& unshaped_type_cache) {
+  EraseShapeInformation(b->inputs(), unshaped_type_cache);
+  EraseShapeInformation(b->outputs(), unshaped_type_cache);
   for (Node* n : b->nodes()) {
-    EraseShapeInformation(n->outputs());
+    EraseShapeInformation(n->outputs(), unshaped_type_cache);
     for (Block* sb : n->blocks()) {
-      EraseShapeInformation(sb);
+      EraseShapeInformation(sb, unshaped_type_cache);
     }
     if (n->hasAttribute(attr::Subgraph)) {
-      EraseShapeInformation(n->g(attr::Subgraph));
+      EraseShapeInformation(n->g(attr::Subgraph), unshaped_type_cache);
     }
   }
 }
+
+void EraseShapeInformation(
+    const std::shared_ptr<Graph>& graph,
+    TypeCache& unshaped_type_cache) {
+  EraseShapeInformation(graph->block(), unshaped_type_cache);
+}
+
 } // anonymous namespace
 
 void EraseShapeInformation(const std::shared_ptr<Graph>& graph) {
-  EraseShapeInformation(graph->block());
+  TypeCache unshaped_type_cache;
+  EraseShapeInformation(graph->block(), unshaped_type_cache);
 }
 } // namespace jit
 } // namespace torch

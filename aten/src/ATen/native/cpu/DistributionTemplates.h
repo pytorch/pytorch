@@ -112,7 +112,7 @@ void normal_fill_AVX2(Tensor& self, const float mean, const float std, RNG gener
     at::uniform_real_distribution<float> uniform(0, 1);
     data[i] = uniform(generator);
   }
-  const __m256 two_pi = _mm256_set1_ps(2.0f * M_PI);
+  const __m256 two_pi = _mm256_set1_ps(2.0f * c10::pi<double>);
   const __m256 one = _mm256_set1_ps(1.0f);
   const __m256 minus_two = _mm256_set1_ps(-2.0f);
   const __m256 mean_v = _mm256_set1_ps(mean);
@@ -140,7 +140,7 @@ static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t s
     const scalar_t u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
     const scalar_t u2 = data[j + 8];
     const scalar_t radius = std::sqrt(-2 * std::log(u1));
-    const scalar_t theta = 2.0f * M_PI * u2;
+    const scalar_t theta = 2.0f * c10::pi<double> * u2;
     data[j] = radius * std::cos(theta) * std + mean;
     data[j + 8] = radius * std::sin(theta) * std + mean;
   }
@@ -312,10 +312,11 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
-    auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
+    auto p_cpu = p_.to(kCPU);
+    c10::MaybeOwned<Tensor> p = expand_inplace(self, p_cpu);
     auto iter = TensorIteratorConfig()
         .add_output(self)
-        .add_input(p)
+        .add_input(*p)
         .check_all_same_dtype(false)
         .build();
     if (p_.scalar_type() == kDouble) {

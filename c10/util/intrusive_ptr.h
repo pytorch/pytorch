@@ -2,6 +2,7 @@
 
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
+#include <c10/util/MaybeOwned.h>
 #include <atomic>
 #include <stdexcept>
 
@@ -206,7 +207,7 @@ class intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_same<TTarget*, decltype(NullType::singleton())>::value,
+      std::is_base_of<TTarget, typename std::remove_pointer<decltype(NullType::singleton())>::type>::value,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -238,6 +239,7 @@ class intrusive_ptr final {
     if (target_ != NullType::singleton() && detail::atomic_refcount_decrement(target_->refcount_) == 0) {
       // justification for const_cast: release_resources is basically a destructor
       // and a destructor always mutates the object, even for const objects.
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
       const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
 
       // See comment above about weakcount. As long as refcount>0,
@@ -493,6 +495,37 @@ inline bool operator!=(
   return !operator==(lhs, rhs);
 }
 
+template <typename T>
+struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
+  using owned_type = c10::intrusive_ptr<T>;
+  using borrow_type = c10::intrusive_ptr<T>;
+
+  static borrow_type createBorrow(const owned_type& from) {
+    return borrow_type::reclaim(from.get());
+  }
+
+  static void assignBorrow(borrow_type& lhs, const borrow_type& rhs) {
+    lhs.release();
+    lhs = borrow_type::reclaim(rhs.get());
+  }
+
+  static void destroyBorrow(borrow_type& toDestroy) {
+    toDestroy.release();
+  }
+
+  static const owned_type& referenceFromBorrow(const borrow_type& borrow) {
+    return borrow;
+  }
+
+  static const owned_type* pointerFromBorrow(const borrow_type& borrow) {
+    return &borrow;
+  }
+
+  static bool debugBorrowIsValid(const borrow_type& borrow) {
+    return true;
+  }
+};
+
 template <
     typename TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>>
@@ -509,7 +542,7 @@ class weak_intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_same<TTarget*, decltype(NullType::singleton())>::value,
+      std::is_base_of<TTarget, typename std::remove_pointer<decltype(NullType::singleton())>::type>::value,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -528,6 +561,7 @@ class weak_intrusive_ptr final {
 
   void reset_() noexcept {
     if (target_ != NullType::singleton() && detail::atomic_weakcount_decrement(target_->weakcount_) == 0) {
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
       delete target_;
     }
     target_ = NullType::singleton();
@@ -700,7 +734,7 @@ class weak_intrusive_ptr final {
   /**
    * Takes an owning (but must be weakly referenced) pointer to TTarget* and
    * creates a weak_intrusive_ptr that takes over ownership.
-   * Thas means the weakcount is not increased.
+   * This means that the weakcount is not increased.
    * This is the counter-part to weak_intrusive_ptr::release() and the pointer
    * passed in *must* have been created using weak_intrusive_ptr::release().
    */

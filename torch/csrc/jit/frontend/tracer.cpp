@@ -10,6 +10,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -103,6 +104,9 @@ void TracingState::delValue(const IValue& var) {
 Value* getValueTrace(const IValue& var) {
   return getTracingState()->getValue(var);
 }
+Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
+  return getValueTrace(IValue(var));
+}
 Value* TracingState::getValue(const IValue& var) {
   // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...]
   // arguments
@@ -134,7 +138,7 @@ Value* TracingState::getValue(const IValue& var) {
     return graph->insertNode(dict_node)->output();
   }
   if (var.isTensor()) {
-    auto ten = var.toTensor();
+    auto& ten = var.toTensor();
     if (!ten.defined()) {
       Node* n = graph->createNone();
       return graph->insertNode(n)->output();
@@ -234,7 +238,7 @@ bool TracingState::hasValue(const IValue& var) const {
 Value* TracingState::getOutput(const IValue& iv, size_t i) {
   bool tracing_mode_strict = getTracingState()->strict;
   if (iv.isTensor()) {
-    at::Tensor var = iv.toTensor();
+    const at::Tensor& var = iv.toTensor();
     if (!var.defined()) {
       Node* n = graph->createNone();
       return graph->insertNode(n)->output();
@@ -284,11 +288,23 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
         key_type->isSubtypeOf(TensorType::get());
     bool value_type_valid = value_type->isSubtypeOf(TensorType::get());
 
+    // Support tuple values that contain only tensors
+    if (value_type->isSubtypeOf(AnyTupleType::get())) {
+      value_type_valid = true;
+      for (const auto& type : value_type->containedTypes()) {
+        if (!type->isSubtypeOf(TensorType::get())) {
+          value_type_valid = false;
+          break;
+        }
+      }
+    }
+
     if (!key_type_valid || !value_type_valid) {
       std::ostringstream os;
       os << "output " << i << " (" << dict << ") of traced region "
-         << "cannot be understood by the tracer, only dict[str, Tensor] "
-         << "or dict[Tensor, Tensor] can be a dictionary output of a traced function";
+         << "cannot be understood by the tracer, only outputs matching"
+         << "dict[Union[str, Tensor], Union[Tensor, Tuple[Tensor, ...]]] "
+         << "can be a dictionary output of a traced function";
       throw std::runtime_error(os.str());
     }
     std::vector<Value*> keys;
@@ -319,7 +335,9 @@ static IValue addInput(
     if (state->hasValue(input)) {
       input_tensor = input_tensor.view(input_tensor.sizes());
     }
-    value->setDebugName(name);
+    if (!value->hasDebugName()) {
+      value->setDebugName(name);
+    }
     state->setValue(input_tensor, value);
     return input_tensor;
   } else if (auto tuple_type = type->cast<TupleType>()) {
@@ -412,7 +430,14 @@ static void gatherParametersAndBuffers(
     if (isCustomClass(s.value)) {
       tracer::setValueTrace(s.value, trace_get_attr);
     }
-    if (self_ty->getAttribute(s.name)->is_module()) {
+
+    auto attr_type = self_ty->getAttribute(s.name);
+    // Skipping Parameters and Buffers that are behind an `InterfaceType`
+    // because it is illegal for InterfaceType to expose any attribute.
+    // And these attributes should never be used/exposed outside of
+    // InterfaceType'd module anyway.
+    if (attr_type->is_module() &&
+        attr_type->kind() != TypeKind::InterfaceType) {
       gatherParametersAndBuffers(
           state, trace_get_attr, Module(s.value.toObject()), qualname);
     }
@@ -425,7 +450,8 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     std::function<std::string(const Variable&)> var_name_lookup_fn,
     bool strict,
     bool force_outplace,
-    Module* self) {
+    Module* self,
+    const std::vector<std::string>& argument_names) {
   try {
     // Start tracing, treating 'inputs' as inputs to the trace, which can be
     // varied on subsequent invocations of the trace.  Any other variables
@@ -444,9 +470,26 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
       gatherParametersAndBuffers(state, self_value, *self, {"__module"});
     }
 
-    for (IValue& input : inputs) {
-      input = addInput(state, input, input.type(), state->graph->addInput());
+    // When enough argument name hints are provided, use them as debug names
+    // for traced function/modules.
+    // Here argument_names is allowed to have more names than needed because
+    // some arguments may have valid default values, therefore they don't need
+    // example inputs.
+    if (argument_names.size() >= inputs.size()) {
+      for (size_t i = 0, e = inputs.size(); i < e; ++i) {
+        IValue& input = inputs[i];
+        input = addInput(
+            state,
+            input,
+            input.type(),
+            state->graph->addInput(argument_names[i]));
+      }
+    } else {
+      for (IValue& input : inputs) {
+        input = addInput(state, input, input.type(), state->graph->addInput());
+      }
     }
+
     auto graph = state->graph;
 
     getTracingState()->lookup_var_name_fn = std::move(var_name_lookup_fn);
@@ -491,7 +534,7 @@ void setValueTrace(const IValue& v, Value* value) {
 }
 void TracingState::setValue(const IValue& v, Value* value) {
   if (v.isTensor()) {
-    auto var = v.toTensor();
+    auto& var = v.toTensor();
     AT_ASSERT(var.defined());
     env_stack.back()[v] = value;
   } else if (v.isTensorList()) {
@@ -547,7 +590,11 @@ void addInputs(Node* n, const char* name, int64_t value) {
 }
 
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
-  if (value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else if (value) {
     detail::genericAddInput(n, *value);
   } else {
     Graph* g = n->owningGraph();
@@ -672,6 +719,16 @@ void addInputs(
     list_node = g->insertNode(
         g->createList(TensorType::get(), fmap(value, getValueTrace)));
   }
+  n->addInput(list_node->output());
+}
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const List<c10::optional<at::Tensor>>& value) {
+  Graph* g = n->owningGraph();
+  Node* list_node = nullptr;
+  list_node = g->insertNode(g->createList(
+      OptionalType::ofTensor(), fmap(value, getOptTensorValueTrace)));
   n->addInput(list_node->output());
 }
 

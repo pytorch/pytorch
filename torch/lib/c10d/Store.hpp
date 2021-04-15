@@ -28,6 +28,13 @@ class Store : public torch::CustomClassHolder {
       const std::string& key,
       const std::vector<uint8_t>& value) = 0;
 
+  virtual std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& currentValue,
+      const std::vector<uint8_t>& newValue) {
+    TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+  }
+
   virtual std::vector<uint8_t> get(const std::string& key) = 0;
 
   virtual int64_t add(const std::string& key, int64_t value) = 0;
@@ -44,7 +51,25 @@ class Store : public torch::CustomClassHolder {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) = 0;
 
-  void setTimeout(const std::chrono::milliseconds& timeout);
+  virtual const std::chrono::milliseconds& getTimeout() const noexcept;
+
+  virtual void setTimeout(const std::chrono::milliseconds& timeout);
+
+  // watchKey() takes two arguments: key and callback function. The callback
+  // should be run whenever the key is changed (create, update, or delete). The
+  // callback function takes two parameters: currentValue and newValue, which
+  // are optional depending on how the key is changed. These key updates should
+  // trigger the callback as follows:
+  // CREATE: callback(c10::nullopt, newValue) // null currentValue
+  // UPDATE: callback(currentValue, newValue)
+  // DELETE: callback(currentValue, c10::nullopt) // null newValue
+  virtual void watchKey(
+      const std::string& /* unused */,
+      std::function<void(
+          c10::optional<std::string>,
+          c10::optional<std::string>)> /* unused */) {
+    TORCH_INTERNAL_ASSERT(false, "watchKey only implemented for TCPStore.");
+  }
 
  protected:
   std::chrono::milliseconds timeout_;

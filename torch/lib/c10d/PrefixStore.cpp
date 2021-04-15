@@ -27,6 +27,13 @@ void PrefixStore::set(
   store_->set(joinKey(key), value);
 }
 
+std::vector<uint8_t> PrefixStore::compareSet(
+    const std::string& key,
+    const std::vector<uint8_t>& currentValue,
+    const std::vector<uint8_t>& newValue) {
+  return store_->compareSet(joinKey(key), currentValue, newValue);
+}
+
 std::vector<uint8_t> PrefixStore::get(const std::string& key) {
   return store_->get(joinKey(key));
 }
@@ -37,6 +44,13 @@ int64_t PrefixStore::add(const std::string& key, int64_t value) {
 
 bool PrefixStore::deleteKey(const std::string& key) {
   return store_->deleteKey(joinKey(key));
+}
+
+void PrefixStore::watchKey(
+    const std::string& key,
+    std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
+        callback) {
+  return store_->watchKey(joinKey(key), callback);
 }
 
 int64_t PrefixStore::getNumKeys() {
@@ -58,6 +72,14 @@ void PrefixStore::wait(
     const std::chrono::milliseconds& timeout) {
   auto joinedKeys = joinKeys(keys);
   store_->wait(joinedKeys, timeout);
+}
+
+const std::chrono::milliseconds& PrefixStore::getTimeout() const noexcept {
+  return store_->getTimeout();
+}
+
+void PrefixStore::setTimeout(const std::chrono::milliseconds& timeout) {
+  store_->setTimeout(timeout);
 }
 
 } // namespace c10d

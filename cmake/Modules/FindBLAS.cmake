@@ -20,7 +20,7 @@ SET(BLAS_INCLUDE_DIR)
 SET(BLAS_INFO)
 SET(BLAS_F2C)
 
-SET(WITH_BLAS "" CACHE STRING "Blas type [mkl/open/goto/acml/atlas/accelerate/veclib/generic]")
+SET(WITH_BLAS "" CACHE STRING "Blas type [accelerate/acml/atlas/blis/generic/goto/mkl/open/veclib]")
 
 # Old FindBlas
 INCLUDE(CheckCSourceRuns)
@@ -83,7 +83,7 @@ MACRO(Check_Fortran_Libraries LIBRARIES _prefix _name _flags _list)
       check_fortran_function_exists(${_name} ${_prefix}${_combined_name}_WORKS)
     else (CMAKE_Fortran_COMPILER_WORKS)
       check_function_exists("${_name}_" ${_prefix}${_combined_name}_WORKS)
-    endif (CMAKE_Fortran_COMPILER_WORKS)
+    endif(CMAKE_Fortran_COMPILER_WORKS)
     set(CMAKE_REQUIRED_LIBRARIES)
     mark_as_advanced(${_prefix}${_combined_name}_WORKS)
     set(_libraries_work ${${_prefix}${_combined_name}_WORKS})
@@ -105,6 +105,20 @@ if((NOT BLAS_LIBRARIES)
   ENDIF(MKL_FOUND)
 endif()
 
+#BLIS?
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "blis")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "blis")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "blis")
+  endif(BLAS_LIBRARIES)
+endif()
+
 # Apple BLAS library?
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "accelerate")))
@@ -117,20 +131,25 @@ if((NOT BLAS_LIBRARIES)
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "accelerate")
     set(BLAS_IS_ACCELERATE 1)
-  endif (BLAS_LIBRARIES)
+  endif(BLAS_LIBRARIES)
 endif()
 
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "veclib")))
-  check_fortran_libraries(
-    BLAS_LIBRARIES
-    BLAS
-    sgemm
-    ""
-    "vecLib")
-  if (BLAS_LIBRARIES)
-    set(BLAS_INFO "veclib")
-  endif (BLAS_LIBRARIES)
+  FIND_PACKAGE(vecLib)
+  if(vecLib_FOUND)
+    SET(BLAS_INFO "veclib")
+  else()
+    check_fortran_libraries(
+      BLAS_LIBRARIES
+      BLAS
+      sgemm
+      ""
+      "vecLib")
+    if (BLAS_LIBRARIES)
+      set(BLAS_INFO "veclib")
+    endif(BLAS_LIBRARIES)
+  endif()
 endif()
 
 if((NOT BLAS_LIBRARIES)
@@ -182,7 +201,7 @@ if((NOT BLAS_LIBRARIES)
   "goto2;gfortran")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "goto")
-  endif (BLAS_LIBRARIES)
+  endif(BLAS_LIBRARIES)
 endif()
 
 if((NOT BLAS_LIBRARIES)
@@ -195,7 +214,7 @@ if((NOT BLAS_LIBRARIES)
   "goto2;gfortran;pthread")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "goto")
-  endif (BLAS_LIBRARIES)
+  endif(BLAS_LIBRARIES)
 endif()
 
 if((NOT BLAS_LIBRARIES)
@@ -208,7 +227,7 @@ if((NOT BLAS_LIBRARIES)
   "acml;gfortran")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "acml")
-  endif (BLAS_LIBRARIES)
+  endif(BLAS_LIBRARIES)
 endif()
 
 if((NOT BLAS_LIBRARIES)
@@ -222,21 +241,26 @@ if((NOT BLAS_LIBRARIES)
   "blis")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "FLAME")
-  endif (BLAS_LIBRARIES)
+  endif(BLAS_LIBRARIES)
 endif()
 
 # BLAS in ATLAS library? (http://math-atlas.sourceforge.net/)
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "atlas")))
-  check_fortran_libraries(
-  BLAS_LIBRARIES
-  BLAS
-  sgemm
-  ""
-  "ptf77blas;atlas;gfortran")
-  if (BLAS_LIBRARIES)
-    set(BLAS_INFO "atlas")
-  endif (BLAS_LIBRARIES)
+  FIND_PACKAGE(Atlas)
+  if(Atlas_FOUND)
+    SET(BLAS_INFO "atlas")
+  else()
+    check_fortran_libraries(
+      BLAS_LIBRARIES
+      BLAS
+      sgemm
+      ""
+      "ptf77blas;atlas;gfortran")
+    if (BLAS_LIBRARIES)
+      set(BLAS_INFO "atlas")
+    endif(BLAS_LIBRARIES)
+  endif()
 endif()
 
 # Generic BLAS library?
@@ -250,7 +274,7 @@ if((NOT BLAS_LIBRARIES)
   "blas")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "generic")
-  endif (BLAS_LIBRARIES)
+  endif(BLAS_LIBRARIES)
 endif()
 
 # Determine if blas was compiled with the f2c conventions
@@ -287,7 +311,7 @@ int main() {
     SET(BLAS_F2C TRUE)
   ELSE (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
     SET(BLAS_F2C FALSE)
-  ENDIF (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
+  ENDIF(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
   CHECK_C_SOURCE_RUNS("
 #include <stdlib.h>
 #include <stdio.h>
@@ -303,7 +327,7 @@ int main() {
     SET(BLAS_USE_CBLAS_DOT TRUE)
   ELSE (BLAS_USE_CBLAS_DOT)
     SET(BLAS_USE_CBLAS_DOT FALSE)
-  ENDIF (BLAS_USE_CBLAS_DOT)
+  ENDIF(BLAS_USE_CBLAS_DOT)
   SET(CMAKE_REQUIRED_LIBRARIES)
 ENDIF(BLAS_LIBRARIES)
 
@@ -317,10 +341,10 @@ endif(BLAS_LIBRARIES)
 
 IF (NOT BLAS_FOUND AND BLAS_FIND_REQUIRED)
   message(FATAL_ERROR "Cannot find a library with BLAS API. Please specify library location.")
-ENDIF (NOT BLAS_FOUND AND BLAS_FIND_REQUIRED)
+ENDIF(NOT BLAS_FOUND AND BLAS_FIND_REQUIRED)
 IF(NOT BLAS_FIND_QUIETLY)
   IF(BLAS_FOUND)
-    MESSAGE(STATUS "Found a library with BLAS API (${BLAS_INFO}).")
+    MESSAGE(STATUS "Found a library with BLAS API (${BLAS_INFO}). Full path: (${BLAS_LIBRARIES})")
   ELSE(BLAS_FOUND)
     MESSAGE(STATUS "Cannot find a library with BLAS API. Not using BLAS.")
   ENDIF(BLAS_FOUND)

@@ -131,7 +131,7 @@ struct CaptureList {
       auto tensors = val.toTensorList();
       sizes_.push_back(tensors.size());
 
-      for (const at::Tensor& tensor : tensors) {
+      for (const at::Tensor tensor : tensors) {
         captureTensor(tensor, is_output);
       }
     } else {
@@ -269,12 +269,14 @@ struct DifferentiableGraphBackward : public autograd::Node {
     size_t output_index = 0;
     for (IValue& v : stack) {
       if (v.isTensorList()) {
-        for (const at::Tensor& tensor : v.toTensorList()) {
+        for (at::Tensor tensor : v.toTensorList()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
         produceOutput(output_index++, std::move(v).toTensor(), outputs);
       } else {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(v.isNone());
+        output_index++;
         // Input grad can also be None even if it requires grad
         // Example: `other` in expand_as(self, other)
         outputs.emplace_back();
@@ -295,11 +297,14 @@ struct DifferentiableGraphBackward : public autograd::Node {
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
-      for (const at::Tensor& tensor : value.toTensorList()) {
+      for (const at::Tensor tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
       }
-    } else {
+    } else if (value.isTensor()) {
       addOutputForTensor(value.toTensor());
+    } else {
+      // We could have None passed here via `Optional[Tensor]`
+      add_next_edge(autograd::Edge{});
     }
   }
 
@@ -319,7 +324,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     if (v.isTensorList()) {
       auto tensors = v.toTensorList();
       input_instructions_.pushTensorList(tensors.size());
-      for (const at::Tensor& tensor : tensors) {
+      for (const at::Tensor tensor : tensors) {
         addInputVariable(tensor);
       }
     } else if (v.isTensor()) {
@@ -362,7 +367,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
 // to the output Variables if present.
 struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
-      : f(grad.f, "<foward op>"),
+      : f_ptr(std::make_shared<GraphExecutor>(grad.f, "<foward op>")),
+        legacy_f(grad.f, "<foward op>"),
         grad(std::move(grad)),
         grad_executor(this->grad.df, "<backward op>"),
         num_inputs(this->grad.f->inputs().size()),
@@ -387,7 +393,13 @@ struct DifferentiableGraphOp {
     }
 
     detachVariables(*stack);
-    InterpreterState(f).run(*stack);
+    if (IsNewExecutorEnabled()) {
+      ExecutionPlan plan =
+          f_ptr->getPlanFor(*stack, GraphExecutor::getDefaultNumBailOuts());
+      InterpreterState(plan.code).run(*stack);
+    } else {
+      InterpreterState(legacy_f).run(*stack);
+    }
 
     {
       auto outputs = last(stack, num_outputs);
@@ -411,6 +423,7 @@ struct DifferentiableGraphOp {
 
  private:
   friend GraphExecutor* detail::getGradExecutor(Operation& op);
+  friend GraphExecutor* detail::getDifferentiableGraphOpExecutor(Operation& op);
 
   at::Tensor detach(at::Tensor t) const {
     if (!t.defined()) {
@@ -457,7 +470,8 @@ struct DifferentiableGraphOp {
     }
   }
 
-  Code f;
+  std::shared_ptr<GraphExecutor> f_ptr;
+  Code legacy_f;
   Gradient grad;
   GraphExecutor grad_executor;
 
@@ -493,6 +507,17 @@ namespace detail {
 GraphExecutor* getGradExecutor(Operation& op) {
   if (auto diff_op = op.target<DifferentiableGraphOp>()) {
     return &diff_op->grad_executor;
+  }
+  return nullptr;
+}
+
+GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op) {
+  TORCH_INTERNAL_ASSERT(
+      IsNewExecutorEnabled(),
+      __FUNCTION__,
+      " is only accessible under profiling executor\n");
+  if (auto diff_op = op.target<DifferentiableGraphOp>()) {
+    return diff_op->f_ptr.get();
   }
   return nullptr;
 }
@@ -719,7 +744,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 };
 
 GraphExecutor::GraphExecutor(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     std::string function_name)
     : pImpl(
           IsNewExecutorEnabled()
@@ -756,6 +781,16 @@ std::shared_ptr<Graph> GraphExecutor::graph() const {
 
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
+}
+
+void GraphExecutor::debugFlushCompilationCache() {
+  if (auto ppImpl =
+          std::dynamic_pointer_cast<ProfilingGraphExecutorImpl>(pImpl)) {
+    ppImpl->debugFlushCompilationCache();
+  } else {
+    // we are deprecating legacy executor
+    TORCH_INTERNAL_ASSERT("Not Implemented for Legacy Executor");
+  }
 }
 
 TORCH_API bool IsNewExecutorEnabled() {

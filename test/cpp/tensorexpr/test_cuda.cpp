@@ -452,8 +452,8 @@ TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
 
   Store* init_store = output_buf.store({0}, 0.f);
   VarHandle i1("i1", kInt);
-  ExprHandle load_data = Load::make(BufHandle(data_buf.data()), {i1}, 1);
-  ExprHandle load_output = Load::make(BufHandle(output_buf.data()), {0}, 1);
+  ExprHandle load_data = Load::make(BufHandle(data_buf.data()), {i1});
+  ExprHandle load_output = Load::make(BufHandle(output_buf.data()), {0});
   ExprHandle add_value = load_output + load_data;
   Store* store_output = output_buf.store({0}, add_value);
   For* for_output = For::make(i1, 0, N, store_output);
@@ -535,8 +535,8 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
 
   //  for t in 0..1024: // thread-idx
   //    b[0] = b[0] + a[t] // implied atomic
-  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {t}, 1);
-  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {0}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {t});
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {0});
   ExprHandle add_value = load_b + load_a;
   Store* store_b = b_buf.store({0}, add_value);
   For* for_b = For::make(t, 0, N, store_b, thread_idx_options);
@@ -610,7 +610,7 @@ TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
   //   for n in 0..2:
   //     a[0] = a[0] + n
   Store* store_a0_0 = a_buf.store({0}, 0.f);
-  ExprHandle load_a0 = Load::make(BufHandle(a_buf.data()), {0}, 1);
+  ExprHandle load_a0 = Load::make(BufHandle(a_buf.data()), {0});
   ExprHandle v1 = load_a0 + n;
   Store* store_a0_v1 = a_buf.store({0}, v1);
   For* loop_a_0 = For::make(n, 0, 2, store_a0_v1);
@@ -707,20 +707,19 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
   VarHandle n("n", kInt);
 
   std::vector<Stmt*> block;
-  VarHandle c_var("c", kHandle);
   std::vector<const Expr*> dims;
   dims.push_back(ExprHandle(N).node());
-  BufHandle c{new Buf(c_var.node(), dims, kFloat)};
+  BufHandle c{new Buf("c", dims, kFloat)};
   {
     // alloc(c, 64);
-    Allocate* alloc = Allocate::make(c_var, kFloat, {N});
+    Allocate* alloc = Allocate::make(c);
     block.push_back(alloc);
   }
 
   {
     //    for n in 0..64:  // thread-idx
     //      c(n) = 0
-    Store* store_cn_0 = Store::make(c, {n}, 0.f, 1);
+    Store* store_cn_0 = Store::make(c, {n}, 0.f);
     For* loop_n1 = For::make(n, 0, N, store_cn_0, thread_idx_opt);
     block.push_back(loop_n1);
   }
@@ -729,9 +728,9 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
     //  for m in 0..128:
     //    for n in 0..64:  // thread_idx
     //      c(n) = c(n) + a(k, m, n)
-    ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
+    ExprHandle load_cn = Load::make(kFloat, c, {n});
     ExprHandle a_kmn =
-        Load::make(BufHandle(a.data()), {k * (M * N) + m * N + n}, 1);
+        Load::make(BufHandle(a.data()), {k * (M * N) + m * N + n});
     ExprHandle v_add = load_cn + a_kmn;
     Store* store_cn_v = Store::make(c, {n}, v_add);
     For* loop_n2 = For::make(n, 0, N, store_cn_v, thread_idx_opt);
@@ -746,7 +745,7 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
     Store* store_bk_0 = b.store({k}, 0.f);
     block.push_back(store_bk_0);
     ExprHandle load_bk = b.load(k);
-    ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
+    ExprHandle load_cn = Load::make(kFloat, c, {n});
     ExprHandle v_add = load_bk + load_cn;
     Store* store_bk = b.store({k}, v_add);
     For* loop_n3 = For::make(n, 0, N, store_bk, thread_idx_opt);
@@ -755,7 +754,7 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
 
   {
     //    free(c)
-    Free* free_stmt = Free::make(c_var);
+    Free* free_stmt = Free::make(c);
     block.push_back(free_stmt);
   }
 
@@ -843,10 +842,7 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  VarHandle c_var("c", kHandle);
-  std::vector<const Expr*> dims;
-  dims.push_back(ExprHandle(N).node());
-  BufHandle c{new Buf(c_var.node(), dims, kFloat)};
+  BufHandle c{new Buf("c", {new IntImm(1)}, kFloat)};
   std::vector<Stmt*> block_k;
   {
     //    b(k) = 0
@@ -856,18 +852,18 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
   std::vector<Stmt*> block_n;
   {
     // alloc(c, 1);
-    Allocate* alloc = Allocate::make(c_var, kFloat, {1});
+    Allocate* alloc = Allocate::make(c);
     block_n.push_back(alloc);
   }
   {
     // c(0) = 0
-    Store* store_c0_0 = Store::make(c, {0}, 0.f, 1);
+    Store* store_c0_0 = Store::make(c, {0}, 0.f);
     block_n.push_back(store_c0_0);
   }
   {
     //      for m in 0..128:
     //        c(0) = c(0) + a(k, m, n)
-    ExprHandle load_c0 = Load::make(kFloat, c, {0}, 1);
+    ExprHandle load_c0 = Load::make(kFloat, c, {0});
     ExprHandle a_kmn = a.load(k * (M * N) + m * N + n);
     ExprHandle v_add = load_c0 + a_kmn;
     Store* store_c0_v = Store::make(c, {0}, v_add);
@@ -877,14 +873,14 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
   {
     //      b(k) = b(k) + c(0)
     ExprHandle load_bk = b.load(k);
-    ExprHandle load_c0 = Load::make(kFloat, c, {0}, 1);
+    ExprHandle load_c0 = Load::make(kFloat, c, {0});
     ExprHandle v_add = load_bk + load_c0;
     Store* store_bk = b.store({k}, v_add);
     block_n.push_back(store_bk);
   }
   {
     //      free(c)
-    Free* free_stmt = Free::make(c_var);
+    Free* free_stmt = Free::make(c);
     block_n.push_back(free_stmt);
   }
   {
@@ -938,11 +934,11 @@ TEST(Cuda, HalfSupport_CUDA) {
   });
 
   Tensor* c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
-    return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b->call(i));
+    return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b->load(i));
   });
 
   Tensor* d = Compute("d", {{4, "n"}}, [&](const VarHandle& i) {
-    return Cast::make(half, c->call(i));
+    return Cast::make(half, c->load(i));
   });
 
   LoopNest l({b, c, d});
@@ -1110,8 +1106,8 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
    *   c[i] = (i < 10 ? a[i] + b[i] : b[i]);
    * }
    */
-  ExprHandle load_a = Load::make(BufHandle(a.data()), {i}, 1);
-  ExprHandle load_b = Load::make(BufHandle(b.data()), {i}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a.data()), {i});
+  ExprHandle load_b = Load::make(BufHandle(b.data()), {i});
   ExprHandle cmp = CompareSelect::make(i, 10, CompareSelectOperation::kLT);
   ExprHandle ite = IfThenElse::make(cmp, Add::make(load_a, load_b), load_b);
 
@@ -1558,7 +1554,7 @@ TEST(Cuda, MaskMultiDim_CUDA) {
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -1688,7 +1684,7 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -1944,8 +1940,8 @@ TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
 
 // Tests the case with two loops fused into a common parent, which is not bound
 // to any block or thread dimension - however it's two inner loops are bound to
-// the first thread dimenions. This should work just like the MaskThreadDim test
-// where the bigger loop is unmasked but the smaller is masked.
+// the first thread dimensions. This should work just like the MaskThreadDim
+// test where the bigger loop is unmasked but the smaller is masked.
 TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
   KernelScope kernel_scope;
   int OUTER_SIZE = 10;
@@ -2102,7 +2098,7 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -2233,7 +2229,7 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
       "D",
       {{OUTER_B_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf.load(i, j);
+        return c->load(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});

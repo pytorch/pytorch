@@ -50,7 +50,7 @@ void testAllreduce(int iter = 1000) {
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
     const auto expected = worldSize * i;
-    auto data = allTensors[i][0].data<float>();
+    auto data = allTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
       if (data[j] != expected) {
         throw std::runtime_error("BOOM!");
@@ -87,7 +87,7 @@ void testBroadcast(int iter = 10000) {
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
     const auto expected = i;
-    auto data = allTensors[i][0].data<float>();
+    auto data = allTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
       if (data[j] != expected) {
         throw std::runtime_error("BOOM!");
@@ -122,7 +122,7 @@ void testReduce(int iter = 10000) {
     // Verify outputs
     for (int i = 0; i < iter; ++i) {
       const auto expected = worldSize * i;
-      auto data = allTensors[i][0].data<float>();
+      auto data = allTensors[i][0].data_ptr<float>();
       for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
         if (data[j] != expected) {
           throw std::runtime_error("BOOM!");
@@ -166,7 +166,7 @@ void testAllgather(int iter = 10000) {
   for (int i = 0; i < iter; ++i) {
     for (int j = 0; j < worldSize; ++j) {
       const auto expected = i * j;
-      auto data = allOutputTensors[i][0][j].data<float>();
+      auto data = allOutputTensors[i][0][j].data_ptr<float>();
       for (auto k = 0; k < allOutputTensors[i][0][j].numel(); ++k) {
         if (data[k] != expected) {
           throw std::runtime_error("BOOM!");
@@ -215,7 +215,7 @@ void testGather(int iter = 10000) {
     for (int i = 0; i < iter; ++i) {
       for (int j = 0; j < worldSize; ++j) {
         const auto expected = i * j;
-        auto data = allOutputTensors[i][0][j].data<float>();
+        auto data = allOutputTensors[i][0][j].data_ptr<float>();
         for (auto k = 0; k < allOutputTensors[i][0][j].numel(); ++k) {
           if (data[k] != expected) {
             throw std::runtime_error("BOOM!");
@@ -265,7 +265,7 @@ void testScatter(int iter = 1) {
   for (int i = 0; i < iter; ++i) {
     for (int j = 0; j < worldSize; ++j) {
       const auto expected = i * j;
-      auto data = allTensors[i][0].data<float>();
+      auto data = allTensors[i][0].data_ptr<float>();
       for (auto k = 0; k < allTensors[i][0].numel(); ++k) {
         if (data[k] != expected) {
           throw std::runtime_error("BOOM!");
@@ -324,13 +324,20 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
         throw std::runtime_error("src rank is wrong for recvAnysource");
       }
       const auto expected = i;
-      auto data = allTensors[i][0].data<float>();
+      auto data = allTensors[i][0].data_ptr<float>();
       for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
         if (data[j] != expected) {
           throw std::runtime_error("BOOM!");
         }
       }
     }
+  }
+}
+
+void testBackendName() {
+  auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
+  if (pg->getBackendName() != std::string(c10d::MPI_BACKEND_NAME)) {
+    throw std::runtime_error("BOOM!");
   }
 }
 
@@ -350,6 +357,7 @@ int main(int argc, char** argv) {
   testScatter();
   testSendRecv(false);
   testSendRecv(true);
+  testBackendName();
 
   std::cout << "Test successful" << std::endl;
 #else

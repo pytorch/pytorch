@@ -158,7 +158,7 @@ __global__ void upsample_bicubic2d_backward_out_frame(
 }
 
 static void upsample_bicubic2d_out_cuda_template(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
@@ -166,11 +166,6 @@ static void upsample_bicubic2d_out_cuda_template(
     c10::optional<double> scales_w) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_bicubic2d_out", {input_arg, output_arg});
-
-  TORCH_CHECK(
-      output_size.size() == 2,
-      "It is expected output_size equals to 2, but got size ",
-      output_size.size());
 
   int output_height = output_size[0];
   int output_width = output_size[1];
@@ -180,22 +175,7 @@ static void upsample_bicubic2d_out_cuda_template(
   int input_height = input.size(2);
   int input_width = input.size(3);
 
-  upsample_2d_shape_check(
-      input,
-      Tensor(),
-      nbatch,
-      channels,
-      input_height,
-      input_width,
-      output_height,
-      output_width);
-
-  output.resize_({input.size(0), input.size(1), output_height, output_width});
   output.zero_();
-
-  AT_ASSERT(
-      input_height > 0 && input_width > 0 && output_height > 0 &&
-      output_width > 0);
 
   const int num_output_elements = output_height * output_width;
   const int max_threads = std::min(
@@ -228,12 +208,12 @@ static void upsample_bicubic2d_out_cuda_template(
                 align_corners,
                 idata,
                 odata);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
 static void upsample_bicubic2d_backward_out_cuda_template(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
@@ -246,16 +226,6 @@ static void upsample_bicubic2d_backward_out_cuda_template(
       "upsample_bicubic2d_backward_out_cuda",
       {grad_output_arg, grad_input_arg});
 
-  TORCH_CHECK(
-      output_size.size() == 2,
-      "It is expected output_size equals to 2, but got size ",
-      output_size.size());
-
-  TORCH_CHECK(
-      input_size.size() == 4,
-      "It is expected input_size equals to 4, but got size ",
-      input_size.size());
-
   int output_height = output_size[0];
   int output_width = output_size[1];
 
@@ -264,19 +234,8 @@ static void upsample_bicubic2d_backward_out_cuda_template(
   int input_height = input_size[2];
   int input_width = input_size[3];
 
-  upsample_2d_shape_check(
-      Tensor(),
-      grad_output_,
-      nbatch,
-      channels,
-      input_height,
-      input_width,
-      output_height,
-      output_width);
-
   Tensor grad_output = grad_output_.contiguous();
 
-  grad_input.resize_({nbatch, channels, input_height, input_width});
   grad_input.zero_();
 
   const int num_kernels = output_height * output_width;
@@ -302,99 +261,35 @@ static void upsample_bicubic2d_backward_out_cuda_template(
                0,
                stream>>>(
                 num_kernels, rheight, rwidth, align_corners, idata, odata);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
 } // namespace
 
-Tensor& upsample_bicubic2d_out_cuda(
-    Tensor& output,
+TORCH_IMPL_FUNC(upsample_bicubic2d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
     c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  upsample_bicubic2d_out_cuda_template(
-      output, input, output_size, align_corners, scales_h, scales_w);
-  return output;
+    c10::optional<double> scales_w,
+    const Tensor& output) {
+  upsample_bicubic2d_out_cuda_template(output, input, output_size, align_corners, scales_h, scales_w);
 }
 
-Tensor upsample_bicubic2d_cuda(
-    const Tensor& input,
-    IntArrayRef output_size,
-    bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_bicubic2d_out_cuda_template(
-      output, input, output_size, align_corners, scales_h, scales_w);
-  return output;
-}
-
-Tensor& upsample_bicubic2d_backward_out_cuda(
-    Tensor& grad_input,
+TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
     c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    c10::optional<double> scales_w,
+    const Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("upsample_bicubic2d_backward_out_cuda");
   upsample_bicubic2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
-  return grad_input;
-}
-
-Tensor upsample_bicubic2d_backward_cuda(
-    const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("upsample_bicubic2d_backward_cuda");
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_bicubic2d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
-  return grad_input;
-}
-
-using at::native::upsample::compute_output_size;
-using at::native::upsample_cuda::get_scale_value;
-
-Tensor upsample_bicubic2d_cuda(
-    const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
-    bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  upsample_bicubic2d_out_cuda_template(output, input, osize, align_corners, scale_h, scale_w);
-  return output;
-}
-
-Tensor upsample_bicubic2d_backward_cuda(
-    const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("upsample_bicubic2d_backward_cuda");
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_bicubic2d_backward_out_cuda_template(
-      grad_input, grad_output, osize, input_size, align_corners, scale_h, scale_w);
-  return grad_input;
 }
 
 } // namespace native

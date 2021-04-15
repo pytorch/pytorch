@@ -15,6 +15,11 @@ class PrefixStore : public Store {
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
+  std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& currentValue,
+      const std::vector<uint8_t>& newValue) override;
+
   std::vector<uint8_t> get(const std::string& key) override;
 
   int64_t add(const std::string& key, int64_t value) override;
@@ -30,6 +35,16 @@ class PrefixStore : public Store {
   void wait(
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
+
+  const std::chrono::milliseconds& getTimeout() const noexcept override;
+
+  void setTimeout(const std::chrono::milliseconds& timeout) override;
+
+  void watchKey(
+      const std::string& key,
+      std::function<
+          void(c10::optional<std::string>, c10::optional<std::string>)>
+          callback) override;
 
  protected:
   std::string prefix_;

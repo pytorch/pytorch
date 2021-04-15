@@ -10,6 +10,7 @@
 //
 
 #include <THC/THCReduceApplyUtils.cuh>
+#include <c10/cuda/CUDAException.h>
 #include <c10/macros/Macros.h>
 
 #ifdef __HIP_PLATFORM_HCC__
@@ -209,6 +210,7 @@ void callReduceAll(THCState* state,
       <<<grid, block, smemSize, c10::cuda::getCurrentCUDAStream()>>>(
         in, (IndexType) totalElements, init, modifyOp, reduceOp,
         (AccT*) scratchSpace);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     int numPass1Blocks = grid.x;
     getPass2ReduceBlockGrid<AccT>(state, totalElements, grid, block);
@@ -218,6 +220,7 @@ void callReduceAll(THCState* state,
       <<<grid, block, smemSize, c10::cuda::getCurrentCUDAStream()>>>(
         numPass1Blocks, init, reduceOp,
         (AccT*) scratchSpace, devOut);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     THCudaFree(state, scratchSpace);
   } else {
@@ -227,6 +230,7 @@ void callReduceAll(THCState* state,
     kernelReduceAll<T, IndexType, AccT, ModifyOp, ReduceOp, ADims>
       <<<grid, block, smemSize, c10::cuda::getCurrentCUDAStream()>>>(
         in, (IndexType) totalElements, init, modifyOp, reduceOp, devOut);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 

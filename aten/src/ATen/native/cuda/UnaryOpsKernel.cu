@@ -6,6 +6,7 @@
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/Math.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -33,7 +34,7 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
 }
 
 void exp_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "exp_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "exp_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::exp(a);
     });
@@ -41,7 +42,7 @@ void exp_kernel_cuda(TensorIterator& iter) {
 }
 
 void exp2_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exp2_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "exp2_cuda", [&]() {
     gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::exp2(a);
     });
@@ -49,7 +50,7 @@ void exp2_kernel_cuda(TensorIterator& iter) {
 }
 
 void expm1_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "expm1_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "expm1_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::expm1(a);
     });
@@ -95,7 +96,7 @@ void sqrt_kernel_cuda(TensorIterator& iter) {
 }
 
 void sigmoid_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "sigmoid_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "sigmoid_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       scalar_t one = scalar_t(1);
       return  one / (one + std::exp(- a));
@@ -103,11 +104,25 @@ void sigmoid_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void logit_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
+void sinc_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "sinc_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      if (a == scalar_t(0)) {
+        return scalar_t(1);
+      } else {
+        // NVCC says constexpr var is not accessible from device
+        scalar_t product = c10::detail::pi<scalar_t>() * a;
+        return std::sin(product) / product;
+      }
+    });
+  });
+}
+
+void logit_kernel_cuda(TensorIterator& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
-      iter.dtype(),
+      iter.common_dtype(),
       "logit_cuda",
       [&]() {
         using T_ACC = acc_type<scalar_t, true>;
@@ -131,7 +146,7 @@ void logit_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
 }
 
 void erf_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "erf_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "erf_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::erf(a);
     });
@@ -139,7 +154,7 @@ void erf_kernel_cuda(TensorIterator& iter) {
 }
 
 void erfc_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erfc_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "erfc_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::erfc(a);
     });
@@ -147,14 +162,14 @@ void erfc_kernel_cuda(TensorIterator& iter) {
 }
 
 void erfinv_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erfinv_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "erfinv_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::erfinv(a);
     });
   });
 }
 
-void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value) {
+void clamp_kernel_cuda(TensorIterator& iter, const Scalar& min_value, const Scalar& max_value) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     auto upper = max_value.to<scalar_t>();
@@ -169,7 +184,7 @@ void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value)
   });
 }
 
-void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
+void clamp_min_kernel_cuda(TensorIterator& iter, const Scalar& min_value) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_min_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
@@ -183,7 +198,7 @@ void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
   });
 }
 
-void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
+void clamp_max_kernel_cuda(TensorIterator& iter, const Scalar& max_value) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_max_cuda", [&]() {
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
@@ -237,6 +252,47 @@ void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, doub
   });
 }
 
+void entr_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      iter.common_dtype(),
+      "entr_cuda",
+      [&]() {
+        gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t x) -> scalar_t {
+          if (at::_isnan(x)) {
+            return x;
+          } else if (x > 0) {
+            return -x * std::log(x);
+          } else if (x == 0) {
+            return 0;
+          }
+          return static_cast<scalar_t>(-INFINITY);
+        });
+      });
+}
+
+void frexp_kernel_cuda(TensorIterator& iter) {
+#ifdef __HIP_PLATFORM_HCC__
+  // Reference: https://rocmdocs.amd.com/en/latest/ROCm_API_References/HIP-MATH.html
+  //            https://github.com/ROCm-Developer-Tools/HIP/issues/2169
+  // ROCm does not support frexp function yet
+  TORCH_CHECK(false, "torch.frexp() is not implemented on ROCm platform.");
+#else
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half,
+    // The iter.dtype() here is the dtype of mantissa output.
+    // It's a floating point type and must be the same as the input's dtype.
+    iter.dtype(),
+    "frexp_cuda", [&]() {
+      gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t a) -> thrust::tuple<scalar_t, int32_t> {
+        int32_t exponent;
+        scalar_t mantissa = std::frexp(a, &exponent);
+        return {mantissa, exponent};
+      });
+  });
+#endif
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
@@ -245,6 +301,7 @@ REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel_cuda);
+REGISTER_DISPATCH(sinc_stub, &sinc_kernel_cuda);
 REGISTER_DISPATCH(logit_stub, &logit_kernel_cuda);
 REGISTER_DISPATCH(erf_stub, &erf_kernel_cuda);
 REGISTER_DISPATCH(erfc_stub, &erfc_kernel_cuda);
@@ -254,6 +311,8 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
+REGISTER_DISPATCH(entr_stub, &entr_kernel_cuda);
+REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
 
 } // namespace native
 } // namespace at

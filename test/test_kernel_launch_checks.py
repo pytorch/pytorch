@@ -9,26 +9,33 @@ class AlwaysCheckCudaLaunchTest(TestCase):
         # Try some different spacings
         self.assertEqual(2, check_code_for_cuda_kernel_launches("""
 some_function_call<TemplateArg><<<1,2,0,stream>>>(arg1,arg2,arg3);
-TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+C10_CUDA_KERNEL_LAUNCH_CHECK();
 some_function_call<TemplateArg><<<1,2,0,stream>>>(arg1,arg2,arg3);
 
 some_function_call<TemplateArg><<<1,2,0,stream>>>(arg1,arg2,arg3);
-TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+C10_CUDA_KERNEL_LAUNCH_CHECK();
 some_function_call<TemplateArg><<<1,2,0,stream>>>(arg1,arg2,arg3);
 some_other_stuff;
 some_function_call<TemplateArg><<<1,2,0,stream>>>(arg1,arg2,arg3);
-TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+C10_CUDA_KERNEL_LAUNCH_CHECK();
 some_function_call<TemplateArg><<<1,2,0,stream>>> (arg1,arg2,arg3);
-TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+C10_CUDA_KERNEL_LAUNCH_CHECK();
 some_function_call<TemplateArg><<<1,2,0,stream>>> ( arg1 , arg2 , arg3 ) ;
 
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
         """))
 
         # Does it work for macros?
-        self.assertEqual(0, check_code_for_cuda_kernel_launches("""
-#define SOME_MACRO(x) some_function_call<<<1,2>>> ( x ) ;  \\
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        self.assertEqual(0, check_code_for_cuda_kernel_launches(r"""
+#define SOME_MACRO(x) some_function_call<<<1,2>>> ( x ) ;  \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)  \
+  indexAddSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM> \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                \
+      selfInfo, sourceInfo, indexInfo,                                               \
+      selfAddDim, sourceAddDim, sliceSize, selfAddDimSize);                          \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
         """))
 
     def test_check_cuda_launches(self):

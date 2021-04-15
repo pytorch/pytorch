@@ -1,5 +1,5 @@
-#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
 #include <limits>
@@ -24,7 +24,7 @@ std::vector<IValue> toIValues(const Message& message, MessageType type) {
       payload,
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &message.tensors());
+      message.tensors());
   return value.toTuple()->elements();
 }
 

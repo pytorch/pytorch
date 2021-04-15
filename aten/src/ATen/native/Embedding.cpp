@@ -3,6 +3,8 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 
+#include <c10/util/irange.h>
+
 #include <cstring>
 #include <memory>
 #include <sstream>
@@ -17,17 +19,9 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
 
-  auto zerofill_padding = [&](Tensor& embedding) {
-    if (padding_idx >= 0) {
-      embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
-    }
-  };
-
   // TODO: use tensor.index() after improving perf
   if (indices.dim() == 1) {
-    auto out = weight.index_select(0, indices);
-    zerofill_padding(out);
-    return out;
+    return weight.index_select(0, indices);
   }
 
   auto size = indices.sizes().vec();
@@ -35,9 +29,7 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
     size.push_back(d);
   }
 
-  auto out = weight.index_select(0, indices.reshape(-1));
-  zerofill_padding(out);
-  return out.view(size);
+  return weight.index_select(0, indices.reshape(-1)).view(size);
 }
 
 Tensor embedding_backward(
@@ -68,7 +60,7 @@ Tensor embedding_sparse_backward(
   Tensor indices = indices_;
   Tensor grad = grad_;
   if (padding_idx != -1) {
-    auto c = indices != padding_idx;
+    torch::List<c10::optional<Tensor>> c({indices != padding_idx});
     indices = indices.index(c);
     grad = grad.index(c);
   }
@@ -107,10 +99,10 @@ Tensor embedding_dense_backward_cpu(
     std::unique_ptr<index_t[]> counts;
     if (scale_grad_by_freq) {
       counts.reset(new index_t[num_weights]);
-      for (int i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
         counts[indices_data[i]] = 0;
       }
-      for (int i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
         counts[indices_data[i]]++;
       }
     }

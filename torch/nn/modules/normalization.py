@@ -7,7 +7,7 @@ from .. import functional as F
 from .. import init
 
 from torch import Tensor, Size
-from typing import Union, List
+from typing import Union, List, Tuple
 
 
 class LocalResponseNorm(Module):
@@ -141,20 +141,21 @@ class LayerNorm(Module):
         >>> output = m(input)
     """
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
-    normalized_shape: _shape_t
+    normalized_shape: Tuple[int, ...]
     eps: float
     elementwise_affine: bool
 
     def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True) -> None:
         super(LayerNorm, self).__init__()
         if isinstance(normalized_shape, numbers.Integral):
-            normalized_shape = (normalized_shape,)
-        self.normalized_shape = tuple(normalized_shape)
+            # mypy error: incompatible types in assignment
+            normalized_shape = (normalized_shape,)  # type: ignore[assignment]
+        self.normalized_shape = tuple(normalized_shape)  # type: ignore[arg-type]
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
-            self.weight = Parameter(torch.Tensor(*normalized_shape))
-            self.bias = Parameter(torch.Tensor(*normalized_shape))
+            self.weight = Parameter(torch.empty(self.normalized_shape))
+            self.bias = Parameter(torch.empty(self.normalized_shape))
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
@@ -169,7 +170,7 @@ class LayerNorm(Module):
         return F.layer_norm(
             input, self.normalized_shape, self.weight, self.bias, self.eps)
 
-    def extra_repr(self) -> Tensor:
+    def extra_repr(self) -> str:
         return '{normalized_shape}, eps={eps}, ' \
             'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
 
@@ -229,8 +230,8 @@ class GroupNorm(Module):
         self.eps = eps
         self.affine = affine
         if self.affine:
-            self.weight = Parameter(torch.Tensor(num_channels))
-            self.bias = Parameter(torch.Tensor(num_channels))
+            self.weight = Parameter(torch.empty(num_channels))
+            self.bias = Parameter(torch.empty(num_channels))
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)

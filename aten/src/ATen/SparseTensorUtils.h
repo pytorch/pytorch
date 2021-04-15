@@ -2,14 +2,14 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
+#include <ATen/Parallel.h>
 
 namespace at { namespace sparse {
 
 // Just for documentary purposes
 using SparseTensor = Tensor;
-using LongTensor = Tensor;
-using IntTensor = Tensor;
 using SparseType = Type;
+
 
 // This is an internal utility function for getting at the SparseTensorImpl,
 // so that we can write sparse tensor specific accessors for special fields
@@ -18,20 +18,20 @@ using SparseType = Type;
 // the low level setters/getters that were implemented using this.
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
-inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
-  AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
+inline  SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
 // Takes indices and values and directly puts them into the sparse tensor, no
 // copy.  This used to be called THSTensor_(_move)
-inline void alias_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values) {
+inline void alias_into_sparse(const SparseTensor& self, const Tensor& indices, const Tensor& values) {
   get_sparse_impl(self)->set_indices_and_values_unsafe(indices, values);
 }
 
 // Take indices and values and makes a (data) copy of them to put into the sparse
 // indices/values.  This used to be called THSTensor_(_set)
-inline void copy_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values, bool non_blocking) {
+inline void copy_into_sparse(const SparseTensor& self, const Tensor& indices, const Tensor& values, bool non_blocking) {
   alias_into_sparse(
       self,
       indices.to(self._indices().options(), non_blocking, /*copy=*/true),
@@ -58,7 +58,7 @@ inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz) {
 }
 
 // NOTE [ Flatten Sparse Indices ]
-// This helper function flattens a sparse indices tensor (a LongTensor) into a 1D
+// This helper function flattens a sparse indices tensor (a Tensor) into a 1D
 // indices tensor. E.g.,
 //   input = [[2, 4, 0],
 //            [3, 1, 10]]
@@ -70,34 +70,7 @@ inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz) {
 // the flattened tensor `t.reshape( prod(full_size[:indices.size(0)]), -1 )`.
 // if forceClone is true, the result will forced to be a clone of self.
 // if force_clone is true, the result will forced to be a clone of self.
-inline LongTensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_clone = false) {
-  int64_t sparse_dim = indices.size(0);
-  if (sparse_dim == 1) {
-    if (force_clone) {
-      return indices.squeeze(0).clone(at::MemoryFormat::Contiguous);
-    } else {
-      return indices.squeeze(0);
-    }
-  } else {
-    std::vector<int64_t> indices_mult_cpu_vec;
-    indices_mult_cpu_vec.reserve(sparse_dim);
-    int64_t mult = 1;
-    for (int64_t i = sparse_dim - 1; i >= 0; i--) {
-      indices_mult_cpu_vec[i] = mult;
-      mult *= full_size[i];
-    }
-    auto indices_mult_cpu = at::from_blob(
-        indices_mult_cpu_vec.data(),
-        /*size=*/{sparse_dim, 1},
-        indices.options().device(kCPU));
-    // NB: must be blocking because this blob may be freed after this closure,
-    //     and non_blocking copy will see garbage.
-    auto indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/false);
-    // Ideally we want matmul but matmul is slow on CPU Long and not implemented
-    // on CUDA Long. So mul is faster.
-    return indices.mul(indices_mult).sum(0);
-  }
-}
+TORCH_API Tensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_clone = false);
 
 // Flatten sparse tensor's indices from nD to 1D, similar to NOTE [ Flatten Sparse Indices ],
 // except this one allows partial flatten: only flatten on specified dims. Note that
@@ -119,13 +92,9 @@ inline LongTensor flatten_indices(const Tensor& indices, IntArrayRef full_size, 
 // Ex2:
 //   dims_to_flatten = [1]
 //   new_indices = [ 3, 1, 3 ]  # uncoalesced
-inline LongTensor flatten_indices_by_dims(const LongTensor& indices, const IntArrayRef& sizes, const IntArrayRef& dims_to_flatten){
-  LongTensor new_indices = at::zeros({indices.size(1)}, indices.options());
-  for (auto d : dims_to_flatten) {
-    new_indices.mul_(sizes[d]);
-    new_indices.add_(indices.select(0, d));
-  }
-  return new_indices;
-}
+TORCH_API Tensor flatten_indices_by_dims(const Tensor& indices, const IntArrayRef& sizes, const IntArrayRef& dims_to_flatten);
+
+// Find the CSR representation for a row `indices` from the COO format
+TORCH_API Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz);
 
 }} // namespace at::sparse

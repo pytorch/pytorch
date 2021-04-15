@@ -16,6 +16,16 @@ inline void set(
   store.set(key, data);
 }
 
+inline std::vector<uint8_t> compareSet(
+    Store& store,
+    const std::string& key,
+    const std::string& currentValue,
+    const std::string& newValue) {
+  std::vector<uint8_t> currentData(currentValue.begin(), currentValue.end());
+  std::vector<uint8_t> newData(newValue.begin(), newValue.end());
+  return store.compareSet(key, currentData, newData);
+}
+
 inline void check(
     Store& store,
     const std::string& key,

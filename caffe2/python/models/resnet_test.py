@@ -53,6 +53,7 @@ if __name__ == "__main__":
     import unittest
     import random
     random.seed(2603)
+    # pyre-fixme[10]: Name `workspace` is used but not defined in the current scope
     workspace.GlobalInit([
         'caffe2',
         '--caffe2_log_level=0',
