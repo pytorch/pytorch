@@ -3689,13 +3689,13 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
-    # TODO Add test for dtype kwarg
+    # TODO(@heitorschueroff) Add test for dtype kwarg
     OpInfo('mean',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True),
            # Need to skip out test because one of the overload for mean does not support it
-           # TODO fix this when implementing ReductionInfo
+           # TODO(@heitorschueroff) fix this when implementing ReductionInfo
            skips=(SkipInfo('TestCommon', 'test_out'),)),
     OpInfo('maximum',
            op=torch.maximum,
