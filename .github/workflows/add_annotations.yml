@@ -15,7 +15,6 @@ jobs:
         name:
           - flake8-py3
           - clang-tidy
-    if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-18.04
     steps:
       - name: Download artifact
@@ -51,20 +50,17 @@ jobs:
       - name: Unzip artifact
         id: unzip
         run: |
-          FILENAME=linter-output.zip
-          EXISTS=$([ -f $FILENAME ]; echo $?)
-          echo ::set-output name=exists::"$EXISTS"
-          if [ "$EXISTS" -eq 0 ]; then
-            unzip $FILENAME
-            echo ::set-output name=commit-sha::"$(cat commit-sha.txt)"
+          if unzip linter-output.zip annotations.json commit-sha.txt; then
+            echo ::set-output \
+              name=sha::"$(grep -Em1 '^[[:xdigit:]]{40}$' commit-sha.txt)"
           fi
-      - if: steps.unzip.outputs.exists == '0' # i.e. true
+      - if: steps.unzip.outputs.sha
         name: Add annotations
         uses: pytorch/add-annotations-github-action@master
         with:
           check_name: ${{ matrix.name }}
           linter_output_path: annotations.json
-          commit_sha: ${{ steps.unzip.outputs.commit-sha }}
+          commit_sha: ${{ steps.unzip.outputs.sha }}
           mode: json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
