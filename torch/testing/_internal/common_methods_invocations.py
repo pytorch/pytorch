@@ -588,25 +588,26 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
-def sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad, for_inplace_variant=False, **kwargs):
+def sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad, **kwargs):
     tests_list = [
-        ((2, 3), (2, 2), (2, 3), kwargs.get('alpha', 1), kwargs.get('beta', 1))
+        ((2, 3), (2, 2), (2, 3), kwargs.get('alpha', 1), kwargs.get('beta', 1), False)
     ]
-    tests_require_resizing = [
-        ((1,), (2, 2), (2, 3), kwargs.get('alpha', 1), kwargs.get('beta', 1)),
-        ((), (2, 2), (2, 3), kwargs.get('alpha', 1), kwargs.get('beta', 1))
+    tests_with_lhs_broadcasting = [
+        ((1,), (2, 2), (2, 3), kwargs.get('alpha', 1), kwargs.get('beta', 1), True),
+        ((), (2, 2), (2, 3), kwargs.get('alpha', 1), kwargs.get('beta', 1), True)
     ]
-    test_cases = tests_list if for_inplace_variant else (tests_list + tests_require_resizing)  # type: ignore
+    test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore
     inputs = tuple(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
                                args=(make_tensor(shape_b, device, dtype,
                                                  requires_grad=requires_grad),
                                      make_tensor(shape_c, device, dtype,
                                                  requires_grad=requires_grad)),
-                               kwargs={'alpha': alpha, 'beta': beta})
-                   for shape_a, shape_b, shape_c, alpha, beta in test_cases)
+                               kwargs={'alpha': alpha, 'beta': beta}, 
+                               broadcasts_input=broadcasts_input)
+                   for shape_a, shape_b, shape_c, alpha, beta, broadcasts_input in test_cases)
     return inputs
 
-def sample_inputs_addmm(op_info, device, dtype, requires_grad, for_inplace_variant=False, **kwargs):
+def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     if dtype.is_complex:
         inputs = sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad,
                                                        for_inplace_variant=for_inplace_variant,
