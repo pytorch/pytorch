@@ -210,8 +210,7 @@ class Proxy:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
         if isinstance(orig_method, torch._C.ScriptMethod):
-            assert isinstance(args[0], torch._C.ScriptMethod)
-            args = (args[0].owner,) + args[1:]
+            args = (orig_method.owner,) + args
             return self.tracer.create_proxy('call_method', orig_method.name, args, kwargs)
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)

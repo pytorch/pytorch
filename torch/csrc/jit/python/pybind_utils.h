@@ -989,7 +989,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
     const c10::QualifiedName qualname) {
-  std::vector<py::handle> args_vec = {callee};
+  std::vector<py::handle> args_vec;
   for (const auto& arg : args_no_self) {
     args_vec.push_back(arg);
   }
@@ -1023,12 +1023,12 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
   if (overloaded_args.size() > 0) {
     return pybind11::reinterpret_steal<py::object>(
         handle_torch_function_no_python_arg_parser(
-            overloaded_args,
-            args.ptr(),
-            kwargs.ptr(),
-            qualname.name().c_str(),
-            args[0].ptr(),
-            qualname.prefix().c_str()));
+            /*overloaded_args=*/overloaded_args,
+            /*args=*/args.ptr(),
+            /*kwargs=*/kwargs.ptr(),
+            /*func_name=*/qualname.name().c_str(),
+            /*torch_api_function=*/callee.ptr(),
+            /*module_name=*/qualname.prefix().c_str()));
   }
 
   return c10::nullopt;

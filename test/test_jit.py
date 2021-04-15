@@ -13959,6 +13959,24 @@ dedent """
         with self.assertRaisesRegex(Exception, "Parameters not specified"):
             torch.jit.script(test)
 
+    def test_script_method_torch_function_overload(self):
+        class MyCustomTensor(torch.Tensor):
+            pass
+
+        class MyCustomModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        scripted_mod = torch.jit.script(MyCustomModule())
+        t = torch.tensor([3.0])
+        ref_out = scripted_mod(t)
+
+        t_custom = MyCustomTensor([3.0])
+        out1 = scripted_mod(t_custom)
+        self.assertEqual(out1, ref_out)
+
+        out2 = scripted_mod.forward(t_custom)
+        self.assertEqual(out2, ref_out)
 
     def test_function_overloading_isinstance(self):
         @torch.jit._overload  # noqa: F811
