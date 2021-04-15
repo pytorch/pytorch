@@ -61,6 +61,20 @@ class LinearReluFunctional(nn.Module):
         return x
 
 
+class LinearReluLinearFunctional(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w = nn.Parameter(torch.Tensor(4, 4))
+        self.b = nn.Parameter(torch.zeros(4))
+        torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
+
+    def forward(self, x):
+        x = F.linear(x, self.w, self.b)
+        x = F.relu(x)
+        x = F.linear(x, self.w, self.b)
+        return x
+
+
 class AllConvAndLinearFusionModules(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -141,6 +155,51 @@ class AllConvAndLinearFusionModules(torch.nn.Module):
         x = self.linear_0(x)
         x = self.linear_1(x)
         x = self.relu_3(x)
+        return x
+
+
+class AllConvFunctional(torch.nn.Module):
+    def __init__(self, weight1d, weight2d, weight3d, bias1d, bias2d, bias3d):
+        super().__init__()
+        self.weight1d = torch.nn.Parameter(weight1d)
+        self.weight2d = torch.nn.Parameter(weight2d)
+        self.weight3d = torch.nn.Parameter(weight3d)
+        self.bias1d = torch.nn.Parameter(bias1d)
+        self.bias2d = torch.nn.Parameter(bias2d)
+        self.bias3d = torch.nn.Parameter(bias3d)
+        self.stride1d = 1
+        self.padding1d = 0
+        self.dilation1d = 1
+        self.stride2d = (1, 1)
+        self.padding2d = (0, 0)
+        self.dilation2d = (1, 1)
+        self.groups = 1
+        self.stride3d = (1, 1, 1)
+        self.padding3d = (0, 0, 0)
+        self.dilation3d = (1, 1, 1)
+
+    def forward(self, x):
+        x = F.conv1d(
+            x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
+            self.dilation1d, self.groups)
+        x = F.conv1d(
+            x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
+            self.dilation1d, self.groups)
+        x = F.relu(x)
+        x = F.conv2d(
+            x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
+            self.dilation2d, self.groups)
+        x = F.conv2d(
+            x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
+            self.dilation2d, self.groups)
+        x = F.relu(x)
+        x = F.conv3d(
+            x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
+            self.dilation3d, self.groups)
+        x = F.conv3d(
+            x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
+            self.dilation3d, self.groups)
+        x = F.relu(x)
         return x
 
 
@@ -503,77 +562,40 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m, results_len=14, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
 
     @skipIfNoFBGEMM
-    def test_extract_weights_linear_fun(self):
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = nn.Parameter(torch.empty(4, 4))
-                self.b = nn.Parameter(torch.zeros(4))
-                torch.nn.init.kaiming_uniform_(self.w, a=math.sqrt(5))
-
-            def forward(self, x):
-                x = F.linear(x, self.w, self.b)
-                x = F.relu(x)
-                x = F.linear(x, self.w, self.b)
-                return x
-
-        m = M().eval()
+    def test_extract_weights_linear_fun_ptq(self):
+        m = LinearReluLinearFunctional().eval()
         self._test_extract_weights(m, results_len=2)
 
     @skipIfNoFBGEMM
-    def test_extract_weights_conv_fun(self):
-        class M(torch.nn.Module):
-            def __init__(self, weight1d, weight2d, weight3d, bias1d, bias2d, bias3d):
-                super().__init__()
-                self.weight1d = torch.nn.Parameter(weight1d)
-                self.weight2d = torch.nn.Parameter(weight2d)
-                self.weight3d = torch.nn.Parameter(weight3d)
-                self.bias1d = torch.nn.Parameter(bias1d)
-                self.bias2d = torch.nn.Parameter(bias2d)
-                self.bias3d = torch.nn.Parameter(bias3d)
-                self.stride1d = 1
-                self.padding1d = 0
-                self.dilation1d = 1
-                self.stride2d = (1, 1)
-                self.padding2d = (0, 0)
-                self.dilation2d = (1, 1)
-                self.groups = 1
-                self.stride3d = (1, 1, 1)
-                self.padding3d = (0, 0, 0)
-                self.dilation3d = (1, 1, 1)
+    def test_extract_weights_linear_fun_qat(self):
+        m = LinearReluLinearFunctional().train()
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        self._test_extract_weights(
+            m, results_len=2, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
 
-            def forward(self, x):
-                x = F.conv1d(
-                    x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
-                    self.dilation1d, self.groups)
-                x = F.conv1d(
-                    x, self.weight1d, self.bias1d, self.stride1d, self.padding1d,
-                    self.dilation1d, self.groups)
-                x = F.relu(x)
-                x = F.conv2d(
-                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
-                    self.dilation2d, self.groups)
-                x = F.conv2d(
-                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
-                    self.dilation2d, self.groups)
-                x = F.relu(x)
-                x = F.conv3d(
-                    x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
-                    self.dilation3d, self.groups)
-                x = F.conv3d(
-                    x, self.weight3d, self.bias3d, self.stride3d, self.padding3d,
-                    self.dilation3d, self.groups)
-                x = F.relu(x)
-                return x
-
+    @skipIfNoFBGEMM
+    def test_extract_weights_conv_fun_ptq(self):
         w1d = torch.randn(1, 1, 1)
         w2d = torch.randn(1, 1, 1, 1)
         w3d = torch.randn(1, 1, 1, 1, 1)
         b1d = torch.randn(1)
         b2d = torch.randn(1)
         b3d = torch.randn(1)
-        m = M(w1d, w2d, w3d, b1d, b2d, b3d).eval()
+        m = AllConvFunctional(w1d, w2d, w3d, b1d, b2d, b3d).eval()
         self._test_extract_weights(m, results_len=6)
+
+    @skipIfNoFBGEMM
+    def test_extract_weights_conv_fun_qat(self):
+        w1d = torch.randn(1, 1, 1)
+        w2d = torch.randn(1, 1, 1, 1)
+        w3d = torch.randn(1, 1, 1, 1, 1)
+        b1d = torch.randn(1)
+        b2d = torch.randn(1)
+        b3d = torch.randn(1)
+        m = AllConvFunctional(w1d, w2d, w3d, b1d, b2d, b3d).train()
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        self._test_extract_weights(
+            m, results_len=6, qconfig_dict=qconfig_dict, prepare_fn=prepare_qat_fx)
 
     @skipIfNoFBGEMM
     def test_extract_weights_dynamic(self):
