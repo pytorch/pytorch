@@ -288,3 +288,12 @@ TAGS
 
 # bazel symlinks
 bazel-*
+
+# generated shellcheck directories
+.shellcheck_generated*/
+
+# zip archives
+*.zip
+
+# core dump files
+core.*
