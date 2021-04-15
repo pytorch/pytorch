@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
+#include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
@@ -232,6 +233,15 @@ bool isSupported(Node* node) {
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = true;
+static bool texpr_parallel_cpu_enabled = false;
+
+bool texprParallelCPUEnabled() {
+  return texpr_parallel_cpu_enabled;
+}
+
+void setTexprParallelCPUEnabled(bool val) {
+  texpr_parallel_cpu_enabled = val;
+}
 
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
@@ -854,7 +864,14 @@ class TensorExprFuser {
       return false;
     }
     if (device->is_cpu()) {
-      return canFuseOnCPU();
+      // CPU fusion is only supported for single-thread.
+      if (!canFuseOnCPU()) {
+        return false;
+      }
+      if (at::get_num_threads() == 1 || texprParallelCPUEnabled()) {
+        return true;
+      }
+      return false;
     } else if (device->is_cuda()) {
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
