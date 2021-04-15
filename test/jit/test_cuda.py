@@ -5,6 +5,7 @@ import unittest
 
 import torch
 from typing import NamedTuple
+from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_utils import skipIfRocm, skipCUDANonDefaultStreamIf
 
@@ -48,6 +49,43 @@ class TestCUDA(JitTestCase):
         gc.collect()
         torch.cuda.empty_cache()
         super(TestCUDA, self).tearDown()
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_cuda_synchronize(self):
+        # Test device synchronization.
+
+        @torch.jit.script
+        def test_device_synchronize():
+            prev_current_device_index = torch.cuda.current_device()
+            torch.cuda.synchronize()
+            torch.cuda.synchronize('cuda')
+            torch.cuda.synchronize('cuda:0')
+            torch.cuda.synchronize(0)
+            torch.cuda.synchronize(torch.device('cuda:1'))
+            after_current_device_index = torch.cuda.current_device()
+
+            # Check if the current device index is same as the device index before
+            # synchronizing the device.
+            return prev_current_device_index == after_current_device_index
+
+        @torch.jit.script
+        def test_multi_device_synchronize():
+            torch.cuda.synchronize(torch.device('cuda:0'))
+            prev_current_device_index = torch.cuda.current_device()
+            torch.cuda.synchronize(1)
+            after_current_device_index = torch.cuda.current_device()
+
+            # Check if the current device index is same as the device index before
+            # synchronizing the device.
+            return prev_current_device_index == after_current_device_index
+
+        self.assertTrue(test_device_synchronize)
+        FileCheck().check("cuda::synchronize(") \
+                   .run(test_device_synchronize.graph)
+        self.assertTrue(test_multi_device_synchronize)
+        FileCheck().check("cuda::synchronize(") \
+                   .run(test_multi_device_synchronize.graph)
 
     @skipIfRocm
     def test_stream_args(self):
