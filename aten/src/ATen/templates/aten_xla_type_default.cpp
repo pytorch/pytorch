@@ -56,27 +56,49 @@ std::vector<at::Tensor> to_device_opt(const std::vector<at::Tensor>& tensors, c1
 
 // convenience helper for converting tensors to cpu
 
-std::vector<c10::optional<at::Tensor>> to_cpu(const std::vector<c10::optional<at::Tensor>>& tensors) {
-    std::vector<c10::optional<at::Tensor>> opt_cpu_tensors(tensors.size());
-    std::vector<bool> copy_indices(tensors.size());
+std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
+    // We can't just call at::to_cpu() on the entire list of Tensors
+    // Because it will break on undefined tensors. Separate out undefined tensors first.
+    std::vector<at::Tensor> cpu_tensors(tensors.size());
     std::vector<at::Tensor> valid_tensors;
-    for (auto i = 0; i < tensors.size(); ++i) {
-        if (tensors[i].has_value()) {
-            valid_tensors.push_back(*tensors[i]);
-            copy_indices[i] = true;
+    std::vector<bool> to_translate(tensors.size());
+    for (size_t i = 0; i < tensors.size(); ++i) {
+        const at::Tensor& tensor = tensors[i];
+        if (tensor.defined()) {
+            to_translate[i] = true;
+            valid_tensors.push_back(tensor);
         } else {
-            opt_cpu_tensors[i] = tensors[i];
+            cpu_tensors[i] = tensor;
         }
     }
-    auto cpu_tensors = at::_to_cpu(valid_tensors); // redispatch!
+    auto cpu_valid_tensors = at::_to_cpu(valid_tensors);
+    for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {
+        if (to_translate[i]) {
+            cpu_tensors[i] = std::move(cpu_valid_tensors[defined_pos++]);
+        }
+    }
+  return cpu_tensors;
+}
 
-    int idx = 0;
-    for (auto i = 0; i < tensors.size(); ++i) {
-        if (copy_indices[i]) {
-            opt_cpu_tensors[i] = c10::optional<at::Tensor>(cpu_tensors[idx++]);
+std::vector<c10::optional<at::Tensor>> to_cpu(const std::vector<c10::optional<at::Tensor>>& tensors) {
+    std::vector<c10::optional<at::Tensor>> opt_tensors(tensors.size());
+    std::vector<at::Tensor> materialized_tensors;
+    std::vector<bool> to_translate(tensors.size());
+    for (size_t i = 0; i < tensors.size(); ++i) {
+        auto tensor = tensors[i];
+        if (tensor.has_value()) {
+            to_translate[i] = true;
+            materialized_tensors.push_back(*tensor);
         }
     }
-    return opt_cpu_tensors;
+    auto aten_materialized_tensors = to_cpu(materialized_tensors);
+    for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {
+        if (to_translate[i]) {
+          opt_tensors[i] =
+          std::move(aten_materialized_tensors[defined_pos++]);
+        }
+    }
+    return opt_tensors;
 }
 
 ${dispatch_aten_fallback_definitions}

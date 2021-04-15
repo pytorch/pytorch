@@ -131,12 +131,12 @@ class GenExternalAtenFallback:
             return_names = cpp.return_names(f.native_function, override_name="x_result")
             if len(return_names) > 1:
                 updates = '\n  '.join(
-                    f'at::_copy_from(std::get<{i}>({name}_tmp), {ret_name});'
+                    f'at::_copy_from_temp(std::get<{i}>({name}_tmp), {ret_name});'
                     for i, ret_name in enumerate(return_names))
                 returns = f'{dispatcher_sig.returns_type().cpp_type()}({", ".join(return_names)})'
             else:
                 ret_name = return_names[0]
-                updates = f'at::_copy_from({name}_tmp, {ret_name});'
+                updates = f'at::_copy_from_temp({name}_tmp, {ret_name});'
                 returns = ret_name
 
             # TODO: instead of hardcoding out wrappers that call into functional kernels,
@@ -226,7 +226,7 @@ class GenExternalAtenFallback:
 
             tensorlist_intermediates_str = ''
             if len(tensorlist_args) > 0:
-                tensorlist_intermediates_str = '\n'.join([f'  auto {updated_name} = at::_to_cpu({arg.name});'
+                tensorlist_intermediates_str = '\n'.join([f'  auto {updated_name} = to_cpu({arg.name});'
                                                           for arg, updated_name in tensorlist_args.items()])
 
             opt_tensor_intermediates_str = ''
@@ -239,7 +239,7 @@ class GenExternalAtenFallback:
             if tensorlist_intermediates_str != '':
                 intermediates += tensorlist_intermediates_str + '\n'
             intermediates += f"  std::vector<at::Tensor> xlatens_tensors = {{{', '.join([a.name for a in tensor_args.keys()])}}};"
-            intermediates += "\n  auto xlatens = at::_to_cpu(xlatens_tensors);"
+            intermediates += "\n  auto xlatens = to_cpu(xlatens_tensors);"
             if opt_tensor_intermediates_str != '':
                 intermediates += opt_tensor_intermediates_str
 
@@ -272,7 +272,7 @@ class GenExternalAtenFallback:
                 update_tensors = '''
   for (int i : xlatens_update_indices) {
     // if (xlatens_tensors[i].sizes() != xlatens[i].sizes()) xlatens_tensors[i].resize_(xlatens[i].sizes());
-    at::_copy_from(xlatens[i], xlatens_tensors[i]);
+    at::_copy_from_temp(xlatens[i], xlatens_tensors[i]);
   }
 '''
 

@@ -1051,6 +1051,9 @@
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch: {}
 
+- func: _copy_from_temp(Tensor self, Tensor dst) -> Tensor
+  dispatch: {}
+
 - func: cos(Tensor self) -> Tensor
   variants: function, method
   structured_delegate: cos.out
