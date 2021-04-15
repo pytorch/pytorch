@@ -621,11 +621,9 @@ def sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad,
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     if dtype.is_complex:
         inputs = sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad,
-                                                       for_inplace_variant=for_inplace_variant,
                                                        beta=1 + 2j, alpha=2 + 3j)
     else:
         inputs = sample_inputs_addmm_non_fusible_nodes(op_info, device, dtype, requires_grad,
-                                                       for_inplace_variant=for_inplace_variant,
                                                        beta=0.2, alpha=0.6)
     return inputs
 
