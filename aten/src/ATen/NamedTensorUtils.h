@@ -146,8 +146,7 @@ TORCH_API void propagate_names_for_addmm(
     const Tensor& m2,
     const Tensor& bias);
 
-TORCH_API void propagate_names_for_addmv(
-    Tensor& result,
+TORCH_API std::vector<Dimname> propagate_names_for_addmv(
     const Tensor& mat,
     const Tensor& vec,
     const Tensor& bias);
