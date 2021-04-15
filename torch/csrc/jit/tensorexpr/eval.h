@@ -23,10 +23,12 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DECLARE_TRIGGER(simple_ir_eval_executed);
 
 class Value {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Value() : dtype_(kInt) {
     Intvalues.push_back(0);
   }
@@ -35,12 +37,14 @@ class Value {
   Value(Type v) : dtype_(k##Name) { \
     Name##values.push_back(v);      \
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_CTOR);
 #undef VALUE_CTOR
 
 #define VALUE_VEC_CTOR(Type, Name)  \
   Value(const std::vector<Type>& v) \
       : dtype_(Dtype(k##Name, v.size())), Name##values(v) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_VEC_CTOR);
 #undef VALUE_VEC_CTOR
 
@@ -132,6 +136,7 @@ class ExprEval {
   using CallArg = CodeGen::CallArg;
 
   template <typename... Ts>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ExprEval(const ExprHandle& expr, Ts... ts)
       : ExprEval(expr, {BufferArg(ts)...}) {}
 
@@ -145,7 +150,9 @@ class ExprEval {
       indices.push_back(zero);
     }
     Stmt* store_stmt =
-        new Store(ret_buf.data(), indices, expr.node(), new IntImm(1));
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+        new Store(ret_buf.data(), indices, expr.node());
+    // NOLINTNEXTLINE(modernize-use-emplace)
     buffer_args_extended.push_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
@@ -182,10 +189,12 @@ class ExprEval {
     codegen_->call(call_args_extended);                 \
     ret_value_ = Value(ret_val_arg[0]);                 \
   } break;
+      // NOLINTNEXTLINE(modernize-use-emplace)
       AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Bool: {
         std::vector<unsigned char> ret_val_arg(1);
+        // NOLINTNEXTLINE(modernize-use-emplace)
         call_args_extended.push_back(CallArg(ret_val_arg.data()));
         codegen_->call(call_args_extended);
         ret_value_ = Value((bool)ret_val_arg[0]);
