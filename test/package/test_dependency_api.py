@@ -77,11 +77,13 @@ class TestDependencyAPI(PackageTestCase):
         Test that an error is thrown when a extern glob is specified with allow_empty=True
         and no matching module is required during packaging.
         """
+        import package_a.subpackage
+
         buffer = BytesIO()
         with self.assertRaisesRegex(EmptyMatchError, r"did not match any modules"):
             with PackageExporter(buffer, verbose=False) as exporter:
-                exporter.extern(include=["package_a.*"], allow_empty=False)
-                exporter.save_module("package_b.subpackage")
+                exporter.extern(include=["package_b.*"], allow_empty=False)
+                exporter.save_module("package_a.subpackage")
 
     def test_deny(self):
         """
@@ -174,11 +176,13 @@ class TestDependencyAPI(PackageTestCase):
         Test that an error is thrown when a mock glob is specified with allow_empty=True
         and no matching module is required during packaging.
         """
+        import package_a.subpackage
+
         buffer = BytesIO()
         with self.assertRaisesRegex(EmptyMatchError, r"did not match any modules"):
             with PackageExporter(buffer, verbose=False) as exporter:
-                exporter.mock(include=["package_a.*"], allow_empty=False)
-                exporter.save_module("package_b.subpackage")
+                exporter.mock(include=["package_b.*"], allow_empty=False)
+                exporter.save_module("package_a.subpackage")
 
     def test_module_glob(self):
         from torch.package.package_exporter import _GlobGroup
