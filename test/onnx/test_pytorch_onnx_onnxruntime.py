@@ -7961,6 +7961,49 @@ class TestONNXRuntime(unittest.TestCase):
         output = module(x, win_length)
         self.run_test(module, (x, win_length))
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    @disableScriptTest()
+    def test_tensordot_dim_count(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                output = torch.tensordot(x, y, 2)
+                return output
+
+        x = torch.randint(6, (7, 5, 3, 4))
+        y = torch.randint(6, (3, 4, 9, 2))
+
+        self.run_test(M(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_tensordot_dim_list(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                output = torch.tensordot(x, y, ([1, -2, -1], [1, 0, 3]))
+                return output
+
+        x = torch.randint(6, (7, 4, 3, 5, 2))
+        y = torch.randint(6, (5, 4, 4, 2, 6))
+
+        self.run_test(M(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    @disableScriptTest()
+    def test_tensordot_dynamic_dim(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                output = torch.tensordot(x, y, 2)
+                return output
+
+        x = torch.randint(6, (7, 5, 3, 4))
+        y = torch.randint(6, (3, 4, 9, 2))
+
+        new_x = torch.randint(6, (8, 6, 2, 5))
+        new_y = torch.randint(6, (2, 5, 3, 4))
+
+        self.run_test(M(), (x, y), test_with_inputs=[(new_x, new_y)],
+                      input_names=['input_x', 'input_y'],
+                      dynamic_axes={'input_x': [0, 1, 2, 3], 'input_y': [0, 1, 2, 3]})
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
               **extra_kwargs):
