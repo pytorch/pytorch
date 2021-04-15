@@ -216,16 +216,19 @@ Module Module::deepcopy() const {
   return Module(_ivalue()->deepcopy());
 }
 
-Module Module::clone(bool inplace) const {
+Module Module::clone(
+    bool inplace,
+    std::unordered_set<std::string> const& ignored_methods) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
   IValue::HashAliasedIValueMap memo;
-  return clone_impl(type_remap, inplace, memo);
+  return clone_impl(type_remap, inplace, memo, ignored_methods);
 }
 
 Module Module::clone_impl(
     std::unordered_map<TypePtr, TypePtr>& type_remap,
     bool inplace,
-    IValue::HashAliasedIValueMap memo) const {
+    IValue::HashAliasedIValueMap memo,
+    std::unordered_set<std::string> const& ignored_methods) const {
   // Create a new _ivalue in the same compilation unit.
   // Since now we have shared ClassType, we need to preserve the shared
   // ClassType during cloning, so we first need to check if the type
@@ -252,7 +255,8 @@ Module Module::clone_impl(
     TypePtr attr_type = type()->getAttribute(i);
     if (attr_type->is_module()) {
       const Module& orig = Module(s.toObject());
-      Module cloned = orig.clone_impl(type_remap, inplace, memo);
+      Module cloned = orig.clone_impl(
+          type_remap, inplace, memo, std::unordered_set<std::string>());
       type_remap[orig.type()] = cloned.type();
       // NOTE: why do we need to manually setattr on object instead of using
       // register_module here? because the attr can be a module interface
@@ -286,7 +290,9 @@ Module Module::clone_impl(
     }
     // clone methods, remapping the types to the cloned ones.
     for (auto& fn : type()->methods()) {
-      r.clone_method(*this, *fn, type_remap);
+      if (ignored_methods.count(fn->name()) == 0) {
+        r.clone_method(*this, *fn, type_remap);
+      }
     }
 
     // Execute __setstate__(__getstate__()) to initialize custom class members.

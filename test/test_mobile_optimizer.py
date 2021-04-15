@@ -505,6 +505,40 @@ class TestOptimizer(TestCase):
         self.assertEqual(m(x).numel(), 1000)
         self.assertEqual(m(x).numel(), 1000)
 
+    def test_clone_module_with_class(self):
+        class MyTestModule(torch.nn.Module):
+            def __init__(self):
+                super(MyTestModule, self).__init__()
+
+            def forward(self, inputs):
+                return inputs
+
+            @torch.jit.export
+            def dummy_method_not_cloned(self):
+                return None
+
+            @torch.jit.export
+            def dummy_method_cloned(self):
+                return None
+
+        m = torch.jit.script(MyTestModule())
+        cloned = torch._C._clone_module_with_class(m._c, ["dummy_method_not_cloned"])
+
+        self.assertEqual(
+            (
+                hasattr(m, "dummy_method_not_cloned"),
+                hasattr(m, "dummy_method_cloned"),
+                hasattr(cloned, "dummy_method_not_cloned"),
+                hasattr(cloned, "dummy_method_cloned"),
+            ),
+            (True, True, False, True),
+        )
+
+        self.assertTrue(
+            cloned.qualified_name.startswith('__torch__.'),
+            ("Expected the cloned module's name to start with the string "
+             "'__torch__.', but got: {0}").format(cloned.qualified_name),
+        )
 
 
 if __name__ == '__main__':
