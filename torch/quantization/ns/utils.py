@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.quantized as nnq
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized.dynamic as nnqd
 toq = torch.ops.quantized
 from torch.fx import GraphModule
@@ -65,6 +67,7 @@ fp32_mods = set([
     nn.Linear,
     nn.Conv1d,
     nn.Conv2d,
+    nni.ConvReLU2d,
     nn.Conv3d,
     nn.LSTM,
     # note: nnqd.Linear is an instance of nnq.Linear, so this
@@ -79,6 +82,7 @@ int8_mods = set([
     nnq.Linear,
     nnq.Conv1d,
     nnq.Conv2d,
+    nniq.ConvReLU2d,
     nnq.Conv3d,
 ])
 
@@ -206,3 +210,17 @@ def get_number_of_non_param_args(
 
     # default is 1
     return 1
+
+def get_target_type_str(node: Node, gm: GraphModule) -> str:
+    """
+    Returns a string representation of the type of the function or module
+    pointed to by this node, or '' for other op types.
+    """
+    target_type = ''
+    if node.op == 'call_function':
+        target_type = str(node.target)
+    elif node.op == 'call_module':
+        assert isinstance(node.target, str)
+        target_mod = getattr_from_fqn(gm, node.target)
+        target_type = str(type(target_mod))
+    return target_type
