@@ -2573,7 +2573,7 @@ struct KronImpl final {
 
 DEFINE_DISPATCH(unpack_pivots_stub);
 
-std::tuple<Tensor, Tensor, Tensor> _lu_unpack(
+std::tuple<Tensor, Tensor, Tensor> lu_unpack(
     const Tensor& LU_data,
     const Tensor& LU_pivots,
     bool unpack_data,

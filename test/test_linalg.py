@@ -5203,11 +5203,10 @@ class TestLinalg(TestCase):
             for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3),
                           (3, 5), (5, 3), (3, 3, 5), (3, 5, 3),
                           (7, 5, 3, 5, 3), (7, 5, 3, 3, 5)):
-                for lu_unpack in [torch.lu_unpack, torch._lu_unpack]:
-                    a = torch.randn(*shape, dtype=dtype, device=device)
-                    a_lu, p = torch.lu(a, pivot=pivot)
-                    p_ref, l_ref, u_ref = lu_unpack(a_lu, p)
-                    self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
+                a = torch.randn(*shape, dtype=dtype, device=device)
+                a_lu, p = torch.lu(a, pivot=pivot)
+                p_ref, l_ref, u_ref = torch.lu_unpack(a_lu, p)
+                self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
 
         run_test(True)
 
@@ -5218,14 +5217,22 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @dtypes(torch.double)
     @skipCUDAIfRocm
-    def test__lu_unpack_check_input(self, device, dtype):
+    def test_lu_unpack_check_input(self, device, dtype):
         x = torch.rand(5, 5, 5, device=device, dtype=dtype)
         lu_data, lu_pivots = torch.lu(x, pivot=True)
 
         with self.assertRaisesRegex(RuntimeError, "torch.int32 dtype"):
-            torch._lu_unpack(lu_data, lu_pivots.long())
+            torch.lu_unpack(lu_data, lu_pivots.long())
         with self.assertRaisesRegex(RuntimeError, "contiguous tensor"):
-            torch._lu_unpack(lu_data, lu_pivots.transpose(-1, -2))
+            torch.lu_unpack(lu_data, lu_pivots.transpose(-1, -2))
+
+        # check that onces flags are unset, Nones are returned
+        p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False)
+        self.assertTrue(l == u == None)
+        p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_pivots=False)
+        self.assertTrue(p == None)
+        p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False, unpack_pivots=False)
+        self.assertTrue(p == l == u == None)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
