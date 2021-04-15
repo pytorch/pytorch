@@ -17,9 +17,9 @@ enum class DebugDumpOption {
   KernelIr, //!< Dump the compiler Kernel IR
   CudaKernel, //!< Dump the generated CUDA C++ kernel code
   CudaFull, //!< Dump the complete CUDA C++ code
+  CudaToFile, //!< Dump CUDA Strings to File
   LaunchParam, //!< Dump the Launch parameters of kernel
   FusionSegments, //!< Dump Segmented Fusion Graph
-  DumpKernel, //!< Dump CUDA Strings to File
   PrintRuntimeArgs, //!< Print the runtime arguments when launching kernels
   EffectiveBandwidth, //! Measure kernel performance and print effective
                       //! bandwidth

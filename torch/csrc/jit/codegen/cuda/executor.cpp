@@ -45,7 +45,7 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()
               << " =======\n\n"
               << code << "\n======================================\n\n";
-  } else if (isDebugDumpEnabled(DebugDumpOption::DumpKernel)) {
+  } else if (isDebugDumpEnabled(DebugDumpOption::CudaToFile)) {
     std::stringstream file_name;
     file_name << "__tmp_kernel" << fusion_id_ << ".cu";
     std::cout << "PRINTING: " << file_name.str() << std::endl;
@@ -552,24 +552,24 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (isDebugDumpEnabled(DebugDumpOption::PrintRuntimeArgs)) {
     std::cout << "Arguments for kernel" << fusion_id_ << ":" << std::endl
               << "Inputs:" << std::endl;
-    for (auto input : inputs) {
+    for (const auto& input : inputs) {
       if (input.isTensor()) {
         std::cout << input.toTensor().scalar_type() << " "
                   << input.toTensor().sizes() << std::endl;
       }
     }
     std::cout << "Outputs:" << std::endl;
-    for (auto output : allocated_outputs) {
+    for (const auto& output : allocated_outputs) {
       std::cout << "  " << output.scalar_type() << " " << output.sizes()
                 << std::endl;
     }
     std::cout << "Reduction buffers:" << std::endl;
-    for (auto buffer : global_buffers.empty_buffers) {
+    for (const auto& buffer : global_buffers.empty_buffers) {
       std::cout << "  " << buffer.scalar_type() << " " << buffer.sizes()
                 << std::endl;
     }
     std::cout << "Semaphores:" << std::endl;
-    for (auto buffer : global_buffers.zero_buffers) {
+    for (const auto& buffer : global_buffers.zero_buffers) {
       std::cout << "  " << buffer.scalar_type() << " " << buffer.sizes()
                 << std::endl
                 << std::endl;

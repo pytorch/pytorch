@@ -20,9 +20,9 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::KernelIr, false},
       {DebugDumpOption::CudaKernel, false},
       {DebugDumpOption::CudaFull, false},
+      {DebugDumpOption::CudaToFile, false},
       {DebugDumpOption::LaunchParam, false},
       {DebugDumpOption::FusionSegments, false},
-      {DebugDumpOption::DumpKernel, false},
       {DebugDumpOption::PrintRuntimeArgs, false},
       {DebugDumpOption::EffectiveBandwidth, false},
       {DebugDumpOption::FusionSegmentsDrawing, false}};
@@ -42,12 +42,12 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::CudaKernel] = true;
       } else if (token == "cuda_full") {
         options_map[DebugDumpOption::CudaFull] = true;
+      } else if (token == "cuda_to_file") {
+        options_map[DebugDumpOption::CudaToFile] = true;
       } else if (token == "launch_param") {
         options_map[DebugDumpOption::LaunchParam] = true;
       } else if (token == "segmented_fusion") {
         options_map[DebugDumpOption::FusionSegments] = true;
-      } else if (token == "dump_kernel") {
-        options_map[DebugDumpOption::DumpKernel] = true;
       } else if (token == "print_args") {
         options_map[DebugDumpOption::PrintRuntimeArgs] = true;
       } else if (token == "dump_eff_bandwidth") {
@@ -59,8 +59,10 @@ auto parseDebugDumpOptions() {
             false,
             "Invalid debug dump option: '",
             token,
-            "'\n  Available options: ",
-            "fusion_ir, fusion_ir_math, kernel_ir, cuda_kernel, cuda_full, launch_param, segmented_fusion, draw_segmented_fusion\n");
+            "'\nAvailable options:\n",
+            "\tfusion_ir, fusion_ir_math, kernel_ir, cuda_kernel, cuda_full,\n",
+            "\tcuda_to_file, launch_param, segmented_fusion, print_args,\n",
+            "\tdump_eff_bandwidth, draw_segmented_fusion\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
