@@ -2055,7 +2055,7 @@
 
 - func: mkldnn_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
   dispatch:
-      MkldnnCPU: mkldnn_linear_backward_input
+    MkldnnCPU: mkldnn_linear_backward_input
 
 - func: mkldnn_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
   dispatch:
@@ -8417,6 +8417,18 @@
 
 - func: special_erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
+
+- func: special_i0e(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_i0e.out
+
+- func: special_i0e.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_i0e_out
 
 - func: special_logit(Tensor self, float? eps=None) -> Tensor
   python_module: special
