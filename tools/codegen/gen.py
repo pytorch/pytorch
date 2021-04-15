@@ -10,8 +10,15 @@ import json
 from dataclasses import dataclass
 
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.model import *
-from tools.codegen.api.types import *
+from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
+                                 Location, NativeFunction,
+                                 NativeFunctionsGroup, OperatorName,
+                                 OptionalType, SchemaKind, SelfArgument,
+                                 TensorOptionsArguments, Type, Variant,
+                                 assert_never, is_cuda_dispatch_key,
+                                 is_generic_dispatch_key)
+from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
+                                     DispatcherSignature, NativeSignature)
 from tools.codegen.api import cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
@@ -19,8 +26,10 @@ import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import *
-from tools.codegen.context import *
+from tools.codegen.utils import Target, concatMap, context, mapMaybe
+from tools.codegen.context import (method_with_native_function,
+                                   native_function_manager,
+                                   with_native_function)
 import tools.codegen.dest as dest
 
 try:
@@ -619,7 +628,6 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('overload_name', str(f.func.name.overload_name)),
         ('manual_kernel_registration', f.manual_kernel_registration),
         ('category_override', f.category_override if f.category_override is not None else ''),
-        ('matches_jit_signature', True),
         ('schema_string', f'aten::{f.func}'),
         ('arguments', arguments),
         ('schema_order_cpp_signature', schema_order_cpp_signature),

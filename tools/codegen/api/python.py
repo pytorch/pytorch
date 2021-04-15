@@ -1,10 +1,12 @@
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence, Set, List, Dict, Tuple
 
-from tools.codegen.api.types import *
+from tools.codegen.api.types import Binding, CppSignature, CppSignatureGroup
 from tools.codegen.api import cpp
 from tools.codegen.gen import pythonify_default
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
+                                 NativeFunction, OptionalType, Return, Type,
+                                 Variant)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -883,8 +885,8 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
         type_str = cpp_arg.type
         is_out_arg = cpp_arg.name in out_args
         if ps.method and cpp_arg.name == 'self':
-            # For method's 'self', we can use 'Tensor &' and simply ignore mutability!
-            type_str = 'Tensor &'
+            # For method's 'self', we can use 'const Tensor &' and simply ignore mutability!
+            type_str = 'const Tensor &'
         else:
             # For other cases we need prevent dangling refs to temps (unless it's
             # unpacked scattered output)
