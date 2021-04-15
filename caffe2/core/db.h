@@ -3,8 +3,8 @@
 
 #include <mutex>
 
-#include "c10/util/Registry.h"
-#include "c10/util/string_view.h"
+#include <c10/util/Registry.h>
+#include <c10/util/string_view.h>
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/proto/caffe2_pb.h"
 
