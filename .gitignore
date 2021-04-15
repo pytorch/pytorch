@@ -288,3 +288,7 @@ TAGS
 
 # bazel symlinks
 bazel-*
+
+# direnv, posh-direnv
+.envrc
+.psenvrc
