@@ -313,13 +313,7 @@ static void LowPrecisionCastNodeForStandardOps(Node* n, int opset_version) {
     if (n->input(i)->type()->cast<TensorType>() == nullptr ||
         n->input(i)->type()->cast<TensorType>()->scalarType() == c10::nullopt) {
       // skip LowPrecisionCast if any op input type node is null.
-      return;
-    }
-    auto input_tensor_type =
         n->input(i)->type()->cast<TensorType>()->scalarType().value();
-    TORCH_INTERNAL_ASSERT(output_scalar_type == input_tensor_type);
-  }
-
   // The LowPrecision problem will be fixed in ONNX opset 14.
   if (opset_version < ONNX_OPSET_14) {
     auto expected_scalar_type_cast =
