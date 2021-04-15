@@ -43,7 +43,7 @@ template <
     int BDims,
     CUDAHistogramMemoryType MemoryType = CUDAHistogramMemoryType::MULTI_BLOCK,
     typename Op>
-C10_LAUNCH_BOUNDS_1(AT_APPLY_THREADS_PER_BLOCK)
+C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
 __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
