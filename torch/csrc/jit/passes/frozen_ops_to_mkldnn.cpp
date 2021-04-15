@@ -541,6 +541,16 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       continue;
     }
 
+    if (body_node->kind() == aten::hardtanh) {
+      WithInsertPoint insert_guard{body_node};
+      auto out_val = body_node->owningGraph()->insert(
+          prim::MKLDNNRelu6, {body_node->input(0)});
+      out_val->copyMetadata(body_node->output());
+      body_node->output()->replaceAllUsesWith(out_val);
+      body_node->destroy();
+      continue;
+    }
+
     if (body_node->kind() == aten::conv2d ||
         body_node->kind() == aten::conv3d) {
       // this node doesnt handle string padding yet...
@@ -719,7 +729,16 @@ class MKLDNNSubgraphSlicer {
       // conversions. from initial testing including it speeds up models
       case aten::max_pool2d:
       case aten::max_pool3d:
+      case aten::adaptive_avg_pool2d:
         return true;
+    }
+
+    if (n->kind() == aten::hardtanh) {
+      auto min_val = constant_as<double>(n->namedInput("min_val")).value();
+      auto max_val = constant_as<double>(n->namedInput("max_val")).value();
+      if (min_val == 0. && max_val == 6.) {
+        return true;
+      }
     }
 
     if (n->kind() == aten::add || n->kind() == aten::mul) {
@@ -851,6 +870,7 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
           aten::dropout_,
           aten::sigmoid_,
           aten::hardsigmoid_,
+          aten::hardtanh_,
       };
       return mkldnn_ops.count(node_to_functionalize->kind()) != 0;
     });
