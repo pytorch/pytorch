@@ -160,7 +160,7 @@ def get_class_properties(cls, self_name):
 def get_class_assigns(ctx, cls_ast):
     assigns = []
 
-    def build_assign(builder, entry):
+    def maybe_build_assign(builder, entry):
         nonlocal assigns
         try:
             assigns.append(builder(ctx, entry))
