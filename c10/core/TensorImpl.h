@@ -169,6 +169,22 @@ struct C10_API AutogradMetaFactoryRegisterer {
   }
 };
 
+// c10 does not directly depend on Python, so we need to indirect any
+// calls to Python API via hooks.
+struct C10_API PythonHooks {
+  virtual ~PythonHooks() = default;
+  virtual void release_pyobj(PyObject*) const = 0;
+};
+
+C10_API void SetPythonHooks(PythonHooks* factory);
+C10_API PythonHooks* GetPythonHooks();
+
+struct C10_API PythonHooksRegisterer {
+  explicit PythonHooksRegisterer(PythonHooks* factory) {
+    SetPythonHooks(factory);
+  }
+};
+
 } // namespace impl
 
 struct C10_API NamedTensorMetaInterface {

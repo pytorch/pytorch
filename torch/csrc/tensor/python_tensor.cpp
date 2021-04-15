@@ -416,4 +416,13 @@ ScalarType get_default_scalar_type() {
   return typeMetaToScalarType(get_default_dtype());
 }
 
+struct ConcretePythonHooks : public c10::impl::PythonHooks {
+  void release_pyobj(PyObject* pyobj) const override {
+    pybind11::gil_scoped_acquire gil;
+  };
+};
+
+static ConcretePythonHooks python_hooks;
+static c10::impl::PythonHooksRegisterer python_hooks_registerer(&python_hooks);
+
 }} // namespace torch::tensors
