@@ -5228,11 +5228,11 @@ class TestLinalg(TestCase):
 
         # check that onces flags are unset, Nones are returned
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False)
-        self.assertTrue(l == u == None)
+        self.assertTrue((l == u) and l is None)
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_pivots=False)
-        self.assertTrue(p == None)
+        self.assertTrue(p is None)
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False, unpack_pivots=False)
-        self.assertTrue(p == l == u == None)
+        self.assertTrue((p == l == u) and p is None)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
