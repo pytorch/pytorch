@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/Parallel.h>
+#include "c10/core/DeviceType.h"
 #include "test/cpp/jit/test_utils.h"
 #include "torch/jit.h"
 #include "torch/script.h"
@@ -141,6 +142,27 @@ TEST(InterpreterTest, Basic_CUDA) {
 
   ASSERT_TRUE(exactlyEqual(outputs[0], hx));
   ASSERT_TRUE(exactlyEqual(outputs[1], cx));
+}
+
+TEST(InterpreterTest, IgnoreTrailArgs) {
+
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+  constexpr int seq_len = 32;
+
+  int hidden_size = 2 * input_size;
+
+  auto input1 = at::randn({seq_len, batch_size, input_size}, at::kCPU);
+  auto input2 = at::randn({batch_size, hidden_size}, at::kCPU);
+
+  auto graph = build_mobile_export_analysis_graph();
+  Code function(graph, "", true);
+  auto op_to_num_ignore_function = function.op_to_num_ignore_inputs();
+  for (auto & it : op_to_num_ignore_function) {
+    std::cout << it.second << std::endl;
+    ASSERT_TRUE(it.second == 1);
+  }
+
 }
 
 TEST(InterpreterTest, runAsyncBasicTest) {

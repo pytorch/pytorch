@@ -115,7 +115,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
 
   Inline(*graph);
 
-  torch::jit::Code code(graph, func.name());
+  torch::jit::Code code(graph, func.name(), true);
   auto instructions_copy = code.instructions();
 
   // operator names

@@ -48,6 +48,7 @@ struct TORCH_API Code {
   explicit Code(
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
+      bool from_mobile = false,
       size_t remaining_bailout_depth = 0);
   ~Code();
 
@@ -63,6 +64,7 @@ struct TORCH_API Code {
   const std::vector<c10::IValue>& constant_table() const;
   const std::vector<c10::TypePtr>& type_table() const;
   const std::vector<Instruction>& instructions() const;
+  const std::unordered_map<std::string, int> op_to_num_ignore_inputs() const;
   const std::vector<Node*>& instructions_source() const;
   void request_bailout(size_t index);
   size_t register_size() const;

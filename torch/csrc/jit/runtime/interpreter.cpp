@@ -465,6 +465,7 @@ struct CodeImpl {
   size_t n_inputs;
   TypePtr return_type_;
   std::string function_name_;
+  bool from_mobile_;
 
   // We MUST hold onto graph here because some Operators stored in the
   // instruction lists have dependencies on meta-data stored in the graph
@@ -480,7 +481,7 @@ struct CodeImpl {
   std::unordered_map<Value*, int> value_to_reg_;
 
   // map from operator name to trailing unnecessary inputs
-  std::unordered_map<std::string, int> op_to_num_ignore_inputs;
+  std::unordered_map<std::string, int> op_to_num_ignore_inputs_;
 
   // running count of uses as we emit. When we reach use_count_[v] =
   // v.uses().size() we know it is the final use and we can move rather than
@@ -499,10 +500,12 @@ struct CodeImpl {
   CodeImpl(
       const std::shared_ptr<Graph>& graph,
       std::string function_name,
+      bool from_mobile,
       size_t remaining_bailout_depth)
       : function_name_(std::move(function_name)),
         preprocess_(*graph),
         current_node_(preprocess_.graph->return_node()),
+        from_mobile_(from_mobile),
         remaining_bailout_depth_(remaining_bailout_depth) {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
@@ -518,18 +521,21 @@ struct CodeImpl {
     std::unordered_map<std::string, std::vector<int>> op_to_trailing_ignore;
     for (auto node: graph_nodes) {
       // TODO only do it for aten:: operators?
+      if (!node->maybeOperator()) continue;
       auto op = node->getOperator();
-      const auto& op_schema = op.schema();
-      const auto& op_args = op_schema.arguments();
-      auto node_inputs = node->inputs();
-      auto numIgnore = calculate_trailing_ignore(op_args, node_inputs);
-      auto it = op_to_trailing_ignore.insert(std::pair<std::string, std::vector<int>>(op.schema().name(), std::vector<int>()));
-      it.first->second.push_back(numIgnore);
+      if (op.schema().name().find("aten::") != std::string::npos) {
+        const auto& op_schema = op.schema();
+        const auto& op_args = op_schema.arguments();
+        auto node_inputs = node->inputs();
+        auto numIgnore = calculate_trailing_ignore(op_args, node_inputs);
+        auto it = op_to_trailing_ignore.insert(std::pair<std::string, std::vector<int>>(op.schema().name(), std::vector<int>()));
+        it.first->second.push_back(numIgnore);
+      }
     }
 
     for (auto & it : op_to_trailing_ignore) {
       int min_ignore = *std::min_element(it.second.begin(), it.second.end());
-      op_to_num_ignore_inputs.insert(std::pair<std::string, int>(it.first, min_ignore));
+      op_to_num_ignore_inputs_.insert(std::pair<std::string, int>(it.first, min_ignore));
     }
 
 
@@ -561,14 +567,12 @@ struct CodeImpl {
         auto schema_value = schema_args.at(i).default_value().value();
         auto actual_value = toIValue(actual_inputs[i]);
         if (schema_value == actual_value) {
-          necessary_mark[i] = true;
-        } else {
           necessary_mark[i] = false;
+        } else {
+          necessary_mark[i] = true;
         }
       }
-
     }
-
     // scan backwards to count how many trailing unnecessary args there are
     // for example, [necessary, unneccessary, necessary, unneccessary, unneccessary] -> 2
     int num_trailing_ignore = 0;
@@ -606,6 +610,10 @@ struct CodeImpl {
 
   const std::vector<Instruction>& instructions() const {
     return instructions_;
+  }
+
+  const std::unordered_map<std::string, int> op_to_num_ignore_inputs() const {
+    return op_to_num_ignore_inputs_;
   }
 
   const std::vector<Node*>& instructions_source() const {
@@ -703,8 +711,9 @@ struct CodeImpl {
     const Operator& op = node->getOperator();
 
     auto min_ignore = 0;
-    if (op_to_num_ignore_inputs.find(op.schema().name()) != op_to_num_ignore_inputs.end()) {
-      min_ignore = op_to_num_ignore_inputs[op.schema().name()];
+    // make sure we only do this for mobile code
+    if (from_mobile_ && op_to_num_ignore_inputs_.find(op.schema().name()) != op_to_num_ignore_inputs_.end()) {
+      min_ignore = op_to_num_ignore_inputs_[op.schema().name()];
 
     }
     at::ArrayRef<Value*> necessary_inputs = node->inputs().slice(0, node->inputs().size() - min_ignore);
@@ -1806,10 +1815,12 @@ std::ostream& operator<<(std::ostream& out, const Code& code) {
 Code::Code(
     const std::shared_ptr<Graph>& graph,
     std::string function_name,
+    bool from_mobile,
     size_t remaining_bailout_depth)
     : pImpl(new CodeImpl(
           graph,
           std::move(function_name),
+          from_mobile,
           remaining_bailout_depth)) {}
 Code::~Code() = default;
 
@@ -1843,6 +1854,10 @@ const std::vector<c10::IValue>& Code::constant_table() const {
 
 const std::vector<Instruction>& Code::instructions() const {
   return pImpl->instructions();
+}
+
+const std::unordered_map<std::string, int> Code::op_to_num_ignore_inputs() const {
+  return pImpl->op_to_num_ignore_inputs();
 }
 
 const std::vector<Node*>& Code::instructions_source() const {
