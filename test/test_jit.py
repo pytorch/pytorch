@@ -4622,76 +4622,6 @@ a")
                     test(backward=True)
                     test(backward=True)
 
-    def test_tensor_item(self):
-        def test_scalar_cast(x):
-            scalar = x.item()
-            return int(scalar), float(scalar)
-
-        graph = torch.jit.script(test_scalar_cast).graph
-        FileCheck().check("(int, float) = prim::TupleConstruct").run(graph)
-        self.checkScript(test_scalar_cast, (torch.tensor(1.0),))
-        self.checkScript(test_scalar_cast, (torch.tensor(1),))
-
-    def test_method_on_number(self):
-        def func():
-            c = 1
-            return c.add(1)
-        with self.assertRaisesRegex(RuntimeError, 'nonexistent attribute or method'):
-            torch.jit.script(func)
-
-    # testing implicit conversion of tensors to scalars to match function arguments
-    def test_scalar_to_num_conversions(self):
-        @torch.jit.script
-        def multiple_defs(x):
-            c = 1
-            x = x + c
-            return x
-
-        self.assertTrue("ImplicitTensorToNum" not in str(multiple_defs.graph))
-
-        @torch.jit.script
-        def tensor_to_int_script(x, tensor):
-            return x.unsqueeze(tensor)
-
-        # location present in error message
-        with self.assertRaisesRegex(RuntimeError, "x.unsqueeze"):
-            tensor_to_int_script(torch.tensor([2]), torch.tensor([2, 2]))
-
-        def tensor_to_int(x, tensor):
-            return x.unsqueeze(tensor)
-
-        @torch.jit.script
-        def tensor_to_float_script(x, tensor):
-            return x.addcmul(tensor, tensor, value=tensor)
-
-        def tensor_to_float(x, tensor):
-            return x.addcmul(tensor, tensor, value=tensor)
-
-        x = torch.zeros(10)
-        # float tensor, float tensor with grad, int tensor (can't set grad on int tensor)
-        tensors = [torch.tensor(1.1),
-                   torch.tensor(1.1, requires_grad=True),
-                   torch.tensor(0),
-                   torch.tensor([2])]
-
-        script_funs = [tensor_to_int_script, tensor_to_float_script]
-        funs = [tensor_to_int, tensor_to_float]
-
-        # return the result, or whether exception was thrown
-        def test_func(func, x, tensor):
-            try:
-                result = func(x, tensor)
-            except RuntimeError as e:
-                result = True
-            except TypeError as e:
-                result = True
-            return result
-
-        # assert result or exception equal for each (function, inputs)
-        for tensor in tensors:
-            for i in range(len(script_funs)):
-                self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
-
     def test_module_copy_with_attributes(self):
         class Vocabulary(torch.jit.ScriptModule):
             def __init__(self, vocab_list):
@@ -10379,16 +10309,6 @@ dedent """
 
         self.checkScript(t, (torch.zeros(3, 2, 3),))
 
-    def test_slice_dynamic_index(self):
-        def t(x):
-            slice1 = x[0:1]
-            zero = 0
-            one = zero + 1
-            slice2 = x[zero:one]
-            return slice1 + slice2
-
-        self.checkScript(t, (torch.zeros(3, 2, 3),))
-
     def test_addmm_grad(self):
         """ This test checks several things:
             1. An expand node was inserted before the addmm operating on the
@@ -12107,27 +12027,6 @@ dedent """
             return len((1, "str", None))
 
         self.assertEqual(foo(), 3)
-
-    def test_tuple_slicing(self):
-        def tuple_slice(a):
-            if bool(a):
-                b = (1, 2, 3, 4)
-            else:
-                b = (4, 3, 2, 1)
-            c = b[-4:4]
-            e = c[1:-1]
-            return e
-
-        self.checkScript(tuple_slice, (torch.tensor([1]),), optimize=True)
-        scripted_fn = torch.jit.script(tuple_slice)
-        self.assertEqual(scripted_fn(torch.tensor(1)), (2, 3))
-        tuple_graph = scripted_fn.graph
-        slices = tuple_graph.findAllNodes("prim::TupleConstruct")
-        num_outputs = set(len(x.output().type().elements()) for x in slices)
-        # there should be only one tupleSlice with length of 2
-        self.assertTrue(num_outputs == {2})
-        self.run_pass('lower_all_tuples', tuple_graph)
-        self.assertTrue('Tuple' not in str(tuple_graph))
 
         @torch.jit.script
         def test_indexing_end_out_of_bounds():
