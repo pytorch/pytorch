@@ -144,12 +144,16 @@ jobs:
           sudo df -H
       - name: Test PyTorch
         run: |
+          SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
+          MEMORY_LIMIT_MAX_JOBS=8 # our "linux.2xlarge" runner has 16 vCPUs, if we use all of them we'll OOM
+          export MAX_JOBS=$(( SCCACHE_MAX_JOBS > MEMORY_LIMIT_MAX_JOBS ? MEMORY_LIMIT_MAX_JOBS : SCCACHE_MAX_JOBS ))
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086
           docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e IN_CI \
+            -e MAX_JOBS \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --shm-size="${SHM_SIZE}" \

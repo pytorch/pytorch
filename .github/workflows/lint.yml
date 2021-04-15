@@ -92,6 +92,8 @@ jobs:
           python2 setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
 
   templates:
+    runs-on: ubuntu-18.04
+    steps:
       - name: Install Jinja2
         run: pip install Jinja2
       - name: Checkout PyTorch
