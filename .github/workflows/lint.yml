@@ -94,6 +94,11 @@ jobs:
   templates:
     runs-on: ubuntu-18.04
     steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
       - name: Install Jinja2
         run: pip install Jinja2
       - name: Checkout PyTorch
