@@ -235,7 +235,6 @@ class DeviceTypeTestBase(TestCase):
         else:
             return self.precision
 
-
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test, *, generic_cls=None):
