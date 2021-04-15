@@ -708,17 +708,14 @@ def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
 def sample_inputs_transpose_swapdims(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    shape = (1, 2, 3)
-    dims = (1, 2)
-    cases = []
-    for sign in product([-1, 1], repeat=len(dims)):
-        new_dims = tuple(dim * sign for dim, sign in zip(dims, sign))
-        cases.append((shape, new_dims))
-
-    cases += [((), (0, 0)),
-              ((1, ), (0, 0)),
-              ((L, L), (0, 1)),
-              ((S, S, S), (2, 0)), ]
+    cases = [((1, 2, 3), (-1, -2)),
+             ((1, 2, 3), (-1, 2)),
+             ((1, 2, 3), (1, -2)),
+             ((1, 2, 3), (1, 2)),
+             ((), (0, 0)),
+             ((1, ), (0, 0)),
+             ((L, L), (0, 1)),
+             ((S, S, S), (2, 0)), ]
 
     def generator():
         for shape, args in cases:
