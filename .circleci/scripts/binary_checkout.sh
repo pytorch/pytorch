@@ -5,6 +5,7 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
+git config --global submodule.fetchJobs 0
 
 # This step runs on multiple executors with different envfile locations
 if [[ "$(uname)" == Darwin ]]; then
@@ -55,7 +56,7 @@ else
   echo "Can't tell what to checkout"
   exit 1
 fi
-retry git submodule update --init --recursive --jobs 0
+retry git submodule update --init --recursive
 echo "Using Pytorch from "
 git --no-pager log --max-count 1
 popd
@@ -64,6 +65,6 @@ popd
 retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
-git checkout driazati/test
+# git checkout driazati/test
 git --no-pager log --max-count 1
 popd
