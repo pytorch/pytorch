@@ -13,6 +13,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/comm.hpp>
+#include <c10d/Utils.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -38,7 +39,9 @@ class Reducer {
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
-      bool gradient_as_bucket_view);
+      bool gradient_as_bucket_view,
+      std::unordered_map<size_t, std::string>
+          paramNames);
 
   ~Reducer() noexcept(false);
 
@@ -427,6 +430,23 @@ class Reducer {
   std::unique_ptr<CommHookInterface> comm_hook_;
   // Current thread local state
   at::ThreadLocalState thread_local_state_;
+  // Debug level setting. It is parsed once when Reducer is constructed, and
+  // remains the same across a single invocation of DDP training.
+  DistributedDebugLevel ddp_debug_level_;
+  // Mapping of variable index to fully qualified name of model to notify users
+  // about errors when certain parameters do not get gradient.
+  std::unordered_map<size_t, std::string> param_names_;
+  // Per iteration set of parameter indices that have been marked ready.
+  std::unordered_set<size_t> perIterationReadyParams_;
+  // Retrieves parameter names that have not been marked as ready as part of
+  // previous iteration.
+  std::vector<std::string> getUnmarkedParamsForIteration();
+  // Retrives parameter indices that have not been marked as ready as part of
+  // previous iteration.
+  std::vector<size_t> getUnmarkedParamIndicesForIteration();
+  // Raises appropriate error if mark_variable_ready is called on the same
+  // variable twice, which is unexpected.
+  void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
   friend class Logger;
 };
 

@@ -486,8 +486,13 @@ class DistributedDataParallel(Module):
         dist._verify_model_across_ranks(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
+        # In debug mode, build a mapping of parameter index -> parameter.
+        if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
+            param_to_name_mapping = self._build_param_to_name_mapping(parameters)
+        else:
+            param_to_name_mapping = {}
         # Builds reducer.
-        self._ddp_init_helper(parameters, expect_sparse_gradient)
+        self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
@@ -500,7 +505,7 @@ class DistributedDataParallel(Module):
                 module_states, self.broadcast_bucket_size, authoritative_rank
             )
 
-    def _ddp_init_helper(self, parameters, expect_sparse_gradient):
+    def _ddp_init_helper(self, parameters, expect_sparse_gradient, param_to_name_mapping):
         """
         Initialization helper function that does the following:
         (1) bucketing the parameters for reductions
@@ -531,6 +536,7 @@ class DistributedDataParallel(Module):
             self.bucket_bytes_cap,
             self.find_unused_parameters,
             self.gradient_as_bucket_view,
+            param_to_name_mapping,
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -561,7 +567,13 @@ class DistributedDataParallel(Module):
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
-        self._ddp_init_helper(parameters, expect_sparse_gradient)
+        # In debug mode, build a mapping of parameter index -> parameter.
+        if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
+            param_to_name_mapping = self._build_param_to_name_mapping(parameters)
+        else:
+            param_to_name_mapping = {}
+        # Builds reducer
+        self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
 
     def _build_params_for_reducer(self):
         # Build tuple of (module, parameter) for all parameters that require grads.
@@ -633,6 +645,37 @@ class DistributedDataParallel(Module):
         ]
 
         return parameters, expect_sparse_gradient
+
+    def _build_param_to_name_mapping(self, parameters):
+        param_to_param_index = {
+            parameters[0][i] : i for i in range(len(parameters[0]))
+        }
+        param_set = set(parameters[0])
+        param_index_to_param_fqn = {}
+        for module_name, module in self.module.named_modules():
+            for param_name, param in module.named_parameters(recurse=False):
+                fqn = f"{module_name}.{param_name}"
+                # Bypass ignored parameters since those are not reduced by DDP
+                # to begin with.
+                if fqn not in self.parameters_to_ignore:
+                    if param not in param_set:
+                        raise ValueError(
+                            f"Param with name {fqn} found in module parameters, but not DDP parameters."
+                        )
+                    param_index = param_to_param_index[param]
+                    param_index_to_param_fqn[param_index] = fqn
+
+        # Ensure we covered all parameters
+        if len(param_set) != len(param_index_to_param_fqn):
+            raise ValueError(
+                (
+                    "Expected param to name mapping to cover all parameters, but"
+                    f" got conflicting lengths: {len(param_set)} vs "
+                    f"{len(param_index_to_param_fqn)}"
+                )
+            )
+
+        return param_index_to_param_fqn
 
     def _get_parameters(self, m, recurse=True):
         """
@@ -1235,6 +1278,23 @@ class DistributedDataParallel(Module):
     def _set_params_and_buffers_to_ignore_for_model(
         module, params_and_buffers_to_ignore
     ):
+        """
+        Sets parameters and buffers to be ignored by DDP. Expected format for
+        parameters is the fully qualified name: {module_name}.{param_name}, and
+        similarly, {module_name}.{buffer_name} for buffers. For example:
+        params_to_ignore = []
+        # NB: model here is vanilla PyTorch module, not yet wrapped with DDP.
+        for module_name, module in model.named_modules():
+            for param_name, param in module.named_parameters(recurse=False):
+                if should_ignore(param):
+                    # Create expected format
+                    fqn = f"{module_name}.{param_name}"
+                    params_to_ignore.append(fqn)
+        torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+            model,
+            params_to_ignore
+        )
+        """
         # This is a workaround to set parameters and buffers DDP should ignore
         # during synchronization. It will be removed when the API is finalized
         # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
