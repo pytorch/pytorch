@@ -26,11 +26,7 @@ jobs:
           pip install ruamel.yaml==0.17.4
           echo "Please locally run .github/scripts/regenerate_cancel_redundant_workflow.py and commit if this step fails."
           .github/scripts/regenerate_cancel_redundant_workflow.py
-          set -eux
-          CHANGES=$(git status --porcelain)
-          echo "$CHANGES"
-          git diff
-          [ -z "$CHANGES" ]
+          git diff --exit-code .github/workflows/cancel_redundant_workflows.yml
       - name: Lint native_functions.yaml
         run: |
           pip install ruamel.yaml==0.17.4

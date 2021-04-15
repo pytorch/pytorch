@@ -16,22 +16,22 @@ yaml.boolean_representation = ['False', 'True']
 yaml.default_flow_style = False
 
 
-workflow_paths = (Path(__file__).parent.parent / 'workflows').rglob('*')
-workflows = []
-for path in workflow_paths:
-    if path.suffix in {'.yml', '.yaml'}:
-        with open(path) as f:
-            data = yaml.load(f)
-            assert 'name' in data, 'Every GHA workflow must have a name.'
-            if 'pull_request' in data['on']:
-                workflows.append(data['name'])
+if __name__ == '__main__':
+    workflow_paths = (Path(__file__).parent.parent / 'workflows').rglob('*')
+    workflows = []
+    for path in workflow_paths:
+        if path.suffix in {'.yml', '.yaml'}:
+            with open(path) as f:
+                data = yaml.load(f)
+                assert 'name' in data, 'Every GHA workflow must have a name.'
+                if 'pull_request' in data['on']:
+                    workflows.append(data['name'])
 
+    with open('.github/workflows/cancel_redundant_workflows.yml', 'r') as f:
+        data = yaml.load(f)
 
-with open('.github/workflows/cancel_redundant_workflows.yml', 'r') as f:
-    data = yaml.load(f)
     # Replace workflows to cancel
     data['on']['workflow_run']['workflows'] = sorted(workflows)
 
-
-with open('.github/workflows/cancel_redundant_workflows.yml', 'w') as f:
-    yaml.dump(data, f)
+    with open('.github/workflows/cancel_redundant_workflows.yml', 'w') as f:
+        yaml.dump(data, f)
