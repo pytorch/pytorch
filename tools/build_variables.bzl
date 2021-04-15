@@ -628,7 +628,6 @@ libtorch_python_distributed_core_sources = [
     "torch/lib/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
-    "torch/csrc/distributed/rpc/types.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
@@ -644,6 +643,7 @@ libtorch_python_distributed_sources = libtorch_python_distributed_core_sources +
     "torch/csrc/distributed/rpc/tensorpipe_utils.cpp",
     "torch/csrc/distributed/rpc/testing/faulty_process_group_agent.cpp",
     "torch/csrc/distributed/rpc/testing/init.cpp",
+    "torch/csrc/distributed/rpc/types.cpp",
     "torch/csrc/distributed/rpc/unpickled_python_call.cpp",
     "torch/csrc/distributed/rpc/unpickled_python_remote_call.cpp",
     "torch/csrc/jit/runtime/register_distributed_ops.cpp",
