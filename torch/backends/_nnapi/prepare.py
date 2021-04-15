@@ -36,7 +36,6 @@ class NnapiModule(torch.nn.Module):
     @torch.jit.export
     def init(self, args: List[torch.Tensor]):
         assert self.comp is None
-        # self.shape_compute_prepare is a module and not a Tensor
         self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)  # type: ignore[operator]
         self.weights = [w.contiguous() for w in self.weights]
         comp = torch.classes._nnapi.Compilation()
