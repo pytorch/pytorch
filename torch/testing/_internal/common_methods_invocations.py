@@ -704,6 +704,29 @@ def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
                                      low=None, high=None,
                                      requires_grad=requires_grad))),)
 
+
+def sample_inputs_transpose_swapdims(self, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    shape = (1, 2, 3)
+    dims = (1, 2)
+    cases = []
+    for sign in product([-1, 1], repeat=len(dims)):
+        new_dims = tuple(dim * sign for dim, sign in zip(dims, sign))
+        cases.append((shape, new_dims))
+
+    cases += [((), (0, 0)),
+              ((1, ), (0, 0)),
+              ((L, L), (0, 1)),
+              ((S, S, S), (2, 0)), ]
+
+    def generator():
+        for shape, args in cases:
+            yield SampleInput(make_arg(shape), args=args)
+
+    return list(generator())
+
+
 def sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates always invertible input for linear algebra ops using
@@ -4350,6 +4373,12 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_out=False,
            sample_inputs_func=sample_inputs_trace),
+    OpInfo('transpose',
+           aliases=('swapdims', 'swapaxes'),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_transpose_swapdims),
     OpInfo('kron',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -4672,21 +4701,6 @@ def method_tests():
         ('float_power', torch.rand(S, S, S) + 1e-3, (uniform_scalar(0.1),), 'scalar_broadcast_rhs'),
         ('float_power', uniform_scalar(1e-3, requires_grad=True), (torch.rand(S, S, S) + 0.1,), 'scalar_broadcast_lhs'),
         ('float_power', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant'),
-        ('transpose', (1, 2, 3), (1, 2), 'dim', (False,), [0, 1]),
-        ('transpose', (), (0, 0), 'scalar', (False,)),
-        ('transpose', (1,), (0, 0), '1d', (False,)),
-        ('transpose', (L, L), (0, 1), '2d', (False,)),
-        ('transpose', (S, S, S), (2, 0), '3d', (False,)),
-        ('swapdims', (1, 2, 3), (1, 2), 'dim', (False,), [0, 1]),
-        ('swapdims', (), (0, 0), 'scalar', (False,)),
-        ('swapdims', (1,), (0, 0), '1d', (False,)),
-        ('swapdims', (L, L), (0, 1), '2d', (False,)),
-        ('swapdims', (S, S, S), (2, 0), '3d', (False,)),
-        ('swapaxes', (1, 2, 3), (1, 2), 'dim', (False,), [0, 1]),
-        ('swapaxes', (), (0, 0), 'scalar', (False,)),
-        ('swapaxes', (1,), (0, 0), '1d', (False,)),
-        ('swapaxes', (L, L), (0, 1), '2d', (False,)),
-        ('swapaxes', (S, S, S), (2, 0), '3d', (False,)),
         ('t', (1, 2), NO_ARGS, '', (False,)),
         ('view', (S, S, S), (S * S, S), '', (False,)),
         ('view', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
