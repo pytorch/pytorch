@@ -56,6 +56,7 @@ SaveOpImpl::SaveOpImpl(
     : operator_(op),
       strip_prefix_(op->template GetSingleArgument<string>("strip_prefix", "")),
       db_type_(op->template GetSingleArgument<string>("db_type", "")),
+      db_options_(op->template GetSingleArgument<string>("db_options", "")),
       blob_names_(
           op->template GetRepeatedArgument<string>("blob_name_overrides")) {
   CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
@@ -165,6 +166,9 @@ bool SaveOpImpl::RunOnDevice() {
       " (while trying to open ",
       full_db_name_,
       ")");
+  if (!db_options_.empty()) {
+    out_db->SetOptions(db_options_);
+  }
 
   BlobSerializerBase::SerializationAcceptor acceptor =
       [&](const std::string& blobName, const std::string& data) {
