@@ -631,6 +631,17 @@ static void frexp_kernel(TensorIteratorBase& iter) {
   });
 }
 
+static void i0e_kernel(TensorIteratorBase& iter) {
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, iter.common_dtype(), "i0e_cpu", [&]() {
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t x) { return calc_i0e(x); },
+            [](Vec256<scalar_t> x) { return x.i0e(); });
+      });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -736,6 +747,7 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel);
 REGISTER_DISPATCH(entr_stub, &entr_kernel);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel);
+REGISTER_DISPATCH(i0e_stub, &i0e_kernel);
 
 
 IMPLEMENT_COMPLEX_KERNEL(acos)
