@@ -1,9 +1,6 @@
 import enum
-import operator
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 toq = torch.ops.quantized
 
 from torch.fx import GraphModule
