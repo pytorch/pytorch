@@ -622,7 +622,7 @@ def sample_inputs_add(op_info, device, dtype, requires_grad, **kwargs):
     for first_shape, shape_or_scalar, broadcasts_input in test_cases:
         arg = shape_or_scalar
         if isinstance(shape_or_scalar, tuple):
-            arg = make_tensor(shape_or_scalar, device=device, dtype=dtype, 
+            arg = make_tensor(shape_or_scalar, device=device, dtype=dtype,
                               requires_grad=requires_grad)
         samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
                                                requires_grad=requires_grad),
