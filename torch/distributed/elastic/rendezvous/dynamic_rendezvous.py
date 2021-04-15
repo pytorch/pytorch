@@ -4,13 +4,109 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
+import socket
+import threading
 from abc import ABC, abstractmethod
-from datetime import timedelta
-from typing import Any, Optional, Tuple
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional, Set, Tuple
 
 from torch.distributed import Store
 
 from .api import RendezvousHandler, RendezvousParameters
+
+
+@dataclass(eq=True, frozen=True)
+class _NodeDesc:
+    """Describes a node in the rendezvous.
+
+    Attributes:
+        fqdn:
+            The FQDN of the node.
+        pid:
+            The id of the process in which the rendezvous handler runs.
+        local_id:
+            A process-wide unique id.
+    """
+
+    fqdn: str
+    pid: int
+    local_id: int
+
+    def __repr__(self) -> str:
+        return f"{self.fqdn}_{self.pid}_{self.local_id}"
+
+
+class _NodeDescGenerator:
+    """Generates node descriptors.
+
+    A node descriptor is a combination of an FQDN, a process id, and an
+    auto-incremented integer that uniquely identifies a node in the rendezvous.
+    """
+
+    _lock: threading.Lock
+    _local_id: int
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+
+        # An integer that is incremented with each call to `generate()`.
+        self._local_id = 0
+
+    def generate(self) -> _NodeDesc:
+        # This method can be called by multiple threads concurrently; therefore,
+        # we must increment the integer atomically.
+        with self._lock:
+            local_id = self._local_id
+
+            self._local_id += 1
+
+        return _NodeDesc(socket.getfqdn(), os.getpid(), local_id)
+
+
+class _Rendezvous:
+    """Holds the state of a rendezvous.
+
+    A rendezvous is synced across the nodes via a ``RendezvousBackend``.
+
+    Attributes:
+        round:
+            The current round of the rendezvous.
+        complete:
+            A boolean value indicating whether the current round of the
+            rendezvous is complete.
+        deadline:
+            The date and time at which the current round of the rendezvous will
+            be considered complete if it is still waiting for nodes to join.
+        closed:
+            A boolean value indicating whether the rendezvous is closed.
+        participants:
+            A dictionary of the participants and their corresponding ranks.
+        wait_list:
+            A set of nodes that are waiting to participate in the next round of
+            the rendezvous.
+        last_keep_alives:
+            A dictionary containing each node's last keep-alive time.
+    """
+
+    round: int
+    complete: bool
+    deadline: Optional[datetime]
+    closed: bool
+    participants: Dict[_NodeDesc, int]
+    wait_list: Set[_NodeDesc]
+    last_keep_alives: Dict[_NodeDesc, datetime]
+
+    def __init__(self) -> None:
+        self.round = 0
+        self.complete = False
+        self.deadline = None
+        self.closed = False
+        self.participants = {}
+        self.wait_list = set()
+        self.last_keep_alives = {}
+
 
 Token = Any
 """Represents an opaque fencing token used by the rendezvous backend."""
