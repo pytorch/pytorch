@@ -21,6 +21,9 @@ import json
 # Autograd tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
+# TODO(alband) Remove this when this flag is not needed anymore
+torch._C._set_forward_AD_enabled(True)
+
 from torch import nn
 from torch._six import inf, nan
 from torch.autograd.function import once_differentiable
@@ -4021,6 +4024,9 @@ class TestAutograd(TestCase):
             gradcheck(lambda x: torch.tensor([x]), x)
         self.assertFalse(gradcheck(lambda x: torch.tensor([x]), x, raise_exception=False))
 
+        # succeed when no outputs at all
+        self.assertTrue(gradcheck(lambda x: (), (x,)))
+
     def test_gradcheck_check_batched_grad(self):
         x = torch.rand(10, requires_grad=True).to_sparse()
         # runtime error while compute batched grad (print big error)
@@ -4126,6 +4132,110 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1'):
             gradcheck(fn3, (x_c,))
         self.assertFalse(gradcheck(fn3, (x_c,), raise_exception=False))
+
+    def test_gradcheck_dense_and_sparse_inputs(self):
+        def fn(x, y):
+            return x * y.coalesce().to_dense()
+        a = torch.rand(2, 2, requires_grad=True)
+        b = torch.rand(2, 2).to_sparse().requires_grad_(True)
+        self.assertTrue(gradcheck(fn, (a, b), check_sparse_nnz=True, check_batched_grad=False))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_gradcheck_multiple_mkldnn_inputs(self):
+        def fn(x, y):
+            return x + y.to_dense()
+        a = torch.rand(10, requires_grad=True)
+        b = torch.rand(10, dtype=torch.float32).to_mkldnn().requires_grad_(True)
+        self.assertTrue(gradcheck(fn, (a, b), atol=1e-1, check_batched_grad=False))
+
+        def fn2(x, y):
+            return x.to_dense() + y.to_dense()
+        c = torch.rand(10, dtype=torch.float32).to_mkldnn().requires_grad_(True)
+        self.assertTrue(gradcheck(fn, (a, c), atol=1e-1, check_batched_grad=False))
+
+    def test_gradcheck_output_shape_or_dtype_depend_on_values(self):
+        def fn(x):
+            if torch.all(x >= 1):
+                return torch.cat([x, x])
+            else:
+                return x
+        a = torch.ones(1, requires_grad=True)
+        with self.assertRaisesRegex(AssertionError, 'return outputs with the same shape when inputs are perturbed'):
+            self.assertTrue(gradcheck(fn, (a,)))
+
+        def fn2(x):
+            if torch.all(x >= 1):
+                return x.to(torch.float32)
+            else:
+                return x
+        with self.assertRaisesRegex(AssertionError, 'return outputs with the same dtype when inputs are perturbed'):
+            self.assertTrue(gradcheck(fn2, (a,)))
+
+    def test_gradcheck_complex_non_complex_outputs(self):
+        def fn(x, y):
+            z = torch.complex(x, y)
+            return z, x + 1
+        a = torch.ones(2, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.ones(2, 2, requires_grad=True, dtype=torch.float64)
+        self.assertTrue(gradcheck(fn, (a, b)))
+
+        def fn2(z):
+            return z, torch.real(z)
+        c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
+        self.assertTrue(gradcheck(fn2, (c)))
+
+    def test_gradcheck_get_numerical_jacobian(self):
+        # get_numerical_jacobian is deprecated and no longer used internally by gradcheck
+        from torch.autograd.gradcheck import get_numerical_jacobian
+
+        def fn(inputs):
+            # get_numerical_jacobian requires fn to take inputs as a tuple
+            # and returns the jacobian wrt the first output
+            x = inputs[0]
+            y = inputs[1]
+            return 2 * x + y, x + 2 * y
+        a = torch.rand(2, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.rand(2, 2, requires_grad=True, dtype=torch.float64)
+
+        with self.assertWarnsRegex(UserWarning, "get_numerical_jacobian was part of PyTorch's private API"):
+            jacobian = get_numerical_jacobian(fn, (a, b), target=a, eps=1e-6)
+        self.assertEqual(jacobian[0], 2 * torch.eye(4))
+
+        with self.assertWarnsRegex(UserWarning, "get_numerical_jacobian was part of PyTorch's private API"):
+            jacobian = get_numerical_jacobian(fn, (a, b), eps=1e-6)
+        self.assertEqual(jacobian[0], 2 * torch.eye(4))
+        self.assertEqual(jacobian[1], 1 * torch.eye(4))
+
+    def test_gradcheck_get_analytical_jacobian(self):
+        from torch.autograd.gradcheck import get_analytical_jacobian
+
+        def fn(x, y):
+            return 2 * x + y, x + 2 * y
+
+        a = torch.rand(2, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.rand(2, 2, requires_grad=True, dtype=torch.float64)
+
+        outputs = fn(a, b)
+        with self.assertWarnsRegex(UserWarning, "get_analytical_jacobian was part of PyTorch's private API"):
+            jacobians, reentrant, correct_grad_sizes, correct_grad_types = get_analytical_jacobian((a, b), outputs[0])
+        self.assertEqual(jacobians[0], 2 * torch.eye(4))
+        self.assertEqual(jacobians[1], 1 * torch.eye(4))
+        self.assertTrue(reentrant)
+
+        class NonDetFunc(Function):
+            @staticmethod
+            def forward(ctx, x, jitter=0.0):
+                ctx._jitter = jitter
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return NonDetFunc.apply(grad_out, ctx._jitter) * (1 + torch.rand_like(grad_out) * ctx._jitter), None
+
+        outputs = NonDetFunc.apply(a, 1e-6)
+        with self.assertWarnsRegex(UserWarning, "get_analytical_jacobian was part of PyTorch's private API"):
+            jacobians, reentrant, correct_grad_sizes, correct_grad_types = get_analytical_jacobian((a,), outputs)
+        self.assertFalse(reentrant)
 
     def test_version_counter(self):
         x = torch.randn(1, 2)
@@ -6864,6 +6974,13 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
 class TestAutogradForwardMode(TestCase):
+    def tearDown(self):
+        # Ensure that a failing test won't make others fail
+        while fwAD._current_level >= 0:
+            fwAD.exit_dual_level()
+
+        super().tearDown()
+
     def test_forward_level_cleanup(self):
         def get_tensor_and_weak_ref():
             # Create a new Tensor and weak reference
@@ -6908,6 +7025,249 @@ class TestAutogradForwardMode(TestCase):
                 dual = fwAD.make_dual(foo, tangent)
 
             dual = fwAD.make_dual(foo, tangent[1:])
+
+    # The following test functions want to ensure all the following behaviors:
+    #   - Ensure that default level system in the python binding works
+    #   - Ensure that only level 0 exists and nesting is properly disabled
+    #   - Ensure that printing works fine
+    #   - Ensure that basic packing/unpacking works
+    #   - Ensure that advanced packing/unpacking works
+    #     - For memory / version counter share
+    #     - For backward AD (regular ops)
+    #   - Ensure that view + inplace for both modes work fine
+    #   - Ensure we do proper cleanup on exit of a level
+
+    def test_default_level(self):
+        foo = torch.rand(2)
+        bar = torch.rand(2)
+
+        with fwAD.dual_level():
+            baz = fwAD.make_dual(foo, bar)
+            baz_primal, baz_tangent = fwAD.unpack_dual(baz)
+        self.assertEqual(baz_primal, foo)
+        # We don't actually need to enforce that these two are the exact same python
+        # object, feel free to relax in the future
+        self.assertIs(baz_tangent, bar)
+
+        baz_primal, baz_tangent = fwAD.unpack_dual(baz)
+        self.assertEqual(baz_primal, foo)
+        self.assertEqual(baz_tangent, None)
+
+    def test_nested_level(self):
+        with fwAD.dual_level() as level:
+            # For now only level 0 exists
+            self.assertEqual(level, 0)
+
+        with fwAD.dual_level():
+            with self.assertRaisesRegex(RuntimeError, "Nested forward mode AD is not supported at the moment"):
+                nest_level = fwAD.enter_dual_level()
+
+    def test_print(self):
+        with fwAD.dual_level() as level:
+            a = torch.rand(3)
+            self.assertFalse("tangent=" in str(a))
+
+            b = fwAD.make_dual(a, torch.rand(3))
+            self.assertFalse("tangent=" in str(a))
+            self.assertTrue("tangent=" in str(b))
+
+            b_primal, b_tangent = fwAD.unpack_dual(b)
+            self.assertFalse("tangent=" in str(b_primal))
+            self.assertFalse("tangent=" in str(b_tangent))
+
+    def test_basic_packing_unpacking(self):
+        foo = torch.rand(2)
+        bar = torch.rand(2)
+
+        with fwAD.dual_level():
+            baz = fwAD.make_dual(foo, bar)
+            baz_primal, baz_tangent = fwAD.unpack_dual(baz)
+            self.assertEqual(baz_primal, foo)
+            self.assertIs(baz_tangent, bar)
+
+            # Check that packing/unpacking did not change the input
+            foo_primal, foo_tangent = fwAD.unpack_dual(foo)
+            self.assertEqual(foo_primal, foo)
+            self.assertIsNone(foo_tangent)
+
+    def test_advanced_packing_unpacking(self):
+        foo = torch.rand(2)
+        bar = torch.ones(2)
+
+        # Memory and version counter check
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(foo, bar)
+
+            # Ensure that they are sharing memory and version counter
+            self.assertEqual(dual.storage().data_ptr(), foo.storage().data_ptr())
+
+            # Ensure we properly share the version counter
+            self.assertEqual(foo._version, dual._version)
+            foo.add_(1)
+            self.assertEqual(foo._version, dual._version)
+
+            # Unpacking should only create aliases as well
+            dual_primal, dual_tangent = fwAD.unpack_dual(dual)
+            self.assertEqual(dual_primal.storage().data_ptr(), foo.storage().data_ptr())
+            self.assertEqual(dual_tangent.storage().data_ptr(), bar.storage().data_ptr())
+            # And the tangent is actually re-used as-is so it is still the same Tensor
+            self.assertIs(dual_tangent, bar)
+
+            # Ensure we properly share the version counter
+            self.assertEqual(foo._version, dual_primal._version)
+            foo.add_(1)
+            self.assertEqual(foo._version, dual_primal._version)
+            self.assertEqual(bar._version, dual_tangent._version)
+            bar.add_(1)
+            self.assertEqual(bar._version, dual_tangent._version)
+
+        # backward mode check
+        with fwAD.dual_level():
+            foo.requires_grad_()
+            bar.requires_grad_()
+
+            # Check that backward gradients properly propagates through packing/unpacking
+            dual = fwAD.make_dual(foo, bar)
+            p, t = fwAD.unpack_dual(dual)
+
+            gfoo, gbar = torch.autograd.grad(p.sum(), (foo, bar), retain_graph=True, allow_unused=True)
+            self.assertEqual(gfoo, torch.ones_like(foo))
+            self.assertIsNone(gbar)
+
+            gfoo, gbar = torch.autograd.grad(t.sum(), (foo, bar), retain_graph=True, allow_unused=True)
+            self.assertIsNone(gfoo)
+            self.assertEqual(gbar, torch.ones_like(bar))
+
+            # Check that forward gradients are not impacted by detach
+            detached_dual = dual.detach()
+            out = detached_dual * 2
+            p, t = fwAD.unpack_dual(out)
+            self.assertFalse(p.requires_grad)
+            self.assertFalse(t.requires_grad)
+            self.assertEqual(p, foo * 2)
+            self.assertEqual(t, bar * 2)
+
+            # Check that forward gradients are not impacted by no_grad
+            with torch.no_grad():
+                out = dual * 3
+            p, t = fwAD.unpack_dual(out)
+            self.assertFalse(p.requires_grad)
+            self.assertFalse(t.requires_grad)
+            self.assertEqual(p, foo * 3)
+            self.assertEqual(t, bar * 3)
+
+            # Check that forward gradients are not impacted by inplace detach
+            dual = dual.clone()
+            dual.detach_()
+            out = dual * 2
+            p, t = fwAD.unpack_dual(out)
+            self.assertFalse(p.requires_grad)
+            self.assertFalse(t.requires_grad)
+            self.assertEqual(p, foo * 2)
+            self.assertEqual(t, bar * 2)
+
+    def test_view_inplace_non_differentiable_views(self):
+        original_foo = torch.rand(2)
+        original_bar = torch.ones(2)
+
+        # Do clones to be able to compare the values updated inplace
+        # with the original content of these Tensors
+        foo = original_foo.clone()
+        bar = original_bar.clone()
+
+        with fwAD.dual_level():
+            # Note that in this test, we use "update" to mean computing the right tangent for the dual
+            # All the inplace operations here are expected to update the primal value of the Tensors but
+            # not always their tangents.
+            # Also all mentions of "non differentiable view" here means non forward differentiable view
+            # unless specified otherwise.
+            # See note [Forward Grad View/inplace] for more details on how these views work.
+
+            # Check that inplace ops do not update non-differentiable views
+            # Non differentiable view
+            dual = fwAD.make_dual(foo, bar)
+            dual *= 2
+            # Check that non differentiable view's tangent was not updated
+            self.assertIsNone(fwAD.unpack_dual(foo)[1])
+            # Check that the computed result is correct
+            self.assertEqual(bar, original_bar * 2)
+            self.assertEqual(fwAD.unpack_dual(dual)[1], original_bar * 2)
+            self.assertEqual(foo, original_foo * 2)
+            self.assertEqual(fwAD.unpack_dual(dual)[0], original_foo * 2)
+            # Other non differentiable view
+            dual_primal, dual_tangent = fwAD.unpack_dual(dual)
+            self.assertIsNone(fwAD.unpack_dual(dual_primal)[1])
+            self.assertIsNone(fwAD.unpack_dual(dual_tangent)[1])
+            dual_primal *= 2
+            # Ensure dual's tangent did not change
+            self.assertEqual(fwAD.unpack_dual(dual)[0], original_foo * 4)
+            self.assertEqual(fwAD.unpack_dual(dual)[1], original_bar * 2)
+            dual_tangent *= 2
+            # Ensure dual's primal did not change
+            self.assertEqual(fwAD.unpack_dual(dual)[0], original_foo * 4)
+            self.assertEqual(fwAD.unpack_dual(dual)[1], original_bar * 4)
+
+
+    def test_view_inplace_differentiable_views(self):
+        original_foo = torch.rand(2)
+        original_bar = torch.ones(2)
+
+        # Do clones to be able to compare the values updated inplace
+        # with the original content of these Tensors
+        foo = original_foo.clone()
+        bar = original_bar.clone()
+
+        with fwAD.dual_level():
+            # Check that inplace ops do update differentiable view but stop at non differentiable ones
+            # A non differentiable view
+            dual = fwAD.make_dual(foo, bar)
+            # A differentiable view
+            view = dual.narrow(0, 0, 1)
+            view *= 2
+            # Check that non differentiable view was not updated
+            self.assertIsNone(fwAD.unpack_dual(foo)[1])
+            # Check that differentiable view was updated
+            self.assertEqual(fwAD.unpack_dual(dual)[1], torch.tensor([2., 1.]))
+            self.assertEqual(fwAD.unpack_dual(view)[1], torch.tensor([2.]))
+
+            # Check that we track differentiable view even for Tensors that are not dual
+            baz = torch.rand(2)
+            baz += dual
+            self.assertEqual(fwAD.unpack_dual(baz)[1], fwAD.unpack_dual(dual)[1])
+            # Updates on view should as well
+            baz = torch.rand(2)
+            baz[0] = dual[0]
+            self.assertEqual(fwAD.unpack_dual(baz)[1][0], fwAD.unpack_dual(dual)[1][0])
+            # Unused values get a gradient of 0
+            self.assertEqual(fwAD.unpack_dual(baz)[1][1], 0.)
+
+            # Check that backward non-differentiable views don't prevent gradient update
+            baz = torch.rand(2)
+            view = baz.detach()
+            view += dual
+            self.assertEqual(fwAD.unpack_dual(baz)[1], fwAD.unpack_dual(dual)[1])
+
+    def test_grad_cleanup(self):
+        foo = torch.rand(2)
+        bar = torch.rand(2)
+        baz = torch.rand(2)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(foo, bar)
+            self.assertIsNone(fwAD.unpack_dual(foo)[1])
+            self.assertIs(fwAD.unpack_dual(dual)[1], bar)
+
+        self.assertIsNone(fwAD.unpack_dual(dual)[1])
+
+        with fwAD.dual_level():
+            self.assertIsNone(fwAD.unpack_dual(foo)[1])
+            new_dual = fwAD.make_dual(foo, baz)
+
+            dual_primal, dual_tangent = fwAD.unpack_dual(dual)
+            new_dual_primal, new_dual_tangent = fwAD.unpack_dual(new_dual)
+            self.assertEqual(dual_primal, new_dual_primal)
+            self.assertIsNone(dual_tangent)
+            self.assertEqual(new_dual_tangent, baz)
 
 
 # Generic device type autograd tests.
@@ -7842,6 +8202,14 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(fn, (vec))
         gradgradcheck(fn, (vec))
+
+    @onlyCUDA
+    def test_gradcheck_input_output_different_device(self, device):
+        x = torch.ones((1,), device="cuda", requires_grad=True)
+        gradcheck(lambda x: x.to("cpu"), (x,))
+
+        x = torch.ones((1,), device="cpu", requires_grad=True)
+        gradcheck(lambda x: x.to("cuda"), (x,))
 
     def test_logcumsumexp_large_value(self, device):
         a = torch.rand(4, 4, 4, dtype=torch.double, requires_grad=True)
