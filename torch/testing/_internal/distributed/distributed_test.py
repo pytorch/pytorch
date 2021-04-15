@@ -12,6 +12,7 @@ from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple
+from torch.testing._internal.common_utils import IS_MACOS, IS_WINDOWS, FILE_SCHEMA
 
 import torch
 import torch.cuda
@@ -24,7 +25,6 @@ from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
-from torch.testing._internal.common_utils import FILE_SCHEMA
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -5136,6 +5136,10 @@ class DistributedTest:
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
+        @unittest.skipIf(
+            IS_MACOS or IS_WINDOWS,
+            "MacOS uses uv transport which does not have as robust error handling as tcp transport"
+        )
         def test_monitored_barrier_gloo(self):
             tensors = [torch.ones(10) * self.rank]
             # Kick off some allreduce work on all ranks
@@ -5147,23 +5151,26 @@ class DistributedTest:
             # All ranks besides 1 call into barrier, rank 0 should report failure
             # while others report gloo error.
             failed_rank = 1
-            if self.rank == failed_rank:
-                return
-            if self.rank == 0:
+            src_rank = 0
+            if self.rank == src_rank:
                 with self.assertRaisesRegex(
                     RuntimeError,
                     f"Rank {failed_rank} failed to pass monitoredBarrier"
                 ):
                     dist.monitored_barrier(timeout=timeout)
-            else:
-                # It is permissible for other ranks that did not fail to
-                # successfully exit or crash in the monitored barrier, the main
-                # purpose of monitored barrier is to report the rank that hung
-                # on rank 0.
-                try:
+            elif self.rank != failed_rank:
+                # Other ranks should not pass barrier since rank 0 failed.
+                err_regex = (
+                    f"Rank {self.rank} successfully reached monitoredBarrier,"
+                    f" but received errors while waiting to be unblocked by rank"
+                    f" {src_rank}"
+                )
+                with self.assertRaisesRegex(RuntimeError, err_regex):
                     dist.monitored_barrier(timeout=timeout)
-                except RuntimeError:
-                    pass
+
+            # We need a barrier since otherwise failed_rank exits too early
+            # and cause a timeout.
+            self._barrier(timeout=30)
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
@@ -5215,22 +5222,21 @@ class DistributedTest:
             if self.rank != 0:
                 with self.assertRaisesRegex(RuntimeError, "Caught collective operation timeout"):
                     nccl_pg.allreduce(tensors).wait(timedelta(seconds=0.1))
-                return
-
-            # Rank 0 should report first (in order) timed out rank or all ranks
-            # depending on wait_all_ranks flag passed into monitored_barrier.
-            if wait_all_ranks:
-                rank_str = ", ".join([str(i) for i in range(1, int(self.world_size))])
-                err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
             else:
-                expected_first_fail_rank = 1
-                err_regex = f"Rank {expected_first_fail_rank} failed to pass monitoredBarrier"
-            monitored_barrier_timeout_seconds = timedelta(seconds=0.1)
-            with self.assertRaisesRegex(
-                RuntimeError,
-                err_regex
-            ):
-                gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks)
+                # Rank 0 should report first (in order) timed out rank or all ranks
+                # depending on wait_all_ranks flag passed into monitored_barrier.
+                if wait_all_ranks:
+                    rank_str = ", ".join([str(i) for i in range(1, int(self.world_size))])
+                    err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
+                else:
+                    expected_first_fail_rank = 1
+                    err_regex = f"Rank {expected_first_fail_rank} failed to pass monitoredBarrier"
+                monitored_barrier_timeout_seconds = timedelta(seconds=0.1)
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    err_regex
+                ):
+                    gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks)
 
         @with_nccl_blocking_wait
         @require_backend({"gloo", "nccl"})
@@ -5269,18 +5275,28 @@ class DistributedTest:
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
         @skip_if_small_worldsize
+        @unittest.skipIf(
+            IS_MACOS or IS_WINDOWS,
+            "MacOS uses uv transport which does not have as robust error handling as tcp transport"
+        )
         def test_monitored_barrier_failure_order(self):
             # Ensure that the first (in sorted order) rank is reported when
             # multiple ranks fail to pass the monitored_barrier.
             # TODO(#54879): Provide ability to wait and report all failed ranks
             expected_first_failed_rank = 2
             timeout = timedelta(seconds=2)
-            if self.rank == 0:
+            src_rank = 0
+            if self.rank == src_rank:
                 with self.assertRaisesRegex(RuntimeError, f"Rank {expected_first_failed_rank}"):
                     dist.monitored_barrier(timeout=timeout)
             elif self.rank == 1:
-                # Successfully pass barrier
-                dist.monitored_barrier(timeout=timeout)
+                err_regex = (
+                    f"Rank {self.rank} successfully reached monitoredBarrier,"
+                    f" but received errors while waiting to be unblocked by rank"
+                    f" {src_rank}"
+                )
+                with self.assertRaisesRegex(RuntimeError, err_regex):
+                    dist.monitored_barrier(timeout=timeout)
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
@@ -5294,7 +5310,3 @@ class DistributedTest:
                 err_regex = f"Ranks {rank_str} failed to pass monitoredBarrier"
                 with self.assertRaisesRegex(RuntimeError, err_regex):
                     dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
-
-            # We need a barrier since otherwise non-zero ranks exit too early
-            # and cause a timeout.
-            self._barrier(timeout=30)

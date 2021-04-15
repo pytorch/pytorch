@@ -349,22 +349,29 @@ node [shape=box];
 
         self.save_module(module_name, dependencies)
 
-    def save_module(self, module_name: str, dependencies=True):
-        """Save the code for `module_name` into the package. Code for the module is resolved using the `importers` path to find the
+    def save_module(self, module: Union[str, types.ModuleType], dependencies=True):
+        """Save the code for `module` into the package. Code for the module is resolved using the `importers` path to find the
         module object, and then using its `__file__` attribute to find the source code.
 
         Args:
-            module_name (str): e.g. `my_package.my_subpackage`, code will be saved to provide code for this package.
+            module (Union[str, types.ModuleType]): e.g. `my_package.my_subpackage`, code will be saved to provide code
+                for this package.
             dependencies (bool, optional): If True, we scan the source for dependencies.
         """
-        module = self._import_module(module_name)
-        source = self._get_source_of_module(module)
+        if isinstance(module, str):
+            module_name = module
+            module_obj = self._import_module(module_name)
+        else:
+            module_name = module.__name__
+            module_obj = module
+
+        source = self._get_source_of_module(module_obj)
         self.save_source_string(
             module_name,
             source,
-            hasattr(module, "__path__"),
+            hasattr(module_obj, "__path__"),
             dependencies,
-            module.__file__,
+            module_obj.__file__,
         )
 
     def save_pickle(
