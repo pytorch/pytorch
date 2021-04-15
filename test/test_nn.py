@@ -5255,7 +5255,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.003)
     def test_Conv3d_depthwise_naive_groups_cuda(self, dtype=torch.float):
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
