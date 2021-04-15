@@ -41,8 +41,11 @@ CREATE_UNARY_META_FUNC(cosh)
 CREATE_UNARY_META_FUNC(acosh)
 CREATE_UNARY_META_FUNC(cos)
 CREATE_UNARY_META_FUNC(special_i0e)
+<<<<<<< HEAD
 CREATE_UNARY_META_FUNC(special_i1)
 CREATE_UNARY_META_FUNC(special_i1e)
+=======
+>>>>>>> 50057e560bc0b863dcb0fa67b7dec891eaa4023f
 
 } // namespace meta
 
@@ -361,6 +364,7 @@ TORCH_IMPL_FUNC(special_i0e_out) (const Tensor& self, const Tensor& result) {
   i0e_stub(device_type(), *this);
 }
 
+<<<<<<< HEAD
 TORCH_IMPL_FUNC(special_i1_out) (const Tensor& self, const Tensor& result) {
   i1_stub(device_type(), *this);
 }
@@ -369,6 +373,8 @@ TORCH_IMPL_FUNC(special_i1e_out) (const Tensor& self, const Tensor& result) {
   i1e_stub(device_type(), *this);
 }
 
+=======
+>>>>>>> 50057e560bc0b863dcb0fa67b7dec891eaa4023f
 Tensor& log_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, log_stub); }
 Tensor log(const Tensor& self) { return unary_op_impl_float(self, log_stub); }
 Tensor& log_(Tensor& self) { return unary_op_impl_(self, at::log_out); }

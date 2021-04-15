@@ -490,7 +490,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     # Acquires members names
     # See Note [Overriding methods in generic tests]
     generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
-    generic_tests = [x for x in generic_members if x.startswith('test')]\
+    generic_tests = [x for x in generic_members if x.startswith('test')]
 
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(device_type_test_bases,
