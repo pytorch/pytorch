@@ -5761,7 +5761,6 @@
     CUDA: _lu_solve_helper_cuda
 
 - func: _lu_unpack(Tensor LU_data, Tensor LU_pivots, bool pivots_as_permutation_matrix=True) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU, CUDA: _lu_unpack
