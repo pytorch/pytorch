@@ -208,6 +208,10 @@ void _th_sort_key_value_inplace(Tensor & keys, Tensor & values, int64_t dim, boo
             THCudaHalfTensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
             break;
         }
+        case ScalarType::BFloat16: {
+            THCudaBFloat16Tensor_sortKeyValueInplace(globalContext().getTHCState(), keys_, values_, dim, descending);
+            break;
+        }
         default:
             AT_ERROR("_th_sort_key_value_inplace not supported on CUDAType for ", dispatch_scalar_type);
     }

@@ -213,7 +213,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
   }
 
 #define RUN_T(INDEX_T)                                                  \
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "topk_out_cuda", [&] { \
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "topk_out_cuda", [&] { \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> inputInfo =           \
       at::cuda::detail::getTensorInfo<scalar_t, INDEX_T>(input);          \
     at::cuda::detail::TensorInfo<scalar_t, INDEX_T> topKInfo =            \
@@ -313,13 +313,14 @@ std::tuple<Tensor&, Tensor&> topk_out_cuda(const Tensor& self,
       // themselves using the reported indices, providing previously
       // allocated tensors to receive the results.
 
-      Tensor sortedTopK;
+      //Tensor sortedTopK;
       Tensor sortedIndices;
-      std::tie(sortedTopK, sortedIndices) = at::sort(values, dim, largest);
-      at::native::sort_out_cuda(values, dim, largest, sortedTopK, sortedIndices);
-      sortedIndices.resize_as_(indices);
-      values = sortedTopK;
-      indices = indices.gather(dim, sortedIndices);
+      //std::tie(sortedTopK, sortedIndices) = at::sort(values, dim, largest);
+      at::native::sort_out_cuda(values, dim, largest, values, sortedIndices);
+      //sortedIndices.resize_as_(indices);
+      //values = sortedTopK;
+      //indices = indices.gather(dim, sortedIndices);
+      indices.copy_(indices.gather(dim, sortedIndices));
     }
   }
   AT_CUDA_CHECK(cudaGetLastError());
