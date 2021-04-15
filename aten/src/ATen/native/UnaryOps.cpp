@@ -40,6 +40,7 @@ CREATE_UNARY_META_FUNC(sinh)
 CREATE_UNARY_META_FUNC(cosh)
 CREATE_UNARY_META_FUNC(acosh)
 CREATE_UNARY_META_FUNC(cos)
+CREATE_UNARY_META_FUNC(acos)
 
 } // namespace meta
 
@@ -138,9 +139,7 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
 }
 
-Tensor& acos_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, acos_stub); }
-Tensor acos(const Tensor& self) { return unary_op_impl_float(self, acos_stub); }
-Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
+CREATE_UNARY_TORCH_IMPL_FUNC(acos)
 
 // arccos, alias for acos
 Tensor& arccos_out(const Tensor& self, Tensor& result) { return at::acos_out(result, self); }

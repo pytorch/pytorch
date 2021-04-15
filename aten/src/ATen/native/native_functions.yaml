@@ -297,15 +297,15 @@
 
 - func: acos(Tensor self) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: acos
+  structured_delegate: acos.out
 
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: acos_
+  structured_delegate: acos.out
 
 - func: acos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: acos_out
 

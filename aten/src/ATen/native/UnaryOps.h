@@ -18,7 +18,7 @@ DECLARE_DISPATCH(unary_fn, angle_stub);
 DECLARE_DISPATCH(unary_fn, real_stub);
 DECLARE_DISPATCH(unary_fn, imag_stub);
 DECLARE_DISPATCH(unary_fn, conj_stub);
-DECLARE_DISPATCH(unary_fn, acos_stub);
+DECLARE_DISPATCH(structured_unary_fn, acos_stub);
 DECLARE_DISPATCH(structured_unary_fn, acosh_stub);
 DECLARE_DISPATCH(unary_fn, asinh_stub);
 DECLARE_DISPATCH(unary_fn, atanh_stub);
