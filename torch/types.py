@@ -1,5 +1,5 @@
 import torch
-from typing import Any, List, Sequence, Tuple, Union, MutableSequence
+from typing import Any, List, Sequence, Tuple, Union
 
 import builtins
 
