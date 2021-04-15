@@ -20,17 +20,27 @@ __device__ inline int min(int a, int b) {
 }
 
 template <typename scalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ static void max_pool3d_with_indices_single_out_frame(
-  scalar_t* inputData,
-  PackedTensorAccessor64<scalar_t, 4> output,
-  PackedTensorAccessor64<int64_t, 4> indices,
-  int itime, int iheight, int iwidth,
-  int kT, int kH, int kW,
-  int dT, int dH, int dW,
-  int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW,
-  int offsetZ)
-{
+    scalar_t* inputData,
+    PackedTensorAccessor64<scalar_t, 4> output,
+    PackedTensorAccessor64<int64_t, 4> indices,
+    int itime,
+    int iheight,
+    int iwidth,
+    int kT,
+    int kH,
+    int kW,
+    int dT,
+    int dH,
+    int dW,
+    int pT,
+    int pH,
+    int pW,
+    int dilationT,
+    int dilationH,
+    int dilationW,
+    int offsetZ) {
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame  = (blockIdx.z + offsetZ) % output.size(1); // output frame/time
@@ -95,7 +105,7 @@ void max_pool3d_with_indices_out_frame(
   int dilationT, int dilationH, int dilationW)
 {
   int offsetZ = 0;
-  dim3 block(32, 8);
+  dim3 block = cuda::detail::get_32x8_block();
 
   while (totalZ > 0) {
     dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int>(block.x)),
@@ -123,16 +133,24 @@ void max_pool3d_with_indices_out_frame(
 #undef UPDATE_OUTPUT_KERNEL_WIDTH
 
 template <typename scalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ static void max_pool3d_with_indices_backward_single_out_frame(
-  scalar_t *gradInputData,
-  PackedTensorAccessor64<scalar_t, 4> gradOutput,
-  PackedTensorAccessor64<int64_t, 4> indices,
-  int itime, int iheight, int iwidth,
-  int dT, int dH, int dW,
-  int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW,
-  int offsetZ)
-{
+    scalar_t* gradInputData,
+    PackedTensorAccessor64<scalar_t, 4> gradOutput,
+    PackedTensorAccessor64<int64_t, 4> indices,
+    int itime,
+    int iheight,
+    int iwidth,
+    int dT,
+    int dH,
+    int dW,
+    int pT,
+    int pH,
+    int pW,
+    int dilationT,
+    int dilationH,
+    int dilationW,
+    int offsetZ) {
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame  = (blockIdx.z + offsetZ) % gradOutput.size(1); // output frame/time
@@ -161,7 +179,7 @@ void max_pool3d_with_indices_backward_out_frame(
   int dilationT, int dilationH, int dilationW)
 {
   int offsetZ = 0;
-  dim3 block(32, 8);
+  dim3 block = cuda::detail::get_32x8_block();
 
   while (totalZ > 0) {
     dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int>(block.x)),

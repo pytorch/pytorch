@@ -1,15 +1,15 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-#include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCGeneral.h>
-#include <THC/THCNumerics.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/LaunchUtils.h>
+#include <THC/THCGeneral.h>
+#include <c10/util/Exception.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <THC/THCAtomics.cuh>
+#include <THC/THCNumerics.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -23,7 +23,6 @@
 // #define START_IND(a,b,c) a * c / b
 // #define END_IND(a,b,c)  (a + 1) * c / b + ((a + 1) * c % b > 0)?1:0
 
-#define CUDA_MAX_THREADS 1024 // this is safe, in reality 256 is our limit
 #define BLOCK_STRIDE 2 // increasing block_stride to lower # of blocks launched
 
 namespace at {
@@ -39,174 +38,180 @@ namespace {
    *    this function adaptively average pools an input 4D tensor along dimensions 2 and 3
    *    4D input, 4D output
    */
-   template <typename T>
-  __global__ void adaptive_average_pool(T *input, T *output,
-                          int isizeH, int isizeW,
-                          int osizeH, int osizeW,
-                          int64_t istrideD, int64_t istrideH, int64_t istrideW)
-  {
-    // iterators on output pixels
-    int oh, ow;
+template <typename T>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
+__global__ void adaptive_average_pool(
+    T* input,
+    T* output,
+    int isizeH,
+    int isizeW,
+    int osizeH,
+    int osizeW,
+    int64_t istrideD,
+    int64_t istrideH,
+    int64_t istrideW) {
+  // iterators on output pixels
+  int oh, ow;
 
-    // select input/output plane based on thread/block ID
-    int o_plane = blockIdx.x;
-    int i_plane = o_plane;
+  // select input/output plane based on thread/block ID
+  int o_plane = blockIdx.x;
+  int i_plane = o_plane;
 
-    output = output + o_plane*osizeH*osizeW;
-    input = input + i_plane*istrideD;
+  output = output + o_plane * osizeH * osizeW;
+  input = input + i_plane * istrideD;
 
-    int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
-    int oendH = osizeH;
-    const int ostepH = blockDim.y*gridDim.y;
+  int ostartH = blockDim.y * blockIdx.y + threadIdx.y;
+  int oendH = osizeH;
+  const int ostepH = blockDim.y * gridDim.y;
 
-    int ostartW = threadIdx.x;
-    int oendW = osizeW;
-    const int ostepW = blockDim.x;
+  int ostartW = threadIdx.x;
+  int oendW = osizeW;
+  const int ostepW = blockDim.x;
 
-    // For all output pixels...
-    for(oh = ostartH; oh < oendH; oh += ostepH) {
+  // For all output pixels...
+  for (oh = ostartH; oh < oendH; oh += ostepH) {
+    int istartH = START_IND(oh, osizeH, isizeH);
+    int iendH = END_IND(oh, osizeH, isizeH);
+    int kH = iendH - istartH;
 
-      int istartH = START_IND(oh, osizeH, isizeH);
-      int iendH   = END_IND(oh, osizeH, isizeH);
-      int kH = iendH - istartH;
+    for (ow = ostartW; ow < oendW; ow += ostepW) {
+      int istartW = START_IND(ow, osizeW, isizeW);
+      int iendW = END_IND(ow, osizeW, isizeW);
+      int kW = iendW - istartW;
 
-      for(ow = ostartW; ow < oendW; ow += ostepW) {
-
-        int istartW = START_IND(ow, osizeW, isizeW);
-        int iendW   = END_IND(ow, osizeW, isizeW);
-        int kW = iendW - istartW;
-
-        // Compute the average pooling over corresponding input pixels
-        T *ptr_input = input + istartH*istrideH + istartW*istrideW;
-        T *ptr_output = output + oh*osizeW + ow;
-        T sum = ScalarConvert<int, T>::to(0);
-        int ih, iw;
-        for(ih = 0; ih < kH; ++ih) {
-          for(iw = 0; iw < kW; ++iw) {
-            T val = ptr_input[iw*istrideW];
-            sum += val;
-          }
-          ptr_input += istrideH; // next input line
+      // Compute the average pooling over corresponding input pixels
+      T* ptr_input = input + istartH * istrideH + istartW * istrideW;
+      T* ptr_output = output + oh * osizeW + ow;
+      T sum = ScalarConvert<int, T>::to(0);
+      int ih, iw;
+      for (ih = 0; ih < kH; ++ih) {
+        for (iw = 0; iw < kW; ++iw) {
+          T val = ptr_input[iw * istrideW];
+          sum += val;
         }
-        // Update output
-        *ptr_output = sum / kH / kW;
+        ptr_input += istrideH; // next input line
       }
+      // Update output
+      *ptr_output = sum / kH / kW;
     }
   }
+}
 
   /*
    * Description:
    *    this function computes the gradInput from gradOutput
    */
-   template <typename T>
-  __global__ void adaptive_average_gradinput(
-    T *gradInput, T *gradOutput,
-    int isizeH, int isizeW, int osizeH, int osizeW
-  )
-  {
-    // iterators on input pixels
-    int ih, iw;
+template <typename T>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
+__global__ void adaptive_average_gradinput(
+    T* gradInput,
+    T* gradOutput,
+    int isizeH,
+    int isizeW,
+    int osizeH,
+    int osizeW) {
+  // iterators on input pixels
+  int ih, iw;
 
-    // select input/output plane based on thread/block ID
-    int i_plane = blockIdx.x;
-    int o_plane = i_plane;
+  // select input/output plane based on thread/block ID
+  int i_plane = blockIdx.x;
+  int o_plane = i_plane;
 
-    gradOutput = gradOutput + o_plane*osizeH*osizeW;
-    gradInput = gradInput + i_plane*isizeH*isizeW;
+  gradOutput = gradOutput + o_plane * osizeH * osizeW;
+  gradInput = gradInput + i_plane * isizeH * isizeW;
 
-    int istartH = blockDim.y*blockIdx.y + threadIdx.y;
-    int iendH = isizeH;
-    int istepH = blockDim.y*gridDim.y;
+  int istartH = blockDim.y * blockIdx.y + threadIdx.y;
+  int iendH = isizeH;
+  int istepH = blockDim.y * gridDim.y;
 
-    int istartW = threadIdx.x;
-    int iendW = isizeW;
-    int istepW = blockDim.x;
+  int istartW = threadIdx.x;
+  int iendW = isizeW;
+  int istepW = blockDim.x;
 
-    // compute gradInput
-    for(ih = istartH; ih < iendH; ih += istepH) {
+  // compute gradInput
+  for (ih = istartH; ih < iendH; ih += istepH) {
+    int ostartH = START_IND(ih, isizeH, osizeH);
+    int oendH = END_IND(ih, isizeH, osizeH);
 
-      int ostartH = START_IND(ih, isizeH, osizeH);
-      int oendH   = END_IND(ih, isizeH, osizeH);
+    for (iw = istartW; iw < iendW; iw += istepW) {
+      int ostartW = START_IND(iw, isizeW, osizeW);
+      int oendW = END_IND(iw, isizeW, osizeW);
 
-      for(iw = istartW; iw < iendW; iw += istepW) {
+      // Compute the gradients over corresponding output pixels
+      T* ptr_gradInput = gradInput + ih * isizeW + iw;
 
-        int ostartW = START_IND(iw, isizeW, osizeW);
-        int oendW   = END_IND(iw, isizeW, osizeW);
-
-        // Compute the gradients over corresponding output pixels
-        T *ptr_gradInput = gradInput + ih*isizeW + iw;
-
-        int oh, ow;
-        for(oh = ostartH; oh < oendH; ++oh) {
-          int kH = START_IND(oh, osizeH, isizeH) - END_IND(oh, osizeH, isizeH);
-          for(ow = ostartW; ow < oendW; ++ow) {
-            int kW = START_IND(ow, osizeW, isizeW) - END_IND(ow, osizeW, isizeW);
-            T grad_delta = gradOutput[ow + oh*osizeW] / kH / kW;
-            *ptr_gradInput += grad_delta;
-          }
+      int oh, ow;
+      for (oh = ostartH; oh < oendH; ++oh) {
+        int kH = START_IND(oh, osizeH, isizeH) - END_IND(oh, osizeH, isizeH);
+        for (ow = ostartW; ow < oendW; ++ow) {
+          int kW = START_IND(ow, osizeW, isizeW) - END_IND(ow, osizeW, isizeW);
+          T grad_delta = gradOutput[ow + oh * osizeW] / kH / kW;
+          *ptr_gradInput += grad_delta;
         }
       }
     }
   }
+}
 
   /*
    * Description:
    *    this function computes the gradInput from gradOutput
    *    (uses atomic add)
    */
-   template <typename T>
-  __global__ void atomic_adaptive_average_gradinput(
-    T *gradInput, T *gradOutput,
-    int isizeH, int isizeW, int osizeH, int osizeW
-  )
-  {
-    // iterators on output indices
-    int oh, ow;
+template <typename T>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
+__global__ void atomic_adaptive_average_gradinput(
+    T* gradInput,
+    T* gradOutput,
+    int isizeH,
+    int isizeW,
+    int osizeH,
+    int osizeW) {
+  // iterators on output indices
+  int oh, ow;
 
-    // select input/output plane based on thread/block ID
-    int o_plane = blockIdx.x;
-    int i_plane = o_plane;
+  // select input/output plane based on thread/block ID
+  int o_plane = blockIdx.x;
+  int i_plane = o_plane;
 
-    gradOutput = gradOutput + o_plane*osizeW*osizeH;
-    gradInput = gradInput + i_plane*isizeW*isizeH;
+  gradOutput = gradOutput + o_plane * osizeW * osizeH;
+  gradInput = gradInput + i_plane * isizeW * isizeH;
 
-    int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
-    int oendH = osizeH;
-    int ostepH = blockDim.y*gridDim.y;
+  int ostartH = blockDim.y * blockIdx.y + threadIdx.y;
+  int oendH = osizeH;
+  int ostepH = blockDim.y * gridDim.y;
 
-    int ostartW = threadIdx.x;
-    int oendW = osizeW;
-    int ostepW = blockDim.x;
+  int ostartW = threadIdx.x;
+  int oendW = osizeW;
+  int ostepW = blockDim.x;
 
-    // For all output pixels...
-    for(oh = ostartH; oh < oendH; oh += ostepH) {
+  // For all output pixels...
+  for (oh = ostartH; oh < oendH; oh += ostepH) {
+    int istartH = START_IND(oh, osizeH, isizeH);
+    int iendH = END_IND(oh, osizeH, isizeH);
+    int kH = iendH - istartH;
 
-      int istartH = START_IND(oh, osizeH, isizeH);
-      int iendH   = END_IND(oh, osizeH, isizeH);
-      int kH = iendH - istartH;
+    for (ow = ostartW; ow < oendW; ow += ostepW) {
+      int istartW = START_IND(ow, osizeW, isizeW);
+      int iendW = END_IND(ow, osizeW, isizeW);
+      int kW = iendW - istartW;
 
-      for(ow = ostartW; ow < oendW; ow += ostepW) {
+      // Compute the gradients for over corresponding input pixels
+      T* ptr_gradInput = gradInput + istartH * isizeW + istartW;
+      T* ptr_gradOutput = gradOutput + oh * osizeW + ow;
+      T grad_delta = *ptr_gradOutput / kW / kH;
 
-        int istartW = START_IND(ow, osizeW, isizeW);
-        int iendW   = END_IND(ow, osizeW, isizeW);
-        int kW = iendW - istartW;
-
-        // Compute the gradients for over corresponding input pixels
-        T *ptr_gradInput = gradInput + istartH*isizeW + istartW;
-        T *ptr_gradOutput = gradOutput + oh*osizeW + ow;
-        T grad_delta = *ptr_gradOutput / kW / kH;
-
-        int ih, iw;
-        for(ih = 0; ih < kH; ++ih) {
-          for(iw = 0; iw < kW; ++iw) {
-            // atomic add since different threads could update same variable
-            gpuAtomicAdd(&(ptr_gradInput[iw]), grad_delta);
-          }
-          ptr_gradInput += isizeW; // next input line
+      int ih, iw;
+      for (ih = 0; ih < kH; ++ih) {
+        for (iw = 0; iw < kW; ++iw) {
+          // atomic add since different threads could update same variable
+          gpuAtomicAdd(&(ptr_gradInput[iw]), grad_delta);
         }
+        ptr_gradInput += isizeW; // next input line
       }
     }
   }
+}
 
   /*
    * Description:
@@ -214,96 +219,106 @@ namespace {
    *    NHWC layout for both input and output tensor
    *    4D input, 4D output
    */
-   template <typename index_t, typename scalar_t>
-  C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-  __global__ void adaptive_average_pool_nhwc(const scalar_t* __restrict__ input, scalar_t* __restrict__ output,
-                          int sizeB, int sizeC,
-                          int isizeH, int isizeW,
-                          int osizeH, int osizeW,
-                          int kernel_stride_C, int kernel_size_C,
-                          index_t istrideB, index_t istrideC,
-                          index_t istrideH, index_t istrideW)
-  {
-    extern __shared__ int smem[];
-    scalar_t *out_cached = reinterpret_cast<scalar_t*>(smem);
+template <typename index_t, typename scalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void adaptive_average_pool_nhwc(
+    const scalar_t* __restrict__ input,
+    scalar_t* __restrict__ output,
+    int sizeB,
+    int sizeC,
+    int isizeH,
+    int isizeW,
+    int osizeH,
+    int osizeW,
+    int kernel_stride_C,
+    int kernel_size_C,
+    index_t istrideB,
+    index_t istrideC,
+    index_t istrideH,
+    index_t istrideW) {
+  extern __shared__ int smem[];
+  scalar_t* out_cached = reinterpret_cast<scalar_t*>(smem);
 
-    // flattening cta for pre-computation & smem initialization;
-    int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
-    int block_size = blockDim.x * blockDim.y * blockDim.z;
+  // flattening cta for pre-computation & smem initialization;
+  int thread_id =
+      threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
+  int block_size = blockDim.x * blockDim.y * blockDim.z;
 
-    // use shared memory to store temporary output value. This is simply to
-    // reduce register usage.
-    for (index_t i = thread_id; i < kernel_size_C*blockDim.x*blockDim.y*blockDim.z; i+= block_size) {
-      out_cached[i] = scalar_t(0.0);
-    }
+  // use shared memory to store temporary output value. This is simply to
+  // reduce register usage.
+  for (index_t i = thread_id;
+       i < kernel_size_C * blockDim.x * blockDim.y * blockDim.z;
+       i += block_size) {
+    out_cached[i] = scalar_t(0.0);
+  }
 
-    __syncthreads();
+  __syncthreads();
 
-    // each CTA handles a portion of a single slice on batch dimension;
-    int batch_id = blockIdx.x % sizeB;
-    int channel_id = blockIdx.x / sizeB;
-    int channel_offset = threadIdx.x + channel_id * blockDim.x;
+  // each CTA handles a portion of a single slice on batch dimension;
+  int batch_id = blockIdx.x % sizeB;
+  int channel_id = blockIdx.x / sizeB;
+  int channel_offset = threadIdx.x + channel_id * blockDim.x;
 
-    // each CTA handles a single slice on batch dimension;
-    // We use gridDim.x to handle striding on C as well.
-    output = output + batch_id * osizeH * osizeW * sizeC;
-    input = input + batch_id * istrideB;
+  // each CTA handles a single slice on batch dimension;
+  // We use gridDim.x to handle striding on C as well.
+  output = output + batch_id * osizeH * osizeW * sizeC;
+  input = input + batch_id * istrideB;
 
-    // split out_cached and exclusively it assigned to each thread;
-    out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * kernel_size_C * blockDim.x];
+  // split out_cached and exclusively it assigned to each thread;
+  out_cached = &out_cached
+                   [(threadIdx.z * blockDim.y + threadIdx.y) * kernel_size_C *
+                    blockDim.x];
 
-    // iterate on output H & W.
-    // Each CTA handles a consecutive H & W section (TILE); Do NOT stride CTA on
-    // tile so there's a better chance to hit L1 cache.
-    index_t oH = (osizeH + gridDim.z-1) / gridDim.z;
-    index_t oW = (osizeW + gridDim.y-1) / gridDim.y;
-    index_t ostartH = threadIdx.z + blockIdx.z*oH;
-    index_t oendH = ::min(ostartH+oH, osizeH);
-    index_t ostartW = threadIdx.y + blockIdx.y*oW;
-    index_t oendW = ::min(ostartW+oW, osizeW);
+  // iterate on output H & W.
+  // Each CTA handles a consecutive H & W section (TILE); Do NOT stride CTA on
+  // tile so there's a better chance to hit L1 cache.
+  index_t oH = (osizeH + gridDim.z - 1) / gridDim.z;
+  index_t oW = (osizeW + gridDim.y - 1) / gridDim.y;
+  index_t ostartH = threadIdx.z + blockIdx.z * oH;
+  index_t oendH = ::min(ostartH + oH, osizeH);
+  index_t ostartW = threadIdx.y + blockIdx.y * oW;
+  index_t oendW = ::min(ostartW + oW, osizeW);
 
-    // Stride for threads, each warp can reuse L1 as they go. So theoretically
-    // better chance to survive cache eviction.
-    for (int oh = ostartH; oh < oendH; oh+=blockDim.z) {
-      int istartH = START_IND_INT(oh, osizeH, isizeH);
-      int iendH = END_IND_INT(oh, osizeH, isizeH);
-      for (int ow = ostartW; ow < oendW; ow+=blockDim.y) {
-        int istartW = START_IND_INT(ow, osizeW, isizeW);
-        int iendW = END_IND_INT(ow, osizeW, isizeW);
-        scalar_t factor = scalar_t(1.0) / ((iendH-istartH) * (iendW-istartW));
+  // Stride for threads, each warp can reuse L1 as they go. So theoretically
+  // better chance to survive cache eviction.
+  for (int oh = ostartH; oh < oendH; oh += blockDim.z) {
+    int istartH = START_IND_INT(oh, osizeH, isizeH);
+    int iendH = END_IND_INT(oh, osizeH, isizeH);
+    for (int ow = ostartW; ow < oendW; ow += blockDim.y) {
+      int istartW = START_IND_INT(ow, osizeW, isizeW);
+      int iendW = END_IND_INT(ow, osizeW, isizeW);
+      scalar_t factor = scalar_t(1.0) / ((iendH - istartH) * (iendW - istartW));
 
-        // loop on input: hierarchy h->w->c, use shared memory here hopefully
-        // would not stall global memory read;
-        for (index_t ih = istartH; ih < iendH; ih++) {
-          for (index_t iw = istartW; iw < iendW; iw++) {
-            int cached_index = threadIdx.x;
-            const scalar_t *ptr_input = input + ih*istrideH + iw*istrideW;
-            for (index_t c = channel_offset;
-                 c < sizeC;
-                 c += blockDim.x*kernel_stride_C) {
-              out_cached[cached_index] += ptr_input[c*istrideC];
-              cached_index += blockDim.x;
-            }
+      // loop on input: hierarchy h->w->c, use shared memory here hopefully
+      // would not stall global memory read;
+      for (index_t ih = istartH; ih < iendH; ih++) {
+        for (index_t iw = istartW; iw < iendW; iw++) {
+          int cached_index = threadIdx.x;
+          const scalar_t* ptr_input = input + ih * istrideH + iw * istrideW;
+          for (index_t c = channel_offset; c < sizeC;
+               c += blockDim.x * kernel_stride_C) {
+            out_cached[cached_index] += ptr_input[c * istrideC];
+            cached_index += blockDim.x;
           }
         }
-        scalar_t *ptr_output = output + (oh * osizeW + ow) * sizeC;
-
-        int cached_index = threadIdx.x;
-        // write accumulated output to global memory;
-        for (index_t c = channel_offset;
-             c < sizeC;
-             c += blockDim.x*kernel_stride_C) {
-          // This causes numerical issueptr when unit test with NCHW kernel;
-          // switch to could verify the correctness;
-          // output[c] = out_cached[c] / (iendH-istartH) / (iendW-istartW);
-          ptr_output[c] = out_cached[cached_index] * factor;
-          out_cached[cached_index] = scalar_t(0.0);
-          cached_index += blockDim.x;
-        }
-        // no need to __syncthreads() since out_cached is not shared.
       }
+      scalar_t* ptr_output = output + (oh * osizeW + ow) * sizeC;
+
+      int cached_index = threadIdx.x;
+      // write accumulated output to global memory;
+      for (index_t c = channel_offset; c < sizeC;
+           c += blockDim.x * kernel_stride_C) {
+        // This causes numerical issueptr when unit test with NCHW kernel;
+        // switch to could verify the correctness;
+        // output[c] = out_cached[c] / (iendH-istartH) / (iendW-istartW);
+        ptr_output[c] = out_cached[cached_index] * factor;
+        out_cached[cached_index] = scalar_t(0.0);
+        cached_index += blockDim.x;
+      }
+      // no need to __syncthreads() since out_cached is not shared.
     }
   }
+}
 
   /*
    * Description:
@@ -311,117 +326,130 @@ namespace {
    *    NHWC layout for both input and output tensor
    *    4D input, 4D output
    */
-   template <typename index_t, typename scalar_t>
-  C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-  __global__ void adaptive_average_gradinput_nhwc(scalar_t* __restrict__ gradInput, const scalar_t* __restrict__ gradOutput,
-                          int sizeB, int sizeC,
-                          int isizeH, int isizeW,
-                          int osizeH, int osizeW,
-                          int kernel_stride_C, int kernel_size_C,
-                          index_t ostrideB, index_t ostrideC,
-                          index_t ostrideH, index_t ostrideW)
-  {
-    extern __shared__ int smem[];
-    index_t *ostartW_cached = smem;
-    index_t *oendW_cached = &ostartW_cached[isizeW];
+template <typename index_t, typename scalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void adaptive_average_gradinput_nhwc(
+    scalar_t* __restrict__ gradInput,
+    const scalar_t* __restrict__ gradOutput,
+    int sizeB,
+    int sizeC,
+    int isizeH,
+    int isizeW,
+    int osizeH,
+    int osizeW,
+    int kernel_stride_C,
+    int kernel_size_C,
+    index_t ostrideB,
+    index_t ostrideC,
+    index_t ostrideH,
+    index_t ostrideW) {
+  extern __shared__ int smem[];
+  index_t* ostartW_cached = smem;
+  index_t* oendW_cached = &ostartW_cached[isizeW];
 
-    // be careful with alignment, in case scalar_t is fp16, we want to assign
-    // int pointers first.
-    scalar_t *r_kW_cached = reinterpret_cast<scalar_t*>(&oendW_cached[isizeW]);
-    scalar_t *r_kH_cached = &r_kW_cached[osizeW];
-    scalar_t *out_cached = &r_kH_cached[osizeH];
+  // be careful with alignment, in case scalar_t is fp16, we want to assign
+  // int pointers first.
+  scalar_t* r_kW_cached = reinterpret_cast<scalar_t*>(&oendW_cached[isizeW]);
+  scalar_t* r_kH_cached = &r_kW_cached[osizeW];
+  scalar_t* out_cached = &r_kH_cached[osizeH];
 
-    // flattening cta for pre-computation & smem initialization;
-    int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
-    int block_size = blockDim.x * blockDim.y * blockDim.z;
+  // flattening cta for pre-computation & smem initialization;
+  int thread_id =
+      threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
+  int block_size = blockDim.x * blockDim.y * blockDim.z;
 
-    // Precompute output start/end index per input index on width dimension;
-    // Not doing this for height dimension, as that's our out-most loop.
-    for (index_t i = thread_id; i < isizeW; i+= block_size) {
-      ostartW_cached[i] = START_IND_INT(i, isizeW, osizeW);
-      oendW_cached[i] = END_IND_INT(i, isizeW, osizeW);
-    }
+  // Precompute output start/end index per input index on width dimension;
+  // Not doing this for height dimension, as that's our out-most loop.
+  for (index_t i = thread_id; i < isizeW; i += block_size) {
+    ostartW_cached[i] = START_IND_INT(i, isizeW, osizeW);
+    oendW_cached[i] = END_IND_INT(i, isizeW, osizeW);
+  }
 
-    // Precompute pooling height/weight factor for each output element;
-    // This is used to weight output gradient when accumulate them on input
-    // gradient.
-    // Technically we don't have to compute it for the whole `osizeH`, since
-    // each cta only covers a consecutive portion of the entire output. But it's
-    // not going to save us from code divergence, and shared memory save is not
-    // an issue neither, so just leave it as is for now.
-    for (index_t i = thread_id; i < osizeH; i+= block_size) {
-      r_kH_cached[i] = scalar_t(1.0) / (END_IND_INT(i, osizeH, isizeH) - START_IND_INT(i, osizeH, isizeH));
-    }
-    for (index_t i = thread_id; i < osizeW; i+= block_size) {
-      r_kW_cached[i] = scalar_t(1.0) / (END_IND_INT(i, osizeW, isizeW) - START_IND_INT(i, osizeW, isizeW));
-    }
+  // Precompute pooling height/weight factor for each output element;
+  // This is used to weight output gradient when accumulate them on input
+  // gradient.
+  // Technically we don't have to compute it for the whole `osizeH`, since
+  // each cta only covers a consecutive portion of the entire output. But it's
+  // not going to save us from code divergence, and shared memory save is not
+  // an issue neither, so just leave it as is for now.
+  for (index_t i = thread_id; i < osizeH; i += block_size) {
+    r_kH_cached[i] = scalar_t(1.0) /
+        (END_IND_INT(i, osizeH, isizeH) - START_IND_INT(i, osizeH, isizeH));
+  }
+  for (index_t i = thread_id; i < osizeW; i += block_size) {
+    r_kW_cached[i] = scalar_t(1.0) /
+        (END_IND_INT(i, osizeW, isizeW) - START_IND_INT(i, osizeW, isizeW));
+  }
 
-    // each CTA handles a portion of a single slice on batch dimension;
-    int batch_id = blockIdx.x % sizeB;
-    int channel_id = blockIdx.x / sizeB;
-    int channel_offset = threadIdx.x + channel_id * blockDim.x;
+  // each CTA handles a portion of a single slice on batch dimension;
+  int batch_id = blockIdx.x % sizeB;
+  int channel_id = blockIdx.x / sizeB;
+  int channel_offset = threadIdx.x + channel_id * blockDim.x;
 
-    // use shared memory to store temporary output value. This is simply to
-    // reduce register usage.
-    for (index_t i = thread_id; i < kernel_size_C*blockDim.x*blockDim.y*blockDim.z; i+= block_size) {
-      out_cached[i] = scalar_t(0.0);
-    }
+  // use shared memory to store temporary output value. This is simply to
+  // reduce register usage.
+  for (index_t i = thread_id;
+       i < kernel_size_C * blockDim.x * blockDim.y * blockDim.z;
+       i += block_size) {
+    out_cached[i] = scalar_t(0.0);
+  }
 
-    __syncthreads();
+  __syncthreads();
 
-    // each CTA handles a portion of a single slice on batch dimension;
-    // We use gridDim.x to handle striding on C as well.
-    gradInput = gradInput + batch_id * isizeH * isizeW * sizeC;
-    gradOutput = gradOutput + batch_id * ostrideB;
+  // each CTA handles a portion of a single slice on batch dimension;
+  // We use gridDim.x to handle striding on C as well.
+  gradInput = gradInput + batch_id * isizeH * isizeW * sizeC;
+  gradOutput = gradOutput + batch_id * ostrideB;
 
-    // split out_cached and exclusively it assigned to each thread;
-    out_cached = &out_cached[(threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x * kernel_size_C];
+  // split out_cached and exclusively it assigned to each thread;
+  out_cached = &out_cached
+                   [(threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x *
+                    kernel_size_C];
 
-    // iterate on input H & W.
-    // Each CTA handles a consecutive H & W section (TILE); Do NOT stride CTA on
-    // tile so there's a better chance to hit L1 cache.
-    index_t iH = (isizeH + gridDim.z-1) / gridDim.z;
-    index_t iW = (isizeW + gridDim.y-1) / gridDim.y;
-    index_t istartH = threadIdx.z + blockIdx.z*iH;
-    index_t iendH = ::min(istartH+iH, isizeH);
-    index_t istartW = threadIdx.y + blockIdx.y*iW;
-    index_t iendW = ::min(istartW+iW, isizeW);
+  // iterate on input H & W.
+  // Each CTA handles a consecutive H & W section (TILE); Do NOT stride CTA on
+  // tile so there's a better chance to hit L1 cache.
+  index_t iH = (isizeH + gridDim.z - 1) / gridDim.z;
+  index_t iW = (isizeW + gridDim.y - 1) / gridDim.y;
+  index_t istartH = threadIdx.z + blockIdx.z * iH;
+  index_t iendH = ::min(istartH + iH, isizeH);
+  index_t istartW = threadIdx.y + blockIdx.y * iW;
+  index_t iendW = ::min(istartW + iW, isizeW);
 
-    // Stride for threads, each warp can reuse L1 as they go. So theoretically
-    // better chance to survive cache eviction.
-    for (index_t ih = istartH; ih < iendH; ih+=blockDim.z) {
-      index_t ostartH = START_IND_INT(ih, isizeH, osizeH);
-      index_t oendH = END_IND_INT(ih, isizeH, osizeH);
-      for (index_t iw = istartW; iw < iendW; iw+=blockDim.y) {
-        // loop on output: hierarchy h->w->c, so we could reuse weight factor f
-        // because it remains the same for given oh & ow
-        for(index_t oh = ostartH; oh < oendH; ++oh) {
-          for(index_t ow = ostartW_cached[iw]; ow < oendW_cached[iw]; ++ow) {
-            scalar_t f = r_kW_cached[ow] * r_kH_cached[oh];
-            const scalar_t* ptr_gradOutput = gradOutput + oh*ostrideH + ow*ostrideW;
-            int cached_index = threadIdx.x;
-            for (index_t c = channel_offset;
-                 c < sizeC;
-                 c += blockDim.x*kernel_stride_C) {
-              out_cached[cached_index] += ptr_gradOutput[c*ostrideC] * f;
-              cached_index += blockDim.x;
-            }
+  // Stride for threads, each warp can reuse L1 as they go. So theoretically
+  // better chance to survive cache eviction.
+  for (index_t ih = istartH; ih < iendH; ih += blockDim.z) {
+    index_t ostartH = START_IND_INT(ih, isizeH, osizeH);
+    index_t oendH = END_IND_INT(ih, isizeH, osizeH);
+    for (index_t iw = istartW; iw < iendW; iw += blockDim.y) {
+      // loop on output: hierarchy h->w->c, so we could reuse weight factor f
+      // because it remains the same for given oh & ow
+      for (index_t oh = ostartH; oh < oendH; ++oh) {
+        for (index_t ow = ostartW_cached[iw]; ow < oendW_cached[iw]; ++ow) {
+          scalar_t f = r_kW_cached[ow] * r_kH_cached[oh];
+          const scalar_t* ptr_gradOutput =
+              gradOutput + oh * ostrideH + ow * ostrideW;
+          int cached_index = threadIdx.x;
+          for (index_t c = channel_offset; c < sizeC;
+               c += blockDim.x * kernel_stride_C) {
+            out_cached[cached_index] += ptr_gradOutput[c * ostrideC] * f;
+            cached_index += blockDim.x;
           }
         }
-        scalar_t *ptr_gradInput = gradInput + (ih * isizeW + iw) * sizeC;
-        int cached_index = threadIdx.x;
-        // write accumulated gradIput to global memory;
-        for (index_t c = channel_offset;
-             c < sizeC;
-             c += blockDim.x*kernel_stride_C) {
-          ptr_gradInput[c] = out_cached[cached_index];
-          out_cached[cached_index] = scalar_t(0.0);
-          cached_index += blockDim.x;
-        }
-        // no need to __syncthreads() since out_cached is not shared.
       }
+      scalar_t* ptr_gradInput = gradInput + (ih * isizeW + iw) * sizeC;
+      int cached_index = threadIdx.x;
+      // write accumulated gradIput to global memory;
+      for (index_t c = channel_offset; c < sizeC;
+           c += blockDim.x * kernel_stride_C) {
+        ptr_gradInput[c] = out_cached[cached_index];
+        out_cached[cached_index] = scalar_t(0.0);
+        cached_index += blockDim.x;
+      }
+      // no need to __syncthreads() since out_cached is not shared.
     }
   }
+}
 
   // 4d tensor B x D x H x W
 
@@ -468,7 +496,8 @@ namespace {
         }
 
         const int max_threads = std::min<int>(
-            at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
+            at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
+            cuda::detail::CUDA_NUM_THREADS);
         int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
         int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
         size_t sharedMemPerBlock = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
@@ -556,7 +585,7 @@ namespace {
               // cuda blocks & threads:
               int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
               dim3 blocks(grid_x, blocksH);
-              dim3 threads(32, 8);
+              dim3 threads = cuda::detail::get_32x8_block();
 
               // run averagepool kernel
               adaptive_average_pool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
@@ -615,7 +644,8 @@ namespace {
         }
 
         const int max_threads = std::min<int>(
-            at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
+            at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
+            cuda::detail::CUDA_NUM_THREADS);
         int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
         int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
         size_t sharedMemPerBlock = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
@@ -695,7 +725,7 @@ namespace {
               // cuda blocks & threads:
               int blocksH = std::max((int)(16L / sizeD), 1);
               dim3 blocks(grid_x, blocksH);
-              dim3 threads(32, 8);
+              dim3 threads = cuda::detail::get_32x8_block();
 
               if(atomic)
               {
@@ -778,6 +808,5 @@ namespace {
 } // at
 
 #undef BLOCK_STRIDE
-#undef CUDA_MAX_THREADS
 #undef START_IND
 #undef END_IND

@@ -17,6 +17,7 @@ __host__ __device__ __forceinline__ T ceilDiv(T a, T b) {
 }
 
 template <typename T>
+C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void max_unpooling2d_forward_kernel(
     const int64_t numInputElements,
     const T* input,
@@ -57,6 +58,7 @@ __global__ void max_unpooling3d_forward_kernel(
 }
 
 template <typename T>
+C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void max_unpooling2d_backward_kernel(
     const int64_t numInputElements,
     const T* input,

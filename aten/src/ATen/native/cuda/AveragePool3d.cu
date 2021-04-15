@@ -23,15 +23,22 @@ __device__ inline int max(int a, int b) {
 }
 
 template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void avg_pool3d_cuda_update_output(
-  PackedTensorAccessor64<scalar_t, 4> input,
-  PackedTensorAccessor64<scalar_t, 4> output,
-  int kT, int kH, int kW,
-  int dT, int dH, int dW,
-  int padT, int padH, int padW,
-  bool count_include_pad,
-  int offsetZ, int divisor_override)
-{
+    PackedTensorAccessor64<scalar_t, 4> input,
+    PackedTensorAccessor64<scalar_t, 4> output,
+    int kT,
+    int kH,
+    int kW,
+    int dT,
+    int dH,
+    int dW,
+    int padT,
+    int padH,
+    int padW,
+    bool count_include_pad,
+    int offsetZ,
+    int divisor_override) {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame = (blockIdx.z + offsetZ) % output.size(1); // output frame/time
@@ -91,16 +98,22 @@ __global__ void avg_pool3d_cuda_update_output(
 // Inner-most loop size (kW) passed as template parameter for
 // performance reasons.
 //
-template<int KERNEL_WIDTH, typename scalar_t, typename accscalar_t>
+template <int KERNEL_WIDTH, typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void avg_pool3d_cuda_update_output(
-  PackedTensorAccessor64<scalar_t, 4> input,
-  PackedTensorAccessor64<scalar_t, 4> output,
-  int kT, int kH,
-  int dT, int dH, int dW,
-  int padT, int padH, int padW,
-  bool count_include_pad,
-  int offsetZ, int divisor_override)
-{
+    PackedTensorAccessor64<scalar_t, 4> input,
+    PackedTensorAccessor64<scalar_t, 4> output,
+    int kT,
+    int kH,
+    int dT,
+    int dH,
+    int dW,
+    int padT,
+    int padH,
+    int padW,
+    bool count_include_pad,
+    int offsetZ,
+    int divisor_override) {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame = (blockIdx.z + offsetZ) % output.size(1); // output frame/time
@@ -158,13 +171,15 @@ __global__ void avg_pool3d_cuda_update_output(
 }
 
 template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void avg_pool3d_single_backward_out_frame_stride1(
-  PackedTensorAccessor64<scalar_t, 4> gradOutput,
-  PackedTensorAccessor64<scalar_t, 4> gradInput,
-  int kT, int kH, int kW,
-  accscalar_t normFactor,
-  int offsetZ)
-{
+    PackedTensorAccessor64<scalar_t, 4> gradOutput,
+    PackedTensorAccessor64<scalar_t, 4> gradInput,
+    int kT,
+    int kH,
+    int kW,
+    accscalar_t normFactor,
+    int offsetZ) {
   int iCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int iRow   = blockIdx.y * blockDim.y + threadIdx.y;
   int iFrame = (blockIdx.z + offsetZ) % gradInput.size(1); // input frame/time
@@ -203,15 +218,22 @@ __global__ void avg_pool3d_single_backward_out_frame_stride1(
 }
 
 template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void avg_pool3d_cuda_update_grad_input_atomic(
-  PackedTensorAccessor64<scalar_t, 4> gradOutput,
-  PackedTensorAccessor64<scalar_t, 4> gradInput,
-  int kT, int kH, int kW,
-  int dT, int dH, int dW,
-  int padT, int padH, int padW,
-  bool count_include_pad,
-  int offsetZ, int divisor_override)
-{
+    PackedTensorAccessor64<scalar_t, 4> gradOutput,
+    PackedTensorAccessor64<scalar_t, 4> gradInput,
+    int kT,
+    int kH,
+    int kW,
+    int dT,
+    int dH,
+    int dW,
+    int padT,
+    int padH,
+    int padW,
+    bool count_include_pad,
+    int offsetZ,
+    int divisor_override) {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame = (blockIdx.z + offsetZ) % gradOutput.size(1); // gradOutput frame/time
@@ -261,14 +283,22 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
 }
 
 template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void avg_pool3d_cuda_update_grad_input(
-  PackedTensorAccessor64<scalar_t, 4> gradOutput,
-  PackedTensorAccessor64<scalar_t, 4> gradInput,
-  int kT, int kH, int kW,
-  int dT, int dH, int dW,
-  int padT, int padH, int padW,
-  bool count_include_pad, int offsetZ, int divisor_override)
-{
+    PackedTensorAccessor64<scalar_t, 4> gradOutput,
+    PackedTensorAccessor64<scalar_t, 4> gradInput,
+    int kT,
+    int kH,
+    int kW,
+    int dT,
+    int dH,
+    int dW,
+    int padT,
+    int padH,
+    int padW,
+    bool count_include_pad,
+    int offsetZ,
+    int divisor_override) {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame = (blockIdx.z + offsetZ) % gradOutput.size(1); // gradOutput frame/time
@@ -419,7 +449,7 @@ void avg_pool3d_out_cuda_template(
       using accscalar_t = acc_type<scalar_t, true>;
       int64_t totalZ = otime * nslices * nbatch;
       int64_t offsetZ = 0;
-      dim3 block(32, 8);
+      dim3 block = cuda::detail::get_32x8_block();
 
       while (totalZ > 0) {
         dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int64_t>(block.x)),
@@ -560,7 +590,7 @@ void avg_pool3d_backward_out_cuda_template(
         using accscalar_t = acc_type<scalar_t, true>;
         int64_t totalZ = itime * nslices * nbatch;
         int64_t offsetZ = 0;
-        dim3 block(32, 8);
+        dim3 block = cuda::detail::get_32x8_block();
 
         accscalar_t divide_factor;
         if (divisor) {
@@ -596,7 +626,7 @@ void avg_pool3d_backward_out_cuda_template(
         using accscalar_t = acc_type<scalar_t, true>;
         int64_t totalZ = otime * nslices * nbatch;
         int64_t offsetZ = 0;
-        dim3 block(32, 8);
+        dim3 block = cuda::detail::get_32x8_block();
 
         while (totalZ > 0) {
           dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int64_t>(block.x)),

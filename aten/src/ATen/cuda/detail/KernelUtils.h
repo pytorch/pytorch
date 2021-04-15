@@ -36,4 +36,11 @@ inline int GET_BLOCKS(const int64_t N) {
   return static_cast<int>(block_num);
 }
 
+inline dim3 get_32x8_block() {
+  return dim3(32, 8);
+}
+
+constexpr int get_32x8_block_size() {
+  return 256;
+}
 }}}  // namespace at::cuda::detail

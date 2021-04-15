@@ -1,15 +1,16 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/BucketizationUtils.h>
 #include <THC/THC.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 namespace at {
 namespace native {
 
 // Implement a TF like searchsorted and a bucketize function running on cuda
-// See details in ATen/nativate/Bucketization.cpp
+// See details in ATen/native/Bucketization.cpp
 
 namespace {
 
@@ -41,17 +42,17 @@ __device__ int64_t upper_bound(const input_t *data_ss, int64_t start, int64_t en
   return start;
 }
 
-template<typename input_t, typename output_t>
+template <typename input_t, typename output_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
 __global__ void searchsorted_cuda_kernel(
-  output_t *data_out,
-  const input_t *data_in,
-  const input_t *data_bd,
-  int64_t idim_in,
-  int64_t idim_bd,
-  int64_t numel_in,
-  bool right,
-  bool is_1d_boundaries) {
-
+    output_t* data_out,
+    const input_t* data_in,
+    const input_t* data_bd,
+    int64_t idim_in,
+    int64_t idim_bd,
+    int64_t numel_in,
+    bool right,
+    bool is_1d_boundaries) {
   for (int64_t tid = blockIdx.x * blockDim.x + threadIdx.x; tid < numel_in; tid += blockDim.x * gridDim.x) {
     // If boundaries tensor is 1d, we always search the entire boundary tensor
     int64_t start_bd = is_1d_boundaries ? 0 : tid / idim_in * idim_bd;
@@ -78,7 +79,9 @@ void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Ten
   const input_t *data_bd = boundaries.data_ptr<input_t>();
   output_t *data_out = result.data_ptr<output_t>();
 
-  int64_t maxThread = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  int64_t maxThread = std::min<int64_t>(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
+      cuda::detail::CUDA_NUM_THREADS);
   int64_t maxGrid = 1024;
   dim3 block = dim3(std::min(maxThread, numel_in));
   dim3 grid  = dim3(std::min(maxGrid, cuda::ATenCeilDiv<int64_t>(numel_in, block.x)));

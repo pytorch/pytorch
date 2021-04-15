@@ -38,14 +38,14 @@ void prelu_cuda_kernel_share_weights(
 }
 
 template <typename scalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
 __global__ void prelu_cuda_kernel_multi_weights(
-  scalar_t* result_data,
-  const scalar_t* input_data,
-  const scalar_t* weight_data,
-  int64_t input_stride0,
-  int64_t input_stride1,
-  int64_t input_numel) {
-
+    scalar_t* result_data,
+    const scalar_t* input_data,
+    const scalar_t* weight_data,
+    int64_t input_stride0,
+    int64_t input_stride1,
+    int64_t input_numel) {
   int64_t linearId = blockIdx.x * blockDim.x + threadIdx.x;
   if (linearId >= input_numel) return;
 
@@ -144,16 +144,16 @@ void prelu_cuda_backward_kernel_share_weights(
 }
 
 template <typename scalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
 __global__ void prelu_cuda_backward_kernel_multi_weights(
-  const scalar_t* input_data,
-  const scalar_t* weight_data,
-  const scalar_t* grad_out_data,
-  scalar_t* input_grad_data,
-  scalar_t* weight_grad_collector,
-  int64_t input_stride0,
-  int64_t input_stride1,
-  int64_t input_numel) {
-
+    const scalar_t* input_data,
+    const scalar_t* weight_data,
+    const scalar_t* grad_out_data,
+    scalar_t* input_grad_data,
+    scalar_t* weight_grad_collector,
+    int64_t input_stride0,
+    int64_t input_stride1,
+    int64_t input_numel) {
   int64_t linearId = blockIdx.x * blockDim.x + threadIdx.x;
   if (linearId >= input_numel) return;
   int64_t channel = (linearId % input_stride0) / input_stride1;

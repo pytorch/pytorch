@@ -1,14 +1,15 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <THC/THCGeneral.h>
-#include <THC/THCNumerics.cuh>
-#include <THC/THCAtomics.cuh>  // for gpuAtomicAdd
 #include <c10/util/Exception.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <THC/THCAtomics.cuh> // for gpuAtomicAdd
+#include <THC/THCNumerics.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -40,12 +41,20 @@ __device__ inline int end_index(int a, int b, int c) {
  *    (blockIdx.x + offsetZ).
  */
 template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void adaptiveaveragepool(
-    scalar_t *input, scalar_t *output,
-    int isizeT, int isizeH, int isizeW,
-    int osizeT, int osizeH, int osizeW,
+    scalar_t* input,
+    scalar_t* output,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW,
     int64_t istrideD,
-    int64_t istrideT, int64_t istrideH, int64_t istrideW,
+    int64_t istrideT,
+    int64_t istrideH,
+    int64_t istrideW,
     int64_t offsetZ) {
   // iterates on output pixels
   int ot, oh, ow;
@@ -114,7 +123,7 @@ void adaptiveaveragepool_loop(
     int osizeT, int osizeH, int osizeW,
     int64_t istrideD, int64_t istrideT, int64_t istrideH, int64_t istrideW) {
   int64_t offsetZ = 0;
-  dim3 threads(32, 8);
+  dim3 threads = cuda::detail::get_32x8_block();
   // each H*W plane is processed by blocksH thread blocks
   int blocksH = std::max((int)(16L / totalZ), 1);
   while (totalZ > 0) {
@@ -141,12 +150,17 @@ void adaptiveaveragepool_loop(
  *    (blockIdx.x + offsetZ).
  */
 template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void adaptiveaveragegradinput(
-    scalar_t *gradInput, scalar_t *gradOutput,
-    int isizeT, int isizeH, int isizeW,
-    int osizeT, int osizeH, int osizeW,
-    int64_t offsetZ)
-{
+    scalar_t* gradInput,
+    scalar_t* gradOutput,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW,
+    int64_t offsetZ) {
   // iterators on input pixels
   int it, ih, iw;
 
@@ -211,7 +225,7 @@ void adaptiveaveragegradinput_loop(
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW) {
   int64_t offsetZ = 0;
-  dim3 threads(32, 8);
+  dim3 threads = cuda::detail::get_32x8_block();
   // each H*W plane is processed by blocksH thread blocks
   int blocksH = std::max((int)(16L / totalZ), 1);
   while (totalZ > 0) {
@@ -239,12 +253,17 @@ void adaptiveaveragegradinput_loop(
  *
  */
 template <typename scalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void atomicadaptiveaveragegradinput(
-    scalar_t *gradInput, scalar_t *gradOutput,
-    int isizeT, int isizeH, int isizeW,
-    int osizeT, int osizeH, int osizeW,
-    int64_t offsetZ)
-{
+    scalar_t* gradInput,
+    scalar_t* gradOutput,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW,
+    int64_t offsetZ) {
   // iterators on output pixels
   int ot, oh, ow;
 
@@ -307,7 +326,7 @@ void atomicadaptiveaveragegradinput_loop(
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW) {
   int64_t offsetZ = 0;
-  dim3 threads(32, 8);
+  dim3 threads = cuda::detail::get_32x8_block();
   int blocksH = std::max((int)(16L / totalZ), 1);
   while (totalZ > 0) {
     dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);

@@ -1,12 +1,13 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-#include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <THC/THCGeneral.h>
+#include <c10/util/Exception.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 
 #include <algorithm>
@@ -34,15 +35,23 @@ __device__ inline int end_index(int a, int b, int c) {
  *    this function adaptively maxpools an input 4D tensor along dimensions 2 and 3
  *    4D input, 4D output, 4D argmax x and y
  */
- template <typename T>
+template <typename T>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void adaptivemaxpool(
-                        T *input, T *output, int64_t *indices,
-                        int isizeT, int isizeH, int isizeW,
-                        int osizeT, int osizeH, int osizeW,
-                        int64_t istrideD,
-                        int64_t istrideT, int64_t istrideH, int64_t istrideW,
-                        int64_t offsetZ)
-{
+    T* input,
+    T* output,
+    int64_t* indices,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW,
+    int64_t istrideD,
+    int64_t istrideT,
+    int64_t istrideH,
+    int64_t istrideW,
+    int64_t offsetZ) {
   // iterators on output pixels
   int ot, oh, ow;
 
@@ -123,7 +132,7 @@ void adaptivemaxpool_loop(
                         int64_t istrideT, int64_t istrideH, int64_t istrideW)
 {
   int64_t offsetZ = 0;
-  dim3 threads(32, 8);
+  dim3 threads = cuda::detail::get_32x8_block();
   // each H*W plane is processed by blocksH thread blocks
   int blocksH = std::max((int)(16L / totalZ), 1);
   while (totalZ > 0) {
@@ -148,14 +157,19 @@ void adaptivemaxpool_loop(
  *    Assumes that input size can be perfectly divided by output size, i.e.
  *    each input pixel can only be argmax of one output pixel.
  */
- template <typename T>
+template <typename T>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void adaptivemaxgradinput(
-  T *gradInput, T *gradOutput, int64_t *indices,
-  int isizeT, int isizeH, int isizeW,
-  int osizeT, int osizeH, int osizeW,
-  int64_t offsetZ
-)
-{
+    T* gradInput,
+    T* gradOutput,
+    int64_t* indices,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW,
+    int64_t offsetZ) {
   // iterators on output pixels
   int oh, ow;
 
@@ -201,7 +215,7 @@ void adaptivemaxgradinput_loop(
   int osizeT, int osizeH, int osizeW)
 {
   int64_t offsetZ = 0;
-  dim3 threads(32, 8);
+  dim3 threads = cuda::detail::get_32x8_block();
   // each H*W plane is processed by blocksH thread blocks
   int blocksH = std::max((int)(16L / totalZ), 1);
   while (totalZ > 0) {
@@ -224,14 +238,19 @@ void adaptivemaxgradinput_loop(
  *
  *    Uses atomic add.
  */
- template <typename T>
+template <typename T>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void atomicadaptivemaxgradinput(
-  T *gradInput, T *gradOutput, int64_t *indices,
-  int isizeT, int isizeH, int isizeW,
-  int osizeT, int osizeH, int osizeW,
-  int64_t offsetZ
-)
-{
+    T* gradInput,
+    T* gradOutput,
+    int64_t* indices,
+    int isizeT,
+    int isizeH,
+    int isizeW,
+    int osizeT,
+    int osizeH,
+    int osizeW,
+    int64_t offsetZ) {
   // iterators on output pixels
   int oh, ow;
 
@@ -277,7 +296,7 @@ void atomicadaptivemaxgradinput_loop(
   int osizeT, int osizeH, int osizeW)
 {
   int64_t offsetZ = 0;
-  dim3 threads(32, 8);
+  dim3 threads = cuda::detail::get_32x8_block();
   // each H*W plane is processed by blocksH thread blocks
   int blocksH = std::max((int)(16L / totalZ), 1);
   while (totalZ > 0) {

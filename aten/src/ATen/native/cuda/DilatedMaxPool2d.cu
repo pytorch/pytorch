@@ -20,8 +20,6 @@ __device__ inline int min(int a, int b) {
   return a <= b ? a : b;
 }
 
-#define CUDA_MAX_THREADS 1024 // this is safe, in reality 256 is our limit
-
 #define BLOCK_STRIDE 2 // increasing block_stride to lower # of blocks launched
 
 static __device__ inline int p_start(int size, int pad, int kernel, int dilation, int stride) {
@@ -34,12 +32,25 @@ static __device__ inline int p_end(int size, int pad, int pooled_size, int strid
 
 // kernels borrowed from Caffe
 template <typename scalar_t, typename accscalar_t>
-__global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom_data,
-    const int num, const int channels, const int height,
-    const int width, const int pooled_height, const int pooled_width,
-    const int kernel_h, const int kernel_w, const int stride_h,
-    const int stride_w, const int pad_h, const int pad_w,
-    const int dilation_h, const int dilation_w, scalar_t* top_data,
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void max_pool_forward_nchw(
+    const int nthreads,
+    const scalar_t* bottom_data,
+    const int num,
+    const int channels,
+    const int height,
+    const int width,
+    const int pooled_height,
+    const int pooled_width,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const int pad_h,
+    const int pad_w,
+    const int dilation_h,
+    const int dilation_w,
+    scalar_t* top_data,
     int64_t* top_mask) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     int pw = index % pooled_width;
@@ -72,17 +83,31 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
 }
 
 template <typename scalar_t, typename accscalar_t>
-C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-__global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nbatch,
-                                   const int channels, const int height,
-                                   const int width, const int pooled_height, const int pooled_width,
-                                   const int kernel_h, const int kernel_w, const int stride_h,
-                                   const int stride_w, const int pad_h, const int pad_w,
-                                   const int dilation_h, const int dilation_w,
-                                   const int in_stride_n, const int in_stride_c,
-                                   const int in_stride_h, const int in_stride_w,
-                                   const int kernel_stride_C, const int kernel_size_C,
-                                   scalar_t* top_data, int64_t* top_mask) {
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void max_pool_forward_nhwc(
+    const scalar_t* bottom_data,
+    const int nbatch,
+    const int channels,
+    const int height,
+    const int width,
+    const int pooled_height,
+    const int pooled_width,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const int pad_h,
+    const int pad_w,
+    const int dilation_h,
+    const int dilation_w,
+    const int in_stride_n,
+    const int in_stride_c,
+    const int in_stride_h,
+    const int in_stride_w,
+    const int kernel_stride_C,
+    const int kernel_size_C,
+    scalar_t* top_data,
+    int64_t* top_mask) {
   extern __shared__ int smem[];
   int *out_mask_cached = smem;
   scalar_t *out_cached = reinterpret_cast<scalar_t*>(&out_mask_cached[kernel_size_C*blockDim.x*blockDim.y*blockDim.z]);
@@ -157,7 +182,6 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
   }
 }
 
-
 static const int BLOCK_THREADS = 256;
 
 template <typename scalar_t, typename accscalar_t>
@@ -198,18 +222,35 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
 }
 
 template <typename scalar_t, typename accscalar_t>
-C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-__global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_diff,
-                                    const int64_t* top_mask, const int nbatch, const int channels,
-                                    const int height, const int width, const int pooled_height,
-                                    const int pooled_width, const int kernel_h, const int kernel_w,
-                                    const int stride_h, const int stride_w, const int pad_h, const int pad_w,
-                                    const int dilation_h, const int dilation_w,
-                                    const int out_stride_c, const int out_stride_h, const int out_stride_w,
-                                    const int in_stride_n, const int in_stride_c,
-                                    const int in_stride_h, const int in_stride_w,
-                                    const int kernel_stride_C, const int kernel_size_C,
-                                    scalar_t* bottom_diff) {
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void max_pool_backward_nhwc(
+    const int nthreads,
+    const scalar_t* top_diff,
+    const int64_t* top_mask,
+    const int nbatch,
+    const int channels,
+    const int height,
+    const int width,
+    const int pooled_height,
+    const int pooled_width,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const int pad_h,
+    const int pad_w,
+    const int dilation_h,
+    const int dilation_w,
+    const int out_stride_c,
+    const int out_stride_h,
+    const int out_stride_w,
+    const int in_stride_n,
+    const int in_stride_c,
+    const int in_stride_h,
+    const int in_stride_w,
+    const int kernel_stride_C,
+    const int kernel_size_C,
+    scalar_t* bottom_diff) {
   extern __shared__ int smem[];
   accscalar_t *out_cached = reinterpret_cast<accscalar_t*>(smem);
 
@@ -375,7 +416,8 @@ void max_pool2d_with_indices_out_cuda_template(
       switch (memory_format) {
         case MemoryFormat::ChannelsLast: {
           const int max_threads = std::min<int>(
-              at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
+              at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
+              cuda::detail::CUDA_NUM_THREADS);
           int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
           int block_x = std::min<int>(
               maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
@@ -538,7 +580,9 @@ void max_pool2d_with_indices_backward_out_cuda_template(
 
       switch (memory_format) {
         case MemoryFormat::ChannelsLast: {
-          const int max_threads = std::min<int>(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
+          const int max_threads = std::min<int>(
+              at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
+              cuda::detail::CUDA_NUM_THREADS);
           int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
           int block_x = std::min<int>(
               maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));

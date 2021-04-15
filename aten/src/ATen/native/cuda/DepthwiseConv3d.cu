@@ -13,18 +13,32 @@ namespace at {
 namespace native {
 namespace {
 
-template <typename scalar_t, typename accscalar_t,
-    int kKnownKernelT, int kKnownKernelH, int kKnownKernelW,
-    int kKnownDilationT, int kKnownDilationH, int kKnownDilationW>
+constexpr int BLOCK_SIZE = 256;
+
+template <
+    typename scalar_t,
+    typename accscalar_t,
+    int kKnownKernelT,
+    int kKnownKernelH,
+    int kKnownKernelW,
+    int kKnownDilationT,
+    int kKnownDilationH,
+    int kKnownDilationW>
+C10_LAUNCH_BOUNDS_1(BLOCK_SIZE)
 __global__ void conv_depthwise3d_cuda_kernel(
     const PackedTensorAccessor32<scalar_t, 5> input,
     PackedTensorAccessor32<scalar_t, 5> output,
     const PackedTensorAccessor32<scalar_t, 5> kernel,
     const scalar_t* bias,
-    int strideT, int strideH, int strideW,
-    int paddingT, int paddingH, int paddingW,
-    int dilationT_, int dilationH_, int dilationW_)
-{
+    int strideT,
+    int strideH,
+    int strideW,
+    int paddingT,
+    int paddingH,
+    int paddingW,
+    int dilationT_,
+    int dilationH_,
+    int dilationW_) {
   const int kT = kKnownKernelT > 0 ? kKnownKernelT : kernel.size(2);
   const int kH = kKnownKernelH > 0 ? kKnownKernelH : kernel.size(3);
   const int kW = kKnownKernelW > 0 ? kKnownKernelW : kernel.size(4);
@@ -84,18 +98,32 @@ __global__ void conv_depthwise3d_cuda_kernel(
   }
 }
 
-template <typename scalar_t, typename accscalar_t,
-    int kKnownKernelT, int kKnownKernelH, int kKnownKernelW,
-    int kKnownDilationT, int kKnownDilationH, int kKnownDilationW,
-    int kKnownStrideT, int kKnownStrideH, int kKnownStrideW>
-__global__ void
-conv_depthwise3d_cuda_backward_input_kernel(
+template <
+    typename scalar_t,
+    typename accscalar_t,
+    int kKnownKernelT,
+    int kKnownKernelH,
+    int kKnownKernelW,
+    int kKnownDilationT,
+    int kKnownDilationH,
+    int kKnownDilationW,
+    int kKnownStrideT,
+    int kKnownStrideH,
+    int kKnownStrideW>
+C10_LAUNCH_BOUNDS_1(BLOCK_SIZE)
+__global__ void conv_depthwise3d_cuda_backward_input_kernel(
     const PackedTensorAccessor32<scalar_t, 5> grad_output,
     PackedTensorAccessor32<scalar_t, 5> grad_input,
     const PackedTensorAccessor32<scalar_t, 5> kernel,
-    int strideT_, int strideH_, int strideW_,
-    int paddingT, int paddingH, int paddingW,
-    int dilationT_, int dilationH_, int dilationW_) {
+    int strideT_,
+    int strideH_,
+    int strideW_,
+    int paddingT,
+    int paddingH,
+    int paddingW,
+    int dilationT_,
+    int dilationH_,
+    int dilationW_) {
   const int kT = kKnownKernelT > 0 ? kKnownKernelT : kernel.size(2);
   const int kH = kKnownKernelH > 0 ? kKnownKernelH : kernel.size(3);
   const int kW = kKnownKernelW > 0 ? kKnownKernelW : kernel.size(4);
@@ -167,16 +195,25 @@ conv_depthwise3d_cuda_backward_input_kernel(
   }
 }
 
-template <typename scalar_t, typename accscalar_t,
-    int kKnownStrideH, int kKnownStrideW>
-__global__ void
-conv_depthwise3d_cuda_backward_weight_kernel(
+template <
+    typename scalar_t,
+    typename accscalar_t,
+    int kKnownStrideH,
+    int kKnownStrideW>
+C10_LAUNCH_BOUNDS_1(BLOCK_SIZE)
+__global__ void conv_depthwise3d_cuda_backward_weight_kernel(
     const PackedTensorAccessor32<scalar_t, 5> grad_output,
     const PackedTensorAccessor32<scalar_t, 5> input,
     PackedTensorAccessor32<scalar_t, 5> grad_kernel,
-    int strideT, int strideH_, int strideW_,
-    int paddingT, int paddingH, int paddingW,
-    int dilationT, int dilationH, int dilationW) {
+    int strideT,
+    int strideH_,
+    int strideW_,
+    int paddingT,
+    int paddingH,
+    int paddingW,
+    int dilationT,
+    int dilationH,
+    int dilationW) {
   const int kC = grad_kernel.size(0);
   const int kT = grad_kernel.size(2);
   const int kH = grad_kernel.size(3);
@@ -418,7 +455,7 @@ Tensor conv_depthwise3d_cuda(
       "conv_depthwise3d",
       [&]{
         int64_t num_outputs = output_.numel();
-        int64_t block = 256;
+        int64_t block = BLOCK_SIZE;
         int64_t grid = std::min((num_outputs - 1) / block + 1, (int64_t)65536);
         int64_t smem = 0;
 
@@ -547,7 +584,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
         "conv_depthwise3d",
         [&] {
           int64_t num_inputs = grad_input_.numel();
-          int64_t block = 256;
+          int64_t block = BLOCK_SIZE;
           int64_t grid = std::min((num_inputs - 1) / block + 1, (int64_t)65536);
 
           // Range check to avoid overflow in CUDA kernels.
@@ -581,7 +618,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
         "conv_depthwise3d",
         [&] {
           int64_t grid = grad_weight.numel();
-          int64_t block = 256;
+          int64_t block = BLOCK_SIZE;
           int64_t smem = sizeof(scalar_t) * block;
 
           const int64_t int_max = std::numeric_limits<int32_t>::max();

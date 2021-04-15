@@ -22,13 +22,26 @@ __device__ inline int max(int a, int b) {
 }
 
 template <typename scalar_t, typename accscalar_t>
-__global__ void avg_pool2d_out_cuda_frame(const int nthreads,
-    const scalar_t* const bottom_data, const int num, const int channels,
-    const int height, const int width, const int pooled_height,
-    const int pooled_width, const int kernel_h, const int kernel_w,
-    const int stride_h, const int stride_w, const int pad_h, const int pad_w,
-    scalar_t* const top_data, const int divisor_override,
-    const bool count_include_pad, const bool use_divisor) {
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void avg_pool2d_out_cuda_frame(
+    const int nthreads,
+    const scalar_t* const bottom_data,
+    const int num,
+    const int channels,
+    const int height,
+    const int width,
+    const int pooled_height,
+    const int pooled_width,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const int pad_h,
+    const int pad_w,
+    scalar_t* const top_data,
+    const int divisor_override,
+    const bool count_include_pad,
+    const bool use_divisor) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     const int pw = index % pooled_width;
     const int ph = (index / pooled_width) % pooled_height;
@@ -71,13 +84,26 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
 }
 
 template <typename scalar_t, typename accscalar_t>
-__global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
-    const scalar_t* const bottom_data, const int num, const int channels,
-    const int height, const int width, const int pooled_height,
-    const int pooled_width, const int kernel_h, const int kernel_w,
-    const int stride_h, const int stride_w, const int pad_h, const int pad_w,
-    scalar_t* const top_data, const int divisor_override,
-    const bool count_include_pad, const bool use_divisor) {
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void avg_pool2d_out_cuda_frame_nhwc(
+    const int nthreads,
+    const scalar_t* const bottom_data,
+    const int num,
+    const int channels,
+    const int height,
+    const int width,
+    const int pooled_height,
+    const int pooled_width,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const int pad_h,
+    const int pad_w,
+    scalar_t* const top_data,
+    const int divisor_override,
+    const bool count_include_pad,
+    const bool use_divisor) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     const int c = index % channels;
     const int pw = (index / channels) % pooled_width;
@@ -120,13 +146,26 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
 }
 
 template <typename scalar_t, typename accscalar_t>
-__global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const scalar_t* const top_diff,
-    const int num, const int channels, const int height,
-    const int width, const int pooled_height, const int pooled_width,
-    const int kernel_h, const int kernel_w, const int stride_h,
-    const int stride_w, const int pad_h, const int pad_w,
-    scalar_t* const bottom_diff, const int divisor_override,
-    bool count_include_pad, bool use_divisor) {
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void avg_pool2d_backward_out_cuda_frame(
+    const int nthreads,
+    const scalar_t* const top_diff,
+    const int num,
+    const int channels,
+    const int height,
+    const int width,
+    const int pooled_height,
+    const int pooled_width,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const int pad_h,
+    const int pad_w,
+    scalar_t* const bottom_diff,
+    const int divisor_override,
+    bool count_include_pad,
+    bool use_divisor) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     // find out the local index
     // find out the local offset
@@ -176,14 +215,26 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const sca
 }
 
 template <typename scalar_t, typename accscalar_t>
-__global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void avg_pool2d_backward_out_cuda_frame_nhwc(
+    const int nthreads,
     const scalar_t* const top_diff,
-    const int num, const int channels, const int height,
-    const int width, const int pooled_height, const int pooled_width,
-    const int kernel_h, const int kernel_w, const int stride_h,
-    const int stride_w, const int pad_h, const int pad_w,
-    scalar_t* const bottom_diff, const int divisor_override,
-    bool count_include_pad, bool use_divisor) {
+    const int num,
+    const int channels,
+    const int height,
+    const int width,
+    const int pooled_height,
+    const int pooled_width,
+    const int kernel_h,
+    const int kernel_w,
+    const int stride_h,
+    const int stride_w,
+    const int pad_h,
+    const int pad_w,
+    scalar_t* const bottom_diff,
+    const int divisor_override,
+    bool count_include_pad,
+    bool use_divisor) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     const int c = index % channels;
     const int w = (index / channels) % width;
@@ -287,7 +338,9 @@ void avg_pool2d_out_cuda_template(
   output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
 
   const int32_t count = safe_downcast<int32_t, int64_t>(output.numel());
-  const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  const uint32_t num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
+      cuda::detail::CUDA_NUM_THREADS);
   const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
 
   bool use_divisor = divisor_override.has_value();
@@ -416,7 +469,9 @@ Tensor& avg_pool2d_backward_out_cuda_template(
     return gradInput;
   }
 
-  const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  const uint32_t num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
+      cuda::detail::CUDA_NUM_THREADS);
   const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
 
   bool use_divisor = divisor_override.has_value();

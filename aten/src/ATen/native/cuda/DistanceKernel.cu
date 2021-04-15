@@ -11,7 +11,8 @@ namespace at { namespace native {
 
 namespace {
 
-static const int forward_threads = 256;
+constexpr int forward_threads = 256;
+constexpr int backward_threads = 1024;
 
 template <typename scalar_t>
 static __forceinline__ __device__ scalar_t device_sqrt(scalar_t val);
@@ -105,8 +106,15 @@ __device__ static inline scalar_t reduce_agg(scalar_t agg) {
 }
 
 template <typename scalar_t, typename F>
-__global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self, const int64_t n, const int64_t m, const scalar_t p,
-                                              const double n2, const double n2_squared_minus_1) {
+C10_LAUNCH_BOUNDS_1(forward_threads)
+__global__ static void pdist_kernel_cuda_impl(
+    scalar_t* result,
+    const scalar_t* self,
+    const int64_t n,
+    const int64_t m,
+    const scalar_t p,
+    const double n2,
+    const double n2_squared_minus_1) {
   const int64_t k = blockIdx.x;
   const int stride = blockDim.x;
 
@@ -130,8 +138,22 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
 }
 
 template <typename scalar_t, typename F>
-__global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * x1, const scalar_t * x2, const scalar_t * dist, int64_t gs,
-                                                       const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t count, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
+C10_LAUNCH_BOUNDS_1(backward_threads)
+__global__ static void cdist_backward_kernel_cuda_impl(
+    scalar_t* buffer,
+    const scalar_t* grad,
+    const scalar_t* x1,
+    const scalar_t* x2,
+    const scalar_t* dist,
+    int64_t gs,
+    const scalar_t p,
+    const int64_t r1,
+    const int64_t r2,
+    const int64_t m,
+    const int64_t count,
+    const int64_t r_size,
+    const int64_t l1_size,
+    const int64_t l2_size) {
   const int y = (blockIdx.y * gridDim.z + blockIdx.z) * blockDim.y + threadIdx.y;
   const int init = blockIdx.x * blockDim.x + threadIdx.x;
   if (y >= count || init >= m) {
@@ -162,8 +184,19 @@ __global__ static void cdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 }
 
 template <typename scalar_t, typename F>
-__global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const scalar_t * grad, const scalar_t * self, const scalar_t * dist, int64_t gs, const int64_t n, const int64_t m, const int64_t combs, const scalar_t p,
-                                                       const double n2, const double n2_squared_minus_1) {
+C10_LAUNCH_BOUNDS_1(backward_threads)
+__global__ static void pdist_backward_kernel_cuda_impl(
+    scalar_t* buffer,
+    const scalar_t* grad,
+    const scalar_t* self,
+    const scalar_t* dist,
+    int64_t gs,
+    const int64_t n,
+    const int64_t m,
+    const int64_t combs,
+    const scalar_t p,
+    const double n2,
+    const double n2_squared_minus_1) {
   const int64_t k = blockIdx.x * blockDim.x + threadIdx.x;
   const int init = blockIdx.y * blockDim.y + threadIdx.y;
   const int stride = blockDim.y * gridDim.y;
@@ -195,8 +228,18 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
 }
 
 template <typename scalar_t, typename F>
-__global__ static void cdist_kernel_cuda_impl(scalar_t * result, const scalar_t * x1, const scalar_t * x2,
-    const scalar_t p, const int64_t r1, const int64_t r2, const int64_t m, const int64_t r_size, const int64_t l1_size, const int64_t l2_size) {
+C10_LAUNCH_BOUNDS_1(forward_threads)
+__global__ static void cdist_kernel_cuda_impl(
+    scalar_t* result,
+    const scalar_t* x1,
+    const scalar_t* x2,
+    const scalar_t p,
+    const int64_t r1,
+    const int64_t r2,
+    const int64_t m,
+    const int64_t r_size,
+    const int64_t l1_size,
+    const int64_t l2_size) {
   const int64_t l = blockIdx.x / r_size;
   const int64_t k = blockIdx.x % r_size;
   const int64_t i = k / r2;
@@ -290,6 +333,7 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   // NB: be careful with changing block_y; as it's currently written, grid_y is limited to be 2^16.
   // block_y of 64 gives us max pdist dim1 of 2**24
   const int block_y = 64;
+  static_assert(block_x * block_y == backward_threads);
   const int grid_x = (dist.numel() + block_x - 1) / block_x;
   const int grid_y = (m + block_y * 8 - 1) / (block_y * 8);
   const dim3 grid(grid_x, grid_y);
@@ -334,6 +378,7 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   int64_t batch = x1.dim() > 2 ? x1.size(0) : 1;
   const int block_x = 64;
   const int block_y = 16;
+  static_assert(block_x * block_y == backward_threads);
   const int grid_x = (m + block_x * 8 - 1) / (block_x * 8);
 
   const int64_t count = dist.numel();

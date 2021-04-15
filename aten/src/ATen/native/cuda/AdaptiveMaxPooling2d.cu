@@ -1,12 +1,13 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-#include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <THC/THCGeneral.h>
+#include <c10/util/Exception.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 
 #include <algorithm>
@@ -34,12 +35,19 @@ __device__ inline int end_index(int a, int b, int c) {
  *    this function adaptively maxpools an input 4D tensor along dimensions 2 and 3
  *    4D input, 4D output, 4D argmax x and y
  */
- template <typename T>
-__global__ void adaptivemaxpool(T *input, T *output, int64_t *indices,
-                        int isizeH, int isizeW,
-                        int osizeH, int osizeW,
-                        int64_t istrideD, int64_t istrideH, int64_t istrideW)
-{
+template <typename T>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
+__global__ void adaptivemaxpool(
+    T* input,
+    T* output,
+    int64_t* indices,
+    int isizeH,
+    int isizeW,
+    int osizeH,
+    int osizeW,
+    int64_t istrideD,
+    int64_t istrideH,
+    int64_t istrideW) {
   // iterators
   int oh, ow;
 
@@ -100,11 +108,16 @@ __global__ void adaptivemaxpool(T *input, T *output, int64_t *indices,
  * Description:
  *    this function computes the gradInput from weight and gradOutput
  */
- template <typename T>
-__global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, int64_t *indices,
-                             int isizeH, int isizeW,
-                             int osizeH, int osizeW)
-{
+template <typename T>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
+__global__ void adaptivemaxgradinput(
+    T* gradInput,
+    T* gradOutput,
+    int64_t* indices,
+    int isizeH,
+    int isizeW,
+    int osizeH,
+    int osizeW) {
   // iterators
   int oh, ow;
 
@@ -147,12 +160,16 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, int64_t *indic
  *    this function computes the gradInput from weight and gradOutput
  *    when kH != dH or kW != dW (uses atomic add)
  */
- template <typename T>
+template <typename T>
+C10_LAUNCH_BOUNDS_1(cuda::detail::get_32x8_block_size())
 __global__ void atomicadaptivemaxgradinput(
-  T *gradInput, T *gradOutput, int64_t *indices,
-  int isizeH, int isizeW, int osizeH, int osizeW
-)
-{
+    T* gradInput,
+    T* gradOutput,
+    int64_t* indices,
+    int isizeH,
+    int isizeW,
+    int osizeH,
+    int osizeW) {
   // iterators
   int oh, ow;
 
@@ -243,7 +260,7 @@ void adaptive_max_pool2d_out_cuda_template(
         int blocksH = (int)(16L / sizeD);
         blocksH = blocksH < 1 ? 1 : blocksH;
         dim3 blocks(sizeD, blocksH);
-        dim3 threads(32, 8);
+        dim3 threads = cuda::detail::get_32x8_block();
 
         // run maxpool kernel
         adaptivemaxpool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
@@ -279,7 +296,7 @@ void adaptive_max_pool2d_out_cuda_template(
         int blocksH = (int)(16L / sizeD);
         blocksH = blocksH < 1 ? 1 : blocksH;
         dim3 blocks(sizeB*sizeD, blocksH);
-        dim3 threads(32, 8);
+        dim3 threads = cuda::detail::get_32x8_block();
 
         // run maxpool kernel
         adaptivemaxpool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
@@ -335,7 +352,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
         int blocksH = (int)(16L / sizeD);
         blocksH = blocksH < 1 ? 1 : blocksH;
         dim3 blocks(sizeD, blocksH);
-        dim3 threads(32, 8);
+        dim3 threads = cuda::detail::get_32x8_block();
 
         if(atomic)
         {
@@ -382,7 +399,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
         int blocksH = (int)(16L / sizeD);
         blocksH = blocksH < 1 ? 1 : blocksH;
         dim3 blocks(sizeB*sizeD, blocksH);
-        dim3 threads(32, 8);
+        dim3 threads = cuda::detail::get_32x8_block();
 
         if(atomic)
         {

@@ -173,14 +173,18 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
 }
 
 // Binary kernel
-template <typename func_t, typename inp_offset_calc_t, typename out_offset_calc_t>
+template <
+    typename func_t,
+    typename inp_offset_calc_t,
+    typename out_offset_calc_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void distribution_binary_elementwise_kernel(
     int numel,
     func_t f,
     PhiloxCudaState philox_args,
-    typename function_traits<func_t>::result_type *output_data,
-    const typename function_traits<func_t>::template arg<1>::type *input_data_1,
-    const typename function_traits<func_t>::template arg<2>::type *input_data_2,
+    typename function_traits<func_t>::result_type* output_data,
+    const typename function_traits<func_t>::template arg<1>::type* input_data_1,
+    const typename function_traits<func_t>::template arg<2>::type* input_data_2,
     inp_offset_calc_t inp_calc,
     out_offset_calc_t out_calc) {
   auto seeds = at::cuda::philox::unpack(philox_args);
