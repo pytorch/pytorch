@@ -68,15 +68,34 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
-    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
+    def test_save_module_with_module_object(self):
+        """
+        Test that save_module works with a module object
+        instead of a module name.
+        """
+        buffer = BytesIO()
+
+        with PackageExporter(buffer, verbose=False) as he:
+            import module_a
+
+            he.save_module(module_a)
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        module_a_i = hi.import_module("module_a")
+        self.assertEqual(module_a_i.result, "module_a")
+        self.assertIsNot(module_a, module_a_i)
+
+  
     def test_dunder_imports(self):
-        filename = self.temp()
-        with PackageExporter(filename, verbose=True) as he:
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
             import package_b
             obj = package_b.PackageBObject
             he.save_pickle("res", "obj.pkl", obj)
-            print(he.debug_deps)
-        hi = PackageImporter(filename)
+        
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
         loaded_obj = hi.load_pickle("res", "obj.pkl")
         # hi will throw errors if cannot resolve __import__'s
         # dependencies on loading side

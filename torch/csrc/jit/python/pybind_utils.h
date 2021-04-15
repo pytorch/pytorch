@@ -179,6 +179,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
   void add_done_callback(py::function cb) {
     auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     fut->addCallback(std::bind(
         [pyFut(this->getPtr())](std::shared_ptr<PythonFunctionGuard> pf) {
           try {
@@ -195,13 +196,13 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               PyErr_Clear();
             }
             // Log and ignore exceptions raised through the callback
-            VLOG(1) << "Got the following error when running the callback: "
-                    << e.what();
+            LOG(ERROR) << "Got the following error when running the callback: "
+                       << e.what();
 
-          } catch (std::exception& e) {
+          } catch (const std::exception& e) {
             // Log and ignore exceptions raised through the callback
-            VLOG(1) << "Got the following error when running the callback: "
-                    << e.what();
+            LOG(ERROR) << "Got the following error when running the callback: "
+                       << e.what();
           }
         },
         std::move(pf)));
@@ -299,6 +300,7 @@ inline InferredType tryToInferType(py::handle input) {
   // Try basic types first
   if (py::isinstance<py::bool_>(input)) {
     return InferredType(BoolType::get());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (py::isinstance<py::int_>(input)) {
     return InferredType(IntType::get());
   } else if (py::isinstance<py::float_>(input)) {
@@ -334,12 +336,49 @@ inline InferredType tryToInferType(py::handle input) {
   py::bool_ isClass =
       py::module::import("inspect").attr("isclass")(input.get_type());
   if (py::cast<bool>(isClass)) {
-    auto scriptClass = py::module::import("torch.jit._state")
-                           .attr("_get_script_class")(input.get_type());
-    if (!scriptClass.is_none()) {
-      auto classType = py::cast<ClassTypePtr>(scriptClass);
-      TORCH_INTERNAL_ASSERT(classType);
-      return InferredType(classType);
+    // Assume that the class is compiled already or will compile. Invalidate
+    // this later if needed.
+    bool class_compiled = true;
+
+    // Check if the type is already compiled.
+    py::object existing_ty = py::module::import("torch.jit._state")
+                                 .attr("_get_script_class")(input.get_type());
+
+    if (existing_ty.is_none()) {
+      // If not, try to compile it.
+      py::bool_ can_compile = py::module::import("torch._jit_internal")
+                                  .attr("can_compile_class")(input.get_type());
+
+      if (py::cast<bool>(can_compile)) {
+        // Try to compile the class. This is wrapped in a try-catch because
+        // compilation of class types can raise an Exception and in that case,
+        // we want to defer to other attempts at type inference below rather
+        // than fail compilation altogether.
+        try {
+          py::module::import("torch.jit._script")
+              .attr("_recursive_compile_class")(
+                  input.get_type(), SourceRange());
+        } catch (...) {
+          // Invalidate the assumption that the class compiled so that we don't
+          // look up and return its JIT type as the type for the input.
+          class_compiled = false;
+        }
+      }
+    }
+
+    // If the class compiled successfully, look up the existing JIT type by
+    // qualified name and return it.
+    if (class_compiled) {
+      auto script_class = py::module::import("torch.jit._state")
+                              .attr("_get_script_class")(input.get_type());
+
+      if (!script_class.is_none()) {
+        auto class_type = py::cast<ClassTypePtr>(script_class);
+
+        if (class_type && !class_type->is_module()) {
+          return InferredType(class_type);
+        }
+      }
     }
   }
 
@@ -914,6 +953,7 @@ inline py::object runAndInsertCall(
     auto graph = tracing_state->graph;
     std::vector<NamedValue> named_values;
     for (Value* v : input_values) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       named_values.emplace_back(v);
     }
 
@@ -949,7 +989,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
     const c10::QualifiedName qualname) {
-  std::vector<py::handle> args_vec = {callee};
+  std::vector<py::handle> args_vec;
   for (const auto& arg : args_no_self) {
     args_vec.push_back(arg);
   }
@@ -983,12 +1023,12 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
   if (overloaded_args.size() > 0) {
     return pybind11::reinterpret_steal<py::object>(
         handle_torch_function_no_python_arg_parser(
-            overloaded_args,
-            args.ptr(),
-            kwargs.ptr(),
-            qualname.name().c_str(),
-            args[0].ptr(),
-            qualname.prefix().c_str()));
+            /*overloaded_args=*/overloaded_args,
+            /*args=*/args.ptr(),
+            /*kwargs=*/kwargs.ptr(),
+            /*func_name=*/qualname.name().c_str(),
+            /*torch_api_function=*/callee.ptr(),
+            /*module_name=*/qualname.prefix().c_str()));
   }
 
   return c10::nullopt;

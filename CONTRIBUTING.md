@@ -1,45 +1,50 @@
 # Table of Contents
 
-- [Table of Contents](#table-of-contents)
-  - [Contributing to PyTorch](#contributing-to-pytorch)
-  - [Developing PyTorch](#developing-pytorch)
-    - [Tips and Debugging](#tips-and-debugging)
-  - [Nightly Checkout & Pull](#nightly-checkout--pull)
-  - [Codebase structure](#codebase-structure)
-  - [Unit testing](#unit-testing)
-    - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
-    - [Running `mypy`](#running-mypy)
-  - [Writing documentation](#writing-documentation)
-    - [Building documentation](#building-documentation)
-      - [Tips](#tips)
-      - [Building C++ Documentation](#building-c-documentation)
-    - [Previewing changes](#previewing-changes)
-      - [Submitting changes for review](#submitting-changes-for-review)
-    - [Adding documentation tests](#adding-documentation-tests)
-  - [Profiling with `py-spy`](#profiling-with-py-spy)
-  - [Managing multiple build trees](#managing-multiple-build-trees)
-  - [C++ development tips](#c-development-tips)
-    - [Build only what you need](#build-only-what-you-need)
-    - [Code completion and IDE support](#code-completion-and-ide-support)
-    - [Make no-op build fast](#make-no-op-build-fast)
-      - [Use Ninja](#use-ninja)
-      - [Use CCache](#use-ccache)
-      - [Use a faster linker](#use-a-faster-linker)
-    - [C++ frontend development tips](#c-frontend-development-tips)
-    - [GDB integration](#gdb-integration)
-  - [CUDA development tips](#cuda-development-tips)
-  - [Windows development tips](#windows-development-tips)
-    - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
-  - [Running clang-tidy](#running-clang-tidy)
-  - [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
-  - [Building PyTorch with ASAN](#building-pytorch-with-asan)
-    - [Getting `ccache` to work](#getting-ccache-to-work)
-    - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
-    - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
-    - [Why no leak detection?](#why-no-leak-detection)
-  - [Caffe2 notes](#caffe2-notes)
-  - [CI failure tips](#ci-failure-tips)
-    - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+<!-- toc -->
+
+- [Contributing to PyTorch](#contributing-to-pytorch)
+- [Developing PyTorch](#developing-pytorch)
+  - [Tips and Debugging](#tips-and-debugging)
+- [Nightly Checkout & Pull](#nightly-checkout--pull)
+- [Codebase structure](#codebase-structure)
+- [Unit testing](#unit-testing)
+  - [Python Unit Testing](#python-unit-testing)
+  - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
+  - [Running `mypy`](#running-mypy)
+  - [C++ Unit Testing](#c-unit-testing)
+- [Writing documentation](#writing-documentation)
+  - [Building documentation](#building-documentation)
+    - [Tips](#tips)
+    - [Building C++ Documentation](#building-c-documentation)
+  - [Previewing changes](#previewing-changes)
+    - [Submitting changes for review](#submitting-changes-for-review)
+  - [Adding documentation tests](#adding-documentation-tests)
+- [Profiling with `py-spy`](#profiling-with-py-spy)
+- [Managing multiple build trees](#managing-multiple-build-trees)
+- [C++ development tips](#c-development-tips)
+  - [Build only what you need](#build-only-what-you-need)
+  - [Code completion and IDE support](#code-completion-and-ide-support)
+  - [Make no-op build fast](#make-no-op-build-fast)
+    - [Use Ninja](#use-ninja)
+    - [Use CCache](#use-ccache)
+    - [Use a faster linker](#use-a-faster-linker)
+  - [C++ frontend development tips](#c-frontend-development-tips)
+  - [GDB integration](#gdb-integration)
+- [CUDA development tips](#cuda-development-tips)
+- [Windows development tips](#windows-development-tips)
+  - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
+- [Running clang-tidy](#running-clang-tidy)
+- [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
+- [Building PyTorch with ASAN](#building-pytorch-with-asan)
+  - [Getting `ccache` to work](#getting-ccache-to-work)
+  - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
+  - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
+  - [Why no leak detection?](#why-no-leak-detection)
+- [Caffe2 notes](#caffe2-notes)
+- [CI failure tips](#ci-failure-tips)
+  - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+
+<!-- tocstop -->
 
 ## Contributing to PyTorch
 
@@ -133,6 +138,10 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
 * A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
 with `brew install cmake` if you are developing on MacOS or Linux system.
 * Our `setup.py` requires Python >= 3.6
+* If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
+  that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
+  [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
+  Note that changing the pull request body or title on GitHub itself has no effect.
 * If you run into errors when running `python setup.py develop`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
@@ -294,41 +303,91 @@ into the repo directory.
 
 ## Unit testing
 
-`hypothesis` is required to run the tests, `mypy` is an optional dependency,
-and `pytest` may help run tests more selectively. All these packages can be
-installed with `conda` or `pip`.
+### Python Unit Testing
 
-PyTorch's testing is located under `test/`. Run the entire test suite with
+All PyTorch test suites are located in the `test` folder and start with
+`test_`. Run the entire test
+suite with
 
 ```bash
 python test/run_test.py
 ```
 
-or run individual test files, like `python test/test_nn.py`, for individual test suites.
+or run individual test suites using the command `python test/FILENAME.py`,
+where `FILENAME` represents the file containing the test suite you wish
+to run.
 
-### Better local unit tests with pytest
-We don't officially support `pytest`, but it works well with our `unittest` tests and offers
-a number of useful features for local developing. Install it via `pip install pytest`.
+For example, to run all the TorchScript JIT tests (located at
+`test/test_jit.py`), you would run:
 
-If you want to just run tests that contain a specific substring, you can use the `-k` flag:
+```bash
+python test/test_jit.py
+```
+
+You can narrow down what you're testing even further by specifying the
+name of an individual test with `TESTCLASSNAME.TESTNAME`. Here,
+`TESTNAME` is the name of the test you want to run, and `TESTCLASSNAME`
+is the name of the class in which it is defined.
+
+Going off the above example, let's say you want to run
+`test_Sequential`, which is defined as part of the `TestJit` class
+in `test/test_jit.py`. Your command would be:
+
+```bash
+python test/test_jit.py TestJit.test_Sequential
+```
+
+The `hypothesis` library must be installed to run the tests. `mypy` is
+an optional dependency, and `pytest` may help run tests more selectively.
+All these packages can be installed with `conda` or `pip`.
+
+### Better local unit tests with `pytest`
+We don't officially support `pytest`, but it works well with our
+`unittest` tests and offers a number of useful features for local
+developing. Install it via `pip install pytest`.
+
+If you want to just run tests that contain a specific substring, you can
+use the `-k` flag:
 
 ```bash
 pytest test/test_nn.py -k Loss -v
 ```
 
-The above is an example of testing a change to Loss functions: this command runs tests such as
-`TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
+The above is an example of testing a change to all Loss functions: this
+command runs tests such as `TestNN.test_BCELoss` and
+`TestNN.test_MSELoss` and can be useful to save keystrokes.
 
 ### Running `mypy`
 
-One of the test suites runs `mypy` on the codebase:
+`mypy` is an optional static type checker for Python. We have multiple `mypy`
+configs for the PyTorch codebase, so you can run them all using this command:
+
 ```bash
-python test/test_type_hints.py
+for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
 ```
+
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
 for more information on how to set up `mypy` and tackle type annotation
-tasks, as well as other ways to run `mypy` besides running that test suite.
+tasks.
+
+### C++ Unit Testing
+
+PyTorch offers a series of tests located in the `test/cpp` folder.
+These tests are written in C++ and use the Google Test testing framework.
+After compiling PyTorch from source, the test runner binaries will be
+written to the `build/bin` folder. The command to run one of these tests
+is `./build/bin/FILENAME --gtest_filter=TESTSUITE.TESTNAME`, where
+`TESTNAME` is the name of the test you'd like to run and `TESTSUITE` is
+the suite that test is defined in.
+
+For example, if you wanted to run the test ` MayContainAlias`, which
+is part of the test suite `ContainerAliasingTest` in the file
+`test/cpp/jit/test_alias_analysis.cpp`, the command would be:
+
+```bash
+./build/bin/test_jit --gtest_filter=ContainerAliasingTest.UnionAliasing
+```
 
 ## Writing documentation
 
@@ -352,8 +411,12 @@ pip install -r requirements.txt
 # npm install -g katex
 # Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
 # npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
-# If you're a Facebook employee using a devserver, yarn may be more convenient:
-# yarn global add katex
+```
+
+> Note that if you are a Facebook employee using a devserver, yarn may be more convenient to install katex:
+
+```
+yarn global add katex
 ```
 
 3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
@@ -418,6 +481,13 @@ et my_machine -t="8000:8000"
 ```
 
 Then navigate to `localhost:8000` in your web browser.
+
+**Tip:**
+You can start a lightweight HTTP server on the remote machine with:
+
+```
+python -m http.server 8000 <path_to_html_output>
+```
 
 Alternatively, you can run `rsync` on your local machine to copy the files from
 your remote machine:
@@ -826,7 +896,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
    nbytes_read_write = 4 # this is number of bytes read + written by a kernel. Change this to fit your kernel.
 
    for i in range(10):
-       a=torch.Tensor(size).cuda().uniform_()
+       a=torch.empty(size).cuda().uniform_()
        torch.cuda.synchronize()
        start = time.time()
        # dry run to alloc
