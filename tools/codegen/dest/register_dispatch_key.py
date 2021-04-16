@@ -13,7 +13,7 @@ from tools.codegen.model import (DispatchKey, NativeFunction,
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      CppSignature, CppSignatureGroup,
                                      DispatcherSignature, Expr, MutRefCType,
-                                     NativeSignature, tensorT)
+                                     NativeSignature, tensorT, NamedCType)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
@@ -446,13 +446,13 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # add it to the context
             out_args = structured.out_arguments(self.g)
             for i, out_arg in enumerate(out_args):
-                assert ConstRefCType(BaseCType(tensorT, out_arg.ctype.name)) == out_arg.ctype
+                assert ConstRefCType(BaseCType(tensorT)) == out_arg.nctype.type
                 context.append(Expr(
                     expr=f"op.outputs_[{i}]",
                     # TODO: Stop hardcoding that the output type is a Tensor.  Note
                     # that for the codegen here this is fine because outputs_ is
                     # hardcoded to be tensor already
-                    type=MutRefCType(BaseCType(tensorT, out_arg.ctype.name)),
+                    type=NamedCType(out_arg.nctype.name, MutRefCType(BaseCType(tensorT)))
                 ))
 
             # With the expanded context, do the impl call (if not a meta

@@ -1,6 +1,5 @@
 from tools.codegen.model import (Argument, FunctionSchema, NativeFunction,
-                                 SelfArgument, TensorOptionsArguments,
-                                 BaseTy)
+                                 SelfArgument, TensorOptionsArguments, BaseTy)
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict
 from enum import Enum
@@ -16,17 +15,6 @@ SpecialArgName = Enum('SpecialArgName', (
     'possibly_redundant_memory_format',
 ))
 ArgName = Union[str, SpecialArgName]
-
-# A CType is short for C++ semantic type.  A CType represents a C++ type, plus
-# semantic information about what it represents.  For example, consider the
-# argument "bool pin_memory"; its normal C++ type is "bool", but its C++
-# semantic type also keeps track that this represents a "pin_memory"; you can't
-# just use a random other boolean in a context where you need a "pin_memory"!
-#
-# CTypes encode C++ type structure as needed for translation.  Right now we
-# track references and optional, but don't, for example, track ArrayRef.  If
-# you need trnsnlations that know about these types, beef up this data
-# structure.
 
 # This class shouldn't be created directly; instead, use/create one of the singletons below.
 @dataclass(frozen=True)
@@ -61,6 +49,8 @@ storageT = BaseCppType('at', 'Storage')
 streamT = BaseCppType('at', 'Stream')
 intArrayRefT = BaseCppType('at', 'IntArrayRef')
 tensorOptionsT = BaseCppType('at', 'TensorOptions')
+typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
+tensorGeometryT = BaseCppType('at', 'TensorGeometry')
 
 BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.int: intT,
@@ -80,10 +70,11 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.Stream: streamT,
 }
 
+# CTypes encode C++ type structure as needed for translation.
+
 @dataclass(frozen=True)
 class BaseCType:
     type: BaseCppType
-    name: ArgName
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         return str(self.type)
@@ -92,6 +83,9 @@ class BaseCType:
     # TODO: Kill this when we eventually remove it!
     def cpp_type_registration_declarations(self) -> str:
         return str(self.type).replace('at::', '')
+
+    def remove_const_ref(self) -> 'CType':
+        return self
 
 @dataclass(frozen=True)
 class ConstRefCType:
@@ -105,9 +99,8 @@ class ConstRefCType:
     def cpp_type_registration_declarations(self) -> str:
         return f'const {self.elem.cpp_type_registration_declarations()} &'
 
-    @property
-    def name(self) -> ArgName:
-        return self.elem.name
+    def remove_const_ref(self) -> 'CType':
+        return self.elem.remove_const_ref()
 
 @dataclass(frozen=True)
 class MutRefCType:
@@ -121,9 +114,8 @@ class MutRefCType:
     def cpp_type_registration_declarations(self) -> str:
         return f'{self.elem.cpp_type_registration_declarations()} &'
 
-    @property
-    def name(self) -> ArgName:
-        return self.elem.name
+    def remove_const_ref(self) -> 'CType':
+        return self.elem.remove_const_ref()
 
 @dataclass(frozen=True)
 class OptionalCType:
@@ -136,9 +128,8 @@ class OptionalCType:
     def cpp_type_registration_declarations(self) -> str:
         return f'c10::optional<{self.elem.cpp_type_registration_declarations()}>'
 
-    @property
-    def name(self) -> ArgName:
-        return self.elem.name
+    def remove_const_ref(self) -> 'CType':
+        return OptionalCType(self.elem.remove_const_ref())
 
 @dataclass(frozen=True)
 class ListCType:
@@ -151,9 +142,8 @@ class ListCType:
     def cpp_type_registration_declarations(self) -> str:
         return f'c10::List<{self.elem.cpp_type_registration_declarations()}>'
 
-    @property
-    def name(self) -> ArgName:
-        return self.elem.name
+    def remove_const_ref(self) -> 'CType':
+        return ListCType(self.elem.remove_const_ref())
 
 @dataclass(frozen=True)
 class ArrayRefCType:
@@ -166,9 +156,8 @@ class ArrayRefCType:
     def cpp_type_registration_declarations(self) -> str:
         return f'ArrayRef<{self.elem.cpp_type_registration_declarations()}>'
 
-    @property
-    def name(self) -> ArgName:
-        return self.elem.name
+    def remove_const_ref(self) -> 'CType':
+        return ArrayRefCType(self.elem.remove_const_ref())
 
 @dataclass(frozen=True)
 class VectorCType:
@@ -181,9 +170,8 @@ class VectorCType:
     def cpp_type_registration_declarations(self) -> str:
         return f'std::vector<{self.elem.cpp_type_registration_declarations()}>'
 
-    @property
-    def name(self) -> ArgName:
-        return self.elem.name
+    def remove_const_ref(self) -> 'CType':
+        return VectorCType(self.elem.remove_const_ref())
 
 @dataclass(frozen=True)
 class ArrayCType:
@@ -197,9 +185,8 @@ class ArrayCType:
     def cpp_type_registration_declarations(self) -> str:
         return f'std::array<{self.elem.cpp_type_registration_declarations()},{self.size}>'
 
-    @property
-    def name(self) -> ArgName:
-        return self.elem.name
+    def remove_const_ref(self) -> 'CType':
+        return ArrayCType(self.elem.remove_const_ref(), self.size)
 
 @dataclass(frozen=True)
 class TupleCType:
@@ -212,10 +199,8 @@ class TupleCType:
     def cpp_type_registration_declarations(self) -> str:
         return f'std::tuple<{",".join([e.cpp_type_registration_declarations() for e in self.elems])}>'
 
-    @property
-    def name(self) -> ArgName:
-        # N.B. this isn't currently used anywhere: std::tuple is only used as a return type, which doesn't use names.
-        raise AssertionError("std::tuple isn't currently used as an argument anywhere, and doesn't require a name.")
+    def remove_const_ref(self) -> 'CType':
+        return TupleCType([e.remove_const_ref() for e in self.elems])
 
 CType = Union[
     BaseCType,
@@ -229,6 +214,32 @@ CType = Union[
     TupleCType
 ]
 
+# A NamedCType is short for Named C++ semantic type.  A NamedCType represents a C++ type, plus
+# semantic information about what it represents.  For example, consider the
+# argument "bool pin_memory"; its normal C++ type is "bool", but its C++
+# semantic type also keeps track that this represents a "pin_memory"; you can't
+# just use a random other boolean in a context where you need a "pin_memory"!
+#
+
+@dataclass(frozen=True)
+class NamedCType:
+    name: ArgName
+    type: CType
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        return self.type.cpp_type(strip_ref=strip_ref)
+
+    # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
+    # TODO: Kill this when we eventually remove it!
+    def cpp_type_registration_declarations(self) -> str:
+        return self.type.cpp_type_registration_declarations()
+
+    def remove_const_ref(self) -> 'NamedCType':
+        return NamedCType(self.name, self.type.remove_const_ref())
+
+    def with_name(self, name: str) -> 'NamedCType':
+        return NamedCType(name, self.type)
+
 # A binding represents any C++ binding site for a formal parameter.
 # We don't distinguish between binding sites for different APIs;
 # instead, all of the important distinctions are encoded in CType,
@@ -238,19 +249,19 @@ CType = Union[
 @dataclass(frozen=True)
 class Binding:
     name: str
-    ctype: CType
+    nctype: NamedCType
     argument: Union[Argument, TensorOptionsArguments, SelfArgument]
     # TODO: maybe don't represent default here
     default: Optional[str] = None
 
     @property
     def type(self) -> str:
-        return self.ctype.cpp_type()
+        return self.nctype.cpp_type()
 
     def no_default(self) -> 'Binding':
         return Binding(
             name=self.name,
-            ctype=self.ctype,
+            nctype=self.nctype,
             default=None,
             argument=self.argument,
         )
@@ -264,7 +275,7 @@ class Binding:
     # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
     # TODO: Kill this when we eventually remove it!
     def decl_registration_declarations(self) -> str:
-        type_s = self.ctype.cpp_type_registration_declarations()
+        type_s = self.nctype.cpp_type_registration_declarations()
         mb_default = ""
         if self.default is not None:
             mb_default = f"={self.default}"
@@ -279,7 +290,7 @@ class Binding:
 @dataclass(frozen=True)
 class Expr:
     expr: str
-    type: CType
+    type: NamedCType
 
 # A CppSignature represents a single overload in the C++ API.  For
 # any given function schema, there may be multiple CppSignatures
@@ -403,7 +414,7 @@ class DispatcherSignature:
         return f"{self.returns_type().cpp_type()} {name}({args_str})"
 
     def exprs(self) -> List[Expr]:
-        return [Expr(a.name, a.ctype) for a in self.arguments()]
+        return [Expr(a.name, a.nctype) for a in self.arguments()]
 
     def returns_type(self) -> CType:
         return dispatcher.returns_type(self.func.returns)
