@@ -12,11 +12,13 @@ entr(input, *, out=None) -> Tensor
 Computes the entropy on :attr:`input` (as defined below), elementwise.
 
 .. math::
+    \begin{align}
     \text{entr(x)} = \begin{cases}
         -x * \ln(x)  & x > 0 \\
         0 &  x = 0.0 \\
         -\infty & x < 0
     \end{cases}
+    \end{align}
 """ + """
 
 Args:
@@ -131,13 +133,15 @@ Returns a new tensor with the logit of the elements of :attr:`input`.
 When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
 
 .. math::
-    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
-    z_{i} = \begin{cases}
+    \begin{align}
+    y_{i} &= \ln(\frac{z_{i}}{1 - z_{i}}) \\
+    z_{i} &= \begin{cases}
         x_{i} & \text{if eps is None} \\
         \text{eps} & \text{if } x_{i} < \text{eps} \\
         x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
         1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
     \end{cases}
+    \end{align}
 """ + r"""
 Args:
     {input}
@@ -224,4 +228,23 @@ Example::
 
     >>> torch.special.expm1(torch.tensor([0, math.log(2.)]))
     tensor([ 0.,  1.])
+""".format(**common_args))
+
+i0e = _add_docstr(_special.special_i0e,
+                  r"""
+i0e(input, *, out=None) -> Tensor
+Computes the exponentially scaled zeroth order modified Bessel function of the first kind (as defined below)
+for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \exp(-|x|) * i0(x) = \exp(-|x|) * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+
+""" + r"""
+Args:
+    {input}
+Keyword args:
+    {out}
+Example::
+    >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
+    tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
 """.format(**common_args))
