@@ -452,6 +452,8 @@ struct Property : public TreeView {
   }
 };
 
+struct Assign;
+
 struct ClassDef : public TreeView {
   explicit ClassDef(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_CLASS_DEF);
@@ -472,19 +474,43 @@ struct ClassDef : public TreeView {
   Maybe<List<Property>> properties() const {
     return Maybe<List<Property>>(subtree(3));
   }
+  Maybe<List<Assign>> assigns() const {
+    return Maybe<List<Assign>>(subtree(4));
+  }
+  static ClassDef create(
+      const SourceRange& range,
+      const Ident& name,
+      const Maybe<Expr>& superclass,
+      const List<Stmt>& body) {
+    return ClassDef(Compound::create(
+        TK_CLASS_DEF,
+        range,
+        {name,
+         superclass,
+         body,
+         Maybe<List<Property>>::create(range),
+         Maybe<List<Assign>>::create(range)}));
+  }
   static ClassDef create(
       const SourceRange& range,
       const Ident& name,
       const Maybe<Expr>& superclass,
       const List<Stmt>& body,
-      c10::optional<const List<Property>> properties = {}) {
-    auto props = properties.has_value()
-        ? Maybe<List<Property>>::create(range, properties.value())
-        : Maybe<List<Property>>::create(range);
-    return ClassDef(
-        Compound::create(TK_CLASS_DEF, range, {name, superclass, body, props}));
+      const List<Property>& properties,
+      const List<Assign>& assigns) {
+    return ClassDef(Compound::create(
+        TK_CLASS_DEF,
+        range,
+        {name,
+         superclass,
+         body,
+         Maybe<List<Property>>::create(range, properties),
+         Maybe<List<Assign>>::create(range, assigns)}));
   }
 };
+
+TORCH_API std::vector<std::string> getUnresolvedClassAttributes(
+    const ClassDef& def);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Statements
