@@ -1278,6 +1278,8 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(tensor_result, numpy_result, exact_dtype=False)
                 self.assertEqual(out, numpy_result, exact_dtype=False)
             else:
+                print(a_np, b_np, numpy_result)
+                print(a_tensor, b_tensor, tensor_result)
                 self.assertEqual(tensor_result, numpy_result)
                 self.assertEqual(out, numpy_result)
 
