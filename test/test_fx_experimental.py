@@ -26,10 +26,10 @@ from torch.fx.experimental.partitioner_utils import (
 )
 import torch.fx.experimental.optimization as optimization
 from torch.fx.experimental import merge_matmul
-from torch.fx.experimental.normalize import NormalizeOperators
+from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.fx.operator_schemas import _torchscript_type_to_python_type, normalize_function
+from torch.fx.operator_schemas import _torchscript_type_to_python_type, normalize_function, normalize_module
 from torch.fx.passes.shape_prop import extract_tensor_metadata
 
 try:
@@ -898,6 +898,8 @@ class {test_classname}(torch.nn.Module):
                     nn_class = getattr(torch.nn, submod_class.__name__)
                     if submod_class == nn_class:
                         normalized_args = node.normalized_arguments(traced)
+                        normalized_args2 = normalize_module(traced, node.target, node.args, node.kwargs)
+                        assert(normalized_args == normalized_args2)
                         assert normalized_args
                         node.args = ()
                         node.kwargs = normalized_args
@@ -912,6 +914,17 @@ class {test_classname}(torch.nn.Module):
 
             if mod.__class__.__name__ not in stochastic_modules:
                 self.assertEqual(traced(*inputs), mod(*inputs))
+
+            traced = NormalizeArgs(symbolic_trace(test_instance)).transform()
+            modules = dict(traced.named_modules())
+            for node in traced.graph.nodes:
+                if node.op == 'call_module':
+                    submod_class = modules[node.target].__class__
+                    nn_class = getattr(torch.nn, submod_class.__name__)
+                    if submod_class == nn_class:
+                        self.assertEqual(len(node.args), 0)
+
+
 
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):

@@ -3,9 +3,8 @@ from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, D
 from .immutable_collections import immutable_dict, immutable_list
 import torch
 import builtins
-import inspect
 import types
-from torch.fx.operator_schemas import normalize_function, _args_kwargs_to_normalized_kwargs
+from torch.fx.operator_schemas import normalize_function, normalize_module
 
 if TYPE_CHECKING:
     from .graph import Graph
@@ -474,19 +473,7 @@ class Node:
             return normalize_function(self.target, self.args, self.kwargs, arg_types, kwarg_types)  # type: ignore
         elif self.op == 'call_module':
             assert isinstance(self.target, str)
-            try:
-                submod = root.get_submodule(self.target)
-            except AttributeError:
-                raise RuntimeError(f"Tried to normalize node with target {self.target} but root did not "
-                                   f"have that target!")
-            if hasattr(submod.__class__, '__name__'):
-                classname = submod.__class__.__name__
-                if getattr(torch.nn, classname, None) == submod.__class__:
-                    sig = inspect.signature(inspect.unwrap(submod.forward))
-                    new_kwargs = _args_kwargs_to_normalized_kwargs(sig, self.args, self.kwargs)
-                    if new_kwargs:
-                        return new_kwargs
-            return None
+            return normalize_module(root, self.target, self.args, self.kwargs)
 
         return None
 

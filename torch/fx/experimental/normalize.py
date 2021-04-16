@@ -3,8 +3,43 @@ import torch.fx
 import operator
 from typing import Any, Callable, Dict, Tuple
 from torch.fx.node import Argument, Target
+from torch.fx.operator_schemas import normalize_module, normalize_function
 
+from torch.fx import Transformer
 from .schema_type_annotation import AnnotateTypesWithSchema
+
+class NormalizeArgs(Transformer):
+    """
+    Normalize arguments to Python targets. This means that
+    `args/kwargs` will be matched up to the module/functional's
+    signature and rewritten to exclusively kwargs in positional order.
+    Also populates default values. Does not support positional-only
+    parameters or varargs parameters (*args, **kwargs).
+    Example usage:
+        m = torchvision.models.resnet18()
+        traced = torch.fx.symbolic_trace(m)
+        traced = NormalizeArgs(traced).transform()
+    """
+    def __init__(self, module : torch.nn.Module, normalize_functionals : bool = True,
+                 normalize_modules : bool = True):
+        super().__init__(module)
+        self.normalize_functionals = normalize_functionals
+        self.normalize_modules = normalize_modules
+
+    def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
+        new_kwargs = normalize_function(target, args, kwargs)
+        if new_kwargs:
+            return self.tracer.create_proxy('call_function', target, (), new_kwargs)
+        else:
+            return super().call_function(target, args, kwargs)
+
+    def call_module(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
+        assert isinstance(target, str)
+        new_kwargs = normalize_module(self.module, target, args, kwargs)
+        if new_kwargs:
+            return super().call_module(target, (), new_kwargs)
+        else:
+            return super().call_module(target, args, kwargs)
 
 class NormalizeOperators(AnnotateTypesWithSchema):
     """

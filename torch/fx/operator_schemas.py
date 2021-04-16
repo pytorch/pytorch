@@ -221,6 +221,38 @@ def normalize_function(
 
     return new_kwargs
 
+def normalize_module(
+        root: torch.nn.Module, target: Callable, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """
+    Returns normalized arguments to PyTorch modules. This means that
+    `args/kwargs` will be matched up to the functional's
+    signature and return exclusively kwargs in positional order.
+    Also populates default values. Does not support positional-only
+    parameters or varargs parameters (*args, **kwargs).
+
+    Args:
+        root (nn.Module): root module upon which we query modules
+        target (Callable): Function that we are normalizing
+        args (Tuple[Any]): Tuple of args to the function
+        kwargs (Optional[Dict[str, Any]]): Dict of kwargs to the function
+
+    Returns:
+
+        Returns normalized_kwargs, or `None` if not successful.
+    """
+    try:
+        submod = root.get_submodule(target)
+    except AttributeError:
+        raise RuntimeError(f"Tried to normalize node with target {target} but root did not "
+                           f"have that target!")
+    if hasattr(submod.__class__, '__name__'):
+        classname = submod.__class__.__name__
+        if getattr(torch.nn, classname, None) == submod.__class__:
+            sig = inspect.signature(inspect.unwrap(submod.forward))
+            new_kwargs = _args_kwargs_to_normalized_kwargs(sig, args, kwargs)
+            return new_kwargs
+    return None
+
 def _args_kwargs_to_normalized_kwargs(sig : inspect.Signature, args : Tuple[Any, ...],
                                       kwargs : Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
