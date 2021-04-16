@@ -1249,9 +1249,9 @@ class TestSparse(TestCase):
         test_shape(7, 8, 9, 20, False, None)
         test_shape(7, 8, 9, 20, True, None)
         test_shape(7, 8, 9, 20, False, (1, 0))
-        test_shape(7, 8, 9, 20, True,  (1, 0))
+        test_shape(7, 8, 9, 20, True, (1, 0))
         test_shape(7, 8, 9, 20, False, (1, 1))
-        test_shape(7, 8, 9, 20, True,  (1, 1))
+        test_shape(7, 8, 9, 20, True, (1, 1))
 
     @coalescedonoff
     @dtypes(torch.double)
