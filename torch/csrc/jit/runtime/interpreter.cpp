@@ -566,40 +566,27 @@ struct CodeImpl {
       bool is_vararg) {
     if (is_vararg) {
       AT_ASSERT(schema_args.size() <= actual_inputs.size());
-    } else {
-      AT_ASSERT(schema_args.size() == actual_inputs.size());
+      return 0;
     }
-    // first construct boolean vector to mark if arg is necessary or
-    // unneccessary
-    auto num_args = (schema_args.size() == actual_inputs.size())
-        ? schema_args.size()
-        : actual_inputs.size();
-    std::vector<bool> necessary_mark(num_args, true);
+
+    AT_ASSERT(schema_args.size() == actual_inputs.size());
+
+    // keeps track of trailing unnecessary args
+    int trail_count = 0;
     for (size_t i = 0; i < schema_args.size(); i++) {
       // this means it is not default argument, so it is necessary
       if (!schema_args.at(i).default_value().has_value()) {
-        necessary_mark[i] = true;
+        trail_count = 0;
       } else {
         auto schema_value = schema_args.at(i).default_value().value();
         // non-const value will become nullptr here, so will be marked necessary
         auto actual_value = toIValue(actual_inputs[i]);
         // if the IR has same value as default value of the schema,
         // it is not neccessary argument.
-        if (schema_value == actual_value) {
-          necessary_mark[i] = false;
-        } else {
-          necessary_mark[i] = true;
-        }
+        trail_count = (schema_value == actual_value) ? trail_count + 1 : 0;
       }
     }
-
-    // scan backwards to count how many trailing
-    // unnecessary args there are.
-    // i.e [nec, unnec, nec, unnec, unnec] -> 2
-    auto is_true = [](bool x) { return x == true; };
-    auto first_true_end =
-        std::find_if(necessary_mark.crbegin(), necessary_mark.crend(), is_true);
-    return std::distance(necessary_mark.crbegin(), first_true_end);
+    return trail_count;
   }
 
   void request_bailout(size_t index) {
