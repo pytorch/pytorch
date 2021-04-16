@@ -17,7 +17,6 @@ from .ns_types import (
 from typing import List, Optional, Set, Tuple, Callable
 
 def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
-    # TODO(future PR): handle QAT variants
     if (
         isinstance(mod, nn.Conv1d) or
         isinstance(mod, nn.Conv2d) or
@@ -34,7 +33,6 @@ def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
         return mod._weight_bias()[0]  # type: ignore
 
 def get_linear_mod_weight(mod: nn.Module) -> torch.Tensor:
-    # TODO(future PR): make more generic, handle everything
     if isinstance(mod, nn.Linear):
         return mod.weight.detach()
     elif isinstance(mod, nni.LinearReLU):
@@ -138,8 +136,6 @@ def extract_weight_from_node(
     res_type = NSSingleResultValuesType.WEIGHT.value
     if node.op == 'call_function':
 
-        # linear
-        # TODO(future PR): other function types
         related_to_linear = node.target in (F.linear,) or \
             (node.target, F.linear) in type_a_related_to_b
         related_to_conv1d = node.target in (F.conv1d,) or \
@@ -177,7 +173,6 @@ def extract_weight_from_node(
 
         # check that A is one the modules we need
         # assume B is related (this is done by graph matcher)
-        # TODO(future PR): 1d and 3d convs
         related_to_conv1d_mod = isinstance(mod, nn.Conv1d) or \
             (type(mod), nn.Conv1d) in type_a_related_to_b
         related_to_conv2d_mod = isinstance(mod, nn.Conv2d) or \
@@ -189,20 +184,35 @@ def extract_weight_from_node(
         related_to_lstm_mod = isinstance(mod, nn.LSTM) or \
             (type(mod), nn.LSTM) in type_a_related_to_b
 
-        # TODO(future PR): other module types
         if related_to_conv1d_mod or related_to_conv2d_mod or related_to_conv3d_mod:
             weights = [get_conv_mod_weight(mod)]
+            return {
+                'type': res_type,
+                'values': weights,
+                'prev_node_name': node.name,
+                'prev_node_target_type': str(type(mod)),
+                'ref_node_name': node.name,
+                'index_within_arg': 0,
+            }
         elif related_to_lstm_mod:
             weights = get_lstm_mod_weights(mod)
-        else:
-            assert related_to_linear_mod, f"module type {type(mod)} not handled yet"
+            return {
+                'type': res_type,
+                'values': weights,
+                'prev_node_name': node.name,
+                'prev_node_target_type': str(type(mod)),
+                'ref_node_name': node.name,
+                'index_within_arg': 0,
+            }
+        elif related_to_linear_mod:
             weights = [get_linear_mod_weight(mod)]
-        return {
-            'type': res_type,
-            'values': weights,
-            'prev_node_name': node.name,
-            'prev_node_target_type': str(type(mod)),
-            'ref_node_name': node.name,
-            'index_within_arg': 0,
-        }
+            return {
+                'type': res_type,
+                'values': weights,
+                'prev_node_name': node.name,
+                'prev_node_target_type': str(type(mod)),
+                'ref_node_name': node.name,
+                'index_within_arg': 0,
+            }
+
     return None
