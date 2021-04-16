@@ -715,7 +715,7 @@ def preprocessor(
 
     with open(fin_path, 'r', encoding='utf-8') as fin:
         if fin.readline() == HIPIFY_C_BREADCRUMB:
-            return {"hipified_path": None, "status": "ignored"}
+            return {"hipified_path": fin_path, "status": "ignored"}
         fin.seek(0)
         output_source = fin.read()
 
