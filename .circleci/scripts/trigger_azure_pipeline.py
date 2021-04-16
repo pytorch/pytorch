@@ -1,6 +1,7 @@
 # Documentation: https://docs.microsoft.com/en-us/rest/api/azure/devops/build/?view=azure-devops-rest-6.0
 
 import re
+import json
 import os
 import sys
 import requests
@@ -12,18 +13,27 @@ PIPELINE_ID = "911"
 PROJECT_ID = "0628bce4-2d33-499e-bac5-530e12db160f"
 TARGET_BRANCH = os.environ.get("CIRCLE_BRANCH", "master")
 
+build_base_url = AZURE_PIPELINE_BASE_URL + "_apis/build/builds?api-version=6.0"
+
 s = requests.Session()
 s.headers.update({"Authorization": "Basic " + AZURE_DEVOPS_PAT_BASE64})
 
 def submit_build(pipeline_id, project_id, source_branch):
     print("Submitting build for branch: " + source_branch)
+
     run_build_raw = s.post(build_base_url, json={
         "definition": {"id": pipeline_id},
         "project": {"id": project_id},
         "sourceBranch": source_branch
     })
 
-    run_build_json = run_build_raw.json()
+    try:
+        run_build_json = run_build_raw.json()
+    except json.decoder.JSONDecodeError as e:
+        print(e)
+        print("Failed to parse the response. Check if the Azure DevOps PAT is incorrect or expired.")
+        sys.exit(-1)
+
     build_id = run_build_json['id']
 
     print("Submitted bulid: " + str(build_id))
@@ -89,8 +99,6 @@ def wait_for_build(_id):
     return build_status, build_result
 
 if __name__ == '__main__':
-    build_base_url = AZURE_PIPELINE_BASE_URL + "_apis/build/builds?api-version=6.0"
-
     # Convert the branch name for Azure DevOps
     match = re.search(r'pull/(\d+)', TARGET_BRANCH)
     if match is not None:
@@ -99,13 +107,13 @@ if __name__ == '__main__':
     else:
         SOURCE_BRANCH = f'refs/heads/{TARGET_BRANCH}'
 
-    retry = 3
+    retry = 2
 
     while retry > 0:
         build_id = submit_build(PIPELINE_ID, PROJECT_ID, SOURCE_BRANCH)
         build_status, build_result = wait_for_build(build_id)
 
-        if build_result == 'cancelled':
+        if build_result != 'succeeded':
             retry = retry - 1
             if retry > 0:
                 print("Retrying... remaining attempt: " + str(retry))
@@ -114,5 +122,6 @@ if __name__ == '__main__':
                 continue
             else:
                 print("No more chance to retry. Giving up.")
-        if build_result != 'succeeded':
-            sys.exit(-1)
+                sys.exit(-1)
+        else:
+            break
