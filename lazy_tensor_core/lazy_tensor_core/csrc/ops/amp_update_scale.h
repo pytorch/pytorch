@@ -14,6 +14,12 @@ class AmpUpdateScale : public Node {
 
   NodePtr Clone(OpList operands) const override;
 
+  double scale_growth_factor() const { return scale_growth_factor_; }
+
+  double scale_backoff_factor() const { return scale_backoff_factor_; }
+
+  int growth_interval() const { return growth_interval_; }
+
  private:
   double scale_growth_factor_;
   double scale_backoff_factor_;
