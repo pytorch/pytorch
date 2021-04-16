@@ -18,9 +18,10 @@ namespace jit {
  */
 class MobileDebugTable {
  public:
+  MobileDebugTable() = default;
   MobileDebugTable(
       std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader);
-  std::string getSourceDebugString(const int64_t debug_handle);
+  std::string getSourceDebugString(const int64_t debug_handle) const;
 
  private:
   ska::flat_hash_map<int64_t, SourceRange> source_range_map_;

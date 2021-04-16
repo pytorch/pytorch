@@ -41,12 +41,12 @@ MobileDebugTable::MobileDebugTable(
   }
 }
 
-std::string MobileDebugTable::getSourceDebugString(const int64_t debug_handle) {
+std::string MobileDebugTable::getSourceDebugString(const int64_t debug_handle) const {
   const auto it = source_range_map_.find(debug_handle);
   if (it == source_range_map_.end()) {
     return "";
   }
-  return source_range_map_[debug_handle].str();
+  return source_range_map_.at(debug_handle).str();
 }
 
 } // namespace jit
