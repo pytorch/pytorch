@@ -44,10 +44,9 @@ void i0e_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "sigmoid_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "sigmoid_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      scalar_t one = scalar_t(1);
-      return  one / (one + std::exp(- a));
+      return static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp(-a));
     });
   });
 }
