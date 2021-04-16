@@ -17,10 +17,7 @@ GetDimensionsSize::GetDimensionsSize(
            lazy_tensors::ShapeUtil::MakeShape(
                GetShapeDimensionType(/*device=*/nullptr), {}),
            /*num_outputs=*/1, lazy_tensors::util::MHash(dimensions)),
-      dimensions_(std::move(dimensions)) {
-  SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
-}
+      dimensions_(std::move(dimensions)) {}
 
 NodePtr GetDimensionsSize::Clone(OpList operands) const {
   return MakeNode<GetDimensionsSize>(operands.at(0), dimensions_);
