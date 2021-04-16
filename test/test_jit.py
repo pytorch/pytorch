@@ -10309,6 +10309,44 @@ dedent """
 
         self.checkScript(t, (torch.zeros(3, 2, 3),))
 
+    def test_torch_ignore_conversion_to_none(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            @torch.jit.ignore
+            def ignored(self, a: int) -> None:
+                l: int = len([2 for i in range(a) if i > 2])
+                return
+
+            def forward(self) -> int:
+                a: int = 4
+                b: int = 5
+                self.ignored(a)
+                return a + b
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+
+            @torch.jit.ignore
+            def ignored(self, a: int):
+                l: int = len([2 for i in range(a) if i > 2])
+                return
+
+            def forward(self) -> int:
+                a: int = 4
+                b: int = 5
+                self.ignored(a)
+                return a + b
+
+        modelA = torch.jit.script(A())
+        self.assertEqual(modelA(), 9)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "expected value of type Tensor", "self.ignored"):
+            modelB = torch.jit.script(B())
+            modelB()
+
     def test_addmm_grad(self):
         """ This test checks several things:
             1. An expand node was inserted before the addmm operating on the
@@ -10693,7 +10731,7 @@ dedent """
             ReassignSelfRHS()
 
     def test_unknown_builtin(self):
-        with self.assertRaisesRegex(RuntimeError, 'nonexistent attribute or method'):
+        with self.assertRaisesRegex(RuntimeError, 'object has no attribute or method'):
             @torch.jit.script
             def unknown_builtin(x):
                 return x.splork(3)
@@ -12010,12 +12048,12 @@ dedent """
 
         self.checkScript(f, (torch.rand(20, 20, 20),), optimize=True)
 
-        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
+        with self.assertRaisesRegex(RuntimeError, "object has no attribute or method"):
             @torch.jit.script
             def g1(x):
                 return x.max(dim=1).unknown_symbol
 
-        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
+        with self.assertRaisesRegex(RuntimeError, "object has no attribute or method"):
             @torch.jit.script
             def g2(x):
                 print((x, x, x).__doc__)
@@ -14589,6 +14627,16 @@ dedent """
         self.checkScript(fn, ("",))
         self.checkScript(fn, ("h",))
         self.checkScript(fn, ("hello",))
+
+    def test_multiline_optional_future_refinement(self):
+        @torch.jit.script
+        def fun() -> int:
+            future: Optional[
+                torch.jit.Future[Tuple[torch.Tensor]]
+            ] = None
+
+            return 1
+        self.assertEqual(fun(), 1)
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_attribute_unpickling(self):

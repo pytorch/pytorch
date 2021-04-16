@@ -459,7 +459,7 @@ def dynamic_type(t: Type) -> str:
     # Note we don't use t.is_tensor_like() here because it would
     # also include Tensor[]
     if str(t) == 'Tensor':
-        return 'Tensor'
+        return 'at::Tensor'
     return cpp.argumenttype_type(t, mutable=False, binds='__placeholder__').cpp_type()
 
 def compute_method_of_yaml(variants: Set[Variant]) -> List[str]:
@@ -521,7 +521,7 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
         ret = {
             'dynamic_type': dynamic_type(r.type),
             'name': name,
-            'type': cpp.return_type(r),
+            'type': cpp.return_type(r).cpp_type(),
         }
 
         if r.name:
@@ -540,7 +540,7 @@ def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_
     if isinstance(cpp_a.argument, TensorOptionsArguments):
         arg: Dict[str, object] = {
             'annotation': None,
-            'dynamic_type': 'TensorOptions',
+            'dynamic_type': 'at::TensorOptions',
             'is_nullable': False,
             'name': cpp_a.name,
             'type': cpp_a.type,
@@ -616,7 +616,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
             a, method=False, cpp_no_default_args=set(), faithful=False, has_tensor_options=False)
     ]
 
-    cpp_returns = cpp.returns_type(f.func.returns)
+    cpp_returns = cpp.returns_type(f.func.returns).cpp_type()
     schema_order_cpp_signature = f"{cpp_returns} ({', '.join(cpp_schema_order_types)})"
 
     is_factory_method = any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) \
@@ -628,7 +628,6 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('overload_name', str(f.func.name.overload_name)),
         ('manual_kernel_registration', f.manual_kernel_registration),
         ('category_override', f.category_override if f.category_override is not None else ''),
-        ('matches_jit_signature', True),
         ('schema_string', f'aten::{f.func}'),
         ('arguments', arguments),
         ('schema_order_cpp_signature', schema_order_cpp_signature),
@@ -649,9 +648,9 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 @with_native_function
 def compute_registration_declarations(f: NativeFunction) -> str:
     name = dispatcher.name(f.func)
-    returns_type = dispatcher.returns_type(f.func.returns)
+    returns_type = dispatcher.returns_type(f.func.returns).cpp_type_registration_declarations()
     args = dispatcher.arguments(f.func)
-    args_str = ', '.join(a.no_default().decl() for a in args)
+    args_str = ', '.join(a.no_default().decl_registration_declarations() for a in args)
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         # TODO: What exactly is the semantics of the 'dispatch' field?
