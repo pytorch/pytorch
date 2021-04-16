@@ -229,3 +229,22 @@ Example::
     >>> torch.special.expm1(torch.tensor([0, math.log(2.)]))
     tensor([ 0.,  1.])
 """.format(**common_args))
+
+i0e = _add_docstr(_special.special_i0e,
+                  r"""
+i0e(input, *, out=None) -> Tensor
+Computes the exponentially scaled zeroth order modified Bessel function of the first kind (as defined below)
+for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \exp(-|x|) * i0(x) = \exp(-|x|) * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+
+""" + r"""
+Args:
+    {input}
+Keyword args:
+    {out}
+Example::
+    >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
+    tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
+""".format(**common_args))
