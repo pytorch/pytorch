@@ -217,8 +217,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             2. INDICES WITH CORRESPONDING NAMES::
 
                 ``dynamic_axes = {'input_1':{0:'batch',
-                                             1:'width',
-                                             2:'height'},
+                                             2:'width',
+                                             3:'height'},
                                   'input_2':{0:'batch'},
                                   'output':{0:'batch',
                                             1:'detections'}}``
