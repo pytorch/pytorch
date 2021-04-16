@@ -75,8 +75,8 @@ class TestTEFuser(JitTestCase):
         torch._C._jit_set_te_must_use_llvm_cpu(False)
 
         # TODO: CPU fuser currently is disabled when multithreading.
-        self.old_num_threads = torch.get_num_threads()
-        torch.set_num_threads(1)
+        self.old_fuse_parallel = torch._C._jit_texpr_parallel_cpu_enabled()
+        torch._C._jit_set_texpr_parallel_cpu_enabled(True)
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         self.int_dtypes = [
@@ -87,7 +87,8 @@ class TestTEFuser(JitTestCase):
             torch.bool,
         ]
         self.fp_dtypes = [
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
         ]
@@ -104,7 +105,7 @@ class TestTEFuser(JitTestCase):
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
-        torch.set_num_threads(self.old_num_threads)
+        torch._C._jit_set_texpr_parallel_cpu_enabled(self.old_fuse_parallel)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -1319,7 +1320,8 @@ class TestTEFuser(JitTestCase):
         dtypes = [
             torch.bool,
             torch.int,
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
         ]
@@ -1353,7 +1355,8 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,
@@ -1388,7 +1391,8 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            torch.float16,
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            # torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,
