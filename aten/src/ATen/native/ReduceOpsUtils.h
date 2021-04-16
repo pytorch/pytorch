@@ -257,18 +257,20 @@ static TensorIterator make_reduction(
   return make_reduction(name, result1, result2, self, dim, keepdim, dtype, dtype);
 }
 
-static void zero_numel_check_dims(const Tensor& self, const int64_t dim) {
+static void zero_numel_check_dims(const Tensor& self, const int64_t dim, const char *fn_name) {
   if (self.ndimension() == 0) {
-    TORCH_CHECK_INDEX(dim == 0 || dim == -1, "zero_numel_check_dims(): Expected reduction dim -1 or 0 for scalar but got ", dim);
+    TORCH_CHECK_INDEX(dim == 0 || dim == -1, fn_name,
+      ": Expected reduction dim -1 or 0 for scalar but got ", dim);
   }
   else {
-    TORCH_CHECK_INDEX(self.size(dim) != 0, "zero_numel_check_dims(): Expected reduction dim ", dim, " to be non-zero.");
+    TORCH_CHECK_INDEX(self.size(dim) != 0, fn_name,
+      ": Expected reduction dim ", dim, " to be non-zero.");
   }
 }
 
-static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim) {
+static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
   for (const int64_t d : dim) {
-    zero_numel_check_dims(self, d);
+    zero_numel_check_dims(self, d, fn_name);
   }
 }
 
@@ -277,8 +279,9 @@ static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim) {
 // This function should be called when you are reducing a zero-dim tensor and want to
 // simply resize the output and return it.
 static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
-                                     const Tensor& self, const int64_t dim, const bool keepdim) {
-  zero_numel_check_dims(self, dim);
+                                     const Tensor& self, const int64_t dim,
+                                     const bool keepdim, const char *fn_name) {
+  zero_numel_check_dims(self, dim, fn_name);
   std::vector<int64_t> sizes;
   if (keepdim) {
     sizes = ensure_nonempty_vec(self.sizes().vec());

@@ -1115,7 +1115,7 @@ Tensor &any_out(const Tensor &self, int64_t dim, bool keepdim, Tensor &result) {
 Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:",
     self.scalar_type(), result.scalar_type());
-  zero_numel_check_dims(self, dim);
+  zero_numel_check_dims(self, dim, "amin()");
 
   auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {
@@ -1131,7 +1131,7 @@ Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
 
 Tensor &amax_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
-  zero_numel_check_dims(self, dim);
+  zero_numel_check_dims(self, dim, "amax()");
 
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {
@@ -1149,7 +1149,7 @@ Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
   Tensor in;
   if (dim) {
     auto sizes = self.sizes();
-    zero_numel_check_dims(self, dim.value());
+    zero_numel_check_dims(self, dim.value(), "argmax()");
 
     auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
     if (sizes[wrap_dim] == 1) {
@@ -1187,7 +1187,7 @@ Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
   Tensor in;
   if (dim) {
     auto sizes = self.sizes();
-    zero_numel_check_dims(self, dim.value());
+    zero_numel_check_dims(self, dim.value(), "argmin()");
 
     auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
     if (sizes[wrap_dim] == 1) {

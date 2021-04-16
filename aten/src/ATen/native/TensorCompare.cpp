@@ -311,7 +311,7 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
               indices.scalar_type(), "' for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (self.numel() == 0) {
-    zero_numel_tensor_resize(values, indices, self, dim, keepdim);
+    zero_numel_tensor_resize(values, indices, self, dim, keepdim, "mode()");
     return std::tie(values, indices);
   }
   else if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
@@ -366,7 +366,7 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
               max_indices.device(), " for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (self.numel() == 0) {
-    zero_numel_tensor_resize(max, max_indices, self, dim, keepdim);
+    zero_numel_tensor_resize(max, max_indices, self, dim, keepdim, "max()");
     return std::tie(max, max_indices);
   }
   else if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
@@ -460,7 +460,7 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
               min_indices.device(), " for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (self.numel() == 0) {
-    zero_numel_tensor_resize(min, min_indices, self, dim, keepdim);
+    zero_numel_tensor_resize(min, min_indices, self, dim, keepdim, "min()");
     return std::tie(min, min_indices);
   }
   else if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {

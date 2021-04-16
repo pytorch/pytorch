@@ -255,7 +255,7 @@ void kthvalue_cuda_template(
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   int64_t slicesize = self.dim() == 0 ? 1 : self.size(dim);
-  zero_numel_check_dims(self, dim);
+  zero_numel_check_dims(self, dim, "kth_value()");
 
   TORCH_CHECK(k >= 1 && k <= slicesize, "selected number k out of range");
 
@@ -336,7 +336,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
       " dimensions");
 
   std::vector<int64_t> out_shape = self.sizes().vec();
-  zero_numel_check_dims(self, dim);
+  zero_numel_check_dims(self, dim, "median()");
   if (self.dim() > 0) {
     if (keepdim) {
       out_shape[dim] = 1;
