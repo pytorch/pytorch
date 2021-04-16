@@ -360,7 +360,7 @@ class Tracer(TracerBase):
                 flat_args[idx] = self.create_proxy('placeholder', f'tree_{str(idx)}', (), {})
 
         def flatten_fn(*args):
-            tree_args = pytree.tree_unflatten(args, in_spec)
+            tree_args = pytree.tree_unflatten(list(args), in_spec)
             return root_fn(*tree_args)
 
         return flatten_fn, flat_args

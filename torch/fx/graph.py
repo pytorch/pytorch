@@ -283,7 +283,7 @@ class Graph:
         self._owners = 0
         self._owning_module = owning_module
         self._in_spec: Optional[TreeSpec] = None
-        self._orig_args: Optional[List[Any]] = None
+        self._orig_args: Optional[List[str]] = None
 
     @property
     def owning_module(self):
@@ -927,6 +927,7 @@ class Graph:
             # single pass statement
             body.append('pass\n')
         if self._in_spec is not None:
+            assert(self._orig_args is not None)
             orig_vars = self._orig_args
             body.insert(0, f"{', '.join(free_vars)} = pytree.tree_flatten_spec([{', '.join(orig_vars)}], self._in_spec)\n")
         else:
