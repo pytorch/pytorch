@@ -22,7 +22,7 @@ def gen_unstructured(f: NativeFunction) -> List[str]:
         if "legacy::" in n:
             continue
         seen.add(n)
-        returns_type = native.returns_type(f.func.returns)
+        returns_type = native.returns_type(f.func.returns).cpp_type()
         args = native.arguments(f.func)
         rs.append(f"TORCH_API {returns_type} {n}({', '.join(a.decl() for a in args)});")
 
@@ -49,7 +49,7 @@ void impl({', '.join(a.decl() for a in out_args)});
 
     seen = set()
     for f in g.functions():
-        returns_type = native.returns_type(f.func.returns)
+        returns_type = native.returns_type(f.func.returns).cpp_type()
         args = native.arguments(f.func)
         for k, n in f.dispatch.items():
             if n in seen:
