@@ -948,6 +948,22 @@ void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config
   if (!config.check_mem_overlap_) {
     return;
   }
+
+  // hacked specialized version for binary
+  const auto& out = operands_[0].tensor;
+  const auto& op1 = operands_[1].tensor;
+  const auto& op2 = operands_[2].tensor;
+
+  if (!out.defined()) {
+    return;
+  }
+  if (!out.is_contiguous()) {
+      assert_no_internal_overlap(out);
+  }
+  assert_no_partial_overlap(out, op1);
+  assert_no_partial_overlap(out, op2);
+
+  /*
   for (int i = 0; i < num_outputs_; i++) {
     const auto& output = operands_[i].tensor;
     if (!output.defined()) continue;
@@ -959,6 +975,7 @@ void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config
       assert_no_partial_overlap(output, input);
     }
   }
+  */
 }
 
 void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
