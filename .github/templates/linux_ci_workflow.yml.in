@@ -142,7 +142,6 @@ jobs:
       - name: Unzip artifacts
         run: |
           (cd ../ && unzip -q pytorch/artifacts.zip)
-          rm pytorch/artifacts.zip
       - name: Output disk space left
         run: |
           sudo df -H
