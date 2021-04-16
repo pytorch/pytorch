@@ -187,6 +187,26 @@ bool conv2dIsSupported(const torch::jit::Node* node) {
   return true;
 }
 
+// The fuser currently only supports matmul of 2D x 2D matrices
+bool matmulIsSupported(const torch::jit::Node* node) {
+  auto const& input0 = tensorSizes(node->input(0));
+  auto const& input1 = tensorSizes(node->input(1));
+
+  // Everything should be statically known.
+  if (!input0 || !input1) {
+    GRAPH_DEBUG("matmulIsSupported: Input shapes aren't static");
+    return false;
+  }
+
+  // Proper ndim for tensor inputs.
+  if (input0->size() != 2 || input1->size() != 2) {
+    GRAPH_DEBUG("matmulIsSupported: Unsupported input sizes");
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -233,7 +253,7 @@ static std::vector<ExprHandle> computeIndicesToBroadcast(
 ExprHandle TensorExprKernel::broadcast(
     Tensor* t,
     const std::vector<ExprHandle>& axes) {
-  return t->call(computeIndicesToBroadcast(
+  return t->load(computeIndicesToBroadcast(
       axes, ExprVectorToExprHandleVector(t->buf()->dims())));
 }
 
@@ -256,7 +276,7 @@ ExprHandle TensorExprKernel::chunk(
     }
   }
 
-  return t->call(indices);
+  return t->load(indices);
 }
 
 ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
@@ -1683,6 +1703,10 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       return computeConv2d(v);
     }
 
+    case aten::matmul: {
+      return computeMatmul(v);
+    }
+
     default: {
       throw std::runtime_error("Unhandled node kind");
     }
@@ -2048,6 +2072,49 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
   return new Tensor(ResultBuf.node(), s);
 }
 
+Tensor* TensorExprKernel::computeMatmul(const torch::jit::Value* v) {
+  const Node* n = v->node();
+  auto const& shape = sizesForValue(v);
+  Dtype dtype = kFloat;
+  auto maybe_stype = findDtypeForValue(v);
+  if (maybe_stype) {
+    dtype = Dtype(*maybe_stype);
+  }
+  BufHandle ResultBuf("matmul", shape, dtype);
+  const Buf* a = tensors_.at(n->input(0))->buf();
+  const Buf* b = tensors_.at(n->input(1))->buf();
+
+  auto size_a = ExprVectorToExprHandleVector(a->dims());
+  auto size_b = ExprVectorToExprHandleVector(b->dims());
+  const IntImm* total_size = dynamic_cast<const IntImm*>(
+      IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
+
+  // For small sizes, where N*M*K < 1000, lower matmul to a naive 3-level
+  // loopnest. The number is not tuned very carefully, and in future we should
+  // fine-tune it as well as we should add more advanced native TE lowerings for
+  // matmuls. For bigger sizes we generate a TE ExternalCall, which would call
+  // an aten::matmul.
+  // Native, even naive, lowering is beneficial when the sizes are small because
+  // it allows to eliminate dispatch overhead.
+  if (total_size && total_size->value() < 1000) {
+    return Reduce(
+        "nnc_matmul",
+        {{size_a[0], "M"}, {size_b[1], "N"}},
+        Sum(),
+        [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+          BufHandle ah(a);
+          BufHandle bh(b);
+          return Load::make(ah, {m, k}) * Load::make(bh, {k, n});
+        },
+        {{size_a[1], "K"}});
+  } else {
+    return new Tensor(
+        ResultBuf.node(),
+        ExternalCall::make(
+            ResultBuf, "nnc_aten_matmul", {BufHandle(a), BufHandle(b)}, {}));
+  }
+}
+
 Tensor* TensorExprKernel::computeSoftmax(
     const torch::jit::Value* v,
     bool log_softmax) {
@@ -2154,21 +2221,21 @@ Tensor* TensorExprKernel::computeSoftmax(
       Compute("aten_softmax_exp", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             v->node()->input(0), convert_indices_to_expr_handle(indices));
-        return exp(inp - max->call(remove_softmax_dim_index(indices)));
+        return exp(inp - max->load(remove_softmax_dim_index(indices)));
       });
   auto sum = Reduce(
       "aten_softmax_sum",
       non_softmax_dims,
       Sum(),
       [&](ParameterList& indices) {
-        return e->call(move_softmax_dim_index_to_pos(indices));
+        return e->load(move_softmax_dim_index_to_pos(indices));
       },
       {output_dims[softmax_dim]});
   if (!log_softmax) {
     auto result =
         Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
-          return e->call(indices) /
-              sum->call(remove_softmax_dim_index(indices));
+          return e->load(indices) /
+              sum->load(remove_softmax_dim_index(indices));
         });
     return new Tensor(
         result->buf(),
@@ -2177,15 +2244,15 @@ Tensor* TensorExprKernel::computeSoftmax(
 
   auto log_sum = Compute(
       "aten_softmax_log_sum", non_softmax_dims, [&](ParameterList& indices) {
-        return log(sum->call(indices));
+        return log(sum->load(indices));
       });
   auto result =
       Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             v->node()->input(0), convert_indices_to_expr_handle(indices));
         auto non_softmax_indices = remove_softmax_dim_index(indices);
-        return inp - max->call(non_softmax_indices) -
-            log_sum->call(non_softmax_indices);
+        return inp - max->load(non_softmax_indices) -
+            log_sum->load(non_softmax_indices);
       });
   return new Tensor(
       result->buf(),
@@ -2273,10 +2340,9 @@ Tensor* TensorExprKernel::computeCatWoConditionals(const torch::jit::Value* v) {
       }
     }
     auto inp_buf = tensors_.at(inp)->buf();
-    auto load_expr = new Load(inp_buf, load_indices, new IntImm(1));
+    auto load_expr = new Load(inp_buf, load_indices);
     auto load_promoted = promoteToDtype(ExprHandle(load_expr), highType);
-    Stmt* st = new Store(
-        output_buf, store_indices, load_promoted.node(), new IntImm(1));
+    Stmt* st = new Store(output_buf, store_indices, load_promoted.node());
     for (size_t i = dims.size(); i > 0; --i) {
       st = new For(for_vars[i - 1], new IntImm(0), dims[i - 1].node(), st);
     }
@@ -2446,7 +2512,7 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
               Mod::make(absolute_position, IntImm::make(stride));
           new_axes[stride_index] = index;
         }
-        return tensor->call(new_axes);
+        return tensor->load(new_axes);
       });
 }
 
