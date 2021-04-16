@@ -156,7 +156,3 @@ fi
 retry () {
   "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
 }
-
-# Enable LLVM dependency for TensorExpr testing
-export USE_LLVM=/opt/llvm
-export LLVM_DIR=/opt/llvm/lib/cmake/llvm
