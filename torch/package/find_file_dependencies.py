@@ -1,4 +1,5 @@
 import ast
+import sys
 from typing import List, Optional, Tuple
 
 from ._importlib import _resolve_name
@@ -41,26 +42,38 @@ class _ExtractModuleReferences(ast.NodeVisitor):
             else:
                 self.references[(name, None)] = True
 
+    def _grab_node_int(self, node):
+        if sys.version_info[:2] < (3, 7):
+            return node.n
+        else:
+            return node.value
+
+    def _grab_node_str(self, node):
+        if sys.version_info[:2] < (3, 7):
+            return node.s
+        else:
+            return node.value
+
     def visit_Call(self, node):
         # __import__ calls aren't routed to the visit_Import/From nodes
         if hasattr(node.func, "id") and node.func.id == "__import__":
-            name = node.args[0].value
+            name = self._grab_node_str(node.args[0])
             fromlist = []
             level = 0
             if len(node.args) > 3:
                 for v in node.args[3].elts:
-                    fromlist.append(v.value)
+                    fromlist.append(self._grab_node_str(v))
             elif hasattr(node, "keywords"):
                 for keyword in node.keywords:
                     if keyword.arg == "fromlist":
                         for v in keyword.value.elts:
-                            fromlist.append(v.value)
+                            fromlist.append(self._grab_node_str(v))
             if len(node.args) > 4:
-                level = node.args[4].value
+                level = self._grab_node_int(node.args[4])
             elif hasattr(node, "keywords"):
                 for keyword in node.keywords:
                     if keyword.arg == "level":
-                        level = keyword.value.value
+                        level = self._grab_node_int(keyword.value)
             if fromlist == []:
                 # the top-level package (the name up till the first dot) is returned
                 # when the fromlist argument is empty in normal import system,
