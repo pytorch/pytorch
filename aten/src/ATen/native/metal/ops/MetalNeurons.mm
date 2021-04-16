@@ -41,7 +41,7 @@ Tensor& neuronKernel_(Tensor& input, MPSCNNNeuron* neuron) {
                destinationImage:Y];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
-  implStorage.texture()->copyFromTexture(Y);
+  implStorage.texture()->setTexture(Y);
   return input;
 }
 
