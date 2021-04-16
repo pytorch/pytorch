@@ -51,7 +51,7 @@ void randperm_handle_duplicate_keys(T *keys, scalar_t *data, int bits, int64_t n
   //   rng_engine_inputs = gen->philox_cuda_state(counter_offset);
   // }
   T mask = static_cast<T>((1UL << bits) - 1);
-  std::cout << "bits: " << bits /*<< ", seeds: " << rng_engine_inputs.seed_ << ", " << rng_engine_inputs.offset_.val <<*/ std::endl;
+  std::cout << "bits: " << bits /*<< ", seeds: " << rng_engine_inputs.seed_ << ", " << rng_engine_inputs.offset_.val*/ << std::endl;
   randperm_handle_duplicate_keys_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
     keys, data, mask, n/*, rng_engine_inputs*/);
 }
