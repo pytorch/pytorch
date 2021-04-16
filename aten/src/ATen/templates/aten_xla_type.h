@@ -3,7 +3,7 @@
 
 #include <ATen/Tensor.h>
 
-namespace torch_xla {
+namespace ${cpp_namespace} {
 
 // Base ATEN Type class where the XLA specific overrides should be defined.
 class AtenXlaType {

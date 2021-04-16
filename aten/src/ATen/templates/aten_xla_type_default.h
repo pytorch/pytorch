@@ -5,7 +5,7 @@
 
 using c10::Stream;
 
-namespace torch_xla {
+namespace ${cpp_namespace} {
 
 class AtenXlaTypeDefault {
  public:
@@ -17,4 +17,3 @@ ${dispatch_aten_fallback_declarations}
 void RegisterAtenTypeFunctions();
 
 }  // namespace torch_xla
-
