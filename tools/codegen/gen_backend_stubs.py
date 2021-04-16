@@ -1,15 +1,25 @@
 import pathlib
-from tools.codegen.model import *
-from tools.codegen.api.types import *
-from tools.codegen.gen import *
+import argparse
+import os
+import yaml
+from typing import List, Dict, Union, Tuple, Sequence
+from tools.codegen.gen import FileManager, get_grouped_native_functions, LineLoader, parse_native_yaml
+from tools.codegen.model import (ExternalBackendFunction, ExternalBackendFunctionsGroup,
+                                 NativeFunction, NativeFunctionsGroup, OperatorName,
+                                 ExternalBackendMetadata, assert_never)
+from tools.codegen.selective_build.selector import SelectiveBuilder
+from tools.codegen.utils import Target, concatMap
+import tools.codegen.dest as dest
 
 def parse_backend_yaml(
         backend_yaml_path: str,
-        grouped_native_functions: List[Union[NativeFunction, NativeFunctionsGroup]]
-) -> List[Union[ExternalBackendFunction, ExternalBackendFunctionsGroup]]:
+        grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]]
+) -> Tuple[str, List[Union[ExternalBackendFunction, ExternalBackendFunctionsGroup]]]:
     with open(backend_yaml_path, 'r') as f:
         yaml_values = yaml.load(f, Loader=LineLoader)
     assert isinstance(yaml_values, dict)
+
+    cpp_namespace = yaml_values['cpp_namespace']
 
     backend = yaml_values['backend']
     supported = yaml_values['supported']
@@ -25,6 +35,11 @@ def parse_backend_yaml(
         m = ExternalBackendMetadata(op_name, backend, is_autograd=True)
         metadata[m.operator] = m
 
+    native_functions_map: Dict[OperatorName, NativeFunction] = {
+        f.func.name: f
+        for f in concatMap(lambda f: [f] if isinstance(f, NativeFunction) else list(f.functions()), grouped_native_functions)
+    }
+
     def native_to_external(
             g: Union[NativeFunction, NativeFunctionsGroup]
     ) -> Union[ExternalBackendFunction, ExternalBackendFunctionsGroup]:
@@ -36,13 +51,10 @@ def parse_backend_yaml(
             return ExternalBackendFunctionsGroup.from_function_group(g, metadata)
         else:
             assert_never(g)
-    native_functions_map = {
-        f.func.name: f for f in
-        concatMap(lambda f: [f] if isinstance(f, NativeFunction) else f.functions(), grouped_native_functions)}
     for op_name in metadata.keys():
         if op_name not in native_functions_map:
             raise AssertionError(f"Found an invalid operator name: {op_name}")
-    return [native_to_external(g) for g in grouped_native_functions]
+    return cpp_namespace, [native_to_external(g) for g in grouped_native_functions]
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate backend stub files')
@@ -65,23 +77,28 @@ def main() -> None:
 
     native_yaml_path = os.path.join(pytorch_root, 'aten/src/ATen/native/native_functions.yaml')
     grouped_native_functions = get_grouped_native_functions(native_yaml_path)
-    external_backend_functions = parse_backend_yaml(options.source_yaml, grouped_native_functions)
+    cpp_namespace, external_backend_functions = parse_backend_yaml(options.source_yaml, grouped_native_functions)
 
     native_functions = parse_native_yaml(native_yaml_path)
 
     selector = SelectiveBuilder.get_nop_selector()
 
     fm.write('aten_xla_type.h', lambda: {
+        'cpp_namespace': cpp_namespace,
         'dispatch_xla_declarations': list(concatMap(dest.compute_native_function_declaration, external_backend_functions)),
     })
 
     fm.write('aten_xla_type_default.h', lambda: {
+        'cpp_namespace': cpp_namespace,
         'dispatch_aten_fallback_declarations': list(concatMap(
             dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION), external_backend_functions
         )),
     })
 
     fm.write('aten_xla_type_default.cpp', lambda: {
+        'cpp_namespace': cpp_namespace,
+        # TODO: after cpu fallbacks are moved to a boxed kernel,
+        # merge registrations / definitions into RegisterDispatchKey
         'dispatch_aten_fallback_definitions': list(concatMap(
             dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION), external_backend_functions
         )),
