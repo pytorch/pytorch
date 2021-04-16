@@ -2092,7 +2092,10 @@ Tensor* TensorExprKernel::computeMatmul(const torch::jit::Value* v) {
   // For small sizes, where N*M*K < 1000, lower matmul to a naive 3-level
   // loopnest. The number is not tuned very carefully, and in future we should
   // fine-tune it as well as we should add more advanced native TE lowerings for
-  // matmuls.
+  // matmuls. For bigger sizes we generate a TE ExternalCall, which would call
+  // an aten::matmul.
+  // Native, even naive, lowering is beneficial when the sizes are small because
+  // it allows to eliminate dispatch overhead.
   if (total_size && total_size->value() < 1000) {
     return Reduce(
         "nnc_matmul",
