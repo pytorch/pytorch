@@ -5,20 +5,21 @@
 #include <sys/socket.h>
 #endif
 
-#include <unordered_map>
-#include <cstdlib>
-#include <libshm.h>
-#include <TH/TH.h>
-#include <c10/util/Logging.h>
 #include <ATen/ATen.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/dlpack.h>
 #include <ATen/DLConvertor.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/VmapMode.h>
+#include <ATen/dlpack.h>
+#include <ATen/core/Vitals.h>
+#include <TH/TH.h>
+#include <c10/util/Logging.h>
+#include <cstdlib>
+#include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <unordered_map>
 
 #include <torch/csrc/THP.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -54,6 +55,7 @@
 #include <torch/csrc/fx/fx_init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
+#include <torch/csrc/utils/crash_handler.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 
 #ifdef USE_DISTRIBUTED
@@ -849,6 +851,7 @@ PyObject* initModule() {
   torch::fx::initFx(module);
   torch::impl::dispatch::initDispatchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
+  torch::crash_handler::initCrashHandlerBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
   torch::autograd::initLinalgFunctions(module);
@@ -933,6 +936,11 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
+
+  py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
+  py_module.def("set_vital", [](const std::string &vital, const std::string &attr, const std::string value){
+    return at::vitals::VitalsAPI.setVital(vital, attr, value);
+  });
 
   py_module.def(
     "init_num_threads",

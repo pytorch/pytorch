@@ -92,7 +92,7 @@ enum class PickleOpCode : char {
 
 using ::c10::IValue;
 
-struct TORCH_API WriteableTensorData {
+struct WriteableTensorData {
   const char* data() const {
     return static_cast<const char*>(tensor_.storage().data());
   }
@@ -278,12 +278,12 @@ TORCH_API WriteableTensorData
 getWriteableTensorData(const at::Tensor& tensor, bool to_cpu = true);
 
 // return the value of the tensor's storage pointer
-TORCH_API uint64_t getStorageKey(const at::Tensor& tensor);
+uint64_t getStorageKey(const at::Tensor& tensor);
 
 // if the cls has __getstate__/__setstate__
 // assert they have the right schema and return true,
 // otherwise return false
-TORCH_API bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
+bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
 } // namespace jit
 } // namespace torch
