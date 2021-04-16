@@ -4574,9 +4574,10 @@ for shape in [(1,), ()]:
         out = torch.logit(a)
         self.assertIsNone(out.grad_fn._saved_eps)
 
-        a = torch.ones(1, 1, requires_grad=True)
-        q, r = torch.linalg.qr(a, mode="reduced")
-        self.assertEqual(q.grad_fn._saved_mode, "reduced")                # std::string -> str
+        if torch._C.has_lapack:
+            a = torch.ones(1, 1, requires_grad=True)
+            q, r = torch.linalg.qr(a, mode="reduced")
+            self.assertEqual(q.grad_fn._saved_mode, "reduced")                # std::string -> str
 
         x = torch.zeros(5, requires_grad=True)
         out = torch.threshold(x, threshold=(1 + 0j), value=(1 + 0j))
