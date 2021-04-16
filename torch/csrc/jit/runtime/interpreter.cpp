@@ -486,10 +486,10 @@ struct CodeImpl {
   // If the usages in a graph is:
   //    aten::foo("somestr", arg1=0, arg2=False, arg3=0.0)
   //    aten::foo("somestr", arg1=1, arg2=False, arg3=0.0)
-  // op_to_unnecessary_args_["aten::foo.str"] = 2
+  // op_to_num_unnecessary_args_["aten::foo.str"] = 2
   // This is because for all usages, last two args are not used. (e.g. same
   // value as default schema value)
-  std::unordered_map<std::string, int> op_to_unnecessary_args_;
+  std::unordered_map<std::string, int> op_to_num_unnecessary_args_;
 
   // running count of uses as we emit. When we reach use_count_[v] =
   // v.uses().size() we know it is the final use and we can move rather than
@@ -543,7 +543,6 @@ struct CodeImpl {
   void process_ops_for_mobile() {
     DepthFirstGraphNodeIterator graph_it(graph_);
     Node* node = graph_it.next();
-    std::unordered_map<std::string, std::vector<int>> op_to_trailing_ignore;
     while (node) {
       if (node->maybeOperator()) {
         auto op_schema = node->getOperator().schema();
@@ -552,18 +551,12 @@ struct CodeImpl {
         auto unique_name = op_schema.overload_name() != ""
             ? op_schema.name() + "." + op_schema.overload_name()
             : op_schema.name();
-        auto it = op_to_trailing_ignore.insert(
-            std::pair<std::string, std::vector<int>>(
-                unique_name, std::vector<int>()));
-        it.first->second.push_back(numIgnore);
+        auto it = op_to_num_unnecessary_args_.insert(
+            std::pair<std::string, int>(unique_name, INT_MAX));
+        auto prev_value = it.first->second;
+        it.first->second = std::min(numIgnore, prev_value);
       }
       node = graph_it.next();
-    }
-
-    for (auto& it : op_to_trailing_ignore) {
-      int min_ignore = *std::min_element(it.second.begin(), it.second.end());
-      op_to_unnecessary_args_.insert(
-          std::pair<std::string, int>(it.first, min_ignore));
     }
   }
 
@@ -588,6 +581,7 @@ struct CodeImpl {
         necessary_mark[i] = true;
       } else {
         auto schema_value = schema_args.at(i).default_value().value();
+        // non-const value will become nullptr here, so will be marked necessary
         auto actual_value = toIValue(actual_inputs[i]);
         // if the IR has same value as default value of the schema,
         // it is not neccessary argument.
@@ -632,8 +626,9 @@ struct CodeImpl {
     return instructions_;
   }
 
-  const std::unordered_map<std::string, int> op_to_unnecessary_args() const {
-    return op_to_unnecessary_args_;
+  const std::unordered_map<std::string, int> op_to_num_unnecessary_args()
+      const {
+    return op_to_num_unnecessary_args_;
   }
 
   const std::vector<Node*>& instructions_source() const {
@@ -746,9 +741,9 @@ struct CodeImpl {
     auto min_ignore = 0;
     // make sure we only do this for mobile code
     if (from_mobile_ &&
-        op_to_unnecessary_args_.find(unique_op_name) !=
-            op_to_unnecessary_args_.end()) {
-      min_ignore = op_to_unnecessary_args_[unique_op_name];
+        op_to_num_unnecessary_args_.find(unique_op_name) !=
+            op_to_num_unnecessary_args_.end()) {
+      min_ignore = op_to_num_unnecessary_args_[unique_op_name];
     }
 
     auto necessary_size = node->inputs().size() - min_ignore;
@@ -1891,9 +1886,9 @@ const std::vector<Instruction>& Code::instructions() const {
   return pImpl->instructions();
 }
 
-const std::unordered_map<std::string, int> Code::op_to_unnecessary_args()
+const std::unordered_map<std::string, int> Code::op_to_num_unnecessary_args()
     const {
-  return pImpl->op_to_unnecessary_args();
+  return pImpl->op_to_num_unnecessary_args();
 }
 
 const std::vector<Node*>& Code::instructions_source() const {
