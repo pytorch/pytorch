@@ -573,15 +573,7 @@ node [shape=box];
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        # If __exit__ was called because an exception was raised, we do not attempt to
-        # attempt to finalize the package. Instead, control is returned to the
-        # caller to continue raising the exception.
-        if exc_type is not None:
-            # Do the bare minimum to leave the open buffer in a valid state.
-            self._finalize_zip()
-            return
-
+    def __exit__(self, type, value, traceback):
         self.close()
 
     def _write(self, filename, str_or_bytes):
@@ -623,10 +615,6 @@ node [shape=box];
             self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
         contents = "\n".join(self.extern_modules) + "\n"
         self._write(".data/extern_modules", contents)
-        self._finalize_zip()
-
-    def _finalize_zip(self):
-        """Called at the very end of packaging to leave the zipfile in a closed but valid state."""
         del self.zip_file
         if self.buffer:
             self.buffer.flush()

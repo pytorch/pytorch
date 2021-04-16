@@ -76,7 +76,7 @@ class _FunctionalAdadelta(object):
                        grads,
                        square_avgs,
                        acc_deltas,
-                       lr=lr,
-                       rho=rho,
-                       eps=eps,
-                       weight_decay=weight_decay)
+                       lr,
+                       rho,
+                       eps,
+                       weight_decay)
