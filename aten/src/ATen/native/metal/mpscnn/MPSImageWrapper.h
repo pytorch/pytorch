@@ -28,15 +28,15 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
   IntArrayRef textureSizes() const;
   void setTexture(MPSImage* image);
   MPSImage* image() const;
-  void recycleImage();
   void synchronize();
   void prepare();
   void release();
+
  private:
   std::vector<int64_t> _textureSizes;
   MPSImage* _image = nullptr;
-  MetalCommandBuffer* _commandBuffer;
-  id<PTMetalCommandBufferDelegate> _delegate;
+  __weak MetalCommandBuffer* _commandBuffer;
+  id<PTMetalCommandBuffer> _delegate;
 };
 
 } // namespace metal

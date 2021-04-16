@@ -2,12 +2,10 @@
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 
-#include <mutex>
-
 NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
 @implementation MetalCommandBuffer {
   NSMutableArray* _images;
-  NSMutableSet<id<PTMetalCommandBufferDelegate>>* _delegates;
+  NSMutableSet<id<PTMetalCommandBuffer>>* _delegates;
 }
 
 + (MetalCommandBuffer*)newBuffer {
@@ -25,20 +23,24 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
   MetalCommandBuffer* cb = dict[thread_local_storage_key];
   if (!cb) {
     cb = [MetalCommandBuffer newBuffer];
+    // The command buffer should only be retained by the thread-local storage.
     dict[thread_local_storage_key] = cb;
   }
   return cb;
 }
 
-- (void)addDelegate:(id<PTMetalCommandBufferDelegate>)delegate {
-  if (delegate) {
-    [_delegates addObject:delegate];
-  }
+- (bool)valid {
+  return _buffer;
 }
 
-- (void)removeDelegate:(id<PTMetalCommandBufferDelegate>)delegate {
-  if (delegate) {
-    [_delegates removeObject:delegate];
+- (void)addSubscriber:(id<PTMetalCommandBuffer>)subscriber {
+  if (subscriber) {
+    [_delegates addObject:subscriber];
+  }
+}
+- (void)removeSubscriber:(id<PTMetalCommandBuffer>)subscriber {
+  if (subscriber) {
+    [_delegates removeObject:subscriber];
   }
 }
 
@@ -56,36 +58,41 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
   [_images removeObject:image];
 }
 
-- (void)synchronize {
-  [self prepare];
-  [self flush];
-  [self cleanup];
-}
-
-- (void)flush {
+- (void)commit {
+  [self beginSynchronization];
   if (_buffer.status == 0) {
     [_buffer commit];
     [_buffer waitUntilCompleted];
   }
+  [self endSynchronization];
 }
 
-- (void)prepare {
-  for (id<PTMetalCommandBufferDelegate> delegate in _delegates) {
-    if ([delegate respondsToSelector:@selector(prepareForSynchronization)]) {
-      [delegate prepareForSynchronization];
+- (void)beginSynchronization {
+  for (id<PTMetalCommandBuffer> delegate in _delegates) {
+    if ([delegate respondsToSelector:@selector(beginSynchronization)]) {
+      [delegate beginSynchronization];
     };
   }
   // recycle all temporary images manually before flushing the command buffer
+#if DEBUG
+  NSLog(@"[Metal Command Buffer] Recycle images, found: (%ld)\n", _images.count);
+#endif
   for (MPSTemporaryImage* image in _images) {
     [image recycle];
   }
 }
 
-- (void)cleanup {
-  [_images removeAllObjects];
+- (void)endSynchronization {
+  for (id<PTMetalCommandBuffer> delegate in _delegates) {
+    if ([delegate respondsToSelector:@selector(endSynchronization:)]) {
+      [delegate endSynchronization:_buffer.error];
+    };
+  }
   [_delegates removeAllObjects];
+  [_images removeAllObjects];
   _buffer = nil;
-  [[NSThread currentThread].threadDictionary removeObjectForKey:thread_local_storage_key];
+  [[NSThread currentThread].threadDictionary
+      removeObjectForKey:thread_local_storage_key];
 }
 
 - (BOOL)isEqual:(id)object {

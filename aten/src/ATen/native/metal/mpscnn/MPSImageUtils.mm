@@ -88,7 +88,7 @@ MPSImage* createStaticImage(
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [cb synchronize];
+  [cb commit];
   return output;
 }
 
@@ -118,7 +118,7 @@ MPSImage* createStaticImage(MPSImage* image) {
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [cb synchronize];
+  [cb commit];
   return Y;
 }
 
@@ -143,7 +143,7 @@ MPSImage* createStaticImage(
   [encoder endEncoding];
   [image markRead];
   if (waitUntilCompleted) {
-    [buffer synchronize];
+    [buffer commit];
   }
   return Y;
 }
