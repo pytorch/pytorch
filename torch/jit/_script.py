@@ -327,8 +327,8 @@ class ConstMap:
 
 def reduce_package_script_module(importer: PackageImporter, ts_id: str) -> torch.nn.Module:
     """
-    Called by torch.Package's PackageImporter's Pickler's persistent_load operation,
-    performs work of loading and returning ScriptModule
+    Called by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
+    Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
     """
     cu = torch._C.CompilationUnit()
     cpp_module = torch._C._import_ir_module_from_package(
@@ -411,10 +411,12 @@ if _enabled:
 
         def __reduce_package__(self, exporter: PackageExporter):
             """
-            Called by torch.Package's PackageExporter's Pickler's persistent_id when
-            saving TorchScript objests. Performs act of saving ScriptModule inside of
-            PackageExporter and return method to load the ScriptModule in PackageImporter's
-            Pickler's persistent_load operation
+            Called by ``torch.package.PackageExporter``'s Pickler's ``persistent_id`` when
+            saving TorchScript objects. Performs act of saving a ScriptModule inside of
+            a ``torch.package`` archive.
+
+            Returns method to load the ScriptModule from a ``torch.package.PackageImporter``'s
+            Pickler's ``persistent_load`` function.
             """
             ts_id, next_storage_id = exporter.ts_serializer.serialize(
                 self._actual_script_module, exporter.get_storage_id()
@@ -577,10 +579,12 @@ if _enabled:
 
         def __reduce_package__(self, exporter: PackageExporter):
             """
-            Called by torch.Package's PackageExporter's Pickler's persistent_id when
-            saving TorchScript objests. Performs act of saving ScriptModule inside of
-            PackageExporter and return method to load the ScriptModule in PackageImporter's
-            Pickler's persistent_load operation
+            Called by ``torch.package.PackageExporter``'s Pickler's ``persistent_id`` when
+            saving TorchScript objects. Performs act of saving a ScriptModule inside of
+            a ``torch.package`` archive.
+
+            Returns method to load the ScriptModule from a ``torch.package.PackageImporter``'s
+            Pickler's ``persistent_load`` function.
             """
             ts_id, next_storage_id = exporter.ts_serializer.serialize(
                 self._c, exporter.get_storage_id()

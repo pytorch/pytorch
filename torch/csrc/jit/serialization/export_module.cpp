@@ -372,7 +372,7 @@ void SetExportModuleMobileInfoConverter(
   GetMobileInfoConverter() = std::move(converter);
 }
 
-int ScriptModuleSerializer::serialize(
+void ScriptModuleSerializer::serialize(
     const Module& module,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
@@ -407,7 +407,6 @@ int ScriptModuleSerializer::serialize(
   for (auto& item : file_streams_) {
     writer_.setMinVersion(item.value().minVersion());
   }
-  return 0;
 }
 
 uint64_t ScriptModuleSerializer::writeArchive(
