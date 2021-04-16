@@ -700,10 +700,10 @@ class TestClassType(JitTestCase):
             def __mod__(self, other: int) -> int:
                 return self.x % other
 
-            def __ne__(self, other: int) -> bool:  # noqa T484
+            def __ne__(self, other: int) -> bool:
                 return self.x != other
 
-            def __eq__(self, other: int) -> bool:  # noqa T484
+            def __eq__(self, other: int) -> bool:
                 return self.x == other
 
             def __lt__(self, other: int) -> bool:
