@@ -3260,26 +3260,28 @@ Tensor lu_unpack_backward(
   auto L_grad = grads[1];
   auto U_grad = grads[2];
 
+  auto m = LU_data.size(-2);
+  auto n = LU_data.size(-1);
+  auto k = std::min(m, n);
+
   TORCH_CHECK(unpack_data, "lu_unpack_backward: cannot compute gradients unless unpack_data=True");
+
+  auto res = at::zeros(LU_data.sizes(), LU_data.options());
 
   Tensor L_grad_contrib;
   if (L_grad.defined()) {
     L_grad_contrib = L_grad.tril();
     L_grad_contrib.diagonal(0, -2, -1).fill_(0);
-  }
-  else {
-    L_grad_contrib = at::zeros_like(LU_data, at::MemoryFormat::Contiguous);
+    res.narrow(-2, 0, m).narrow(-1, 0, k).add_(L_grad_contrib);
   }
 
   Tensor U_grad_contrib;
   if (U_grad.defined()) {
     U_grad_contrib = U_grad.triu();
-  }
-  else {
-    U_grad_contrib = at::zeros_like(LU_data, at::MemoryFormat::Contiguous);
+    res.narrow(-2, 0, k).narrow(-1, 0, n).add_(U_grad_contrib);
   }
 
-  return L_grad_contrib + U_grad_contrib;
+  return res;
 }
 
 } // namespace details
