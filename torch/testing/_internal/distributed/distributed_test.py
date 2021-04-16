@@ -995,6 +995,7 @@ class DistributedTest:
             print("all asserts passed")
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
+        @unittest.skipIf(IS_FBCODE, "Kineto in fbcode causes hang")
         def test_send_recv_torch_profiler(self):
             cpu_act = torch.profiler.ProfilerActivity.CPU
             cuda_act = torch.profiler.ProfilerActivity.CUDA
@@ -1078,6 +1079,7 @@ class DistributedTest:
         @unittest.skipIf(
             BACKEND == "nccl", "Nccl does not support send/recv from any source"
         )
+        @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
         def test_send_recv_any_source_torch_profiler(self):
             cpu_act = torch.profiler.ProfilerActivity.CPU
             cuda_act = torch.profiler.ProfilerActivity.CUDA
@@ -1127,6 +1129,7 @@ class DistributedTest:
             return self._test_send_recv_with_tag(profiler_cls=autograd_profiler_ctx)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
+        @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
         def test_send_recv_with_tag_torch_profiler(self):
             cpu_act = torch.profiler.ProfilerActivity.CPU
             cuda_act = torch.profiler.ProfilerActivity.CUDA
@@ -1183,6 +1186,7 @@ class DistributedTest:
             self._test_isend(profiler_cls=autograd_profiler_ctx)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
+        @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
         def test_isend_torch_profiler(self):
             cpu_act = torch.profiler.ProfilerActivity.CPU
             cuda_act = torch.profiler.ProfilerActivity.CUDA
@@ -1585,23 +1589,21 @@ class DistributedTest:
             if secondary_op_call is not None:
                 op_calls.append(secondary_op_call)
 
-
-            prof_activities = [torch.profiler.ProfilerActivity.CPU]
-            if profile_cuda:
-                prof_activities.append(torch.profiler.ProfilerActivity.CUDA)
-
-            torch_profiler_ctx = torch.profiler.profile(
-                activities=prof_activities,
+            autograd_profiler_ctx = torch.autograd.profiler.profile(
+                use_cuda=profile_cuda,
+                record_shapes=True
             )
 
-            with torch_profiler_ctx as prof:
+            # TODO: move this test to use torch.profiler once kineto issues are
+            # fixed internally.
+            with autograd_profiler_ctx as prof:
                 works = [op_call() for op_call in op_calls]
                 if is_async:
                     for work in works:
                         work.wait()
 
             if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
-                events = get_profiling_event(profiling_title_postfix, torch_profiler_ctx)
+                events = get_profiling_event(profiling_title_postfix, autograd_profiler_ctx)
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertEqual(e.count, 1)
@@ -4241,6 +4243,8 @@ class DistributedTest:
             net = torch.nn.parallel.DistributedDataParallel(
                 model.cuda(self.rank), device_ids=[self.rank]
             )
+            profiler_cls_copy = copy.deepcopy(profiler_cls)
+
             with profiler_cls as prof:
                 for i in range(num_iters):
                     loss = net(inp).sum()
@@ -4255,6 +4259,14 @@ class DistributedTest:
             for event in events:
                 self.assertEqual(event.name, all_reduce_event_name)
 
+            broadcast_event_name = f"{dist.get_backend()}:broadcast"
+            broadcast_events = get_profiling_event(broadcast_event_name, prof)
+            event_count = sum(e.count for e in broadcast_events)
+            # Broadcast is called during rebuild_buckets
+            self.assertGreaterEqual(event_count, 1)
+            for event in broadcast_events:
+                self.assertEqual(event.name, broadcast_event_name)
+
             # Run DDP with profiling for a few iterations, then enable profiling
             # for a single pass, and ensure it is recorded. This tests that the
             # thread local state is correctly updated.
@@ -4265,7 +4277,7 @@ class DistributedTest:
                 loss = net(inp).sum()
                 loss.backward()
             # Now enable the profiler.
-            with profiler_cls as prof:
+            with profiler_cls_copy as prof:
                 loss = net(inp).sum()
                 loss.backward()
 
@@ -4284,13 +4296,14 @@ class DistributedTest:
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
         def test_ddp_profiling_torch_profiler(self):
             cpu_act = torch.profiler.ProfilerActivity.CPU
             cuda_act = torch.profiler.ProfilerActivity.CUDA
             torch_profiler_ctx = torch.profiler.profile(
                 activities=[cpu_act, cuda_act]
             )
-            return self._test_ddp_profiling(profiler_cls=torch_profiler_ctx)
+            self._test_ddp_profiling(profiler_cls=torch_profiler_ctx)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
