@@ -93,7 +93,7 @@ class _CPatchManager(object):
     def __exit__(self, type, value, tb):
         sys.setprofile(None)
 
-HOLE = object()
+PH = object()
 
 class Tracer(TracerBase):
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -356,7 +356,7 @@ class Tracer(TracerBase):
         self.graph._in_spec = in_spec
         self.graph._orig_args = orig_args[skip_arg_idx:total_args]
         for idx, arg in enumerate(flat_args):
-            if arg is HOLE:
+            if arg is PH:
                 flat_args[idx] = self.create_proxy('placeholder', f'tree_{str(idx)}', (), {})
 
         def flatten_fn(*args):
