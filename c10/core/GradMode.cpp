@@ -1,8 +1,8 @@
-#include <ATen/core/grad_mode.h>
+#include <c10/core/GradMode.h>
 
 #include <stdexcept>
 
-namespace at {
+namespace c10 {
 
 thread_local bool GradMode_enabled = true;
 
@@ -13,4 +13,4 @@ bool GradMode::is_enabled() {
 void GradMode::set_enabled(bool enabled) {
   GradMode_enabled = enabled;
 }
-} // namespace at
+} // namespace c10
