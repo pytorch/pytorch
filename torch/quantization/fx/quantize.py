@@ -1345,7 +1345,7 @@ class Quantizer:
                                 )
 
                                 # handle is_reference = True
-                                match_supported_is_reference = (
+                                supported_is_reference = (
                                     (node.target in binary_reference_op_supported_dtypes) and
                                     (dtypes in binary_reference_op_supported_dtypes[node.target])
                                 )
