@@ -12,7 +12,7 @@
 #include "torch_xla/csrc/aten_xla_type.h"
 #include "torch_xla/csrc/function_call_tracker.h"
 
-namespace torch_xla {
+namespace ${cpp_namespace} {
 
 // convenience helpers for extracting out an optional c10::Device
 
@@ -115,4 +115,3 @@ ${dispatch_autograd_registrations}
 }
 
 }  // namespace torch_xla
-

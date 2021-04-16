@@ -150,7 +150,7 @@ def returns_type(rs: Sequence[Return]) -> CType:
     else:
         return TupleCType([return_type(r) for r in rs])
 
-def return_names(f: NativeFunction, *, override_name: str = None) -> Sequence[str]:
+def return_names(f: NativeFunction, *, override_name: Optional[str] = None) -> Sequence[str]:
     returns: List[str] = []
     for i, r in enumerate(f.func.returns):
         # If we have an inplace function, the return argument is
@@ -171,7 +171,7 @@ def return_names(f: NativeFunction, *, override_name: str = None) -> Sequence[st
                 name = f'{r.name}_return'
             else:
                 name = r.name
-        # If there is no explicit name, we just name the output result,
+        # If there is no explicit name and no overide was passed in, we just name the output result,
         # unless it's a multi-return, in which case it's result0,
         # result1, etc (zero-indexed)
         else:
