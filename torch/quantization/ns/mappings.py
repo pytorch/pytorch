@@ -12,6 +12,8 @@ import torch.nn.intrinsic.qat as nniqat
 import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
 
+from typing import Callable, Set
+
 FUNS_IO_TYPE_FP32 = set([
     F.linear,
     F.conv1d,
@@ -77,6 +79,11 @@ FUNS_IO_TYPE_FP32_OR_INT8 = set([
     torch.squeeze,
     torch.stack,
     torch.unsqueeze,
+])
+
+FUNS_UNMATCHABLE: Set[Callable] = set([
+    torch.quantize_per_tensor,
+    operator.getitem,
 ])
 
 MODS_IO_TYPE_FP32 = set([
@@ -174,6 +181,11 @@ MODS_IO_TYPE_FP32_OR_INT8 = set([
     nn.ReLU6,
 ])
 
+MODS_UNMATCHABLE: Set[Callable] = set([
+    torch.quantization.ObserverBase,
+    torch.quantization.FakeQuantizeBase,
+])
+
 METHS_IO_TYPE_FP32_OR_INT8 = set([
     'sigmoid_',
     'sigmoid',
@@ -183,4 +195,29 @@ METHS_IO_TYPE_FP32_OR_INT8 = set([
     'hardsigmoid',
     'relu_',
     'relu',
+])
+
+METHS_UNMATCHABLE = set([
+    'to',
+    'dequantize',
+    'reshape',
+    'view',
+    'unsqueeze_',
+    'unsqueeze',
+    'transpose',
+    'squeeze_',
+    'squeeze',
+    'size',
+    'shape',
+    'resize_',
+    'repeat_interleave',
+    'repeat',
+    'permute',
+    'numel',
+    'mean',
+    'detach_',
+    'detach',
+    'contiguous',
+    'clamp',
+    'chunk',
 ])

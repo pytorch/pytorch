@@ -1,5 +1,4 @@
 import enum
-import operator
 
 import torch
 toq = torch.ops.quantized
@@ -9,6 +8,11 @@ from torch.fx.graph import Graph, Node
 
 from .utils import getattr_from_fqn
 from .ns_types import NSSubgraph, NSNodeTargetType
+from .mappings import (
+    FUNS_UNMATCHABLE,
+    MODS_UNMATCHABLE,
+    METHS_UNMATCHABLE,
+)
 from .pattern_utils import (
     get_base_name_to_sets_of_related_ops,
     get_type_a_related_to_b,
@@ -26,20 +30,14 @@ def get_non_matchable_functions() -> Set[Callable]:
     `call_function` nodes pointing to these functions are non-matchable.
     """
     # TODO(future PR): allow customizations
-    return set([
-        torch.quantize_per_tensor,
-        operator.getitem,
-    ])
+    return FUNS_UNMATCHABLE
 
 def get_non_matchable_modules() -> Set[Callable]:
     """
     `call_module` nodes pointing to instances of these types are non-matchable.
     """
     # TODO(future PR): allow customizations
-    return set([
-        torch.quantization.ObserverBase,
-        torch.quantization.FakeQuantizeBase,
-    ])
+    return MODS_UNMATCHABLE
 
 def get_non_matchable_methods() -> Set[str]:
     """
@@ -47,11 +45,7 @@ def get_non_matchable_methods() -> Set[str]:
 
     """
     # TODO(future PR): allow customizations
-    return set([
-        'to',
-        'dequantize',
-        'reshape',
-    ])
+    return METHS_UNMATCHABLE
 
 class _NSGraphMatchableSubgraphsIterator:
     """
