@@ -10,7 +10,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
 from .utils import getattr_from_fqn
-from .ns_types import NSSubgraph
+from .ns_types import NSSubgraph, NSNodeTargetType
 from .pattern_utils import (
     get_base_name_to_sets_of_related_ops,
     get_type_a_related_to_b,
@@ -43,6 +43,17 @@ def get_non_matchable_modules() -> Set[Callable]:
         torch.quantization.FakeQuantizeBase,
     ])
 
+def get_non_matchable_methods() -> Set[str]:
+    """
+    `call_method` nodes pointing to these targets are non-matchable.
+
+    """
+    # TODO(future PR): allow customizations
+    return set([
+        'to',
+        'dequantize',
+        'reshape',
+    ])
 
 class _NSGraphMatchableSubgraphsIterator:
     """
@@ -57,10 +68,12 @@ class _NSGraphMatchableSubgraphsIterator:
         gm: GraphModule,
         non_matchable_functions: Set[Callable],
         non_matchable_modules: Set[Callable],
+        non_matchable_methods: Set[str],
     ):
         self.gm: GraphModule = gm
         self.non_matchable_functions: Set[Callable] = non_matchable_functions
         self.non_matchable_modules: Set[Callable] = non_matchable_modules
+        self.non_matchable_methods: Set[str] = non_matchable_methods
         self.seen_nodes: Set[Node] = set()
         self.stack: List[Node] = []
         for start_node in _get_output_nodes(self.gm.graph):
@@ -147,11 +160,12 @@ class _NSGraphMatchableSubgraphsIterator:
             return not (node.target in self.non_matchable_functions)
         elif node.op == 'call_module':
             assert isinstance(node.target, str)
-            # target_mod = getattr(self.gm, node.target)
             target_mod = getattr_from_fqn(self.gm, node.target)
             return not \
                 any(isinstance(target_mod, t)  # type: ignore
                     for t in self.non_matchable_modules)
+        elif node.op == 'call_method':
+            return not (node.target in self.non_matchable_methods)
         else:
             return False
 
@@ -192,7 +206,7 @@ def _get_subgraph_relationship_type(
     subgraph_b: NSSubgraph,
     gm_a: GraphModule,
     gm_b: GraphModule,
-    type_a_related_to_b: Set[Tuple[Callable, Callable]],
+    type_a_related_to_b: Set[Tuple[NSNodeTargetType, NSNodeTargetType]],
 ) -> SubgraphTypeRelationship:
     node_a = subgraph_a.base_op_node
     node_b = subgraph_b.base_op_node
@@ -248,12 +262,23 @@ def _get_subgraph_relationship_type(
             return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
         else:
             return SubgraphTypeRelationship.NOT_RELATED
+    elif node_a.op == 'call_method':
+        assert (subgraph_a.base_op_node == subgraph_a.start_node and
+                subgraph_b.base_op_node == subgraph_b.start_node), \
+            "Matching call_method patterns where base_op_node != start_node is not supported yet"
+        if node_a.target == node_b.target:
+            return SubgraphTypeRelationship.EQUAL
+        key = (node_a.target, node_b.target)
+        if key in type_a_related_to_b:
+            return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL
+        else:
+            return SubgraphTypeRelationship.NOT_RELATED
     return SubgraphTypeRelationship.NOT_RELATED
 
 def _get_name_for_subgraph(
     subgraph_a: NSSubgraph,
     gm_a: GraphModule,
-    base_name_to_sets_of_related_ops: Dict[str, Set[Callable]],
+    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]],
     existing_names: Set[str],
 ) -> str:
     """
@@ -302,8 +327,8 @@ def _get_name_for_subgraph(
     existing_names.add(proposed_name)
     return proposed_name
 
-def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[Callable]:
-    if node.op == 'call_function':
+def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[NSNodeTargetType]:
+    if node.op in ('call_function', 'call_method'):
         return node.target  # type: ignore
     elif node.op == 'call_module':
         assert isinstance(node.target, str)
@@ -380,10 +405,13 @@ def get_matching_subgraph_pairs(
     """
     non_matchable_functions = get_non_matchable_functions()
     non_matchable_modules = get_non_matchable_modules()
+    non_matchable_methods = get_non_matchable_methods()
     graph_a_iterator = _NSGraphMatchableSubgraphsIterator(
-        gm_a, non_matchable_functions, non_matchable_modules)
+        gm_a, non_matchable_functions, non_matchable_modules,
+        non_matchable_methods)
     graph_b_iterator = _NSGraphMatchableSubgraphsIterator(
-        gm_b, non_matchable_functions, non_matchable_modules)
+        gm_b, non_matchable_functions, non_matchable_modules,
+        non_matchable_methods)
     results = {}
     base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
