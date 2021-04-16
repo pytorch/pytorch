@@ -1319,17 +1319,22 @@ class Quantizer:
                                 # TODO(future PR): update the pattern to quantize
                                 # handler logic to take this into account.
 
+                                # This needs to handle 3 cases
+                                # 1) op and dtype is in either [is_ref or non-ref] list -> don't skip
+                                # 2) op is not in either list (i.e. relu) -> don't skip
+                                # 3) op is in non-ref list, but not for dtype, and op+dtype not in is_ref list -> skip
+
                                 # note: the value of is_reference is unknown at prepare, so we have to cover both cases
                                 # handle is_reference = False
-                                skip_match_if_not_is_reference = node.target in binary_op_supported_dtypes and \
+                                skip_match_not_is_reference = node.target in binary_op_supported_dtypes and \
                                     dtypes not in binary_op_supported_dtypes[node.target]
 
                                 # handle is_reference = True
-                                skip_match_if_is_reference = node.target in binary_reference_op_supported_dtypes and \
-                                    dtypes not in binary_reference_op_supported_dtypes[node.target]
+                                supported_is_reference = node.target in binary_reference_op_supported_dtypes and \
+                                    dtypes in binary_reference_op_supported_dtypes[node.target]
 
-                                # only skip if both sides are unsupported
-                                skip_this_match = skip_match_if_not_is_reference and skip_match_if_is_reference
+                                # only skip if unsupported
+                                skip_this_match = skip_match_not_is_reference and not supported_is_reference
 
                         if not skip_this_match:
                             matched: List[Any] = []
