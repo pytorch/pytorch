@@ -4,7 +4,8 @@ from tools.codegen.model import (Argument, Arguments, BaseTy, BaseType,
                                  TensorOptionsArguments, Type, assert_never)
 from tools.codegen.api.types import (ArgName, BaseCType, Binding,
                                      ConstRefCType, CType, MutRefCType,
-                                     OptionalCType, SpecialArgName)
+                                     OptionalCType, SpecialArgName,
+                                     TupleCType, ArrayCType, ListCType, VectorCType, ArrayRefCType)
 from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
@@ -63,7 +64,7 @@ def valuetype_type(t: Type, *, binds: ArgName) -> Optional[CType]:
     elif isinstance(t, ListType):
         if str(t.elem) == 'bool':
             assert t.size is not None
-            return BaseCType(f"std::array<bool,{t.size}>", binds)
+            return ArrayCType(BaseCType("bool", binds), t.size)
         else:
             return None
     else:
@@ -98,21 +99,18 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
         return OptionalCType(elem)
     elif isinstance(t, ListType):
         # TODO: remove these special cases, ArrayRef fallthrough works fine
-        # NB: CType throws away ArrayRef structure because it is not currently
-        # relevant in translation.  When it becomes relevant, need to add back
         if str(t.elem) == 'int':
             return BaseCType("IntArrayRef", binds)
         elif str(t.elem) == 'Tensor':
             return BaseCType("TensorList", binds)
         elif str(t.elem) == 'Scalar':
-            return BaseCType("ArrayRef<Scalar>", binds)
+            return ArrayRefCType(BaseCType("Scalar", binds))
         elif str(t.elem) == 'Dimname':
             return BaseCType("DimnameList", binds)
         elif str(t.elem) == 'Tensor?':
-            return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
+            return ConstRefCType(ListCType(OptionalCType(BaseCType("Tensor", binds))))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
-        # TODO: explicitly qualify namespace here
-        return BaseCType(f"ArrayRef<{elem.cpp_type()}>", binds)
+        return ArrayRefCType(elem)
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
@@ -124,40 +122,39 @@ def argument_type(a: Argument, *, binds: ArgName) -> CType:
 # NB: if need translations on return types, make this return CType too.  Need to
 # take care; ArgName is misnomer now, and inputs are permitted to conflict with outputs
 # so need to make sure you don't have trouble
-def returntype_type(t: Type, *, mutable: bool) -> str:
+def returntype_type(t: Type, *, mutable: bool) -> CType:
     # placeholder is ignored
     r = valuetype_type(t, binds="__placeholder__")
     if r is not None:
-        return r.cpp_type()
+        return r
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
-                return 'Tensor &'
+                return MutRefCType(BaseCType('Tensor', "__placeholder__"))
             else:
-                return 'Tensor'
+                return BaseCType('Tensor', "__placeholder__")
         elif t.name == BaseTy.Scalar:
-            return 'Scalar'
+            return BaseCType('Scalar', "__placeholder__")
     elif isinstance(t, ListType):
         elem = returntype_type(t.elem, mutable=mutable)
         assert t.size is None, f"fixed size list returns not supported: {t}"
-        return f"std::vector<{elem}>"
+        return VectorCType(elem)
 
     raise AssertionError(f"unrecognized return type {t}")
 
 # Translation of a single return to its C++ type
-def return_type(r: Return) -> str:
+def return_type(r: Return) -> CType:
     return returntype_type(r.type, mutable=r.is_write)
 
 # Translation of a full (possibly multi) return from JIT to its C++ type
-def returns_type(rs: Sequence[Return]) -> str:
+def returns_type(rs: Sequence[Return]) -> CType:
     if len(rs) == 0:
-        return 'void'
+        return BaseCType('void', "__placeholder__")
     elif len(rs) == 1:
         return return_type(rs[0])
     else:
-        args = ','.join(map(return_type, rs))
-        return f'std::tuple<{args}>'
+        return TupleCType([return_type(r) for r in rs])
 
 def return_names(f: NativeFunction) -> Sequence[str]:
     returns: List[str] = []

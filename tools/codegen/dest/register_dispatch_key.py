@@ -114,7 +114,7 @@ class RegisterDispatchKey:
         sig = NativeSignature(f.func, prefix='wrapper_')
 
         name = sig.name()
-        returns_type = sig.returns_type()
+        returns_type = sig.returns_type().cpp_type()
         args = sig.arguments()
         args_str = ', '.join(a.defn() for a in args)
 
