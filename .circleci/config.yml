@@ -818,6 +818,8 @@ jobs:
           when: always
       - store_test_results:
           path: test/test-reports
+      - store_artifacts:
+          path: test/coverage.xml
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:
