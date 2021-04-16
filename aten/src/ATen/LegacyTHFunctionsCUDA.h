@@ -35,8 +35,6 @@ std::tuple<Tensor &,Tensor &> _th_gels_out(const Tensor & self, const Tensor & A
 std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A);
 Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper);
 Tensor _th_potri(const Tensor & self, bool upper);
-std::tuple<Tensor &,Tensor &> _th_geqrf_out(const Tensor & self, Tensor & res1, Tensor & res2);
-std::tuple<Tensor,Tensor> _th_geqrf(const Tensor & self);
 Tensor & _th_copy_ignoring_overlaps_(Tensor & self, const Tensor & src);
 Tensor & _thnn_multi_margin_loss_forward_out(const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor & output);
 Tensor _thnn_multi_margin_loss_forward(const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const optional<Tensor> & weight, int64_t reduction);

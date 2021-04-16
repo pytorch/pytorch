@@ -3400,14 +3400,9 @@ op_db: List[OpInfo] = [
     OpInfo('geqrf',
            dtypes=floating_and_complex_types(),
            dtypesIfCPU=floating_and_complex_types(),
-           dtypesIfCUDA=floating_types(),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_geqrf,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # TODO: geqrf_out for CUDA inputs modifies the stride of "out" tensors
-               SkipInfo('TestCommon', 'test_out', device_type='cuda'),
-           )),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],),
     OpInfo('inverse',
            op=torch.inverse,
            dtypes=floating_and_complex_types(),

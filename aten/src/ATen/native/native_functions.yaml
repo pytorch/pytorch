@@ -5716,14 +5716,12 @@
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
-    CPU: geqrf_out
-    CUDA: legacy::cuda::_th_geqrf_out
+    CPU, CUDA: geqrf_out
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   variants: method, function
   dispatch:
-    CPU: geqrf
-    CUDA: legacy::cuda::_th_geqrf
+    CPU, CUDA: geqrf
 
 # orgqr, alias for linalg_householder_product
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
