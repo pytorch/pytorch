@@ -515,10 +515,11 @@ struct CodeImpl {
           fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
     }
     n_inputs = graph_->inputs().size();
-    // std::cout << *graph_ << "\n";
-    if (from_mobile_) {
-      process_ops_for_mobile();
-    }
+    // TODO: for now, we do the calculation all the time
+    // if (from_mobile_) {
+    //   process_ops_for_mobile();
+    // }
+    process_ops_for_mobile();
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
     // we deferred the emission of bailout blocks so they appear at the end
@@ -714,8 +715,19 @@ struct CodeImpl {
     }
   }
 
+  void emitLoadInputs(at::ArrayRef<Value*> inputs, int num_include) {
+    int count = 0;
+    for (Value* input : inputs) {
+      if (count < num_include) {
+        emitUse(input, false);
+        count++;
+      } else {
+        emitUse(input, true);
+      }
+    }
+  }
+
   void emitOperator(Node* node) {
-    // TODO: pass in variable to tell if it happening during mobile export
     const Operator& op = node->getOperator();
     auto unique_op_name =
         op.schema().name() + "." + op.schema().overload_name();
@@ -726,12 +738,12 @@ struct CodeImpl {
             op_to_unnecessary_args_.end()) {
       min_ignore = op_to_unnecessary_args_[unique_op_name];
     }
-    at::ArrayRef<Value*> necessary_inputs =
-        node->inputs().slice(0, node->inputs().size() - min_ignore);
-    emitLoadInputs(necessary_inputs);
+
+    auto necessary_size = node->inputs().size() - min_ignore;
+    emitLoadInputs(node->inputs(), necessary_size);
 
     if (op.hasOperation() && op.schema().is_vararg()) {
-      insertInstruction(OPN, operator_table_.size(), necessary_inputs.size());
+      insertInstruction(OPN, operator_table_.size(), necessary_size);
     } else {
       insertInstruction(OP, operator_table_.size());
     }

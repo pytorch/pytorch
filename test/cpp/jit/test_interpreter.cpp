@@ -157,10 +157,8 @@ TEST(InterpreterTest, IgnoreTrailArgs) {
   auto graph = build_mobile_export_analysis_graph();
   Code function(graph, "", true);
   auto op_to_unnecessary_args = function.op_to_unnecessary_args();
-  for (auto& it : op_to_unnecessary_args) {
-    std::cout << it.first << std::endl;
-    ASSERT_TRUE(it.second == 1);
-  }
+  ASSERT_TRUE(op_to_unnecessary_args["aten::slice.Tensor"] == 1);
+  ASSERT_TRUE(op_to_unnecessary_args["aten::slice.str"] == 3);
 }
 
 TEST(InterpreterTest, runAsyncBasicTest) {

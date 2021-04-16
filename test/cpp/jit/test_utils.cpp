@@ -100,9 +100,12 @@ std::shared_ptr<Graph> build_mobile_export_analysis_graph() {
       %2 : int = prim::Constant[value=2]()
       %20 : int = prim::Constant[value=0]()
       %21 : int = prim::Constant[value=9223372036854775807]()
+      %22 : str = prim::Constant[value="value"]()
       %3 : Tensor  = aten::slice(%0, %1, %20, %2, %1)
       %4 : Tensor = aten::slice(%0, %2, %20, %21, %1)
-      return (%3, %4))IR";
+      %5 : str = aten::slice(%22, %20, %21, %1)
+      return (%3, %4, %5))IR";
+
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
