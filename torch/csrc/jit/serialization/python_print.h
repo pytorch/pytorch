@@ -11,7 +11,7 @@ struct Method;
 struct Module;
 struct PythonPrintImpl;
 
-struct PrintDepsTable {
+struct TORCH_API PrintDepsTable {
   void add(const c10::NamedTypePtr& type);
 
   size_t size() const {

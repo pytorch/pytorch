@@ -17,7 +17,7 @@ struct SourceRange;
 //                          which the code segment originated.
 //  - starting_line_no : represents the line in the original file where the
 //                       code segment started.
-struct Source {
+struct TORCH_API Source {
   explicit Source(
       std::string text,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
