@@ -77,7 +77,9 @@ void impl({', '.join(a.decl() for a in out_args)});
 # Generates NativeFunctions.h, a list of forward declarations of all
 # actual kernel definitions we keep in aten/src/ATen/native/
 @with_native_function
-def compute_native_function_declaration(g: Union[NativeFunctionsGroup, NativeFunction, ExternalBackendFunctionsGroup, ExternalBackendFunction]) -> List[str]:
+def compute_native_function_declaration(
+        g: Union[NativeFunctionsGroup, NativeFunction, ExternalBackendFunctionsGroup, ExternalBackendFunction]
+) -> List[str]:
     if isinstance(g, ExternalBackendFunctionsGroup):
         if g.structured:
             assert_never("Structured external backend functions are not implemented yet.")

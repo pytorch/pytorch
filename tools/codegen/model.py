@@ -333,7 +333,9 @@ class NativeFunction:
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
 
-        e.pop('__line__')
+        # don't care if it exists or not; make it easier to use this function
+        # with other yaml parsers that aren't setting __line__ in the dict
+        e.pop('__line__', None)
         assert not e, f"leftover entries: {e}"
 
         return NativeFunction(
@@ -1388,7 +1390,7 @@ class ExternalBackendFunctionsGroup:
         return self.primary.structured
 
     @property
-    def primary(self) -> bool:
+    def primary(self) -> ExternalBackendFunction:
         # TODO: hardcoding that XLA will only implement functional variants of structured kernel.
         # This will eventually by toggleable per backend.
         return self.functional
@@ -1417,7 +1419,7 @@ class ExternalBackendFunctionsGroup:
 
     # TODO: do we need this?
     def signature(self) -> 'FunctionSchema':
-        return self.primary.func.signature()
+        return self.primary.native_function.func.signature()
 
     def functions(self) -> Iterator[ExternalBackendFunction]:
         yield self.out
@@ -1426,7 +1428,10 @@ class ExternalBackendFunctionsGroup:
             yield self.inplace
 
     @staticmethod
-    def from_function_group(g: NativeFunctionsGroup, metadata: Dict[OperatorName, ExternalBackendMetadata]) -> 'ExternalBackendFunctionsGroup':
+    def from_function_group(
+            g: NativeFunctionsGroup,
+            metadata: Dict[OperatorName, ExternalBackendMetadata]
+    ) -> 'ExternalBackendFunctionsGroup':
         out_meta = metadata.get(g.out.func.name, None)
         out = ExternalBackendFunction(g.out, out_meta)
 

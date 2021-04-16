@@ -41,7 +41,7 @@ def returns_type(rs: Sequence[Return]) -> CType:
     # At present, there is no difference. But there could be!
     return cpp.returns_type(rs)
 
-def jit_arguments(func: FunctionSchema) -> Sequence[Argument]:
+def jit_arguments(func: FunctionSchema) -> List[Argument]:
     def to_argument(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> List[Argument]:
         if isinstance(a, Argument):
             return [a]
@@ -51,10 +51,10 @@ def jit_arguments(func: FunctionSchema) -> Sequence[Argument]:
             return [a.dtype, a.layout, a.device, a.pin_memory]
         else:
             assert_never(a)
-    return concatMap(to_argument, itertools.chain(
+    return list(concatMap(to_argument, itertools.chain(
         func.arguments.positional,
         func.arguments.kwarg_only,
-        func.arguments.out))
+        func.arguments.out)))
 
 def arguments(func: FunctionSchema) -> List[Binding]:
     return [
