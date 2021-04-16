@@ -1,5 +1,4 @@
 #include <ATen/native/TensorIterator.h>
-#include "c10/util/Exception.h"
 
 #include <array>
 #include <ATen/ExpandUtils.h>
