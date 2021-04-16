@@ -23,15 +23,14 @@ jobs:
         run: cd .circleci && ./ensure-consistency.py
       - name: Ensure consistent GHA workflows in cancel_redundant_workflows.yml
         run: |
-          import yaml
-          import subprocess
-          workflows = subprocess.check_output(['python', '.github/scripts/generate_workflow_names.py'],
-                                              encoding="ascii").splitlines()
-          with open('.github/workflows/cancel_redundant_workflows.yml') as f:
-                data = yaml.safe_load(f)
-                workflows_to_cancel = data[True]['workflow_run']['workflows']
-          assert workflows.sort() == workflows_to_cancel.sort()
-        shell: python
+          pip install ruamel.yaml==0.17.4
+          echo "Please locally run .github/scripts/regenerate_cancel_redundant_workflow.py and commit if this step fails."
+          .github/scripts/regenerate_cancel_redundant_workflow.py
+          git diff --exit-code .github/workflows/cancel_redundant_workflows.yml
+      - name: Lint native_functions.yaml
+        run: |
+          pip install ruamel.yaml==0.17.4
+          .github/scripts/lint_native_functions.py
       - name: ShellCheck
         # https://github.com/koalaman/shellcheck/tree/v0.7.1#installing-a-pre-compiled-binary
         run: |
@@ -78,6 +77,37 @@ jobs:
         run: |
           (! git grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
 
+  python2-setup-compat:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 2.x
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+      - name: Attempt to run setup.py
+        run: |
+          python2 setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
+
+  templates:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Install Jinja2
+        run: pip install Jinja2
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+      - name: Regenerate workflows
+        run: .github/scripts/generate_linux_ci_workflows.py
+      - name: Assert that regenerating the workflows didn't change them
+        run: .github/scripts/report_git_status.sh
+
   toc:
     runs-on: ubuntu-18.04
     # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
@@ -98,12 +128,7 @@ jobs:
             markdown-toc --bullets='-' -i "$FILE"
           done
       - name: Assert that regenerating the ToCs didn't change them
-        run: |
-          set -eux
-          CHANGES=$(git status --porcelain)
-          echo "$CHANGES"
-          git diff
-          [ -z "$CHANGES" ]
+        run: .github/scripts/report_git_status.sh
 
   flake8-py3:
     runs-on: ubuntu-18.04
@@ -293,7 +318,7 @@ jobs:
         run: |
           set -eux
           pip install -r requirements.txt
-          pip install mypy==0.770
+          pip install mypy==0.812
       - name: Run autogen
         run: |
           set -eux
