@@ -213,7 +213,6 @@ void removeMutation(script::Module& module) {
   RemoveTensorMutation(graph);
 }
 
-
 script::Module vulkanOptimizeForMobile(
     const script::Module& m,
     const std::vector<std::string>& preserved_methods) {
