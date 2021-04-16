@@ -4,7 +4,7 @@ import torch.optim._functional as F
 
 from torch import Tensor
 
-# Define a TorchScript compatible Functional Adam Optimizer
+# Define a TorchScript compatible Functional Adamax Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
 # we explicitly allow the distributed optimizer pass gradients to
@@ -14,7 +14,7 @@ from torch import Tensor
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
 @torch.jit.script
-class _FunctionalAdam(object):
+class _FunctionalAdamax(object):
     def __init__(
         self,
         params: List[Tensor],
@@ -22,7 +22,6 @@ class _FunctionalAdam(object):
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0.0,
-        amsgrad: bool = False
     ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -42,7 +41,6 @@ class _FunctionalAdam(object):
             "beta2": betas[1],
             "weight_decay": weight_decay,
         }
-        self.amsgrad = amsgrad
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0:
@@ -57,8 +55,7 @@ class _FunctionalAdam(object):
         params_with_grad = []
         grads = []
         exp_avgs = []
-        exp_avg_sqs = []
-        max_exp_avg_sqs = []
+        exp_infs = []
         state_steps: List[int] = []
 
         if len(params) != len(gradients):
@@ -80,18 +77,12 @@ class _FunctionalAdam(object):
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(param, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(param, memory_format=torch.preserve_format)
-                    if self.amsgrad:
-                        # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+                    state['exp_inf'] = torch.zeros_like(param, memory_format=torch.preserve_format)
 
                 state = self.state[param]
 
                 exp_avgs.append(state['exp_avg'])
-                exp_avg_sqs.append(state['exp_avg_sq'])
-
-                if self.amsgrad:
-                    max_exp_avg_sqs.append(state['max_exp_avg_sq'])
+                exp_infs.append(state['exp_inf'])
 
                 # update the steps for each param group update
                 state['step'] += 1
@@ -99,15 +90,13 @@ class _FunctionalAdam(object):
                 state_steps.append(state['step'].item())
 
         with torch.no_grad():
-            F.adam(params_with_grad,
-                   grads,
-                   exp_avgs,
-                   exp_avg_sqs,
-                   max_exp_avg_sqs,
-                   state_steps,
-                   amsgrad=self.amsgrad,
-                   beta1=self.defaults['beta1'],
-                   beta2=self.defaults['beta2'],
-                   lr=self.defaults['lr'],
-                   weight_decay=self.defaults['weight_decay'],
-                   eps=self.defaults['eps'])
+            F.adamax(params_with_grad,
+                     grads,
+                     exp_avgs,
+                     exp_infs,
+                     state_steps,
+                     eps=self.defaults['eps'],
+                     beta1=self.defaults['beta1'],
+                     beta2=self.defaults['beta2'],
+                     lr=self.defaults['lr'],
+                     weight_decay=self.defaults['weight_decay'])
