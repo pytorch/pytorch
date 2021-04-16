@@ -306,6 +306,7 @@ def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[NSNodeTargetT
 def get_matching_subgraph_pairs(
     gm_a: GraphModule,
     gm_b: GraphModule,
+    base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> Dict[str, Tuple[NSSubgraph, NSSubgraph]]:
     """
     Matches matchable subgraphs of graph_a to graph_b.
@@ -380,7 +381,8 @@ def get_matching_subgraph_pairs(
         gm_b, non_matchable_functions, non_matchable_modules,
         non_matchable_methods)
     results = {}
-    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    if base_name_to_sets_of_related_ops is None:
+        base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
         get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
