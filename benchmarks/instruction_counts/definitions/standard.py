@@ -256,4 +256,24 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
             autograd=True,
         ),
     },
+
+    "InferenceMode": GroupedVariants(
+        # In general, the mixed input scenario is less common so its
+        # perf can be less important than pure inference tensor inputs.
+        cpp_block=r"""
+            // @Setup
+            auto s = torch::ones({3, 3});  // Normal Tensor
+            c10::InferenceMode guard;
+            auto x = torch::ones({3, 3});  // Inference Tensor
+
+            // @View
+            torch::Tensor y = x.view({9});
+
+            // @Inplace
+            torch::Tensor y = x.mul_(x);
+
+            // @Mixed
+            torch::Tensor y = x + s;
+        """
+    ),
 })
