@@ -1740,7 +1740,10 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank == src:
         object_tensor = torch.cat(tensor_list)
     else:
-        object_tensor = torch.empty(torch.sum(object_sizes_tensor).item(), dtype=torch.uint8)
+        object_tensor = torch.empty(
+            torch.sum(object_sizes_tensor).int().item(),
+            dtype=torch.uint8
+        )
 
     if is_nccl_backend:
         object_tensor = object_tensor.to(current_device)
