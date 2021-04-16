@@ -1312,14 +1312,27 @@ class Quantizer:
                                 # handler logic to take this into account.
                                 value = CopyNodeQuantizeHandler  # type: ignore
 
-                            this_node_qconfig = self.qconfig_map[node.name]
+                            # to properly check for dtype support, we need to
+                            # navigate to the base node of an add-relu or mul-relu
+                            # pattern
+                            base_node = node
+                            if (
+                                (node.op == 'call_function' and
+                                 node.target is torch.nn.functional.relu) or
+                                (node.op == 'call_module' and
+                                 isinstance(modules[node.target], torch.nn.ReLU))
+                            ):
+                                base_node = node.args[0]
+
+                            this_node_qconfig = \
+                                self.qconfig_map[base_node.name]
                             if this_node_qconfig:
                                 dtypes = get_qconfig_dtypes(this_node_qconfig)
                                 # TODO(future PR): update the pattern to quantize
                                 # handler logic to take this into account.
                                 skip_this_match = (
-                                    (node.target in binary_op_supported_dtypes) and
-                                    (dtypes not in binary_op_supported_dtypes[node.target])
+                                    (base_node.target in binary_op_supported_dtypes) and
+                                    (dtypes not in binary_op_supported_dtypes[base_node.target])
                                 )
 
                         if not skip_this_match:
