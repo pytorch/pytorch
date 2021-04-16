@@ -276,6 +276,8 @@ Operation BroadOp(const Node* node) {
     auto b_size = b.sizes();
     auto a_size = a.sizes();
     if (a_size.equals(b_size)) {
+      // TODO: follow up with MKLDNN what the best way is
+      // to handle perf incompatible formats
       push(stack, a, b);
       return;
     } else {
@@ -293,6 +295,8 @@ Operation BroadOp(const Node* node) {
       } else if (out_numel == a.numel()) {
         exp_a = a.reshape(out_size);
       } else {
+        // TODO: consider to initializing to a blocked layout
+        // directly if needed
         exp_a = a.to_dense().expand(out_size).to_mkldnn();
       }
 
@@ -316,6 +320,8 @@ Operation BroadOp(const Node* node) {
         auto a_it = at::native::itensor_from_mkldnn(exp_a);
         auto b_it = at::native::itensor_from_mkldnn(exp_b);
 
+        // `is_public_format` means a tensor's physical layout isn't in MKLDNN
+        // blocked layout e.g. nchw or nhwc but not nChw8c
         if (!a_it.is_public_format()) {
           if (b_it.is_public_format()) {
             b_it = b_it.reorder_if_differ_in(a_it.get_desc());
