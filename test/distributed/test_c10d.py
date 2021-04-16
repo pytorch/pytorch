@@ -2019,6 +2019,25 @@ class ProcessGroupNCCLTest(TestCase):
                 self.assertEqual(torch.tensor([s_idx]), t)
 
     @requires_nccl()
+    def test_allgather_base_ops(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allgather_base(output_t, input_t):
+            work = pg.allgather_base(output_t, input_t)
+            work.wait()
+
+        # allgather_base is GPU number agnostic.
+        # Each rank contribute one tensor regardless of GPU counts
+        tensor = torch.tensor([self.rank]).cuda(0)
+        output_t = torch.empty((self.world_size), dtype=tensor.dtype).cuda(0)
+
+        allgather_base(output_t, tensor)
+
+        # Verification
+        self.assertEqual(torch.arange(self.world_size), output_t)
+
+    @requires_nccl()
     def test_reduce_scatter_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)

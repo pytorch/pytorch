@@ -915,6 +915,14 @@ Arguments:
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "allgather_base",
+              &::c10d::ProcessGroup::allgather_base,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "allgather",
               [](::c10d::ProcessGroup& pg,
                  std::vector<at::Tensor>& output,

@@ -222,6 +222,13 @@ class ProcessGroup:
         output_tensors: List[Tensor],
         input_tensor: Tensor,
     ) -> Work: ...
+    @overload
+    def allgather_base(
+        self,
+        output_tensors: List[List[Tensor]],
+        input_tensors: List[Tensor],
+        opts = AllGatherOptions(),
+    ) -> Work: ...
     def allgather_coalesced(
         self,
         output_lists: List[List[Tensor]],

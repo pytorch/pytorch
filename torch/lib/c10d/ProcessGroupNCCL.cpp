@@ -1755,11 +1755,36 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_base(
-    at::Tensor& /*unused */,
-    at::Tensor& /*unused */,
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
     const AllgatherOptions& /*unused */) {
-  throw std::runtime_error(
-      "no support for allgather_base in NCCL process group");
+  check_gpu_single_tensor(input_tensor);
+  check_gpu_single_tensor(output_tensor);
+  // just a wrapper to fit the collective interface
+  auto inputs = std::vector<at::Tensor> {input_tensor};
+  auto outputs = std::vector<at::Tensor> {output_tensor};
+
+  return collective(
+      inputs,
+      outputs,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        c10::cuda::CUDACachingAllocator::recordStream(
+            output.storage().data_ptr(), stream);
+        return ncclAllGather(
+            input.data_ptr(),
+            output.data_ptr(),
+            input.numel(),
+            getNcclDataType(input.scalar_type()),
+            comm,
+            stream.stream());
+      },
+      [&](std::vector<at::cuda::CUDAStream>&) {},
+      [&](std::vector<at::cuda::CUDAStream>&) {},
+      OpType::ALLGATHER_BASE,
+      "nccl:all_gather_base");
 }
 
 } // namespace c10d
