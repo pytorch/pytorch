@@ -70,6 +70,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void deleteHandler(int socket);
   void waitHandler(int socket);
   void watchHandler(int socket);
+  void heartbeatHandler(int socket);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
   // Helper function to alerts waiting workers, used in setHandler, getHandler

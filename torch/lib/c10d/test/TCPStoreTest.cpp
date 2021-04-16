@@ -16,17 +16,6 @@ constexpr int64_t kShortStoreTimeoutMillis = 100;
 constexpr int64_t kStoreCallbackTimeoutMillis = 5000;
 constexpr int defaultTimeout = 20;
 
-// void _waitFinish() {
-//   std::unique_lock<std::mutex> lk(cvMutex);
-//   auto ret = cv.wait_for(
-//       lk, std::chrono::duration<int,
-//       std::milli>(kStoreCallbackTimeoutMillis));
-//   if (ret == std::cv_status::timeout) {
-//     throw std::runtime_error(
-//         "Timeout waiting for callback execution to finish.");
-//   }
-// }
-
 c10::intrusive_ptr<c10d::TCPStore> _createServer(
     int numWorkers = 1,
     int timeout = defaultTimeout) {
@@ -281,15 +270,6 @@ void testKeyChangeHelper(
                   &skipFirstSet](
                      c10::optional<std::string> oldValue,
                      c10::optional<std::string> newValue) {
-        // skip executing the callback on the first "set" that is run for
-        // these tests
-        if (skipFirstSet &&
-            (key == "testEmptyKeyValue" || key == "testRegularKeyValue" ||
-             key == "testWatchKeyDelete")) {
-          skipFirstSet = false;
-          return;
-        }
-
         try {
           EXPECT_EQ(
               expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
@@ -304,25 +284,21 @@ void testKeyChangeHelper(
 
   // Perform the specified update according to key
   if (key == "testEmptyKeyValue") {
-    c10d::test::set(store, key, expectedOldValue.value());
-    store.get(key);
     c10d::test::set(store, key, expectedNewValue.value());
   } else if (key == "testRegularKeyValue") {
-    c10d::test::set(store, key, expectedOldValue.value());
-    store.get(key);
     c10d::test::set(store, key, expectedNewValue.value());
   } else if (key == "testWatchKeyCreate") {
     c10d::test::set(store, key, expectedNewValue.value());
+  } else if (key == "testWatchKeyAdd") {
+    store.add(key, std::stoi(expectedNewValue.value()));
   } else if (key == "testWatchKeyDelete") {
-    c10d::test::set(store, key, expectedOldValue.value());
-    store.get(key);
     store.deleteKey(key);
   }
 
   // Test that the callback is fired and the expected values are correct
+  std::future<bool> callbackFuture = callbackPromise.get_future();
   std::chrono::milliseconds span(kStoreCallbackTimeoutMillis);
-  if (callbackPromise.get_future().wait_for(span) ==
-      std::future_status::timeout)
+  if (callbackFuture.wait_for(span) == std::future_status::timeout)
     throw std::runtime_error("Callback execution timed out.");
 
   // Any errors raised from asserts should be rethrown
@@ -330,14 +306,22 @@ void testKeyChangeHelper(
     std::rethrow_exception(eptr);
 }
 
+TEST(TCPStoreTest, testKeyEmptyUpdate) {
+  auto store = _createServer();
+
+  std::string key = "testEmptyKeyValue";
+  c10d::test::set(*store, key, "");
+  store->get(key);
+  testKeyChangeHelper(*store, key, "", "2");
+}
+
 TEST(TCPStoreTest, testKeyUpdate) {
   auto store = _createServer();
 
-  std::string key1 = "testEmptyKeyValue";
-  testKeyChangeHelper(*store, key1, "", "2");
-
-  std::string key2 = "testRegularKeyValue";
-  testKeyChangeHelper(*store, key2, "1", "2");
+  std::string key = "testRegularKeyValue";
+  c10d::test::set(*store, key, "1");
+  store->get(key);
+  testKeyChangeHelper(*store, key, "1", "2");
 }
 
 TEST(TCPStoreTest, testKeyCreate) {
@@ -347,10 +331,19 @@ TEST(TCPStoreTest, testKeyCreate) {
   testKeyChangeHelper(*store, key, c10::nullopt, "2");
 }
 
+TEST(TCPStoreTest, testKeyAdd) {
+  auto store = _createServer();
+
+  std::string key = "testWatchKeyAdd";
+  testKeyChangeHelper(*store, key, c10::nullopt, "2");
+}
+
 TEST(TCPStoreTest, testKeyDelete) {
   auto store = _createServer();
 
   std::string key = "testWatchKeyDelete";
+  c10d::test::set(*store, key, "1");
+  store->get(key);
   testKeyChangeHelper(*store, key, "1", c10::nullopt);
 }
 
