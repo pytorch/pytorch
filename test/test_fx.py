@@ -1208,6 +1208,20 @@ class TestFX(JitTestCase):
         result = interp.run(x, initial_env=env)
         self.assertEqual(result, (torch.arange(0, 12, 1).reshape(3, 4) - 6.0).clamp(0.0, 1.0))
 
+    def test_is_leaf_function(self):
+        class LeafFuncTracer(torch.fx.Tracer):
+            TO_INLINE = [wrapped_via_decorator]
+
+            def is_leaf_function(self, target, args, kwargs):
+                return target not in self.TO_INLINE
+
+        class TestMod(torch.nn.Module):
+            def forward(self, x):
+                return wrapped_via_decorator(x)
+
+        graph = LeafFuncTracer().trace(TestMod())
+        print(graph)
+
     def test_interpreter_star_args(self):
         def with_star_args(x, *args):
             return x + args[0]

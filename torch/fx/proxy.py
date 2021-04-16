@@ -22,7 +22,23 @@ class TracerBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
+        if kind == 'call_function' and not self.is_leaf_function(target, args, kwargs):
+            # Trace through non-leaf functions. This allows for configurable decomposition
+            # of certain functions based on the specification made by a Tracer subclass.
+            proxy_args = torch.fx.node.map_arg(args, torch.fx.Proxy)
+            proxy_kwargs = torch.fx.node.map_arg(kwargs, torch.fx.Proxy)
+            return target(*proxy_args, **proxy_kwargs).node
+
         return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
+
+    def is_leaf_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Argument]):
+        """
+        Specify whether the given target with `args` and `kwargs` is a "leaf"
+        function. That is: should this function invocation be emitted as a
+        call_function node? Default returns to True, but Tracers can override
+        this to return False for calls they want to be traced through.
+        """
+        return True
 
     def proxy(self, node: Node) -> 'Proxy':
         return Proxy(node, self)
