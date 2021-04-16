@@ -45,6 +45,7 @@ def get_node_first_input_and_output_type(
 
     # TODO(future PR): clean this up
     FUNS_IO_TYPE_FP32 = node_type_to_io_type_map['funs_io_type_fp32']
+    FUNS_IO_TYPE_FP16 = node_type_to_io_type_map['funs_io_type_fp16']
     FUNS_IO_TYPE_INT8 = node_type_to_io_type_map['funs_io_type_int8']
     FUNS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['funs_io_type_fp32_or_int8']
     MODS_IO_TYPE_FP32 = node_type_to_io_type_map['mods_io_type_fp32']
@@ -55,6 +56,8 @@ def get_node_first_input_and_output_type(
     if node.op == 'call_function':
         if node.target in FUNS_IO_TYPE_FP32:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
+        if node.target in FUNS_IO_TYPE_FP16:
+            return (NodeInputOrOutputType.FP16, NodeInputOrOutputType.FP16)
         elif node.target in FUNS_IO_TYPE_INT8:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
         elif node.target in FUNS_IO_TYPE_FP32_OR_INT8:

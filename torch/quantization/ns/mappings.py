@@ -32,6 +32,8 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.silu,
     ])
 
+    FUNS_IO_TYPE_FP16: Set[NSNodeTargetType] = set()
+
     FUNS_IO_TYPE_INT8: Set[NSNodeTargetType] = set([
         toq.linear,
         toq.linear_relu,
@@ -193,6 +195,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
 
     return {
         'funs_io_type_fp32': FUNS_IO_TYPE_FP32,
+        'funs_io_type_fp16': FUNS_IO_TYPE_FP16,
         'funs_io_type_int8': FUNS_IO_TYPE_INT8,
         'funs_io_type_fp32_or_int8': FUNS_IO_TYPE_FP32_OR_INT8,
         'mods_io_type_fp32': MODS_IO_TYPE_FP32,
