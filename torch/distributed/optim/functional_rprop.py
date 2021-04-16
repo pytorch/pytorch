@@ -1,10 +1,10 @@
-from typing import List, Optional, Dict
+from typing import List, Dict, Optional, Tuple
 import torch
 import torch.optim._functional as F
 
 from torch import Tensor
 
-# Define a TorchScript compatible Functional SGD Optimizer
+# Define a TorchScript compatible Functional Rprop Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
 # we explicitly allow the distributed optimizer pass gradients to
@@ -14,24 +14,19 @@ from torch import Tensor
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
 @torch.jit.script
-class _FunctionalSGD(object):
+class _FunctionalRprop(object):
     def __init__(
         self,
         params: List[Tensor],
         lr: float = 1e-2,
-        momentum: float = 0.0,
-        dampening: float = 0.0,
-        weight_decay: float = 0.0,
-        nesterov: bool = False
+        etas: Tuple[float, float] = (0.5, 1.2),
+        step_sizes: Tuple[float, float] = (1e-6, 50)
     ):
         self.defaults = {
             "lr": lr,
-            "momentum": momentum,
-            "dampening": dampening,
-            "weight_decay": weight_decay,
         }
-        self.nesterov = nesterov
-        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
+        self.etas = etas
+        self.step_sizes = step_sizes
 
         if len(params) == 0:
             raise ValueError("optimizer got an empty parameter list")
@@ -40,14 +35,16 @@ class _FunctionalSGD(object):
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
+        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
+
     def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group['params']
         grads = []
-        momentum_buffer_list: List[Optional[Tensor]] = []
+        prevs = []
+        step_sizes = []
         lr = self.defaults['lr']
-        weight_decay = self.defaults['weight_decay']
-        momentum = self.defaults['momentum']
-        dampening = self.defaults['dampening']
+        etaminus, etaplus = self.etas
+        step_size_min, step_size_max = self.step_sizes
 
         if len(params) != len(gradients):
             raise ValueError(
@@ -59,29 +56,26 @@ class _FunctionalSGD(object):
         for param, gradient in zip(params, gradients):
             if gradient is not None:
                 grads.append(gradient)
-
+                # Lazy state initialization
                 if param not in self.state:
                     self.state[param] = {}
+                    state = self.state[param]
+                    state['step'] = torch.tensor(0.0)
+                    state['prev'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+                    state['step_size'] = torch.full_like(gradient, lr)
 
                 state = self.state[param]
-                if 'momentum_buffer' not in state:
-                    momentum_buffer_list.append(None)
-                else:
-                    momentum_buffer_list.append(state['momentum_buffer'])
+                prevs.append(state['prev'])
+                step_sizes.append(state['step_size'])
+
+                state['step'] += 1
 
         with torch.no_grad():
-            F.sgd(params,
-                  grads,
-                  momentum_buffer_list,
-                  weight_decay=weight_decay,
-                  momentum=momentum,
-                  lr=lr,
-                  dampening=dampening,
-                  nesterov=self.nesterov)
-
-        # update momentum_buffers in state
-        for i, p in enumerate(params):
-            state = self.state[p]
-            momentum_buffer = momentum_buffer_list[i]
-            if momentum_buffer is not None:
-                state['momentum_buffer'] = momentum_buffer
+            F.rprop(params,
+                    grads,
+                    prevs,
+                    step_sizes,
+                    step_size_min=step_size_min,
+                    step_size_max=step_size_max,
+                    etaminus=etaminus,
+                    etaplus=etaplus)
