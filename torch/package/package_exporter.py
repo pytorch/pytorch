@@ -22,7 +22,7 @@ import torch
 from torch.serialization import location_tag, normalize_storage_type
 
 from ._file_structure_representation import Folder, _create_folder_from_file_list
-from ._glob_group import GlobPattern, _GlobGroup
+from .glob_group import GlobPattern, GlobGroup
 from ._importlib import _normalize_path
 from ._mangling import is_mangled
 from ._package_pickler import create_pickler
@@ -484,7 +484,7 @@ node [shape=box];
 
         """
         self.patterns.append(
-            (_GlobGroup(include, exclude), self.save_mock_module, allow_empty)
+            (GlobGroup(include, exclude=exclude), self.save_mock_module, allow_empty)
         )
 
     def extern(
@@ -512,7 +512,7 @@ node [shape=box];
 
         """
         self.patterns.append(
-            (_GlobGroup(include, exclude), self.save_extern_module, allow_empty)
+            (GlobGroup(include, exclude=exclude), self.save_extern_module, allow_empty)
         )
 
     def deny(self, include: "GlobPattern", *, exclude: "GlobPattern" = ()):
@@ -526,7 +526,7 @@ node [shape=box];
             exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
         """
         self.patterns.append(
-            (_GlobGroup(include, exclude), self._reject_denied_module, True)
+            (GlobGroup(include, exclude=exclude), self._reject_denied_module, True)
         )
 
     def save_extern_module(self, module_name: str):
@@ -581,7 +581,15 @@ node [shape=box];
     def __enter__(self):
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
+        # If __exit__ was called because an exception was raised, we do not attempt to
+        # attempt to finalize the package. Instead, control is returned to the
+        # caller to continue raising the exception.
+        if exc_type is not None:
+            # Do the bare minimum to leave the open buffer in a valid state.
+            self._finalize_zip()
+            return
+
         self.close()
 
     def _write(self, filename, str_or_bytes):
@@ -624,6 +632,10 @@ node [shape=box];
         contents = "\n".join(self.extern_modules) + "\n"
         self._write(".data/extern_modules", contents)
         self.ts_serializer.write_files()
+        self._finalize_zip()
+
+    def _finalize_zip(self):
+        """Called at the very end of packaging to leave the zipfile in a closed but valid state."""
         del self.zip_file
         if self.buffer:
             self.buffer.flush()
