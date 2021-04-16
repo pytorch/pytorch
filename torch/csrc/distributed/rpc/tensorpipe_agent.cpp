@@ -10,6 +10,7 @@
 #include <tensorpipe/tensorpipe.h>
 
 #include <torch/csrc/distributed/rpc/agent_utils.h>
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -353,8 +354,19 @@ struct MultiStreamGuard {
   explicit MultiStreamGuard(
       const std::shared_ptr<LazyStreamContext>& /* unused */) {}
 #else
+  static inline std::vector<at::cuda::CUDAStream> toCUDAStreams(
+      const std::vector<c10::Stream>& streams) {
+    std::vector<at::cuda::CUDAStream> cudaStreams;
+    cudaStreams.reserve(streams.size());
+    std::transform(
+        streams.begin(),
+        streams.end(),
+        std::back_inserter(cudaStreams),
+        [](c10::Stream s) { return at::cuda::CUDAStream(s); });
+    return cudaStreams;
+  }
   explicit MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& ctx)
-      : guard(ctx->getReservedStreams()) {}
+      : guard(toCUDAStreams(ctx->getReservedStreams())) {}
 
  private:
   at::cuda::CUDAMultiStreamGuard guard;
@@ -599,23 +611,24 @@ void TensorPipeAgent::pipeRead(
         std::shared_ptr<LazyStreamContext>)> fn) noexcept {
   pipe->readDescriptor([fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
-                           tensorpipe::Message tpMessage) mutable {
+                           tensorpipe::Descriptor tpDescriptor) mutable {
     if (error) {
       fn(error, Message(), nullptr);
       return;
     }
 
     auto ctx = createLazyStreamContext();
-    TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage, ctx);
+    tensorpipe::Allocation tpAllocation;
+    TensorpipeReadBuffers tpBuffers;
+    std::tie(tpAllocation, tpBuffers) = tensorpipeAllocate(tpDescriptor, ctx);
 
     pipe->read(
-        std::move(tpMessage),
-        [tpBuffers{
+        std::move(tpAllocation),
+        [tpDescriptor{std::move(tpDescriptor)},
+         tpBuffers{
              std::make_shared<TensorpipeReadBuffers>(std::move(tpBuffers))},
          fn{std::move(fn)},
-         ctx{std::move(ctx)}](
-            const tensorpipe::Error& error,
-            tensorpipe::Message tpMessage) mutable {
+         ctx{std::move(ctx)}](const tensorpipe::Error& error) mutable {
           if (error) {
             fn(error, Message(), nullptr);
             return;
@@ -624,7 +637,7 @@ void TensorPipeAgent::pipeRead(
           // FIXME This does some unpickling, which could be a bit expensive:
           // perhaps it would be best to perform it inside the worker threads?
           Message rpcMessage = tensorpipeDeserialize(
-              std::move(tpMessage), std::move(*tpBuffers));
+              std::move(tpDescriptor), std::move(*tpBuffers));
 
           fn(error, std::move(rpcMessage), std::move(ctx));
         });
@@ -650,10 +663,7 @@ void TensorPipeAgent::pipeWrite(
       [tpBuffers{
            std::make_shared<TensorpipeWriteBuffers>(std::move(tpBuffers))},
        fn{std::move(fn)},
-       ctx{std::move(ctx)}](
-          const tensorpipe::Error& error, tensorpipe::Message /* unused */) {
-        fn(error);
-      });
+       ctx{std::move(ctx)}](const tensorpipe::Error& error) { fn(error); });
 }
 
 void TensorPipeAgent::sendCompletedResponseMessage(
@@ -798,7 +808,10 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
-            futureResponseMessage = cb_->operator()(requestMessage);
+            // The `ctx` needs to be propagated to `process***Call` methods
+            // to synchronize CUDA streams there to make sure that we fetch
+            // the correct value from `to_here()` call.
+            futureResponseMessage = cb_->operator()(requestMessage, ctx);
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
                 std::make_shared<JitFuture>(at::AnyClassType::get());
