@@ -1253,67 +1253,67 @@ def _jit_compile(name,
                  is_python_module,
                  is_standalone,
                  keep_intermediates=True) -> None:
-    if is_python_module and is_standalone:
-        raise ValueError("`is_python_module` and `is_standalone` are mutually exclusive.")
+    # if is_python_module and is_standalone:
+    #     raise ValueError("`is_python_module` and `is_standalone` are mutually exclusive.")
 
-    if with_cuda is None:
-        with_cuda = any(map(_is_cuda_file, sources))
-    with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
-    old_version = JIT_EXTENSION_VERSIONER.get_version(name)
-    version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
-        name,
-        sources,
-        build_arguments=[extra_cflags, extra_cuda_cflags, extra_ldflags, extra_include_paths],
-        build_directory=build_directory,
-        with_cuda=with_cuda,
-        is_python_module=is_python_module,
-        is_standalone=is_standalone,
-    )
-    if version > 0:
-        if version != old_version and verbose:
-            print(f'The input conditions for extension module {name} have changed. ' +
-                  f'Bumping to version {version} and re-building as {name}_v{version}...')
-        name = f'{name}_v{version}'
+    # if with_cuda is None:
+    #     with_cuda = any(map(_is_cuda_file, sources))
+    # with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
+    # old_version = JIT_EXTENSION_VERSIONER.get_version(name)
+    # version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
+    #     name,
+    #     sources,
+    #     build_arguments=[extra_cflags, extra_cuda_cflags, extra_ldflags, extra_include_paths],
+    #     build_directory=build_directory,
+    #     with_cuda=with_cuda,
+    #     is_python_module=is_python_module,
+    #     is_standalone=is_standalone,
+    # )
+    # if version > 0:
+    #     if version != old_version and verbose:
+    #         print(f'The input conditions for extension module {name} have changed. ' +
+    #               f'Bumping to version {version} and re-building as {name}_v{version}...')
+    #     name = f'{name}_v{version}'
 
-    if version != old_version:
-        baton = FileBaton(os.path.join(build_directory, 'lock'))
-        if baton.try_acquire():
-            try:
-                with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
-                    if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
-                        hipify_python.hipify(
-                            project_directory=build_directory,
-                            output_directory=build_directory,
-                            includes=os.path.join(build_directory, '*'),
-                            extra_files=[os.path.abspath(s) for s in sources],
-                            show_detailed=verbose,
-                            is_pytorch_extension=True,
-                            clean_ctx=clean_ctx
-                        )
-                    _write_ninja_file_and_build_library(
-                        name=name,
-                        sources=sources,
-                        extra_cflags=extra_cflags or [],
-                        extra_cuda_cflags=extra_cuda_cflags or [],
-                        extra_ldflags=extra_ldflags or [],
-                        extra_include_paths=extra_include_paths or [],
-                        build_directory=build_directory,
-                        verbose=verbose,
-                        with_cuda=with_cuda,
-                        is_standalone=is_standalone)
-            finally:
-                baton.release()
-        else:
-            baton.wait()
-    elif verbose:
-        print('No modifications detected for re-loaded extension '
-              f'module {name}, skipping build step...')
+    # if version != old_version:
+    #     baton = FileBaton(os.path.join(build_directory, 'lock'))
+    #     if baton.try_acquire():
+    #         try:
+    #             with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
+    #                 if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
+    #                     hipify_python.hipify(
+    #                         project_directory=build_directory,
+    #                         output_directory=build_directory,
+    #                         includes=os.path.join(build_directory, '*'),
+    #                         extra_files=[os.path.abspath(s) for s in sources],
+    #                         show_detailed=verbose,
+    #                         is_pytorch_extension=True,
+    #                         clean_ctx=clean_ctx
+    #                     )
+    #                 _write_ninja_file_and_build_library(
+    #                     name=name,
+    #                     sources=sources,
+    #                     extra_cflags=extra_cflags or [],
+    #                     extra_cuda_cflags=extra_cuda_cflags or [],
+    #                     extra_ldflags=extra_ldflags or [],
+    #                     extra_include_paths=extra_include_paths or [],
+    #                     build_directory=build_directory,
+    #                     verbose=verbose,
+    #                     with_cuda=with_cuda,
+    #                     is_standalone=is_standalone)
+    #         finally:
+    #             baton.release()
+    #     else:
+    #         baton.wait()
+    # elif verbose:
+    #     print('No modifications detected for re-loaded extension '
+    #           f'module {name}, skipping build step...')
 
-    if verbose:
-        print(f'Loading extension module {name}...')
+    # if verbose:
+    #     print(f'Loading extension module {name}...')
 
-    if is_standalone:
-        return _get_exec_path(name, build_directory)
+    # if is_standalone:
+    #     return _get_exec_path(name, build_directory)
 
     return _import_module_from_library(name, build_directory, is_python_module)
 
