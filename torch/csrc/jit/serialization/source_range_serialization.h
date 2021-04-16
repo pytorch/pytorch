@@ -17,7 +17,7 @@ class Pickler;
 class SourceRangeSerializer;
 class SourceRangeDeserializer;
 
-class SourceRangePickler {
+class TORCH_API SourceRangePickler {
  public:
   SourceRangePickler();
 
@@ -27,7 +27,7 @@ class SourceRangePickler {
   std::shared_ptr<SourceRangeSerializer> srs;
 };
 
-class SourceRangeUnpickler {
+class TORCH_API SourceRangeUnpickler {
  public:
   virtual c10::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range) = 0;

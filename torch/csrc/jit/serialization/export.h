@@ -56,7 +56,7 @@ TORCH_API std::string serialize_model_proto_to_string(
 TORCH_API void check_onnx_proto(const std::string& proto_string);
 
 // Serializer for both oldsyle and unified format TS serialization
-class ScriptModuleSerializer {
+class TORCH_API ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(
       caffe2::serialize::PyTorchStreamWriter& export_writer)
