@@ -626,7 +626,7 @@ class DistributedTest:
                 expected_time = time.time() + timeout.total_seconds()
                 with self.assertRaisesRegex(Exception, " (Timed out|closed|timeout) "):
                     dist.barrier(group_id)
-                self.assertGreaterEqual(time.time(), expected_time)
+                self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.05)
             else:
                 time.sleep(timeout.total_seconds())
 
@@ -2659,7 +2659,7 @@ class DistributedTest:
                 else:
                     dist.broadcast(expected_time, dest, group_id)
                     dist.barrier(group_id)
-                    self.assertGreaterEqual(
+                    self.assertGreaterAlmostEqual(
                         float(time.time()),
                         float(expected_time[0]),
                         "destination rank: %d, my rank: %d" % (dest, rank) +
