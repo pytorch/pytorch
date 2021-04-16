@@ -153,6 +153,20 @@ Tensor einsum(std::string equation, TensorList operands) {
   TORCH_CHECK(!operands.empty(), "einsum() must provide at least one operand");
   checkDeviceType("einsum()", operands, operands[0].device().type());
 
+  for (const auto& operand : operands) {
+    const auto scalar_type = operand.scalar_type();
+    TORCH_CHECK(
+        scalar_type != at::kBool,
+        "einsum() is not supported for ",
+        scalar_type,
+        " dtype");
+    if (operand.device().is_cuda()) {
+      TORCH_CHECK(
+          !at::isIntegralType(scalar_type, false),
+          "einsum() integral types are not supported on CUDA devices");
+    }
+  }
+
   // Code used to identify ELLIPSIS ("...")
   constexpr int ELLIPSIS = '.';
 

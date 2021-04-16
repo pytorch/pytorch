@@ -2162,6 +2162,24 @@ def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
         ),
     ]
 
+
+def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
+    tensors = [
+        make_tensor((2, 2, 3), device, dtype, requires_grad=requires_grad),
+        make_tensor((2, 3), device, dtype, requires_grad=requires_grad),
+        make_tensor((2, 1, 3), device, dtype, requires_grad=requires_grad),
+    ]
+
+    # (<number of operands>, <equation>)
+    test_cases = [
+        (1, '...->'),
+        (2, 'bik,jk->bij'),
+        (3, 'a...,...,a...->...'),
+    ]
+
+    return [SampleInput(tensors[:nop], args=(eq,)) for nop, eq in test_cases]
+
+
 def sample_inputs_linalg_qr(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates input for torch.linalg.qr
@@ -4450,6 +4468,15 @@ op_db: List[OpInfo] = [
                skipCPUIfNoLapack,
                skipCUDAIfRocm
            ],),
+    OpInfo('einsum',
+           # we need this lambda because SampleInput expects tensor input as the first argument
+           op=lambda tensors, equation: torch.einsum(equation, tensors),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_einsum,
+           # test does not work with passing lambda for op
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
