@@ -6,7 +6,9 @@
 namespace c10 {
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local AllocationPlanner* allocation_planner{nullptr};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local CPUProfilingAllocator* profiling_allocator{nullptr};
 
 struct MemBlock {
@@ -147,7 +149,9 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
   auto mem_events = create_and_sort_mem_events(allocation_sizes, allocation_lifetimes);
   uint64_t max_offset{0};
   for (const auto& mem_event : mem_events) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint64_t alloc_offset;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint64_t new_offset, new_size;
     if (mem_event.type == EventType::Allocate) {
       auto it = free_size_to_offset.lower_bound(mem_event.size);
