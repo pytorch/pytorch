@@ -1,4 +1,5 @@
 #include <ATen/native/TensorIterator.h>
+#include "c10/util/Exception.h"
 
 #include <array>
 #include <ATen/ExpandUtils.h>
@@ -1333,7 +1334,7 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
 // all the outputs are), but we have to provide all pure virtual methods
 // for MetaBase
 const Tensor& TensorIterator::maybe_get_output(int64_t output_idx) {
-  return operands_[output_idx].tensor;
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 SplitUntil32Bit TensorIteratorBase::with_32bit_indexing() const {
