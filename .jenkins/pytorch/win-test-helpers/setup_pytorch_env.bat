@@ -39,7 +39,13 @@ if %errorlevel% neq 0 ( exit /b %errorlevel% )
 popd
 
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest coverage
+pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest
+
+:: TODO: This is currently the config that runs coverage. We should delineate that more clearly.
+if "%BUILD_ENVIRONMENT%" == "pytorch-win-vs2019-cuda10-cudnn7-py3" (
+    python -mpip install coverage
+)
+
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
 
 set DISTUTILS_USE_SDK=1
