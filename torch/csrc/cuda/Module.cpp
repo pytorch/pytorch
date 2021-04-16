@@ -356,7 +356,6 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   py::dict result;
   result["num_alloc_retries"] = stats.num_alloc_retries;
   result["num_ooms"] = stats.num_ooms;
-  result["max_split_size"] = stats.max_split_size;
   result["allocation"] = statArrayToDict(stats.allocation);
   result["segment"] = statArrayToDict(stats.segment);
   result["active"] = statArrayToDict(stats.active);
@@ -365,8 +364,6 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   result["reserved_bytes"] = statArrayToDict(stats.reserved_bytes);
   result["active_bytes"] = statArrayToDict(stats.active_bytes);
   result["inactive_split_bytes"] = statArrayToDict(stats.inactive_split_bytes);
-  result["oversize_allocations"] = statToDict(stats.oversize_allocations);
-  result["oversize_segments"] = statToDict(stats.oversize_segments);
 
   return result.release().ptr();
   END_HANDLE_TH_ERRORS
