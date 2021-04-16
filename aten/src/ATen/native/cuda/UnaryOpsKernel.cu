@@ -36,7 +36,7 @@ void bitwise_not_kernel_cuda(TensorIteratorBase& iter) {
 void exp_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "exp_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::exp(a);
+      return std::exp(a);
     });
   });
 }
