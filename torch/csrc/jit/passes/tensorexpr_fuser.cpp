@@ -164,6 +164,7 @@ static const OperatorSet& supported_eltwise_set() {
       // TODO: enable slice, shape inference is not implemented for this op yet
 
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::matmul(Tensor self, Tensor other) -> Tensor",
   };
   // clang-format on
 
@@ -914,7 +915,8 @@ class TensorExprFuser {
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
     };
     static const OperatorSet cpu_only_operator_set{
-      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::matmul(Tensor self, Tensor other) -> Tensor",
     };
     // clang-format on
 
@@ -1016,6 +1018,12 @@ class TensorExprFuser {
     if (node->kind() == aten::conv2d) {
       if (!tensorexpr::conv2dIsSupported(node)) {
         GRAPH_DEBUG("Params of conv2d are not supported");
+        return false;
+      }
+    }
+    if (node->kind() == aten::matmul) {
+      if (!tensorexpr::matmulIsSupported(node)) {
+        GRAPH_DEBUG("Shapes of matmul inputs are not supported");
         return false;
       }
     }
