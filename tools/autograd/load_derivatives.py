@@ -437,7 +437,7 @@ def saved_variables(
         # replace self.sizes() with self_sizes
         (r'{}.sizes\(\)', {
             'suffix': '_sizes',
-            'type': 'IntArrayRef',
+            'type': 'at::IntArrayRef',
         }),
         # replace self.options() with self_options
         (r'{}.options\(\)', {
@@ -447,7 +447,7 @@ def saved_variables(
         # replace zeros_like(self) with self_info
         (r'zeros_like\({}\)', {
             'suffix': '_info',
-            'type': 'TypeAndSize',
+            'type': 'torch::autograd::generated::TypeAndSize',
             'expr': lambda name: name,  # at save-time
             'res': lambda name: name + '_info.zeros()',  # at eval-time
         }),
@@ -469,16 +469,16 @@ def saved_variables(
         # replace to_args_scalartypes(self) with self_args_scalartypes
         (r'to_args_scalartypes\({}\)', {
             'suffix': '_args_scalartypes',
-            'type': 'std::vector<ScalarType>',
+            'type': 'std::vector<at::ScalarType>',
         }),
         # replace TensorGeometry(self) with self_geometry
         (r'TensorGeometry\({}\)', {
             'suffix': '_geometry',
-            'type': 'TensorGeometry',
+            'type': 'at::TensorGeometry',
         }),
         (r'{}.scalar_type\(\)', {
             'suffix': '_scalar_type',
-            'type': 'ScalarType',
+            'type': 'at::ScalarType',
         }),
         # replace self.dim() with self_dim
         (r'{}.dim\(\)', {
@@ -488,7 +488,7 @@ def saved_variables(
         # replace self.strides() with self_strides
         (r'{}.strides\(\)', {
             'suffix': '_strides',
-            'type': 'IntArrayRef',
+            'type': 'at::IntArrayRef',
             'expr': stride_expr,
         }),
     ]

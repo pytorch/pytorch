@@ -3,9 +3,9 @@ from tools.codegen.model import (Argument, FunctionSchema, Return,
                                  assert_never)
 
 from tools.codegen.api.types import (ArgName, BaseCType, Binding,
-                                     ConstRefCType, CType, MutRefCType,
-                                     OptionalCType,
-                                     ListCType)
+                                     ConstRefCType, CType, MutRefCType, ListCType,
+                                     OptionalCType, tensorT, scalarT, layoutT,
+                                     deviceT, boolT, scalarTypeT)
 from tools.codegen.api import cpp
 
 from typing import Union, Sequence, List, Optional
@@ -29,17 +29,17 @@ def name(func: FunctionSchema) -> str:
 
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
     if str(t) == 'Tensor?':
-        tensor_type: OptionalCType = OptionalCType(BaseCType('Tensor', binds))
+        tensor_type: OptionalCType = OptionalCType(BaseCType(tensorT, binds))
         if mutable:
             return MutRefCType(tensor_type)
         else:
             return ConstRefCType(tensor_type)
     elif str(t) == 'Tensor?[]':
-        return ConstRefCType(ListCType(OptionalCType(BaseCType("Tensor", binds))))
+        return ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT, binds))))
     elif str(t) == 'Scalar':
-        return ConstRefCType(BaseCType('Scalar', binds))
+        return ConstRefCType(BaseCType(scalarT, binds))
     elif str(t) == 'Scalar?':
-        return ConstRefCType(OptionalCType(BaseCType('Scalar', binds)))
+        return ConstRefCType(OptionalCType(BaseCType(scalarT, binds)))
     return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
 def returns_type(rs: Sequence[Return]) -> CType:
@@ -77,25 +77,25 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out
         # to matter
         return [
             Binding(
-                ctype=OptionalCType(BaseCType('ScalarType', 'dtype')),
+                ctype=OptionalCType(BaseCType(scalarTypeT, 'dtype')),
                 name='dtype',
                 default=default,
                 argument=a,
             ),
             Binding(
-                ctype=OptionalCType(BaseCType('Layout', 'layout')),
+                ctype=OptionalCType(BaseCType(layoutT, 'layout')),
                 name='layout',
                 default=default,
                 argument=a,
             ),
             Binding(
-                ctype=OptionalCType(BaseCType('Device', 'device')),
+                ctype=OptionalCType(BaseCType(deviceT, 'device')),
                 name='device',
                 default=default,
                 argument=a,
             ),
             Binding(
-                ctype=OptionalCType(BaseCType('bool', 'pin_memory')),
+                ctype=OptionalCType(BaseCType(boolT, 'pin_memory')),
                 name='pin_memory',
                 default=default,
                 argument=a,
