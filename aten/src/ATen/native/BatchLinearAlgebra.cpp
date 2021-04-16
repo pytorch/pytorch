@@ -1695,55 +1695,119 @@ std::tuple<Tensor, Tensor> geqrf(const Tensor& input) {
   return std::make_tuple(QR, tau);
 }
 
-std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string mode) {
-  bool compute_q, reduced;
-  std::tie(compute_q, reduced) = _parse_qr_mode(mode);
-  int64_t m = self.size(-2), n = self.size(-1);
+/*
+  Computes the QR decomposition using GEQRF and ORGQR operations.
+  This is an in-place function and Q, R tensors must have correct shape and be Fortran contiguous.
 
-  // Setup inputs for apply_geqrf
-  auto self_sizes = self.sizes().vec();
-  self_sizes.pop_back();
-  self_sizes[self.dim() - 2] = std::min(m, n);
-  auto tau_working_copy = at::empty(self_sizes, self.options());
-  Tensor q_working_copy;
-  Tensor R;
+  Args:
+  * `input` - [in] Input tensor for QR decomposition
+  * `Q` - [out] Tensor containing the Q matrices of QR decomposition
+  * `R` - [out] Tensor containing the R matrices of QR decomposition
+  * `compute_q` - controls whether the Q tensor is computed
+  * `reduced_mode` - controls the size of Q and R tensors
 
-  // Setup input geometry for apply_orgqr
-  std::vector<int64_t> q_sizes, q_strides;
-  int64_t n_columns_q;
-  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, reduced);
+  For further details, please see the LAPACK documentation for GEQRF and ORGQR.
+*/
+void linalg_qr_out_helper(const Tensor& input, const Tensor& Q, const Tensor& R, bool compute_q, bool reduced_mode) {
+  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
 
-  // If there are no elements, then we simply return a pair of tensors of required dimensions
-  if (self.numel() == 0) {
-    R = at::empty({n_columns_q, n}, self.options());
-    if (compute_q) {
-      int64_t n_rows_q = q_sizes[self.dim() - 2];
-      q_working_copy = at::eye(n_rows_q, n_columns_q, self.options());
-    } else {
-      q_working_copy = at::empty({0}, self.options());
-    }
-    return std::make_tuple(q_working_copy, R);
+  TORCH_INTERNAL_ASSERT(input.scalar_type() == Q.scalar_type());
+  TORCH_INTERNAL_ASSERT(input.device() == Q.device());
+
+  TORCH_INTERNAL_ASSERT(input.scalar_type() == R.scalar_type());
+  TORCH_INTERNAL_ASSERT(input.device() == R.device());
+
+  auto m = input.size(-2);
+  auto n = input.size(-1);
+  auto mn = std::min(m, n);
+
+  // Q must have the expected shape: reduced_mode ? (..., m, min(m, n)) : (..., m, m)
+  if (compute_q) {
+    auto expected_Q_shape = input.sizes().vec();
+    expected_Q_shape.back() = reduced_mode ? mn : m;
+    TORCH_INTERNAL_ASSERT(Q.sizes().equals(expected_Q_shape));
+
+    // Q tensor must be in batched column major order (Fortran contiguous)
+    TORCH_INTERNAL_ASSERT(Q.transpose(-2, -1).is_contiguous());
   }
 
-  // First perform GEQRF for R and TAU (the elementary reflectors)
-  // We will need to generate R from the upper triangular matrix from the
-  // matrix input to GEQRF.
-  q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
-  q_working_copy.narrow(-1, 0, n).copy_(self);
+  // R must have the expected shape: (reduced_mode || !compute_q) ? (..., min(m,n), n) : (..., m, n)
+  auto expected_R_shape = input.sizes().vec();
+  expected_R_shape.end()[-2] = (reduced_mode || !compute_q) ? mn : m;
+  TORCH_INTERNAL_ASSERT(R.sizes().equals(expected_R_shape));
 
-  geqrf_stub(q_working_copy.device().type(), q_working_copy, tau_working_copy, m, n);
+  // R tensor must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT(R.transpose(-2, -1).is_contiguous());
 
-  R = q_working_copy.slice(-2, 0, n_columns_q).slice(-1, 0, n).triu();
+  auto tau_shape = input.sizes().vec();
+  tau_shape.pop_back();
+  tau_shape.back() = mn;
+  Tensor tau = at::empty(tau_shape, input.options());
+
+  // geqrf requires m x n workspace input that is modified in-place
+  // if m > n and reduced==true we use Q tensor for storing the result of geqrf operation
+  // otherwise R tensor is used
+  Tensor QR = R;
+  if (m > n && reduced_mode) {
+    QR = Q;
+  }
   if (!compute_q) {
-    // this is for mode='r'
-    Tensor empty_Q = at::empty({0}, self.options());
-    return std::make_tuple(empty_Q, R);
+    QR = at::empty(input.transpose(-2, -1).sizes(), input.options());
+    QR.transpose_(-2, -1);
   }
 
-  // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
-  orgqr_stub(q_working_copy.device().type(), q_working_copy, tau_working_copy, n_columns_q);
+  // geqrf_stub (apply_geqrf) performs calculations in-place and 'QR' must be a copy of input
+  QR.copy_(input);
+  geqrf_stub(input.device().type(), QR, tau, QR.size(-2), QR.size(-1));
 
-  return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q), R);
+  // this is for mode='r'
+  if (!compute_q) {
+    R.copy_(QR.slice(-2, 0, mn));
+    R.triu_();
+    return;
+  }
+
+  // if Q tensor was used for geqrf copy the result for R from QR
+  if (m > n && reduced_mode) {
+    R.copy_(Q.slice(-2, 0, n));
+  } else {
+    Q.slice(-1, 0, n).copy_(R.slice(-1, 0, m));
+  }
+  R.triu_();
+
+  // Next perform ORGQR for Q using the result from GEQRF
+  orgqr_stub(input.device().type(), const_cast<Tensor&>(Q), tau, Q.size(-1));
+}
+
+std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& input, std::string mode) {
+  bool compute_q, reduced_mode;
+  std::tie(compute_q, reduced_mode) = _parse_qr_mode(mode);
+  auto m = input.size(-2);
+  auto n = input.size(-1);
+  auto mn = std::min(m, n);
+
+  // Allocate Q, R tensors with correct shape and memory layout
+  Tensor Q;
+  if (compute_q) {
+    auto Qt_shape = input.sizes().vec();
+    Qt_shape.end()[-2] = reduced_mode ? mn : m;
+    Qt_shape.end()[-1] = m;
+    Q = at::empty(Qt_shape, input.options());
+    Q.transpose_(-2, -1); // make 'Q' with Fortran contiguous memory layout
+  } else {
+    Q = at::empty({0}, input.options());
+  }
+
+  auto Rt_shape = input.sizes().vec();
+  Rt_shape.end()[-2] = n;
+  Rt_shape.end()[-1] = (reduced_mode || !compute_q) ? mn : m;
+  Tensor R = at::empty(Rt_shape, input.options());
+  R.transpose_(-2, -1); // make 'R' with Fortran contiguous memory layout
+
+  // Now fill Q, R tensors with the result
+  linalg_qr_out_helper(input, Q, R, compute_q, reduced_mode);
+
+  return std::make_tuple(Q, R);
 }
 
 std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, std::string mode) {
