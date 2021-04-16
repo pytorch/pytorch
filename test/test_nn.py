@@ -620,30 +620,26 @@ class TestNN(NNTestCase):
         mod(inp, False).sum().backward()
         self.assertEqual(hook_called[0], 1)
 
-        # Input inplace error should throw an error (warning during deprecation cycle)
-        with self.assertWarnsRegex(UserWarning, "Output 0 of BackwardHookFunctionBackward is "
-                                   "a view and is being modified inplace."):
+        # Input inplace error should throw an error
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                    "a view and is being modified inplace."):
             mod(inp.clone(), True)
 
         # Input inplace error should throw an error if we try to re-use the view after they have
-        # been modified (warning during deprecation cycle)
+        # been modified
         local_inp = inp.clone()
         out = mod(local_inp, False)
         local_inp[0] *= 1
-        with self.assertWarnsRegex(UserWarning, "Output 0 of BackwardHookFunctionBackward is "
-                                   "a view and its base or another view"):
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                    "a view and its base or another view"):
             # Any operation involving the view will fail here
             mod.inp + 2
 
-        # Output inplace error should throw an error (warning during deprecation cycle)
-        with self.assertWarnsRegex(UserWarning, "BackwardHookFunctionBackward is a view "
-                                   "and is being modified inplace."):
-            # This error won't happen once the warning above is a proper error
-            with self.assertRaisesRegex(RuntimeError, "Module backward hook for grad_input is "
-                                        "called before the grad_output one."):
-                out = mod(inp, False)
-                out += 1
-                out.sum().backward()
+        # Output inplace error should throw an error
+        out = mod(inp, False)
+        with self.assertRaisesRegex(RuntimeError, "BackwardHookFunctionBackward is a view "
+                                    "and is being modified inplace."):
+            out += 1
 
     def test_hook_non_full_warning(self):
         def noop(*args):
@@ -1166,10 +1162,18 @@ class TestNN(NNTestCase):
         block.add_module('linear1', l1)
         block.add_module('linear2', l2)
         n = Net()
-        s = nn.Sequential(n, n, n, n)
+        s = nn.Sequential(n, n)
         self.assertEqual(list(s.named_modules()), [('', s), ('0', n), ('0.l1', l),
                                                    ('0.block', block), ('0.block.linear1', l1),
                                                    ('0.block.linear2', l2)])
+        # test the option to not remove duplicate module instances
+        self.assertEqual(list(s.named_modules(remove_duplicate=False)), [
+            ('', s), ('0', n), ('0.l1', l), ('0.l2', l),
+            ('0.block', block), ('0.block.linear1', l1),
+            ('0.block.linear2', l2),
+            ('1', n), ('1.l1', l), ('1.l2', l),
+            ('1.block', block), ('1.block.linear1', l1),
+            ('1.block.linear2', l2)])
 
     def test_register_buffer_raises_error_if_name_is_not_string(self):
         m = nn.Module()
