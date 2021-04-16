@@ -3094,7 +3094,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quantized_module, torch.ops.quantized.instance_norm,
                 skip_op_arg_for_functional=True)
 
-    def _test_default_node_quant_handler_ops(self, module, functional, qconfig, is_reference=True, node_list=[], additional_quant_pattern_dict={}):
+    def _test_default_node_quant_handler_ops(
+            self, module, functional, qconfig, is_reference=True, node_list=None, additional_quant_pattern_dict=None
+    ):
         class M(torch.nn.Module):
             def __init__(self, mod, func):
                 super().__init__()
@@ -3106,13 +3108,18 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.functional(x)
                 return x
 
+        if node_list is None:
+            node_list = []
+        if additional_quant_pattern_dict is None:
+            additional_quant_pattern_dict = {}
+
         data = torch.randn((2, 2, 2, 2))
         quant_type = QuantType.STATIC
-        custom_qconfig_dict = {"additional_quant_pattern": additional_quant_pattern_dict}
+        prepare_custom_qconfig_dict = {"additional_quant_pattern": additional_quant_pattern_dict}
         qconfig_dict = {"": qconfig}
 
         m = M(module, functional).eval()
-        m_prep = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict, custom_qconfig_dict)
+        m_prep = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict, prepare_custom_qconfig_dict)
         m_prep(data)
         m_quant = torch.quantization.quantize_fx.convert_fx(m_prep, is_reference=is_reference)
         m_quant(data)
@@ -3123,7 +3130,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         module = torch.nn.GELU
         functional = torch.nn.functional.gelu
         qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        # qconfig = {"object_type": [(module, None), (functional, qconfig)]}
         is_reference = False
         node_list = [
             ns.call_module(module),

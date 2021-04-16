@@ -1318,9 +1318,19 @@ class Quantizer:
                                 dtypes = get_qconfig_dtypes(this_node_qconfig)
                                 # TODO(future PR): update the pattern to quantize
                                 # handler logic to take this into account.
-                                skip_this_match = (node.target in binary_op_supported_dtypes and dtypes not in binary_op_supported_dtypes[node.target]) and not (
-                                    node.target in binary_reference_op_supported_dtypes and dtypes in binary_reference_op_supported_dtypes[node.target])
-                                # the second clause prevents a skip if the op/type are supported by reference pattern
+
+                                # note: the value of is_reference is unknown at prepare, so we have to cover both cases
+                                # handle is_reference = False
+                                skip_match_if_not_is_reference = node.target in binary_op_supported_dtypes and \
+                                    dtypes not in binary_op_supported_dtypes[node.target]
+
+                                # handle is_reference = True
+                                skip_match_if_is_reference = node.target in binary_reference_op_supported_dtypes and \
+                                    dtypes not in binary_reference_op_supported_dtypes[node.target]
+
+                                # only skip if both sides are unsupported
+                                skip_this_match = skip_match_if_not_is_reference and skip_match_if_is_reference
+
                         if not skip_this_match:
                             matched: List[Any] = []
                             record_match(pattern, node, matched)

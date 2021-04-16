@@ -177,7 +177,8 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
 
-        if is_reference and self.binary_op in binary_reference_op_supported_dtypes and dtypes in binary_reference_op_supported_dtypes[self.binary_op]:
+        if is_reference and self.binary_op in binary_reference_op_supported_dtypes and \
+                dtypes in binary_reference_op_supported_dtypes[self.binary_op]:
             if dtypes in binary_op_int8_dtypes:
                 args = load_arg(quantized=[0, 1])(node.args)
                 args = load_arg(quantized=False)(node.args)
@@ -195,8 +196,9 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     "No implementation found for dtype combination: {}"
                     "for op {} with is_reference={} despite it being listed as supported"
                     "this should not happen".format(dtypes, self.binary_op, is_reference))
-                assert False
-        elif not is_reference and self.binary_op in binary_op_supported_dtypes and dtypes in binary_op_supported_dtypes[self.binary_op]:
+                AssertionError()
+        elif not is_reference and self.binary_op in binary_op_supported_dtypes and \
+                dtypes in binary_op_supported_dtypes[self.binary_op]:
             if dtypes in [(torch.quint8, torch.qint8, None)]:
                 assert self.quantized_binary_op is not None
                 if self.num_tensor_args == 1:
@@ -250,7 +252,17 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 "dtype combination: {} is not "
                 "supported by {} for is_reference={}. "
                 "Supported non-reference dtype combinations are: {} "
-                "Supported reference dtype combinations are: {}".format(dtypes, self.binary_op, is_reference, binary_op_supported_dtypes[self.binary_op], [] if self.binary_op not in binary_reference_op_supported_dtypes.keys() else binary_reference_op_supported_dtypes[self.binary_op]))
+                "Supported reference dtype combinations are: {}"
+                "".format(dtypes,
+                          self.binary_op,
+                          is_reference,
+                          binary_op_supported_dtypes[self.binary_op],
+                          (
+                              [] if self.binary_op not in binary_reference_op_supported_dtypes.keys()
+                              else binary_reference_op_supported_dtypes[self.binary_op]
+                          )
+                          )
+            )
             if self.relu_node:
                 op_out = quantizer.quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=False))
                 relu_args = [op_out]
@@ -804,7 +816,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.LayerNorm)
 @register_quant_pattern(torch.nn.SiLU)
 # we currently only support reference patterns for these ops so they have been removed
-# until they receive a proper fp16 kernal. To use the reference pattern, use a custom qconfig
+# until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.GELU)
 # @register_quant_pattern(torch.nn.Softmax)
 @register_quant_pattern(torch.nn.functional.hardswish)
@@ -813,7 +825,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.silu)
 # we currently only support reference patterns for these ops so they have been removed
-# until they receive a proper fp16 kernal. To use the reference pattern, use a custom qconfig
+# until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.functional.gelu)
 # @register_quant_pattern(torch.nn.functional.softmax)
 class DefaultNodeQuantizeHandler(QuantizeHandler):
@@ -923,7 +935,8 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 assert dtypes in [(torch.float16, torch.float16, None)]
                 # Generally fp16 kernels don't exist for fp16 ops
                 warnings.warn(
-                    "Only reference patterns are currently supported for {dtype} dtype with {op} op".format(dtype=dtypes, op=self.op))
+                    "Only reference patterns are currently supported for {dtype} dtype with {op} op"
+                    "".format(dtype=dtypes, op=self.op))
                 return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
         else:
             assert is_reference
