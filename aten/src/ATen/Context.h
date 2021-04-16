@@ -48,32 +48,32 @@ class TORCH_API Context {
       AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
   }
-  static bool isPinnedPtr(void* data) {
+  bool isPinnedPtr(void* data) {
     return detail::getCUDAHooks().isPinnedPtr(data);
   }
-  static bool hasOpenMP() ;
-  static bool hasMKL() ;
-  static bool hasLAPACK() ;
-  static bool hasMKLDNN() ;
-  static bool hasMAGMA() {
+  bool hasOpenMP() const;
+  bool hasMKL() const;
+  bool hasLAPACK() const;
+  bool hasMKLDNN() const;
+  bool hasMAGMA() const {
     return detail::getCUDAHooks().hasMAGMA();
   }
-  static bool hasCUDA() {
+  bool hasCUDA() const {
     return detail::getCUDAHooks().hasCUDA();
   }
-  static bool hasCUDART() {
+  bool hasCUDART() const {
     return detail::getCUDAHooks().hasCUDART();
   }
-  static long versionCUDART() {
+  long versionCUDART() const {
     return detail::getCUDAHooks().versionCUDART();
   }
-  static bool hasHIP() {
+  bool hasHIP() const {
     return detail::getHIPHooks().hasHIP();
   }
-  static bool hasXLA() {
+  bool hasXLA() const {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
-  static bool hasMLC() {
+  bool hasMLC() const {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::MLC);
   }
   // defined in header so that getNonVariableType has ability to inline
@@ -90,7 +90,7 @@ class TORCH_API Context {
     });
     return thh_state.get();
   }
-  static const at::cuda::NVRTC& getNVRTC() {
+  const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
   }
   THCState* getTHCState() {
@@ -101,7 +101,7 @@ class TORCH_API Context {
     return thh_state.get();
   }
 
-  static bool setFlushDenormal(bool on);
+  bool setFlushDenormal(bool on);
 
   // NB: This method is *purely* whether or not a user requested
   // that CuDNN was enabled, it doesn't actually say anything about
@@ -178,12 +178,12 @@ class TORCH_API Context {
   //    }
 
   // Throws an error if `Context::deterministicAlgorithms()` is true
-  static void alertNotDeterministic(c10::string_view const& caller);
+  void alertNotDeterministic(c10::string_view const& caller);
 
   // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA >= 10.2, and
   // CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or ":4096:8". For more details:
   // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
-  void alertCuBLASConfigNotDeterministic() const;
+  void alertCuBLASConfigNotDeterministic();
 
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
@@ -191,8 +191,8 @@ class TORCH_API Context {
   void setAllowTF32CuBLAS(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
-  static const std::vector<at::QEngine>& supportedQEngines() ;
-  static bool isXNNPACKAvailable() ;
+  const std::vector<at::QEngine>& supportedQEngines() const;
+  bool isXNNPACKAvailable() const;
   // This method is used to release the original weight after pre-packing.
   // It should be called once before loading/running the model.
   // NB: By default it is set to true for mobile builds.
@@ -216,7 +216,7 @@ class TORCH_API Context {
       lazyInitHIP();
     }
   }
-  static bool checkCuBLASConfigDeterministic();
+  bool checkCuBLASConfigDeterministic();
   std::once_flag thc_init;
   std::once_flag thh_init;
   bool enabled_cudnn = true;

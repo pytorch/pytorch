@@ -109,7 +109,7 @@ bool Context::checkCuBLASConfigDeterministic() {
   return cublas_config_deterministic;
 }
 
-void Context::alertCuBLASConfigNotDeterministic() const {
+void Context::alertCuBLASConfigNotDeterministic() {
   static bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
   TORCH_CHECK(!deterministicAlgorithms() || cublas_config_deterministic,
     "Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or ",
@@ -138,7 +138,7 @@ void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
 }
 
-bool Context::hasMKL() {
+bool Context::hasMKL() const {
 #if AT_MKL_ENABLED()
   return true;
 #else
@@ -146,7 +146,7 @@ bool Context::hasMKL() {
 #endif
 }
 
-bool Context::hasMKLDNN() {
+bool Context::hasMKLDNN() const {
 #if AT_MKLDNN_ENABLED()
   return true;
 #else
@@ -154,7 +154,7 @@ bool Context::hasMKLDNN() {
 #endif
 }
 
-bool Context::hasOpenMP() {
+bool Context::hasOpenMP() const {
 #ifdef _OPENMP
   return true;
 #else
@@ -162,7 +162,7 @@ bool Context::hasOpenMP() {
 #endif
 }
 
-bool Context::hasLAPACK() {
+bool Context::hasLAPACK() const {
 #ifdef USE_LAPACK
   return true;
 #else
@@ -184,7 +184,7 @@ void Context::setQEngine(at::QEngine e) {
   TORCH_CHECK(false, "quantized engine ", toString(e), " is not supported");
 }
 
-const std::vector<at::QEngine>& Context::supportedQEngines() {
+const std::vector<at::QEngine>& Context::supportedQEngines() const {
   static auto supported_qengines = []() {
     std::vector<at::QEngine> engines = {};
     // Engines are listed in priority order: later one wins
@@ -212,7 +212,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
   return supported_qengines;
 }
 
-bool Context::isXNNPACKAvailable() {
+bool Context::isXNNPACKAvailable() const {
 #ifdef USE_XNNPACK
   return true;
 #else

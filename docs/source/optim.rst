@@ -102,39 +102,33 @@ Example::
 
 .. _optimizer-algorithms:
 
-Base class
-----------
-
-.. autoclass:: Optimizer
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    Optimizer.add_param_group
-    Optimizer.load_state_dict
-    Optimizer.state_dict
-    Optimizer.step
-    Optimizer.zero_grad
-
 Algorithms
 ----------
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    Adadelta
-    Adagrad
-    Adam
-    AdamW
-    SparseAdam
-    Adamax
-    ASGD
-    LBFGS
-    RMSprop
-    Rprop
-    SGD
+.. autoclass:: Optimizer
+    :members:
+.. autoclass:: Adadelta
+    :members:
+.. autoclass:: Adagrad
+    :members:
+.. autoclass:: Adam
+    :members:
+.. autoclass:: AdamW
+    :members:
+.. autoclass:: SparseAdam
+    :members:
+.. autoclass:: Adamax
+    :members:
+.. autoclass:: ASGD
+    :members:
+.. autoclass:: LBFGS
+    :members:
+.. autoclass:: RMSprop
+    :members:
+.. autoclass:: Rprop
+    :members:
+.. autoclass:: SGD
+    :members:
 
 How to adjust learning rate
 ---------------------------
@@ -161,20 +155,26 @@ should write your code this way:
   if you are calling ``scheduler.step()`` at the wrong time.
 
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    lr_scheduler.LambdaLR
-    lr_scheduler.MultiplicativeLR
-    lr_scheduler.StepLR
-    lr_scheduler.MultiStepLR
-    lr_scheduler.ExponentialLR
-    lr_scheduler.CosineAnnealingLR
-    lr_scheduler.ReduceLROnPlateau
-    lr_scheduler.CyclicLR
-    lr_scheduler.OneCycleLR
-    lr_scheduler.CosineAnnealingWarmRestarts
+.. autoclass:: torch.optim.lr_scheduler.LambdaLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.MultiplicativeLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.StepLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.MultiStepLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.ExponentialLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.CosineAnnealingLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.ReduceLROnPlateau
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.CyclicLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.OneCycleLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+    :members:
 
 Stochastic Weight Averaging
 ---------------------------

@@ -27,7 +27,6 @@ if is_available():
         FileStore,
         TCPStore,
         ProcessGroup,
-        PrefixStore,
         Reducer,
         Logger,
         BuiltinCommHookType,

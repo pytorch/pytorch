@@ -66,10 +66,8 @@ std::vector<std::function<void(either<Left, Right>&)>> EXPECT_IS_LEFT(const Left
     }, [&] (either<Left, Right>& obj) {
       EXPECT_EQ(expected, std::move(obj).left());
     }, [&] (either<Left, Right>& obj) {
-      // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
       EXPECT_ANY_THROW(obj.right());
     }, [&] (either<Left, Right>& obj) {
-      // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
       EXPECT_ANY_THROW(std::move(obj).right());
     }
   };
@@ -87,10 +85,8 @@ std::vector<std::function<void(either<Left, Right>&)>> EXPECT_IS_RIGHT(const Rig
       }, [&] (either<Left, Right>& obj) {
         EXPECT_EQ(expected, std::move(obj).right());
       }, [&] (either<Left, Right>& obj) {
-        // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
         EXPECT_ANY_THROW(obj.left());
       }, [&] (either<Left, Right>& obj) {
-        // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
         EXPECT_ANY_THROW(std::move(obj).left());
       }
   };
@@ -117,7 +113,6 @@ void TestSpaceUsage() {
 }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, SpaceUsage) {
     TestSpaceUsage<char, int>();
     TestSpaceUsage<int, short>();
@@ -126,7 +121,6 @@ TEST(EitherTest, SpaceUsage) {
     TestSpaceUsage<string, vector<string>>();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeft) {
   test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
@@ -141,7 +135,6 @@ TEST(EitherTest, givenLeft) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRight) {
   test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
@@ -156,7 +149,6 @@ TEST(EitherTest, givenRight) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenMakeLeft) {
     test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
@@ -171,7 +163,6 @@ TEST(EitherTest, givenMakeLeft) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenMakeLeftWithSameType) {
   test_with_matrix({
       [] (std::function<void(either<int, int>&)> test) {
@@ -186,7 +177,6 @@ TEST(EitherTest, givenMakeLeftWithSameType) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenMakeRight) {
   test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
@@ -201,7 +191,6 @@ TEST(EitherTest, givenMakeRight) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenMakeRightWithSameType) {
   test_with_matrix({
       [] (std::function<void(either<string, string>&)> test) {
@@ -216,7 +205,6 @@ TEST(EitherTest, givenMakeRightWithSameType) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenMovableOnlyMakeLeft) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, string>&)> test) {
@@ -231,7 +219,6 @@ TEST(EitherTest, givenMovableOnlyMakeLeft) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenMovableOnlyMakeRight) {
   test_with_matrix({
       [] (std::function<void(either<int, MovableOnly>&)> test) {
@@ -246,43 +233,34 @@ TEST(EitherTest, givenMovableOnlyMakeRight) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenMultiParamMakeLeft) {
   test_with_matrix({
       [] (std::function<void(either<pair<int, int>, string>&)> test) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         either<pair<int, int>, string> a = make_left<pair<int, int>, string>(5, 6);
         test(a);
       }, [] (std::function<void(either<pair<int, int>, string>&)> test) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto a = make_left<pair<int, int>, string>(5, 6);
         test(a);
       },
     },
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     EXPECT_IS_LEFT<pair<int, int>, string>(pair<int, int>(5, 6))
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenMultiParamMakeRight) {
   test_with_matrix({
       [] (std::function<void(either<int, pair<int, int>>&)> test) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         either<int, pair<int, int>> a = make_right<int, pair<int, int>>(5, 6);
         test(a);
       }, [] (std::function<void(either<int, pair<int, int>>&)> test) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         auto a = make_right<int, pair<int, int>>(5, 6);
         test(a);
       }
     },
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     EXPECT_IS_RIGHT<int, pair<int, int>>(pair<int, int>(5, 6))
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyConstructedFromValue_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, int>&)> test) {
@@ -295,7 +273,6 @@ TEST(EitherTest, givenLeftCopyConstructedFromValue_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyConstructedFromValue_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(string&)> test) {
@@ -308,7 +285,6 @@ TEST(EitherTest, givenLeftCopyConstructedFromValue_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyConstructedFromValue_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
@@ -321,7 +297,6 @@ TEST(EitherTest, givenRightCopyConstructedFromValue_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyConstructedFromValue_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(string&)> test) {
@@ -334,7 +309,6 @@ TEST(EitherTest, givenRightCopyConstructedFromValue_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveConstructedFromValue_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, int>&)> test) {
@@ -347,7 +321,6 @@ TEST(EitherTest, givenLeftMoveConstructedFromValue_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveConstructedFromValue_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(MovableOnly&)> test) {
@@ -360,7 +333,6 @@ TEST(EitherTest, givenLeftMoveConstructedFromValue_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveConstructedFromValue_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<int, MovableOnly>&)> test) {
@@ -373,7 +345,6 @@ TEST(EitherTest, givenRightMoveConstructedFromValue_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveConstructedFromValue_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(MovableOnly&)> test) {
@@ -386,7 +357,6 @@ TEST(EitherTest, givenRightMoveConstructedFromValue_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyAssignedFromValue_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, int>&)> test) {
@@ -405,7 +375,6 @@ TEST(EitherTest, givenLeftCopyAssignedFromValue_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyAssignedFromValue_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(string&)> test) {
@@ -424,7 +393,6 @@ TEST(EitherTest, givenLeftCopyAssignedFromValue_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyAssignedFromValue_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
@@ -443,7 +411,6 @@ TEST(EitherTest, givenRightCopyAssignedFromValue_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyAssignedFromValue_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(string&)> test) {
@@ -462,7 +429,6 @@ TEST(EitherTest, givenRightCopyAssignedFromValue_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveAssignedFromValue_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, string>&)> test) {
@@ -481,7 +447,6 @@ TEST(EitherTest, givenLeftMoveAssignedFromValue_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveAssignedFromValue_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(MovableOnly&)> test) {
@@ -500,7 +465,6 @@ TEST(EitherTest, givenLeftMoveAssignedFromValue_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveAssignedFromValue_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, MovableOnly>&)> test) {
@@ -519,7 +483,6 @@ TEST(EitherTest, givenRightMoveAssignedFromValue_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveAssignedFromValue_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(MovableOnly&)> test) {
@@ -538,12 +501,10 @@ TEST(EitherTest, givenRightMoveAssignedFromValue_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyConstructed_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, int>&)> test) {
         either<string, int> a("4");
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         either<string, int> b(a);
         test(b);
       }
@@ -552,12 +513,10 @@ TEST(EitherTest, givenLeftCopyConstructed_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyConstructed_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, int>&)> test) {
         either<string, int> a("4");
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         either<string, int> b(a);
         test(a);
       }
@@ -566,12 +525,10 @@ TEST(EitherTest, givenLeftCopyConstructed_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyConstructed_withSameType_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_left<string, string>("4");
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         either<string, string> b(a);
         test(b);
       }
@@ -580,12 +537,10 @@ TEST(EitherTest, givenLeftCopyConstructed_withSameType_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyConstructed_withSameType_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_left<string, string>("4");
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         either<string, string> b(a);
         test(a);
       }
@@ -594,12 +549,10 @@ TEST(EitherTest, givenLeftCopyConstructed_withSameType_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyConstructed_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a("4");
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         either<int, string> b(a);
         test(b);
       }
@@ -609,12 +562,10 @@ TEST(EitherTest, givenRightCopyConstructed_thenNewIsCorrect) {
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyConstructed_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a("4");
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         either<int, string> b(a);
         test(a);
       }
@@ -623,12 +574,10 @@ TEST(EitherTest, givenRightCopyConstructed_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyConstructed_withSameType_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_right<string, string>("4");
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         either<string, string> b(a);
         test(b);
       }
@@ -638,12 +587,10 @@ TEST(EitherTest, givenRightCopyConstructed_withSameType_thenNewIsCorrect) {
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyConstructed_withSameType_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_right<string, string>("4");
-        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         either<string, string> b(a);
         test(a);
       }
@@ -652,7 +599,6 @@ TEST(EitherTest, givenRightCopyConstructed_withSameType_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveConstructed_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, int>&)> test) {
@@ -665,7 +611,6 @@ TEST(EitherTest, givenLeftMoveConstructed_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveConstructed_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, int>&)> test) {
@@ -678,7 +623,6 @@ TEST(EitherTest, givenLeftMoveConstructed_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveConstructed_withSameType_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
@@ -691,7 +635,6 @@ TEST(EitherTest, givenLeftMoveConstructed_withSameType_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveConstructed_withSameType_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
@@ -704,7 +647,6 @@ TEST(EitherTest, givenLeftMoveConstructed_withSameType_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveConstructed_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<int, MovableOnly>&)> test) {
@@ -717,7 +659,6 @@ TEST(EitherTest, givenRightMoveConstructed_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveConstructed_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<int, MovableOnly>&)> test) {
@@ -730,7 +671,6 @@ TEST(EitherTest, givenRightMoveConstructed_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveConstructed_withSameType_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
@@ -743,7 +683,6 @@ TEST(EitherTest, givenRightMoveConstructed_withSameType_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveConstructed_withSameType_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
@@ -756,7 +695,6 @@ TEST(EitherTest, givenRightMoveConstructed_withSameType_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyAssigned_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, int>&)> test) {
@@ -775,7 +713,6 @@ TEST(EitherTest, givenLeftCopyAssigned_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyAssigned_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, int>&)> test) {
@@ -794,7 +731,6 @@ TEST(EitherTest, givenLeftCopyAssigned_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyAssigned_withSameType_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, string>&)> test) {
@@ -813,7 +749,6 @@ TEST(EitherTest, givenLeftCopyAssigned_withSameType_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftCopyAssigned_withSameType_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, string>&)> test) {
@@ -832,7 +767,6 @@ TEST(EitherTest, givenLeftCopyAssigned_withSameType_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyAssigned_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
@@ -851,7 +785,6 @@ TEST(EitherTest, givenRightCopyAssigned_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyAssigned_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
@@ -870,7 +803,6 @@ TEST(EitherTest, givenRightCopyAssigned_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyAssigned_withSameType_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, string>&)> test) {
@@ -889,7 +821,6 @@ TEST(EitherTest, givenRightCopyAssigned_withSameType_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightCopyAssigned_withSameType_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, string>&)> test) {
@@ -908,7 +839,6 @@ TEST(EitherTest, givenRightCopyAssigned_withSameType_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveAssigned_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, string>&)> test) {
@@ -927,7 +857,6 @@ TEST(EitherTest, givenLeftMoveAssigned_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveAssigned_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, string>&)> test) {
@@ -946,7 +875,6 @@ TEST(EitherTest, givenLeftMoveAssigned_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveAssigned_withSameType_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
@@ -965,7 +893,6 @@ TEST(EitherTest, givenLeftMoveAssigned_withSameType_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftMoveAssigned_withSameType_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
@@ -984,7 +911,6 @@ TEST(EitherTest, givenLeftMoveAssigned_withSameType_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveAssigned_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, MovableOnly>&)> test) {
@@ -1003,7 +929,6 @@ TEST(EitherTest, givenRightMoveAssigned_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveAssigned_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<string, MovableOnly>&)> test) {
@@ -1022,7 +947,6 @@ TEST(EitherTest, givenRightMoveAssigned_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveAssigned_withSameType_thenNewIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
@@ -1041,7 +965,6 @@ TEST(EitherTest, givenRightMoveAssigned_withSameType_thenNewIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRightMoveAssigned_withSameType_thenOldIsCorrect) {
   test_with_matrix({
       [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
@@ -1060,27 +983,22 @@ TEST(EitherTest, givenRightMoveAssigned_withSameType_thenOldIsCorrect) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeft_whenModified_thenValueIsChanged) {
   test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a(4);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         a.left() = 5;
         test(a);
       }, [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a(4);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         a.left() = 5;
         test(a);
       }
     },
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     EXPECT_IS_LEFT<int, string>(5)
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenRight_whenModified_thenValueIsChanged) {
   test_with_matrix({
       [] (std::function<void(either<int, string>&)> test) {
@@ -1097,7 +1015,6 @@ TEST(EitherTest, givenRight_whenModified_thenValueIsChanged) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, canEmplaceConstructLeft) {
   test_with_matrix({
       [] (std::function<void(either<tuple<int, int>, tuple<int, string, int>>&)> test) {
@@ -1109,7 +1026,6 @@ TEST(EitherTest, canEmplaceConstructLeft) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, canEmplaceConstructRight) {
   test_with_matrix({
       [] (std::function<void(either<tuple<int, int>, tuple<int, string, int>>&)> test) {
@@ -1121,35 +1037,30 @@ TEST(EitherTest, canEmplaceConstructRight) {
   );
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenEqualLefts_thenAreEqual) {
   either<string, int> a("3");
   either<string, int> b("3");
   EXPECT_TRUE(a == b);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenEqualLefts_thenAreNotUnequal) {
   either<string, int> a("3");
   either<string, int> b("3");
   EXPECT_FALSE(a != b);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenEqualRights_thenAreEqual) {
   either<string, int> a(3);
   either<string, int> b(3);
   EXPECT_TRUE(a == b);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenEqualRights_thenAreNotUnequal) {
   either<string, int> a(3);
   either<string, int> b(3);
   EXPECT_FALSE(a != b);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftAndRight_thenAreNotEqual) {
   either<string, int> a("3");
   either<string, int> b(3);
@@ -1157,7 +1068,6 @@ TEST(EitherTest, givenLeftAndRight_thenAreNotEqual) {
   EXPECT_FALSE(b == a);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftAndRight_thenAreUnequal) {
   either<string, int> a("3");
   either<string, int> b(3);
@@ -1165,21 +1075,18 @@ TEST(EitherTest, givenLeftAndRight_thenAreUnequal) {
   EXPECT_TRUE(b != a);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, OutputLeft) {
   ostringstream str;
   str << either<string, int>("mystring");
   EXPECT_EQ("Left(mystring)", str.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, OutputRight) {
   ostringstream str;
   str << either<int, string>("mystring");
   EXPECT_EQ("Right(mystring)", str.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftAndRightWithSameType_thenAreNotEqual) {
   either<string, string> a = make_left<string, string>("3");
   either<string, string> b = make_right<string, string>("3");
@@ -1187,7 +1094,6 @@ TEST(EitherTest, givenLeftAndRightWithSameType_thenAreNotEqual) {
   EXPECT_FALSE(b == a);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest, givenLeftAndRightWithSameType_thenAreUnequal) {
   either<string, string> a = make_left<string, string>("3");
   either<string, string> b = make_right<string, string>("3");
@@ -1208,7 +1114,6 @@ public:
 class ClassWithDestructorCallback {
 public:
   ClassWithDestructorCallback(const DestructorCallback *destructorCallback) : _destructorCallback(destructorCallback) {}
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ClassWithDestructorCallback(const ClassWithDestructorCallback &rhs): _destructorCallback(rhs._destructorCallback) {}
 
   ~ClassWithDestructorCallback() {
@@ -1218,7 +1123,6 @@ public:
 private:
   const DestructorCallback *_destructorCallback;
 
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
   ClassWithDestructorCallback &operator=(const ClassWithDestructorCallback &rhs) = delete;
 };
 class OnlyMoveableClassWithDestructorCallback {
@@ -1237,7 +1141,6 @@ private:
 
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest_Destructor, LeftDestructorIsCalled) {
     DestructorCallback destructorCallback;
     destructorCallback.EXPECT_CALLED(2);  //Once for the temp object, once when the either class destructs
@@ -1246,7 +1149,6 @@ TEST(EitherTest_Destructor, LeftDestructorIsCalled) {
     either<ClassWithDestructorCallback, string> var = temp;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest_Destructor, RightDestructorIsCalled) {
     DestructorCallback destructorCallback;
     destructorCallback.EXPECT_CALLED(2);  //Once for the temp object, once when the either class destructs
@@ -1255,29 +1157,24 @@ TEST(EitherTest_Destructor, RightDestructorIsCalled) {
     either<string, ClassWithDestructorCallback> var = temp;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterCopying) {
     DestructorCallback destructorCallback;
     destructorCallback.EXPECT_CALLED(3);  //Once for the temp object, once for var1 and once for var2
 
     ClassWithDestructorCallback temp(&destructorCallback);
     either<ClassWithDestructorCallback, string> var1 = temp;
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     either<ClassWithDestructorCallback, string> var2 = var1;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest_Destructor, RightDestructorIsCalledAfterCopying) {
     DestructorCallback destructorCallback;
     destructorCallback.EXPECT_CALLED(3);  //Once for the temp object, once for var1 and once for var2
 
     ClassWithDestructorCallback temp(&destructorCallback);
     either<string, ClassWithDestructorCallback> var1 = temp;
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     either<string, ClassWithDestructorCallback> var2 = var1;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterMoving) {
     DestructorCallback destructorCallback;
     destructorCallback.EXPECT_CALLED(3);  //Once for the temp object, once for var1 and once for var2
@@ -1287,7 +1184,6 @@ TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterMoving) {
     either<OnlyMoveableClassWithDestructorCallback, string> var2 = std::move(var1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest_Destructor, RightDestructorIsCalledAfterMoving) {
     DestructorCallback destructorCallback;
     destructorCallback.EXPECT_CALLED(3);  //Once for the temp object, once for var1 and once for var2
@@ -1297,7 +1193,6 @@ TEST(EitherTest_Destructor, RightDestructorIsCalledAfterMoving) {
     either<string, OnlyMoveableClassWithDestructorCallback> var2 = std::move(var1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterAssignment) {
     DestructorCallback destructorCallback1;
     DestructorCallback destructorCallback2;
@@ -1311,7 +1206,6 @@ TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterAssignment) {
     var1 = var2;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest_Destructor, RightDestructorIsCalledAfterAssignment) {
     DestructorCallback destructorCallback1;
     DestructorCallback destructorCallback2;
@@ -1325,7 +1219,6 @@ TEST(EitherTest_Destructor, RightDestructorIsCalledAfterAssignment) {
     var1 = var2;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterMoveAssignment) {
     DestructorCallback destructorCallback1;
     DestructorCallback destructorCallback2;
@@ -1339,7 +1232,6 @@ TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterMoveAssignment) {
     var1 = std::move(var2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EitherTest_Destructor, RightDestructorIsCalledAfterMoveAssignment) {
     DestructorCallback destructorCallback1;
     DestructorCallback destructorCallback2;

@@ -14,16 +14,10 @@ namespace jit {
 
 struct TORCH_API StaticModuleOptions {
   bool cleanup_activations{true};
-  // to batch allocate (deallocate) tensor storage for all non-escaping
-  // temporary tensors
   bool enable_out_variant{true};
-  // to reuse tensor storage for tensors whose live-range do not overlap to
-  // reduce memory footprint (enable_out_variant must be true)
   bool optimize_memory{true};
-  // to batch allocate tensor storage for output tensors of the
-  // graph, where storage is deallocated outside static runtime
-  // (enable_out_variant must be true)
-  bool optimize_graph_output_memory{false};
+  // to enable MemoryPlanner on output tensors
+  bool optimize_output_memory{false};
 };
 
 /// The static runime supports two execution modes.
@@ -289,8 +283,7 @@ class MemoryPlanner {
       StaticRuntime* runtime,
       const std::unordered_map<const Value*, std::vector<const Value*>>&,
       const std::unordered_set<const Value*>& external_values,
-      bool enable_out_variant,
-      bool manage_graph_output_memory);
+      bool out_variants);
 
   void allocate();
   void deallocate();

@@ -7,12 +7,9 @@ Automatic differentiation package - torch.autograd
 .. automodule:: torch.autograd
 .. currentmodule:: torch.autograd
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
+.. autofunction:: backward
 
-    backward
-    grad
+.. autofunction:: grad
 
 .. _functional-api:
 
@@ -34,29 +31,28 @@ For example, for a function ``f`` that takes three inputs, a Tensor for which we
 tensor that should be considered constant and a boolean flag as ``f(input, constant, flag=flag)``
 you can use it as ``functional.jacobian(lambda x: f(x, constant, flag=flag), input)``.
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
+.. autofunction:: torch.autograd.functional.jacobian
 
-    functional.jacobian
-    functional.hessian
-    functional.vjp
-    functional.jvp
-    functional.vhp
-    functional.hvp
+.. autofunction:: torch.autograd.functional.hessian
+
+.. autofunction:: torch.autograd.functional.vjp
+
+.. autofunction:: torch.autograd.functional.jvp
+
+.. autofunction:: torch.autograd.functional.vhp
+
+.. autofunction:: torch.autograd.functional.hvp
 
 .. _locally-disable-grad:
 
 Locally disabling gradient computation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
+.. autoclass:: no_grad
 
-    no_grad
-    enable_grad
-    set_grad_enabled
+.. autoclass:: enable_grad
+
+.. autoclass:: set_grad_enabled
 
 .. _default-grad-layouts:
 
@@ -152,54 +148,47 @@ Variable (deprecated)
 
 Tensor autograd functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-.. autosummary::
-    :nosignatures:
+.. autoclass:: torch.Tensor
+   :noindex:
 
-   torch.Tensor.grad
-   torch.Tensor.requires_grad
-   torch.Tensor.is_leaf
-   torch.Tensor.backward
-   torch.Tensor.detach
-   torch.Tensor.detach_
-   torch.Tensor.register_hook
-   torch.Tensor.retain_grad
+   .. autoattribute:: grad
+      :noindex:
+   .. autoattribute:: requires_grad
+      :noindex:
+   .. autoattribute:: is_leaf
+      :noindex:
+   .. automethod:: backward
+      :noindex:
+   .. automethod:: detach
+      :noindex:
+   .. automethod:: detach_
+      :noindex:
+   .. automethod:: register_hook
+      :noindex:
+   .. automethod:: retain_grad
+      :noindex:
 
 :hidden:`Function`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: Function
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    Function.backward
-    Function.forward
+    :members:
 
 Context method mixins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 When creating a new :class:`Function`, the following methods are available to `ctx`.
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    function._ContextMethodMixin.mark_dirty
-    function._ContextMethodMixin.mark_non_differentiable
-    function._ContextMethodMixin.save_for_backward
-    function._ContextMethodMixin.set_materialize_grads
+.. autoclass:: torch.autograd.function._ContextMethodMixin
+    :members:
 
 .. _grad-check:
 
 Numerical gradient checking
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
+.. autofunction:: gradcheck
 
-    gradcheck
-    gradgradcheck
+.. autofunction:: gradgradcheck
 
 Profiler
 ^^^^^^^^
@@ -211,24 +200,12 @@ and nvprof based (registers both CPU and GPU activity) using
 :class:`~torch.autograd.profiler.emit_nvtx`.
 
 .. autoclass:: torch.autograd.profiler.profile
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    profiler.profile.export_chrome_trace
-    profiler.profile.key_averages
-    profiler.profile.self_cpu_time_total
-    profiler.profile.total_average
+    :members:
 
 .. autoclass:: torch.autograd.profiler.emit_nvtx
+    :members:
 
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    profiler.load_nvprof
+.. autofunction:: torch.autograd.profiler.load_nvprof
 
 Anomaly detection
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
