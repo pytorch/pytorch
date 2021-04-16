@@ -128,7 +128,7 @@ const std::map<std::string, at::Tensor> Module::named_parameters() const {
 std::string Module::get_forward_method_debug_info(size_t pc) const {
   auto debug_handle = find_method("forward")->get_debug_handle(pc);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-  return getDebugTable()->getModuleHierarchyInfo(
+  return getDebugTable().getModuleHierarchyInfo(
       debug_handle, getTopeModuleTypeName(*this));
 #else
   return "";
@@ -186,7 +186,7 @@ void Method::run(Stack& stack) const {
     }
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-    auto debug_string = owner_->getDebugTable()->getSourceDebugString(
+    auto debug_string = owner_->getDebugTable().getSourceDebugString(
         function_->getExceptionDebugHandle(), getTopeModuleTypeName(*owner_));
     error.add_context(debug_string);
 #endif
@@ -208,7 +208,7 @@ void Method::run(Stack& stack) const {
       }
     } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-      auto debug_string = owner_->getDebugTable()->getSourceDebugString(
+      auto debug_string = owner_->getDebugTable().getSourceDebugString(
           function_->getExceptionDebugHandle(), getTopeModuleTypeName(*owner_));
       error.add_context(debug_string);
 #endif

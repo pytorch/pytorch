@@ -112,10 +112,10 @@ class TORCH_API Module {
   }
 
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-  void setDebugTable(std::unique_ptr<MobileDebugTable>&& debug_table) {
+  void setDebugTable(MobileDebugTable&& debug_table) {
     debug_table_ = std::move(debug_table);
   }
-  const std::unique_ptr<MobileDebugTable>& getDebugTable() const {
+  const MobileDebugTable& getDebugTable() const {
     return debug_table_;
   }
 #endif
@@ -125,7 +125,7 @@ class TORCH_API Module {
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-  std::unique_ptr<MobileDebugTable> debug_table_;
+  MobileDebugTable debug_table_;
 #endif
 };
 } // namespace mobile
