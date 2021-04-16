@@ -75,7 +75,7 @@ class _FunctionalRprop(object):
                     grads,
                     prevs,
                     step_sizes,
-                    step_size_min,
-                    step_size_max,
-                    etaminus,
-                    etaplus)
+                    step_size_min=step_size_min,
+                    step_size_max=step_size_max,
+                    etaminus=etaminus,
+                    etaplus=etaplus)

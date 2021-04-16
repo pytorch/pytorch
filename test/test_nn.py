@@ -1166,10 +1166,18 @@ class TestNN(NNTestCase):
         block.add_module('linear1', l1)
         block.add_module('linear2', l2)
         n = Net()
-        s = nn.Sequential(n, n, n, n)
+        s = nn.Sequential(n, n)
         self.assertEqual(list(s.named_modules()), [('', s), ('0', n), ('0.l1', l),
                                                    ('0.block', block), ('0.block.linear1', l1),
                                                    ('0.block.linear2', l2)])
+        # test the option to not remove duplicate module instances
+        self.assertEqual(list(s.named_modules(remove_duplicate=False)), [
+            ('', s), ('0', n), ('0.l1', l), ('0.l2', l),
+            ('0.block', block), ('0.block.linear1', l1),
+            ('0.block.linear2', l2),
+            ('1', n), ('1.l1', l), ('1.l2', l),
+            ('1.block', block), ('1.block.linear1', l1),
+            ('1.block.linear2', l2)])
 
     def test_register_buffer_raises_error_if_name_is_not_string(self):
         m = nn.Module()
@@ -9194,7 +9202,9 @@ class TestNN(NNTestCase):
               ]]
         )
         #  ChannelsFirst
-        y = F.channel_shuffle(x, 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2)
+            self.assertEqual(len(w), 0)
         self.assertEqual(y, y_ref)
         #  ChannelsLast not supported for 3dim
 
@@ -9222,10 +9232,14 @@ class TestNN(NNTestCase):
               ]]
         )
         #  ChannelsFirst NCHW
-        y = F.channel_shuffle(x, 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2)
+            self.assertEqual(len(w), 0)
         self.assertEqual(y, y_ref)
         #  ChannelsLast NHWC
-        y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last), 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last), 2)
+            self.assertEqual(len(w), 0)
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
@@ -9253,10 +9267,14 @@ class TestNN(NNTestCase):
               ]]
         )
         #  ChannelsFirst NCHW
-        y = F.channel_shuffle(x, 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2)
+            self.assertEqual(len(w), 0)
         self.assertEqual(y, y_ref)
         #  ChannelsLast NHWC
-        y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last_3d), 2)
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last_3d), 2)
+            self.assertEqual(len(w), 0)
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
