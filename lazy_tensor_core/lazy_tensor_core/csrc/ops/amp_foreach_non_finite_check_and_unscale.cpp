@@ -11,6 +11,18 @@ namespace ir {
 namespace ops {
 namespace {
 
+lazy_tensors::Shape NodeOutputShape(const OpList& inputs,
+                                    const Value& found_inf) {
+  std::vector<lazy_tensors::Shape> output_shapes;
+  output_shapes.reserve(inputs.size() + 1);
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    const lazy_tensors::Shape& input_shape = inputs[i].shape();
+    output_shapes.push_back(input_shape);
+  }
+  output_shapes.push_back(found_inf.shape());
+  return lazy_tensors::ShapeUtil::MakeTupleShape(output_shapes);
+}
+
 std::vector<Value> GetOperandList(lazy_tensors::Span<const Value> operands,
                                   const Value& found_inf,
                                   const Value& inv_scale) {
@@ -26,10 +38,8 @@ AmpForachNonFiniteCheckAndUnscale::AmpForachNonFiniteCheckAndUnscale(
     const OpList& inputs, const Value& found_inf, const Value& inv_scale)
     : Node(ir::OpKind(at::aten::_amp_foreach_non_finite_check_and_unscale_),
            GetOperandList(inputs, found_inf, inv_scale),
-           /*num_outputs=*/inputs.size() + 1) {
-  SetShapeDeferred(
-      [&]() { return compiler::NodeLowering::Get()->Infer(this); });
-}
+           NodeOutputShape(inputs, found_inf),
+           /*num_outputs=*/inputs.size() + 1) {}
 
 NodePtr AmpForachNonFiniteCheckAndUnscale::Clone(OpList operands) const {
   std::vector<Value> operand_list(operands.begin(), operands.end() - 2);
