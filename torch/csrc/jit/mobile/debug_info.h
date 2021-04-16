@@ -19,15 +19,16 @@ namespace jit {
  */
 class MobileDebugTable {
  public:
+  MobileDebugTable() = default;
   MobileDebugTable(
       std::unique_ptr<caffe2::serialize::PyTorchStreamReader>& reader,
       const std::shared_ptr<CompilationUnit>& cu);
   std::string getSourceDebugString(
       const int64_t debug_handle,
-      const std::string& top_module_type_name = "ModuleTypeUnknown");
+      const std::string& top_module_type_name = "ModuleTypeUnknown") const;
   std::string getModuleHierarchyInfo(
       const int64_t debug_handle,
-      const std::string& top_module_type_name = "ModuleTypeUnknown");
+      const std::string& top_module_type_name = "ModuleTypeUnknown") const;
 
  private:
   ska::flat_hash_map<int64_t, DelegateDebugInfoType> callstack_ptr_map_;
