@@ -4671,7 +4671,7 @@ for shape in [(1,), ()]:
         # Take an invalid view on 'a' that should raise an error (warns during deprecation)
         view_a = MyFn.apply(a)
 
-        with self.assertWarnsRegex(UserWarning, "This view was created inside a custom Function"):
+        with self.assertRaisesRegex(RuntimeError, "This view was created inside a custom Function"):
             view_a += b
 
         # Extra test for copy_ that is a manual implementation and could be easily
@@ -4680,7 +4680,7 @@ for shape in [(1,), ()]:
         b = torch.rand(1, requires_grad=True)
         view_a = MyFn.apply(a)
 
-        with self.assertWarnsRegex(UserWarning, "This view was created inside a custom Function"):
+        with self.assertRaisesRegex(RuntimeError, "This view was created inside a custom Function"):
             view_a.copy_(b)
 
         # Functions that should throw must properly throw
@@ -4742,9 +4742,6 @@ for shape in [(1,), ()]:
                     ga_nz[0] = True
                 return ga + gab, gab, None
 
-        err_msg_two_outputs = "Output 0 of IdTwoOutputBackward is a view and is being modified inplace."
-        err_msg_two_outputs += " This view is the output of a function that returns multiple views."
-
         class ViewOfTemp(Function):
             @staticmethod
             def forward(ctx, a, make_view):
@@ -4763,6 +4760,15 @@ for shape in [(1,), ()]:
                 res = torch.zeros_like(a)
                 res.select(0, 0).copy_(grad)
                 return res, None
+
+        fn_id_to_inplace_view_err_msg = {
+            "one_output": ("Output 0 of IdOneOutputBackward is a view and is being "
+                           "modified inplace. This view was created inside a custom Function"),
+            "two_output": ("Output 0 of IdTwoOutputBackward is a view and is being modified inplace."
+                           " This view is the output of a function that returns multiple views."),
+            "view_of_temp": ("Output 0 of ViewOfTempBackward is a view and is being "
+                             "modified inplace. This view was created inside a custom Function")
+        }
 
         for fn_id in ["one_output", "two_output", "view_of_temp"]:
             for inplace in [True, False]:
@@ -4798,52 +4804,29 @@ for shape in [(1,), ()]:
                     a = torch.ones(2, dtype=dtype, requires_grad=True)
                     b = torch.ones(2, dtype=dtype, requires_grad=True)
 
+                    err_msg = fn_id_to_inplace_view_err_msg[fn_id]
 
-                    if fn_id == "two_output" and inplace and output_is_a_view:
-                        with self.assertRaisesRegex(RuntimeError, err_msg_two_outputs):
+                    if not inplace or not output_is_a_view:
+                        gradcheck(fn, (a, b), check_batched_grad=False)
+
+                    # Was the custom backward called properly
+                    bw_called[0] = 0
+                    ga_nz[0] = True  # For the case where the backward is called
+
+                    if inplace and output_is_a_view:
+                        with self.assertRaisesRegex(RuntimeError, err_msg):
                             fn(a, b)
                     else:
-                        # Are the computed gradients correct ?
-                        if inplace and output_is_a_view:
-                            with warnings.catch_warnings(record=True) as w:
-                                if fn_id == "view_of_temp":
-                                    # This will be fixed after the deprecation cycle and the warning becomes
-                                    # an error.
-                                    with self.assertRaisesRegex(RuntimeError,
-                                                                "a view of a leaf Variable that requires grad "
-                                                                "is being used in an in-place operation."):
-                                        gradcheck(fn, (a, b), check_batched_grad=False)
-                                else:
-                                    # This works but the custom backward is not called (or called with partial)
-                                    # gradients as tested below
-                                    gradcheck(fn, (a, b), check_batched_grad=False)
-                            self.assertTrue(len(w) > 0)
-                        else:
-                            gradcheck(fn, (a, b), check_batched_grad=False)
+                        fn(a, b).backward()
 
-                        # Was the custom backward called properly
-                        bw_called[0] = 0
-                        ga_nz[0] = True  # For the case where the backward is called
-                        with warnings.catch_warnings(record=True) as w:
-                            if inplace and output_is_a_view and fn_id != "one_output":
-                                with self.assertRaisesRegex(RuntimeError,
-                                                            "a view of a leaf Variable that requires grad "
-                                                            "is being used in an in-place operation."):
-                                    fn(a, b).backward()
-                            else:
-                                fn(a, b).backward()
+                    expected_called = 1
+                    expected_ga_nz = True
 
-                        expected_called = 1
-                        expected_ga_nz = True
-                        expected_warning = False
+                    if output_is_a_view and inplace:
+                        expected_called = 0
 
-                        if output_is_a_view and inplace:
-                            expected_called = 0
-                            expected_warning = True
-
-                        self.assertTrue(bw_called[0] == expected_called)
-                        self.assertTrue(ga_nz[0] == expected_ga_nz)
-                        self.assertTrue((len(w) == 1) == expected_warning)
+                    self.assertTrue(bw_called[0] == expected_called)
+                    self.assertTrue(ga_nz[0] == expected_ga_nz)
 
     def test_autograd_simple_views_python(self):
         self._do_test_autograd_simple_views_python(torch.double)
@@ -4887,9 +4870,9 @@ for shape in [(1,), ()]:
         self.assertTrue(bw_called[0] == 1)
 
         out = ComplexView.apply(a.clone(), idx)
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Output 0 of ComplexViewBackward is a view and is being modified inplace"):
             out += 1
-        self.assertEqual(len(w), 1)
 
     def test_autograd_inplace_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -8185,9 +8168,9 @@ class TestAutogradDeviceType(TestCase):
             a = torch.randn(3, 3, device=device, requires_grad=True)
             b = a + a
             s1, s2, s3 = f(b)
-            with warnings.catch_warnings(record=True) as w:
+            error_msg = 'This view is an output of a function that returns multiple views.'
+            with self.assertRaisesRegex(RuntimeError, error_msg):
                 s1.mul_(s2)
-            self.assertIn('Consider using `unsafe_` version', str(w[0].message))
 
     def test_mv_grad_stride_0(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/38315
