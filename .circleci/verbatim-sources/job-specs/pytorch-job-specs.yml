@@ -380,3 +380,5 @@ jobs:
           when: always
       - store_test_results:
           path: test/test-reports
+      - store_artifacts:
+          path: test/coverage.xml
