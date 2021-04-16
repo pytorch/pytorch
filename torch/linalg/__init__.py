@@ -895,7 +895,7 @@ Examples::
 multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
 linalg.multi_dot(tensors, *, out=None)
 
-Efficiently multiplies two or more matrices by reordering the multiplications so that 
+Efficiently multiplies two or more matrices by reordering the multiplications so that
 the fewest arithmetic operations are performed.
 
 Every tensor in :attr:`tensors` must be 2D, except for the first and last which
