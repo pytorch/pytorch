@@ -14,7 +14,7 @@ coverage.xml
 .gradle
 .hypothesis
 .mypy_cache
-/.shellcheck_generated/
+/.extracted_scripts/
 **/.pytorch-test-times
 **/.pytorch-slow-tests
 */*.pyc
@@ -288,3 +288,7 @@ TAGS
 
 # bazel symlinks
 bazel-*
+
+# direnv, posh-direnv
+.envrc
+.psenvrc
