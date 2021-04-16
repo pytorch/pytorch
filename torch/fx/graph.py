@@ -1,4 +1,5 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
+from torch.utils._pytree import TreeSpec
 
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
 from dataclasses import dataclass
@@ -281,7 +282,8 @@ class Graph:
         self._graph_namespace = _Namespace()
         self._owners = 0
         self._owning_module = owning_module
-        self.in_spec = None
+        self._in_spec: Optional[TreeSpec] = None
+        self._orig_args: Optional[List[Any]] = None
 
     @property
     def owning_module(self):
@@ -924,9 +926,9 @@ class Graph:
             # have been emitted. To continue to have valid Python code, emit a
             # single pass statement
             body.append('pass\n')
-        if self.in_spec is not None:
-            orig_vars = self.in_spec[1]
-            body.insert(0, f"{', '.join(free_vars)} = pytree.tree_flatten([{', '.join(orig_vars)}])[0]\n")
+        if self._in_spec is not None:
+            orig_vars = self._orig_args
+            body.insert(0, f"{', '.join(free_vars)} = pytree.tree_flatten_spec([{', '.join(orig_vars)}], self._in_spec)\n")
         else:
             orig_vars = free_vars
         code = ''.join(body)

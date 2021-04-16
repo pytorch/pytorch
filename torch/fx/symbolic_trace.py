@@ -336,7 +336,7 @@ class Tracer(TracerBase):
                 param = sig.parameters[name]
                 default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore[assignment]
             return self.create_proxy('placeholder', name, default, {},
-                                    type_expr=fn_for_analysis.__annotations__.get(name, None))
+                                     type_expr=fn_for_analysis.__annotations__.get(name, None))
 
         args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
 
@@ -349,8 +349,12 @@ class Tracer(TracerBase):
                 args.append(proxy_placeholder('**' + next(names_iter)))
             root_fn = _patch_function(root_fn, len(args))
 
+        if concrete_args is None:
+            return root_fn, args
+
         flat_args, in_spec = pytree.tree_flatten(tuple(args))
-        self.graph.in_spec = (in_spec, orig_args[skip_arg_idx:total_args])
+        self.graph._in_spec = in_spec
+        self.graph._orig_args = orig_args[skip_arg_idx:total_args]
         for idx, arg in enumerate(flat_args):
             if arg is HOLE:
                 flat_args[idx] = self.create_proxy('placeholder', f'tree_{str(idx)}', (), {})

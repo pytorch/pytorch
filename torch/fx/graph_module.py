@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.overrides
-import torch.utils._pytree as pytree
 from torch.nn.modules.module import _addindent
 from torch.package import PackageImporter, PackageExporter
 import linecache
@@ -457,17 +456,13 @@ class {module_name}(torch.nn.Module):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
 
-    def flatten_args(self, *args):
-        flat_args, spec = pytree.tree_flatten(args)
-        assert(spec == self.graph.in_spec)
-        return flat_args
-
     def recompile(self) -> PythonCode:
         """
         Recompile this GraphModule from its ``graph`` attribute. This should be
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
+        self._in_spec = self._graph._in_spec
         python_code = self._graph.python_code(root_module='self')
         self._code = python_code.src
 
