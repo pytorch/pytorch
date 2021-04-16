@@ -3,8 +3,9 @@ from tools.codegen.model import (Argument, FunctionSchema, Return,
                                  assert_never)
 
 from tools.codegen.api.types import (ArgName, BaseCType, Binding,
-                                     ConstRefCType, CType, MutRefCType,
-                                     OptionalCType)
+                                     ConstRefCType, NamedCType, CType, MutRefCType, ListCType,
+                                     OptionalCType, tensorT, scalarT, layoutT,
+                                     deviceT, boolT, scalarTypeT)
 from tools.codegen.api import cpp
 
 from typing import Union, Sequence, List, Optional
@@ -26,25 +27,25 @@ def name(func: FunctionSchema) -> str:
         name += f'_{func.name.overload_name}'
     return name
 
-def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     if str(t) == 'Tensor?':
-        tensor_type: OptionalCType = OptionalCType(BaseCType('Tensor', binds))
+        tensor_type: OptionalCType = OptionalCType(BaseCType(tensorT))
         if mutable:
-            return MutRefCType(tensor_type)
+            return NamedCType(binds, MutRefCType(tensor_type))
         else:
-            return ConstRefCType(tensor_type)
+            return NamedCType(binds, ConstRefCType(tensor_type))
     elif str(t) == 'Tensor?[]':
-        return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
+        return NamedCType(binds, ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))))
     elif str(t) == 'Scalar':
-        return ConstRefCType(BaseCType('Scalar', binds))
+        return NamedCType(binds, ConstRefCType(BaseCType(scalarT)))
     elif str(t) == 'Scalar?':
-        return ConstRefCType(OptionalCType(BaseCType('Scalar', binds)))
+        return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
     return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
-def returns_type(rs: Sequence[Return]) -> str:
+def returns_type(rs: Sequence[Return]) -> CType:
     return cpp.returns_type(rs)
 
-def argument_type(a: Argument, *, binds: ArgName) -> CType:
+def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
     return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
 def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out: bool) -> List[Binding]:
@@ -59,7 +60,7 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out
         if should_default and a.default is not None:
             default = cpp.default_expr(a.default, a.type)
         return [Binding(
-            ctype=argument_type(a, binds=a.name),
+            nctype=argument_type(a, binds=a.name),
             name=a.name,
             default=default,
             argument=a,
@@ -76,25 +77,25 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out
         # to matter
         return [
             Binding(
-                ctype=OptionalCType(BaseCType('ScalarType', 'dtype')),
+                nctype=NamedCType('dtype', OptionalCType(BaseCType(scalarTypeT))),
                 name='dtype',
                 default=default,
                 argument=a,
             ),
             Binding(
-                ctype=OptionalCType(BaseCType('Layout', 'layout')),
+                nctype=NamedCType('layout', OptionalCType(BaseCType(layoutT))),
                 name='layout',
                 default=default,
                 argument=a,
             ),
             Binding(
-                ctype=OptionalCType(BaseCType('Device', 'device')),
+                nctype=NamedCType('device', OptionalCType(BaseCType(deviceT))),
                 name='device',
                 default=default,
                 argument=a,
             ),
             Binding(
-                ctype=OptionalCType(BaseCType('bool', 'pin_memory')),
+                nctype=NamedCType('pin_memory', OptionalCType(BaseCType(boolT))),
                 name='pin_memory',
                 default=default,
                 argument=a,
