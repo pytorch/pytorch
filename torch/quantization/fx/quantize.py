@@ -55,6 +55,7 @@ from .graph_module import (
 
 from .quantization_patterns import (
     binary_op_supported_dtypes,
+    binary_reference_op_supported_dtypes,
     BinaryOpQuantizeHandler,
     CopyNodeQuantizeHandler,
     CustomModuleQuantizeHandler,
@@ -1316,11 +1317,9 @@ class Quantizer:
                                 dtypes = get_qconfig_dtypes(this_node_qconfig)
                                 # TODO(future PR): update the pattern to quantize
                                 # handler logic to take this into account.
-                                skip_this_match = (
-                                    (node.target in binary_op_supported_dtypes) and
-                                    (dtypes not in binary_op_supported_dtypes[node.target])
-                                )
-
+                                skip_this_match = (node.target in binary_op_supported_dtypes and dtypes not in binary_op_supported_dtypes[node.target]) and not (
+                                    node.target in binary_reference_op_supported_dtypes and dtypes in binary_reference_op_supported_dtypes[node.target])
+                                # the second clause prevents a skip if the op/type are supported by reference pattern
                         if not skip_this_match:
                             matched: List[Any] = []
                             record_match(pattern, node, matched)

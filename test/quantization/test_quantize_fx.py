@@ -3191,18 +3191,20 @@ class TestQuantizeFxOps(QuantizationTestCase):
         qconfig_dict = {"": torch.quantization.get_default_qconfig("fbgemm")}
         is_reference = True
         node_list = [
-            ns.call_module(torch.nn.GELU),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_method('dequantize'),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.bmm),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_method('dequantize'),
         ]
 
         m = M().eval()
         m_prep = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
         m_prep(data_x, data_y)
-        print("m_prep")
-        print(m_prep)
         m_quant = torch.quantization.quantize_fx.convert_fx(m_prep, is_reference=is_reference)
         m_quant(data_x, data_y)
-        print("m_quant")
-        print(m_quant)
 
         self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
 
@@ -4111,7 +4113,3 @@ class TestQuantizeFxModels(QuantizationTestCase):
         model = models.__dict__[name](pretrained=True).eval().float()
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
-
-    if __name__ == "__main__":
-        a = TestQuantizeFxOps()
-        a.test_bmm_int_reference()

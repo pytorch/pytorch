@@ -176,13 +176,8 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
-        print("\nstart")
-        print(node)
-        print(is_reference, self.binary_op)
-        print(binary_reference_op_supported_dtypes[self.binary_op])
-        print(dtypes in binary_reference_op_supported_dtypes[self.binary_op])
 
-        if is_reference and dtypes in binary_reference_op_supported_dtypes[self.binary_op]:
+        if is_reference and self.binary_op in binary_reference_op_supported_dtypes and dtypes in binary_reference_op_supported_dtypes[self.binary_op]:
             if dtypes in binary_op_int8_dtypes:
                 args = load_arg(quantized=[0, 1])(node.args)
                 args = load_arg(quantized=False)(node.args)
@@ -201,7 +196,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                     "for op {} with is_reference={} despite it being listed as supported"
                     "this should not happen".format(dtypes, self.binary_op, is_reference))
                 assert False
-        elif not is_reference and dtypes in binary_op_supported_dtypes[self.binary_op]:
+        elif not is_reference and self.binary_op in binary_op_supported_dtypes and dtypes in binary_op_supported_dtypes[self.binary_op]:
             if dtypes in [(torch.quint8, torch.qint8, None)]:
                 assert self.quantized_binary_op is not None
                 if self.num_tensor_args == 1:
@@ -255,7 +250,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 "dtype combination: {} is not "
                 "supported by {} for is_reference={}. "
                 "Supported non-reference dtype combinations are: {} "
-                "Supported reference dtypes combinations are: {}".format(dtypes, self.binary_op, is_reference, binary_op_supported_dtypes[self.binary_op], binary_reference_op_supported_dtypes[self.binary_op]))
+                "Supported reference dtype combinations are: {}".format(dtypes, self.binary_op, is_reference, binary_op_supported_dtypes[self.binary_op], [] if self.binary_op not in binary_reference_op_supported_dtypes.keys() else binary_reference_op_supported_dtypes[self.binary_op]))
             if self.relu_node:
                 op_out = quantizer.quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=False))
                 relu_args = [op_out]
