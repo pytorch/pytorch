@@ -8859,7 +8859,7 @@
 - func: _linalg_qr_helper(Tensor self, str mode) -> (Tensor, Tensor)
   variants: function
   dispatch:
-    CPU: _linalg_qr_helper_cpu
+    CPU: _linalg_qr_helper_default
     CUDA: _linalg_qr_helper_cuda
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor

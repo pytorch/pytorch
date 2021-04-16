@@ -1779,7 +1779,7 @@ void linalg_qr_out_helper(const Tensor& input, const Tensor& Q, const Tensor& R,
   orgqr_stub(input.device().type(), const_cast<Tensor&>(Q), tau);
 }
 
-std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& input, std::string mode) {
+std::tuple<Tensor, Tensor> _linalg_qr_helper_default(const Tensor& input, std::string mode) {
   bool compute_q, reduced_mode;
   std::tie(compute_q, reduced_mode) = _parse_qr_mode(mode);
   auto m = input.size(-2);
