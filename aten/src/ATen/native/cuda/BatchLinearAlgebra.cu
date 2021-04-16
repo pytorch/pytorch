@@ -2044,12 +2044,34 @@ void geqrf_magma(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
   });
 }
 
-void geqrf_kernel(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+// This is a backend library dispatching helper function for calling looped batch implementation
+void geqrf_looped(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
 #if defined(USE_CUSOLVER)
   return geqrf_cusolver(input, tau, m, n);
 #else
   return geqrf_magma(input, tau, m, n);
 #endif
+}
+
+// This is a backend library dispatching helper function for calling specialized batched implementation
+void geqrf_batched(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+#ifdef CUDART_VERSION
+  // if cuBLAS is available
+  return geqrf_batched_cublas(input, tau, m, n);
+#else
+  // TODO: implement MAGMA-based path using magma_zgeqrf_expert_batched
+  return geqrf_looped(input, tau, m, n);
+#endif
+}
+
+void geqrf_kernel(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+  // if number of rows is smaller than 32 batched is always faster for batch size > 1
+  // for larger number of rows number of batches condition
+  if (input.size(-2) <= 256 && batchCount(input) >= std::max<int64_t>(2, input.size(-2) / 16)) {
+    return geqrf_batched(input, tau, m, n);
+  } else {
+    return geqrf_looped(input, tau, m, n);
+  }
 }
 
 REGISTER_DISPATCH(geqrf_stub, &geqrf_kernel);

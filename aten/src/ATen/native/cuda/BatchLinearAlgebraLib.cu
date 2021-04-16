@@ -37,6 +37,40 @@ static Tensor get_device_pointers(const Tensor& input) {
 }
 
 template <typename scalar_t>
+void apply_geqrf_batched(const Tensor& input, const Tensor& tau, int64_t m64, int64_t n64) {
+// AMD ROCm backend is implemented via rewriting all CUDA calls to HIP
+// rocBLAS does not implement BLAS-like extensions of cuBLAS, they're in rocSOLVER
+// rocSOLVER is currently not used in ATen, therefore we raise an error in this case
+#ifndef CUDART_VERSION
+  TORCH_CHECK(false, "geqrf: Batched version is supported only with cuBLAS backend.")
+#else
+  auto batch_size = cuda_int_cast(batchCount(input), "batch_size");
+  auto m = cuda_int_cast(m64, "m");
+  auto n = cuda_int_cast(n64, "n");
+  auto lda = std::max<int>(1, m);
+
+  // cuBLAS batched geqrf requires input to be the device array of pointers to device single matrices
+  Tensor input_ptr_array = get_device_pointers<scalar_t>(input);
+  Tensor tau_ptr_array = get_device_pointers<scalar_t>(tau.unsqueeze(-1));
+  auto input_ptr_array_data = reinterpret_cast<scalar_t**>(input_ptr_array.data_ptr());
+  auto tau_ptr_array_data = reinterpret_cast<scalar_t**>(tau_ptr_array.data_ptr());
+
+  int info;
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  at::cuda::blas::geqrfBatched(handle, m, n, input_ptr_array_data, lda, tau_ptr_array_data, &info, batch_size);
+
+  // info only indicates wrong arguments to geqrfBatched call
+  TORCH_INTERNAL_ASSERT(info == 0);
+#endif
+}
+
+void geqrf_batched_cublas(const Tensor& input, const Tensor& tau, int64_t m, int64_t n) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_batched_cuda", [&]{
+    apply_geqrf_batched<scalar_t>(input, tau, m, n);
+  });
+}
+
+template <typename scalar_t>
 static void apply_triangular_solve(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   cublasOperation_t trans = transpose ? CUBLAS_OP_T : CUBLAS_OP_N;

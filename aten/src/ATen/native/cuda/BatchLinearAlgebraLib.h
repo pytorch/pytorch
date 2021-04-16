@@ -15,6 +15,8 @@
 namespace at {
 namespace native {
 
+void geqrf_batched_cublas(const Tensor& input, const Tensor& tau, int64_t m, int64_t n);
+
 void triangular_solve_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
 void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
 
