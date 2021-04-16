@@ -437,6 +437,29 @@ class TestFXGraphMatcher(QuantizationTestCase):
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
+    def test_methods(self):
+        """
+        Verify that graph matching works on methods
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x.sigmoid()
+                return x
+
+        m1 = M().eval()
+        m2 = M().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m1p = prepare_fx(m1, qconfig_dict)
+        m2p = prepare_fx(m2, qconfig_dict)
+        results = get_matching_subgraph_pairs(m1p, m2p)
+        expected_types = {
+            'base_op_torch.sigmoid_0':
+                (('sigmoid', 'sigmoid'), ('sigmoid', 'sigmoid')),
+        }
+        self.assert_types_for_matched_subgraph_pairs(
+            results, expected_types, m1p, m2p)
+
+
     def test_op_relationship_mapping(self):
         """
         Tests that the mapping of op relationships is complete.

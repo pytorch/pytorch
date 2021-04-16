@@ -16,12 +16,13 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 
 from .utils import getattr_from_fqn
+from .ns_types import NSNodeTargetType
 from torch.quantization.fx.pattern_utils import get_default_quant_patterns
 
 from typing import Dict, Tuple, Set, Callable, Any, Union
 
-def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
-    base_name_to_sets_of_related_ops: Dict[str, Set[Callable]] = {
+def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
+    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]] = {
         # conv modules
         'torch.nn.Conv1d': set([
             nn.Conv1d,
@@ -117,6 +118,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
         # sigmoid
         'torch.sigmoid': set([
             torch.sigmoid,
+            'sigmoid',
         ]),
         # BatchNorm
         'torch.nn.BatchNorm2d': set([
@@ -228,12 +230,12 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
 
 
 def get_type_a_related_to_b(
-    base_name_to_sets_of_related_ops: Dict[str, Set[Callable]],
-) -> Set[Tuple[Callable, Callable]]:
+    base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]],
+) -> Set[Tuple[NSNodeTargetType, NSNodeTargetType]]:
     # TODO(future PR): allow customizations
     # TODO(future PR): reuse existing quantization mappings
     # TODO(future PR): add the rest of modules and ops here
-    type_a_related_to_b: Set[Tuple[Callable, Callable]] = set()
+    type_a_related_to_b: Set[Tuple[NSNodeTargetType, NSNodeTargetType]] = set()
 
     for base_name, s in base_name_to_sets_of_related_ops.items():
         s_list = list(s)
