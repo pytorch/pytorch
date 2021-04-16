@@ -4,7 +4,6 @@ from io import BytesIO
 import torch
 from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_utils import run_tests, IS_FBCODE, IS_SANDCASTLE
-from torch.testing._internal.common_utils import run_tests
 
 try:
     from torchvision.models import resnet18
@@ -69,7 +68,7 @@ class PackagingTsSerTest(PackageTestCase):
         "Tests that use temporary files are disabled in fbcode",
     )
     def test_save_ts_file(self):
-        # Test basic saving of TS module
+        # Test basic saving of TS module in file
         class ModB(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
@@ -206,7 +205,7 @@ class PackagingTsSerTest(PackageTestCase):
         #  Test to verify saving multiple different modules and
         #  repeats of modules in package works. Also tests that
         #  PyTorchStreamReader isn't having code hidden from
-        #  PyTorchStreamWriter writing TS code files multiple times
+        #  PyTorchStreamWriter writing TS code files multiple times.
 
         class ModD(torch.nn.Module):
             def __init__(self, name: str):
@@ -248,14 +247,14 @@ class PackagingTsSerTest(PackageTestCase):
             e.save_pickle("res", "mod1.pkl", scripted_mod_c)
             e.save_pickle("res", "mod2.pkl", scripted_mod_d)
             e.save_pickle("res", "mod3.pkl", scripted_mod_c)
-            e.save_pickle("res", "mod5.pkl", scripted_mod_d)
-            e.save_pickle("res", "mod6.pkl", scripted_mod_foo)
+            e.save_pickle("res", "mod4.pkl", scripted_mod_d)
+            e.save_pickle("res", "mod5.pkl", scripted_mod_foo)
 
         buffer.seek(0)
         importer = PackageImporter(buffer)
         loaded_mod_0 = importer.load_pickle("res", "mod1.pkl")
-        loaded_mod_1 = importer.load_pickle("res", "mod5.pkl")
-        loaded_mod_2 = importer.load_pickle("res", "mod6.pkl")
+        loaded_mod_1 = importer.load_pickle("res", "mod4.pkl")
+        loaded_mod_2 = importer.load_pickle("res", "mod5.pkl")
         self.assertEqual(loaded_mod_0("input"), scripted_mod_c("input"))
         self.assertEqual(loaded_mod_1("input"), scripted_mod_d("input"))
         self.assertEqual(loaded_mod_2("input"), scripted_mod_foo("input"))
