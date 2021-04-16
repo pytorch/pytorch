@@ -115,11 +115,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
-# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
-# CIRCLE_PULL_REQUEST comes from CircleCI
-# GITHUB_HEAD_REF comes from Github Actions
-IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
-if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
+if [ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
 fi
@@ -261,18 +257,6 @@ test_rpc() {
 
 test_custom_backend() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
-    echo "Building custom backends tests"
-    # Build custom backend tests.
-    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
-    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
-    python --version
-    mkdir "$CUSTOM_BACKEND_BUILD"
-    pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
-
     echo "Testing custom backends"
     CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
     pushd test/custom_backend
@@ -290,19 +274,6 @@ test_custom_backend() {
 
 test_custom_script_ops() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
-    # Build custom operator tests.
-    echo "Building custom script operators tests"
-    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-    CUSTOM_OP_TEST="$PWD/test/custom_operator"
-    python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir "$CUSTOM_OP_BUILD"
-    pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
-
     echo "Testing custom script operators"
     CUSTOM_OP_BUILD="$PWD/../custom-op-build"
     pushd test/custom_operator
@@ -319,19 +290,6 @@ test_custom_script_ops() {
 
 test_jit_hooks() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
-    echo "Building jit hooks in cpp tests"
-    # Build jit hook tests
-    JIT_HOOK_BUILD="$PWD/../jit-hook-build"
-    JIT_HOOK_TEST="$PWD/test/jit_hooks"
-    python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir "$JIT_HOOK_BUILD"
-    pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
-
     echo "Testing jit hooks in cpp"
     HOOK_BUILD="$PWD/../jit-hook-build"
     pushd test/jit_hooks
