@@ -14,13 +14,16 @@ namespace at { namespace native {
 // Define per-batch functions to be used in the implementation of batched
 // linear algebra operations
 
-template<class scalar_t>
+template <class scalar_t>
 void lapackCholeskyInverse(char uplo, int n, scalar_t *a, int lda, int *info);
 
-template<class scalar_t, class value_t=scalar_t>
+template <class scalar_t, class value_t=scalar_t>
 void lapackEig(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *w, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, value_t *rwork, int *info);
 
-template<class scalar_t>
+template <class scalar_t>
+void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
+
+template <class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
 template <class scalar_t, class value_t = scalar_t>
@@ -42,6 +45,9 @@ DECLARE_DISPATCH(eig_fn, eig_stub);
 using linalg_eig_fn = void (*)(Tensor& /*eigenvalues*/, Tensor& /*eigenvectors*/, Tensor& /*infos*/, const Tensor& /*input*/, bool /*compute_eigenvectors*/);
 
 DECLARE_DISPATCH(linalg_eig_fn, linalg_eig_stub);
+
+using geqrf_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/, int64_t /*m*/, int64_t /*n*/);
+DECLARE_DISPATCH(geqrf_fn, geqrf_stub);
 
 using orgqr_fn = Tensor& (*)(Tensor& /*result*/, const Tensor& /*tau*/, int64_t /*n_columns*/);
 DECLARE_DISPATCH(orgqr_fn, orgqr_stub);

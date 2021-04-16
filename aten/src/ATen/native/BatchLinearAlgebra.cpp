@@ -217,9 +217,6 @@ void lapackCholeskySolve(char uplo, int n, int nrhs, scalar_t *a, int lda, scala
 template<class scalar_t>
 void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info);
 
-template<class scalar_t>
-void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
-
 template<class scalar_t, class value_t=scalar_t>
 void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, value_t *w, scalar_t *work, int lwork, value_t *rwork, int *info);
 
@@ -1606,67 +1603,7 @@ std::tuple<Tensor&, Tensor&> triangular_solve_out(const Tensor& self, const Tens
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/*
-  The geqrf function computes QR decomposition of matrices stored in `self`.
-  However, rather than producing a Q matrix directly, it produces a sequence of
-  elementary reflectors which may later be composed to construct Q - for example
-  with the orgqr or ormqr functions.
-
-  Args:
-  * `self` - [in] Input tensor for QR decomposition
-             [out] QR decomposition result which contains:
-              i)  The elements of R, on and above the diagonal.
-              ii) Directions of the reflectors implicitly defining Q.
-             Tensor with the directions of the elementary reflectors below the diagonal,
-              it will be overwritten with the result
-  * `tau` - [out] Tensor which will contain the magnitudes of the reflectors
-            implicitly defining Q.
-  * `m` - The number of rows of `self` to consider
-  * `n` - The number of columns of `self` to consider (actual sizes of `self` could be larger)
-
-  For further details, please see the LAPACK documentation for GEQRF.
-*/
-template <typename scalar_t>
-static void apply_geqrf(const Tensor& self, const Tensor& tau, int64_t m, int64_t n) {
-#ifndef USE_LAPACK
-  AT_ERROR("geqrf: LAPACK library not found in compilation");
-#else
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
-  auto self_data = self.data_ptr<scalar_t>();
-  auto tau_data = tau.data_ptr<scalar_t>();
-  auto self_matrix_stride = matrixStride(self);
-  auto tau_stride = tau.size(-1);
-  auto batch_size = batchCount(self);
-  auto lda = std::max<int>(1, m);
-
-  int info;
-  // Run once, first to get the optimum work size.
-  // Since we deal with batches of matrices with the same dimensions, doing this outside
-  // the loop saves (batch_size - 1) workspace queries which would provide the same result
-  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
-  int lwork = -1;
-  scalar_t wkopt;
-  lapackGeqrf<scalar_t>(m, n, self_data, lda, tau_data, &wkopt, lwork, &info);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
-
-  // if lwork is less than 'n' then a warning is printed:
-  // Intel MKL ERROR: Parameter 7 was incorrect on entry to SGEQRF.
-  lwork = std::max<int>({1, n, real_impl<scalar_t, value_t>(wkopt)});
-  Tensor work = at::empty({lwork}, self.options());
-
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
-
-    // now compute the actual QR and tau
-    lapackGeqrf<scalar_t>(m, n, self_working_ptr, lda, tau_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
-
-    // info from lapackGeqrf only reports if the i-th parameter is wrong
-    // so we don't need to check it all the time
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
-  }
-#endif
-}
+DEFINE_DISPATCH(geqrf_stub);
 
 static void geqrf_out_helper(const Tensor& input, const Tensor& QR, const Tensor& tau) {
   TORCH_INTERNAL_ASSERT(input.dim() >= 2);
@@ -1699,13 +1636,7 @@ static void geqrf_out_helper(const Tensor& input, const Tensor& QR, const Tensor
 
   // geqrf_stub (apply_geqrf) performs calculations in-place and 'QR' must be a copy of input
   QR.copy_(input);
-
-  // TODO: implement geqrf_stub
-  // DEFINE_DISPATCH(geqrf_stub);
-  // geqrf_stub(input.device().type(), QR, tau);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_cpu", [&]{
-    apply_geqrf<scalar_t>(QR, tau, input.size(-2), input.size(-1));
-  });
+  geqrf_stub(input.device().type(), QR, tau, input.size(-2), input.size(-1));
 }
 
 std::tuple<Tensor&, Tensor&> geqrf_out(const Tensor& input, Tensor& QR, Tensor& tau) {
@@ -1800,9 +1731,7 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string
   q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
   q_working_copy.narrow(-1, 0, n).copy_(self);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cpu", [&]{
-    apply_geqrf<scalar_t>(q_working_copy, tau_working_copy, m, n);
-  });
+  geqrf_stub(q_working_copy.device().type(), q_working_copy, tau_working_copy, m, n);
 
   R = q_working_copy.slice(-2, 0, n_columns_q).slice(-1, 0, n).triu();
   if (!compute_q) {
