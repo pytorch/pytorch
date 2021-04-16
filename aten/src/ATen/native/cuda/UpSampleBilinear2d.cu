@@ -15,24 +15,6 @@ namespace at {
 namespace native {
 namespace {
 
-__device__ __forceinline__ size_t
-idx(const size_t nc,
-    const size_t height,
-    const size_t width,
-    const size_t y,
-    const size_t x) {
-  return (nc * height + y) * width + x;
-}
-
-// for channels-last
-__device__ __forceinline__ size_t
-idx_cl(
-  const size_t n, const size_t h, const size_t w, const size_t c,
-  const size_t height, const size_t width, const size_t channel
-) {
-  return ((n * height + h) * width + w) * channel + c;
-}
-
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_bilinear2d_out_frame(
@@ -304,9 +286,9 @@ static void upsample_bilinear2d_out_cuda_template(
       }
 
       TORCH_CHECK(input.numel() < std::numeric_limits<int>::max(),
-        "upsample_bilinear2d only supports input tensors with less than INT_MAX elements");
+        "upsample_bilinear2d_nhwc only supports input tensors with less than INT_MAX elements");
       TORCH_CHECK(output.numel() < std::numeric_limits<int>::max(),
-        "upsample_bilinear2d only supports output tensors with less than INT_MAX elements");
+        "upsample_bilinear2d_nhwc only supports output tensors with less than INT_MAX elements");
 
       const int batchsize = input.size(0);
       const int channels = input.size(1);

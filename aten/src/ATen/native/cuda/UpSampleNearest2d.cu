@@ -7,6 +7,8 @@
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
+#include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/cuda/detail/KernelUtils.h>
 
 namespace at {
 namespace native {
@@ -55,6 +57,33 @@ __global__ void upsample_nearest2d_out_frame(
     dst_index += dst_index_stride;
     src_index += src_index_stride;
     nc_iter += nc_stride;
+  }
+}
+
+template <typename scalar_t>
+C10_LAUNCH_BOUNDS_1(1024)
+__global__ void upsample_nearest2d_nhwc_out_frame(
+    const scalar_t* idata,
+    scalar_t* odata,
+    const size_t channels,
+    const size_t height1,
+    const size_t width1,
+    const size_t height2,
+    const size_t width2,
+    float height_scale,
+    float width_scale,
+    const size_t out_numel
+) {
+  CUDA_KERNEL_LOOP(index, out_numel) {
+    const int c = index % channels;
+    const int w2 = (index / channels) % width2;
+    const int h2 = (index / channels / width2) % height2;
+    const int n = index / channels / width2 / height2;
+
+    const size_t h1 = height1 == height2 ? h2 : nearest_neighbor_compute_source_index(height_scale, h2, height1);
+    const size_t w1 = width1 == width2 ? w2 : nearest_neighbor_compute_source_index(width_scale, w2, width1);
+    
+    odata[index] = idata[idx_cl(n, h1, w1, c, height1, width1, channels)];
   }
 }
 
@@ -121,10 +150,9 @@ static void upsample_nearest2d_out_cuda_template(
   checkAllSameGPU(
       "upsample_nearest2d_out_cuda_template", {input_arg, output_arg});
 
-  // TODO: remove this when the cuda kernel is updated to support the channels_last memory format.
-  // This is a temporary hack to prevent a silence correctness issue when calling this kernel
-  // with tensors in channels_last format.
-  auto output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
+ if (input_.numel() == 0) {
+    return;
+  }
 
   int output_height = output_size[0];
   int output_width = output_size[1];
@@ -134,70 +162,110 @@ static void upsample_nearest2d_out_cuda_template(
   int input_height = input_.size(2);
   int input_width = input_.size(3);
 
-  Tensor input = input_.contiguous();
+  const float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
+  const float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
 
-  if (input.numel() == 0) {
-    return;
+  const auto memory_format = input_.suggest_memory_format();
+
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    TORCH_INTERNAL_ASSERT(output.suggest_memory_format() == memory_format, "output should also be channels-last memory format");
+    at::Tensor input = input_;
+
+    if (input.sizes() == output.sizes()) {
+      output.copy_(input);
+      return;
+    }
+
+    TORCH_CHECK(input.numel() < std::numeric_limits<int>::max(),
+      "upsample_nearest_nhwc only supports input tensors with less than INT_MAX elements");
+    TORCH_CHECK(output.numel() < std::numeric_limits<int>::max(),
+      "upsample_nearest_nhwc only supports output tensors with less than INT_MAX elements");
+
+    const int num_kernels = output.numel();
+    const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_nhwc_out_frame", [&] {
+      const scalar_t* idata = input.data_ptr<scalar_t>();
+      scalar_t* odata = output.data_ptr<scalar_t>();
+
+      upsample_nearest2d_nhwc_out_frame
+          <<<cuda::ATenCeilDiv(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+        idata,
+        odata,
+        channels,
+        input_height,
+        input_width,
+        output_height,
+        output_width,
+        height_scale,
+        width_scale,
+        output.numel()
+      );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    });
   }
+  else {
+    // This is needed for non-contiguous tensors.
+    auto output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
 
-  int nc = nbatch * channels;
+    Tensor input = input_.contiguous();
 
-  const int max_threads = std::min<int>(
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS);
+    int nc = nbatch * channels;
 
-  int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
-  int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
+    const int max_threads = std::min<int>(
+        at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS);
 
-  // upsample_nearest2d meta call makes sure input/output tensor is not empty;
-  int block_x = std::min<int>(
-      maxThreadsDim[0], std::min<int>(lastPow2(output_width), max_threads));
-  int block_y = std::min<int>(
-      maxThreadsDim[1],
-      std::min<int>(lastPow2(output_height), max_threads / block_x));
-  int block_z = std::min<int>(
-      maxThreadsDim[2], std::min<int>(nc, max_threads / block_x / block_y));
-  const dim3 block(block_x, block_y, block_z);
+    int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+    int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
 
-  int grid_x = cuda::ATenCeilDiv(output_width, block_x);
-  int grid_y = cuda::ATenCeilDiv(output_height, block_y);
-  int grid_z = std::min<int>(
-      maxGridSize[2], cuda::ATenCeilDiv(nc, block_z * 4));
-  const dim3 grid(grid_x, grid_y, grid_z);
-  // Error out on cases where grid_x & grid_y exceeds limit of launch config, as
-  // the current kernel implementation doesn't loop over the two dimensions.
-  // This is unlikely to happen.
-  // TODO: kernel implementation could stride on spatial dimension. We probably
-  //       need to overhaul the kernel.
-  TORCH_CHECK(
-      grid_x <= maxGridSize[0] && grid_y <= maxGridSize[1],
-      "input tensor has spatial dimension larger than the kernel capacity");
+    // upsample_nearest2d meta call makes sure input/output tensor is not empty;
+    int block_x = std::min<int>(
+        maxThreadsDim[0], std::min<int>(lastPow2(output_width), max_threads));
+    int block_y = std::min<int>(
+        maxThreadsDim[1],
+        std::min<int>(lastPow2(output_height), max_threads / block_x));
+    int block_z = std::min<int>(
+        maxThreadsDim[2], std::min<int>(nc, max_threads / block_x / block_y));
+    const dim3 block(block_x, block_y, block_z);
 
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_out_frame", [&] {
-        using accscalar_t = at::acc_type<scalar_t, true>;
+    int grid_x = cuda::ATenCeilDiv(output_width, block_x);
+    int grid_y = cuda::ATenCeilDiv(output_height, block_y);
+    int grid_z = std::min<int>(
+        maxGridSize[2], cuda::ATenCeilDiv(nc, block_z * 4));
+    const dim3 grid(grid_x, grid_y, grid_z);
+    // Error out on cases where grid_x & grid_y exceeds limit of launch config, as
+    // the current kernel implementation doesn't loop over the two dimensions.
+    // This is unlikely to happen.
+    // TODO: kernel implementation could stride on spatial dimension. We probably
+    //       need to overhaul the kernel.
+    TORCH_CHECK(
+        grid_x <= maxGridSize[0] && grid_y <= maxGridSize[1],
+        "input tensor has spatial dimension larger than the kernel capacity");
 
-        auto idata = input.data_ptr<scalar_t>();
-        auto odata = output_c.data_ptr<scalar_t>();
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_out_frame", [&] {
+          using accscalar_t = at::acc_type<scalar_t, true>;
 
-        const float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
-        const float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
+          auto idata = input.data_ptr<scalar_t>();
+          auto odata = output_c.data_ptr<scalar_t>();
 
-        upsample_nearest2d_out_frame<scalar_t, accscalar_t>
-            <<<grid, block, 0, stream>>>(
-                idata,
-                odata,
-                nc,
-                input_height,
-                input_width,
-                output_height,
-                output_width,
-                height_scale,
-                width_scale);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      });
+          upsample_nearest2d_out_frame<scalar_t, accscalar_t>
+              <<<grid, block, 0, stream>>>(
+                  idata,
+                  odata,
+                  nc,
+                  input_height,
+                  input_width,
+                  output_height,
+                  output_width,
+                  height_scale,
+                  width_scale);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        });
 
-  if (!output.is_contiguous()) {
-      output.copy_(output_c);
+    if (!output.is_contiguous()) {
+        output.copy_(output_c);
+    }
   }
 }
 
