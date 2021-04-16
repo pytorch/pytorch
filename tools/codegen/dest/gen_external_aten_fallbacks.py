@@ -168,7 +168,7 @@ class GenExternalAtenFallback:
                                or a.type == OptionalType(BaseType(BaseTy.Device))]
                 if any(device_like):
                     return device_like[0].name
-                assert_never("Need a tensor-like or device argument in order to determine the output device")
+                raise AssertionError("Need a tensor-like or device argument in order to determine the output device")
 
             # XLA appears to have used the dispatcher convention to write their kernel signatures,
             # probably because they based their signatures off of our RegistrationDeclarations.h
@@ -270,9 +270,8 @@ class GenExternalAtenFallback:
             if f.native_function.func.returns:
                 ret_names = cpp.return_names(f.native_function, override_name="x_result")
                 if len(ret_names) == 1:
-                    return_args = xla_tensor_creation_api(
+                    returns = xla_tensor_creation_api(
                         ret_names[0], f.native_function.func.returns[0], get_device_param(dispatcher_order_args))
-                    returns = return_args
                 else:
                     return_args = [xla_tensor_creation_api(
                         ret_names[i], f.native_function.func.returns[i], get_device_param(dispatcher_order_args), tuple_idx=i)

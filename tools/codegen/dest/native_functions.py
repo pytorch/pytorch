@@ -82,7 +82,7 @@ def compute_native_function_declaration(
 ) -> List[str]:
     if isinstance(g, ExternalBackendFunctionsGroup):
         if g.structured:
-            assert_never("Structured external backend functions are not implemented yet.")
+            raise AssertionError("Structured external backend functions are not implemented yet.")
         else:
             return list(concatMap(gen_unstructured_external, g.functions()))
     elif isinstance(g, ExternalBackendFunction):

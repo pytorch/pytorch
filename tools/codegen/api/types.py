@@ -29,7 +29,6 @@ class BaseCppType:
 
 # The set of all non-templated, valid, fully-qualified names of C++ types that are used in the codegen.
 # Templated types get their own dataclass, mainly to make namespace parsing easier.
-# TODO: before merge, give all relevant types the at:: namespace again. Removed temporarily for byte-for-byte testing
 intT = BaseCppType('', 'int64_t')
 doubleT = BaseCppType('', 'double')
 boolT = BaseCppType('', 'bool')
@@ -42,12 +41,12 @@ tensorListT = BaseCppType('at', 'TensorList')
 dimnameT = BaseCppType('at', 'Dimname')
 dimnameListT = BaseCppType('at', 'DimnameList')
 layoutT = BaseCppType('at', 'Layout')
-deviceT = BaseCppType('c10', 'Device')
+deviceT = BaseCppType('at', 'Device')
 scalarT = BaseCppType('at', 'Scalar')
 memoryFormatT = BaseCppType('at', 'MemoryFormat')
 qschemeT = BaseCppType('at', 'QScheme')
 storageT = BaseCppType('at', 'Storage')
-streamT = BaseCppType('', 'Stream')
+streamT = BaseCppType('at', 'Stream')
 intArrayRefT = BaseCppType('at', 'IntArrayRef')
 tensorOptionsT = BaseCppType('at', 'TensorOptions')
 typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
@@ -83,8 +82,7 @@ class BaseCType:
     # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
     # TODO: Kill this when we eventually remove it!
     def cpp_type_registration_declarations(self) -> str:
-        # TODO: if I'm not keeping c10::Device around in this PR, then kill c10 here.
-        return str(self.type).replace('at::', '').replace('c10::', '')
+        return str(self.type).replace('at::', '')
 
     def remove_const_ref(self) -> 'CType':
         return self
