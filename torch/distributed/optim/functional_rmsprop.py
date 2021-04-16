@@ -91,9 +91,9 @@ class _FunctionalRMSprop(object):
                       square_avgs,
                       grad_avgs,
                       momentum_buffer_list,
-                      lr=lr,
-                      alpha=alpha,
-                      eps=eps,
-                      weight_decay=weight_decay,
-                      momentum=momentum,
-                      centered=self.centered)
+                      lr,
+                      alpha,
+                      eps,
+                      weight_decay,
+                      momentum,
+                      self.centered)

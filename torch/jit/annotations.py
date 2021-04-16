@@ -250,9 +250,13 @@ def try_real_annotations(fn, loc):
     if all(ann is sig.empty for ann in all_annots):
         return None
 
-    arg_types = [ann_to_type(p.annotation, loc)
+    def as_ann(ann):
+        # sig.empty is really annoying so convert it to None
+        return ann if ann is not sig.empty else None
+
+    arg_types = [ann_to_type(as_ann(p.annotation), loc)
                  for p in sig.parameters.values()]
-    return_type = ann_to_type(sig.return_annotation, loc)
+    return_type = ann_to_type(as_ann(sig.return_annotation), loc)
     return arg_types, return_type
 
 
@@ -290,10 +294,8 @@ def is_tensor(ann):
 
 
 def try_ann_to_type(ann, loc):
-    if ann is inspect.Signature.empty:
-        return TensorType.getInferred()
     if ann is None:
-        return NoneType.get()
+        return TensorType.getInferred()
     if inspect.isclass(ann) and is_tensor(ann):
         return TensorType.get()
     if is_tuple(ann):

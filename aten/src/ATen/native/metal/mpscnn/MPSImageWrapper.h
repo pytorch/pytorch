@@ -25,7 +25,6 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
   void setCommandBuffer(MetalCommandBuffer* buffer);
   MetalCommandBuffer* commandBuffer() const;
   IntArrayRef textureSizes() const;
-  void setTexture(MPSImage* image);
   MPSImage* image() const;
   void recycleImage();
   void synchronize();
