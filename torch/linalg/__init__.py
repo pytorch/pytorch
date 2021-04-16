@@ -545,14 +545,18 @@ householder_product(input, tau, *, out=None) -> Tensor
 
 Computes the first `n` columns of a product of Householder matrices or batch of matrices
 
-Assume that :attr:`input` is of size `(*, m, n)` with `m ≥ n` and :attr:`tau` is of size `(*, k)` with `k ≤ n` where `*` is zero or more batch dimensions. Denoting :math:`v_i` `= \ `:attr:`input`\ `[..., :, i]` and :math:`\tau_i` `= \ `:attr:`tau`\ `[..., i]`, for every element of the batch this function returns the first `n` columns of the matrix
+Assume that :attr:`input` is of size `(*, m, n)` with `m ≥ n` and :attr:`tau` is of size
+`(*, k)` with `k ≤ n` where `*` is zero or more batch dimensions. Denoting
+:math:`v_i` `= \ `:attr:`input`\ `[..., :, i]` and :math:`\tau_i` `= \ `:attr:`tau`\ `[..., i]`,
+for every element of the batch this function returns the first `n` columns of the matrix
 
 .. math::
 
     H_1H_2 ... H_k \qquad\text{with}\qquad H_i = \mathrm{I}_m - \tau_i v_i v_i^{\text{H}}
 
 where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and
-:math:`v^{\text{H}}` denotes the conjugate transpose in the complex case and the transpose in the real case. The size of the output is `(*, m, n)`.
+:math:`v^{\text{H}}` denotes the conjugate transpose in the complex case and the transpose in the real case.
+The size of the output is `(*, m, n)`.
 
 Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
 :attr:`tau` should have the same dtype as :attr:`input`.
@@ -612,13 +616,16 @@ torch.linalg.lstsq(input, b, cond=None, *, driver=None) -> (Tensor, Tensor, Tens
 
 Computes the least squares solution of a system of linear equations.
 
-Assume that :attr:`input`, :attr:`b` have sizes `(*, m, n)`, `(*, m, k)` where `*` is zero or more batch dimensions. For every matrix :math:`A` in :attr:`input` and every set :math:`B` in :attr:`b` of `k` vectors of dimension `m`, this function returns the solution to the problem
+Assume that :attr:`input`, :attr:`b` have sizes `(*, m, n)`, `(*, m, k)` where `*` is zero
+or more batch dimensions. For every matrix :math:`A` in :attr:`input` and every set :math:`B`
+in :attr:`b` of `k` vectors of dimension `m`, this function returns the solution to the problem
 
 .. math::
 
     \min_{X \in \mathbb{K}^{n \times k}} \|AX - B\|_F
 
-where :math:`\mathbb{K} = \mathbb{R}` or :math:`\mathbb{C}`, and :math:`\|-\|_F` denotes the Frobenius norm. The size of the output is then `(*, m, k)`.
+where :math:`\mathbb{K} = \mathbb{R}` or :math:`\mathbb{C}`, and :math:`\|-\|_F` denotes the Frobenius norm.
+The size of the output is then `(*, m, k)`.
 
 :attr:`driver` chooses the LAPACK/MAGMA driver that will be used.
 For CPU inputs the valid values are (`'gels'`, `'gelsy'`, `'gelsd`, `'gelss'`).
@@ -948,7 +955,7 @@ Examples::
     >>> multi_dot((a.to(torch.float), torch.empty(3, 0), torch.empty(0, 2)))
     tensor([[0., 0.],
             [0., 0.]])
-""")
+""")  # no qa
 
 norm = _add_docstr(_linalg.linalg_norm, r"""
 linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
@@ -1393,7 +1400,8 @@ Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
 
 .. note:: When :attr:`input` is on a CUDA device, this function synchronizes that device with the CPU.
 
-.. note:: This function uses :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` and :func:`torch.linalg.eigh` if :attr:`hermitian`\ `= True`.
+.. note:: This function uses :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` and
+          :func:`torch.linalg.eigh` if :attr:`hermitian`\ `= True`.
 
 .. seealso::
 
@@ -1480,19 +1488,24 @@ linalg.solve(input, other, *, out=None) -> Tensor
 
 Computes the solution of a square system (or batch of systems) of linear equations with unique solution.
 
-This method accepts both matrices and vectors as the right-hand side of the linear equation. We will denote by `*` zero or more batch dimensions.
+This method accepts both matrices and vectors as the right-hand side of the linear equation.
+We will denote by `*` zero or more batch dimensions.
 
-- If :attr:`input`, :attr:`other` are of size `(*, n, n)`, `(*, n)`, for every matrix :math:`A` in :attr:`input` and vector :math:`b` in :attr:`other`, this function returns a vector :math:`x` such that
+- If :attr:`input`, :attr:`other` are of size `(*, n, n)`, `(*, n)`, for every matrix :math:`A`
+  in :attr:`input` and vector :math:`b` in :attr:`other`, this function returns a vector :math:`x` such that
 
   .. math:: Ax = b
 
   The returned tensor will be of size `(*, n)`.
-- If :attr:`input`, :attr:`other` are of size `(*, n, n)`, `(*, n, k)`, for every pair of matrices  :math:`A` in :attr:`input` and :math:`B` in :attr:`other`, this function returns a matrix :math:`X` such that
+- If :attr:`input`, :attr:`other` are of size `(*, n, n)`, `(*, n, k)`, for every pair of matrices
+  :math:`A` in :attr:`input` and :math:`B` in :attr:`other`, this function returns a matrix :math:`X` such that
 
   .. math:: AX = B
 
   The returned tensor will be of size `(*, n, k)`.
-- If none of the above apply and :attr:`input`, :attr:`other` are of sizes `(*, n, n)`, `(n,)` (resp. `(n, k)`), the vector (resp. matrix) :attr:`other` is broadcasted to be of size `(*, n)` (resp. `(*, n, k)`). This function then  returns the solution of the resulting batch of systems of linear equations.
+- If none of the above apply and :attr:`input`, :attr:`other` are of sizes `(*, n, n)`, `(n,)` (resp. `(n, k)`),
+  the vector (resp. matrix) :attr:`other` is broadcasted to be of size `(*, n)` (resp. `(*, n, k)`).
+  This function then  returns the solution of the resulting batch of systems of linear equations.
 
 Supports :attr:`input` of float, double, cfloat and cdouble dtypes.
 :attr:`other` should have the same dtype as :attr:`input`.
@@ -1614,7 +1627,9 @@ Computes the action of the multiplicative inverse of :func:`torch.tensordot` on 
 If `m` is the product of the first :attr:`other`\ `.ndim`  dimensions of :attr:`input` and
 `n` is the product of the rest of the dimensions, this function expects `m` and `n` to be equal.
 
-The returned tensor `x` satisfies `tensordot(\ `:attr:`input`\ `, x, dims=x.ndim) == \ `:attr:`other`. `x` has shape :attr:`input`\ `[other.ndim:]`.
+The returned tensor `x` satisfies
+`tensordot(\ `:attr:`input`\ `, x, dims=x.ndim) == \ `:attr:`other`.
+`x` has shape :attr:`input`\ `[other.ndim:]`.
 
 If :attr:`dims` is specified, :attr:`input` will be reshaped as
 
