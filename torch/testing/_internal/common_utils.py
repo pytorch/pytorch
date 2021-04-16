@@ -2117,6 +2117,12 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
+# Tentative value for nondet_tol for gradcheck when backward implementation
+# relies on nondeterministic operations, i.e., those listed here:
+# https://pytorch.org/docs/stable/generated/torch.use_deterministic_algorithms.html
+#
+# For more information see https://github.com/pytorch/pytorch/issues/56202
+GRADCHECK_NONDET_TOL = 1e-12
 
 def gradcheck(fn, inputs, **kwargs):
     # Wrapper around gradcheck that enables certain keys by default.
