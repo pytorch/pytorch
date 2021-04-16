@@ -1,6 +1,7 @@
 #include <c10d/test/StoreTestCommon.hpp>
 
 #include <cstdlib>
+#include <future>
 #include <iostream>
 #include <thread>
 
@@ -9,20 +10,41 @@
 #include <c10d/PrefixStore.hpp>
 #include <c10d/TCPStore.hpp>
 
+std::condition_variable cv;
+std::mutex cvMutex;
 constexpr int64_t kShortStoreTimeoutMillis = 100;
+constexpr int64_t kStoreCallbackTimeoutMillis = 5000;
+constexpr int defaultTimeout = 20;
+
+// void _waitFinish() {
+//   std::unique_lock<std::mutex> lk(cvMutex);
+//   auto ret = cv.wait_for(
+//       lk, std::chrono::duration<int,
+//       std::milli>(kStoreCallbackTimeoutMillis));
+//   if (ret == std::cv_status::timeout) {
+//     throw std::runtime_error(
+//         "Timeout waiting for callback execution to finish.");
+//   }
+// }
+
+c10::intrusive_ptr<c10d::TCPStore> _createServer(
+    int numWorkers = 1,
+    int timeout = defaultTimeout) {
+  return c10::make_intrusive<c10d::TCPStore>(
+      "127.0.0.1",
+      0,
+      numWorkers,
+      true,
+      std::chrono::seconds(timeout),
+      /* wait */ false);
+}
 
 // Different ports for different tests.
 void testHelper(const std::string& prefix = "") {
   const auto numThreads = 16;
   const auto numWorkers = numThreads + 1;
 
-  auto serverTCPStore = c10::make_intrusive<c10d::TCPStore>(
-      "127.0.0.1",
-      0,
-      numWorkers,
-      true,
-      std::chrono::seconds(30),
-      /* wait */ false);
+  auto serverTCPStore = _createServer(numWorkers);
 
   auto serverStore =
       c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
@@ -80,36 +102,42 @@ void testHelper(const std::string& prefix = "") {
         c10::make_intrusive<c10d::PrefixStore>(prefix, clientTCPStores[i]));
   }
 
-  std::string expectedCounterRes = std::to_string(numThreads * numIterations + 1);
+  std::string expectedCounterRes =
+      std::to_string(numThreads * numIterations + 1);
 
   for (auto i = 0; i < numThreads; i++) {
-    threads.push_back(
-        std::thread([&sem1, &sem2, &clientStores, i, &expectedCounterRes, &numIterations, &numThreads] {
-          for (auto j = 0; j < numIterations; j++) {
-            clientStores[i]->add("counter", 1);
-          }
-          // Let each thread set and get key on its client store
-          std::string key = "thread_" + std::to_string(i);
-          for (auto j = 0; j < numIterations; j++) {
-            std::string val = "thread_val_" + std::to_string(j);
-            c10d::test::set(*clientStores[i], key, val);
-            c10d::test::check(*clientStores[i], key, val);
-          }
+    threads.emplace_back(std::thread([&sem1,
+                                      &sem2,
+                                      &clientStores,
+                                      i,
+                                      &expectedCounterRes,
+                                      &numIterations,
+                                      &numThreads] {
+      for (auto j = 0; j < numIterations; j++) {
+        clientStores[i]->add("counter", 1);
+      }
+      // Let each thread set and get key on its client store
+      std::string key = "thread_" + std::to_string(i);
+      for (auto j = 0; j < numIterations; j++) {
+        std::string val = "thread_val_" + std::to_string(j);
+        c10d::test::set(*clientStores[i], key, val);
+        c10d::test::check(*clientStores[i], key, val);
+      }
 
-          sem1.post();
-          sem2.wait();
-          // Check the counter results
-          c10d::test::check(*clientStores[i], "counter", expectedCounterRes);
-          // Now check other threads' written data
-          for (auto j = 0; j < numThreads; j++) {
-            if (j == i) {
-              continue;
-            }
-            std::string key = "thread_" + std::to_string(i);
-            std::string val = "thread_val_" + std::to_string(numIterations - 1);
-            c10d::test::check(*clientStores[i], key, val);
-          }
-        }));
+      sem1.post();
+      sem2.wait();
+      // Check the counter results
+      c10d::test::check(*clientStores[i], "counter", expectedCounterRes);
+      // Now check other threads' written data
+      for (auto j = 0; j < numThreads; j++) {
+        if (j == i) {
+          continue;
+        }
+        std::string key = "thread_" + std::to_string(i);
+        std::string val = "thread_val_" + std::to_string(numIterations - 1);
+        c10d::test::check(*clientStores[i], key, val);
+      }
+    }));
   }
 
   sem1.wait(numThreads);
@@ -136,10 +164,227 @@ void testHelper(const std::string& prefix = "") {
   }
 }
 
+void testWatchKeyCallback(const std::string& prefix = "") {
+  // Callback function increments counter of the total number of callbacks that
+  // were run
+  std::promise<int> numCallbacksExecutedPromise;
+  std::atomic<int> numCallbacksExecuted{0};
+  const int numThreads = 16;
+  const int keyChangeOperation = 3;
+  std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
+      callback = [&numCallbacksExecuted,
+                  &numCallbacksExecutedPromise,
+                  &numThreads,
+                  &keyChangeOperation](
+                     c10::optional<std::string> /* unused */,
+                     c10::optional<std::string> /* unused */) {
+        numCallbacksExecuted++;
+        if (numCallbacksExecuted == numThreads * keyChangeOperation) {
+          numCallbacksExecutedPromise.set_value(numCallbacksExecuted);
+        }
+      };
+
+  const int numWorkers = numThreads + 1;
+  auto serverTCPStore = _createServer(numWorkers);
+  auto serverStore =
+      c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
+
+  // Start watching key
+  std::string internalKey = "internalKey";
+  for (auto i = 0; i < numThreads; i++) {
+    serverStore->watchKey(internalKey + std::to_string(i), callback);
+    serverStore->watchKey(
+        internalKey + "counter" + std::to_string(i), callback);
+  }
+
+  // Each thread will have a client store to send/recv data
+  std::vector<c10::intrusive_ptr<c10d::TCPStore>> clientTCPStores;
+  std::vector<c10::intrusive_ptr<c10d::PrefixStore>> clientStores;
+  for (auto i = 0; i < numThreads; i++) {
+    clientTCPStores.push_back(c10::make_intrusive<c10d::TCPStore>(
+        "127.0.0.1", serverTCPStore->getPort(), numWorkers, false));
+    clientStores.push_back(
+        c10::make_intrusive<c10d::PrefixStore>(prefix, clientTCPStores[i]));
+  }
+
+  std::vector<std::thread> threads;
+  std::atomic<int> keyChangeOperationCount{0};
+  for (auto i = 0; i < numThreads; i++) {
+    threads.emplace_back(std::thread([&clientStores,
+                                      &internalKey,
+                                      &keyChangeOperationCount,
+                                      &keyChangeOperation,
+                                      i] {
+      // Let each thread set and get key on its client store
+      std::string key = internalKey + std::to_string(i);
+      std::string keyCounter = internalKey + "counter" + std::to_string(i);
+      std::string val = "thread_val_" + std::to_string(i);
+      // The set, compareSet, add methods count as key change operations
+      c10d::test::set(*clientStores[i], key, val);
+      c10d::test::compareSet(*clientStores[i], key, val, "newValue");
+      clientStores[i]->add(keyCounter, i);
+      keyChangeOperationCount += keyChangeOperation;
+      c10d::test::check(*clientStores[i], key, "newValue");
+      c10d::test::check(*clientStores[i], keyCounter, std::to_string(i));
+    }));
+  }
+
+  // Ensures that internal_key has been "set" and "get"
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  std::future<int> numCallbacksExecutedFuture =
+      numCallbacksExecutedPromise.get_future();
+  std::chrono::milliseconds span(kStoreCallbackTimeoutMillis);
+  if (numCallbacksExecutedFuture.wait_for(span) == std::future_status::timeout)
+    throw std::runtime_error("Callback execution timed out.");
+
+  // Check number of callbacks executed equal to number of key change operations
+  // Wait for all callbacks to be triggered
+  EXPECT_EQ(keyChangeOperationCount, numCallbacksExecutedFuture.get());
+}
+
 TEST(TCPStoreTest, testHelper) {
   testHelper();
 }
 
 TEST(TCPStoreTest, testHelperPrefix) {
   testHelper("testPrefix");
+}
+
+TEST(TCPStoreTest, testWatchKeyCallback) {
+  testWatchKeyCallback();
+}
+
+TEST(TCPStoreTest, testWatchKeyCallbackWithPrefix) {
+  testWatchKeyCallback("testPrefix");
+}
+
+// Helper function to create a key on the store, watch it, and run the callback
+void testKeyChangeHelper(
+    c10d::Store& store,
+    std::string key,
+    const c10::optional<std::string>& expectedOldValue,
+    const c10::optional<std::string>& expectedNewValue) {
+  std::exception_ptr eptr = nullptr;
+  std::promise<bool> callbackPromise;
+
+  bool skipFirstSet = true;
+  // Test the correctness of new_value and old_value
+  std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
+      callback = [expectedOldValue,
+                  expectedNewValue,
+                  &callbackPromise,
+                  &eptr,
+                  &key,
+                  &skipFirstSet](
+                     c10::optional<std::string> oldValue,
+                     c10::optional<std::string> newValue) {
+        // skip executing the callback on the first "set" that is run for
+        // these tests
+        if (skipFirstSet &&
+            (key == "testEmptyKeyValue" || key == "testRegularKeyValue" ||
+             key == "testWatchKeyDelete")) {
+          skipFirstSet = false;
+          return;
+        }
+
+        try {
+          EXPECT_EQ(
+              expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
+          EXPECT_EQ(
+              expectedNewValue.value_or("NONE"), newValue.value_or("NONE"));
+        } catch (...) {
+          eptr = std::current_exception();
+        }
+        callbackPromise.set_value(true);
+      };
+  store.watchKey(key, callback);
+
+  // Perform the specified update according to key
+  if (key == "testEmptyKeyValue") {
+    c10d::test::set(store, key, expectedOldValue.value());
+    store.get(key);
+    c10d::test::set(store, key, expectedNewValue.value());
+  } else if (key == "testRegularKeyValue") {
+    c10d::test::set(store, key, expectedOldValue.value());
+    store.get(key);
+    c10d::test::set(store, key, expectedNewValue.value());
+  } else if (key == "testWatchKeyCreate") {
+    c10d::test::set(store, key, expectedNewValue.value());
+  } else if (key == "testWatchKeyDelete") {
+    c10d::test::set(store, key, expectedOldValue.value());
+    store.get(key);
+    store.deleteKey(key);
+  }
+
+  // Test that the callback is fired and the expected values are correct
+  std::chrono::milliseconds span(kStoreCallbackTimeoutMillis);
+  if (callbackPromise.get_future().wait_for(span) ==
+      std::future_status::timeout)
+    throw std::runtime_error("Callback execution timed out.");
+
+  // Any errors raised from asserts should be rethrown
+  if (eptr)
+    std::rethrow_exception(eptr);
+}
+
+TEST(TCPStoreTest, testKeyUpdate) {
+  auto store = _createServer();
+
+  std::string key1 = "testEmptyKeyValue";
+  testKeyChangeHelper(*store, key1, "", "2");
+
+  std::string key2 = "testRegularKeyValue";
+  testKeyChangeHelper(*store, key2, "1", "2");
+}
+
+TEST(TCPStoreTest, testKeyCreate) {
+  auto store = _createServer();
+
+  std::string key = "testWatchKeyCreate";
+  testKeyChangeHelper(*store, key, c10::nullopt, "2");
+}
+
+TEST(TCPStoreTest, testKeyDelete) {
+  auto store = _createServer();
+
+  std::string key = "testWatchKeyDelete";
+  testKeyChangeHelper(*store, key, "1", c10::nullopt);
+}
+
+TEST(TCPStoreTest, testCleanShutdown) {
+  LOG(INFO) << "start";
+  int numWorkers = 2;
+
+  auto serverTCPStore = std::make_unique<c10d::TCPStore>(
+      "127.0.0.1",
+      0,
+      numWorkers,
+      true,
+      std::chrono::seconds(defaultTimeout),
+      /* wait */ false);
+  c10d::test::set(*serverTCPStore, "key", "val");
+
+  auto clientTCPStore = c10::make_intrusive<c10d::TCPStore>(
+      "127.0.0.1",
+      serverTCPStore->getPort(),
+      numWorkers,
+      false,
+      std::chrono::seconds(defaultTimeout),
+      /* wait */ false);
+  clientTCPStore->get("key");
+
+  auto clientThread = std::thread([&clientTCPStore] {
+    EXPECT_THROW(clientTCPStore->get("invalid_key"), std::runtime_error);
+  });
+
+  LOG(INFO) << "before shutdown";
+  // start server shutdown during a client request
+  serverTCPStore = nullptr;
+  LOG(INFO) << "after shutdown";
+
+  clientThread.join();
+  LOG(INFO) << "finish";
 }
