@@ -560,7 +560,7 @@ TEST(InferenceModeTest, TestCustomFunction) {
     auto var2 = var1.clone();
     int mul = 2;
     // If InferenceMode didn't set NoGradGuard automatically, this line
-    // would error out when trying to save `s` and `n` for backward.
+    // would error out when trying to save `var1` and `var2` for backward.
     auto y = MyFunction::apply(var1, mul, var2);
     torch::Tensor expected = var1 + mul * var2 + var1 * var2;
     assert_tensor_equal(y, expected);

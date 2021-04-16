@@ -16,7 +16,7 @@ struct TORCH_API InferenceMode {
   //   NormalMode: InplaceOrView in raw_local_dispatch_key_set.included(),
   //               Autograd not in raw_local_dispatch_key_set.excluded()
   //               GradMode is enabled by default unless toggled manually through
-  //               NoGradGuard.
+  //               other APIs, e.g. NoGradGuard.
   //
   // Invariant:
   // - InplaceOrView is never in the excluded set
