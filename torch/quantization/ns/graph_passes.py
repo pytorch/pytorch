@@ -381,7 +381,7 @@ def _insert_copy_of_node_a_after_input_node_c(
             new_kwargs, node_a_shadows_c_name)  # type: ignore
         return node_a_shadows_c
     else:
-        assert node_a.op == 'call_function'
+        assert node_a.op in ('call_function', 'call_method')
         node_a_shadows_c = graph_c.create_node(
             node_a.op, node_a.target, (*input_node_c_args, *new_args),
             new_kwargs, node_a_shadows_c_name)  # type: ignore
