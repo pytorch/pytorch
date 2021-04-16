@@ -99,8 +99,8 @@ void check_names_valid_for(const Tensor& tensor, DimnameList names);
 void check_names_valid_for(size_t tensor_dim, DimnameList names);
 
 // Sets the names of `tensor` to be `names`.
-TORCH_API Tensor& internal_set_names_inplace(Tensor& tensor, c10::optional<DimnameList> names);
-TORCH_API Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
+TORCH_API const Tensor& internal_set_names_inplace(const Tensor& tensor, c10::optional<DimnameList> names);
+TORCH_API const Tensor& internal_set_names_inplace(const Tensor& tensor, std::vector<Dimname>&& names, bool validate_names);
 
 constexpr size_t kMaxNamedTensorDim = 64;
 
