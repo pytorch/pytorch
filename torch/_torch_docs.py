@@ -8558,7 +8558,7 @@ always be real-valued, even if :attr:`input` is complex.
 .. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
           be represented as a column-major matrix (i.e. Fortran-contiguous).
 
-.. warning:: The singular values of a matrix are not unique. Any pair of left and right singular values may 
+.. warning:: The singular values of a matrix are not unique. Any pair of left and right singular values may
              be multiplied by `-1` in the real case or by a factor of norm `1` :math:`e^{i \phi}` in the complex case.
              The same happens when :attr:`input` has repeated singular values, where one may multiply
              the columns of the spanning subspace in `U` and `V` by a rotation matrix
