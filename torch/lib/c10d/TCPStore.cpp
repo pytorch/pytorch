@@ -26,7 +26,6 @@ enum class QueryType : uint8_t {
   GETNUMKEYS,
   WATCH_KEY,
   DELETE_KEY,
-  HEARTBEAT,
 };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
@@ -121,6 +120,11 @@ void TCPStoreWorkerDaemon::addCallback(
 // Runs all the callbacks that the worker has registered
 void TCPStoreWorkerDaemon::callbackHandler(int socket) {
   auto watchResponse = tcputil::recvValue<WatchResponseType>(socket);
+  if (watchResponse == WatchResponseType::KEY_CALLBACK_REGISTERED) {
+    // Notify the waiting "watchKey" operation to return
+    cv.notify_one();
+    return;
+  }
   std::string key = tcputil::recvString(socket);
   std::vector<uint8_t> currentValueVec = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> newValueVec = tcputil::recvVector<uint8_t>(socket);
@@ -305,8 +309,6 @@ void TCPStoreMasterDaemon::query(int socket) {
   } else if (qt == QueryType::WATCH_KEY) {
     watchHandler(socket);
 
-  } else if (qt == QueryType::HEARTBEAT) {
-    heartbeatHandler(socket);
   } else {
     throw std::runtime_error("Unexpected query type");
   }
@@ -485,10 +487,8 @@ void TCPStoreMasterDaemon::watchHandler(int socket) {
 
   // record the socket to respond to when the key is updated
   watchedSockets_[key].push_back(socket);
-}
-
-void TCPStoreMasterDaemon::heartbeatHandler(int socket) {
-  tcputil::sendValue<CheckResponseType>(socket, CheckResponseType::READY);
+  tcputil::sendValue<WatchResponseType>(
+      socket, WatchResponseType::KEY_CALLBACK_REGISTERED);
 }
 
 bool TCPStoreMasterDaemon::checkKeys(
@@ -735,10 +735,9 @@ void TCPStore::watchKey(
   tcputil::sendValue<QueryType>(listenSocket_, QueryType::WATCH_KEY);
   tcputil::sendString(listenSocket_, regKey);
 
-  // Only return when callback has been registered successfully
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::HEARTBEAT);
-  auto ret = tcputil::recvValue<CheckResponseType>(storeSocket_);
-  assert(ret == CheckResponseType::READY);
+  // Block until callback has been registered successfully
+  std::unique_lock<std::mutex> lock(tcpStoreWorkerDaemon_->mtx);
+  tcpStoreWorkerDaemon_->cv.wait(lock);
 }
 
 int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {

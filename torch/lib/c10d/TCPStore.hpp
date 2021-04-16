@@ -17,7 +17,8 @@ namespace c10d {
 enum class WatchResponseType : uint8_t {
   KEY_UPDATED,
   KEY_CREATED,
-  KEY_DELETED
+  KEY_DELETED,
+  KEY_CALLBACK_REGISTERED
 };
 
 // Abstract base class to handle thread state for TCPStoreMasterDaemon and
@@ -70,7 +71,6 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void deleteHandler(int socket);
   void waitHandler(int socket);
   void watchHandler(int socket);
-  void heartbeatHandler(int socket);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
   // Helper function to alerts waiting workers, used in setHandler, getHandler
@@ -103,6 +103,8 @@ class TCPStoreWorkerDaemon : public BackgroundThread {
       std::string key,
       std::function<
           void(c10::optional<std::string>, c10::optional<std::string>)> cb);
+  std::mutex mtx;
+  std::condition_variable cv;
 
  protected:
   void run();

@@ -10,8 +10,6 @@
 #include <c10d/PrefixStore.hpp>
 #include <c10d/TCPStore.hpp>
 
-std::condition_variable cv;
-std::mutex cvMutex;
 constexpr int64_t kShortStoreTimeoutMillis = 100;
 constexpr int64_t kStoreCallbackTimeoutMillis = 5000;
 constexpr int defaultTimeout = 20;
@@ -259,27 +257,22 @@ void testKeyChangeHelper(
   std::exception_ptr eptr = nullptr;
   std::promise<bool> callbackPromise;
 
-  bool skipFirstSet = true;
   // Test the correctness of new_value and old_value
   std::function<void(c10::optional<std::string>, c10::optional<std::string>)>
-      callback = [expectedOldValue,
-                  expectedNewValue,
-                  &callbackPromise,
-                  &eptr,
-                  &key,
-                  &skipFirstSet](
-                     c10::optional<std::string> oldValue,
-                     c10::optional<std::string> newValue) {
-        try {
-          EXPECT_EQ(
-              expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
-          EXPECT_EQ(
-              expectedNewValue.value_or("NONE"), newValue.value_or("NONE"));
-        } catch (...) {
-          eptr = std::current_exception();
-        }
-        callbackPromise.set_value(true);
-      };
+      callback =
+          [expectedOldValue, expectedNewValue, &callbackPromise, &eptr, &key](
+              c10::optional<std::string> oldValue,
+              c10::optional<std::string> newValue) {
+            try {
+              EXPECT_EQ(
+                  expectedOldValue.value_or("NONE"), oldValue.value_or("NONE"));
+              EXPECT_EQ(
+                  expectedNewValue.value_or("NONE"), newValue.value_or("NONE"));
+            } catch (...) {
+              eptr = std::current_exception();
+            }
+            callbackPromise.set_value(true);
+          };
   store.watchKey(key, callback);
 
   // Perform the specified update according to key
@@ -301,7 +294,7 @@ void testKeyChangeHelper(
   if (callbackFuture.wait_for(span) == std::future_status::timeout)
     throw std::runtime_error("Callback execution timed out.");
 
-  // Any errors raised from asserts should be rethrown
+  // Any exceptions raised from asserts should be rethrown
   if (eptr)
     std::rethrow_exception(eptr);
 }
@@ -348,7 +341,6 @@ TEST(TCPStoreTest, testKeyDelete) {
 }
 
 TEST(TCPStoreTest, testCleanShutdown) {
-  LOG(INFO) << "start";
   int numWorkers = 2;
 
   auto serverTCPStore = std::make_unique<c10d::TCPStore>(
@@ -373,11 +365,8 @@ TEST(TCPStoreTest, testCleanShutdown) {
     EXPECT_THROW(clientTCPStore->get("invalid_key"), std::runtime_error);
   });
 
-  LOG(INFO) << "before shutdown";
   // start server shutdown during a client request
   serverTCPStore = nullptr;
-  LOG(INFO) << "after shutdown";
 
   clientThread.join();
-  LOG(INFO) << "finish";
 }
